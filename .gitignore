@@ -1,0 +1,26 @@
+# Rust
+/target/
+**/*.rs.bk
+# NOTE: Cargo.lock is intentionally COMMITTED (not ignored) so every build
+# resolves bit-identical dependencies — determinism starts at the toolchain.
+
+# Node / web (M4+)
+node_modules/
+dist/
+.parcel-cache/
+
+# WASM build artifacts
+*.wasm
+pkg/
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Env / secrets
+.env
+.env.*
