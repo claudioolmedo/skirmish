@@ -1,0 +1,16 @@
+{
+  "name": "skirmish-sim",
+  "type": "module",
+  "description": "Skirmish — headless deterministic simulation core (M0)",
+  "version": "0.1.0",
+  "files": [
+    "skirmish_sim_bg.wasm",
+    "skirmish_sim.js",
+    "skirmish_sim.d.ts"
+  ],
+  "main": "skirmish_sim.js",
+  "types": "skirmish_sim.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
