@@ -34,10 +34,7 @@ impl Pcg32 {
 
     #[inline]
     fn step(&mut self) {
-        self.state = self
-            .state
-            .wrapping_mul(Self::MULT)
-            .wrapping_add(self.inc);
+        self.state = self.state.wrapping_mul(Self::MULT).wrapping_add(self.inc);
     }
 
     /// Next uniformly distributed u32 (XSH-RR output function).

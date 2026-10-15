@@ -18,3 +18,11 @@ wasm-bindgen = "=0.2.129"
 
 [dev-dependencies]
 # (none — determinism tests exercise the public API only)
+
+# wasm-pack: skip the wasm-opt binaryen download (unavailable in this
+# environment). The preview runs fine on unoptimized WASM.
+[package.metadata.wasm-pack.profile.dev]
+wasm-opt = false
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

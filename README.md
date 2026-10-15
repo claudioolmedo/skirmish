@@ -39,7 +39,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full technical contract.
 | Milestone | Scope |
 |-----------|-------|
 | **M0** ✅ | Repo scaffolding; `sim` crate with fixed-point math, seeded RNG, tick loop; determinism harness (per-tick state hash, headless replay, CI) |
-| M1 | Unit movement: A\* on grid + steering/separation; command queue |
+| **M1** ✅ | Unit movement: A\* on a coarse grid + steering (separation + arrival); `Move` commands; debug preview page |
 | M2 | Economy loop: workers, resource nodes, gather/carry/drop-off, buildings |
 | M3 | Combat: attack-move, targeting, HP/death, projectiles; first original empire |
 | M4 | Renderer (Canvas 2D) + input shell + adaptive-quality governor |
@@ -58,6 +58,18 @@ rustup target add wasm32-unknown-unknown
 cargo test                    # determinism harness + unit tests
 cargo run --example replay -- 42 600   # headless: 600 ticks from seed 42
 cargo build --target wasm32-unknown-unknown   # WASM build of the sim
+```
+
+## Debug preview (M1)
+
+A throwaway top-down view of the simulation — grid, walls, entities,
+active paths, and the live state hash. Explicitly **not** the final game
+look (that comes with the isometric camera in M4).
+
+```sh
+./web-preview/build.sh        # builds sim → web-preview/pkg/ (wasm-pack)
+cd web-preview && python3 -m http.server 8080
+# open http://localhost:8080/ — click anywhere to order all units there
 ```
 
 ## License

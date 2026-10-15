@@ -89,11 +89,16 @@ fn golden_hash_regression() {
     // Tripwire: the exact hash stream for seed 42 must never change
     // silently. If this fails after an intentional sim change, update the
     // expected values deliberately — never blindly.
+    //
+    // M1 deliberate update: entities no longer drift on RNG nudges (they
+    // stand until ordered), spawn avoids wall cells, and the hash now covers
+    // the grid layout plus move orders. New value verified stable across
+    // independent runs (replay example, seed 42, 360 ticks).
     let mut sim = Sim::new(42);
     let mut hash = 0;
     for _ in 0..360 {
         hash = sim.tick();
     }
     assert_eq!(sim.tick_count(), 360);
-    assert_eq!(format!("{:016x}", hash), "ba181fcd6dce9cdb");
+    assert_eq!(format!("{:016x}", hash), "8b062c09dfdd2f2c");
 }

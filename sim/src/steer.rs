@@ -1,0 +1,185 @@
+//! Fixed-point steering: separation + arrival (M1).
+//!
+//! All math here is integer-based and therefore deterministic on every
+//! platform: no floats, no trigonometry, no hash maps — the same contract
+//! as the rest of the sim. Distances are computed from raw fixed-point bits
+//! with a hand-rolled integer square root.
+
+use fixed::types::I16F16;
+
+/// Speed in world units per tick (60 units/second at 60 Hz).
+/// Constants via raw bits (value × 2^16): from_num is not const in fixed 1.x.
+pub const MAX_SPEED: I16F16 = I16F16::from_bits(65_536); // 1.0
+/// Inside this radius of the final waypoint, speed scales down linearly
+/// with distance (arrival behavior — no overshoot oscillation).
+pub const SLOW_RADIUS: I16F16 = I16F16::from_bits(262_144); // 4.0
+/// A waypoint closer than this counts as reached.
+pub const WAYPOINT_REACH: I16F16 = I16F16::from_bits(65_536); // 1.0
+/// Entities closer than this push each other apart.
+pub const SEPARATION_RADIUS: I16F16 = I16F16::from_bits(131_072); // 2.0
+/// Separation force scale: 0.75 = 49152/65536 raw bits.
+const SEPARATION_FORCE: I16F16 = I16F16::from_bits(49152);
+
+/// Integer square root (Newton's method). Pure integer ops — deterministic.
+pub fn isqrt(x: u64) -> u64 {
+    if x < 2 {
+        return x;
+    }
+    let mut r = x;
+    let mut y = r.div_ceil(2);
+    while y < r {
+        r = y;
+        y = (r + x / r) / 2;
+    }
+    r
+}
+
+/// Length of a fixed-point vector, as fixed-point.
+///
+/// Computed from raw bits: `sqrt((dx·2^16)² + (dy·2^16)²) = dist·2^16`,
+/// so the integer square root lands exactly back in raw fixed-point units.
+/// Max input magnitude (~200 world units) keeps every intermediate safely
+/// inside i64/u64 range.
+pub fn vec_len(dx: I16F16, dy: I16F16) -> I16F16 {
+    let dxb = dx.to_bits() as i64;
+    let dyb = dy.to_bits() as i64;
+    I16F16::from_bits(isqrt((dxb * dxb + dyb * dyb) as u64) as i32)
+}
+
+/// Steering decision for one entity for one tick.
+///
+/// `positions` is the id-ordered snapshot of every entity's position;
+/// `me` is this entity's index into it. Returns
+/// `(vel_x, vel_y, new_wp_index, arrived)`.
+pub fn steer(
+    positions: &[(I16F16, I16F16)],
+    me: usize,
+    waypoints: &[(I16F16, I16F16)],
+    wp_index: usize,
+) -> (I16F16, I16F16, usize, bool) {
+    let (px, py) = positions[me];
+
+    // Advance past already-reached waypoints. Reaching the last one means
+    // the order is complete.
+    let mut idx = wp_index;
+    let (wx, wy, dist) = loop {
+        if idx >= waypoints.len() {
+            return (I16F16::ZERO, I16F16::ZERO, idx, true);
+        }
+        let (wx, wy) = waypoints[idx];
+        let d = vec_len(wx - px, wy - py);
+        if d >= WAYPOINT_REACH {
+            break (wx, wy, d);
+        }
+        idx += 1;
+    };
+
+    // Desired velocity toward the waypoint, slowing inside SLOW_RADIUS on
+    // the final leg so the entity settles instead of orbiting the target.
+    let mut speed = MAX_SPEED;
+    if idx + 1 == waypoints.len() && dist < SLOW_RADIUS && dist > I16F16::ZERO {
+        speed = MAX_SPEED * dist / SLOW_RADIUS;
+    }
+    let (mut vx, mut vy) = if dist > I16F16::ZERO {
+        // |delta| <= dist always, so delta/dist can never overflow.
+        ((wx - px) / dist * speed, (wy - py) / dist * speed)
+    } else {
+        (I16F16::ZERO, I16F16::ZERO)
+    };
+
+    // Separation: every neighbor inside SEPARATION_RADIUS contributes a
+    // push proportional to the overlap, pointing away. Iteration is over
+    // the id-ordered snapshot, so the sum is deterministic.
+    let sep_r_bits = SEPARATION_RADIUS.to_bits() as i64;
+    let sep_r2 = sep_r_bits * sep_r_bits;
+    for (j, &(ox, oy)) in positions.iter().enumerate() {
+        if j == me {
+            continue;
+        }
+        let sx = px - ox;
+        let sy = py - oy;
+        let sxb = sx.to_bits() as i64;
+        let syb = sy.to_bits() as i64;
+        let d2 = sxb * sxb + syb * syb;
+        if d2 == 0 || d2 >= sep_r2 {
+            continue;
+        }
+        let d = I16F16::from_bits(isqrt(d2 as u64) as i32);
+        let push = SEPARATION_RADIUS - d; // > 0 inside the radius
+        vx += sx / d * push * SEPARATION_FORCE;
+        vy += sy / d * push * SEPARATION_FORCE;
+    }
+
+    // Clamp the combined velocity to MAX_SPEED.
+    let vlen = vec_len(vx, vy);
+    if vlen > MAX_SPEED {
+        vx = vx / vlen * MAX_SPEED;
+        vy = vy / vlen * MAX_SPEED;
+    }
+    (vx, vy, idx, false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn isqrt_matches_known_values() {
+        assert_eq!(isqrt(0), 0);
+        assert_eq!(isqrt(1), 1);
+        assert_eq!(isqrt(2), 1);
+        assert_eq!(isqrt(16), 4);
+        assert_eq!(isqrt(1_000_000), 1000);
+        // Largest magnitude the sim can produce: (200·2^16)²·2.
+        let big: u64 = 2 * (200u64 * 65536) * (200u64 * 65536);
+        assert_eq!(isqrt(big) as i64, 18_536_380); // ⌊200·2^16·√2⌋, cross-checked
+    }
+
+    #[test]
+    fn vec_len_pythagorean() {
+        // 3-4-5 triangle in fixed point.
+        let d = vec_len(I16F16::from_num(3), I16F16::from_num(4));
+        assert_eq!(d, I16F16::from_num(5));
+        assert_eq!(vec_len(I16F16::ZERO, I16F16::ZERO), I16F16::ZERO);
+    }
+
+    #[test]
+    fn steer_heads_for_waypoint() {
+        let positions = [(I16F16::ZERO, I16F16::ZERO)];
+        let wps = [(I16F16::from_num(10), I16F16::ZERO)];
+        let (vx, vy, idx, arrived) = steer(&positions, 0, &wps, 0);
+        assert!(!arrived);
+        assert_eq!(idx, 0);
+        assert!(vx > I16F16::ZERO, "must move toward +x");
+        assert_eq!(vy, I16F16::ZERO);
+        assert!(vec_len(vx, vy) <= MAX_SPEED);
+    }
+
+    #[test]
+    fn steer_slows_near_final_waypoint() {
+        let positions = [(I16F16::ZERO, I16F16::ZERO)];
+        // 2 units away, inside SLOW_RADIUS (4): speed must be scaled to ~half.
+        let wps = [(I16F16::from_num(2), I16F16::ZERO)];
+        let (vx, _, _, arrived) = steer(&positions, 0, &wps, 0);
+        assert!(!arrived);
+        assert!(vx < MAX_SPEED, "arrival slowdown missing: {vx}");
+        assert!(vx > I16F16::ZERO);
+    }
+
+    #[test]
+    fn separation_pushes_apart() {
+        // Two entities 1 unit apart on x, both ordered far away: the left
+        // one must feel a push toward -x on top of its desired velocity.
+        let p = [
+            (I16F16::ZERO, I16F16::ZERO),
+            (I16F16::from_num(1), I16F16::ZERO),
+        ];
+        let wps = [(I16F16::from_num(100), I16F16::ZERO)];
+        let (vx0, _, _, _) = steer(&p, 0, &wps, 0);
+        let (vx1, _, _, _) = steer(&p, 1, &wps, 0);
+        // Entity 0 is pushed left (negative x contribution)…
+        assert!(vx0 < MAX_SPEED, "entity 0 felt no separation push");
+        // …entity 1 is pushed right (it keeps full speed toward +x).
+        assert_eq!(vx1, MAX_SPEED);
+    }
+}

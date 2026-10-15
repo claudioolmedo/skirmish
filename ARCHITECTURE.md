@@ -24,10 +24,13 @@ decision by the project owner.
    through a thin `wasm-bindgen` ABI: *commands in, state out*. The renderer
    never computes rules. This is what makes adaptive visual quality and
    future lockstep multiplayer possible.
-2. **Fixed-point math, always.** The sim uses the `fixed` crate (`I32F32`)
-   everywhere. **Zero floating point in sim code** — not even `f32`, because
+2. **Fixed-point math, always.** The sim uses the `fixed` crate (`I16F16`:
+   ±32768 range, 1/65536 precision — plenty for game coordinates) everywhere.
+   **Zero floating point in sim code** — not even `f32`, because
    transcendental functions differ across libm implementations. Floats are
-   allowed *only* in renderer code (M4+), which never feeds back into the sim.
+   allowed *only* in renderer code (M4+) and at the wasm-bindgen boundary
+   (converted to fixed-point immediately on entry), which never feed back
+   into the sim.
 3. **The tick count is the only clock.** Fixed 60 Hz ticks. No
    `Instant::now()`, no frame delta, no `std::time` in sim code. On the web
    the 60 Hz tick loop is decoupled from `requestAnimationFrame` via an
@@ -58,17 +61,25 @@ skirmish/
 ├── ARCHITECTURE.md       # this file
 ├── README.md
 ├── .github/workflows/ci.yml
-└── sim/                  # the deterministic core (M0: complete harness)
+├── web-preview/          # M1 throwaway debug slice (NOT the M4 renderer):
+│   │                     # top-down Canvas 2D view of sim state, click-to-move
+│   ├── index.html        # labeled debug page
+│   ├── app.js            # dependency-free WASM loader + renderer
+│   └── build.sh          # wasm-pack build of sim → web-preview/pkg/
+└── sim/                  # the deterministic core
     ├── Cargo.toml        # pinned deps: fixed, wasm-bindgen
     ├── src/
     │   ├── lib.rs        # Sim: tick loop, commands, state hash
     │   ├── rng.rs        # hand-rolled PCG32 (in sim state)
     │   ├── hash.rs       # hand-rolled FNV-1a 64 (canonical hashing)
-    │   ├── entity.rs     # M0 demo entities (replaced by real units in M1–M3)
-    │   └── wasm.rs       # thin wasm-bindgen ABI, wasm32 only (stub in M0)
+    │   ├── entity.rs     # entities + MoveOrder
+    │   ├── grid.rs       # M1: coarse grid + deterministic A*
+    │   ├── steer.rs      # M1: separation + arrival (integer sqrt)
+    │   └── wasm.rs       # thin wasm-bindgen ABI (commands in, state out)
     ├── tests/
-    │   └── determinism.rs# the harness: identical runs, seed divergence,
-    │                     # replay equality, golden-hash tripwire
+    │   ├── determinism.rs# the harness: identical runs, seed divergence,
+    │   │                 # replay equality, golden-hash tripwire
+    │   └── movement.rs   # M1: A* routing, arrival, separation, determinism
     └── examples/
         └── replay.rs     # headless runner: N ticks from a seed, print hashes
 ```
@@ -77,13 +88,48 @@ Future crates plug in beside `sim/` (never inside it):
 
 | Milestone | New home            | Contents |
 |-----------|---------------------|----------|
-| M1        | `sim` (entities)    | A\* + steering, command queue, real `Command` set |
+| M0 ✅     | `sim` (harness)     | fixed-point math, seeded RNG, tick loop, determinism harness |
+| M1 ✅     | `sim` (entities)    | A* + steering, command queue, real `Command` set |
 | M2        | `sim` (entities)    | economy: workers, resources, buildings |
 | M3        | `sim` (entities)    | combat, projectiles, first original empire |
 | M4        | `web/`              | Canvas 2D renderer, input shell, adaptive-quality governor |
 | M5        | `sim` + `web/`      | feel tuning, scripted AI, playtest loop |
 
 `web/` (M4) reads sim state and sends commands. It never writes sim rules.
+
+## M1 — movement (shipped 2026-10-14)
+
+The movement model, and the decisions that keep it deterministic:
+
+- **Commands.** `Command::Move { entity, x, y }` — plain serializable data,
+  applied FIFO at tick start. The A* path is recomputed *immediately* when
+  the command is applied (not lazily at arrival), so a match is still fully
+  described by (seed, command stream). A later `Move` replaces the order;
+  unreachable/blocked targets clear it — the entity holds position.
+- **Grid.** Fixed 200×200 world, 50×50 coarse cells (4 units each).
+  `world_to_cell` is a pure fixed-point mapping; out-of-bounds counts as
+  blocked. Obstacles are compile-time wall constants (vertical wall with a
+  3-cell gap + one horizontal wall) — identical for every seed, and hashed
+  so the golden tripwire pins the layout.
+- **A*.** Integer costs (10 orthogonal / 14 diagonal), octile heuristic,
+  fixed neighbor order (E, W, N, S, NE, SE, NW, SW), no corner cutting, and
+  a `BinaryHeap` with a *total* deterministic ordering `(f, h, cell)`.
+  Waypoints are cell centers ending exactly on the commanded target point.
+- **Steering.** Per tick, per ordered entity: advance past reached
+  waypoints (1.0-unit reach radius), desired velocity toward the current
+  waypoint with linear arrival slowdown inside 4.0 units of the final leg,
+  plus separation (2.0-unit radius, overlap-proportional push, 0.75 force
+  scale) summed over the id-ordered entity list. Combined velocity is
+  clamped to 1.0 unit/tick. All distances use a hand-rolled integer square
+  root on raw fixed-point bits — no floats, no trig, ever.
+- **WASM boundary.** `push_move(entity, x, y)` accepts f64 *only* at the
+  JS boundary and converts to fixed-point on entry. New read-only
+  accessors: `entity_count`, `positions`, `entity_path`, grid layout,
+  `obstacles`. The sim never sees a float.
+- **Debug preview.** `web-preview/` is an explicitly throwaway top-down
+  Canvas 2D slice for watching M1 movement (grid, walls, entities, paths,
+  live state-hash HUD). It is NOT the M4 renderer: no isometric camera,
+  no art, no input shell. It must keep working when served statically.
 
 ## The sim may
 
