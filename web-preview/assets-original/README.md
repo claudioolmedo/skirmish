@@ -24,4 +24,39 @@ trousers, boots, hair cap), built from tapered boxes posed by joint
 angles. Default player color: blue `#2e6fd8` — regenerate per player
 color with `--player-color` (see the pipeline README).
 
+## House (v1)
+
+Buildings have a single fixed orientation, so the house is one image
+per construction stage — no direction rows, no frames. Canvas
+896x704, anchor (the ground point at the center of the building's
+2x2-cell footprint) at (448, 448), rendered at the same 46 px per
+world unit as the villager.
+
+| File | Stage | Contents |
+|---|---|---|
+| `house-stage0.png` | foundation | stone slab + curb, corner stub posts, log pile, stone blocks |
+| `house-stage1.png` | frame | timber frame (posts, sills, top plates, floor) + front scaffold |
+| `house-stage2.png` | walls + roof rising | plaster walls, door, windows, gables; front roof slope covered, back slope bare rafters |
+| `house-complete.png` | complete | both roof slopes, stone chimney, window shutters |
+
+Draw contract (mirrored as `HOUSE_ORIGINAL` in `web-preview/app.js`):
+the footprint is the sim's real 2x2 cells (`CELL_SIZE = 4` world
+units) = 8x8 world units; the foundation slab in the art is 8.2x8.2.
+Draw at scale 1.0 (true scale — the villager's 1.35 readability
+factor is a unit-only cheat) with
+`k = camS / 46; drawImage(im, sx - 448*k, sy - 448*k, 896*k, 704*k)`.
+Verified against the shipped images: the foundation's front corner
+lands 189 px below the anchor, exactly as the projection predicts.
+
+Stage selection by build progress (client `drawOriginalHouse`):
+`progress < 0.25` → stage0, `< 0.55` → stage1, `< 1` → stage2,
+complete → `house-complete.png`. If a stage image has not loaded,
+the renderer falls back to the CC0 placeholder house (clip-reveal),
+then to vector shapes.
+
+Design: our own cottage — stone foundation, dark timber frame with
+warm plaster infill, terracotta gable roof, lit windows, stone
+chimney — in the villager's palette family, same posterized shading
+and world-fixed sun.
+
 Generated 2026-10-16 by `tools/sprite-pipeline/render.py`.

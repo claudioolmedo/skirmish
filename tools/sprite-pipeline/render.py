@@ -57,6 +57,16 @@ MATERIALS = {
     'belt':     hex2rgb('#4a2f1d'),
     'load':     hex2rgb('#a9803e'),  # generic wooden bundle for carry
     'tunic':    None,                # filled from --player-color
+    # House materials (v1 cottage): warm plaster, dark timber frame,
+    # terracotta roof, stone foundation/chimney — same earthy family
+    # as the villager palette.
+    'plaster':  hex2rgb('#e6d3a3'),
+    'timber':   hex2rgb('#6e4b2c'),
+    'roof':     hex2rgb('#c05a36'),
+    'stone':    hex2rgb('#a39c8a'),
+    'door':     hex2rgb('#54381f'),
+    'window':   hex2rgb('#ffcf6e'),  # warm lit glass
+    'wood':     hex2rgb('#a9803e'),  # raw construction timber / logs
 }
 
 # ----------------------------------------------------------------------
@@ -211,14 +221,16 @@ def shade_of(normal):
     b = AMBIENT + (1.0 - AMBIENT) * d
     return min(SHADE_STEPS, key=lambda s: abs(s - b))
 
-def render_cell(tris, direction):
-    """Render one posed model in one facing direction -> (CELL,CELL,4)
+def render_cell(tris, direction, cw=CELL, ch=CELL, ax=AX, ay=AY):
+    """Render one posed model in one facing direction -> (ch,cw,4)
     uint8 RGBA. Direction d: facing angle = d*45deg in world XY, from
-    +X toward +Y (dir 0 faces +X = screen down-right)."""
-    size = CELL * SS
-    rgb = np.zeros((size, size, 3), dtype=np.float64)
-    alp = np.zeros((size, size), dtype=np.float64)
-    zbuf = np.full((size, size), -1e9)
+    +X toward +Y (dir 0 faces +X = screen down-right). The canvas
+    size / anchor default to the unit-sprite conventions; buildings
+    pass their own (see the house section below)."""
+    size_w, size_h = cw * SS, ch * SS
+    rgb = np.zeros((size_h, size_w, 3), dtype=np.float64)
+    alp = np.zeros((size_h, size_w), dtype=np.float64)
+    zbuf = np.full((size_h, size_w), -1e9)
     face = rot_z(direction * 45.0 - 90.0)  # local +Y -> facing vector
     P = PX_PER_UNIT * SS
     for verts, mat in tris:
@@ -230,11 +242,11 @@ def render_cell(tris, direction):
         n /= ln
         base = np.array(MATERIALS[mat], dtype=np.float64)
         col = base * shade_of(n)
-        sx = AX * SS + (w[:, 0] - w[:, 1]) * P
-        sy = AY * SS + ((w[:, 0] + w[:, 1]) * 0.5 - w[:, 2]) * P
+        sx = ax * SS + (w[:, 0] - w[:, 1]) * P
+        sy = ay * SS + ((w[:, 0] + w[:, 1]) * 0.5 - w[:, 2]) * P
         dep = w[:, 0] + w[:, 1]                 # larger = nearer viewer
-        x0, x1 = int(max(0, math.floor(sx.min()))), int(min(size - 1, math.ceil(sx.max())))
-        y0, y1 = int(max(0, math.floor(sy.min()))), int(min(size - 1, math.ceil(sy.max())))
+        x0, x1 = int(max(0, math.floor(sx.min()))), int(min(size_w - 1, math.ceil(sx.max())))
+        y0, y1 = int(max(0, math.floor(sy.min()))), int(min(size_h - 1, math.ceil(sy.max())))
         if x1 < x0 or y1 < y0:
             continue
         ys, xs = np.mgrid[y0:y1 + 1, x0:x1 + 1]
@@ -254,16 +266,16 @@ def render_cell(tris, direction):
         if not hit.any():
             continue
         sub[hit] = d[hit]
-        for ch in range(3):
-            plane = rgb[y0:y1 + 1, x0:x1 + 1, ch]
-            plane[hit] = col[ch]
+        for chan in range(3):
+            plane = rgb[y0:y1 + 1, x0:x1 + 1, chan]
+            plane[hit] = col[chan]
         ap = alp[y0:y1 + 1, x0:x1 + 1]
         ap[hit] = 1.0
     # Downscale SS x SS, premultiplied so edges have no dark halo.
-    out = np.zeros((CELL, CELL, 4), dtype=np.float64)
+    out = np.zeros((ch, cw, 4), dtype=np.float64)
     pm = rgb * alp[..., None]
-    pm = pm.reshape(CELL, SS, CELL, SS, 3).mean(axis=(1, 3))
-    am = alp.reshape(CELL, SS, CELL, SS).mean(axis=(1, 3))
+    pm = pm.reshape(ch, SS, cw, SS, 3).mean(axis=(1, 3))
+    am = alp.reshape(ch, SS, cw, SS).mean(axis=(1, 3))
     nz = am > 1e-6
     out[..., 3] = am
     out[nz, :3] = pm[nz] / am[nz, None]
@@ -278,24 +290,160 @@ def render_sheet(state):
             sheet.paste(cell, (f * CELL, d * CELL))
     return sheet
 
+# ======================================================================
+# The house (building #1, replacement order #2). Original cottage
+# design in the villager's palette family: stone foundation, timber
+# frame with warm plaster infill, terracotta gable roof, lit windows,
+# stone chimney. Model space: origin at the center of the sim's
+# 2x2-cell footprint (CELL_SIZE = 4 world units, so the footprint is
+# 8x8), +Y = front (door side), +Z up. Buildings have ONE fixed
+# orientation in the world, so each stage is a single render at
+# direction 2 (identity rotation = the game's view of the world) on a
+# larger canvas: 896x704, ground anchor (footprint center) at
+# (448, 448). These constants are the draw contract for the client
+# integration; see web-preview/assets-original/README.md.
+# ======================================================================
+HOUSE_W_PX, HOUSE_H_PX = 896, 704
+HOUSE_AX, HOUSE_AY = 448, 448
+
+def shift(tris, dx, dy, dz):
+    off = np.array([dx, dy, dz], dtype=np.float64)
+    return [(v + off, m) for v, m in tris]
+
+def spin_x(tris, deg, pivot=(0.0, 0.0, 0.0)):
+    mat = rot_x(deg)
+    return [(xform(v, mat, pivot), m) for v, m in tris]
+
+# Roof geometry: ridge along X at z = 7.0, eaves at |y| = 4.35,
+# z = 4.02. Slope rise/run give the pitch; slabs and rafters share it.
+ROOF_RISE, ROOF_RUN = 2.98, 4.35
+ROOF_PITCH = math.degrees(math.atan2(ROOF_RISE, ROOF_RUN))   # ~34.4 deg
+ROOF_SLOPE = math.hypot(ROOF_RISE, ROOF_RUN)                 # ~5.27
+ROOF_CY, ROOF_CZ = ROOF_RUN / 2.0, (7.0 + 4.02) / 2.0        # slope center
+
+def roof_slab(sign):
+    """One pitched roof slab; sign +1 = front (+Y) slope, -1 = back."""
+    tris = box_tris(0, 0, -0.13, 0.13, 8.7, ROOF_SLOPE, mat='roof')
+    tris = spin_x(tris, -sign * ROOF_PITCH)
+    return shift(tris, 0, sign * ROOF_CY, ROOF_CZ)
+
+def build_house(stage):
+    """House triangles for construction stage 0..3:
+    0 foundation, 1 timber frame + scaffold, 2 walls + roof rising,
+    3 complete. Later stages include the earlier structure.
+    Frame faces sit a decisive 0.14 proud of the plaster panels —
+    coplanar faces z-fight in this renderer, so timber always
+    overlaps plaster, never touches it."""
+    t = []
+    # --- Foundation (every stage): stone slab + low curb ------------
+    t += box_tris(0, 0, 0.0, 0.38, 8.2, 8.2, mat='stone')
+    if stage == 0:
+        t += box_tris(0, 3.9, 0.38, 0.83, 7.8, 0.4, mat='stone')
+        t += box_tris(0, -3.9, 0.38, 0.83, 7.8, 0.4, mat='stone')
+        t += box_tris(3.9, 0, 0.38, 0.83, 0.4, 7.8, mat='stone')
+        t += box_tris(-3.9, 0, 0.38, 0.83, 0.4, 7.8, mat='stone')
+        # Corner stub posts + loose stone blocks: the first marks of
+        # the build, so stage 0 reads as a started site, not a patio.
+        for sx_ in (-1, 1):
+            for sy_ in (-1, 1):
+                t += box_tris(3.28 * sx_, 3.28 * sy_, 0.38, 1.35, 0.5, 0.5, mat='timber')
+        t += box_tris(-2.6, 1.8, 0.38, 1.14, 0.76, 0.76, mat='stone')
+        t += box_tris(-1.7, 1.95, 0.38, 1.0, 0.62, 0.62, mat='stone')
+    # --- Log pile: building material on the foundation (stages 0-1) -
+    if stage <= 1:
+        t += box_tris(2.45, 2.75, 0.38, 0.8, 2.5, 0.42, mat='wood')
+        t += box_tris(2.45, 3.22, 0.38, 0.8, 2.5, 0.42, mat='wood')
+        t += box_tris(2.45, 2.98, 0.8, 1.22, 2.5, 0.42, mat='wood')
+    if stage == 0:
+        return t
+    # --- Timber frame (stage 1+): floor, sills, posts, top plates ---
+    t += box_tris(0, 0, 0.38, 0.54, 7.2, 7.2, mat='wood')            # floor
+    for sx_ in (-1, 1):
+        for sy_ in (-1, 1):                                          # corners
+            t += box_tris(3.28 * sx_, 3.28 * sy_, 0.38, 4.5, 0.56, 0.56, mat='timber')
+        t += box_tris(3.28 * sx_, 0, 0.38, 0.78, 0.56, 7.0, mat='timber')  # sill X-side
+        t += box_tris(0, 3.28 * sx_, 0.38, 0.78, 7.0, 0.56, mat='timber')  # sill Y-side
+        t += box_tris(3.28 * sx_, 0, 4.28, 4.62, 0.56, 7.0, mat='timber')  # plate X-side
+        t += box_tris(0, 3.28 * sx_, 4.28, 4.62, 7.0, 0.56, mat='timber')  # plate Y-side
+        t += box_tris(3.28 * sx_, 0, 0.38, 4.45, 0.56, 0.4, mat='timber')  # mid post X
+        t += box_tris(0, 3.28 * sx_, 0.38, 4.45, 0.4, 0.56, mat='timber')  # mid post Y
+    if stage == 1:
+        # Scaffold on the front (+Y): poles, two ledgers, a plank deck.
+        for px in (-3.3, 0.0, 3.3):
+            t += box_tris(px, 4.35, 0.0, 4.9, 0.22, 0.22, mat='wood')
+        t += box_tris(0, 4.35, 1.7, 1.88, 7.0, 0.13, mat='wood')
+        t += box_tris(0, 4.35, 3.5, 3.68, 7.0, 0.13, mat='wood')
+        t += box_tris(0, 4.35, 3.68, 3.82, 7.0, 0.9, mat='wood')
+        return t
+    # --- Plaster walls between the frame (stage 2+), inset so the
+    # timber reads as a frame ON the wall -----------------------------
+    t += box_tris(0, 3.23, 0.38, 4.3, 6.6, 0.38, mat='plaster')
+    t += box_tris(0, -3.23, 0.38, 4.3, 6.6, 0.38, mat='plaster')
+    t += box_tris(3.23, 0, 0.38, 4.3, 0.38, 6.6, mat='plaster')
+    t += box_tris(-3.23, 0, 0.38, 4.3, 0.38, 6.6, mat='plaster')
+    # Gable ends: tapered box whose top edge collapses to the ridge.
+    t += box_tris(0, 0, 4.35, 6.8, 6.84, 6.9, 6.84, 0.12, mat='plaster')
+    # Door (front, left of center): panel proud of the wall, lintel,
+    # threshold stone. Windows: timber frame + warm lit pane.
+    t += box_tris(-1.7, 3.56, 0.38, 2.62, 1.5, 0.14, mat='door')
+    t += box_tris(-1.7, 3.56, 2.62, 2.86, 1.8, 0.2, mat='timber')
+    t += box_tris(-1.7, 3.62, 0.38, 0.52, 1.7, 0.75, mat='stone')
+    t += box_tris(1.75, 3.54, 2.05, 3.15, 1.1, 0.16, mat='timber')   # front frame
+    t += box_tris(1.75, 3.58, 2.2, 3.0, 0.86, 0.1, mat='window')     # front pane
+    t += box_tris(3.54, -1.4, 2.05, 3.15, 0.16, 1.1, mat='timber')   # side frame
+    t += box_tris(3.58, -1.4, 2.2, 3.0, 0.1, 0.86, mat='window')     # side pane
+    # --- Roof: front slope covered first (stage 2), back slope is
+    # bare rafters until completion ----------------------------------
+    t += roof_slab(+1)
+    if stage == 2:
+        for rx in (-3.5, -1.75, 0.0, 1.75, 3.5):
+            r = box_tris(0, 0, -0.09, 0.09, 0.3, ROOF_SLOPE, mat='timber')
+            r = spin_x(r, ROOF_PITCH)
+            t += shift(r, rx, -ROOF_CY, ROOF_CZ - 0.1)
+        return t
+    # --- Complete: back slope, chimney + cap, window shutters -------
+    t += roof_slab(-1)
+    t += box_tris(2.3, 0, 5.4, 7.95, 1.15, 1.15, mat='stone')
+    t += box_tris(2.3, 0, 7.95, 8.2, 1.5, 1.5, mat='stone')
+    t += box_tris(0.97, 3.53, 2.05, 3.15, 0.42, 0.08, mat='timber')
+    t += box_tris(2.53, 3.53, 2.05, 3.15, 0.42, 0.08, mat='timber')
+    return t
+
+HOUSE_STAGES = [(0, 'stage0'), (1, 'stage1'), (2, 'stage2'), (3, 'complete')]
+
+def render_house(stage):
+    cell = render_cell(build_house(stage), 2,
+                       cw=HOUSE_W_PX, ch=HOUSE_H_PX,
+                       ax=HOUSE_AX, ay=HOUSE_AY)
+    return Image.fromarray(cell, 'RGBA')
+
 def main():
-    ap = argparse.ArgumentParser(description='Skirmish sprite pipeline — villager v1')
+    ap = argparse.ArgumentParser(description='Skirmish sprite pipeline — villager v1 + house v1')
     ap.add_argument('--player-color', default='#2e6fd8',
                     help='base color of the player-color (tunic) palette')
     ap.add_argument('--out', default=None,
                     help='output dir (default: web-preview/assets-original)')
+    ap.add_argument('--only', choices=('all', 'villager', 'house'),
+                    default='all', help='render only one model family')
     args = ap.parse_args()
     MATERIALS['tunic'] = hex2rgb(args.player_color)
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     out = args.out or os.path.join(root, 'web-preview', 'assets-original')
     os.makedirs(out, exist_ok=True)
-    for state in STATES:
-        img = render_sheet(state)
-        path = os.path.join(out, f'villager-{state}.png')
-        img.save(path)
-        print(f'{path}: {img.width}x{img.height} '
-              f'({STATES[state][1]} frames x {DIRECTIONS} directions)')
-    print(f'player color: {args.player_color}')
+    if args.only in ('all', 'villager'):
+        for state in STATES:
+            img = render_sheet(state)
+            path = os.path.join(out, f'villager-{state}.png')
+            img.save(path)
+            print(f'{path}: {img.width}x{img.height} '
+                  f'({STATES[state][1]} frames x {DIRECTIONS} directions)')
+        print(f'player color: {args.player_color}')
+    if args.only in ('all', 'house'):
+        for stage, name in HOUSE_STAGES:
+            img = render_house(stage)
+            path = os.path.join(out, f'house-{name}.png')
+            img.save(path)
+            print(f'{path}: {img.width}x{img.height} (construction stage {stage})')
 
 if __name__ == '__main__':
     main()
