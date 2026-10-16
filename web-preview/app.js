@@ -34,6 +34,46 @@ const NODE_MAX = [100, 125, 800, 350];
 const CARRY_COLORS = ['#d9a05b', '#ff5da2', '#ffd700', '#c3c8cd'];
 const KIND_TC = 1; // entity kind tag: 0 villager, 1 town center
 
+// --- Placeholder sprites (CC0 test art) --------------------------------
+// Temporary Kenney CC0 sprites so the preview already looks like a game;
+// each is replaced by our own original art piece by piece. Full source
+// and license list: assets-placeholder/README.md. Loading is fire-and-
+// forget: until an image is ready (or if it fails), the draw functions
+// fall back to the original vector shapes below.
+const SPRITES = {};
+for (const [key, file] of Object.entries({
+  villager: 'villager.png',
+  tree: 'tree.png',
+  berry: 'berry-bush.png',
+  gold: 'gold.png',
+  stone: 'stone.png',
+  tc: 'town-center.png',
+})) {
+  const im = new Image();
+  im.src = 'assets-placeholder/' + file;
+  SPRITES[key] = im;
+}
+function spriteReady(im) {
+  return !!im && im.complete && im.naturalWidth > 0;
+}
+// Draw `im` bottom-anchored at ground point (sx, sy + dyWorld*camS),
+// sized by height (hWorld) or width (wWorld) in world units, keeping
+// the image's aspect ratio. Returns false when not loaded yet.
+function drawSpriteH(im, sx, sy, hWorld, dyWorld = 0) {
+  if (!spriteReady(im)) return false;
+  const h = hWorld * camS;
+  const w = h * (im.naturalWidth / im.naturalHeight);
+  ctx.drawImage(im, sx - w / 2, sy + dyWorld * camS - h, w, h);
+  return true;
+}
+function drawSpriteW(im, sx, sy, wWorld, dyWorld = 0) {
+  if (!spriteReady(im)) return false;
+  const w = wWorld * camS;
+  const h = w * (im.naturalHeight / im.naturalWidth);
+  ctx.drawImage(im, sx - w / 2, sy + dyWorld * camS - h, w, h);
+  return true;
+}
+
 // --- Isometric camera -------------------------------------------------
 // Fixed angle, 2:1 dimetric. Pure functions of explicit parameters so
 // the projection math can be unit-tested headlessly in Node.
@@ -310,6 +350,7 @@ function amountBar(sx, sy, frac) {
 function drawTree(sx, sy) {
   const u = camS;
   shadow(sx, sy, 1.5 * u);
+  if (drawSpriteH(SPRITES.tree, sx, sy, 4.4)) return;
   ctx.fillStyle = '#6b4a2b'; // trunk
   ctx.fillRect(sx - 0.18 * u, sy - 1.5 * u, 0.36 * u, 1.5 * u);
   ctx.fillStyle = '#256b2e'; // canopy, dark side
@@ -329,6 +370,7 @@ function drawTree(sx, sy) {
 function drawBerry(sx, sy) {
   const u = camS;
   shadow(sx, sy, 1.4 * u);
+  if (drawSpriteH(SPRITES.berry, sx, sy, 1.9)) return;
   const blob = (dx, dy, rw, rh, fill) => {
     ctx.fillStyle = fill;
     ctx.beginPath();
@@ -349,6 +391,7 @@ function drawBerry(sx, sy) {
 function drawGold(sx, sy) {
   const u = camS;
   shadow(sx, sy, 1.3 * u);
+  if (drawSpriteW(SPRITES.gold, sx, sy, 2.6)) return;
   // Angular crystals: small diamonds in three gold tones.
   diamond(sx - 0.7 * u, sy - 0.45 * u, 0.5 * u, 0.55 * u, '#c78f00');
   diamond(sx + 0.1 * u, sy - 0.8 * u, 0.65 * u, 0.85 * u, '#ffd700');
@@ -359,6 +402,7 @@ function drawGold(sx, sy) {
 function drawStone(sx, sy) {
   const u = camS;
   shadow(sx, sy, 1.35 * u);
+  if (drawSpriteW(SPRITES.stone, sx, sy, 2.8)) return;
   poly([
     [sx - 0.95 * u, sy], [sx - 0.55 * u, sy - 0.8 * u],
     [sx + 0.1 * u, sy - 1.0 * u], [sx + 0.55 * u, sy - 0.55 * u],
@@ -386,6 +430,9 @@ function drawTC(wx, wy) {
   const l = worldToScreen(wx - a, wy + a);
   const [sx, sy] = worldToScreen(wx, wy);
   shadow(sx, sy, (r[0] - l[0]) / 2);
+  // Placeholder building sprite, base planted toward the footprint's
+  // front edge (dy +1.6 world units from the center point).
+  if (drawSpriteW(SPRITES.tc, sx, sy, 9.5, 1.6)) return;
   const h = 2.2 * camS; // wall height
   poly([l, b, up(b, h), up(l, h)], '#b09468'); // front-left wall
   poly([b, r, up(r, h), up(b, h)], '#8a6f45'); // front-right wall
@@ -405,19 +452,22 @@ function drawVillager(i, wx, wy) {
   const [sx, sy] = worldToScreen(wx, wy);
   const u = camS;
   shadow(sx, sy, 0.95 * u);
-  const by = sy - 1.15 * u; // body floats just above its ground point
-  ctx.fillStyle = COLORS[i % COLORS.length];
-  ctx.beginPath();
-  ctx.arc(sx, by, 0.85 * u, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(0,0,0,0.4)';
-  ctx.lineWidth = 1;
-  ctx.stroke();
+  const spr = drawSpriteH(SPRITES.villager, sx, sy, 2.4);
+  const by = sy - 1.15 * u; // fallback body center / label anchor
+  if (!spr) {
+    ctx.fillStyle = COLORS[i % COLORS.length];
+    ctx.beginPath();
+    ctx.arc(sx, by, 0.85 * u, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
   const ck = carryKind.get(i);
   if (ck !== undefined) {
     ctx.fillStyle = CARRY_COLORS[ck];
     ctx.beginPath();
-    ctx.arc(sx, sy - 2.35 * u, 0.4 * u, 0, Math.PI * 2);
+    ctx.arc(sx, sy - (spr ? 2.8 : 2.35) * u, 0.4 * u, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = 'rgba(0,0,0,0.35)';
     ctx.stroke();
@@ -426,7 +476,7 @@ function drawVillager(i, wx, wy) {
   ctx.font = `${Math.max(7, Math.round(u))}px monospace`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(String(i), sx, by);
+  ctx.fillText(String(i), sx, spr ? sy + 0.5 * u : by);
 }
 
 // --- Frame ------------------------------------------------------------------
