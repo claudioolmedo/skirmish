@@ -1,15 +1,23 @@
-// Skirmish M2 debug preview — dependency-free Canvas 2D view of the sim.
+// Skirmish play page — dependency-free Canvas 2D view of the sim.
+// Loaded by play/index.html (../app.js); it is the game's fullscreen
+// page. The landing page no longer embeds the game.
 //
-// This is a THROWAWAY debug slice, not the M4 renderer. It renders the
-// sim with a 2D isometric camera in the Age of Empires style: flat 2D
-// sprites (programmer art with baked-in two-tone shading and ground
-// shadows) on a fixed 2:1 dimetric projection, painted back-to-front.
-// No real 3D, no rotation — the same technique as the classic engine.
-// Its job is to make the M2 economy loop visible: stockpile HUD,
-// resource nodes, the Town Center, villagers gathering/hauling/
-// depositing, and the live state hash as a determinism proof.
+// Renders the sim with a 2D isometric camera in the Age of Empires
+// style: flat 2D sprites on a fixed 2:1 dimetric projection, painted
+// back-to-front. No real 3D, no rotation — the same technique as the
+// classic engine. On top of the M2 economy view it adds the M2.5 shell:
+// start overlay + pause menu, villager selection, a build menu with a
+// placement ghost (client mirror of the sim's placement rules — the
+// sim validates every order itself), construction rendering, and the
+// population HUD.
+//
+// Asset URLs are resolved relative to THIS module (import.meta.url),
+// so the page works from /play/, from the site root, and from the
+// github.io project path alike.
 
 import init, { WasmSim } from './pkg/skirmish_sim.js';
+
+const assetUrl = (rel) => new URL(rel, import.meta.url).href;
 
 const params = new URLSearchParams(location.search);
 const seed = parseInt(params.get('seed') || '7', 10);
@@ -18,6 +26,17 @@ const canvas = document.getElementById('view');
 const ctx = canvas.getContext('2d');
 const hud = document.getElementById('hud');
 const trainBtn = document.getElementById('train');
+const pauseBtn = document.getElementById('pause-btn');
+const buildMenu = document.getElementById('build-menu');
+const buildHouseBtn = document.getElementById('build-house');
+const buildFarmBtn = document.getElementById('build-farm');
+const selInfo = document.getElementById('sel-info');
+const toast = document.getElementById('toast');
+const startOverlay = document.getElementById('start-overlay');
+const playBtn = document.getElementById('play-btn');
+const pauseMenu = document.getElementById('pause-menu');
+const resumeBtn = document.getElementById('resume-btn');
+const restartBtn = document.getElementById('restart-btn');
 
 const COLORS = [
   '#e74c3c', '#3498db', '#2ecc71', '#f1c40f',
@@ -27,19 +46,39 @@ const COLORS = [
 ];
 
 // Node kind tags (must match the sim's NodeKind::tag): 0 tree, 1 berry,
-// 2 gold, 3 stone. MAX_AMOUNT is each kind's starting amount in the sim
-// (for the remaining-amount bar); CARRY_COLORS is the load dot shown
-// above a hauling villager.
-const NODE_MAX = [100, 125, 800, 350];
-const CARRY_COLORS = ['#d9a05b', '#ff5da2', '#ffd700', '#c3c8cd'];
+// 2 gold, 3 stone, 4 farm. NODE_MAX is each kind's starting amount in
+// the sim (for the remaining-amount bar / farm crop tint); CARRY_COLORS
+// is the load dot shown above a hauling villager.
+const NODE_MAX = [100, 125, 800, 350, 175];
+const CARRY_COLORS = ['#d9a05b', '#ff5da2', '#ffd700', '#c3c8cd', '#ff5da2'];
 const KIND_TC = 1; // entity kind tag: 0 villager, 1 town center
+
+// Building kind tags (must match the sim's BuildingKind::tag):
+// 0 house, 1 farm. Costs mirror the sim (MECHANICS-STUDY §5).
+const BUILD_COST = [25, 60];
+const BUILD_NAME = ['House', 'Farm'];
+
+// --- Game shell state (client-only; never sim input) -------------------
+let playing = false; // Play pressed: the sim ticks
+let paused = false; // pause menu open: the sim holds
+let selected = null; // selected villager id, or null (orders go to all)
+let placement = null; // { kind } while placing a building
+let mouseWorld = null; // last cursor position, world coords
+let flashText = '';
+let flashUntil = 0;
+
+function flash(msg) {
+  flashText = msg;
+  flashUntil = performance.now() + 2600;
+}
 
 // --- Placeholder sprites (CC0 test art) --------------------------------
 // Temporary Kenney CC0 sprites so the preview already looks like a game;
-// each is replaced by our own original art piece by piece. Full source
-// and license list: assets-placeholder/README.md. Loading is fire-and-
-// forget: until an image is ready (or if it fails), the draw functions
-// fall back to the original vector shapes below.
+// each is replaced by our own original art piece by piece (the villager
+// already is). Full source and license list:
+// assets-placeholder/README.md. Loading is fire-and-forget: until an
+// image is ready (or if it fails), the draw functions fall back to the
+// original vector shapes below.
 const SPRITES = {};
 for (const [key, file] of Object.entries({
   villager: 'villager.png',
@@ -48,9 +87,10 @@ for (const [key, file] of Object.entries({
   gold: 'gold.png',
   stone: 'stone.png',
   tc: 'town-center.png',
+  house: 'house.png',
 })) {
   const im = new Image();
-  im.src = 'assets-placeholder/' + file;
+  im.src = assetUrl('assets-placeholder/' + file);
   SPRITES[key] = im;
 }
 function spriteReady(im) {
@@ -88,7 +128,7 @@ const VIL_ORIGINAL = {
 };
 for (const state of Object.keys(VIL_ORIGINAL.frames)) {
   const im = new Image();
-  im.src = `assets-original/villager-${state}.png`;
+  im.src = assetUrl(`assets-original/villager-${state}.png`);
   VIL_ORIGINAL.img[state] = im;
 }
 // Animation state per villager, advanced from sim positions each frame.
@@ -187,6 +227,21 @@ function nodeList() {
   return out;
 }
 
+// Building data is a flat array of 8 per building:
+// [id, kind, x, y, progress, complete, cell_x, cell_y].
+function buildingList() {
+  const flat = sim.buildings();
+  const out = [];
+  for (let i = 0; i < flat.length; i += 8) {
+    out.push({
+      id: flat[i], kind: flat[i + 1], x: flat[i + 2], y: flat[i + 3],
+      progress: flat[i + 4], complete: flat[i + 5] > 0.5,
+      cellX: flat[i + 6], cellY: flat[i + 7],
+    });
+  }
+  return out;
+}
+
 function villagerIds() {
   const kinds = sim.entity_kinds();
   const ids = [];
@@ -194,6 +249,52 @@ function villagerIds() {
     if (kinds[i] !== KIND_TC) ids.push(i); // entities are id-ordered
   }
   return ids;
+}
+
+function worldToCell(wx, wy) {
+  const cx = Math.max(0, Math.min(GW - 1, Math.floor((wx + HALF) / CS)));
+  const cy = Math.max(0, Math.min(GH - 1, Math.floor((wy + HALF) / CS)));
+  return [cx, cy];
+}
+
+function tcCell() {
+  const kinds = sim.entity_kinds();
+  const pos = sim.positions();
+  const tc = kinds.indexOf(KIND_TC);
+  if (tc < 0) return null;
+  return worldToCell(pos[tc * 2], pos[tc * 2 + 1]);
+}
+
+// --- Placement ghost: client mirror of the sim's build validation ----
+// Mirrors Sim::validate_build (lib.rs) using only ABI-visible state, so
+// the ghost is honest. The sim re-validates every order itself — this
+// mirror is a courtesy, never the authority.
+function mirrorValid(kind, cx, cy) {
+  if (cx < 0 || cy < 0 || cx + 1 >= GW || cy + 1 >= GH) return false;
+  const buildings = buildingList();
+  // Resuming an incomplete building of the same kind at this anchor.
+  for (const b of buildings) {
+    if (!b.complete && b.kind === kind && b.cellX === cx && b.cellY === cy) {
+      return true;
+    }
+  }
+  const cells = [[cx, cy], [cx + 1, cy], [cx, cy + 1], [cx + 1, cy + 1]];
+  const tc = tcCell();
+  const nodes = nodeList();
+  for (const [x, y] of cells) {
+    if (OBST[y * GW + x]) return false; // static wall
+    if (tc && x === tc[0] && y === tc[1]) return false; // Town Center
+    for (const b of buildings) { // any standing building's footprint
+      if (Math.abs(b.cellX - cx) <= 1 && Math.abs(b.cellY - cy) <= 1) return false;
+    }
+    for (const n of nodes) { // a live node on this cell
+      if (n.amount <= 0) continue;
+      const nc = worldToCell(n.x, n.y);
+      if (nc[0] === x && nc[1] === y) return false;
+    }
+  }
+  if (sim.wood() < BUILD_COST[kind]) return false;
+  return true;
 }
 
 // --- Carry indicator (client-side heuristic) --------------------------
@@ -245,6 +346,14 @@ function updateCarry(nodes, tcPos, pos, kinds) {
 const keys = new Set();
 addEventListener('keydown', (e) => {
   if (e.code.startsWith('Arrow')) e.preventDefault();
+  if (e.code === 'Escape') {
+    if (placement) {
+      placement = null;
+    } else if (playing) {
+      setPaused(!paused);
+    }
+    return;
+  }
   keys.add(e.code);
 });
 addEventListener('keyup', (e) => keys.delete(e.code));
@@ -257,82 +366,33 @@ function applyKeys() {
   if (keys.has('KeyS') || keys.has('ArrowDown')) camOy -= P;
 }
 
-async function main() {
-  await init();
+function setPaused(v) {
+  if (!playing) return;
+  paused = v;
+  pauseMenu.style.display = paused ? 'flex' : 'none';
+}
+
+// (Re)create the simulation and all client-side mirrors. Restart is a
+// fresh WasmSim with the same seed: bit-identical starting state.
+function resetSim() {
   sim = new WasmSim(seed);
-  HALF = sim.world_half();
-  GW = sim.grid_width();
-  GH = sim.grid_height();
-  CS = sim.cell_size();
-  OBST = sim.obstacles();
+  vilAnim.clear();
+  prevPos.clear();
+  lastNodeKind.clear();
+  carryKind.clear();
+  atNodeNow.clear();
+  selected = null;
+  placement = null;
 
-  // Initial camera: centered on the Town Center.
-  {
-    const kinds = sim.entity_kinds();
-    const pos = sim.positions();
-    const tc = kinds.indexOf(KIND_TC);
-    const [ox, oy] = centerCamera(
-      pos[tc * 2], pos[tc * 2 + 1], camS, canvas.width, canvas.height);
-    camOx = ox;
-    camOy = oy;
-  }
-
-  trainBtn.addEventListener('click', () => {
-    sim.push_train_villager();
-  });
-
-  canvas.addEventListener('click', (ev) => {
-    const r = canvas.getBoundingClientRect();
-    const sx = (ev.clientX - r.left) * (canvas.width / r.width);
-    const sy = (ev.clientY - r.top) * (canvas.height / r.height);
-    const [wx, wy] = s2w(sx, sy, camS, camOx, camOy);
-    // Click near a live node (within 4 world units): gather it with all
-    // villagers. Otherwise: plain move order for all villagers.
-    let best = null;
-    let bestD2 = 4 * 4;
-    for (const n of nodeList()) {
-      if (n.amount <= 0) continue;
-      const d2 = (n.x - wx) * (n.x - wx) + (n.y - wy) * (n.y - wy);
-      if (d2 < bestD2) {
-        bestD2 = d2;
-        best = n;
-      }
-    }
-    for (const id of villagerIds()) {
-      if (best) sim.push_gather(id, best.id);
-      else sim.push_move(id, wx, wy);
-    }
-  });
-
-  // Zoom toward the cursor with the mouse wheel.
-  canvas.addEventListener('wheel', (ev) => {
-    ev.preventDefault();
-    const r = canvas.getBoundingClientRect();
-    const mx = (ev.clientX - r.left) * (canvas.width / r.width);
-    const my = (ev.clientY - r.top) * (canvas.height / r.height);
-    const ns = Math.min(S_MAX, Math.max(S_MIN, camS * Math.exp(-ev.deltaY * 0.0012)));
-    camOx = mx - (mx - camOx) * (ns / camS);
-    camOy = my - (my - camOy) * (ns / camS);
-    camS = ns;
-  }, { passive: false });
-
-  // Pan by dragging with the right mouse button.
-  let drag = null;
-  canvas.addEventListener('mousedown', (e) => {
-    if (e.button === 2) drag = [e.clientX, e.clientY];
-  });
-  addEventListener('mousemove', (e) => {
-    if (!drag) return;
-    const r = canvas.getBoundingClientRect();
-    const f = canvas.width / r.width;
-    camOx += (e.clientX - drag[0]) * f;
-    camOy += (e.clientY - drag[1]) * f;
-    drag = [e.clientX, e.clientY];
-  });
-  addEventListener('mouseup', (e) => {
-    if (e.button === 2) drag = null;
-  });
-  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  // Camera: centered on the Town Center.
+  const kinds = sim.entity_kinds();
+  const pos = sim.positions();
+  const tc = kinds.indexOf(KIND_TC);
+  camS = INITIAL_S;
+  const [ox, oy] = centerCamera(
+    pos[tc * 2], pos[tc * 2 + 1], camS, canvas.width, canvas.height);
+  camOx = ox;
+  camOy = oy;
 
   // Opening demo orders so the economy starts moving immediately:
   // two villagers on the nearest berries, one on the nearest tree.
@@ -347,23 +407,217 @@ async function main() {
   if (tree && vils.length > 2) {
     sim.push_gather(vils[2], tree.id);
   }
+}
+
+function fitCanvas() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+
+async function main() {
+  await init();
+  HALF = null; // set from the first sim instance below
+  fitCanvas();
+  addEventListener('resize', () => {
+    fitCanvas();
+  });
+
+  resetSim();
+  HALF = sim.world_half();
+  GW = sim.grid_width();
+  GH = sim.grid_height();
+  CS = sim.cell_size();
+  OBST = sim.obstacles();
+  // Camera centering in resetSim ran before HALF/GW were known-good;
+  // the values come straight from the sim, so just re-center cleanly.
+  {
+    const kinds = sim.entity_kinds();
+    const pos = sim.positions();
+    const tc = kinds.indexOf(KIND_TC);
+    const [ox, oy] = centerCamera(
+      pos[tc * 2], pos[tc * 2 + 1], camS, canvas.width, canvas.height);
+    camOx = ox;
+    camOy = oy;
+  }
+
+  // --- Menus -----------------------------------------------------------
+  playBtn.addEventListener('click', () => {
+    startOverlay.style.display = 'none';
+    playing = true;
+    paused = false;
+  });
+  pauseBtn.addEventListener('click', () => setPaused(true));
+  resumeBtn.addEventListener('click', () => setPaused(false));
+  restartBtn.addEventListener('click', () => {
+    resetSim();
+    setPaused(false);
+    playing = true;
+  });
+
+  trainBtn.addEventListener('click', () => {
+    if (!sim.push_train_villager()) {
+      const reason = sim.train_block_reason();
+      flash(['', 'Not enough food for a villager.',
+        'The training queue is full.', 'Housed — build a House first.'][reason] || 'Cannot train right now.');
+    }
+  });
+
+  buildHouseBtn.addEventListener('click', () => {
+    placement = placement && placement.kind === 0 ? null : { kind: 0 };
+  });
+  buildFarmBtn.addEventListener('click', () => {
+    placement = placement && placement.kind === 1 ? null : { kind: 1 };
+  });
+
+  // --- Pointer ---------------------------------------------------------
+  function eventWorld(ev) {
+    const r = canvas.getBoundingClientRect();
+    const sx = (ev.clientX - r.left) * (canvas.width / r.width);
+    const sy = (ev.clientY - r.top) * (canvas.height / r.height);
+    return s2w(sx, sy, camS, camOx, camOy);
+  }
+
+  function villagerAt(wx, wy) {
+    const kinds = sim.entity_kinds();
+    const pos = sim.positions();
+    let best = null;
+    let bestD2 = 1.9 * 1.9;
+    for (let i = 0; i < kinds.length; i++) {
+      if (kinds[i] === KIND_TC) continue;
+      const d2 = (pos[i * 2] - wx) ** 2 + (pos[i * 2 + 1] - wy) ** 2;
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  function nodeAt(wx, wy) {
+    let best = null;
+    let bestD2 = 4 * 4;
+    for (const n of nodeList()) {
+      if (n.amount <= 0) continue;
+      const d2 = (n.x - wx) * (n.x - wx) + (n.y - wy) * (n.y - wy);
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        best = n;
+      }
+    }
+    return best;
+  }
+
+  // Context order at a point: gather the node there, else move. Goes
+  // to the selected villager, or to all villagers when none is selected
+  // (the M2 behavior, kept as the no-selection default).
+  function orderAt(wx, wy) {
+    const targets = selected != null ? [selected] : villagerIds();
+    const n = nodeAt(wx, wy);
+    for (const id of targets) {
+      if (n) sim.push_gather(id, n.id);
+      else sim.push_move(id, wx, wy);
+    }
+  }
+
+  function attemptPlace(wx, wy) {
+    const [cx, cy] = worldToCell(wx, wy);
+    // Send a point strictly inside the anchor cell; the sim anchors
+    // the footprint at the cell containing the point.
+    const px = -HALF + cx * CS + 0.01;
+    const py = -HALF + cy * CS + 0.01;
+    const ok = placement.kind === 0
+      ? sim.push_build_house(selected, px, py)
+      : sim.push_build_farm(selected, px, py);
+    if (ok) {
+      placement = null;
+    } else {
+      flash(`Cannot build a ${BUILD_NAME[placement.kind]} there.`);
+    }
+  }
+
+  canvas.addEventListener('mousemove', (ev) => {
+    mouseWorld = eventWorld(ev);
+  });
+
+  canvas.addEventListener('click', (ev) => {
+    const [wx, wy] = eventWorld(ev);
+    if (placement) {
+      attemptPlace(wx, wy);
+      return;
+    }
+    const v = villagerAt(wx, wy);
+    if (v != null) {
+      selected = v;
+      return;
+    }
+    orderAt(wx, wy);
+  });
+
+  // Zoom toward the cursor with the mouse wheel.
+  canvas.addEventListener('wheel', (ev) => {
+    ev.preventDefault();
+    const r = canvas.getBoundingClientRect();
+    const mx = (ev.clientX - r.left) * (canvas.width / r.width);
+    const my = (ev.clientY - r.top) * (canvas.height / r.height);
+    const ns = Math.min(S_MAX, Math.max(S_MIN, camS * Math.exp(-ev.deltaY * 0.0012)));
+    camOx = mx - (mx - camOx) * (ns / camS);
+    camOy = my - (my - camOy) * (ns / camS);
+    camS = ns;
+  }, { passive: false });
+
+  // Pan by dragging with the right mouse button; a right *click*
+  // (no drag) issues a context order without changing the selection —
+  // or cancels placement mode.
+  let drag = null; // [clientX, clientY, moved]
+  canvas.addEventListener('mousedown', (e) => {
+    if (e.button === 2) drag = [e.clientX, e.clientY, false];
+  });
+  addEventListener('mousemove', (e) => {
+    if (!drag) return;
+    const r = canvas.getBoundingClientRect();
+    const f = canvas.width / r.width;
+    if (Math.abs(e.clientX - drag[0]) + Math.abs(e.clientY - drag[1]) > 3) {
+      drag[2] = true;
+    }
+    camOx += (e.clientX - drag[0]) * f;
+    camOy += (e.clientY - drag[1]) * f;
+    drag = [e.clientX, e.clientY, drag[2]];
+  });
+  addEventListener('mouseup', (e) => {
+    if (e.button !== 2 || !drag) return;
+    const wasClick = !drag[2];
+    drag = null;
+    if (!wasClick) return;
+    if (placement) {
+      placement = null;
+      return;
+    }
+    const [wx, wy] = eventWorld(e);
+    orderAt(wx, wy);
+  });
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
   // Fixed 60 Hz tick loop decoupled from rAF, with a max-ticks-per-frame
   // guard: on a slow machine the preview slows down visually, never
-  // logically (same rule as the real game).
+  // logically (same rule as the real game). The sim only advances while
+  // playing and unpaused — it starts paused behind the start overlay.
   let acc = 0;
   let last = performance.now();
   const STEP = 1000 / 60;
   function frame(now) {
-    acc += Math.min(now - last, 250);
-    last = now;
-    let n = 0;
-    while (acc >= STEP && n < 5) {
-      sim.tick();
-      acc -= STEP;
-      n++;
+    if (playing && !paused) {
+      acc += Math.min(now - last, 250);
+      let n = 0;
+      while (acc >= STEP && n < 5) {
+        sim.tick();
+        acc -= STEP;
+        n++;
+      }
+      if (n === 5) acc = 0;
+    } else {
+      acc = 0;
     }
-    if (n === 5) acc = 0;
+    last = now;
     applyKeys();
     draw();
     requestAnimationFrame(frame);
@@ -421,6 +675,20 @@ function amountBar(sx, sy, frac) {
   ctx.fillRect(x, y, w, h);
   ctx.fillStyle = frac > 0.3 ? '#7dd87d' : '#e0a13c';
   ctx.fillRect(x, y, w * Math.max(0, Math.min(1, frac)), h);
+}
+
+// Construction progress bar, drawn at an explicit anchor (above the
+// building), gold fill — same visual family as amountBar.
+function progressBar(sx, sy, frac) {
+  const w = 5 * camS;
+  const h = Math.max(3, camS * 0.6);
+  const x = sx - w / 2;
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(x - 1, sy - 1, w + 2, h + 2);
+  ctx.fillStyle = '#20261c';
+  ctx.fillRect(x, sy, w, h);
+  ctx.fillStyle = '#d9a441';
+  ctx.fillRect(x, sy, w * Math.max(0, Math.min(1, frac)), h);
 }
 
 function drawTree(sx, sy) {
@@ -494,9 +762,44 @@ function drawStone(sx, sy) {
   ], '#c3c8cd');
 }
 
-const NODE_DRAW = [drawTree, drawBerry, drawGold, drawStone];
+// A farm field: a tilled-soil diamond spanning the farm's 2x2 cells
+// around its center point, with furrow lines and a crop tint whose
+// strength follows the food remaining (full field = lush, nearly
+// depleted = mostly bare soil). `cropFrac` null draws bare soil
+// (under construction).
+function drawFarmPlot(wx, wy, cropFrac) {
+  const t = worldToScreen(wx - CS, wy - CS);
+  const r = worldToScreen(wx + CS, wy - CS);
+  const b = worldToScreen(wx + CS, wy + CS);
+  const l = worldToScreen(wx - CS, wy + CS);
+  poly([t, r, b, l], '#6b4a2c'); // tilled soil
+  // Furrows: three lines running one way across the field.
+  ctx.strokeStyle = 'rgba(0,0,0,0.28)';
+  ctx.lineWidth = Math.max(1, camS * 0.18);
+  for (const f of [0.25, 0.5, 0.75]) {
+    const x1 = t[0] + (l[0] - t[0]) * f;
+    const y1 = t[1] + (l[1] - t[1]) * f;
+    const x2 = r[0] + (b[0] - r[0]) * f;
+    const y2 = r[1] + (b[1] - r[1]) * f;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+  }
+  if (cropFrac != null) {
+    const a = 0.12 + 0.5 * Math.max(0, Math.min(1, cropFrac));
+    poly([t, r, b, l], `rgba(96, 165, 62, ${a.toFixed(3)})`);
+  }
+}
 
-// --- Building / unit sprites ----------------------------------------------
+function drawFarm(sx, sy, frac, wx, wy) {
+  shadow(sx, sy, 3.4 * camS);
+  drawFarmPlot(wx, wy, frac);
+}
+
+const NODE_DRAW = [drawTree, drawBerry, drawGold, drawStone, drawFarm];
+
+// --- Building sprites -----------------------------------------------------
 const TC_HALF = 3.6; // world units: TC footprint half-extent
 function drawTC(wx, wy) {
   const a = TC_HALF;
@@ -524,10 +827,74 @@ function drawTC(wx, wy) {
   ctx.fillText('TC', cx, cy);
 }
 
+// House sprite (CC0 placeholder until our sprite pipeline reaches it —
+// it is next in the pipeline order after the villager). Under
+// construction only the bottom `frac` of the sprite is revealed, over
+// a foundation diamond: the building visibly rises as work progresses.
+const HOUSE_W = 8.6; // world units wide
+const HOUSE_DY = 2.0; // base planted toward the footprint's front edge
+function drawHouse(b) {
+  const [sx, sy] = worldToScreen(b.x, b.y);
+  shadow(sx, sy, 3.6 * camS);
+  // Foundation: the footprint as a flat stone diamond.
+  const t = worldToScreen(b.x - CS, b.y - CS);
+  const r = worldToScreen(b.x + CS, b.y - CS);
+  const bt = worldToScreen(b.x + CS, b.y + CS);
+  const l = worldToScreen(b.x - CS, b.y + CS);
+  poly([t, r, bt, l], b.complete ? 'rgba(0,0,0,0.12)' : '#8d8578');
+  const im = SPRITES.house;
+  if (spriteReady(im)) {
+    const w = HOUSE_W * camS;
+    const h = w * (im.naturalHeight / im.naturalWidth);
+    const base = sy + HOUSE_DY * camS;
+    if (b.complete) {
+      ctx.drawImage(im, sx - w / 2, base - h, w, h);
+    } else {
+      const hh = Math.max(1, h * b.progress);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(sx - w / 2, base - hh, w, hh);
+      ctx.clip();
+      ctx.drawImage(im, sx - w / 2, base - h, w, h);
+      ctx.restore();
+    }
+  } else {
+    // Vector fallback: a low wall block that grows with progress, plus
+    // a roof slab when complete.
+    const hh = (b.complete ? 2.0 : 2.0 * b.progress) * camS;
+    poly([l, bt, up(bt, hh), up(l, hh)], '#a08b62');
+    poly([bt, r, up(r, hh), up(bt, hh)], '#7d6845');
+    if (b.complete) {
+      poly([up(t, hh), up(r, hh), up(bt, hh), up(l, hh)], '#9c4a2f');
+    }
+  }
+  if (!b.complete) progressBar(sx, sy - 4.9 * camS, b.progress);
+}
+
+function drawBuilding(b) {
+  if (b.kind === 1) {
+    // Farm under construction: bare tilled plot + progress bar.
+    // (A completed farm is drawn by the node renderer instead.)
+    const [sx, sy] = worldToScreen(b.x, b.y);
+    shadow(sx, sy, 3.4 * camS);
+    drawFarmPlot(b.x, b.y, null);
+    progressBar(sx, sy - 3.4 * camS, b.progress);
+  } else {
+    drawHouse(b);
+  }
+}
+
 function drawVillager(i, wx, wy) {
   const [sx, sy] = worldToScreen(wx, wy);
   const u = camS;
   shadow(sx, sy, 0.95 * u);
+  if (i === selected) {
+    ctx.strokeStyle = '#ffcf4d';
+    ctx.lineWidth = Math.max(1.5, u * 0.22);
+    ctx.beginPath();
+    ctx.ellipse(sx, sy, 1.25 * u, 0.62 * u, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
   const anim = updateVilAnim(i, wx, wy, performance.now());
   const orig = drawOriginalVillager(anim, sx, sy);
   const spr = orig || drawSpriteH(SPRITES.villager, sx, sy, 2.4);
@@ -558,6 +925,57 @@ function drawVillager(i, wx, wy) {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(String(i), sx, spr ? sy + 0.5 * u : by);
+}
+
+// --- HUD / build menu -------------------------------------------------
+function updateHud() {
+  const [food, wood, gold, stone] = sim.stockpile();
+  const queue = sim.train_queue_len();
+  const reason = sim.train_block_reason();
+  hud.textContent =
+    `food ${Math.floor(food)} · wood ${Math.floor(wood)} · gold ${Math.floor(gold)} · stone ${Math.floor(stone)}` +
+    ` · pop ${sim.population()}/${sim.population_cap()}` +
+    ` · villagers ${sim.villager_count()}${queue ? ` (+${queue} training)` : ''}` +
+    (reason === 3 ? ' · HOUSED — build a House' : '') +
+    ` · tick ${sim.tick_count()} · hash ${sim.state_hash()} · seed ${seed}`;
+
+  // Train button affordances follow the sim's block reason.
+  trainBtn.disabled = reason === 2;
+  trainBtn.textContent = reason === 3
+    ? 'Train villager (50 food) — housed!'
+    : 'Train villager (50 food)';
+  trainBtn.title = [
+    'Train a villager at the Town Center (50 food).',
+    'Not enough food.',
+    'The training queue is full.',
+    'Population is at capacity: queued villagers cannot finish training until a House stands.',
+  ][reason] || '';
+
+  // Build menu: visible while a villager is selected.
+  const show = selected != null;
+  buildMenu.style.display = show ? 'flex' : 'none';
+  if (show) {
+    selInfo.textContent = `Villager ${selected} — click a node to gather, ground to move.`;
+    const w = sim.wood();
+    buildHouseBtn.disabled = w < BUILD_COST[0];
+    buildHouseBtn.title = w < BUILD_COST[0]
+      ? `House — needs ${BUILD_COST[0]} wood`
+      : 'House — 25 wood, +5 population room';
+    buildFarmBtn.disabled = w < BUILD_COST[1];
+    buildFarmBtn.title = w < BUILD_COST[1]
+      ? `Farm — needs ${BUILD_COST[1]} wood`
+      : 'Farm — 60 wood, 175 food';
+    buildHouseBtn.classList.toggle('active', !!placement && placement.kind === 0);
+    buildFarmBtn.classList.toggle('active', !!placement && placement.kind === 1);
+  }
+
+  // Transient toast (placement rejections, training blocks).
+  if (flashText && performance.now() < flashUntil) {
+    toast.textContent = flashText;
+    toast.style.display = 'block';
+  } else {
+    toast.style.display = 'none';
+  }
 }
 
 // --- Frame ------------------------------------------------------------------
@@ -594,6 +1012,7 @@ function draw() {
   }
 
   const nodes = nodeList();
+  const buildings = buildingList();
   const kinds = sim.entity_kinds();
   const pos = sim.positions();
   const count = sim.entity_count();
@@ -639,10 +1058,14 @@ function draw() {
       key: n.x + n.y,
       fn: () => {
         const [sx, sy] = worldToScreen(n.x, n.y);
-        NODE_DRAW[n.kind](sx, sy);
+        NODE_DRAW[n.kind](sx, sy, n.amount / NODE_MAX[n.kind], n.x, n.y);
         amountBar(sx, sy, n.amount / NODE_MAX[n.kind]);
       },
     });
+  }
+  for (const b of buildings) {
+    if (b.kind === 1 && b.complete) continue; // drawn as a farm node
+    draws.push({ key: b.x + b.y + CS, fn: () => drawBuilding(b) });
   }
   for (let i = 0; i < count; i++) {
     const wx = pos[i * 2];
@@ -657,13 +1080,30 @@ function draw() {
   draws.sort((a, b) => a.key - b.key);
   for (const d of draws) d.fn();
 
-  // HUD: resources + villagers + tick + live state hash.
-  const [food, wood, gold, stone] = sim.stockpile();
-  const queue = sim.train_queue_len();
-  hud.textContent =
-    `food ${Math.floor(food)} · wood ${Math.floor(wood)} · gold ${Math.floor(gold)} · stone ${Math.floor(stone)}` +
-    ` · villagers ${sim.villager_count()}${queue ? ` (+${queue} training)` : ''}` +
-    ` · tick ${sim.tick_count()} · hash ${sim.state_hash()} · seed ${seed}`;
+  // Placement ghost: the footprint under the cursor, green when the
+  // mirrored sim rules allow building there, red when they don't.
+  if (placement && mouseWorld) {
+    const [cx, cy] = worldToCell(mouseWorld[0], mouseWorld[1]);
+    const ok = mirrorValid(placement.kind, cx, cy);
+    const x0 = -HALF + cx * CS;
+    const y0 = -HALF + cy * CS;
+    const pts = [
+      worldToScreen(x0, y0),
+      worldToScreen(x0 + 2 * CS, y0),
+      worldToScreen(x0 + 2 * CS, y0 + 2 * CS),
+      worldToScreen(x0, y0 + 2 * CS),
+    ];
+    poly(pts, ok ? 'rgba(90, 230, 120, 0.30)' : 'rgba(240, 70, 55, 0.30)');
+    ctx.strokeStyle = ok ? 'rgba(140, 255, 170, 0.9)' : 'rgba(255, 110, 95, 0.9)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.closePath();
+    ctx.stroke();
+  }
+
+  updateHud();
 }
 
 main().catch((e) => {

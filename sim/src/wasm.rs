@@ -9,11 +9,14 @@
 //! accessors (entity positions, active paths, grid layout) for rendering.
 //! M2 adds: gather/train commands, stockpile, node list, entity kinds,
 //! villager and training-queue counts.
+//! M2.5 adds: build commands (House/Farm), the building list, and
+//! population / training-block accessors.
 
 use wasm_bindgen::prelude::*;
 
 use fixed::types::I16F16;
 
+use crate::build::BuildingKind;
 use crate::econ::ResourceKind;
 use crate::grid;
 use crate::{Command, Sim};
@@ -80,6 +83,73 @@ impl WasmSim {
             self.inner.push_command(Command::TrainVillager);
         }
         ok
+    }
+
+    /// Order a villager to build a House with its 2×2-cell footprint
+    /// anchored at the cell containing the world point `(x, y)`. The
+    /// 25-wood cost is deducted at placement (next tick). Returns
+    /// whether the order *would* be accepted against the current state
+    /// (same pattern as `push_train_villager`); the sim re-validates
+    /// when the command is applied.
+    pub fn push_build_house(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build(entity, BuildingKind::House, x, y)
+    }
+
+    /// Order a villager to build a Farm (60 wood) — see
+    /// `push_build_house`.
+    pub fn push_build_farm(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build(entity, BuildingKind::Farm, x, y)
+    }
+
+    fn push_build(&mut self, entity: u32, kind: BuildingKind, x: f64, y: f64) -> bool {
+        let (fx, fy) = (I16F16::from_num(x), I16F16::from_num(y));
+        let ok = self.inner.can_build(entity, kind, fx, fy);
+        if ok {
+            self.inner.push_command(Command::Build {
+                entity,
+                kind,
+                x: fx,
+                y: fy,
+            });
+        }
+        ok
+    }
+
+    /// Placed buildings as a flat array: eight values per building —
+    /// `[id, kind, x, y, progress, complete, cell_x, cell_y]` — in
+    /// building id order. `kind` tags: 0 house, 1 farm. `progress` is
+    /// 0..1 (1 when complete); `complete` is 0/1. A completed farm is
+    /// listed here (its food shows up as a node in `nodes()`); an
+    /// under-construction farm appears only here.
+    pub fn buildings(&self) -> Vec<f64> {
+        let mut out = Vec::with_capacity(self.inner.buildings().len() * 8);
+        for b in self.inner.buildings() {
+            out.push(b.id as f64);
+            out.push(b.kind.tag() as f64);
+            out.push(b.pos_x.to_num::<f64>());
+            out.push(b.pos_y.to_num::<f64>());
+            out.push(I16F16::from_bits(b.progress_frac_bits()).to_num::<f64>());
+            out.push(if b.complete { 1.0 } else { 0.0 });
+            out.push(b.cell_x as f64);
+            out.push(b.cell_y as f64);
+        }
+        out
+    }
+
+    /// Current population: living villagers plus the training queue.
+    pub fn population(&self) -> u32 {
+        self.inner.population()
+    }
+
+    /// Population capacity (Town Center +5, each completed House +5).
+    pub fn population_cap(&self) -> u32 {
+        self.inner.population_cap()
+    }
+
+    /// Why Town Center training cannot currently proceed:
+    /// 0 ok, 1 no food, 2 queue full, 3 housed (at population cap).
+    pub fn train_block_reason(&self) -> u32 {
+        self.inner.train_block_reason().tag() as u32
     }
 
     /// Current state hash as hex, without advancing the sim.
@@ -174,8 +244,9 @@ impl WasmSim {
 
     /// Resource nodes as a flat array: five values per node —
     /// `[id, x, y, kind, amount_left]` — in node id order. `kind` tags:
-    /// 0 tree, 1 berry bush, 2 gold mine, 3 stone mine. Depleted nodes
-    /// are included with `amount_left` 0 (the preview hides them).
+    /// 0 tree, 1 berry bush, 2 gold mine, 3 stone mine, 4 farm (M2.5 —
+    /// a completed farm). Depleted nodes are included with
+    /// `amount_left` 0 (the preview hides them).
     pub fn nodes(&self) -> Vec<f64> {
         let mut out = Vec::with_capacity(self.inner.nodes().len() * 5);
         for n in self.inner.nodes() {

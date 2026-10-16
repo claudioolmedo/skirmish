@@ -12,6 +12,7 @@
 //! - food  0.31/s → 339 bits/tick (effective 0.3104/s)  [berries]
 //! - gold  0.38/s → 415 bits/tick (effective 0.3799/s)
 //! - stone 0.36/s → 393 bits/tick (effective 0.3598/s)
+//! - food  0.319/s → 348 bits/tick (effective 0.3186/s) [farm, M2.5]
 
 use fixed::types::I16F16;
 
@@ -70,6 +71,10 @@ pub enum NodeKind {
     BerryBush,
     GoldMine,
     StoneMine,
+    /// A completed Farm (M2.5): created by construction, never part of
+    /// the starting layout. Yields food like a berry bush but at the
+    /// farm rate, and holds exactly `FARM_FOOD_AMOUNT`.
+    Farm,
 }
 
 impl NodeKind {
@@ -80,16 +85,20 @@ impl NodeKind {
             NodeKind::BerryBush => ResourceKind::Food,
             NodeKind::GoldMine => ResourceKind::Gold,
             NodeKind::StoneMine => ResourceKind::Stone,
+            NodeKind::Farm => ResourceKind::Food,
         }
     }
 
-    /// Contents of a fresh node (100 / 125 / 800 / 350).
+    /// Contents of a fresh node (100 / 125 / 800 / 350 / 175).
     pub fn full_amount(self) -> I16F16 {
         I16F16::from_num(match self {
             NodeKind::Tree => 100,
             NodeKind::BerryBush => 125,
             NodeKind::GoldMine => 800,
             NodeKind::StoneMine => 350,
+            // Farm base food is 175 (public wiki value; 250 is the
+            // post-Horse-Collar figure — see MECHANICS-STUDY §6.3).
+            NodeKind::Farm => 175,
         })
     }
 
@@ -101,17 +110,19 @@ impl NodeKind {
             NodeKind::BerryBush => 339,
             NodeKind::GoldMine => 415,
             NodeKind::StoneMine => 393,
+            NodeKind::Farm => 348,
         })
     }
 
     /// Stable tag for the state hash and the WASM node array:
-    /// 0 tree, 1 berry, 2 gold, 3 stone.
+    /// 0 tree, 1 berry, 2 gold, 3 stone, 4 farm.
     pub fn tag(self) -> u8 {
         match self {
             NodeKind::Tree => 0,
             NodeKind::BerryBush => 1,
             NodeKind::GoldMine => 2,
             NodeKind::StoneMine => 3,
+            NodeKind::Farm => 4,
         }
     }
 }

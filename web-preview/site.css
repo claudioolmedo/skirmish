@@ -282,6 +282,22 @@ a { color: var(--gold-bright); }
 }
 .hint code { color: #c9c2a8; }
 
+/* M2.5: the play section is a showcase — the game itself lives
+   fullscreen at play/. The old #hud/#train/#view rules above stay for
+   the play page's shared classes history; the landing no longer
+   embeds the canvas. */
+.showcase-art {
+  display: block;
+  width: 100%;
+  border-radius: 6px;
+  border: 1px solid var(--panel-edge);
+}
+.showcase-cta {
+  margin: 16px 0 2px;
+  text-align: center;
+}
+.showcase-cta .btn { font-size: 17px; padding: 12px 30px; }
+
 /* ---------- feature cards ---------- */
 
 .cards {

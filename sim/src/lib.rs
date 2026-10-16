@@ -9,8 +9,12 @@
 //! M1 scope: unit movement — `Move` commands, A* on a coarse grid, steering
 //! (separation + arrival). M2 scope: the economy loop — resources, nodes,
 //! villagers that gather/carry/deposit, and a Town Center that trains
-//! villagers. Combat (M3) arrives later.
+//! villagers. M2.5 scope: construction — villagers build Houses (+5
+//! population room each) and Farms (175-food nodes), training stalls at
+//! the population cap, and placement is validated in the sim. Combat
+//! (M3) arrives later.
 
+mod build;
 mod econ;
 mod entity;
 mod grid;
@@ -21,6 +25,10 @@ mod steer;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
 
+pub use build::{
+    Building, BuildingKind, BUILD_RANGE, FARM_BUILD_TICKS, FARM_WOOD_COST, FOOTPRINT_CELLS,
+    HOUSE_BUILD_TICKS, HOUSE_POP_SUPPORT, HOUSE_WOOD_COST, TOWN_CENTER_POP_SUPPORT,
+};
 pub use econ::{
     NodeKind, ResourceKind, ResourceNode, Stockpile, CARRY_CAPACITY, DEPOSIT_RANGE, GATHER_RANGE,
     TRAIN_QUEUE_CAP, VILLAGER_FOOD_COST, VILLAGER_TRAIN_TICKS,
@@ -69,8 +77,8 @@ const MAX_POS: I16F16 = I16F16::from_bits(6_488_064);
 /// multiplayer and replays possible: a match is (seed, settings,
 /// commands).
 ///
-/// M1 adds `Move`; M2 adds `Gather` and `TrainVillager`. Attack commands
-/// land in M3.
+/// M1 adds `Move`; M2 adds `Gather` and `TrainVillager`; M2.5 adds
+/// `Build`. Attack commands land in M3.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
     /// Does nothing. Exists so the command pipeline is exercised.
@@ -89,6 +97,58 @@ pub enum Command {
     /// deducted *on enqueue*; rejected (no deduction) when food is
     /// insufficient or the queue is full (15).
     TrainVillager,
+    /// Order a villager to construct a building whose 2×2-cell footprint
+    /// is anchored at the cell containing the world point `(x, y)`. The
+    /// wood cost is deducted *at placement*; the order is rejected
+    /// (nothing deducted, nothing placed) when the villager is invalid,
+    /// the footprint is out of bounds, overlaps a wall, building, node
+    /// or the Town Center, no ring cell is reachable, or wood is short.
+    /// If an *incomplete* building of the same kind already stands at
+    /// that anchor, the villager is assigned to resume it instead (no
+    /// further cost). Ignored for non-villagers and unknown ids.
+    Build {
+        entity: u32,
+        kind: BuildingKind,
+        x: I16F16,
+        y: I16F16,
+    },
+}
+
+/// Why Town Center training cannot currently proceed (M2.5). The
+/// numeric tags are the WASM ABI contract: 0 ok, 1 no food,
+/// 2 queue full, 3 housed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrainBlock {
+    /// Training would proceed: room in the queue, food to pay, and
+    /// population room for the result.
+    Ok,
+    /// The stockpile cannot cover the 50-food cost.
+    NoFood,
+    /// The training queue is at its cap (15).
+    QueueFull,
+    /// Population is at capacity: queued villagers cannot finish
+    /// training until more housing stands (the AoE2 "housed" state).
+    Housed,
+}
+
+impl TrainBlock {
+    pub fn tag(self) -> u8 {
+        match self {
+            TrainBlock::Ok => 0,
+            TrainBlock::NoFood => 1,
+            TrainBlock::QueueFull => 2,
+            TrainBlock::Housed => 3,
+        }
+    }
+}
+
+/// Outcome of build validation (see `Sim::validate_build`): resume an
+/// incomplete building at the requested anchor, place a new one there,
+/// or reject the order whole.
+enum BuildVerdict {
+    Resume(u32),
+    Place(u32, u32),
+    Reject,
 }
 
 /// The headless deterministic simulation.
@@ -110,6 +170,13 @@ pub struct Sim {
     train_queue: u32,
     /// Ticks of training progress on the villager at the queue's head.
     train_progress: u64,
+    /// Placed buildings in id order (M2.5): under construction and
+    /// complete. A completed Farm's record stays while its node lives
+    /// (footprint registry), then retires with it.
+    buildings: Vec<Building>,
+    /// Next building id. Buildings are occasionally removed (depleted
+    /// farms), so ids cannot be derived from the list length.
+    next_building_id: u32,
 }
 
 impl Sim {
@@ -158,6 +225,8 @@ impl Sim {
             nodes,
             train_queue: 0,
             train_progress: 0,
+            buildings: Vec::new(),
+            next_building_id: 0,
         }
     }
 
@@ -184,6 +253,54 @@ impl Sim {
     /// Villagers currently waiting in the Town Center training queue.
     pub fn train_queue_len(&self) -> u32 {
         self.train_queue
+    }
+
+    /// Placed buildings in id order, under construction and complete.
+    pub fn buildings(&self) -> &[Building] {
+        &self.buildings
+    }
+
+    /// Current population: living villagers plus those in the training
+    /// queue (a queued villager is already spoken for).
+    pub fn population(&self) -> u32 {
+        self.villager_count() + self.train_queue
+    }
+
+    /// Population capacity: the Town Center's room (+5) plus every
+    /// completed House's (+5 each), per the mechanics study §9.4.
+    pub fn population_cap(&self) -> u32 {
+        let mut cap = TOWN_CENTER_POP_SUPPORT;
+        for b in &self.buildings {
+            if b.complete {
+                cap += b.kind.pop_support();
+            }
+        }
+        cap
+    }
+
+    /// Why training cannot currently proceed (for UI display). Checked
+    /// in display-priority order: queue full, housed, no food.
+    pub fn train_block_reason(&self) -> TrainBlock {
+        if self.train_queue >= TRAIN_QUEUE_CAP {
+            return TrainBlock::QueueFull;
+        }
+        if self.population() >= self.population_cap() {
+            return TrainBlock::Housed;
+        }
+        if self.stockpile.amount(ResourceKind::Food) < VILLAGER_FOOD_COST {
+            return TrainBlock::NoFood;
+        }
+        TrainBlock::Ok
+    }
+
+    /// Would a `Build` command be accepted right now? A pure query —
+    /// the same validation `issue_build` re-runs at apply time. For UI
+    /// affordances (placement ghost, button states).
+    pub fn can_build(&self, entity: u32, kind: BuildingKind, x: I16F16, y: I16F16) -> bool {
+        !matches!(
+            self.validate_build(entity, kind, clamp_pos(x), clamp_pos(y)),
+            BuildVerdict::Reject
+        )
     }
 
     /// Number of villager entities (the Town Center is not counted).
@@ -221,6 +338,7 @@ impl Sim {
                 Command::Move { entity, x, y } => self.issue_move(entity, x, y),
                 Command::Gather { entity, node } => self.issue_gather(entity, node),
                 Command::TrainVillager => self.issue_train_villager(),
+                Command::Build { entity, kind, x, y } => self.issue_build(entity, kind, x, y),
             }
         }
 
@@ -307,6 +425,7 @@ impl Sim {
             let e = &mut self.entities[idx];
             e.task = Task::Idle;
             e.task_node = None;
+            e.task_building = None;
         }
         self.set_move_order(idx, clamp_pos(x), clamp_pos(y));
     }
@@ -323,14 +442,26 @@ impl Sim {
         if self.entities[idx].kind != EntityKind::Villager {
             return;
         }
+        match self.node_index(node) {
+            Some(ni) if !self.nodes[ni].is_depleted() => {}
+            _ => return,
+        }
+        self.begin_gather(idx, node);
+    }
+
+    /// Assign villager `idx` to work node `node` (which must be live).
+    /// Shared by the `Gather` command and by farm completion, where the
+    /// builder starts working the field it just raised.
+    fn begin_gather(&mut self, idx: usize, node: u32) {
         let (nx, ny, resource) = match self.node_index(node) {
-            Some(ni) if !self.nodes[ni].is_depleted() => {
+            Some(ni) => {
                 let n = &self.nodes[ni];
                 (n.pos_x, n.pos_y, n.resource())
             }
-            _ => return,
+            None => return,
         };
         self.entities[idx].task_node = Some(node);
+        self.entities[idx].task_building = None;
         match self.entities[idx].carry_kind {
             Some(k) if k != resource && self.entities[idx].carry > I16F16::ZERO => {
                 self.entities[idx].task = Task::Returning;
@@ -359,6 +490,177 @@ impl Sim {
         self.train_queue += 1;
     }
 
+    /// Apply a `Build` command: validate in the sim, deduct the wood at
+    /// placement, register the building (blocking its footprint cells
+    /// when the kind is solid), and send the villager to the site. On
+    /// any validation failure the order is rejected whole — no partial
+    /// spends, no phantom buildings.
+    fn issue_build(&mut self, entity: u32, kind: BuildingKind, x: I16F16, y: I16F16) {
+        let idx = match self.entity_index(entity) {
+            Some(i) => i,
+            None => return,
+        };
+        match self.validate_build(entity, kind, clamp_pos(x), clamp_pos(y)) {
+            BuildVerdict::Reject => {}
+            BuildVerdict::Resume(bid) => self.assign_builder(idx, bid),
+            BuildVerdict::Place(cell_x, cell_y) => {
+                // Validation proved the stockpile covers the cost; the
+                // spend re-checks anyway so a failure can never place a
+                // free building.
+                if !self.stockpile.spend(ResourceKind::Wood, kind.wood_cost()) {
+                    return;
+                }
+                let id = self.next_building_id;
+                self.next_building_id += 1;
+                let (pos_x, pos_y) = build::footprint_center(cell_x, cell_y);
+                let building = Building {
+                    id,
+                    kind,
+                    cell_x,
+                    cell_y,
+                    pos_x,
+                    pos_y,
+                    progress_ticks: 0,
+                    complete: false,
+                    node_id: None,
+                };
+                if kind.blocks_footprint() {
+                    for (cx, cy) in building.footprint_cells() {
+                        self.grid.set_dynamic(cx, cy, true);
+                    }
+                }
+                self.buildings.push(building);
+                self.assign_builder(idx, id);
+            }
+        }
+    }
+
+    /// The single source of build validation, shared by the `Build`
+    /// command path and the read-only `can_build` query, so the two can
+    /// never drift apart.
+    fn validate_build(
+        &self,
+        entity: u32,
+        kind: BuildingKind,
+        x: I16F16,
+        y: I16F16,
+    ) -> BuildVerdict {
+        let idx = match self.entity_index(entity) {
+            Some(i) => i,
+            None => return BuildVerdict::Reject,
+        };
+        if self.entities[idx].kind != EntityKind::Villager {
+            return BuildVerdict::Reject;
+        }
+        let (ax, ay) = self.grid.world_to_cell(x, y);
+        // Resume before placement checks: the footprint of a standing
+        // incomplete building is *supposed* to be occupied — by itself.
+        for b in &self.buildings {
+            if !b.complete && b.kind == kind && b.cell_x == ax && b.cell_y == ay {
+                return BuildVerdict::Resume(b.id);
+            }
+        }
+        // The whole 2×2 footprint must be inside the grid.
+        if ax + 1 >= GRID_DIM || ay + 1 >= GRID_DIM {
+            return BuildVerdict::Reject;
+        }
+        let cells = build::footprint_cells(ax, ay);
+        for &(cx, cy) in &cells {
+            // Walls and already-blocking buildings.
+            if self.grid.is_blocked(cx, cy) {
+                return BuildVerdict::Reject;
+            }
+            // The Town Center's cell.
+            if (cx, cy) == TC_CELL {
+                return BuildVerdict::Reject;
+            }
+            // Resource nodes sit on cell centers; a footprint may not
+            // swallow a live one. Depleted nodes reserve nothing —
+            // like the reference game, what is harvested is gone and
+            // the ground is free again (this is also what lets a
+            // depleted farm's own plot be replanted).
+            for n in &self.nodes {
+                if !n.is_depleted()
+                    && self.grid.world_to_cell(n.pos_x, n.pos_y) == (cx, cy)
+                {
+                    return BuildVerdict::Reject;
+                }
+            }
+        }
+        // Overlap with any standing building's footprint (farms do not
+        // block cells, so they are only visible in this registry).
+        // Two 2×2 footprints overlap iff their anchors are within one
+        // cell on both axes.
+        for b in &self.buildings {
+            if ax.abs_diff(b.cell_x) <= 1 && ay.abs_diff(b.cell_y) <= 1 {
+                return BuildVerdict::Reject;
+            }
+        }
+        // The wood must be payable at placement.
+        if self.stockpile.amount(ResourceKind::Wood) < kind.wood_cost() {
+            return BuildVerdict::Reject;
+        }
+        // Reachable-ish: at least one ring cell stands open and the
+        // builder has a path to it.
+        if self.approach_point(idx, ax, ay).is_none() {
+            return BuildVerdict::Reject;
+        }
+        BuildVerdict::Place(ax, ay)
+    }
+
+    /// Put villager `idx` on construction duty for building `bid`:
+    /// travel phase, with a move order to the best standing spot.
+    fn assign_builder(&mut self, idx: usize, bid: u32) {
+        let (ax, ay) = match self.building_index(bid) {
+            Some(bi) => {
+                let b = &self.buildings[bi];
+                (b.cell_x, b.cell_y)
+            }
+            None => return,
+        };
+        {
+            let e = &mut self.entities[idx];
+            e.task = Task::ToBuild;
+            e.task_building = Some(bid);
+            e.task_node = None;
+        }
+        match self.approach_point(idx, ax, ay) {
+            Some((px, py)) => self.set_move_order(idx, px, py),
+            None => {
+                // No standing spot right now (crowded site): the work
+                // step retries every tick, like gather/deposit orders.
+                let e = &mut self.entities[idx];
+                e.order = None;
+                e.vel_x = I16F16::ZERO;
+                e.vel_y = I16F16::ZERO;
+            }
+        }
+    }
+
+    /// The builder's standing spot for the footprint anchored at
+    /// `(ax, ay)`: the first ring cell (fixed order) that is in bounds,
+    /// unblocked, and reachable from the villager's position.
+    fn approach_point(&self, idx: usize, ax: u32, ay: u32) -> Option<(I16F16, I16F16)> {
+        let from = (self.entities[idx].pos_x, self.entities[idx].pos_y);
+        for (cx, cy) in build::ring_cells(ax, ay) {
+            if cx >= GRID_DIM || cy >= GRID_DIM {
+                continue;
+            }
+            if self.grid.is_blocked(cx, cy) {
+                continue;
+            }
+            let center = self.grid.cell_center(cx, cy);
+            if self.grid.find_path(from, center).is_some() {
+                return Some(center);
+            }
+        }
+        None
+    }
+
+    fn building_index(&self, id: u32) -> Option<usize> {
+        self.buildings.iter().position(|b| b.id == id)
+    }
+
     /// Install a freshly computed A* move order toward a world point.
     /// On failure (blocked/unreachable) the order is cleared and the
     /// entity holds position; work-state callers re-issue as needed.
@@ -385,9 +687,14 @@ impl Sim {
     }
 
     /// The economy phase of a tick: training progress at the Town Center,
-    /// then every villager's work state machine, in id order.
+    /// then every villager's work state machine, in id order, then
+    /// construction progress (M2.5).
     fn economy_tick(&mut self) {
-        if self.train_queue > 0 {
+        // Training stalls while the population is at capacity — the
+        // "housed" state: the queue keeps its place and its progress,
+        // and resumes the tick housing frees up. Completion spawns only
+        // while there is room, so the cap can never be exceeded.
+        if self.train_queue > 0 && self.villager_count() < self.population_cap() {
             self.train_progress += 1;
             if self.train_progress >= VILLAGER_TRAIN_TICKS {
                 self.train_progress = 0;
@@ -400,6 +707,7 @@ impl Sim {
                 self.work_tick(idx);
             }
         }
+        self.construction_tick();
     }
 
     /// One villager's work state machine step. Transitions trigger on
@@ -486,6 +794,179 @@ impl Sim {
                     self.set_move_order(idx, tx, ty);
                 }
             }
+            Task::ToBuild => {
+                let bid = match self.entities[idx].task_building {
+                    Some(b) => b,
+                    None => {
+                        self.entities[idx].task = Task::Idle;
+                        return;
+                    }
+                };
+                let bi = match self.building_index(bid) {
+                    Some(bi) => bi,
+                    None => {
+                        self.stop_task(idx);
+                        return;
+                    }
+                };
+                if self.buildings[bi].complete {
+                    self.leave_finished_site(idx);
+                    return;
+                }
+                let (bx, by) = (self.buildings[bi].pos_x, self.buildings[bi].pos_y);
+                let (ax, ay) = (self.buildings[bi].cell_x, self.buildings[bi].cell_y);
+                let d = self.distance_to(idx, bx, by);
+                if d <= BUILD_RANGE {
+                    let e = &mut self.entities[idx];
+                    e.task = Task::Building;
+                    e.order = None;
+                    e.vel_x = I16F16::ZERO;
+                    e.vel_y = I16F16::ZERO;
+                } else if self.entities[idx].order.is_none() {
+                    if let Some((px, py)) = self.approach_point(idx, ax, ay) {
+                        self.set_move_order(idx, px, py);
+                    }
+                }
+            }
+            Task::Building => {
+                let bid = match self.entities[idx].task_building {
+                    Some(b) => b,
+                    None => {
+                        self.entities[idx].task = Task::Idle;
+                        return;
+                    }
+                };
+                let bi = match self.building_index(bid) {
+                    Some(bi) => bi,
+                    None => {
+                        self.stop_task(idx);
+                        return;
+                    }
+                };
+                if self.buildings[bi].complete {
+                    self.leave_finished_site(idx);
+                    return;
+                }
+                // Drifted out of build range (separation shove): go
+                // back to the travel phase and re-approach. While in
+                // range, progress itself is applied by the construction
+                // phase — this arm only maintains the phase.
+                let (bx, by) = (self.buildings[bi].pos_x, self.buildings[bi].pos_y);
+                if self.distance_to(idx, bx, by) > BUILD_RANGE {
+                    self.entities[idx].task = Task::ToBuild;
+                }
+            }
+        }
+    }
+
+    /// A villager whose building finished while it was travelling to or
+    /// standing at the site: for a Farm, go work the new field; for a
+    /// House, the job is simply done.
+    fn leave_finished_site(&mut self, idx: usize) {
+        let bid = self.entities[idx].task_building;
+        let node_id = bid.and_then(|b| {
+            self.building_index(b)
+                .and_then(|bi| self.buildings[bi].node_id)
+        });
+        match node_id {
+            Some(nid) => self.begin_gather(idx, nid),
+            None => self.stop_task(idx),
+        }
+    }
+
+    /// The construction phase of a tick (M2.5): every villager in the
+    /// `Building` phase adds one tick of progress to its building;
+    /// buildings reaching their build time complete. Depleted farms
+    /// retire (their footprint frees up for new placement).
+    fn construction_tick(&mut self) {
+        let mut completed: Vec<u32> = Vec::new();
+        for idx in 0..self.entities.len() {
+            if self.entities[idx].task != Task::Building {
+                continue;
+            }
+            let bid = match self.entities[idx].task_building {
+                Some(b) => b,
+                None => continue,
+            };
+            if let Some(bi) = self.building_index(bid) {
+                if !self.buildings[bi].complete {
+                    self.buildings[bi].progress_ticks += 1;
+                    if self.buildings[bi].progress_ticks >= self.buildings[bi].kind.build_ticks()
+                    {
+                        completed.push(bid);
+                    }
+                }
+            }
+        }
+        for bid in completed {
+            self.complete_building(bid);
+        }
+        // Retire depleted farms: the node is inert and the field's
+        // ground returns to the map.
+        let retire: Vec<u32> = self
+            .buildings
+            .iter()
+            .filter(|b| {
+                b.complete
+                    && b.kind == BuildingKind::Farm
+                    && match b.node_id {
+                        Some(nid) => self
+                            .node_index(nid)
+                            .map(|ni| self.nodes[ni].is_depleted())
+                            .unwrap_or(true),
+                        None => false,
+                    }
+            })
+            .map(|b| b.id)
+            .collect();
+        if !retire.is_empty() {
+            self.buildings.retain(|b| !retire.contains(&b.id));
+        }
+    }
+
+    /// Mark a building complete and apply its function: a Farm becomes
+    /// a food node (and its active builders start working it); a House
+    /// simply starts counting toward the population cap.
+    fn complete_building(&mut self, bid: u32) {
+        let bi = match self.building_index(bid) {
+            Some(bi) => bi,
+            None => return,
+        };
+        if self.buildings[bi].complete {
+            return;
+        }
+        self.buildings[bi].complete = true;
+        if self.buildings[bi].kind != BuildingKind::Farm {
+            // House: active builders are done; travellers notice the
+            // completion in their own work step and stand down.
+            for idx in 0..self.entities.len() {
+                if self.entities[idx].task == Task::Building
+                    && self.entities[idx].task_building == Some(bid)
+                {
+                    self.stop_task(idx);
+                }
+            }
+            return;
+        }
+        let (px, py) = (self.buildings[bi].pos_x, self.buildings[bi].pos_y);
+        let nid = self.nodes.len() as u32;
+        self.nodes.push(ResourceNode {
+            id: nid,
+            kind: NodeKind::Farm,
+            pos_x: px,
+            pos_y: py,
+            amount_left: NodeKind::Farm.full_amount(),
+        });
+        if let Some(bi) = self.building_index(bid) {
+            self.buildings[bi].node_id = Some(nid);
+        }
+        // The builders who raised the field start farming it.
+        for idx in 0..self.entities.len() {
+            if self.entities[idx].task == Task::Building
+                && self.entities[idx].task_building == Some(bid)
+            {
+                self.begin_gather(idx, nid);
+            }
         }
     }
 
@@ -537,11 +1018,13 @@ impl Sim {
         }
     }
 
-    /// Clear the gather assignment and halt the villager.
+    /// Clear the work assignment (gather or construction) and halt the
+    /// villager.
     fn stop_task(&mut self, idx: usize) {
         let e = &mut self.entities[idx];
         e.task = Task::Idle;
         e.task_node = None;
+        e.task_building = None;
         e.order = None;
         e.vel_x = I16F16::ZERO;
         e.vel_y = I16F16::ZERO;
@@ -623,6 +1106,10 @@ impl Sim {
         for b in self.grid.blocked_bytes() {
             h.write_u8(b);
         }
+        // M2.5: the dynamic layer — cells blocked by placed buildings.
+        for b in self.grid.dynamic_bytes() {
+            h.write_u8(b);
+        }
         // M2: stockpile in canonical resource order.
         for amount in self.stockpile.amounts() {
             h.write_i32(amount.to_bits());
@@ -638,6 +1125,25 @@ impl Sim {
         }
         h.write_u32(self.train_queue);
         h.write_u64(self.train_progress);
+        // M2.5: buildings (id order), construction state included.
+        h.write_u32(self.buildings.len() as u32);
+        for b in &self.buildings {
+            h.write_u32(b.id);
+            h.write_u8(b.kind.tag());
+            h.write_u32(b.cell_x);
+            h.write_u32(b.cell_y);
+            h.write_i32(b.pos_x.to_bits());
+            h.write_i32(b.pos_y.to_bits());
+            h.write_u64(b.progress_ticks);
+            h.write_u8(u8::from(b.complete));
+            match b.node_id {
+                None => h.write_u8(0),
+                Some(n) => {
+                    h.write_u8(1);
+                    h.write_u32(n);
+                }
+            }
+        }
         h.write_u32(self.entities.len() as u32);
         for e in &self.entities {
             h.write_u32(e.id);
@@ -667,6 +1173,14 @@ impl Sim {
                 Some(n) => {
                     h.write_u8(1);
                     h.write_u32(n);
+                }
+            }
+            // M2.5: construction assignment.
+            match e.task_building {
+                None => h.write_u8(0),
+                Some(b) => {
+                    h.write_u8(1);
+                    h.write_u32(b);
                 }
             }
             h.write_i32(e.carry.to_bits());

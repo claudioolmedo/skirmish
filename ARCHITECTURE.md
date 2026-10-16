@@ -75,6 +75,7 @@ skirmish/
     │   ├── hash.rs       # hand-rolled FNV-1a 64 (canonical hashing)
     │   ├── entity.rs     # entities, move orders, villager work state
     │   ├── econ.rs       # M2: resources, nodes, stockpile, econ numbers
+    │   ├── build.rs      # M2.5: buildings, placement, population numbers
     │   ├── grid.rs       # M1: coarse grid + deterministic A*
     │   ├── steer.rs      # M1: separation + arrival (integer sqrt)
     │   └── wasm.rs       # thin wasm-bindgen ABI (commands in, state out)
@@ -82,7 +83,8 @@ skirmish/
     │   ├── determinism.rs# the harness: identical runs, seed divergence,
     │   │                 # replay equality, golden-hash tripwire
     │   ├── movement.rs   # M1: A* routing, arrival, separation, determinism
-    │   └── economy.rs    # M2: gather cycle, depletion, training, replay
+    │   ├── economy.rs    # M2: gather cycle, depletion, training, replay
+    │   └── construction.rs # M2.5: houses, farms, population, placement
     └── examples/
         └── replay.rs     # headless runner: N ticks from a seed, print hashes
 ```
@@ -193,6 +195,54 @@ Center, deposit, and repeat; the Town Center trains more villagers.
   by kind (depleted ones vanish), TC as a square, click a node to send
   all villagers gathering, click ground to move, and a "Train villager
   (50 food)" button.
+
+## M2.5 — construction (shipped 2026-10-16)
+
+Villagers raise buildings; the Town Center's output is capped by
+population room. Numbers are from the public mechanics study (house
+25 W / 1500 t / +5 room; farm 60 W / 900 t / 175 food; TC +5 room).
+
+- **Placement is sim-validated.** `Command::Build { entity, kind, x, y }`
+  names a villager, a kind, and a world point; the footprint is the
+  2×2 cells anchored at the point's cell. The sim rejects the order
+  whole (no deduction) when the footprint leaves the grid, overlaps a
+  wall, a standing building, a live node, or the Town Center cell,
+  when no ring cell around the footprint is reachable, or when wood is
+  short. Validation lives in one function shared by the command path
+  and the read-only `can_build` query, so UI affordances can't drift
+  from the rules — lockstep multiplayer inherits the checks as-is.
+  Ordering onto an *incomplete* building of the same kind at the same
+  anchor resumes it instead of placing a copy (and charges nothing).
+- **Blocking.** Houses mark their footprint in the grid's new dynamic
+  layer (`Grid::dynamic`), which A* respects and the hash covers.
+  Farms don't block: the farmer stands on the field to work it.
+- **Construction flow.** The builder travels to a ring cell
+  (`Task::ToBuild`), then builds in place (`Task::Building`); progress
+  accrues only while a villager is in that phase, so an abandoned site
+  just waits. On completion a House starts counting toward the cap; a
+  Farm becomes an ordinary food node (175, farm gather rate) that its
+  builders start working unprompted, depletes like any node, and then
+  retires — the ground is placeable again.
+- **Population.** Capacity = Town Center (+5) + completed Houses (+5).
+  Enqueueing a villager is unchanged (food + queue cap), but training
+  *progress* stalls while living villagers are at capacity — the
+  reference game's "housed" state — and resumes by itself when a house
+  completes. `train_block_reason` tells the client which of ok /
+  no-food / queue-full / housed applies.
+- **Hash.** Extended to cover the dynamic grid layer, the buildings
+  list (kind, anchor, progress, completion, farm node link), and the
+  villagers' construction assignment. Golden hash updated deliberately
+  (see `tests/determinism.rs`).
+- **WASM boundary.** New commands `push_build_house` /
+  `push_build_farm` (same would-it-be-accepted return pattern as
+  training); new accessors `buildings()` (flat, with progress and
+  completion), `population()`, `population_cap()`,
+  `train_block_reason()`; farm nodes appear in `nodes()` with kind 4.
+- **Play page.** The game moved out of the landing page to a dedicated
+  fullscreen page (`web-preview/play/`, served at `/play`) with the
+  start overlay, pause menu, villager selection, build menu with
+  sim-mirrored placement ghost, and population HUD. The landing page
+  links to it; ad slots stay on the landing page only.
 
 ## The sim may
 

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Skirmish — a free browser RTS, built in the open</title>
-<meta name="description" content="Skirmish is a free, open-source real-time strategy game that runs in your browser. Inspired by the classics, built from scratch: deterministic simulation, adaptive quality, original clean-room art and code. Play the test build right here.">
+<meta name="description" content="Skirmish is a free, open-source real-time strategy game that runs in your browser. Inspired by the classics, built from scratch: deterministic simulation, adaptive quality, original clean-room art and code. Play the test build — no install, no account.">
 <link rel="icon" type="image/webp" href="art/emblem.webp">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Skirmish">
@@ -54,7 +54,7 @@
     built from scratch to run on any computer. No install, no account: open the page and play.
     Send-a-link multiplayer is on the roadmap.</p>
     <div class="cta">
-      <a class="btn btn-gold" href="#play">Play the test build</a>
+      <a class="btn btn-gold" href="play/">Play the test build</a>
       <a class="btn btn-ghost" href="https://github.com/claudioolmedo/skirmish">View on GitHub</a>
     </div>
   </div>
@@ -70,23 +70,29 @@
 <main>
   <section class="section" id="play">
     <h2>Play the test build</h2>
-    <p class="lede">This is the live <strong>M2 test build</strong>: a working economy loop.
-    Send villagers to gather wood, berries, gold and stone, and train more at the Town Center.
-    The sprites are placeholder test art, being replaced by original art piece by piece —
-    and the state hash in the HUD proves every run of the simulation is deterministic.</p>
+    <p class="lede">This is the live <strong>M2.5 test build</strong>: a working economy plus
+    construction. Send villagers to gather wood, berries, gold and stone, train more at the
+    Town Center — and now build: Houses raise your population room, Farms grow food your
+    villagers harvest. The villager is already our own original art; the environment still
+    uses clearly-marked placeholder test art while our own sprites replace it piece by
+    piece — and the state hash in the game's HUD proves every run of the simulation is
+    deterministic. The game opens fullscreen on its own page.</p>
 
     <div class="play-layout">
       <div class="game-frame">
-        <span class="build-badge">Test build · M2 — economy</span>
-        <div id="hud">loading…</div>
-        <button id="train">Train villager (50 food)</button>
-        <br>
-        <canvas id="view" width="720" height="720"></canvas>
-        <div class="hint">Click a resource node to send all villagers to gather it. Click open ground to move all villagers there. Pan with WASD / arrow keys or right-mouse drag; zoom with the mouse wheel. Seed via <code>?seed=N</code>.</div>
+        <span class="build-badge">Test build · M2.5 — economy + construction</span>
+        <img class="showcase-art" src="art/hero-key-art.jpg" alt="Skirmish — a little village of workers, trees and a town center, in original art">
+        <p class="showcase-cta">
+          <a class="btn btn-gold" href="play/">▶ Play Skirmish — free</a>
+        </p>
+        <div class="hint">How to play: click a villager to select it, click a tree, bush, gold or stone to
+          gather, click the ground to move. Train grows the village — but training stalls at the
+          population cap, so build Houses (+5 room, 25 wood) and Farms (175 food, 60 wood) from the
+          build menu. Pan with WASD / arrow keys or right-mouse drag; zoom with the mouse wheel; Esc pauses.</div>
       </div>
 
       <aside class="play-side">
-        <!-- Ad slot 2 of 2: 300x250 beside the game. Never overlays the canvas. -->
+        <!-- Ad slot 2 of 2: 300x250 beside the game showcase. Never overlays the game. -->
         <div class="ad-wrap">
           <div class="ad-label">Advertisement</div>
           <div class="ad-slot ad-slot-box" id="ad-slot-play">Ads keep Skirmish free — thanks for being here.</div>
@@ -128,12 +134,13 @@
 
   <section class="section" id="roadmap">
     <h2>Roadmap</h2>
-    <p class="lede">Small milestones, shipped one at a time. The economy is playable today;
-    combat is next.</p>
+    <p class="lede">Small milestones, shipped one at a time. The economy and construction are
+    playable today; combat is next.</p>
     <div class="roadmap">
       <div class="step done"><span class="m">M0</span>Deterministic sim core<span class="state"> — done</span></div>
       <div class="step done"><span class="m">M1</span>Movement &amp; pathfinding<span class="state"> — done</span></div>
-      <div class="step done"><span class="m">M2</span>Economy loop<span class="state"> — done, playable above</span></div>
+      <div class="step done"><span class="m">M2</span>Economy loop<span class="state"> — done</span></div>
+      <div class="step done"><span class="m">M2.5</span>Construction — houses, farms, population<span class="state"> — done, playable now</span></div>
       <div class="step next"><span class="m">M3</span>Combat<span class="state"> — next</span></div>
       <div class="step"><span class="m">Later</span>Multiplayer lobby<span class="state"> — send a link, play a friend</span></div>
     </div>
@@ -151,6 +158,5 @@
 </footer>
 
 <script src="ads.js"></script>
-<script type="module" src="app.js"></script>
 </body>
 </html>

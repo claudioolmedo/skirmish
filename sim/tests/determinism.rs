@@ -102,11 +102,19 @@ fn golden_hash_regression() {
     // separation became displacement-based with mutual shove. New value
     // verified stable across independent runs (replay example, seed 42,
     // 360 ticks, run twice).
+    //
+    // M2.5 deliberate update: the hash now also covers the grid's
+    // dynamic (building-blocked) cell layer, the buildings list with
+    // construction progress, and the villagers' construction
+    // assignment. No commands are issued in this scenario, so the stream
+    // changes only through the wider hash coverage. New value verified
+    // stable across independent runs (replay example, seed 42, 360
+    // ticks, run twice).
     let mut sim = Sim::new(42);
     let mut hash = 0;
     for _ in 0..360 {
         hash = sim.tick();
     }
     assert_eq!(sim.tick_count(), 360);
-    assert_eq!(format!("{:016x}", hash), "ea0f1386f7fc2ed5");
+    assert_eq!(format!("{:016x}", hash), "171155e840f1f02d");
 }

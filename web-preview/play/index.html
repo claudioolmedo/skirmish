@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Skirmish — Play the test build</title>
+<meta name="description" content="Play the Skirmish test build in your browser: a free, clean-room RTS inspired by the classics. Gather, build houses and farms, grow your village.">
+<link rel="icon" type="image/webp" href="../art/emblem.webp">
+<link rel="stylesheet" href="../site.css">
+<link rel="stylesheet" href="play.css">
+</head>
+<body>
+
+<canvas id="view"></canvas>
+
+<a class="back-link" href="../">← Skirmish</a>
+
+<div class="hud-bar">
+  <div id="hud" class="hud-text">loading…</div>
+  <div class="hud-actions">
+    <button id="train" class="btn btn-gold btn-sm" type="button">Train villager (50 food)</button>
+    <button id="pause-btn" class="btn btn-ghost btn-sm" type="button">Pause</button>
+  </div>
+</div>
+
+<div id="build-menu" class="build-menu" style="display:none">
+  <span id="sel-info" class="sel-info"></span>
+  <button id="build-house" class="btn btn-ghost btn-sm" type="button" title="House — 25 wood, +5 population room">🏠 House · 25 wood</button>
+  <button id="build-farm" class="btn btn-ghost btn-sm" type="button" title="Farm — 60 wood, 175 food">🌾 Farm · 60 wood</button>
+  <span class="build-hint">Pick a building, then click the ground to place it. Esc / right-click cancels.</span>
+</div>
+
+<div id="toast" class="toast" style="display:none"></div>
+
+<div id="start-overlay" class="overlay">
+  <div class="overlay-card">
+    <h1 class="game-title">SKIRMISH</h1>
+    <p class="overlay-sub">A free browser RTS, built from scratch. Grow the little village: gather, build, train.</p>
+    <button id="play-btn" class="btn btn-gold btn-big" type="button">▶ Play</button>
+    <div class="howto">
+      <h2>How to play</h2>
+      <ul>
+        <li><strong>Click a villager</strong> to select it (no selection = orders go to everyone).</li>
+        <li><strong>Click a tree, bush, gold or stone</strong> to gather it; <strong>click the ground</strong> to move.</li>
+        <li><strong>Right-click</strong> also orders; <strong>drag right button / WASD / arrows</strong> to pan, <strong>mouse wheel</strong> to zoom.</li>
+        <li><strong>Train villager</strong> grows your village — but training stalls at the population cap.</li>
+        <li><strong>Build menu</strong> (with a villager selected): a <strong>House</strong> (25 wood) adds +5 population room; a <strong>Farm</strong> (60 wood) grows 175 food your villagers harvest.</li>
+        <li><strong>Esc</strong> pauses.</li>
+      </ul>
+    </div>
+    <p class="overlay-note">Test build · M2.5 — economy + construction. Placeholder art is being replaced piece by piece with our own.</p>
+  </div>
+</div>
+
+<div id="pause-menu" class="overlay" style="display:none">
+  <div class="overlay-card">
+    <h2 class="game-title-sm">Paused</h2>
+    <div class="pause-actions">
+      <button id="resume-btn" class="btn btn-gold" type="button">Resume</button>
+      <button id="restart-btn" class="btn btn-ghost" type="button">Restart</button>
+    </div>
+    <p class="overlay-note">Restart begins a fresh, identical match (same seed).</p>
+  </div>
+</div>
+
+<script type="module" src="../app.js"></script>
+</body>
+</html>

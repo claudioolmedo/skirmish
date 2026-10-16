@@ -43,11 +43,17 @@ fn is_wall_cell(x: u32, y: u32) -> bool {
     false
 }
 
-/// The coarse navigation grid. Obstacles are static; the struct exists so
-/// the layout is explicit state (and part of the state hash).
+/// The coarse navigation grid. Static obstacles (walls) are compile-time
+/// constants; M2.5 adds a second, dynamic layer for cells blocked by
+/// placed buildings (houses). The struct exists so both layers are
+/// explicit state (and part of the state hash).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Grid {
-    blocked: Vec<bool>, // row-major, GRID_DIM * GRID_DIM
+    blocked: Vec<bool>, // row-major, GRID_DIM * GRID_DIM — static walls
+    /// Cells blocked at runtime by buildings (M2.5). Kept separate from
+    /// the static layer: `blocked_bytes` (state hash, debug preview)
+    /// stays wall-only, and the sim hashes this layer on its own.
+    dynamic: Vec<bool>, // row-major, GRID_DIM * GRID_DIM
 }
 
 impl Grid {
@@ -60,7 +66,10 @@ impl Grid {
                 }
             }
         }
-        Grid { blocked }
+        Grid {
+            blocked,
+            dynamic: vec![false; (GRID_DIM * GRID_DIM) as usize],
+        }
     }
 
     pub fn width(&self) -> u32 {
@@ -71,12 +80,32 @@ impl Grid {
         GRID_DIM
     }
 
-    /// Out-of-bounds counts as blocked: the world edge is a wall.
+    /// Out-of-bounds counts as blocked: the world edge is a wall. A cell
+    /// is blocked when a static wall *or* a placed building occupies it.
     pub fn is_blocked(&self, x: u32, y: u32) -> bool {
         if x >= GRID_DIM || y >= GRID_DIM {
             return true;
         }
-        self.blocked[(y * GRID_DIM + x) as usize]
+        let i = (y * GRID_DIM + x) as usize;
+        self.blocked[i] || self.dynamic[i]
+    }
+
+    /// Whether a building (dynamic layer) blocks this cell. Static
+    /// walls alone do not count.
+    pub fn is_dynamic(&self, x: u32, y: u32) -> bool {
+        if x >= GRID_DIM || y >= GRID_DIM {
+            return false;
+        }
+        self.dynamic[(y * GRID_DIM + x) as usize]
+    }
+
+    /// Set or clear the dynamic (building) block on one cell.
+    pub fn set_dynamic(&mut self, x: u32, y: u32, value: bool) {
+        if x >= GRID_DIM || y >= GRID_DIM {
+            return;
+        }
+        let i = (y * GRID_DIM + x) as usize;
+        self.dynamic[i] = value;
     }
 
     /// World coordinates → cell indices, clamped into the grid.
@@ -101,10 +130,18 @@ impl Grid {
         (wx, wy)
     }
 
-    /// Blocked cells as row-major bytes (0/1) — for the state hash and the
-    /// debug preview.
+    /// Static wall cells as row-major bytes (0/1) — for the state hash
+    /// and the debug preview. The dynamic building layer is *not*
+    /// included (the preview draws buildings themselves); see
+    /// `dynamic_bytes`.
     pub fn blocked_bytes(&self) -> Vec<u8> {
         self.blocked.iter().map(|&b| u8::from(b)).collect()
+    }
+
+    /// Dynamic (building-blocked) cells as row-major bytes (0/1) — for
+    /// the state hash, so building placement is replay-visible.
+    pub fn dynamic_bytes(&self) -> Vec<u8> {
+        self.dynamic.iter().map(|&b| u8::from(b)).collect()
     }
 
     /// A* from one world point to another.

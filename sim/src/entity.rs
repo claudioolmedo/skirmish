@@ -48,6 +48,15 @@ impl EntityKind {
 /// - A `Move` command clears the task from any phase (the villager keeps
 ///   whatever it carries — see `carry`). The Town Center never works:
 ///   its task is always `Idle`.
+///
+/// M2.5 adds the construction phases, driven by `task_building`:
+///
+/// - `Build` command: `Idle → ToBuild` (travel to the site).
+/// - `ToBuild`: on arrival within build range, `→ Building`.
+/// - `Building`: each tick in this phase adds progress to the building;
+///   if the builder drifts out of build range, `→ ToBuild` again. On
+///   completion the builder goes `Idle` — or, for a Farm, straight to
+///   gathering the field it just raised.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Task {
     /// No work order. The entity may still hold a plain move order.
@@ -58,17 +67,23 @@ pub enum Task {
     Gathering,
     /// Travelling to the Town Center to deposit the carry.
     Returning,
+    /// Travelling to the task building's site (M2.5).
+    ToBuild,
+    /// At the site, actively building (M2.5).
+    Building,
 }
 
 impl Task {
     /// Stable tag for the state hash: 0 idle, 1 to-node, 2 gathering,
-    /// 3 returning.
+    /// 3 returning, 4 to-build, 5 building.
     pub fn tag(self) -> u8 {
         match self {
             Task::Idle => 0,
             Task::ToNode => 1,
             Task::Gathering => 2,
             Task::Returning => 3,
+            Task::ToBuild => 4,
+            Task::Building => 5,
         }
     }
 }
@@ -95,6 +110,10 @@ pub struct Entity {
     /// until re-commanded. Survives deposit trips; cleared by a `Move`
     /// command or when the node is gone and the carry is delivered.
     pub task_node: Option<u32>,
+    /// The construction assignment (M2.5): the building this villager
+    /// is travelling to or actively building. Mutually exclusive with
+    /// `task_node` — a fresh order of either kind clears the other.
+    pub task_building: Option<u32>,
     /// Resources currently carried. Counted in the stockpile only when
     /// deposited at the Town Center. A `Move` override keeps the carry —
     /// it is neither deposited nor lost, just still on the villager.
@@ -116,6 +135,7 @@ impl Entity {
             order: None,
             task: Task::Idle,
             task_node: None,
+            task_building: None,
             carry: I16F16::ZERO,
             carry_kind: None,
         }
