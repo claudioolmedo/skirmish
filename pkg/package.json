@@ -1,7 +1,7 @@
 {
   "name": "skirmish-sim",
   "type": "module",
-  "description": "Skirmish — headless deterministic simulation core (M0)",
+  "description": "Skirmish — headless deterministic simulation core (M2)",
   "version": "0.1.0",
   "files": [
     "skirmish_sim_bg.wasm",

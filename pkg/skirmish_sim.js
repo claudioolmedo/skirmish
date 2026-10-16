@@ -15,6 +15,21 @@ export class WasmSim {
         wasm.__wbg_wasmsim_free(ptr, 0);
     }
     /**
+     * Placed buildings as a flat array: eight values per building —
+     * `[id, kind, x, y, progress, complete, cell_x, cell_y]` — in
+     * building id order. `kind` tags: 0 house, 1 farm. `progress` is
+     * 0..1 (1 when complete); `complete` is 0/1. A completed farm is
+     * listed here (its food shows up as a node in `nodes()`); an
+     * under-construction farm appears only here.
+     * @returns {Float64Array}
+     */
+    buildings() {
+        const ret = wasm.wasmsim_buildings(this.__wbg_ptr);
+        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v1;
+    }
+    /**
      * Cell edge length in world units.
      * @returns {number}
      */
@@ -95,8 +110,9 @@ export class WasmSim {
     /**
      * Resource nodes as a flat array: five values per node —
      * `[id, x, y, kind, amount_left]` — in node id order. `kind` tags:
-     * 0 tree, 1 berry bush, 2 gold mine, 3 stone mine. Depleted nodes
-     * are included with `amount_left` 0 (the preview hides them).
+     * 0 tree, 1 berry bush, 2 gold mine, 3 stone mine, 4 farm (M2.5 —
+     * a completed farm). Depleted nodes are included with
+     * `amount_left` 0 (the preview hides them).
      * @returns {Float64Array}
      */
     nodes() {
@@ -116,6 +132,22 @@ export class WasmSim {
         return v1;
     }
     /**
+     * Population capacity (Town Center +5, each completed House +5).
+     * @returns {number}
+     */
+    population_cap() {
+        const ret = wasm.wasmsim_population_cap(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Current population: living villagers plus the training queue.
+     * @returns {number}
+     */
+    population() {
+        const ret = wasm.wasmsim_population(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
      * Flat `[x0, y0, x1, y1, …]` entity positions as f64. Rendering only —
      * the sim itself never sees these floats.
      * @returns {Float64Array}
@@ -125,6 +157,34 @@ export class WasmSim {
         var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
         return v1;
+    }
+    /**
+     * Order a villager to build a Farm (60 wood) — see
+     * `push_build_house`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_farm(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_farm(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Order a villager to build a House with its 2×2-cell footprint
+     * anchored at the cell containing the world point `(x, y)`. The
+     * 25-wood cost is deducted at placement (next tick). Returns
+     * whether the order *would* be accepted against the current state
+     * (same pattern as `push_train_villager`); the sim re-validates
+     * when the command is applied.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_house(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_house(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
     }
     /**
      * Order a villager to work a resource node (gather → haul → deposit
@@ -222,6 +282,15 @@ export class WasmSim {
         } finally {
             wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
         }
+    }
+    /**
+     * Why Town Center training cannot currently proceed:
+     * 0 ok, 1 no food, 2 queue full, 3 housed (at population cap).
+     * @returns {number}
+     */
+    train_block_reason() {
+        const ret = wasm.wasmsim_train_block_reason(this.__wbg_ptr);
+        return ret >>> 0;
     }
     /**
      * Villagers waiting in the Town Center training queue.

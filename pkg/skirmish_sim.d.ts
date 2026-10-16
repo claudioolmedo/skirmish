@@ -8,6 +8,15 @@ export class WasmSim {
     free(): void;
     [Symbol.dispose](): void;
     /**
+     * Placed buildings as a flat array: eight values per building —
+     * `[id, kind, x, y, progress, complete, cell_x, cell_y]` — in
+     * building id order. `kind` tags: 0 house, 1 farm. `progress` is
+     * 0..1 (1 when complete); `complete` is 0/1. A completed farm is
+     * listed here (its food shows up as a node in `nodes()`); an
+     * under-construction farm appears only here.
+     */
+    buildings(): Float64Array;
+    /**
      * Cell edge length in world units.
      */
     cell_size(): number;
@@ -41,8 +50,9 @@ export class WasmSim {
     /**
      * Resource nodes as a flat array: five values per node —
      * `[id, x, y, kind, amount_left]` — in node id order. `kind` tags:
-     * 0 tree, 1 berry bush, 2 gold mine, 3 stone mine. Depleted nodes
-     * are included with `amount_left` 0 (the preview hides them).
+     * 0 tree, 1 berry bush, 2 gold mine, 3 stone mine, 4 farm (M2.5 —
+     * a completed farm). Depleted nodes are included with
+     * `amount_left` 0 (the preview hides them).
      */
     nodes(): Float64Array;
     /**
@@ -50,10 +60,32 @@ export class WasmSim {
      */
     obstacles(): Uint8Array;
     /**
+     * Population capacity (Town Center +5, each completed House +5).
+     */
+    population_cap(): number;
+    /**
+     * Current population: living villagers plus the training queue.
+     */
+    population(): number;
+    /**
      * Flat `[x0, y0, x1, y1, …]` entity positions as f64. Rendering only —
      * the sim itself never sees these floats.
      */
     positions(): Float64Array;
+    /**
+     * Order a villager to build a Farm (60 wood) — see
+     * `push_build_house`.
+     */
+    push_build_farm(entity: number, x: number, y: number): boolean;
+    /**
+     * Order a villager to build a House with its 2×2-cell footprint
+     * anchored at the cell containing the world point `(x, y)`. The
+     * 25-wood cost is deducted at placement (next tick). Returns
+     * whether the order *would* be accepted against the current state
+     * (same pattern as `push_train_villager`); the sim re-validates
+     * when the command is applied.
+     */
+    push_build_house(entity: number, x: number, y: number): boolean;
     /**
      * Order a villager to work a resource node (gather → haul → deposit
      * → repeat). Ids only — no floats cross this boundary here.
@@ -97,6 +129,11 @@ export class WasmSim {
      */
     tick(): string;
     /**
+     * Why Town Center training cannot currently proceed:
+     * 0 ok, 1 no food, 2 queue full, 3 housed (at population cap).
+     */
+    train_block_reason(): number;
+    /**
      * Villagers waiting in the Town Center training queue.
      */
     train_queue_len(): number;
@@ -116,6 +153,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_wasmsim_free: (a: number, b: number) => void;
+    readonly wasmsim_buildings: (a: number) => [number, number];
     readonly wasmsim_cell_size: (a: number) => number;
     readonly wasmsim_entity_count: (a: number) => number;
     readonly wasmsim_entity_kinds: (a: number) => [number, number];
@@ -127,7 +165,11 @@ export interface InitOutput {
     readonly wasmsim_new: (a: number) => number;
     readonly wasmsim_nodes: (a: number) => [number, number];
     readonly wasmsim_obstacles: (a: number) => [number, number];
+    readonly wasmsim_population: (a: number) => number;
+    readonly wasmsim_population_cap: (a: number) => number;
     readonly wasmsim_positions: (a: number) => [number, number];
+    readonly wasmsim_push_build_farm: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_house: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_gather: (a: number, b: number, c: number) => void;
     readonly wasmsim_push_move: (a: number, b: number, c: number, d: number) => void;
     readonly wasmsim_push_noop: (a: number) => void;
@@ -137,6 +179,7 @@ export interface InitOutput {
     readonly wasmsim_stone: (a: number) => number;
     readonly wasmsim_tick: (a: number) => [number, number];
     readonly wasmsim_tick_count: (a: number) => number;
+    readonly wasmsim_train_block_reason: (a: number) => number;
     readonly wasmsim_train_queue_len: (a: number) => number;
     readonly wasmsim_villager_count: (a: number) => number;
     readonly wasmsim_wood: (a: number) => number;

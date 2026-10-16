@@ -2,6 +2,7 @@
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
 export const __wbg_wasmsim_free: (a: number, b: number) => void;
+export const wasmsim_buildings: (a: number) => [number, number];
 export const wasmsim_cell_size: (a: number) => number;
 export const wasmsim_entity_count: (a: number) => number;
 export const wasmsim_entity_kinds: (a: number) => [number, number];
@@ -13,7 +14,11 @@ export const wasmsim_grid_width: (a: number) => number;
 export const wasmsim_new: (a: number) => number;
 export const wasmsim_nodes: (a: number) => [number, number];
 export const wasmsim_obstacles: (a: number) => [number, number];
+export const wasmsim_population: (a: number) => number;
+export const wasmsim_population_cap: (a: number) => number;
 export const wasmsim_positions: (a: number) => [number, number];
+export const wasmsim_push_build_farm: (a: number, b: number, c: number, d: number) => number;
+export const wasmsim_push_build_house: (a: number, b: number, c: number, d: number) => number;
 export const wasmsim_push_gather: (a: number, b: number, c: number) => void;
 export const wasmsim_push_move: (a: number, b: number, c: number, d: number) => void;
 export const wasmsim_push_noop: (a: number) => void;
@@ -23,6 +28,7 @@ export const wasmsim_stockpile: (a: number) => [number, number];
 export const wasmsim_stone: (a: number) => number;
 export const wasmsim_tick: (a: number) => [number, number];
 export const wasmsim_tick_count: (a: number) => number;
+export const wasmsim_train_block_reason: (a: number) => number;
 export const wasmsim_train_queue_len: (a: number) => number;
 export const wasmsim_villager_count: (a: number) => number;
 export const wasmsim_wood: (a: number) => number;

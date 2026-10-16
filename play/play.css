@@ -1,0 +1,163 @@
+/* Skirmish play page — fullscreen game layout.
+   The canvas fills the entire viewport; the page never scrolls.
+   UI chrome floats above it: back link, HUD bar, build menu,
+   toast, and the start / pause overlays. */
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #0b0f14;
+}
+
+#view {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  display: block;
+}
+
+.back-link {
+  position: fixed;
+  top: 10px;
+  left: 12px;
+  z-index: 30;
+  color: #e8e3d5;
+  background: rgba(11, 15, 20, 0.72);
+  border: 1px solid rgba(232, 227, 213, 0.25);
+  border-radius: 8px;
+  padding: 5px 10px;
+  font: 600 13px/1.2 system-ui, sans-serif;
+  text-decoration: none;
+}
+.back-link:hover { background: rgba(11, 15, 20, 0.9); }
+
+.hud-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px 8px 130px; /* room for the back link */
+  background: linear-gradient(rgba(11, 15, 20, 0.82), rgba(11, 15, 20, 0.55) 80%, transparent);
+  pointer-events: none;
+}
+.hud-text {
+  color: #e8e3d5;
+  font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hud-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+  pointer-events: auto;
+}
+.hud-bar .hud-actions { pointer-events: auto; }
+.hud-bar .btn { pointer-events: auto; }
+
+.btn-sm { padding: 6px 12px; font-size: 13px; }
+.btn-big { padding: 14px 42px; font-size: 20px; }
+.btn.active {
+  outline: 2px solid #ffcf4d;
+  outline-offset: 1px;
+}
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.build-menu {
+  position: fixed;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(94vw, 860px);
+  flex-wrap: wrap;
+  justify-content: center;
+  background: rgba(11, 15, 20, 0.85);
+  border: 1px solid rgba(232, 227, 213, 0.22);
+  border-radius: 12px;
+  padding: 8px 12px;
+  color: #e8e3d5;
+  font: 13px/1.35 system-ui, sans-serif;
+}
+.sel-info { font-weight: 600; }
+.build-hint { color: #b9b2a0; font-size: 12px; }
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 76px;
+  transform: translateX(-50%);
+  z-index: 25;
+  background: rgba(120, 30, 20, 0.92);
+  color: #ffe9e2;
+  border: 1px solid rgba(255, 200, 180, 0.4);
+  border-radius: 10px;
+  padding: 8px 14px;
+  font: 600 13px/1.3 system-ui, sans-serif;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 8, 11, 0.62);
+  padding: 16px;
+  overflow-y: auto;
+}
+.overlay-card {
+  background: #141a21;
+  border: 1px solid rgba(232, 227, 213, 0.18);
+  border-radius: 16px;
+  padding: 28px 30px;
+  max-width: 520px;
+  width: 100%;
+  text-align: center;
+  color: #e8e3d5;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+}
+.game-title {
+  margin: 0 0 6px;
+  font: 800 44px/1.05 Georgia, 'Times New Roman', serif;
+  letter-spacing: 0.22em;
+  color: #ffcf4d;
+}
+.game-title-sm {
+  margin: 0 0 14px;
+  font: 800 28px/1.1 Georgia, 'Times New Roman', serif;
+  letter-spacing: 0.18em;
+  color: #ffcf4d;
+}
+.overlay-sub { margin: 0 0 18px; color: #cfc8b6; }
+.howto {
+  text-align: left;
+  margin: 20px 0 6px;
+  background: rgba(232, 227, 213, 0.05);
+  border-radius: 10px;
+  padding: 12px 16px;
+}
+.howto h2 { margin: 0 0 8px; font-size: 15px; }
+.howto ul { margin: 0; padding-left: 18px; }
+.howto li { margin: 5px 0; font-size: 13.5px; line-height: 1.45; }
+.overlay-note { color: #9d968a; font-size: 12.5px; margin: 14px 0 0; }
+.pause-actions { display: flex; gap: 10px; justify-content: center; }
+
+@media (max-width: 640px) {
+  .hud-bar { padding-left: 12px; padding-top: 44px; }
+  .game-title { font-size: 34px; }
+  .overlay-card { padding: 20px; }
+}
