@@ -3,62 +3,154 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Skirmish — Debug Preview (M2 · ISO)</title>
-<style>
-  body {
-    font-family: ui-monospace, monospace;
-    background: #111;
-    color: #ddd;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-  }
-  .label {
-    color: #ffcf4d;
-    font-weight: bold;
-    margin: 12px 8px 4px;
-    text-align: center;
-    font-size: 14px;
-  }
-  #hud {
-    padding: 8px;
-    font-size: 13px;
-    color: #8fd18f;
-    text-align: center;
-  }
-  #train {
-    font-family: inherit;
-    font-size: 13px;
-    background: #2a3b2a;
-    color: #cfe8cf;
-    border: 1px solid #4a6b4a;
-    padding: 6px 14px;
-    margin-bottom: 8px;
-    cursor: pointer;
-  }
-  #train:hover { background: #385038; }
-  canvas {
-    border: 1px solid #444;
-    cursor: crosshair;
-    max-width: 96vw;
-    max-height: 72vh;
-  }
-  .hint {
-    font-size: 12px;
-    color: #888;
-    padding: 8px;
-    text-align: center;
-  }
-  code { color: #bbb; }
-</style>
+<title>Skirmish — a free browser RTS, built in the open</title>
+<meta name="description" content="Skirmish is a free, open-source real-time strategy game that runs in your browser. Inspired by the classics, built from scratch: deterministic simulation, adaptive quality, original clean-room art and code. Play the test build right here.">
+<link rel="icon" type="image/webp" href="art/emblem.webp">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Skirmish">
+<meta property="og:title" content="Skirmish — a free browser RTS, built in the open">
+<meta property="og:description" content="Real-time strategy in your browser: free, open source, and built to run on any computer. Play the test build — no install, no account.">
+<meta property="og:url" content="https://skirmish.online/">
+<meta property="og:image" content="https://skirmish.online/art/og-card.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Skirmish — a free browser RTS, built in the open">
+<meta name="twitter:description" content="Real-time strategy in your browser: free, open source, and built to run on any computer. Play the test build — no install, no account.">
+<meta name="twitter:image" content="https://skirmish.online/art/og-card.jpg">
+<meta name="theme-color" content="#0c110b">
+<link rel="stylesheet" href="site.css">
 </head>
 <body>
-<div class="label">SKIRMISH · DEBUG PREVIEW · M2 · ISO (2D isometric, fixed angle, like AoE: no real 3D — sprites are CC0 placeholder test art, being replaced by original art)</div>
-<div id="hud">loading…</div>
-<button id="train">Train villager (50 food)</button>
-<canvas id="view" width="720" height="720"></canvas>
-<div class="hint">Click a resource node to send all villagers to gather it. Click open ground to move all villagers there. Pan with WASD / arrow keys or right-mouse drag; zoom with the mouse wheel. Seed via <code>?seed=N</code>.</div>
+
+<header class="site-header">
+  <div class="bar">
+    <a class="brand" href="#top">
+      <img src="art/emblem.webp" alt="Skirmish emblem">
+      <span class="wordmark">SKIRMISH</span>
+    </a>
+    <nav class="site-nav">
+      <a href="#play">Play</a>
+      <a href="#about">Why Skirmish</a>
+      <a href="#roadmap">Roadmap</a>
+      <a class="btn btn-github" href="https://github.com/claudioolmedo/skirmish">View on GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<div class="ad-notice" id="ad-notice" role="note">
+  <div class="inner">
+    <p><strong>Skirmish is free — and it stays free.</strong> A couple of small,
+    clearly labeled ads help pay for the servers and keep development going.
+    They never cover the game and never pop up. Thanks for being here!</p>
+    <button id="ad-notice-close" type="button" aria-label="Dismiss this notice">&times;</button>
+  </div>
+</div>
+
+<section class="hero" id="top">
+  <div class="hero-inner">
+    <img class="emblem" src="art/emblem.webp" alt="Skirmish emblem — a wooden shield with crossed swords and a small tower">
+    <h1>SKIRMISH</h1>
+    <p class="tagline">A little empire, right in your browser.</p>
+    <p class="pitch">A real-time strategy game inspired by the classics — free and open,
+    built from scratch to run on any computer. No install, no account: open the page and play.
+    Send-a-link multiplayer is on the roadmap.</p>
+    <div class="cta">
+      <a class="btn btn-gold" href="#play">Play the test build</a>
+      <a class="btn btn-ghost" href="https://github.com/claudioolmedo/skirmish">View on GitHub</a>
+    </div>
+  </div>
+</section>
+
+<!-- Ad slot 1 of 2: leaderboard under the hero. Config in ads.js (see ADS.md). -->
+<div class="ad-wrap">
+  <div class="ad-label">Advertisement</div>
+  <div class="ad-slot ad-slot-leaderboard" id="ad-slot-leaderboard">Ads keep Skirmish free — thanks for being here.</div>
+  <div class="ad-note">Ads keep Skirmish free &amp; pay the server.</div>
+</div>
+
+<main>
+  <section class="section" id="play">
+    <h2>Play the test build</h2>
+    <p class="lede">This is the live <strong>M2 test build</strong>: a working economy loop.
+    Send villagers to gather wood, berries, gold and stone, and train more at the Town Center.
+    The sprites are placeholder test art, being replaced by original art piece by piece —
+    and the state hash in the HUD proves every run of the simulation is deterministic.</p>
+
+    <div class="play-layout">
+      <div class="game-frame">
+        <span class="build-badge">Test build · M2 — economy</span>
+        <div id="hud">loading…</div>
+        <button id="train">Train villager (50 food)</button>
+        <br>
+        <canvas id="view" width="720" height="720"></canvas>
+        <div class="hint">Click a resource node to send all villagers to gather it. Click open ground to move all villagers there. Pan with WASD / arrow keys or right-mouse drag; zoom with the mouse wheel. Seed via <code>?seed=N</code>.</div>
+      </div>
+
+      <aside class="play-side">
+        <!-- Ad slot 2 of 2: 300x250 beside the game. Never overlays the canvas. -->
+        <div class="ad-wrap">
+          <div class="ad-label">Advertisement</div>
+          <div class="ad-slot ad-slot-box" id="ad-slot-play">Ads keep Skirmish free — thanks for being here.</div>
+          <div class="ad-note">Ads keep Skirmish free &amp; pay the server.</div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <section class="section" id="about">
+    <h2>Why Skirmish</h2>
+    <p class="lede">Most strategy games demand new hardware, a big download and a store account.
+    Skirmish goes the other way: a complete little RTS that lives in a browser tab,
+    engineered so anyone can play — and anyone can read how it works.</p>
+    <div class="cards">
+      <div class="card">
+        <h3>Deterministic simulation</h3>
+        <p>The whole game is a pure Rust simulation with fixed-point math and a seeded RNG.
+        Same seed, same commands, same result — on every machine, every time. That is what
+        makes replays, spectating and fair multiplayer possible.</p>
+      </div>
+      <div class="card">
+        <h3>Adaptive quality</h3>
+        <p>One build for every computer. The simulation never changes; only the visuals scale
+        to what your machine can handle — so a modest laptop and a gaming rig compete evenly.</p>
+      </div>
+      <div class="card">
+        <h3>Clean-room &amp; original</h3>
+        <p>Every sprite and every line of code is made for Skirmish, from scratch. Inspired by
+        the classics, built on public knowledge — never on anyone else's assets.</p>
+      </div>
+      <div class="card">
+        <h3>Built in the open</h3>
+        <p>The source lives on GitHub and the game is developed in public, milestone by
+        milestone. Play the test build, read the code, follow along — or fork it.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="roadmap">
+    <h2>Roadmap</h2>
+    <p class="lede">Small milestones, shipped one at a time. The economy is playable today;
+    combat is next.</p>
+    <div class="roadmap">
+      <div class="step done"><span class="m">M0</span>Deterministic sim core<span class="state"> — done</span></div>
+      <div class="step done"><span class="m">M1</span>Movement &amp; pathfinding<span class="state"> — done</span></div>
+      <div class="step done"><span class="m">M2</span>Economy loop<span class="state"> — done, playable above</span></div>
+      <div class="step next"><span class="m">M3</span>Combat<span class="state"> — next</span></div>
+      <div class="step"><span class="m">Later</span>Multiplayer lobby<span class="state"> — send a link, play a friend</span></div>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="inner">
+    <span><strong>Skirmish</strong> — free and open source, built in public.</span>
+    <a href="https://github.com/claudioolmedo/skirmish">github.com/claudioolmedo/skirmish</a>
+    <span class="fineprint">Skirmish is an original clean-room project, developed from scratch.
+    It is not affiliated with, or endorsed by, Microsoft or Age of Empires.
+    Two small, labeled ads (see the config in <code>ads.js</code>) help keep it free — that is all the advertising there is, and it never touches the game.</span>
+  </div>
+</footer>
+
+<script src="ads.js"></script>
 <script type="module" src="app.js"></script>
 </body>
 </html>
