@@ -12,14 +12,23 @@ export class WasmSim {
      */
     cell_size(): number;
     /**
-     * Number of entities.
+     * Number of entities (Town Center + villagers).
      */
     entity_count(): number;
+    /**
+     * Per-entity kind tags in id order: 0 = villager, 1 = town center.
+     */
+    entity_kinds(): Uint8Array;
     /**
      * Remaining waypoints of an entity's active move order, flat
      * `[x0, y0, …]`. Empty when the entity has no order.
      */
     entity_path(entity: number): Float64Array;
+    /**
+     * One stockpile resource by name: convenience getters for the HUD.
+     */
+    food(): number;
+    gold(): number;
     grid_height(): number;
     /**
      * Navigation grid dimensions, in cells.
@@ -30,6 +39,13 @@ export class WasmSim {
      */
     constructor(seed: number);
     /**
+     * Resource nodes as a flat array: five values per node —
+     * `[id, x, y, kind, amount_left]` — in node id order. `kind` tags:
+     * 0 tree, 1 berry bush, 2 gold mine, 3 stone mine. Depleted nodes
+     * are included with `amount_left` 0 (the preview hides them).
+     */
+    nodes(): Float64Array;
+    /**
      * Obstacle cells as row-major bytes (0 = open, 1 = blocked).
      */
     obstacles(): Uint8Array;
@@ -38,6 +54,11 @@ export class WasmSim {
      * the sim itself never sees these floats.
      */
     positions(): Float64Array;
+    /**
+     * Order a villager to work a resource node (gather → haul → deposit
+     * → repeat). Ids only — no floats cross this boundary here.
+     */
+    push_gather(entity: number, node: number): void;
     /**
      * Order one entity to move to a world point.
      *
@@ -50,9 +71,21 @@ export class WasmSim {
      */
     push_noop(): void;
     /**
+     * Enqueue a villager at the Town Center (50 food, deducted when the
+     * command is applied next tick). Returns whether the order *would*
+     * be accepted against the current state — a UI affordance; the sim
+     * re-validates when the command is applied.
+     */
+    push_train_villager(): boolean;
+    /**
      * Current state hash as hex, without advancing the sim.
      */
     state_hash(): string;
+    /**
+     * Stockpile as `[food, wood, gold, stone]` (f64 at the boundary).
+     */
+    stockpile(): Float64Array;
+    stone(): number;
     /**
      * Ticks elapsed. Returned as u32 (wraps after ~2.26 years at 60 Hz —
      * fine for the prototype; widen if a match ever needs more).
@@ -63,6 +96,15 @@ export class WasmSim {
      * as a 16-character hex string.
      */
     tick(): string;
+    /**
+     * Villagers waiting in the Town Center training queue.
+     */
+    train_queue_len(): number;
+    /**
+     * Number of villagers (Town Center not counted).
+     */
+    villager_count(): number;
+    wood(): number;
     /**
      * World half-extent in world units: the world spans [-half, half).
      */
@@ -76,17 +118,28 @@ export interface InitOutput {
     readonly __wbg_wasmsim_free: (a: number, b: number) => void;
     readonly wasmsim_cell_size: (a: number) => number;
     readonly wasmsim_entity_count: (a: number) => number;
+    readonly wasmsim_entity_kinds: (a: number) => [number, number];
     readonly wasmsim_entity_path: (a: number, b: number) => [number, number];
+    readonly wasmsim_food: (a: number) => number;
+    readonly wasmsim_gold: (a: number) => number;
     readonly wasmsim_grid_height: (a: number) => number;
     readonly wasmsim_grid_width: (a: number) => number;
     readonly wasmsim_new: (a: number) => number;
+    readonly wasmsim_nodes: (a: number) => [number, number];
     readonly wasmsim_obstacles: (a: number) => [number, number];
     readonly wasmsim_positions: (a: number) => [number, number];
+    readonly wasmsim_push_gather: (a: number, b: number, c: number) => void;
     readonly wasmsim_push_move: (a: number, b: number, c: number, d: number) => void;
     readonly wasmsim_push_noop: (a: number) => void;
+    readonly wasmsim_push_train_villager: (a: number) => number;
     readonly wasmsim_state_hash: (a: number) => [number, number];
+    readonly wasmsim_stockpile: (a: number) => [number, number];
+    readonly wasmsim_stone: (a: number) => number;
     readonly wasmsim_tick: (a: number) => [number, number];
     readonly wasmsim_tick_count: (a: number) => number;
+    readonly wasmsim_train_queue_len: (a: number) => number;
+    readonly wasmsim_villager_count: (a: number) => number;
+    readonly wasmsim_wood: (a: number) => number;
     readonly wasmsim_world_half: (a: number) => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;

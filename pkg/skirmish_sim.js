@@ -23,12 +23,22 @@ export class WasmSim {
         return ret;
     }
     /**
-     * Number of entities.
+     * Number of entities (Town Center + villagers).
      * @returns {number}
      */
     entity_count() {
         const ret = wasm.wasmsim_entity_count(this.__wbg_ptr);
         return ret >>> 0;
+    }
+    /**
+     * Per-entity kind tags in id order: 0 = villager, 1 = town center.
+     * @returns {Uint8Array}
+     */
+    entity_kinds() {
+        const ret = wasm.wasmsim_entity_kinds(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
     }
     /**
      * Remaining waypoints of an entity's active move order, flat
@@ -41,6 +51,21 @@ export class WasmSim {
         var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
         return v1;
+    }
+    /**
+     * One stockpile resource by name: convenience getters for the HUD.
+     * @returns {number}
+     */
+    food() {
+        const ret = wasm.wasmsim_food(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    gold() {
+        const ret = wasm.wasmsim_gold(this.__wbg_ptr);
+        return ret;
     }
     /**
      * @returns {number}
@@ -68,6 +93,19 @@ export class WasmSim {
         return this;
     }
     /**
+     * Resource nodes as a flat array: five values per node —
+     * `[id, x, y, kind, amount_left]` — in node id order. `kind` tags:
+     * 0 tree, 1 berry bush, 2 gold mine, 3 stone mine. Depleted nodes
+     * are included with `amount_left` 0 (the preview hides them).
+     * @returns {Float64Array}
+     */
+    nodes() {
+        const ret = wasm.wasmsim_nodes(this.__wbg_ptr);
+        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v1;
+    }
+    /**
      * Obstacle cells as row-major bytes (0 = open, 1 = blocked).
      * @returns {Uint8Array}
      */
@@ -89,6 +127,15 @@ export class WasmSim {
         return v1;
     }
     /**
+     * Order a villager to work a resource node (gather → haul → deposit
+     * → repeat). Ids only — no floats cross this boundary here.
+     * @param {number} entity
+     * @param {number} node
+     */
+    push_gather(entity, node) {
+        wasm.wasmsim_push_gather(this.__wbg_ptr, entity, node);
+    }
+    /**
      * Order one entity to move to a world point.
      *
      * Floats are accepted ONLY here at the JS boundary and converted to
@@ -107,6 +154,17 @@ export class WasmSim {
         wasm.wasmsim_push_noop(this.__wbg_ptr);
     }
     /**
+     * Enqueue a villager at the Town Center (50 food, deducted when the
+     * command is applied next tick). Returns whether the order *would*
+     * be accepted against the current state — a UI affordance; the sim
+     * re-validates when the command is applied.
+     * @returns {boolean}
+     */
+    push_train_villager() {
+        const ret = wasm.wasmsim_push_train_villager(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * Current state hash as hex, without advancing the sim.
      * @returns {string}
      */
@@ -121,6 +179,23 @@ export class WasmSim {
         } finally {
             wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
         }
+    }
+    /**
+     * Stockpile as `[food, wood, gold, stone]` (f64 at the boundary).
+     * @returns {Float64Array}
+     */
+    stockpile() {
+        const ret = wasm.wasmsim_stockpile(this.__wbg_ptr);
+        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v1;
+    }
+    /**
+     * @returns {number}
+     */
+    stone() {
+        const ret = wasm.wasmsim_stone(this.__wbg_ptr);
+        return ret;
     }
     /**
      * Ticks elapsed. Returned as u32 (wraps after ~2.26 years at 60 Hz —
@@ -147,6 +222,29 @@ export class WasmSim {
         } finally {
             wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
         }
+    }
+    /**
+     * Villagers waiting in the Town Center training queue.
+     * @returns {number}
+     */
+    train_queue_len() {
+        const ret = wasm.wasmsim_train_queue_len(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Number of villagers (Town Center not counted).
+     * @returns {number}
+     */
+    villager_count() {
+        const ret = wasm.wasmsim_villager_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @returns {number}
+     */
+    wood() {
+        const ret = wasm.wasmsim_wood(this.__wbg_ptr);
+        return ret;
     }
     /**
      * World half-extent in world units: the world spans [-half, half).
