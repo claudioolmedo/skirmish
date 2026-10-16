@@ -1,7 +1,8 @@
 /* Skirmish play page — fullscreen game layout.
    The canvas fills the entire viewport; the page never scrolls.
-   UI chrome floats above it: back link, HUD bar, build menu,
-   toast, and the start / pause overlays. */
+   UI chrome floats above it: back link, toast, and the start / pause
+   overlays. The resource bar, command/selection panels and minimap
+   live in ui.css (loaded after this file). */
 
 html, body {
   margin: 0;
@@ -34,36 +35,6 @@ html, body {
 }
 .back-link:hover { background: rgba(11, 15, 20, 0.9); }
 
-.hud-bar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 12px 8px 130px; /* room for the back link */
-  background: linear-gradient(rgba(11, 15, 20, 0.82), rgba(11, 15, 20, 0.55) 80%, transparent);
-  pointer-events: none;
-}
-.hud-text {
-  color: #e8e3d5;
-  font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.hud-actions {
-  display: flex;
-  gap: 8px;
-  flex-shrink: 0;
-  pointer-events: auto;
-}
-.hud-bar .hud-actions { pointer-events: auto; }
-.hud-bar .btn { pointer-events: auto; }
-
 .btn-sm { padding: 6px 12px; font-size: 13px; }
 .btn-big { padding: 14px 42px; font-size: 20px; }
 .btn.active {
@@ -72,32 +43,11 @@ html, body {
 }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
-.build-menu {
-  position: fixed;
-  left: 50%;
-  bottom: 14px;
-  transform: translateX(-50%);
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  max-width: min(94vw, 860px);
-  flex-wrap: wrap;
-  justify-content: center;
-  background: rgba(11, 15, 20, 0.85);
-  border: 1px solid rgba(232, 227, 213, 0.22);
-  border-radius: 12px;
-  padding: 8px 12px;
-  color: #e8e3d5;
-  font: 13px/1.35 system-ui, sans-serif;
-}
-.sel-info { font-weight: 600; }
-.build-hint { color: #b9b2a0; font-size: 12px; }
-
 .toast {
   position: fixed;
   left: 50%;
-  bottom: 76px;
+  /* clears the bottom bar (minimap strip is ~142px tall) */
+  bottom: 156px;
   transform: translateX(-50%);
   z-index: 25;
   background: rgba(120, 30, 20, 0.92);
@@ -157,7 +107,6 @@ html, body {
 .pause-actions { display: flex; gap: 10px; justify-content: center; }
 
 @media (max-width: 640px) {
-  .hud-bar { padding-left: 12px; padding-top: 44px; }
   .game-title { font-size: 34px; }
   .overlay-card { padding: 20px; }
 }

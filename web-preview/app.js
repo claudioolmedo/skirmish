@@ -7,16 +7,20 @@
 // back-to-front. No real 3D, no rotation — the same technique as the
 // classic engine. On top of the M2 economy view it adds the M2.5 shell:
 // start overlay + pause menu, AoE2-style unit selection (individual,
-// box, shift, double-click — orders go only to the selection), a build
-// menu with a placement ghost (client mirror of the sim's placement
-// rules — the sim validates every order itself), construction
-// rendering, and the population HUD.
+// box, shift, double-click — orders go only to the selection), a
+// placement ghost (client mirror of the sim's placement rules — the
+// sim validates every order itself), construction rendering, and the
+// AoE2-style interface layout: top resource bar, bottom-left command
+// panel, bottom-center selection panel, bottom-right minimap.
 //
 // Asset URLs are resolved relative to THIS module (import.meta.url),
 // so the page works from /play/, from the site root, and from the
 // github.io project path alike.
 
 import init, { WasmSim } from './pkg/skirmish_sim.js';
+import {
+  createMinimap, renderMinimap, minimapToWorld, cameraCenteredOn,
+} from './play/minimap.js';
 
 const assetUrl = (rel) => new URL(rel, import.meta.url).href;
 
@@ -25,13 +29,24 @@ const seed = parseInt(params.get('seed') || '7', 10);
 
 const canvas = document.getElementById('view');
 const ctx = canvas.getContext('2d');
-const hud = document.getElementById('hud');
-const trainBtn = document.getElementById('train');
+// Interface chrome (play/index.html + play/ui.css). The command-grid
+// buttons (#train / #build-house / #build-farm) are REBUILT per
+// selection context by renderCommands(), so they are reached through
+// one delegated listener on #cmd-grid, never through stored refs.
+const resFood = document.getElementById('res-food');
+const resWood = document.getElementById('res-wood');
+const resGold = document.getElementById('res-gold');
+const resStone = document.getElementById('res-stone');
+const resPop = document.getElementById('res-pop');
+const gameClock = document.getElementById('game-clock');
 const pauseBtn = document.getElementById('pause-btn');
-const buildMenu = document.getElementById('build-menu');
-const buildHouseBtn = document.getElementById('build-house');
-const buildFarmBtn = document.getElementById('build-farm');
+const cmdGrid = document.getElementById('cmd-grid');
+const selPortrait = document.getElementById('sel-portrait');
+const selName = document.getElementById('sel-name');
 const selInfo = document.getElementById('sel-info');
+const selGrid = document.getElementById('sel-grid');
+const minimapCanvas = document.getElementById('minimap');
+const mmCtx = minimapCanvas.getContext('2d');
 const toast = document.getElementById('toast');
 const startOverlay = document.getElementById('start-overlay');
 const playBtn = document.getElementById('play-btn');
@@ -64,6 +79,23 @@ const BUILD_NAME = ['House', 'Farm'];
 let playing = false; // Play pressed: the sim ticks
 let paused = false; // pause menu open: the sim holds
 let selection = new Set(); // selected unit ids — orders go ONLY to these (AoE2-style)
+let selectedBuilding = null; // Town Center entity id while selected, else null
+
+// Selection invariants: the unit selection and the building selection
+// are mutually exclusive — selecting one clears the other — and
+// buildings never enter the unit Set (selectedUnits() also filters).
+// Every selection change goes through these two helpers.
+function selectUnits(set) {
+  selection = set;
+  selectedBuilding = null;
+}
+function selectBuilding(idOrNull) {
+  selectedBuilding = idOrNull;
+  selection = new Set();
+}
+
+let mmGeom = null; // minimap geometry, created once the grid is known
+const OWN_COLOR = '#4da3ff'; // our player blue on the minimap (villager tunic family)
 let lDrag = null; // left-button drag state, canvas px: { x0, y0, x1, y1, moved }
 let placement = null; // { kind } while placing a building
 let mouseWorld = null; // last cursor position, world coords
@@ -424,7 +456,7 @@ function resetSim() {
   lastNodeKind.clear();
   carryKind.clear();
   atNodeNow.clear();
-  selection = new Set();
+  selectUnits(new Set()); // also clears any building selection
   placement = null;
 
   // Camera: centered on the Town Center.
@@ -471,6 +503,9 @@ async function main() {
   GH = sim.grid_height();
   CS = sim.cell_size();
   OBST = sim.obstacles();
+  mmGeom = createMinimap({
+    worldHalf: HALF, width: minimapCanvas.width, height: minimapCanvas.height,
+  });
   // Camera centering in resetSim ran before HALF/GW were known-good;
   // the values come straight from the sim, so just re-center cleanly.
   {
@@ -497,20 +532,49 @@ async function main() {
     playing = true;
   });
 
-  trainBtn.addEventListener('click', () => {
-    if (!sim.push_train_villager()) {
-      const reason = sim.train_block_reason();
-      flash(['', 'Not enough food for a villager.',
-        'The training queue is full.', 'Housed — build a House first.'][reason] || 'Cannot train right now.');
+  // Command panel: ONE delegated listener — renderCommands() rebuilds
+  // the buttons per selection context, so per-button refs would go
+  // stale. The sim-facing behavior is unchanged from the old buttons.
+  cmdGrid.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('button');
+    if (!btn || btn.disabled) return;
+    if (btn.id === 'train') {
+      if (!sim.push_train_villager()) {
+        const reason = sim.train_block_reason();
+        flash(['', 'Not enough food for a villager.',
+          'The training queue is full.', 'Housed — build a House first.'][reason] || 'Cannot train right now.');
+      }
+    } else if (btn.id === 'build-house') {
+      placement = placement && placement.kind === 0 ? null : { kind: 0 };
+    } else if (btn.id === 'build-farm') {
+      placement = placement && placement.kind === 1 ? null : { kind: 1 };
     }
   });
 
-  buildHouseBtn.addEventListener('click', () => {
-    placement = placement && placement.kind === 0 ? null : { kind: 0 };
+  // Minimap camera control: click or drag to jump the main camera.
+  // The bottom bar floats above #view, so these gestures never reach
+  // the canvas selection/pan handlers. Client px are converted to
+  // canvas px through the bounding rect — the CSS display size
+  // differs from the attribute size on narrow screens.
+  let mmDrag = false;
+  function minimapJump(ev) {
+    if (!mmGeom) return;
+    const r = minimapCanvas.getBoundingClientRect();
+    const mx = (ev.clientX - r.left) * (minimapCanvas.width / r.width);
+    const my = (ev.clientY - r.top) * (minimapCanvas.height / r.height);
+    const [wx, wy] = minimapToWorld(mmGeom, mx, my);
+    [camOx, camOy] = cameraCenteredOn(wx, wy, camS, canvas.width, canvas.height);
+  }
+  minimapCanvas.addEventListener('pointerdown', (ev) => {
+    mmDrag = true;
+    minimapCanvas.setPointerCapture(ev.pointerId);
+    minimapJump(ev);
   });
-  buildFarmBtn.addEventListener('click', () => {
-    placement = placement && placement.kind === 1 ? null : { kind: 1 };
+  minimapCanvas.addEventListener('pointermove', (ev) => {
+    if (mmDrag) minimapJump(ev);
   });
+  minimapCanvas.addEventListener('pointerup', () => { mmDrag = false; });
+  minimapCanvas.addEventListener('pointercancel', () => { mmDrag = false; });
 
   // --- Pointer ---------------------------------------------------------
   function eventWorld(ev) {
@@ -544,6 +608,20 @@ async function main() {
     return best;
   }
 
+  // Town Center hit test: the TC whose footprint box (pos ± TC_HALF
+  // on both axes) contains the point — deliberately more generous
+  // than villagerAt's pick radius, since the TC is a big building.
+  function tcAt(wx, wy) {
+    const kinds = sim.entity_kinds();
+    const pos = sim.positions();
+    for (let i = 0; i < kinds.length; i++) {
+      if (kinds[i] !== KIND_TC) continue;
+      if (Math.abs(pos[i * 2] - wx) <= TC_HALF &&
+          Math.abs(pos[i * 2 + 1] - wy) <= TC_HALF) return i;
+    }
+    return null;
+  }
+
   function nodeAt(wx, wy) {
     let best = null;
     let bestD2 = 4 * 4;
@@ -564,7 +642,9 @@ async function main() {
   function orderAt(wx, wy) {
     const targets = selectedUnits();
     if (targets.length === 0) {
-      flash('Select a villager first.');
+      flash(selectedBuilding != null
+        ? 'The Town Center trains villagers from the Commands panel.'
+        : 'Select a villager first.');
       return;
     }
     const n = nodeAt(wx, wy);
@@ -653,9 +733,11 @@ async function main() {
         if (sx >= x0 && sx <= x1 && sy >= y0 && sy <= y1) boxed.push(id);
       }
       if (ev.shiftKey) {
-        for (const id of boxed) selection.add(id);
+        const next = new Set(selection);
+        for (const id of boxed) next.add(id);
+        selectUnits(next);
       } else {
-        selection = new Set(boxed);
+        selectUnits(new Set(boxed));
       }
       return;
     }
@@ -663,13 +745,19 @@ async function main() {
     const v = villagerAt(wx, wy);
     if (v != null) {
       if (ev.shiftKey) {
-        if (selection.has(v)) selection.delete(v);
-        else selection.add(v);
+        const next = new Set(selection);
+        if (next.has(v)) next.delete(v);
+        else next.add(v);
+        selectUnits(next);
       } else {
-        selection = new Set([v]);
+        selectUnits(new Set([v]));
       }
     } else if (!ev.shiftKey) {
-      selection = new Set(); // clicked empty ground: deselect
+      // No unit hit: the Town Center is a selection of its own (kept
+      // OUT of the unit Set); empty ground clears both selections.
+      const tc = tcAt(wx, wy);
+      if (tc != null) selectBuilding(tc);
+      else selectUnits(new Set());
     }
   });
   canvas.addEventListener('dblclick', (ev) => {
@@ -686,9 +774,11 @@ async function main() {
       if (sx >= 0 && sx <= canvas.width && sy >= 0 && sy <= canvas.height) same.push(id);
     }
     if (ev.shiftKey) {
-      for (const id of same) selection.add(id);
+      const next = new Set(selection);
+      for (const id of same) next.add(id);
+      selectUnits(next);
     } else {
-      selection = new Set(same);
+      selectUnits(new Set(same));
     }
   });
 
@@ -1070,56 +1160,173 @@ function drawVillager(i, wx, wy) {
   ctx.fillText(String(i), sx, spr ? sy + 0.5 * u : by);
 }
 
-// --- HUD / build menu -------------------------------------------------
-function updateHud() {
+// --- Interface panels (top bar / commands / selection / toast) ------
+// updateHud() was split per the AoE2-style layout: each panel updates
+// from draw(), and the two panels that rebuild DOM (commands,
+// selection) are signature-gated so they only touch the DOM when
+// something they display actually changed — never at 60 fps.
+
+function updateTopBar() {
   const [food, wood, gold, stone] = sim.stockpile();
+  resFood.textContent = Math.floor(food);
+  resWood.textContent = Math.floor(wood);
+  resGold.textContent = Math.floor(gold);
+  resStone.textContent = Math.floor(stone);
+  const pop = sim.population();
+  const cap = sim.population_cap();
+  resPop.textContent = `${pop} / ${cap}`;
+  // Warn tint when housed (reason 3) or simply at the cap.
+  resPop.classList.toggle('warn', sim.train_block_reason() === 3 || pop >= cap);
+  const secs = Math.floor(sim.tick_count() / 60); // the sim ticks at 60 Hz
+  const mm = String(Math.floor(secs / 60)).padStart(2, '0');
+  const ss = String(secs % 60).padStart(2, '0');
+  gameClock.textContent = `${mm}:${ss}`;
+}
+
+function cmdButton({ id, icon, label, costIcon, cost, title, disabled, active, badge }) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.id = id;
+  btn.className = 'cmd-btn' + (active ? ' active' : '');
+  btn.disabled = !!disabled;
+  btn.title = title;
+  let html =
+    `<svg class="cmd-icon"><use href="#${icon}"/></svg>` +
+    `<span class="cmd-label">${label}</span>` +
+    `<span class="cmd-cost"><svg class="ui-icon"><use href="#${costIcon}"/></svg>${cost}</span>`;
+  if (badge) html += `<span class="cmd-badge" id="train-badge">${badge}</span>`;
+  btn.innerHTML = html;
+  return btn;
+}
+
+let cmdSig = ''; // signature of the last-rendered command context
+
+// Contextual commands, bottom-left: villagers selected -> build
+// buttons (driving the existing placement flow); Town Center
+// selected -> train button (existing push_train_villager semantics);
+// nothing -> a hint line. Button ids (#build-house / #build-farm /
+// #train) are stable across rebuilds; clicks are handled by the one
+// delegated listener on #cmd-grid in main().
+function renderCommands() {
+  const selUnits = selectedUnits();
+  const wood = sim.wood();
+  const reason = sim.train_block_reason();
+  const queue = sim.train_queue_len();
+  const context = selUnits.length > 0 ? 'build'
+    : selectedBuilding != null ? 'tc' : 'none';
+  const sig = [context, Math.floor(wood), reason, queue,
+    placement ? placement.kind : -1].join('|');
+  if (sig === cmdSig) return;
+  cmdSig = sig;
+  cmdGrid.innerHTML = '';
+  if (context === 'build') {
+    cmdGrid.append(
+      cmdButton({
+        id: 'build-house', icon: 'i-house', label: BUILD_NAME[0],
+        costIcon: 'i-wood', cost: BUILD_COST[0],
+        disabled: wood < BUILD_COST[0],
+        active: !!placement && placement.kind === 0,
+        title: wood < BUILD_COST[0]
+          ? `House — needs ${BUILD_COST[0]} wood`
+          : 'House — 25 wood, +5 population room',
+      }),
+      cmdButton({
+        id: 'build-farm', icon: 'i-farm', label: BUILD_NAME[1],
+        costIcon: 'i-wood', cost: BUILD_COST[1],
+        disabled: wood < BUILD_COST[1],
+        active: !!placement && placement.kind === 1,
+        title: wood < BUILD_COST[1]
+          ? `Farm — needs ${BUILD_COST[1]} wood`
+          : 'Farm — 60 wood, 175 food',
+      }),
+    );
+  } else if (context === 'tc') {
+    cmdGrid.append(cmdButton({
+      id: 'train', icon: 'i-train', label: 'Villager',
+      costIcon: 'i-food', cost: 50,
+      disabled: reason === 2, // queue full; other blocks flash on click
+      badge: queue > 0 ? `+${queue}` : null,
+      title: [
+        'Train a villager at the Town Center (50 food).',
+        'Not enough food.',
+        'The training queue is full.',
+        'Housed: population is at capacity — queued villagers cannot finish training until a House stands.',
+      ][reason] || 'Train a villager at the Town Center (50 food).',
+    }));
+  } else {
+    const hint = document.createElement('p');
+    hint.className = 'ui-cmd-hint';
+    hint.textContent = 'Select a villager to build, or the Town Center to train.';
+    cmdGrid.append(hint);
+  }
+}
+
+let selSig = ''; // signature of the last-rendered selection panel
+
+// Selection panel, bottom-center: single unit -> portrait + name +
+// hint; group -> count + one cell per unit (capped at 12 + "+k");
+// Town Center -> portrait + queue state; nothing -> guidance.
+function updateSelPanel() {
+  const selUnits = selectedUnits();
   const queue = sim.train_queue_len();
   const reason = sim.train_block_reason();
-  hud.textContent =
-    `food ${Math.floor(food)} · wood ${Math.floor(wood)} · gold ${Math.floor(gold)} · stone ${Math.floor(stone)}` +
-    ` · pop ${sim.population()}/${sim.population_cap()}` +
-    ` · villagers ${sim.villager_count()}${queue ? ` (+${queue} training)` : ''}` +
-    (reason === 3 ? ' · HOUSED — build a House' : '') +
-    ` · tick ${sim.tick_count()} · hash ${sim.state_hash()} · seed ${seed}`;
+  const context = selUnits.length > 0 ? 'units'
+    : selectedBuilding != null ? 'tc' : 'none';
+  const sig = [context, selUnits.join(','), selectedBuilding, queue, reason].join('|');
+  if (sig === selSig) return;
+  selSig = sig;
 
-  // Train button affordances follow the sim's block reason.
-  trainBtn.disabled = reason === 2;
-  trainBtn.textContent = reason === 3
-    ? 'Train villager (50 food) — housed!'
-    : 'Train villager (50 food)';
-  trainBtn.title = [
-    'Train a villager at the Town Center (50 food).',
-    'Not enough food.',
-    'The training queue is full.',
-    'Population is at capacity: queued villagers cannot finish training until a House stands.',
-  ][reason] || '';
-
-  // Build menu + selection indicator: visible while at least one
-  // villager is selected. The indicator shows count · kind; the build
-  // menu acts on the selection (builder = nearest selected villager,
-  // see attemptPlace).
-  const selUnits = selectedUnits();
-  const show = selUnits.length > 0;
-  buildMenu.style.display = show ? 'flex' : 'none';
-  if (show) {
-    const kindName = KIND_NAME[sim.entity_kinds()[selUnits[0]]] || 'Unit';
-    selInfo.textContent = selUnits.length === 1
-      ? `Villager ${selUnits[0]} — right-click a node to gather, ground to move.`
-      : `${selUnits.length} · ${kindName} — right-click to order the group.`;
-    const w = sim.wood();
-    buildHouseBtn.disabled = w < BUILD_COST[0];
-    buildHouseBtn.title = w < BUILD_COST[0]
-      ? `House — needs ${BUILD_COST[0]} wood`
-      : 'House — 25 wood, +5 population room';
-    buildFarmBtn.disabled = w < BUILD_COST[1];
-    buildFarmBtn.title = w < BUILD_COST[1]
-      ? `Farm — needs ${BUILD_COST[1]} wood`
-      : 'Farm — 60 wood, 175 food';
-    buildHouseBtn.classList.toggle('active', !!placement && placement.kind === 0);
-    buildFarmBtn.classList.toggle('active', !!placement && placement.kind === 1);
+  selGrid.innerHTML = '';
+  selInfo.classList.remove('warn');
+  if (context === 'units') {
+    const kinds = sim.entity_kinds();
+    const kindName = KIND_NAME[kinds[selUnits[0]]] || 'Unit';
+    selPortrait.classList.remove('empty');
+    selPortrait.innerHTML = '<svg class="ui-icon"><use href="#i-villager"/></svg>';
+    if (selUnits.length === 1) {
+      selName.textContent = kindName;
+      selInfo.textContent =
+        `Villager ${selUnits[0]} — right-click a node to gather, ground to move.`;
+    } else {
+      selName.textContent = `${selUnits.length} · ${kindName}`;
+      selInfo.textContent = 'Right-click to order the group.';
+      const shown = selUnits.slice(0, 12);
+      for (let i = 0; i < shown.length; i++) {
+        const cell = document.createElement('span');
+        cell.className = 'sel-cell';
+        cell.innerHTML = '<svg class="ui-icon"><use href="#i-villager"/></svg>';
+        selGrid.append(cell);
+      }
+      if (selUnits.length > shown.length) {
+        const more = document.createElement('span');
+        more.className = 'sel-cell more';
+        more.textContent = `+${selUnits.length - shown.length}`;
+        selGrid.append(more);
+      }
+    }
+  } else if (context === 'tc') {
+    selPortrait.classList.remove('empty');
+    selPortrait.innerHTML = '<svg class="ui-icon"><use href="#i-tc"/></svg>';
+    selName.textContent = 'Town Center';
+    if (reason === 3) {
+      selInfo.textContent = 'Housed — training stalls until a House stands.';
+      selInfo.classList.add('warn');
+    } else if (queue > 0) {
+      selInfo.textContent = `Training a villager… · Queue ${queue}`;
+    } else {
+      selInfo.textContent = 'Train villagers from the Commands panel.';
+    }
+  } else {
+    selPortrait.classList.add('empty');
+    selPortrait.innerHTML = '<svg class="ui-icon"><use href="#i-villager"/></svg>';
+    selName.textContent = 'No selection';
+    selInfo.textContent =
+      'Click a villager, drag to select a group, or click the Town Center.';
   }
+}
 
-  // Transient toast (placement rejections, training blocks).
+// Transient toast (placement rejections, training blocks).
+function updateToast() {
   if (flashText && performance.now() < flashUntil) {
     toast.textContent = flashText;
     toast.style.display = 'block';
@@ -1230,6 +1437,27 @@ function draw() {
   draws.sort((a, b) => a.key - b.key);
   for (const d of draws) d.fn();
 
+  // Town Center selection: a gold outline around its footprint —
+  // the building counterpart of the villager selection ring.
+  if (selectedBuilding != null && kinds[selectedBuilding] === KIND_TC) {
+    const bx = pos[selectedBuilding * 2];
+    const by = pos[selectedBuilding * 2 + 1];
+    const pts = [
+      worldToScreen(bx - TC_HALF, by - TC_HALF),
+      worldToScreen(bx + TC_HALF, by - TC_HALF),
+      worldToScreen(bx + TC_HALF, by + TC_HALF),
+      worldToScreen(bx - TC_HALF, by + TC_HALF),
+    ];
+    poly(pts, 'rgba(255, 207, 77, 0.10)');
+    ctx.strokeStyle = 'rgba(255, 207, 77, 0.95)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.closePath();
+    ctx.stroke();
+  }
+
   // Placement ghost: the footprint under the cursor, green when the
   // mirrored sim rules allow building there, red when they don't.
   if (placement && mouseWorld) {
@@ -1266,10 +1494,32 @@ function draw() {
     ctx.strokeRect(x, y, w, h);
   }
 
-  updateHud();
+  updateTopBar();
+  renderCommands();
+  updateSelPanel();
+  updateToast();
+
+  // Minimap: reuses this frame's nodes/buildings/kinds/pos, so it
+  // costs no extra ABI calls.
+  if (mmGeom) {
+    const mmEntities = [];
+    for (let i = 0; i < count; i++) {
+      mmEntities.push({
+        x: pos[i * 2], y: pos[i * 2 + 1], kind: kinds[i],
+        color: OWN_COLOR, selected: selection.has(i),
+      });
+    }
+    renderMinimap(mmCtx, mmGeom, {
+      gridW: GW, gridH: GH, cellSize: CS, obstacles: OBST,
+      nodes, buildings, entities: mmEntities,
+      cam: { s: camS, ox: camOx, oy: camOy, viewW: W, viewH: H },
+    });
+  }
 }
 
 main().catch((e) => {
-  hud.textContent = 'failed to load WASM: ' + e;
+  // No #hud text line anymore: load failures surface on the toast.
+  toast.textContent = 'Failed to load the game (WASM): ' + e;
+  toast.style.display = 'block';
   console.error(e);
 });
