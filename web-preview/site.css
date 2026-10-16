@@ -112,14 +112,6 @@ a { color: var(--gold-bright); }
 }
 .btn-ghost:hover { border-color: var(--gold); color: var(--gold-bright); }
 
-.btn-github {
-  background: #1d2619;
-  color: var(--ink);
-  border-color: var(--panel-edge);
-  padding: 7px 14px;
-}
-.btn-github:hover { border-color: var(--gold); color: var(--gold-bright); }
-
 /* The header Play is the site's main action — a filled gold button,
    never a quiet text link. (Explicit colors: .site-nav a would win on
    specificity over .btn-gold alone.) */
