@@ -14,7 +14,7 @@ anywhere in this project (clean-room rule).
 
 | File | Used as | Original file | Source | License |
 |---|---|---|---|---|
-| `villager.png` | Villager unit | `Male_0_Idle0.png` (Isometric folder, Characters/Male) from Kenney "Dungeon Pack" (Isometric Miniature Dungeon) | https://kenney.nl/assets/isometric-miniature-dungeon | CC0 1.0 |
+| `villager.png` | Villager unit — **REPLACED by original art** (`../assets-original/villager-*.png`, our sprite pipeline) on 2026-10-16; this file is retained only as a load-failure fallback in the renderer's fallback chain | `Male_0_Idle0.png` (Isometric folder, Characters/Male) from Kenney "Dungeon Pack" (Isometric Miniature Dungeon) | https://kenney.nl/assets/isometric-miniature-dungeon | CC0 1.0 |
 | `tree.png` | Tree node | `medievalEnvironment_03.png` from Kenney "RTS Pack: Medieval" (Medieval RTS) | https://kenney.nl/assets/medieval-rts | CC0 1.0 |
 | `berry-bush.png` | Berry bush node | `medievalEnvironment_19.png` from Kenney "RTS Pack: Medieval" | https://kenney.nl/assets/medieval-rts | CC0 1.0 |
 | `gold.png` | Gold node (gold-flecked rock) | `medievalEnvironment_11.png` from Kenney "RTS Pack: Medieval" | https://kenney.nl/assets/medieval-rts | CC0 1.0 |
