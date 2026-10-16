@@ -17,8 +17,15 @@ pub const SLOW_RADIUS: I16F16 = I16F16::from_bits(262_144); // 4.0
 pub const WAYPOINT_REACH: I16F16 = I16F16::from_bits(65_536); // 1.0
 /// Entities closer than this push each other apart.
 pub const SEPARATION_RADIUS: I16F16 = I16F16::from_bits(131_072); // 2.0
-/// Separation force scale: 0.75 = 49152/65536 raw bits.
-const SEPARATION_FORCE: I16F16 = I16F16::from_bits(49152);
+/// Separation displacement factor: 0.5 = 32768/65536 raw bits.
+///
+/// Separation is *displacement*-based: a unit moves half the overlap per
+/// tick, so a pair at distance d separates to exactly the radius in one
+/// tick and stops — critically damped, no overshoot. (M1 used a 0.75
+/// force scale; M2 testing showed the stiff spring, stateless velocity,
+/// and 1-unit steps form a period-2 oscillation when units converge on
+/// one point, and force equilibrium deadlocks against standing units.)
+const SEPARATION_DISPLACEMENT: I16F16 = I16F16::from_bits(32768);
 
 /// Integer square root (Newton's method). Pure integer ops — deterministic.
 pub fn isqrt(x: u64) -> u64 {
@@ -44,6 +51,58 @@ pub fn vec_len(dx: I16F16, dy: I16F16) -> I16F16 {
     let dxb = dx.to_bits() as i64;
     let dyb = dy.to_bits() as i64;
     I16F16::from_bits(isqrt((dxb * dxb + dyb * dyb) as u64) as i32)
+}
+
+/// Separation push for one entity: the summed, *unclamped* displacement
+/// of every neighbor inside `SEPARATION_RADIUS` — half the overlap,
+/// pointing away from the neighbor. (This is the term `steer` adds to
+/// the desired velocity, factored out unchanged.)
+///
+/// The sim also applies it to entities with *no* move order (M2, see
+/// `shove`): a stationary villager must be shovable. If only ordered
+/// entities reacted, an idle unit standing on another's path could cancel
+/// its desired velocity exactly — a perfect head-on equilibrium, i.e. a
+/// deadlock. With mutual shove, the blocker slides aside (half the
+/// overlap per tick) and the traveler gets through.
+pub fn separation(positions: &[(I16F16, I16F16)], me: usize) -> (I16F16, I16F16) {
+    let (px, py) = positions[me];
+    let mut vx = I16F16::ZERO;
+    let mut vy = I16F16::ZERO;
+    // Iteration is over the id-ordered snapshot, so the sum is
+    // deterministic.
+    let sep_r_bits = SEPARATION_RADIUS.to_bits() as i64;
+    let sep_r2 = sep_r_bits * sep_r_bits;
+    for (j, &(ox, oy)) in positions.iter().enumerate() {
+        if j == me {
+            continue;
+        }
+        let sx = px - ox;
+        let sy = py - oy;
+        let sxb = sx.to_bits() as i64;
+        let syb = sy.to_bits() as i64;
+        let d2 = sxb * sxb + syb * syb;
+        if d2 == 0 || d2 >= sep_r2 {
+            continue;
+        }
+        let d = I16F16::from_bits(isqrt(d2 as u64) as i32);
+        let push = SEPARATION_RADIUS - d; // overlap, > 0 inside the radius
+        vx += sx / d * push * SEPARATION_DISPLACEMENT;
+        vy += sy / d * push * SEPARATION_DISPLACEMENT;
+    }
+    (vx, vy)
+}
+
+/// The velocity an entity with *no* move order gets this tick: just the
+/// separation shove, clamped to `MAX_SPEED`. Standing units are nudged
+/// aside by neighbors instead of acting as immovable walls.
+pub fn shove(positions: &[(I16F16, I16F16)], me: usize) -> (I16F16, I16F16) {
+    let (mut vx, mut vy) = separation(positions, me);
+    let vlen = vec_len(vx, vy);
+    if vlen > MAX_SPEED {
+        vx = vx / vlen * MAX_SPEED;
+        vy = vy / vlen * MAX_SPEED;
+    }
+    (vx, vy)
 }
 
 /// Steering decision for one entity for one tick.
@@ -87,28 +146,10 @@ pub fn steer(
         (I16F16::ZERO, I16F16::ZERO)
     };
 
-    // Separation: every neighbor inside SEPARATION_RADIUS contributes a
-    // push proportional to the overlap, pointing away. Iteration is over
-    // the id-ordered snapshot, so the sum is deterministic.
-    let sep_r_bits = SEPARATION_RADIUS.to_bits() as i64;
-    let sep_r2 = sep_r_bits * sep_r_bits;
-    for (j, &(ox, oy)) in positions.iter().enumerate() {
-        if j == me {
-            continue;
-        }
-        let sx = px - ox;
-        let sy = py - oy;
-        let sxb = sx.to_bits() as i64;
-        let syb = sy.to_bits() as i64;
-        let d2 = sxb * sxb + syb * syb;
-        if d2 == 0 || d2 >= sep_r2 {
-            continue;
-        }
-        let d = I16F16::from_bits(isqrt(d2 as u64) as i32);
-        let push = SEPARATION_RADIUS - d; // > 0 inside the radius
-        vx += sx / d * push * SEPARATION_FORCE;
-        vy += sy / d * push * SEPARATION_FORCE;
-    }
+    // Separation from neighbors, on top of the desired velocity.
+    let (sx, sy) = separation(positions, me);
+    vx += sx;
+    vy += sy;
 
     // Clamp the combined velocity to MAX_SPEED.
     let vlen = vec_len(vx, vy);
@@ -181,5 +222,26 @@ mod tests {
         assert!(vx0 < MAX_SPEED, "entity 0 felt no separation push");
         // …entity 1 is pushed right (it keeps full speed toward +x).
         assert_eq!(vx1, MAX_SPEED);
+    }
+
+    #[test]
+    fn shove_moves_half_the_overlap() {
+        // Two orderless entities 1 unit apart: each is shoved away from
+        // the other by half the overlap (0.5), so one tick of mutual
+        // shove separates the pair to exactly the separation radius.
+        let p = [
+            (I16F16::ZERO, I16F16::ZERO),
+            (I16F16::from_num(1), I16F16::ZERO),
+        ];
+        let (vx0, vy0) = shove(&p, 0);
+        let (vx1, vy1) = shove(&p, 1);
+        assert_eq!((vx0, vy0), (I16F16::from_num(-0.5), I16F16::ZERO));
+        assert_eq!((vx1, vy1), (I16F16::from_num(0.5), I16F16::ZERO));
+        // Beyond the radius there is no shove at all.
+        let far = [
+            (I16F16::ZERO, I16F16::ZERO),
+            (I16F16::from_num(3), I16F16::ZERO),
+        ];
+        assert_eq!(shove(&far, 0), (I16F16::ZERO, I16F16::ZERO));
     }
 }

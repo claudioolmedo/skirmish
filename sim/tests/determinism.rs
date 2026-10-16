@@ -94,11 +94,19 @@ fn golden_hash_regression() {
     // stand until ordered), spawn avoids wall cells, and the hash now covers
     // the grid layout plus move orders. New value verified stable across
     // independent runs (replay example, seed 42, 360 ticks).
+    //
+    // M2 deliberate update: the demo entities are replaced by the real
+    // starting layout (Town Center + 3 villagers at fixed positions, no
+    // RNG spawn), the hash now also covers the stockpile, node amounts,
+    // the training queue, entity kinds, and villager work state, and
+    // separation became displacement-based with mutual shove. New value
+    // verified stable across independent runs (replay example, seed 42,
+    // 360 ticks, run twice).
     let mut sim = Sim::new(42);
     let mut hash = 0;
     for _ in 0..360 {
         hash = sim.tick();
     }
     assert_eq!(sim.tick_count(), 360);
-    assert_eq!(format!("{:016x}", hash), "8b062c09dfdd2f2c");
+    assert_eq!(format!("{:016x}", hash), "ea0f1386f7fc2ed5");
 }

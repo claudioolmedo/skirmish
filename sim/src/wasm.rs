@@ -1,17 +1,20 @@
-//! Thin WebAssembly ABI (M1).
+//! Thin WebAssembly ABI (M1–M2).
 //!
 //! Compiled only for `wasm32-unknown-unknown`. This is the narrow boundary
 //! between the headless sim and the outside world: commands in, state out.
-//! The renderer (M4) — and the M1 debug preview — talk *only* through this
+//! The renderer (M4) — and the debug preview — talk *only* through this
 //! surface. The renderer must never compute game rules.
 //!
 //! M1 exposes: create, tick, state hash, move orders, and read-only state
 //! accessors (entity positions, active paths, grid layout) for rendering.
+//! M2 adds: gather/train commands, stockpile, node list, entity kinds,
+//! villager and training-queue counts.
 
 use wasm_bindgen::prelude::*;
 
 use fixed::types::I16F16;
 
+use crate::econ::ResourceKind;
 use crate::grid;
 use crate::{Command, Sim};
 
@@ -61,14 +64,47 @@ impl WasmSim {
         });
     }
 
+    /// Order a villager to work a resource node (gather → haul → deposit
+    /// → repeat). Ids only — no floats cross this boundary here.
+    pub fn push_gather(&mut self, entity: u32, node: u32) {
+        self.inner.push_command(Command::Gather { entity, node });
+    }
+
+    /// Enqueue a villager at the Town Center (50 food, deducted when the
+    /// command is applied next tick). Returns whether the order *would*
+    /// be accepted against the current state — a UI affordance; the sim
+    /// re-validates when the command is applied.
+    pub fn push_train_villager(&mut self) -> bool {
+        let ok = self.inner.can_train_villager();
+        if ok {
+            self.inner.push_command(Command::TrainVillager);
+        }
+        ok
+    }
+
     /// Current state hash as hex, without advancing the sim.
     pub fn state_hash(&self) -> String {
         self.inner.state_hash_hex()
     }
 
-    /// Number of entities.
+    /// Number of entities (Town Center + villagers).
     pub fn entity_count(&self) -> u32 {
         self.inner.entities().len() as u32
+    }
+
+    /// Number of villagers (Town Center not counted).
+    pub fn villager_count(&self) -> u32 {
+        self.inner.villager_count()
+    }
+
+    /// Villagers waiting in the Town Center training queue.
+    pub fn train_queue_len(&self) -> u32 {
+        self.inner.train_queue_len()
+    }
+
+    /// Per-entity kind tags in id order: 0 = villager, 1 = town center.
+    pub fn entity_kinds(&self) -> Vec<u8> {
+        self.inner.entities().iter().map(|e| e.kind.tag()).collect()
     }
 
     /// Flat `[x0, y0, x1, y1, …]` entity positions as f64. Rendering only —
@@ -93,6 +129,61 @@ impl WasmSim {
                     out.push(wy.to_num::<f64>());
                 }
             }
+        }
+        out
+    }
+
+    /// Stockpile as `[food, wood, gold, stone]` (f64 at the boundary).
+    pub fn stockpile(&self) -> Vec<f64> {
+        self.inner
+            .stockpile()
+            .amounts()
+            .iter()
+            .map(|a| a.to_num::<f64>())
+            .collect()
+    }
+
+    /// One stockpile resource by name: convenience getters for the HUD.
+    pub fn food(&self) -> f64 {
+        self.inner
+            .stockpile()
+            .amount(ResourceKind::Food)
+            .to_num::<f64>()
+    }
+
+    pub fn wood(&self) -> f64 {
+        self.inner
+            .stockpile()
+            .amount(ResourceKind::Wood)
+            .to_num::<f64>()
+    }
+
+    pub fn gold(&self) -> f64 {
+        self.inner
+            .stockpile()
+            .amount(ResourceKind::Gold)
+            .to_num::<f64>()
+    }
+
+    pub fn stone(&self) -> f64 {
+        self.inner
+            .stockpile()
+            .amount(ResourceKind::Stone)
+            .to_num::<f64>()
+    }
+
+    /// Resource nodes as a flat array: five values per node —
+    /// `[id, x, y, kind, amount_left]` — in node id order. `kind` tags:
+    /// 0 tree, 1 berry bush, 2 gold mine, 3 stone mine. Depleted nodes
+    /// are included with `amount_left` 0 (the preview hides them).
+    pub fn nodes(&self) -> Vec<f64> {
+        let mut out = Vec::with_capacity(self.inner.nodes().len() * 5);
+        for n in self.inner.nodes() {
+            out.push(n.id as f64);
+            out.push(n.pos_x.to_num::<f64>());
+            out.push(n.pos_y.to_num::<f64>());
+            out.push(n.kind.tag() as f64);
+            out.push(n.amount_left.to_num::<f64>());
         }
         out
     }

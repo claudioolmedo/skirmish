@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the Skirmish sim crate to WebAssembly for the M1 debug preview.
+# Builds the Skirmish sim crate to WebAssembly for the debug preview.
 #
 # Output: web-preview/pkg/ (JS glue + .wasm), loaded by web-preview/app.js.
 # Serve the preview statically, e.g.:  cd web-preview && python3 -m http.server 8080

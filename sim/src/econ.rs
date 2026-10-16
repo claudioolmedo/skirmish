@@ -1,0 +1,309 @@
+//! Economy model (M2): resources, resource nodes, and the stockpile.
+//!
+//! The AoE2-style loop in deterministic form: villagers walk to a resource
+//! node, gather into a carry buffer, haul it back to the Town Center, and
+//! deposit. Every number here is fixed-point; gather rates are per-tick
+//! raw-bit constants tuned toward the publicly documented per-second rates
+//! (community wiki values), converted once, by hand, at authoring time —
+//! never computed with floats at runtime.
+//!
+//! Per-second targets → per-tick bits (rate × 65536 / 60, rounded):
+//! - wood  0.39/s → 426 bits/tick (effective 0.3901/s)
+//! - food  0.31/s → 339 bits/tick (effective 0.3104/s)  [berries]
+//! - gold  0.38/s → 415 bits/tick (effective 0.3799/s)
+//! - stone 0.36/s → 393 bits/tick (effective 0.3598/s)
+
+use fixed::types::I16F16;
+
+/// The four stockpile resources. Declaration order is the canonical order
+/// used by the state hash and the WASM stockpile array: Food, Wood, Gold,
+/// Stone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResourceKind {
+    Food,
+    Wood,
+    Gold,
+    Stone,
+}
+
+impl ResourceKind {
+    /// All resources in canonical order.
+    pub const ALL: [ResourceKind; 4] = [
+        ResourceKind::Food,
+        ResourceKind::Wood,
+        ResourceKind::Gold,
+        ResourceKind::Stone,
+    ];
+
+    /// Index into stockpile arrays (canonical order).
+    pub fn index(self) -> usize {
+        match self {
+            ResourceKind::Food => 0,
+            ResourceKind::Wood => 1,
+            ResourceKind::Gold => 2,
+            ResourceKind::Stone => 3,
+        }
+    }
+
+    /// Hash tag: 1..=4 (0 is reserved for "no resource" / empty carry).
+    pub fn tag(self) -> u8 {
+        self.index() as u8 + 1
+    }
+
+    /// Inverse of `tag`; 0 and out-of-range values map to `None`.
+    pub fn from_tag(tag: u8) -> Option<ResourceKind> {
+        match tag {
+            1 => Some(ResourceKind::Food),
+            2 => Some(ResourceKind::Wood),
+            3 => Some(ResourceKind::Gold),
+            4 => Some(ResourceKind::Stone),
+            _ => None,
+        }
+    }
+}
+
+/// A harvestable node type. Amounts are the standard full-node contents;
+/// rates are per-tick fixed-point constants (see module docs).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NodeKind {
+    Tree,
+    BerryBush,
+    GoldMine,
+    StoneMine,
+}
+
+impl NodeKind {
+    /// The resource this node yields.
+    pub fn resource(self) -> ResourceKind {
+        match self {
+            NodeKind::Tree => ResourceKind::Wood,
+            NodeKind::BerryBush => ResourceKind::Food,
+            NodeKind::GoldMine => ResourceKind::Gold,
+            NodeKind::StoneMine => ResourceKind::Stone,
+        }
+    }
+
+    /// Contents of a fresh node (100 / 125 / 800 / 350).
+    pub fn full_amount(self) -> I16F16 {
+        I16F16::from_num(match self {
+            NodeKind::Tree => 100,
+            NodeKind::BerryBush => 125,
+            NodeKind::GoldMine => 800,
+            NodeKind::StoneMine => 350,
+        })
+    }
+
+    /// Amount gathered per tick while a villager works this node.
+    /// Raw bits on purpose (see module docs for the per-second targets).
+    pub fn gather_rate(self) -> I16F16 {
+        I16F16::from_bits(match self {
+            NodeKind::Tree => 426,
+            NodeKind::BerryBush => 339,
+            NodeKind::GoldMine => 415,
+            NodeKind::StoneMine => 393,
+        })
+    }
+
+    /// Stable tag for the state hash and the WASM node array:
+    /// 0 tree, 1 berry, 2 gold, 3 stone.
+    pub fn tag(self) -> u8 {
+        match self {
+            NodeKind::Tree => 0,
+            NodeKind::BerryBush => 1,
+            NodeKind::GoldMine => 2,
+            NodeKind::StoneMine => 3,
+        }
+    }
+}
+
+/// One harvestable resource node on the map. Position is a fixed-point
+/// world point (a grid cell center); `amount_left` drains as villagers
+/// gather and the node is inert at zero.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResourceNode {
+    pub id: u32,
+    pub kind: NodeKind,
+    pub pos_x: I16F16,
+    pub pos_y: I16F16,
+    pub amount_left: I16F16,
+}
+
+impl ResourceNode {
+    /// The resource this node yields.
+    pub fn resource(&self) -> ResourceKind {
+        self.kind.resource()
+    }
+
+    /// A depleted node yields nothing and rejects new gather orders.
+    pub fn is_depleted(&self) -> bool {
+        self.amount_left <= I16F16::ZERO
+    }
+}
+
+/// The player's resource stockpile. Only *deposited* resources live here —
+/// what a villager carries is still on the villager (see `Entity::carry`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Stockpile {
+    amounts: [I16F16; 4], // canonical order: Food, Wood, Gold, Stone
+}
+
+impl Stockpile {
+    /// Standard start: 200 food, 200 wood, 100 gold, 200 stone.
+    pub fn starting() -> Self {
+        Stockpile {
+            amounts: [
+                I16F16::from_num(200),
+                I16F16::from_num(200),
+                I16F16::from_num(100),
+                I16F16::from_num(200),
+            ],
+        }
+    }
+
+    pub fn amount(&self, kind: ResourceKind) -> I16F16 {
+        self.amounts[kind.index()]
+    }
+
+    /// All four amounts in canonical order (Food, Wood, Gold, Stone).
+    pub fn amounts(&self) -> [I16F16; 4] {
+        self.amounts
+    }
+
+    pub fn add(&mut self, kind: ResourceKind, amount: I16F16) {
+        let i = kind.index();
+        self.amounts[i] += amount;
+    }
+
+    /// Deduct `amount` if the stockpile covers it. Returns success; on
+    /// failure nothing changes (no partial spends).
+    pub fn spend(&mut self, kind: ResourceKind, amount: I16F16) -> bool {
+        let i = kind.index();
+        if self.amounts[i] < amount {
+            return false;
+        }
+        self.amounts[i] -= amount;
+        true
+    }
+}
+
+/// How much a villager can carry before it must haul back: 10.
+pub const CARRY_CAPACITY: I16F16 = I16F16::from_bits(655_360);
+/// Villager training cost: 50 food, deducted when the order is enqueued.
+pub const VILLAGER_FOOD_COST: I16F16 = I16F16::from_bits(3_276_800); // 50
+/// Villager training time: 25 s at 60 Hz.
+pub const VILLAGER_TRAIN_TICKS: u64 = 1500;
+/// Maximum number of villagers waiting in the Town Center queue.
+pub const TRAIN_QUEUE_CAP: u32 = 15;
+/// A villager this close to its node is gathering from it: 2.5 units.
+/// Generous on purpose — separation can hold a latecomer slightly off the
+/// node point when others are already working it.
+pub const GATHER_RANGE: I16F16 = I16F16::from_bits(163_840); // 2.5
+/// A villager this close to the Town Center deposits instantly: 3.0 units.
+pub const DEPOSIT_RANGE: I16F16 = I16F16::from_bits(196_608); // 3.0
+
+/// Static node layout: (kind, cell_x, cell_y), ids assigned in table
+/// order. All cells are free (not walls) and every node is reachable from
+/// the Town Center cell — pinned by a test in `tests/economy.rs`.
+///
+/// Two tree clusters west/east, berries close to the Town Center (the
+/// classic start), gold to the north-east, stone to the south-west.
+pub const NODE_SPECS: &[(NodeKind, u32, u32)] = &[
+    // Trees — west forest.
+    (NodeKind::Tree, 8, 19),
+    (NodeKind::Tree, 9, 19),
+    (NodeKind::Tree, 8, 20),
+    (NodeKind::Tree, 9, 20),
+    (NodeKind::Tree, 10, 20),
+    (NodeKind::Tree, 8, 21),
+    (NodeKind::Tree, 9, 21),
+    (NodeKind::Tree, 10, 21),
+    // Trees — east copse.
+    (NodeKind::Tree, 40, 40),
+    (NodeKind::Tree, 41, 40),
+    (NodeKind::Tree, 40, 41),
+    // Berry bushes — just west of the Town Center.
+    (NodeKind::BerryBush, 21, 24),
+    (NodeKind::BerryBush, 22, 24),
+    (NodeKind::BerryBush, 21, 25),
+    (NodeKind::BerryBush, 22, 25),
+    // Gold mines — east, through the wall gap.
+    (NodeKind::GoldMine, 35, 15),
+    (NodeKind::GoldMine, 36, 15),
+    (NodeKind::GoldMine, 35, 16),
+    // Stone mines — south-west, around the horizontal wall.
+    (NodeKind::StoneMine, 15, 40),
+    (NodeKind::StoneMine, 16, 40),
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn starting_stockpile_is_standard() {
+        let s = Stockpile::starting();
+        assert_eq!(s.amount(ResourceKind::Food), I16F16::from_num(200));
+        assert_eq!(s.amount(ResourceKind::Wood), I16F16::from_num(200));
+        assert_eq!(s.amount(ResourceKind::Gold), I16F16::from_num(100));
+        assert_eq!(s.amount(ResourceKind::Stone), I16F16::from_num(200));
+    }
+
+    #[test]
+    fn spend_requires_funds_and_is_atomic() {
+        let mut s = Stockpile::starting();
+        assert!(s.spend(ResourceKind::Food, I16F16::from_num(50)));
+        assert_eq!(s.amount(ResourceKind::Food), I16F16::from_num(150));
+        assert!(!s.spend(ResourceKind::Food, I16F16::from_num(151)));
+        assert_eq!(
+            s.amount(ResourceKind::Food),
+            I16F16::from_num(150),
+            "failed spend must not deduct"
+        );
+    }
+
+    #[test]
+    fn node_kind_numbers() {
+        assert_eq!(NodeKind::Tree.full_amount(), I16F16::from_num(100));
+        assert_eq!(NodeKind::BerryBush.full_amount(), I16F16::from_num(125));
+        assert_eq!(NodeKind::GoldMine.full_amount(), I16F16::from_num(800));
+        assert_eq!(NodeKind::StoneMine.full_amount(), I16F16::from_num(350));
+        assert_eq!(NodeKind::Tree.resource(), ResourceKind::Wood);
+        assert_eq!(NodeKind::BerryBush.resource(), ResourceKind::Food);
+        assert_eq!(NodeKind::GoldMine.resource(), ResourceKind::Gold);
+        assert_eq!(NodeKind::StoneMine.resource(), ResourceKind::Stone);
+        // Rates stay in the documented ballpark (0.30–0.40 per second).
+        for kind in [
+            NodeKind::Tree,
+            NodeKind::BerryBush,
+            NodeKind::GoldMine,
+            NodeKind::StoneMine,
+        ] {
+            let per_sec = kind.gather_rate() * I16F16::from_num(60);
+            assert!(
+                per_sec > I16F16::from_num(0.3) && per_sec < I16F16::from_num(0.4),
+                "{kind:?} rate off target: {per_sec}/s"
+            );
+        }
+    }
+
+    #[test]
+    fn resource_tags_round_trip() {
+        for kind in ResourceKind::ALL {
+            assert_eq!(ResourceKind::from_tag(kind.tag()), Some(kind));
+        }
+        assert_eq!(ResourceKind::from_tag(0), None);
+    }
+
+    #[test]
+    fn node_specs_are_unique_cells() {
+        for (i, a) in NODE_SPECS.iter().enumerate() {
+            for b in NODE_SPECS.iter().skip(i + 1) {
+                assert_ne!(
+                    (a.1, a.2),
+                    (b.1, b.2),
+                    "two nodes share a cell"
+                );
+            }
+        }
+    }
+}

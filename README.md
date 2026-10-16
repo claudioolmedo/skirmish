@@ -40,7 +40,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full technical contract.
 |-----------|-------|
 | **M0** ✅ | Repo scaffolding; `sim` crate with fixed-point math, seeded RNG, tick loop; determinism harness (per-tick state hash, headless replay, CI) |
 | **M1** ✅ | Unit movement: A\* on a coarse grid + steering (separation + arrival); `Move` commands; debug preview page |
-| M2 | Economy loop: workers, resource nodes, gather/carry/drop-off, buildings |
+| **M2** ✅ | Economy loop: resources + stockpile, resource nodes, villagers that gather/carry/deposit, Town Center that trains villagers |
 | M3 | Combat: attack-move, targeting, HP/death, projectiles; first original empire |
 | M4 | Renderer (Canvas 2D) + input shell + adaptive-quality governor |
 | M5 | Feel tuning + scripted opponent AI; playtest loop |
@@ -60,16 +60,19 @@ cargo run --example replay -- 42 600   # headless: 600 ticks from seed 42
 cargo build --target wasm32-unknown-unknown   # WASM build of the sim
 ```
 
-## Debug preview (M1)
+## Debug preview (M2)
 
-A throwaway top-down view of the simulation — grid, walls, entities,
-active paths, and the live state hash. Explicitly **not** the final game
+A throwaway top-down view of the simulation — grid, walls, resource
+nodes, the Town Center, villagers working the economy loop, the live
+stockpile, and the live state hash. Explicitly **not** the final game
 look (that comes with the isometric camera in M4).
 
 ```sh
 ./web-preview/build.sh        # builds sim → web-preview/pkg/ (wasm-pack)
 cd web-preview && python3 -m http.server 8080
-# open http://localhost:8080/ — click anywhere to order all units there
+# open http://localhost:8080/ — click a resource node to send all
+# villagers to gather it, click open ground to move them there, and
+# use the button to train more villagers (50 food)
 ```
 
 ## License

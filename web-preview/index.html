@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Skirmish — Debug Preview (M1)</title>
+<title>Skirmish — Debug Preview (M2)</title>
 <style>
   body {
     font-family: ui-monospace, monospace;
@@ -25,12 +25,24 @@
     padding: 8px;
     font-size: 13px;
     color: #8fd18f;
+    text-align: center;
   }
+  #train {
+    font-family: inherit;
+    font-size: 13px;
+    background: #2a3b2a;
+    color: #cfe8cf;
+    border: 1px solid #4a6b4a;
+    padding: 6px 14px;
+    margin-bottom: 8px;
+    cursor: pointer;
+  }
+  #train:hover { background: #385038; }
   canvas {
     border: 1px solid #444;
     cursor: crosshair;
     max-width: 96vw;
-    max-height: 76vh;
+    max-height: 72vh;
   }
   .hint {
     font-size: 12px;
@@ -42,10 +54,11 @@
 </style>
 </head>
 <body>
-<div class="label">SKIRMISH · DEBUG PREVIEW · M1 (programmer art, top-down debug view — not the final isometric camera)</div>
+<div class="label">SKIRMISH · DEBUG PREVIEW · M2 (programmer art, top-down debug view — not the final isometric camera)</div>
 <div id="hud">loading…</div>
+<button id="train">Train villager (50 food)</button>
 <canvas id="view" width="720" height="720"></canvas>
-<div class="hint">Click anywhere to order all units to move there. Seed via <code>?seed=N</code>.</div>
+<div class="hint">Click a resource node to send all villagers to gather it. Click open ground to move all villagers there. Seed via <code>?seed=N</code>.</div>
 <script type="module" src="app.js"></script>
 </body>
 </html>
