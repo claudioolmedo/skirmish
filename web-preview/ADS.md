@@ -1,6 +1,6 @@
 # Skirmish — advertising
 
-Skirmish is free. A small amount of advertising pays for the servers and
+Skirmish is open. A small amount of advertising pays for the servers and
 keeps development going. This document explains exactly how it works, where
 the ads are, and the rules they follow — the same transparency visitors get
 on the page itself.
@@ -9,7 +9,7 @@ on the page itself.
 
 1. **Maximum two ad slots on the page.** There will never be more.
 2. **Always labeled.** Every slot sits under a visible "Advertisement"
-   caption, with a note that ads keep Skirmish free.
+   caption, with a note that ads pay for the servers and keep Skirmish open.
 3. **Never over the game.** No slot covers, overlays or floats above the
    canvas; there are no interstitials, pop-ups, pop-unders, autoplay
    video ads, or ads that block play in any way.
