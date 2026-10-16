@@ -6,10 +6,11 @@
 // style: flat 2D sprites on a fixed 2:1 dimetric projection, painted
 // back-to-front. No real 3D, no rotation — the same technique as the
 // classic engine. On top of the M2 economy view it adds the M2.5 shell:
-// start overlay + pause menu, villager selection, a build menu with a
-// placement ghost (client mirror of the sim's placement rules — the
-// sim validates every order itself), construction rendering, and the
-// population HUD.
+// start overlay + pause menu, AoE2-style unit selection (individual,
+// box, shift, double-click — orders go only to the selection), a build
+// menu with a placement ghost (client mirror of the sim's placement
+// rules — the sim validates every order itself), construction
+// rendering, and the population HUD.
 //
 // Asset URLs are resolved relative to THIS module (import.meta.url),
 // so the page works from /play/, from the site root, and from the
@@ -52,6 +53,7 @@ const COLORS = [
 const NODE_MAX = [100, 125, 800, 350, 175];
 const CARRY_COLORS = ['#d9a05b', '#ff5da2', '#ffd700', '#c3c8cd', '#ff5da2'];
 const KIND_TC = 1; // entity kind tag: 0 villager, 1 town center
+const KIND_NAME = { 0: 'Villager', 1: 'Town Center' }; // HUD labels; grows with M3 kinds
 
 // Building kind tags (must match the sim's BuildingKind::tag):
 // 0 house, 1 farm. Costs mirror the sim (MECHANICS-STUDY §5).
@@ -61,7 +63,8 @@ const BUILD_NAME = ['House', 'Farm'];
 // --- Game shell state (client-only; never sim input) -------------------
 let playing = false; // Play pressed: the sim ticks
 let paused = false; // pause menu open: the sim holds
-let selected = null; // selected villager id, or null (orders go to all)
+let selection = new Set(); // selected unit ids — orders go ONLY to these (AoE2-style)
+let lDrag = null; // left-button drag state, canvas px: { x0, y0, x1, y1, moved }
 let placement = null; // { kind } while placing a building
 let mouseWorld = null; // last cursor position, world coords
 let flashText = '';
@@ -251,6 +254,16 @@ function villagerIds() {
   return ids;
 }
 
+// The current selection as an id list, restricted to selectable units
+// (buildings are never in the selection — the filter keeps it true even
+// if a future caller slips one in). Kind-agnostic on purpose: when M3
+// adds military kinds, they flow through here unchanged.
+function selectedUnits() {
+  if (!sim) return [];
+  const kinds = sim.entity_kinds();
+  return [...selection].filter((i) => kinds[i] !== KIND_TC);
+}
+
 function worldToCell(wx, wy) {
   const cx = Math.max(0, Math.min(GW - 1, Math.floor((wx + HALF) / CS)));
   const cy = Math.max(0, Math.min(GH - 1, Math.floor((wy + HALF) / CS)));
@@ -381,7 +394,7 @@ function resetSim() {
   lastNodeKind.clear();
   carryKind.clear();
   atNodeNow.clear();
-  selected = null;
+  selection = new Set();
   placement = null;
 
   // Camera: centered on the Town Center.
@@ -477,6 +490,14 @@ async function main() {
     return s2w(sx, sy, camS, camOx, camOy);
   }
 
+  function eventScreen(ev) {
+    const r = canvas.getBoundingClientRect();
+    return [
+      (ev.clientX - r.left) * (canvas.width / r.width),
+      (ev.clientY - r.top) * (canvas.height / r.height),
+    ];
+  }
+
   function villagerAt(wx, wy) {
     const kinds = sim.entity_kinds();
     const pos = sim.positions();
@@ -508,10 +529,14 @@ async function main() {
   }
 
   // Context order at a point: gather the node there, else move. Goes
-  // to the selected villager, or to all villagers when none is selected
-  // (the M2 behavior, kept as the no-selection default).
+  // ONLY to the current selection (AoE2-style) — with an empty
+  // selection the order does nothing but flash the hint.
   function orderAt(wx, wy) {
-    const targets = selected != null ? [selected] : villagerIds();
+    const targets = selectedUnits();
+    if (targets.length === 0) {
+      flash('Select a villager first.');
+      return;
+    }
     const n = nodeAt(wx, wy);
     for (const id of targets) {
       if (n) sim.push_gather(id, n.id);
@@ -520,14 +545,32 @@ async function main() {
   }
 
   function attemptPlace(wx, wy) {
+    // The builder is the selected villager NEAREST the placement
+    // point: with a group selected, the closest pair of hands does
+    // the work (the sim's Build command names a single builder).
+    const pos = sim.positions();
+    let builder = null;
+    let bestD2 = Infinity;
+    for (const id of selectedUnits()) {
+      const d2 = (pos[id * 2] - wx) ** 2 + (pos[id * 2 + 1] - wy) ** 2;
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        builder = id;
+      }
+    }
+    if (builder == null) {
+      placement = null;
+      flash('Select a villager to build.');
+      return;
+    }
     const [cx, cy] = worldToCell(wx, wy);
     // Send a point strictly inside the anchor cell; the sim anchors
     // the footprint at the cell containing the point.
     const px = -HALF + cx * CS + 0.01;
     const py = -HALF + cy * CS + 0.01;
     const ok = placement.kind === 0
-      ? sim.push_build_house(selected, px, py)
-      : sim.push_build_farm(selected, px, py);
+      ? sim.push_build_house(builder, px, py)
+      : sim.push_build_farm(builder, px, py);
     if (ok) {
       placement = null;
     } else {
@@ -539,18 +582,84 @@ async function main() {
     mouseWorld = eventWorld(ev);
   });
 
-  canvas.addEventListener('click', (ev) => {
+  // ---- AoE2-style selection (left button) ----
+  // Click a unit: select only it. Click empty ground: deselect.
+  // Drag: selection box — every own unit whose ground point falls
+  // inside joins the selection. Shift+click toggles one unit;
+  // shift+drag ADDS the boxed units. Double-click a unit: select all
+  // units of the same kind visible on screen. Left-click NEVER issues
+  // an order — orders are the right button's job (or the build menu).
+  canvas.addEventListener('mousedown', (ev) => {
+    if (ev.button !== 0) return;
+    const [sx, sy] = eventScreen(ev);
+    lDrag = { x0: sx, y0: sy, x1: sx, y1: sy, moved: false };
+  });
+  window.addEventListener('mousemove', (ev) => {
+    if (!lDrag) return;
+    const [sx, sy] = eventScreen(ev);
+    lDrag.x1 = sx;
+    lDrag.y1 = sy;
+    if (Math.abs(sx - lDrag.x0) + Math.abs(sy - lDrag.y0) > 6) lDrag.moved = true;
+  });
+  window.addEventListener('mouseup', (ev) => {
+    if (ev.button !== 0 || !lDrag) return;
+    const d = lDrag;
+    lDrag = null;
     const [wx, wy] = eventWorld(ev);
     if (placement) {
-      attemptPlace(wx, wy);
+      if (!d.moved) attemptPlace(wx, wy); // a placement click, not a drag
       return;
     }
+    if (d.moved) {
+      // Selection box (screen space): ground point inside the rect.
+      const x0 = Math.min(d.x0, d.x1);
+      const x1 = Math.max(d.x0, d.x1);
+      const y0 = Math.min(d.y0, d.y1);
+      const y1 = Math.max(d.y0, d.y1);
+      const pos = sim.positions();
+      const boxed = [];
+      for (const id of villagerIds()) {
+        const [sx, sy] = worldToScreen(pos[id * 2], pos[id * 2 + 1]);
+        if (sx >= x0 && sx <= x1 && sy >= y0 && sy <= y1) boxed.push(id);
+      }
+      if (ev.shiftKey) {
+        for (const id of boxed) selection.add(id);
+      } else {
+        selection = new Set(boxed);
+      }
+      return;
+    }
+    // Plain click.
     const v = villagerAt(wx, wy);
     if (v != null) {
-      selected = v;
-      return;
+      if (ev.shiftKey) {
+        if (selection.has(v)) selection.delete(v);
+        else selection.add(v);
+      } else {
+        selection = new Set([v]);
+      }
+    } else if (!ev.shiftKey) {
+      selection = new Set(); // clicked empty ground: deselect
     }
-    orderAt(wx, wy);
+  });
+  canvas.addEventListener('dblclick', (ev) => {
+    const [wx, wy] = eventWorld(ev);
+    const v = villagerAt(wx, wy);
+    if (v == null) return;
+    const kinds = sim.entity_kinds();
+    const kind = kinds[v];
+    const pos = sim.positions();
+    const same = [];
+    for (const id of villagerIds()) {
+      if (kinds[id] !== kind) continue;
+      const [sx, sy] = worldToScreen(pos[id * 2], pos[id * 2 + 1]);
+      if (sx >= 0 && sx <= canvas.width && sy >= 0 && sy <= canvas.height) same.push(id);
+    }
+    if (ev.shiftKey) {
+      for (const id of same) selection.add(id);
+    } else {
+      selection = new Set(same);
+    }
   });
 
   // Zoom toward the cursor with the mouse wheel.
@@ -888,7 +997,7 @@ function drawVillager(i, wx, wy) {
   const [sx, sy] = worldToScreen(wx, wy);
   const u = camS;
   shadow(sx, sy, 0.95 * u);
-  if (i === selected) {
+  if (selection.has(i)) {
     ctx.strokeStyle = '#ffcf4d';
     ctx.lineWidth = Math.max(1.5, u * 0.22);
     ctx.beginPath();
@@ -951,11 +1060,18 @@ function updateHud() {
     'Population is at capacity: queued villagers cannot finish training until a House stands.',
   ][reason] || '';
 
-  // Build menu: visible while a villager is selected.
-  const show = selected != null;
+  // Build menu + selection indicator: visible while at least one
+  // villager is selected. The indicator shows count · kind; the build
+  // menu acts on the selection (builder = nearest selected villager,
+  // see attemptPlace).
+  const selUnits = selectedUnits();
+  const show = selUnits.length > 0;
   buildMenu.style.display = show ? 'flex' : 'none';
   if (show) {
-    selInfo.textContent = `Villager ${selected} — click a node to gather, ground to move.`;
+    const kindName = KIND_NAME[sim.entity_kinds()[selUnits[0]]] || 'Unit';
+    selInfo.textContent = selUnits.length === 1
+      ? `Villager ${selUnits[0]} — right-click a node to gather, ground to move.`
+      : `${selUnits.length} · ${kindName} — right-click to order the group.`;
     const w = sim.wood();
     buildHouseBtn.disabled = w < BUILD_COST[0];
     buildHouseBtn.title = w < BUILD_COST[0]
@@ -1101,6 +1217,19 @@ function draw() {
     for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
     ctx.closePath();
     ctx.stroke();
+  }
+
+  // Selection box while left-dragging: translucent gold rect.
+  if (lDrag && lDrag.moved) {
+    const x = Math.min(lDrag.x0, lDrag.x1);
+    const y = Math.min(lDrag.y0, lDrag.y1);
+    const w = Math.abs(lDrag.x1 - lDrag.x0);
+    const h = Math.abs(lDrag.y1 - lDrag.y0);
+    ctx.fillStyle = 'rgba(255, 207, 77, 0.12)';
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = 'rgba(255, 207, 77, 0.85)';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(x, y, w, h);
   }
 
   updateHud();
