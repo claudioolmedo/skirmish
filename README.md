@@ -62,10 +62,11 @@ cargo build --target wasm32-unknown-unknown   # WASM build of the sim
 
 ## Debug preview (M2)
 
-A throwaway top-down view of the simulation — grid, walls, resource
-nodes, the Town Center, villagers working the economy loop, the live
-stockpile, and the live state hash. Explicitly **not** the final game
-look (that comes with the isometric camera in M4).
+A throwaway view of the simulation in 2D isometric (AoE-style): flat
+programmer-art sprites on a fixed-angle isometric projection — no real
+3D — showing the grid, walls, resource nodes, the Town Center,
+villagers working the economy loop, the live stockpile, and the live
+state hash. Programmer art only; the production renderer is M4.
 
 ```sh
 ./web-preview/build.sh        # builds sim → web-preview/pkg/ (wasm-pack)
