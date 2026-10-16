@@ -28,7 +28,7 @@
       <span class="wordmark">SKIRMISH</span>
     </a>
     <nav class="site-nav">
-      <a href="#play">Play</a>
+      <a class="btn btn-gold nav-play" href="play/">&#9654; Play</a>
       <a href="#about">Why Skirmish</a>
       <a href="#roadmap">Roadmap</a>
       <a class="btn btn-github" href="https://github.com/claudioolmedo/skirmish">View on GitHub</a>
@@ -50,13 +50,13 @@
     <img class="emblem" src="art/emblem.webp" alt="Skirmish emblem — a wooden shield with crossed swords and a small tower">
     <h1>SKIRMISH</h1>
     <p class="tagline">A little empire, right in your browser.</p>
-    <p class="pitch">A real-time strategy game inspired by the classics — free and open,
-    built from scratch to run on any computer. No install, no account: open the page and play.
-    Send-a-link multiplayer is on the roadmap.</p>
     <div class="cta">
-      <a class="btn btn-gold" href="play/">Play the test build</a>
+      <a class="btn btn-gold btn-hero" href="play/">&#9654; Play free &mdash; test build</a>
       <a class="btn btn-ghost" href="https://github.com/claudioolmedo/skirmish">View on GitHub</a>
     </div>
+    <p class="pitch">A real-time strategy game inspired by the classics &mdash; built from
+    scratch, in the open. Free forever: no install, no account, and it runs on any
+    computer, even an old one. Send-a-link multiplayer is coming.</p>
   </div>
 </section>
 
@@ -70,25 +70,25 @@
 <main>
   <section class="section" id="play">
     <h2>Play the test build</h2>
-    <p class="lede">This is the live <strong>M2.5 test build</strong>: a working economy plus
-    construction. Send villagers to gather wood, berries, gold and stone, train more at the
-    Town Center — and now build: Houses raise your population room, Farms grow food your
-    villagers harvest. The villager is already our own original art; the environment still
-    uses clearly-marked placeholder test art while our own sprites replace it piece by
-    piece — and the state hash in the game's HUD proves every run of the simulation is
-    deterministic. The game opens fullscreen on its own page.</p>
+    <p class="lede">This is the live <strong>M2.5 test build</strong> &mdash; a working economy
+    plus construction. Send villagers to gather wood, berries, gold and stone, train more at
+    the Town Center, then build: Houses raise your population room, Farms grow food your
+    villagers harvest. The villager is already our own original art; the landscape still uses
+    clearly-marked placeholder test art while our own sprites replace it, piece by piece.
+    The game opens fullscreen, on its own page.</p>
 
     <div class="play-layout">
       <div class="game-frame">
         <span class="build-badge">Test build · M2.5 — economy + construction</span>
         <img class="showcase-art" src="art/hero-key-art.jpg" alt="Skirmish — a little village of workers, trees and a town center, in original art">
         <p class="showcase-cta">
-          <a class="btn btn-gold" href="play/">▶ Play Skirmish — free</a>
+          <a class="btn btn-gold btn-hero" href="play/">&#9654; Play Skirmish &mdash; free</a>
         </p>
-        <div class="hint">How to play: click a villager to select it, click a tree, bush, gold or stone to
-          gather, click the ground to move. Train grows the village — but training stalls at the
-          population cap, so build Houses (+5 room, 25 wood) and Farms (175 food, 60 wood) from the
-          build menu. Pan with WASD / arrow keys or right-mouse drag; zoom with the mouse wheel; Esc pauses.</div>
+        <div class="hint">How to play: click a villager to select it, then click a tree, bush,
+          gold or stone to gather &mdash; or the ground to move. Train villagers at the Town Center,
+          but training stalls at the population cap: build Houses (+5 room, 25 wood) and Farms
+          (175 food, 60 wood) from the build menu. Pan with WASD / arrow keys or right-mouse
+          drag; zoom with the mouse wheel; Esc pauses.</div>
       </div>
 
       <aside class="play-side">
@@ -104,30 +104,29 @@
 
   <section class="section" id="about">
     <h2>Why Skirmish</h2>
-    <p class="lede">Most strategy games demand new hardware, a big download and a store account.
-    Skirmish goes the other way: a complete little RTS that lives in a browser tab,
-    engineered so anyone can play — and anyone can read how it works.</p>
+    <p class="lede">Big strategy games want new hardware, a huge download and a store account.
+    Skirmish is the opposite: a complete little RTS that lives in a browser tab &mdash; for
+    anyone, on any machine, free.</p>
     <div class="cards">
       <div class="card">
-        <h3>Deterministic simulation</h3>
-        <p>The whole game is a pure Rust simulation with fixed-point math and a seeded RNG.
-        Same seed, same commands, same result — on every machine, every time. That is what
-        makes replays, spectating and fair multiplayer possible.</p>
+        <h3>Same game, every machine</h3>
+        <p>The simulation is pure Rust with fixed-point math: same seed, same commands, same
+        result &mdash; on every computer. That is what makes fair multiplayer and replays possible.</p>
       </div>
       <div class="card">
-        <h3>Adaptive quality</h3>
-        <p>One build for every computer. The simulation never changes; only the visuals scale
-        to what your machine can handle — so a modest laptop and a gaming rig compete evenly.</p>
+        <h3>Runs on anything</h3>
+        <p>One build for every computer. Only the visuals scale to your machine &mdash; the
+        simulation never does &mdash; so an old laptop and a gaming rig play on even terms.</p>
       </div>
       <div class="card">
-        <h3>Clean-room &amp; original</h3>
+        <h3>Original &amp; clean-room</h3>
         <p>Every sprite and every line of code is made for Skirmish, from scratch. Inspired by
-        the classics, built on public knowledge — never on anyone else's assets.</p>
+        the classics &mdash; never copied from them.</p>
       </div>
       <div class="card">
         <h3>Built in the open</h3>
-        <p>The source lives on GitHub and the game is developed in public, milestone by
-        milestone. Play the test build, read the code, follow along — or fork it.</p>
+        <p>The source is on GitHub and the game grows in public, milestone by milestone. Play
+        it, read the code, follow along &mdash; or fork it.</p>
       </div>
     </div>
   </section>
@@ -135,7 +134,7 @@
   <section class="section" id="roadmap">
     <h2>Roadmap</h2>
     <p class="lede">Small milestones, shipped one at a time. The economy and construction are
-    playable today; combat is next.</p>
+    playable today &mdash; combat is next.</p>
     <div class="roadmap">
       <div class="step done"><span class="m">M0</span>Deterministic sim core<span class="state"> — done</span></div>
       <div class="step done"><span class="m">M1</span>Movement &amp; pathfinding<span class="state"> — done</span></div>
@@ -149,7 +148,7 @@
 
 <footer class="site-footer">
   <div class="inner">
-    <span><strong>Skirmish</strong> — free and open source, built in public.</span>
+    <span><strong>Skirmish</strong> — free forever, open source, built in public.</span>
     <a href="https://github.com/claudioolmedo/skirmish">github.com/claudioolmedo/skirmish</a>
     <span class="fineprint">Skirmish is an original clean-room project, developed from scratch.
     It is not affiliated with, or endorsed by, Microsoft or Age of Empires.
