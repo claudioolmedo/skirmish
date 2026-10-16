@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<!-- ============================================================================
+  DRAFT — proposed play-page structure for the AoE2-style UI integration.
+  NOT wired to the game: the app.js <script> tag is intentionally omitted
+  (app.js still expects the legacy #hud / #build-menu ids). The element
+  ids below are the ones the integration step will wire up — see
+  INTEGRATION-PLAN.md in the goal files folder. Static example values
+  (resources, selection) are the M2 starting state, for layout QA only.
+  Icons are original geometric SVG symbols drawn for Skirmish.
+============================================================================= -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Skirmish — Play the test build</title>
+<meta name="description" content="Play the Skirmish test build in your browser: an open, clean-room RTS inspired by the classics. Gather, build houses and farms, grow your village.">
+<link rel="icon" type="image/webp" href="../art/emblem.webp">
+<link rel="stylesheet" href="../site.css">
+<link rel="stylesheet" href="play.css">
+<link rel="stylesheet" href="ui.css">
+</head>
+<body>
+
+<!-- Original icon set (ours). Simple geometric silhouettes, drawn for
+     Skirmish; referenced as <svg class="ui-icon"><use href="#i-...">. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-food" viewBox="0 0 24 24"><!-- wheat -->
+      <ellipse cx="12" cy="3.8" rx="1.7" ry="3.2"/>
+      <ellipse cx="8.4" cy="6" rx="1.6" ry="2.9" transform="rotate(-28 8.4 6)"/>
+      <ellipse cx="15.6" cy="6" rx="1.6" ry="2.9" transform="rotate(28 15.6 6)"/>
+      <ellipse cx="8.8" cy="11.4" rx="1.5" ry="2.6" transform="rotate(-30 8.8 11.4)"/>
+      <ellipse cx="15.2" cy="11.4" rx="1.5" ry="2.6" transform="rotate(30 15.2 11.4)"/>
+      <rect x="11.3" y="6" width="1.4" height="15" rx="0.7"/>
+    </symbol>
+    <symbol id="i-wood" viewBox="0 0 24 24"><!-- log -->
+      <rect x="1.5" y="9" width="17" height="7" rx="3.5"/>
+      <circle cx="18.5" cy="12.5" r="3.6" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <circle cx="18.5" cy="12.5" r="1.1"/>
+    </symbol>
+    <symbol id="i-gold" viewBox="0 0 24 24"><!-- nugget -->
+      <polygon points="6,18 3.5,10.5 7.5,4.5 14,3.5 19.5,7.5 20.5,14.5 15.5,19.5 9,19.5"/>
+      <circle cx="10.5" cy="9" r="1.7" fill="#0b0f14" opacity="0.35"/>
+    </symbol>
+    <symbol id="i-stone" viewBox="0 0 24 24"><!-- rock -->
+      <polygon points="3.5,18.5 5,10 10,5.5 16,6.5 20.5,11.5 19,18.5"/>
+      <polyline points="10,5.5 12,12 19,18.5" fill="none" stroke="#0b0f14" stroke-width="1.3" opacity="0.35"/>
+    </symbol>
+    <symbol id="i-pop" viewBox="0 0 24 24"><!-- two villagers -->
+      <circle cx="9" cy="7.6" r="3.3"/>
+      <path d="M3.2 19.5c.7-3.6 3-5.4 5.8-5.4s5.1 1.8 5.8 5.4z"/>
+      <circle cx="16.8" cy="8.8" r="2.6"/>
+      <path d="M14.6 14.1c2.9-.5 5.6 1.3 6.3 4.9l.2.5h-5.4c-.2-2-.6-3.8-1.1-5.4z"/>
+    </symbol>
+    <symbol id="i-house" viewBox="0 0 24 24"><!-- house -->
+      <polygon points="2.5,11.8 12,3.8 21.5,11.8 19.9,11.8 12,5.4 4.1,11.8"/>
+      <rect x="5.8" y="11.4" width="12.4" height="8.8"/>
+      <rect x="10.5" y="14.6" width="3" height="5.6" fill="#0b0f14" opacity="0.45"/>
+    </symbol>
+    <symbol id="i-farm" viewBox="0 0 24 24"><!-- field rows + sprout -->
+      <g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+        <path d="M3 20.5 9.5 12.5"/><path d="M8.5 20.5 11.5 12.5"/>
+        <path d="M13.5 20.5 12.5 12.5"/><path d="M18.5 20.5 14.5 12.5"/>
+        <path d="M12 12.5V7"/>
+      </g>
+      <ellipse cx="9.7" cy="5.9" rx="1.6" ry="2.5" transform="rotate(-32 9.7 5.9)"/>
+      <ellipse cx="14.3" cy="5.9" rx="1.6" ry="2.5" transform="rotate(32 14.3 5.9)"/>
+    </symbol>
+    <symbol id="i-villager" viewBox="0 0 24 24"><!-- villager bust -->
+      <circle cx="12" cy="6.4" r="3.2"/>
+      <path d="M5.8 20.2c.8-4.4 3.2-6.7 6.2-6.7s5.4 2.3 6.2 6.7z"/>
+    </symbol>
+    <symbol id="i-train" viewBox="0 0 24 24"><!-- villager + plus -->
+      <circle cx="9.3" cy="6.8" r="2.9"/>
+      <path d="M4 19.4c.7-3.4 2.7-5.1 5.3-5.1s4.6 1.7 5.3 5.1z"/>
+      <rect x="16.6" y="12.4" width="2.3" height="8.4" rx="1.1"/>
+      <rect x="13.5" y="15.5" width="8.4" height="2.3" rx="1.1"/>
+    </symbol>
+    <symbol id="i-tc" viewBox="0 0 24 24"><!-- town center: hall + tower -->
+      <polygon points="12.3,1.6 15.8,3 12.3,4.6"/>
+      <rect x="12" y="1.6" width="0.9" height="3.4"/>
+      <polygon points="9,5.4 12.5,2.6 16,5.4"/>
+      <rect x="10" y="5.2" width="4.6" height="14.8"/>
+      <polygon points="2.8,12.4 8.6,8.6 8.6,12.4"/>
+      <polygon points="21.2,12.4 15.4,8.6 15.4,12.4"/>
+      <rect x="3.8" y="12.2" width="16.4" height="7.8"/>
+      <rect x="10.9" y="15" width="2.7" height="5" fill="#0b0f14" opacity="0.45"/>
+    </symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><!-- menu -->
+      <rect x="3" y="3" width="18" height="18" rx="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/>
+      <rect x="7" y="7.6" width="10" height="1.9" rx="0.95"/>
+      <rect x="7" y="11" width="10" height="1.9" rx="0.95"/>
+      <rect x="7" y="14.5" width="10" height="1.9" rx="0.95"/>
+    </symbol>
+  </defs>
+</svg>
+
+<canvas id="view"></canvas>
+
+<a class="back-link" href="../">← Skirmish</a>
+
+<!-- TOP: resource bar -->
+<header class="ui-topbar">
+  <div class="ui-res-group" role="status" aria-label="Resources">
+    <span class="res res-food"><svg class="ui-icon"><use href="#i-food"/></svg><span class="res-val" id="res-food">200</span></span>
+    <span class="res res-wood"><svg class="ui-icon"><use href="#i-wood"/></svg><span class="res-val" id="res-wood">200</span></span>
+    <span class="res res-gold"><svg class="ui-icon"><use href="#i-gold"/></svg><span class="res-val" id="res-gold">100</span></span>
+    <span class="res res-stone"><svg class="ui-icon"><use href="#i-stone"/></svg><span class="res-val" id="res-stone">200</span></span>
+    <span class="res res-pop"><svg class="ui-icon"><use href="#i-pop"/></svg><span class="res-val" id="res-pop">3 / 5</span></span>
+  </div>
+  <div class="ui-topbar-spacer"></div>
+  <span class="ui-clock" id="game-clock">00:00</span>
+  <button id="pause-btn" class="btn btn-ghost btn-sm" type="button" title="Menu (Esc)">
+    <svg class="ui-icon" style="width:15px;height:15px"><use href="#i-menu"/></svg> Menu
+  </button>
+</header>
+
+<!-- BOTTOM: command panel | selection panel | minimap -->
+<footer class="ui-bottombar">
+
+  <!-- bottom-left: contextual commands. app.js rebuilds #cmd-grid per
+       selection context: villager(s) -> build buttons; Town Center ->
+       train button; nothing -> the hint line. The three buttons below
+       are ALL contexts at once, for layout QA only. -->
+  <section class="ui-cmd-panel" aria-label="Commands">
+    <p class="ui-panel-title">Commands</p>
+    <div class="cmd-grid" id="cmd-grid">
+      <button id="build-house" class="cmd-btn" type="button" title="House — 25 wood, +5 population room">
+        <svg class="cmd-icon"><use href="#i-house"/></svg>
+        <span class="cmd-label">House</span>
+        <span class="cmd-cost"><svg class="ui-icon"><use href="#i-wood"/></svg>25</span>
+      </button>
+      <button id="build-farm" class="cmd-btn" type="button" title="Farm — 60 wood, 175 food">
+        <svg class="cmd-icon"><use href="#i-farm"/></svg>
+        <span class="cmd-label">Farm</span>
+        <span class="cmd-cost"><svg class="ui-icon"><use href="#i-wood"/></svg>60</span>
+      </button>
+      <button id="train" class="cmd-btn" type="button" title="Train a villager at the Town Center (50 food)">
+        <svg class="cmd-icon"><use href="#i-train"/></svg>
+        <span class="cmd-label">Villager</span>
+        <span class="cmd-cost"><svg class="ui-icon"><use href="#i-food"/></svg>50</span>
+        <span class="cmd-badge" id="train-badge" style="display:none"></span>
+      </button>
+    </div>
+  </section>
+
+  <!-- bottom-center: selection info -->
+  <section class="ui-sel-panel" aria-label="Selection">
+    <div class="sel-portrait" id="sel-portrait">
+      <svg class="ui-icon"><use href="#i-villager"/></svg>
+    </div>
+    <div class="sel-main">
+      <p class="sel-name" id="sel-name">Villager</p>
+      <p class="sel-line" id="sel-info">Right-click a node to gather, ground to move. Build from the Commands panel.</p>
+      <div class="sel-grid" id="sel-grid"><!-- group selection cells (app.js) --></div>
+    </div>
+  </section>
+
+  <!-- bottom-right: minimap (rendered by minimap.js) -->
+  <section class="ui-minimap-wrap" aria-label="Minimap">
+    <canvas id="minimap" width="220" height="124"></canvas>
+  </section>
+</footer>
+
+<div id="toast" class="toast" style="display:none"></div>
+
+<div id="start-overlay" class="overlay">
+  <div class="overlay-card">
+    <h1 class="game-title">SKIRMISH</h1>
+    <p class="overlay-sub">An open browser RTS, built from scratch. Grow the little village: gather, build, train.</p>
+    <button id="play-btn" class="btn btn-gold btn-big" type="button">▶ Play</button>
+    <div class="howto">
+      <h2>How to play</h2>
+      <ul>
+        <li><strong>Click a villager</strong> to select it; <strong>drag</strong> to select a group; <strong>Shift+click</strong> adds or removes one; <strong>double-click</strong> selects every villager on screen. Click empty ground to deselect.</li>
+        <li><strong>Right-click a tree, bush, gold or stone</strong> to gather it; <strong>right-click the ground</strong> to move. Orders go only to the selected villagers.</li>
+        <li><strong>Drag right button / WASD / arrows</strong> to pan, <strong>mouse wheel</strong> to zoom. Click the <strong>minimap</strong> to jump the camera.</li>
+        <li><strong>Commands panel</strong> (bottom-left): with a villager selected, build a <strong>House</strong> (25 wood, +5 population room) or a <strong>Farm</strong> (60 wood, 175 food). Select the <strong>Town Center</strong> to train villagers (50 food) — training stalls at the population cap.</li>
+        <li><strong>Esc</strong> pauses.</li>
+      </ul>
+    </div>
+    <p class="overlay-note">Test build · M2.5 — economy + construction. Placeholder art is being replaced piece by piece with our own.</p>
+  </div>
+</div>
+
+<div id="pause-menu" class="overlay" style="display:none">
+  <div class="overlay-card">
+    <h2 class="game-title-sm">Paused</h2>
+    <div class="pause-actions">
+      <button id="resume-btn" class="btn btn-gold" type="button">Resume</button>
+      <button id="restart-btn" class="btn btn-ghost" type="button">Restart</button>
+    </div>
+    <p class="overlay-note">Restart begins a fresh, identical match (same seed).</p>
+  </div>
+</div>
+
+<!-- Integration adds: <script type="module" src="../app.js"></script> -->
+</body>
+</html>
