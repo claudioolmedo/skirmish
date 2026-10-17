@@ -88,6 +88,9 @@ const playBtn = document.getElementById('play-btn');
 const pauseMenu = document.getElementById('pause-menu');
 const resumeBtn = document.getElementById('resume-btn');
 const restartBtn = document.getElementById('restart-btn');
+const helpBtn = document.getElementById('help-btn');
+const helpOverlay = document.getElementById('help-overlay');
+const helpClose = document.getElementById('help-close');
 // M5 match-end overlay + start-overlay mode radios.
 const endOverlay = document.getElementById('end-overlay');
 const endTitle = document.getElementById('end-title');
@@ -782,7 +785,9 @@ const keys = new Set();
 addEventListener('keydown', (e) => {
   if (e.code.startsWith('Arrow')) e.preventDefault();
   if (e.code === 'Escape') {
-    if (placement) {
+    if (helpOverlay.style.display !== 'none') {
+      helpOverlay.style.display = 'none';
+    } else if (placement) {
       placement = null;
     } else if (playing) {
       setPaused(!paused);
@@ -1021,6 +1026,11 @@ async function main() {
   idleVilBtn.addEventListener('click', () => { if (sim) cycleIdle('villager', false); });
   idleMilBtn.addEventListener('click', () => { if (sim) cycleIdle('military', false); });
   resumeBtn.addEventListener('click', () => setPaused(false));
+  helpBtn.addEventListener('click', () => { helpOverlay.style.display = 'flex'; });
+  helpClose.addEventListener('click', () => { helpOverlay.style.display = 'none'; });
+  helpOverlay.addEventListener('click', (e) => {
+    if (e.target === helpOverlay) helpOverlay.style.display = 'none';
+  });
   restartBtn.addEventListener('click', () => {
     // M5: Restart re-enters the SAME mode the current match was
     // built with (the pause menu has no mode choice of its own).

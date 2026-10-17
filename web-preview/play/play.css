@@ -107,6 +107,12 @@ html, body {
 .howto h2 { margin: 0 0 8px; font-size: 15px; }
 .howto ul { margin: 0; padding-left: 18px; }
 .howto li { margin: 5px 0; font-size: 13.5px; line-height: 1.45; }
+/* Help guide (moved off the start screen into the pause menu at
+   Claudio's direction, 2026-10-17): a narrow, legible column — the
+   list scrolls inside the card instead of widening it. */
+.help-card { max-width: 560px; text-align: left; }
+.help-card .game-title-sm { text-align: center; }
+.help-card .howto { margin: 0 0 14px; max-height: 52vh; overflow-y: auto; }
 .overlay-note { color: #7a6248; font-size: 12.5px; margin: 14px 0 0; }
 /* ghost buttons are light-on-dark elsewhere (top bar Menu); on the
    parchment card they need umber ink to stay readable */
