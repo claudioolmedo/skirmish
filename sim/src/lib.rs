@@ -20,7 +20,16 @@
 //! rally points on the Town Center and production buildings (SEL-13),
 //! gatherer retargeting when a node depletes (ECO-09), and the idle
 //! queries behind the idle keys and indicators (SEL-08/09, INF-03).
+//! M5 scope: a real match — per-player state (stockpiles, population,
+//! building ownership), a mirrored opponent start, and a scripted AI
+//! opponent (`ai` module) that plays through the same command queue
+//! as the human (AI-01/02), at Easy/Normal behavior profiles
+//! (AI-03/04); buildings gain HP and can be attacked and destroyed,
+//! and Conquest decides the match (VIC-01): a player with no
+//! buildings and no units has lost, and the AI resigns when it has
+//! no Town Center and no villagers left (AI-05).
 
+mod ai;
 mod build;
 mod classes;
 mod combat;
@@ -46,7 +55,10 @@ pub use econ::{
     HUNT_CARRY_CAPACITY, RALLY_NODE_SNAP_RADIUS, RETARGET_RADIUS, TRAIN_QUEUE_CAP,
     VILLAGER_FOOD_COST, VILLAGER_TRAIN_TICKS,
 };
-pub use entity::{Entity, EntityKind, MoveOrder, QueuedOrder, Task, OWNER_GAIA, OWNER_PLAYER};
+pub use entity::{
+    is_player_owner, Entity, EntityKind, MoveOrder, QueuedOrder, Task, OWNER_GAIA, OWNER_OPPONENT,
+    OWNER_PLAYER,
+};
 pub use grid::{Grid, CELL_SIZE, GRID_DIM, WORLD_HALF};
 pub use hash::Fnv1a64;
 pub use rng::Pcg32;
@@ -135,7 +147,9 @@ pub const ORDER_QUEUE_CAP: usize = 16;
 ///
 /// M1 adds `Move`; M2 adds `Gather` and `TrainVillager`; M2.5 adds
 /// `Build`; M3 adds `Attack` and `TrainAt`; M4 adds `Queue` and
-/// `SetRally`.
+/// `SetRally`; M5 adds `TrainVillagerAt` (the per-Town-Center form
+/// the AI opponent uses — `TrainVillager` remains the human Town
+/// Center shorthand) and `AttackBuilding`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
     /// Does nothing. Exists so the command pipeline is exercised.
@@ -154,6 +168,10 @@ pub enum Command {
     /// deducted *on enqueue*; rejected (no deduction) when food is
     /// insufficient or the queue is full (15).
     TrainVillager,
+    /// Enqueue a villager at a specific Town Center (M5) — the form
+    /// the AI opponent uses for its own Town Center; identical rules
+    /// to `TrainVillager`, charged to that Town Center's owner.
+    TrainVillagerAt { tc: u32 },
     /// Order a villager to construct a building whose square footprint
     /// is anchored at the cell containing the world point `(x, y)`. The
     /// wood cost is deducted *at placement*; the order is rejected
@@ -173,10 +191,19 @@ pub enum Command {
     /// chases and strikes until the target dies or a new order lands.
     /// Valid attackers: any living player unit with an attack row
     /// (villager, Scout, Militia, Archer). Valid targets: Gaia
-    /// entities, plus the player's own sheep (killing your own
-    /// herdables is an ordinary order — ECO-13). Anything else is
-    /// ignored.
+    /// entities, the player's own sheep (killing your own
+    /// herdables is an ordinary order — ECO-13), and — since M5 —
+    /// any entity of *another* player, its Town Center included.
+    /// Anything else is ignored.
     Attack { entity: u32, target: u32 },
+    /// Order a unit to attack a placed building (M5): chase its
+    /// footprint and strike until it is destroyed or a new order
+    /// lands. Valid attackers: any living player unit with an attack
+    /// row (same as `Attack`). Valid targets: a building owned by
+    /// *another* player (your own buildings are never targets).
+    /// Buildings have HP and armor from the study's building table
+    /// (see `BuildingKind::max_hp`).
+    AttackBuilding { entity: u32, building: u32 },
     /// Enqueue a unit at a production building (M3: the Barracks
     /// trains Militia and Archers). The cost is deducted *on enqueue*;
     /// rejected (no deduction) when the building is missing,
@@ -240,51 +267,164 @@ enum BuildVerdict {
     Reject,
 }
 
+/// What kind of game a `Sim` is (M5). Sandbox is the pre-M5 free
+/// build: one player, no opponent, no win/lose — preserved exactly.
+/// The `Ai*` modes spawn the mirrored opponent start and run the
+/// scripted AI (see the `ai` module); the tag only selects the AI's
+/// *behavior* profile (AI-03: difficulty changes behavior, never
+/// physics — costs, stats and the damage formula are identical).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MatchMode {
+    /// One player, no opponent — the M0–M4 sandbox.
+    Sandbox,
+    /// Scripted opponent, gentler profile (slower decisions, smaller
+    /// economy/army targets, smaller and rarer attack waves).
+    AiEasy,
+    /// Scripted opponent, full profile.
+    AiNormal,
+}
+
+impl MatchMode {
+    /// Stable tag for the state hash and the WASM ABI:
+    /// 0 sandbox, 1 AI Easy, 2 AI Normal.
+    pub fn tag(self) -> u8 {
+        match self {
+            MatchMode::Sandbox => 0,
+            MatchMode::AiEasy => 1,
+            MatchMode::AiNormal => 2,
+        }
+    }
+
+    /// Inverse of `tag`; unknown values map to `None`.
+    pub fn from_tag(tag: u8) -> Option<MatchMode> {
+        match tag {
+            0 => Some(MatchMode::Sandbox),
+            1 => Some(MatchMode::AiEasy),
+            2 => Some(MatchMode::AiNormal),
+            _ => None,
+        }
+    }
+
+    /// Whether this mode has an opponent (and therefore a match to
+    /// win or lose).
+    pub fn is_match(self) -> bool {
+        self != MatchMode::Sandbox
+    }
+}
+
+/// The match outcome, from the human player's seat (M5, VIC-01).
+/// Derived from state on every call — elimination is monotonic (the
+/// dead never come back and a player with no Town Center and no units
+/// can never produce again), so the result can never flip back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MatchState {
+    /// The match is still being played (always, in Sandbox).
+    Ongoing,
+    /// The opponent has been eliminated (or resigned, AI-05).
+    Victory,
+    /// The human player has been eliminated.
+    Defeat,
+}
+
+impl MatchState {
+    /// WASM ABI tag: 0 ongoing, 1 victory, 2 defeat.
+    pub fn tag(self) -> u8 {
+        match self {
+            MatchState::Ongoing => 0,
+            MatchState::Victory => 1,
+            MatchState::Defeat => 2,
+        }
+    }
+}
+
+/// One Town Center's production state (M5): its villager queue,
+/// progress, and rally point. Before M5 these lived as loose fields
+/// on `Sim` for the single Town Center; a match has two Town Centers
+/// (one per player), each with its own — the state a `TrainVillagerAt`
+/// command and the economy phase operate on. Part of the hashed state.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TcState {
+    /// The Town Center entity this state belongs to.
+    tc_id: u32,
+    /// Villagers waiting in this Town Center's training queue.
+    queue: u32,
+    /// Ticks of training progress on the queue's head villager.
+    progress: u64,
+    /// Rally point (SEL-13): where a freshly trained villager walks
+    /// on spawn. `None` = unset — the villager stays at its spawn
+    /// point just outside the Town Center (the reference game's
+    /// default). `rally_node` is the node the point snapped to, if
+    /// any: the new villager gathers it instead of walking.
+    rally: Option<(I16F16, I16F16)>,
+    rally_node: Option<u32>,
+}
+
 /// The headless deterministic simulation.
 pub struct Sim {
     tick: u64,
     rng: Pcg32,
     grid: Grid,
+    /// What kind of game this is (M5): sandbox, or a match against
+    /// the scripted AI at one of the two behavior profiles. Set at
+    /// construction; a match's definition is (seed, mode, commands).
+    mode: MatchMode,
     /// All entities, always sorted by `id`. Never a HashMap.
-    /// Entity 0 is the Town Center; the rest are villagers (M2).
+    /// Entity 0 is the human Town Center; in a match the opponent's
+    /// Town Center and start follow the standard layout.
     entities: Vec<Entity>,
     /// FIFO command queue, drained at the start of every tick.
     commands: Vec<Command>,
-    /// The player's resource stockpile (M2).
-    stockpile: Stockpile,
+    /// The players' resource stockpiles (M2, per-player since M5),
+    /// indexed by player slot (see `player_slot`): slot 0 is the
+    /// human, slot 1 the opponent. In Sandbox slot 1 simply sits at
+    /// its starting values, unused.
+    stockpiles: [Stockpile; 2],
     /// Resource nodes in id order (M2). Depleted nodes stay in the list
     /// with zero amount — inert, but still hashed.
     nodes: Vec<ResourceNode>,
-    /// Villagers waiting in the Town Center training queue (M2).
-    train_queue: u32,
-    /// Ticks of training progress on the villager at the queue's head.
-    train_progress: u64,
-    /// Town Center rally point (M4, SEL-13): where a freshly trained
-    /// villager walks on spawn. `None` = unset — the villager stays at
-    /// its spawn point just outside the Town Center (the reference
-    /// game's default). `tc_rally_node` is the node the point snapped
-    /// to, if any: the new villager gathers it instead of walking.
-    tc_rally: Option<(I16F16, I16F16)>,
-    tc_rally_node: Option<u32>,
+    /// Per-Town-Center production state (M5), in Town Center spawn
+    /// order: the human's first, the opponent's second (matches only).
+    tc_states: Vec<TcState>,
     /// Placed buildings in id order (M2.5): under construction and
     /// complete. A completed Farm's record stays while its node lives
     /// (footprint registry), then retires with it.
     buildings: Vec<Building>,
     /// Next building id. Buildings are occasionally removed (depleted
-    /// farms), so ids cannot be derived from the list length.
+    /// farms, M5 destruction), so ids cannot be derived from the list
+    /// length.
     next_building_id: u32,
     /// Projectiles in flight (M3), in spawn order.
     projectiles: Vec<Projectile>,
+    /// The scripted opponent's bookkeeping (M5) — wave scheduling
+    /// only; every *decision* reads live sim state, so nothing else
+    /// needs storing. Inert in Sandbox.
+    ai: ai::AiState,
 }
 
 impl Sim {
-    /// Create a new simulation from a seed. The starting layout is
-    /// fixed (Town Center, 3 villagers, the starting Scout, the Gaia
-    /// herds, node layout, stockpile), so the seed feeds only the
-    /// in-state RNG — its words are hashed every tick, keeping seeds
-    /// divergent from tick one. Combat is the first system that draws
-    /// from it (archer accuracy, PRJ-03).
+    /// Create a new sandbox simulation from a seed — the pre-M5
+    /// game: one player, no opponent, no win/lose. The starting
+    /// layout is fixed (Town Center, 3 villagers, the starting
+    /// Scout, the Gaia herds, node layout, stockpile), so the seed
+    /// feeds only the in-state RNG — its words are hashed every
+    /// tick, keeping seeds divergent from tick one. Combat is the
+    /// first system that draws from it (archer accuracy, PRJ-03).
     pub fn new(seed: u64) -> Self {
+        Self::with_mode(seed, MatchMode::Sandbox)
+    }
+
+    /// Create a match against the scripted AI opponent (M5):
+    /// `MatchMode::AiEasy` or `MatchMode::AiNormal`. The human start
+    /// is the sandbox layout; the opponent gets a mirrored start
+    /// across the map center (see `spawn_opponent_start`).
+    pub fn new_match(seed: u64, mode: MatchMode) -> Self {
+        debug_assert!(mode.is_match());
+        Self::with_mode(seed, mode)
+    }
+
+    /// The shared constructor: the standard (human) start, plus —
+    /// in a match — the mirrored opponent start.
+    pub fn with_mode(seed: u64, mode: MatchMode) -> Self {
         let rng = Pcg32::new(seed);
         let grid = Grid::new();
         let (tc_x, tc_y) = grid.cell_center(TC_CELL.0, TC_CELL.1);
@@ -332,22 +472,212 @@ impl Sim {
             })
             .collect();
 
-        Sim {
+        let mut sim = Sim {
             tick: 0,
             rng,
             grid,
+            mode,
             entities,
             commands: Vec::new(),
-            stockpile: Stockpile::starting(),
+            stockpiles: [Stockpile::starting(), Stockpile::starting()],
             nodes,
-            train_queue: 0,
-            train_progress: 0,
-            tc_rally: None,
-            tc_rally_node: None,
+            tc_states: vec![TcState {
+                tc_id: TOWN_CENTER_ID,
+                queue: 0,
+                progress: 0,
+                rally: None,
+                rally_node: None,
+            }],
             buildings: Vec::new(),
             next_building_id: 0,
             projectiles: Vec::new(),
+            ai: ai::AiState::default(),
+        };
+        if mode.is_match() {
+            sim.spawn_opponent_start();
         }
+        sim
+    }
+
+    /// The opponent's start (M5): the human start mirrored through
+    /// the map center — cell (cx, cy) → (GRID_DIM−1−cx, GRID_DIM−1−cy),
+    /// world offsets negated. Its own Town Center at the mirrored TC
+    /// cell, 3 villagers and a Scout at the mirrored offsets, its own
+    /// copies of the resource layout at the mirrored node cells, and
+    /// its own sheep at the mirrored herdable cells (boars and deer
+    /// stay shared Gaia, as placed). Mirroring is exact where the
+    /// arena allows it; a mirrored spawn point that lands inside a
+    /// wall (the arena's walls are not rotationally symmetric)
+    /// walks outward ring by ring to the first open cell — the same
+    /// deterministic search wherever it is needed.
+    fn spawn_opponent_start(&mut self) {
+        let mirror_cell = |cx: u32, cy: u32| (GRID_DIM - 1 - cx, GRID_DIM - 1 - cy);
+        let (etc_x, etc_y) = mirror_cell(TC_CELL.0, TC_CELL.1);
+        let (tc_x, tc_y) = self.grid.cell_center(etc_x, etc_y);
+        let mut next_id = self.entities.len() as u32;
+
+        // Town Center (an entity, like the human's).
+        let enemy_tc = next_id;
+        self.entities.push(Entity::spawned(
+            enemy_tc,
+            EntityKind::TownCenter,
+            entity::OWNER_OPPONENT,
+            tc_x,
+            tc_y,
+        ));
+        next_id += 1;
+        self.tc_states.push(TcState {
+            tc_id: enemy_tc,
+            queue: 0,
+            progress: 0,
+            rally: None,
+            rally_node: None,
+        });
+        // Villagers and Scout at the mirrored start offsets.
+        for &(ox, oy) in START_VILLAGER_OFFSETS.iter() {
+            let (px, py) = self.free_spawn_pos(
+                tc_x - I16F16::from_num(ox),
+                tc_y - I16F16::from_num(oy),
+            );
+            self.entities.push(Entity::spawned(
+                next_id,
+                EntityKind::Villager,
+                entity::OWNER_OPPONENT,
+                px,
+                py,
+            ));
+            next_id += 1;
+        }
+        let (px, py) = self.free_spawn_pos(
+            tc_x - I16F16::from_num(START_SCOUT_OFFSET.0),
+            tc_y - I16F16::from_num(START_SCOUT_OFFSET.1),
+        );
+        self.entities.push(Entity::spawned(
+            next_id,
+            EntityKind::ScoutCavalry,
+            entity::OWNER_OPPONENT,
+            px,
+            py,
+        ));
+        next_id += 1;
+        // The opponent's own sheep at the mirrored herdable cells.
+        for &(kind, cx, cy) in ANIMAL_SPECS {
+            if kind != EntityKind::Sheep {
+                continue;
+            }
+            let (mcx, mcy) = mirror_cell(cx, cy);
+            let (pos_x, pos_y) = self.free_cell_pos(mcx, mcy);
+            self.entities.push(Entity::spawned(
+                next_id,
+                EntityKind::Sheep,
+                entity::OWNER_GAIA,
+                pos_x,
+                pos_y,
+            ));
+            next_id += 1;
+        }
+        // The opponent's own resource set: the full node layout at
+        // the mirrored cells, appended after the shared layout.
+        let node_specs: Vec<(NodeKind, u32, u32)> = econ::NODE_SPECS
+            .iter()
+            .map(|&(kind, cx, cy)| {
+                let (mcx, mcy) = mirror_cell(cx, cy);
+                (kind, mcx, mcy)
+            })
+            .collect();
+        for (kind, cx, cy) in node_specs {
+            let (pos_x, pos_y) = self.free_node_pos(cx, cy);
+            let nid = self.nodes.len() as u32;
+            self.nodes
+                .push(ResourceNode::placed(nid, kind, pos_x, pos_y));
+        }
+    }
+
+    /// A spawn position at or near a world point: the point itself
+    /// when its cell is open and holds no Town Center, else the
+    /// center of the first open, Town-Center-free cell found by an
+    /// expanding ring search (fixed order: ring radius, then rows,
+    /// then columns). Deterministic by construction.
+    fn free_spawn_pos(&self, x: I16F16, y: I16F16) -> (I16F16, I16F16) {
+        let (cx, cy) = self.grid.world_to_cell(x, y);
+        if self.spawn_cell_free(cx, cy) {
+            return (x, y);
+        }
+        self.free_cell_pos(cx, cy)
+    }
+
+    /// The center of cell `(cx, cy)` if it can hold a spawn, else the
+    /// center of the nearest cell that can (same ring search as
+    /// `free_spawn_pos`).
+    fn free_cell_pos(&self, cx: u32, cy: u32) -> (I16F16, I16F16) {
+        if self.spawn_cell_free(cx, cy) {
+            return self.grid.cell_center(cx, cy);
+        }
+        for r in 1..GRID_DIM as i32 {
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    if dx.abs() != r && dy.abs() != r {
+                        continue; // ring cells only
+                    }
+                    let (nx, ny) = (cx as i32 + dx, cy as i32 + dy);
+                    if nx < 0 || ny < 0 || nx >= GRID_DIM as i32 || ny >= GRID_DIM as i32 {
+                        continue;
+                    }
+                    let (nx, ny) = (nx as u32, ny as u32);
+                    if self.spawn_cell_free(nx, ny) {
+                        return self.grid.cell_center(nx, ny);
+                    }
+                }
+            }
+        }
+        self.grid.cell_center(cx, cy) // unreachable on an open map
+    }
+
+    /// A cell a fresh unit or animal may appear on: inside the grid,
+    /// not blocked, and not a Town Center's cell (a spawn must never
+    /// land inside a Town Center).
+    fn spawn_cell_free(&self, cx: u32, cy: u32) -> bool {
+        if cx >= GRID_DIM || cy >= GRID_DIM || self.grid.is_blocked(cx, cy) {
+            return false;
+        }
+        !self.entities.iter().any(|e| {
+            e.kind == EntityKind::TownCenter
+                && self.grid.world_to_cell(e.pos_x, e.pos_y) == (cx, cy)
+        })
+    }
+
+    /// A position for a mirrored resource node: its own cell when it
+    /// is open and no live node already sits on it, else the nearest
+    /// cell that qualifies (same ring search).
+    fn free_node_pos(&self, cx: u32, cy: u32) -> (I16F16, I16F16) {
+        let node_cell_free = |x: u32, y: u32| {
+            !self.grid.is_blocked(x, y)
+                && !self
+                    .nodes
+                    .iter()
+                    .any(|n| self.grid.world_to_cell(n.pos_x, n.pos_y) == (x, y))
+        };
+        if node_cell_free(cx, cy) {
+            return self.grid.cell_center(cx, cy);
+        }
+        for r in 1..GRID_DIM as i32 {
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    if dx.abs() != r && dy.abs() != r {
+                        continue;
+                    }
+                    let (nx, ny) = (cx as i32 + dx, cy as i32 + dy);
+                    if nx < 0 || ny < 0 || nx >= GRID_DIM as i32 || ny >= GRID_DIM as i32 {
+                        continue;
+                    }
+                    let (nx, ny) = (nx as u32, ny as u32);
+                    if node_cell_free(nx, ny) {
+                        return self.grid.cell_center(nx, ny);
+                    }
+                }
+            }
+        }
+        self.grid.cell_center(cx, cy) // unreachable on an open map
     }
 
     /// Queue a command to be applied at the start of the next tick.
@@ -360,9 +690,100 @@ impl Sim {
         &self.grid
     }
 
-    /// The player's resource stockpile (read-only).
+    /// The human player's resource stockpile (read-only).
     pub fn stockpile(&self) -> &Stockpile {
-        &self.stockpile
+        &self.stockpiles[0]
+    }
+
+    /// Any player's resource stockpile by owner tag (M5). Gaia has
+    /// no stockpile; asking for it (or an unknown tag) yields the
+    /// human's — callers pass player tags.
+    pub fn stockpile_of(&self, owner: u8) -> &Stockpile {
+        match player_slot(owner) {
+            Some(slot) => &self.stockpiles[slot],
+            None => &self.stockpiles[0],
+        }
+    }
+
+    /// The mutable stockpile of a player (slot-resolved like
+    /// `stockpile_of`).
+    fn stockpile_mut(&mut self, owner: u8) -> &mut Stockpile {
+        let slot = player_slot(owner).unwrap_or(0);
+        &mut self.stockpiles[slot]
+    }
+
+    /// What kind of game this is (M5).
+    pub fn mode(&self) -> MatchMode {
+        self.mode
+    }
+
+    /// A Town Center's production state, by Town Center entity id.
+    fn tc_state(&self, tc_id: u32) -> Option<&TcState> {
+        self.tc_states.iter().find(|s| s.tc_id == tc_id)
+    }
+
+    /// The living Town Center entity owned by `owner`, if any.
+    fn tc_entity_of(&self, owner: u8) -> Option<&Entity> {
+        self.entities.iter().find(|e| {
+            e.kind == EntityKind::TownCenter && e.owner == owner && !e.dead
+        })
+    }
+
+    /// Where `owner`'s villagers deposit: their living Town Center's
+    /// position, or `None` when it is gone (a villager with no Town
+    /// Center has nowhere to haul to — it keeps its carry and idles).
+    fn deposit_pos(&self, owner: u8) -> Option<(I16F16, I16F16)> {
+        self.tc_entity_of(owner).map(|tc| (tc.pos_x, tc.pos_y))
+    }
+
+    /// The match outcome from the human's seat (M5, VIC-01): in a
+    /// match, a player with no Town Center, no placed buildings
+    /// (under construction counts) and no living population units
+    /// has lost; if both fall on the same tick the human loses the
+    /// tie (checked first — the same precedence beats even the
+    /// AI's resignation). The AI also resigns earlier (AI-05):
+    /// no Town Center and no villagers means no path to rebuild.
+    /// Sandbox is always `Ongoing`.
+    pub fn match_state(&self) -> MatchState {
+        if !self.mode.is_match() {
+            return MatchState::Ongoing;
+        }
+        if self.eliminated(entity::OWNER_PLAYER) {
+            return MatchState::Defeat;
+        }
+        if self.ai_resigned() {
+            return MatchState::Victory;
+        }
+        if self.eliminated(entity::OWNER_OPPONENT) {
+            return MatchState::Victory;
+        }
+        MatchState::Ongoing
+    }
+
+    /// AI-05 resignation: the opponent has no Town Center and no
+    /// villagers — it cannot rebuild its economy, so it resigns
+    /// rather than playing to the last unit.
+    fn ai_resigned(&self) -> bool {
+        self.tc_entity_of(entity::OWNER_OPPONENT).is_none()
+            && !self.entities.iter().any(|e| {
+                e.owner == entity::OWNER_OPPONENT
+                    && e.kind == EntityKind::Villager
+                    && !e.dead
+            })
+    }
+
+    /// Conquest elimination (VIC-01, M5 form): no living Town Center,
+    /// no placed buildings at all, and no living population units.
+    fn eliminated(&self, owner: u8) -> bool {
+        if self.tc_entity_of(owner).is_some() {
+            return false;
+        }
+        if self.buildings.iter().any(|b| b.owner == owner) {
+            return false;
+        }
+        !self.entities.iter().any(|e| {
+            e.owner == owner && !e.dead && e.kind.counts_population()
+        })
     }
 
     /// Resource nodes in id order, depleted ones included (amount zero).
@@ -370,9 +791,10 @@ impl Sim {
         &self.nodes
     }
 
-    /// Villagers currently waiting in the Town Center training queue.
+    /// Villagers currently waiting in the human Town Center's
+    /// training queue.
     pub fn train_queue_len(&self) -> u32 {
-        self.train_queue
+        self.tc_state(TOWN_CENTER_ID).map(|s| s.queue).unwrap_or(0)
     }
 
     /// Placed buildings in id order, under construction and complete.
@@ -380,25 +802,46 @@ impl Sim {
         &self.buildings
     }
 
-    /// Living population: alive player units that occupy a slot —
-    /// villagers, the Scout, Militia, Archers (M3). Captured sheep
-    /// and the Town Center never count (see
+    /// Living population of the human player: alive player units
+    /// that occupy a slot — villagers, the Scout, Militia, Archers
+    /// (M3). Captured sheep and the Town Center never count (see
     /// `EntityKind::counts_population`).
     pub fn living_population(&self) -> u32 {
+        self.living_population_of(entity::OWNER_PLAYER)
+    }
+
+    /// Living population of one player (M5): the per-player form of
+    /// `living_population`.
+    pub fn living_population_of(&self, owner: u8) -> u32 {
         self.entities
             .iter()
-            .filter(|e| {
-                e.owner == entity::OWNER_PLAYER && !e.dead && e.kind.counts_population()
-            })
+            .filter(|e| e.owner == owner && !e.dead && e.kind.counts_population())
             .count() as u32
     }
 
-    /// Current population: living population plus every production
-    /// queue (a queued unit is already spoken for) — the Town Center
-    /// queue and all Barracks queues.
+    /// Current population of the human player: living population
+    /// plus every production queue (a queued unit is already spoken
+    /// for) — the Town Center queue and all Barracks queues.
     pub fn population(&self) -> u32 {
-        let queued: u32 = self.buildings.iter().map(|b| b.queue.len() as u32).sum();
-        self.living_population() + self.train_queue + queued
+        self.population_of(entity::OWNER_PLAYER)
+    }
+
+    /// Current population of one player (M5): living population plus
+    /// that player's Town Center queue and production-building
+    /// queues.
+    pub fn population_of(&self, owner: u8) -> u32 {
+        let tc_queue = self
+            .tc_entity_of(owner)
+            .and_then(|tc| self.tc_state(tc.id))
+            .map(|s| s.queue)
+            .unwrap_or(0);
+        let queued: u32 = self
+            .buildings
+            .iter()
+            .filter(|b| b.owner == owner)
+            .map(|b| b.queue.len() as u32)
+            .sum();
+        self.living_population_of(owner) + tc_queue + queued
     }
 
     /// Projectiles currently in flight, in spawn order (M3).
@@ -406,28 +849,51 @@ impl Sim {
         &self.projectiles
     }
 
-    /// Population capacity: the Town Center's room (+5) plus every
-    /// completed House's (+5 each), per the mechanics study §9.4.
+    /// Population capacity of the human player: the Town Center's
+    /// room (+5) plus every completed House's (+5 each), per the
+    /// mechanics study §9.4.
     pub fn population_cap(&self) -> u32 {
+        self.population_cap_of(entity::OWNER_PLAYER)
+    }
+
+    /// Population capacity of one player (M5): the Town Center's
+    /// base room plus that player's completed Houses.
+    pub fn population_cap_of(&self, owner: u8) -> u32 {
         let mut cap = TOWN_CENTER_POP_SUPPORT;
         for b in &self.buildings {
-            if b.complete {
+            if b.owner == owner && b.complete {
                 cap += b.kind.pop_support();
             }
         }
         cap
     }
 
-    /// Why training cannot currently proceed (for UI display). Checked
-    /// in display-priority order: queue full, housed, no food.
+    /// Why training cannot currently proceed at the human Town
+    /// Center (for UI display). Checked in display-priority order:
+    /// queue full, housed, no food.
     pub fn train_block_reason(&self) -> TrainBlock {
-        if self.train_queue >= TRAIN_QUEUE_CAP {
+        self.train_block_at(TOWN_CENTER_ID)
+    }
+
+    /// Why training cannot currently proceed at Town Center `tc`
+    /// (M5): the per-Town-Center form of `train_block_reason`, read
+    /// against that Town Center's owner's population and stockpile.
+    /// A missing or dead Town Center reports as `QueueFull` (the
+    /// generic refusal).
+    fn train_block_at(&self, tc: u32) -> TrainBlock {
+        let (owner, queue) = match (self.entity_index(tc), self.tc_state(tc)) {
+            (Some(i), Some(s)) if !self.entities[i].dead => {
+                (self.entities[i].owner, s.queue)
+            }
+            _ => return TrainBlock::QueueFull,
+        };
+        if queue >= TRAIN_QUEUE_CAP {
             return TrainBlock::QueueFull;
         }
-        if self.population() >= self.population_cap() {
+        if self.population_of(owner) >= self.population_cap_of(owner) {
             return TrainBlock::Housed;
         }
-        if self.stockpile.amount(ResourceKind::Food) < VILLAGER_FOOD_COST {
+        if self.stockpile_of(owner).amount(ResourceKind::Food) < VILLAGER_FOOD_COST {
             return TrainBlock::NoFood;
         }
         TrainBlock::Ok
@@ -454,7 +920,10 @@ impl Sim {
 
     /// Would an `Attack` command be accepted right now? A pure query
     /// mirroring `issue_attack`'s validation, for UI affordances; the
-    /// command path re-validates at apply time.
+    /// command path re-validates at apply time. M5 generalizes the
+    /// seats: the attacker may be any player's unit, and the target
+    /// may be Gaia, another player's entity (Town Center included),
+    /// or a sheep of anyone's (ECO-13).
     pub fn can_attack(&self, entity: u32, target: u32) -> bool {
         let (Some(ai), Some(ti)) = (self.entity_index(entity), self.entity_index(target))
         else {
@@ -465,10 +934,12 @@ impl Sim {
         if a.dead || t.dead || entity == target {
             return false;
         }
-        if a.owner != entity::OWNER_PLAYER || units::spec(a.kind).attacks.is_empty() {
+        if !entity::is_player_owner(a.owner) || units::spec(a.kind).attacks.is_empty() {
             return false;
         }
-        t.owner == entity::OWNER_GAIA || t.kind == EntityKind::Sheep
+        t.owner == entity::OWNER_GAIA
+            || t.owner != a.owner
+            || t.kind == EntityKind::Sheep
     }
 
     /// Why training `kind` at `building` cannot currently proceed
@@ -476,6 +947,8 @@ impl Sim {
     /// the same tag contract. A missing/unfinished/non-production
     /// building reports as `QueueFull` (a generic refusal: the client
     /// only asks for buildings it knows are complete Barracks).
+    /// Population and funds are read against the building's *owner*
+    /// (M5).
     pub fn train_at_block(&self, building: u32, kind: EntityKind) -> TrainBlock {
         let bi = match self.building_index(building) {
             Some(bi) => bi,
@@ -488,10 +961,10 @@ impl Sim {
         if b.queue.len() as u32 >= TRAIN_QUEUE_CAP {
             return TrainBlock::QueueFull;
         }
-        if self.population() >= self.population_cap() {
+        if self.population_of(b.owner) >= self.population_cap_of(b.owner) {
             return TrainBlock::Housed;
         }
-        if !self.can_afford(kind) {
+        if !self.can_afford(b.owner, kind) {
             return TrainBlock::NoFood;
         }
         TrainBlock::Ok
@@ -511,41 +984,78 @@ impl Sim {
             && b.kind.is_production()
             && kind.is_trainable()
             && (b.queue.len() as u32) < TRAIN_QUEUE_CAP
-            && self.can_afford(kind)
+            && self.can_afford(b.owner, kind)
     }
 
-    /// Whether the stockpile covers a unit kind's full table cost.
-    fn can_afford(&self, kind: EntityKind) -> bool {
+    /// Whether a player's stockpile covers a unit kind's full table
+    /// cost (M5: per-player).
+    fn can_afford(&self, owner: u8, kind: EntityKind) -> bool {
         let spec = units::spec(kind);
-        self.stockpile.amount(ResourceKind::Food) >= I16F16::from_num(spec.food_cost)
-            && self.stockpile.amount(ResourceKind::Wood) >= I16F16::from_num(spec.wood_cost)
-            && self.stockpile.amount(ResourceKind::Gold) >= I16F16::from_num(spec.gold_cost)
+        let stockpile = self.stockpile_of(owner);
+        stockpile.amount(ResourceKind::Food) >= I16F16::from_num(spec.food_cost)
+            && stockpile.amount(ResourceKind::Wood) >= I16F16::from_num(spec.wood_cost)
+            && stockpile.amount(ResourceKind::Gold) >= I16F16::from_num(spec.gold_cost)
     }
 
-    /// Deduct a unit kind's full table cost. Callers check
-    /// `can_afford` first, so the spends cannot fail partway.
-    fn spend_cost(&mut self, kind: EntityKind) {
+    /// Deduct a unit kind's full table cost from a player's
+    /// stockpile. Callers check `can_afford` first, so the spends
+    /// cannot fail partway.
+    fn spend_cost(&mut self, owner: u8, kind: EntityKind) {
         let spec = units::spec(kind);
         if spec.food_cost > 0 {
-            self.stockpile
+            self.stockpile_mut(owner)
                 .spend(ResourceKind::Food, I16F16::from_num(spec.food_cost));
         }
         if spec.wood_cost > 0 {
-            self.stockpile
+            self.stockpile_mut(owner)
                 .spend(ResourceKind::Wood, I16F16::from_num(spec.wood_cost));
         }
         if spec.gold_cost > 0 {
-            self.stockpile
+            self.stockpile_mut(owner)
                 .spend(ResourceKind::Gold, I16F16::from_num(spec.gold_cost));
         }
     }
 
-    /// Would a `TrainVillager` command be accepted right now? (Food
-    /// covers the cost and the queue has room.) The command path
-    /// re-checks at apply time; this is for UI affordances.
+    /// Would a `TrainVillager` command be accepted right now at the
+    /// human Town Center? (Food covers the cost and the queue has
+    /// room.) The command path re-checks at apply time; this is for
+    /// UI affordances.
     pub fn can_train_villager(&self) -> bool {
-        self.train_queue < TRAIN_QUEUE_CAP
-            && self.stockpile.amount(ResourceKind::Food) >= VILLAGER_FOOD_COST
+        self.can_train_villager_at(TOWN_CENTER_ID)
+    }
+
+    /// Would a villager enqueue be accepted at Town Center `tc`
+    /// (M5)? The per-Town-Center form of `can_train_villager`,
+    /// charged to that Town Center's owner.
+    fn can_train_villager_at(&self, tc: u32) -> bool {
+        let (owner, queue) = match (self.entity_index(tc), self.tc_state(tc)) {
+            (Some(i), Some(s)) if !self.entities[i].dead => {
+                (self.entities[i].owner, s.queue)
+            }
+            _ => return false,
+        };
+        queue < TRAIN_QUEUE_CAP
+            && self.stockpile_of(owner).amount(ResourceKind::Food) >= VILLAGER_FOOD_COST
+    }
+
+    /// Would an `AttackBuilding` command be accepted right now?
+    /// (M5.) Mirrors `can_attack` for placed buildings: the attacker
+    /// must be a living player unit with an attack row, and the
+    /// building must belong to *another* player.
+    pub fn can_attack_building(&self, entity: u32, building: u32) -> bool {
+        let (Some(ai), Some(bi)) = (self.entity_index(entity), self.building_index(building))
+        else {
+            return false;
+        };
+        let a = &self.entities[ai];
+        if a.dead {
+            return false;
+        }
+        if !entity::is_player_owner(a.owner) || units::spec(a.kind).attacks.is_empty() {
+            return false;
+        }
+        self.buildings[bi].owner != a.owner
+            && entity::is_player_owner(self.buildings[bi].owner)
     }
 
     /// Would a `Queue` command be accepted right now? (M4, SEL-12.)
@@ -589,10 +1099,11 @@ impl Sim {
         }
     }
 
-    /// The Town Center's rally point as `(x, y, snapped_node)`, or
-    /// `None` when unset (M4, SEL-13). For the client's flag render.
+    /// The human Town Center's rally point as `(x, y, snapped_node)`,
+    /// or `None` when unset (M4, SEL-13). For the client's flag render.
     pub fn tc_rally(&self) -> Option<(I16F16, I16F16, Option<u32>)> {
-        self.tc_rally.map(|(x, y)| (x, y, self.tc_rally_node))
+        let s = self.tc_state(TOWN_CENTER_ID)?;
+        s.rally.map(|(x, y)| (x, y, s.rally_node))
     }
 
     /// A placed building's rally point, same shape as `tc_rally`.
@@ -603,11 +1114,12 @@ impl Sim {
         b.rally.map(|(x, y)| (x, y, b.rally_node))
     }
 
-    /// Idle villagers (M4, SEL-08): living player villagers with no
+    /// Idle villagers (M4, SEL-08): living human villagers with no
     /// work task, no move order, and no attack target — the
     /// definition the rulebook gives ("no work task and no move
     /// order"). Id order. Behind the client's idle-villager key and
-    /// indicator (INF-03).
+    /// indicator (INF-03). Human-only: the AI reads its own idle
+    /// state directly, and the client's indicators are the human's.
     pub fn idle_villagers(&self) -> Vec<u32> {
         self.entities
             .iter()
@@ -618,12 +1130,13 @@ impl Sim {
                     && e.task == Task::Idle
                     && e.order.is_none()
                     && e.attack_target.is_none()
+                    && e.attack_building.is_none()
             })
             .map(|e| e.id)
             .collect()
     }
 
-    /// Idle military (M4, SEL-09): living player military units
+    /// Idle military (M4, SEL-09): living human military units
     /// (Scout, Militia, Archer) with no move order and no attack
     /// target. Id order. The mirror of `idle_villagers`.
     pub fn idle_military(&self) -> Vec<u32> {
@@ -635,6 +1148,7 @@ impl Sim {
                     && !e.dead
                     && e.order.is_none()
                     && e.attack_target.is_none()
+                    && e.attack_building.is_none()
             })
             .map(|e| e.id)
             .collect()
@@ -659,8 +1173,12 @@ impl Sim {
                 Command::Move { entity, x, y } => self.issue_move(entity, x, y),
                 Command::Gather { entity, node } => self.issue_gather(entity, node),
                 Command::TrainVillager => self.issue_train_villager(),
+                Command::TrainVillagerAt { tc } => self.issue_train_villager_at(tc),
                 Command::Build { entity, kind, x, y } => self.issue_build(entity, kind, x, y),
                 Command::Attack { entity, target } => self.issue_attack(entity, target),
+                Command::AttackBuilding { entity, building } => {
+                    self.issue_attack_building(entity, building)
+                }
                 Command::TrainAt { building, kind } => self.issue_train_at(building, kind),
                 Command::Queue { entity, order } => self.issue_queue(entity, order),
                 Command::SetRally { building, x, y } => self.issue_set_rally(building, x, y),
@@ -748,6 +1266,16 @@ impl Sim {
         //    has no dead tick between links.
         self.advance_queues();
 
+        // 6. The scripted opponent decides (M5): on its cadence the
+        //    AI reads live state and enqueues ordinary commands into
+        //    the same FIFO the human uses (AI-01) — they apply at the
+        //    next tick's step 1 like any command. No state is touched
+        //    directly, so a match is still just (seed, mode, the
+        //    human's commands) and replays bit-identically.
+        if self.mode.is_match() && self.tick % ai::config(self.mode).cadence == 0 {
+            ai::decide(self);
+        }
+
         self.tick += 1;
         self.state_hash()
     }
@@ -763,11 +1291,13 @@ impl Sim {
         units::spec(e.kind).speed
     }
 
-    /// Can this entity take player orders at all? Living, player-owned,
-    /// mobile. Shared by the `Move` path and the queue validation.
+    /// Can this entity take player orders at all? Living, owned by a
+    /// *player* (human or opponent — M5), mobile. Shared by the
+    /// `Move` path and the queue validation. Gaia's animals take no
+    /// orders; herdables are driven by capture logic instead.
     fn orderable(&self, idx: usize) -> bool {
         let e = &self.entities[idx];
-        !e.dead && e.owner == entity::OWNER_PLAYER && e.kind.is_mobile()
+        !e.dead && e.owner != entity::OWNER_GAIA && e.kind.is_mobile()
     }
 
     /// Apply a `Move` command: clamp the target into the world, recompute
@@ -830,6 +1360,31 @@ impl Sim {
         e.task_building = None;
         e.order = None;
         e.attack_target = Some(target);
+        e.attack_building = None;
+        e.strike_tick = None;
+        e.attack_engaged = false;
+        e.next_attack_tick = 0;
+    }
+
+    /// Apply an `AttackBuilding` command (M5): the building
+    /// counterpart of `issue_attack` — validate (same rules as
+    /// `can_attack_building`), cancel the attacker's current work,
+    /// and set its building target. The combat phase's building step
+    /// chases the footprint and strikes it. A non-queued order also
+    /// clears the entity's order queue (SEL-12 replace semantics).
+    fn issue_attack_building(&mut self, entity: u32, building: u32) {
+        if !self.can_attack_building(entity, building) {
+            return;
+        }
+        let idx = self.entity_index(entity).expect("validated");
+        self.entities[idx].order_queue.clear();
+        let e = &mut self.entities[idx];
+        e.task = Task::Idle;
+        e.task_node = None;
+        e.task_building = None;
+        e.order = None;
+        e.attack_target = None;
+        e.attack_building = Some(building);
         e.strike_tick = None;
         e.attack_engaged = false;
         e.next_attack_tick = 0;
@@ -842,8 +1397,9 @@ impl Sim {
         if !self.can_train_at(building, kind) {
             return;
         }
-        self.spend_cost(kind);
         let bi = self.building_index(building).expect("validated");
+        let owner = self.buildings[bi].owner;
+        self.spend_cost(owner, kind);
         self.buildings[bi].queue.push(kind);
     }
 
@@ -884,9 +1440,21 @@ impl Sim {
         self.entities[idx].task_building = None;
         match self.entities[idx].carry_kind {
             Some(k) if k != resource && self.entities[idx].carry > I16F16::ZERO => {
-                self.entities[idx].task = Task::Returning;
-                let (tx, ty) = self.town_center_pos();
-                self.set_move_order(idx, tx, ty);
+                // Haul the other resource home first — to *its own*
+                // player's Town Center (M5). With no Town Center left
+                // there is nowhere to haul to: head for the node and
+                // keep the carry (it tops up what it can and idles
+                // full — see `begin_return`).
+                match self.deposit_pos(self.entities[idx].owner) {
+                    Some((tx, ty)) => {
+                        self.entities[idx].task = Task::Returning;
+                        self.set_move_order(idx, tx, ty);
+                    }
+                    None => {
+                        self.entities[idx].task = Task::ToNode;
+                        self.set_move_order(idx, nx, ny);
+                    }
+                }
             }
             _ => {
                 self.entities[idx].task = Task::ToNode;
@@ -895,19 +1463,32 @@ impl Sim {
         }
     }
 
-    /// Apply a `TrainVillager` command: deduct the food cost and enqueue,
-    /// or reject silently (insufficient food / full queue).
+    /// Apply a `TrainVillager` command: deduct the food cost and enqueue
+    /// at the human Town Center, or reject silently (insufficient food /
+    /// full queue).
     fn issue_train_villager(&mut self) {
-        if self.train_queue >= TRAIN_QUEUE_CAP {
+        self.issue_train_villager_at(TOWN_CENTER_ID);
+    }
+
+    /// The shared villager-enqueue mechanics behind `TrainVillager`
+    /// and `TrainVillagerAt` (M5): the cost is charged to the Town
+    /// Center's owner and the queue is that Town Center's own — this
+    /// is exactly how the AI opponent trains its villagers (AI-01:
+    /// ordinary commands, no side channels).
+    fn issue_train_villager_at(&mut self, tc: u32) {
+        if !self.can_train_villager_at(tc) {
             return;
         }
+        let owner = self.entities[self.entity_index(tc).expect("validated")].owner;
         if !self
-            .stockpile
+            .stockpile_mut(owner)
             .spend(ResourceKind::Food, VILLAGER_FOOD_COST)
         {
             return;
         }
-        self.train_queue += 1;
+        if let Some(s) = self.tc_states.iter_mut().find(|s| s.tc_id == tc) {
+            s.queue += 1;
+        }
     }
 
     /// Apply a `Build` command: validate in the sim, deduct the wood at
@@ -944,10 +1525,14 @@ impl Sim {
                 true
             }
             BuildVerdict::Place(cell_x, cell_y) => {
-                // Validation proved the stockpile covers the cost; the
-                // spend re-checks anyway so a failure can never place a
-                // free building.
-                if !self.stockpile.spend(ResourceKind::Wood, kind.wood_cost()) {
+                // Validation proved the builder's owner can pay; the
+                // spend re-checks anyway so a failure can never place
+                // a free building.
+                let builder_owner = self.entities[idx].owner;
+                if !self
+                    .stockpile_mut(builder_owner)
+                    .spend(ResourceKind::Wood, kind.wood_cost())
+                {
                     return false;
                 }
                 let id = self.next_building_id;
@@ -957,6 +1542,8 @@ impl Sim {
                 let building = Building {
                     id,
                     kind,
+                    owner: builder_owner,
+                    hp: I16F16::from_num(kind.max_hp()),
                     cell_x,
                     cell_y,
                     pos_x,
@@ -1010,6 +1597,7 @@ impl Sim {
                     || e.task != Task::Idle
                     || e.order.is_some()
                     || e.attack_target.is_some()
+                    || e.attack_building.is_some()
                 {
                     continue;
                 }
@@ -1069,8 +1657,14 @@ impl Sim {
         let node = self.rally_snap_node(x, y);
         match building {
             None => {
-                self.tc_rally = Some((x, y));
-                self.tc_rally_node = node;
+                if let Some(s) = self
+                    .tc_states
+                    .iter_mut()
+                    .find(|s| s.tc_id == TOWN_CENTER_ID)
+                {
+                    s.rally = Some((x, y));
+                    s.rally_node = node;
+                }
             }
             Some(bid) => {
                 let bi = self.building_index(bid).expect("validated");
@@ -1150,9 +1744,16 @@ impl Sim {
         let size = kind.footprint_size();
         let (ax, ay) = self.grid.world_to_cell(x, y);
         // Resume before placement checks: the footprint of a standing
-        // incomplete building is *supposed* to be occupied — by itself.
+        // incomplete building is *supposed* to be occupied — by
+        // itself. Only the owner's own villagers resume it (M5: a
+        // building under construction belongs to its placer).
         for b in &self.buildings {
-            if !b.complete && b.kind == kind && b.cell_x == ax && b.cell_y == ay {
+            if !b.complete
+                && b.kind == kind
+                && b.owner == self.entities[idx].owner
+                && b.cell_x == ax
+                && b.cell_y == ay
+            {
                 return BuildVerdict::Resume(b.id);
             }
         }
@@ -1166,9 +1767,15 @@ impl Sim {
             if self.grid.is_blocked(cx, cy) {
                 return BuildVerdict::Reject;
             }
-            // The Town Center's cell.
-            if (cx, cy) == TC_CELL {
-                return BuildVerdict::Reject;
+            // Any Town Center's cell (M5: both players' — the TC is
+            // an entity, so its cell is wherever it stands).
+            for e in &self.entities {
+                if e.kind == EntityKind::TownCenter
+                    && !e.dead
+                    && self.grid.world_to_cell(e.pos_x, e.pos_y) == (cx, cy)
+                {
+                    return BuildVerdict::Reject;
+                }
             }
             // Resource nodes sit on cell centers; a footprint may not
             // swallow a live one. Depleted nodes reserve nothing —
@@ -1193,8 +1800,10 @@ impl Sim {
                 return BuildVerdict::Reject;
             }
         }
-        // The wood must be payable at placement.
-        if self.stockpile.amount(ResourceKind::Wood) < kind.wood_cost() {
+        // The wood must be payable at placement — by the *builder's*
+        // owner (M5: each player builds from their own stockpile).
+        let builder_owner = self.entities[idx].owner;
+        if self.stockpile_of(builder_owner).amount(ResourceKind::Wood) < kind.wood_cost() {
             return BuildVerdict::Reject;
         }
         // Reachable-ish: at least one ring cell stands open and the
@@ -1312,22 +1921,42 @@ impl Sim {
         // and resumes the tick housing frees up. Completion spawns only
         // while there is room, so the cap can never be exceeded.
         // (M3: the room check counts every living population unit —
-        // villagers, Scout, military — not just villagers.)
-        if self.train_queue > 0 && self.living_population() < self.population_cap() {
-            self.train_progress += 1;
-            if self.train_progress >= VILLAGER_TRAIN_TICKS {
-                self.train_progress = 0;
-                self.train_queue -= 1;
-                self.spawn_trained_villager();
+        // villagers, Scout, military — not just villagers. M5: every
+        // Town Center runs its own queue, checked against its owner's
+        // population and capacity.)
+        let tc_ids: Vec<u32> = self.tc_states.iter().map(|s| s.tc_id).collect();
+        for tc_id in tc_ids {
+            let owner = match self.entity_index(tc_id) {
+                Some(i) if !self.entities[i].dead => self.entities[i].owner,
+                _ => continue,
+            };
+            let si = self
+                .tc_states
+                .iter()
+                .position(|s| s.tc_id == tc_id)
+                .expect("listed");
+            if self.tc_states[si].queue == 0 {
+                continue;
+            }
+            if self.living_population_of(owner) >= self.population_cap_of(owner) {
+                continue; // housed: this Town Center's queue stalls
+            }
+            self.tc_states[si].progress += 1;
+            if self.tc_states[si].progress >= VILLAGER_TRAIN_TICKS {
+                self.tc_states[si].progress = 0;
+                self.tc_states[si].queue -= 1;
+                self.spawn_trained_villager(tc_id);
             }
         }
         // Barracks production (M3): same queue/pop rules as the Town
-        // Center — progress only while there is population room.
+        // Center — progress only while there is population room (the
+        // building's owner's room, M5).
         for bi in 0..self.buildings.len() {
             if !self.buildings[bi].complete || self.buildings[bi].queue.is_empty() {
                 continue;
             }
-            if self.living_population() >= self.population_cap() {
+            let owner = self.buildings[bi].owner;
+            if self.living_population_of(owner) >= self.population_cap_of(owner) {
                 continue; // housed: this building's queue stalls too
             }
             self.buildings[bi].train_progress += 1;
@@ -1360,6 +1989,7 @@ impl Sim {
         let (ax, ay, size) = (b.cell_x, b.cell_y, b.kind.footprint_size());
         let (cx0, cy0) = (b.pos_x, b.pos_y);
         let (rally, rally_node) = (b.rally, b.rally_node);
+        let owner = b.owner; // the unit belongs to the building's player (M5)
         let mut pos = None;
         for (cx, cy) in build::ring_cells(ax, ay, size) {
             if cx >= GRID_DIM || cy >= GRID_DIM {
@@ -1388,13 +2018,7 @@ impl Sim {
         }
         let (px, py) = pos.unwrap_or((cx0, cy0));
         let id = self.entities.len() as u32;
-        self.entities.push(Entity::spawned(
-            id,
-            kind,
-            entity::OWNER_PLAYER,
-            px,
-            py,
-        ));
+        self.entities.push(Entity::spawned(id, kind, owner, px, py));
         // Rally (M4, SEL-13): the new unit walks to the building's
         // rally point (military units just walk — only villagers can
         // be sent straight to a node, and Barracks train none).
@@ -1490,12 +2114,19 @@ impl Sim {
                 }
             }
             Task::Returning => {
-                let (tx, ty) = self.town_center_pos();
-                let d = self.distance_to(idx, tx, ty);
-                if d <= DEPOSIT_RANGE {
-                    self.deposit(idx);
-                } else if self.entities[idx].order.is_none() {
-                    self.set_move_order(idx, tx, ty);
+                // Haul to the villager's *own* Town Center (M5). If
+                // it is gone the load has nowhere to go: the villager
+                // idles with its carry kept.
+                match self.deposit_pos(self.entities[idx].owner) {
+                    Some((tx, ty)) => {
+                        let d = self.distance_to(idx, tx, ty);
+                        if d <= DEPOSIT_RANGE {
+                            self.deposit(idx);
+                        } else if self.entities[idx].order.is_none() {
+                            self.set_move_order(idx, tx, ty);
+                        }
+                    }
+                    None => self.stop_task(idx),
                 }
             }
             Task::ToBuild => {
@@ -1684,10 +2315,10 @@ impl Sim {
         }
     }
 
-    /// Deposit the villager's carry into the stockpile, then resume
-    /// the gather assignment if its node is still alive; if it died,
-    /// retarget to a same-resource neighbor (ECO-09); otherwise go
-    /// idle.
+    /// Deposit the villager's carry into *its owner's* stockpile
+    /// (M5), then resume the gather assignment if its node is still
+    /// alive; if it died, retarget to a same-resource neighbor
+    /// (ECO-09); otherwise go idle.
     fn deposit(&mut self, idx: usize) {
         let (carry, kind) = {
             let e = &mut self.entities[idx];
@@ -1701,7 +2332,8 @@ impl Sim {
         };
         if let Some(kind) = kind {
             if carry > I16F16::ZERO {
-                self.stockpile.add(kind, carry);
+                let owner = self.entities[idx].owner;
+                self.stockpile_mut(owner).add(kind, carry);
             }
         }
         match self.entities[idx].task_node {
@@ -1769,11 +2401,17 @@ impl Sim {
         }
     }
 
-    /// Send the villager home to deposit, keeping its gather assignment.
+    /// Send the villager home to deposit, keeping its gather
+    /// assignment. "Home" is its owner's Town Center (M5); with none
+    /// left the villager simply stops, carry kept.
     fn begin_return(&mut self, idx: usize) {
-        self.entities[idx].task = Task::Returning;
-        let (tx, ty) = self.town_center_pos();
-        self.set_move_order(idx, tx, ty);
+        match self.deposit_pos(self.entities[idx].owner) {
+            Some((tx, ty)) => {
+                self.entities[idx].task = Task::Returning;
+                self.set_move_order(idx, tx, ty);
+            }
+            None => self.stop_task(idx),
+        }
     }
 
     /// The villager's node vanished mid-task: haul the carry home if
@@ -1807,9 +2445,16 @@ impl Sim {
         e.vel_y = I16F16::ZERO;
     }
 
-    /// Spawn a trained villager adjacent to the Town Center.
-    fn spawn_trained_villager(&mut self) {
-        let (tx, ty) = self.town_center_pos();
+    /// Spawn a trained villager adjacent to Town Center `tc_id`
+    /// (M5: each Town Center spawns its own, owned by its player,
+    /// rallied by its own rally point).
+    fn spawn_trained_villager(&mut self, tc_id: u32) {
+        let ti = match self.entity_index(tc_id) {
+            Some(i) => i,
+            None => return,
+        };
+        let (tx, ty) = (self.entities[ti].pos_x, self.entities[ti].pos_y);
+        let owner = self.entities[ti].owner;
         let mut pos = (tx + I16F16::from_num(TRAIN_SPAWN_OFFSETS[0].0), ty);
         for &(ox, oy) in &TRAIN_SPAWN_OFFSETS {
             let p = (tx + I16F16::from_num(ox), ty + I16F16::from_num(oy));
@@ -1822,11 +2467,15 @@ impl Sim {
         // Ids are sequential: dead entities are tombstoned, never
         // removed (M3), so the next id is always the current count.
         let id = self.entities.len() as u32;
-        self.entities.push(Entity::villager(id, pos.0, pos.1));
-        // Rally (M4, SEL-13): a new villager walks to the Town
+        self.entities
+            .push(Entity::spawned(id, EntityKind::Villager, owner, pos.0, pos.1));
+        // Rally (M4, SEL-13): a new villager walks to its Town
         // Center's rally point — or straight to work, when the rally
         // snapped to a live resource node.
-        let (rally, rally_node) = (self.tc_rally, self.tc_rally_node);
+        let (rally, rally_node) = match self.tc_state(tc_id) {
+            Some(s) => (s.rally, s.rally_node),
+            None => (None, None),
+        };
         let idx = self.entities.len() - 1;
         self.apply_spawn_rally(idx, rally, rally_node);
     }
@@ -1849,11 +2498,6 @@ impl Sim {
                 Some((n.pos_x, n.pos_y))
             }
         })
-    }
-
-    fn town_center_pos(&self) -> (I16F16, I16F16) {
-        let tc = self.town_center();
-        (tc.pos_x, tc.pos_y)
     }
 
     /// Fixed-point distance from an entity to a world point.
@@ -1893,9 +2537,15 @@ impl Sim {
         for b in self.grid.dynamic_bytes() {
             h.write_u8(b);
         }
-        // M2: stockpile in canonical resource order.
-        for amount in self.stockpile.amounts() {
-            h.write_i32(amount.to_bits());
+        // M5: the match mode — a sandbox and a match with identical
+        // openings must never share a hash stream.
+        h.write_u8(self.mode.tag());
+        // M2: stockpiles in canonical resource order. M5: both
+        // players' stockpiles, in slot order (human, opponent).
+        for slot in &self.stockpiles {
+            for amount in slot.amounts() {
+                h.write_i32(amount.to_bits());
+            }
         }
         // M2: nodes (id order), then the Town Center training state.
         // M3: node decay joins (carcasses are state, not decoration).
@@ -1908,23 +2558,27 @@ impl Sim {
             h.write_i32(n.amount_left.to_bits());
             h.write_i32(n.decay_per_tick.to_bits());
         }
-        h.write_u32(self.train_queue);
-        h.write_u64(self.train_progress);
-        // M4: the Town Center rally point and its snapped node
-        // (SEL-13).
-        match self.tc_rally {
-            None => h.write_u8(0),
-            Some((x, y)) => {
-                h.write_u8(1);
-                h.write_i32(x.to_bits());
-                h.write_i32(y.to_bits());
+        // M5: every Town Center's production state (queue, progress,
+        // rally — M4's SEL-13 fields, now per Town Center).
+        h.write_u32(self.tc_states.len() as u32);
+        for s in &self.tc_states {
+            h.write_u32(s.tc_id);
+            h.write_u32(s.queue);
+            h.write_u64(s.progress);
+            match s.rally {
+                None => h.write_u8(0),
+                Some((x, y)) => {
+                    h.write_u8(1);
+                    h.write_i32(x.to_bits());
+                    h.write_i32(y.to_bits());
+                }
             }
-        }
-        match self.tc_rally_node {
-            None => h.write_u8(0),
-            Some(n) => {
-                h.write_u8(1);
-                h.write_u32(n);
+            match s.rally_node {
+                None => h.write_u8(0),
+                Some(n) => {
+                    h.write_u8(1);
+                    h.write_u32(n);
+                }
             }
         }
         // M2.5: buildings (id order), construction state included.
@@ -1933,6 +2587,9 @@ impl Sim {
         for b in &self.buildings {
             h.write_u32(b.id);
             h.write_u8(b.kind.tag());
+            // M5: the building's owner and its hit points.
+            h.write_u8(b.owner);
+            h.write_i32(b.hp.to_bits());
             h.write_u32(b.cell_x);
             h.write_u32(b.cell_y);
             h.write_i32(b.pos_x.to_bits());
@@ -2042,6 +2699,14 @@ impl Sim {
                     h.write_u32(t);
                 }
             }
+            // M5: the building under attack, if any.
+            match e.attack_building {
+                None => h.write_u8(0),
+                Some(t) => {
+                    h.write_u8(1);
+                    h.write_u32(t);
+                }
+            }
             match e.strike_tick {
                 None => h.write_u8(0),
                 Some(t) => {
@@ -2092,6 +2757,14 @@ impl Sim {
                     h.write_u32(t);
                 }
             }
+            // M5: the building the shot was fired at, if any.
+            match p.intended_building {
+                None => h.write_u8(0),
+                Some(t) => {
+                    h.write_u8(1);
+                    h.write_u32(t);
+                }
+            }
             h.write_u32(p.attacker);
             h.write_u8(p.owner);
             h.write_u32(p.attacks.len() as u32);
@@ -2100,12 +2773,25 @@ impl Sim {
                 h.write_i32(value);
             }
         }
+        // M5: the AI opponent's scheduling state (its decisions read
+        // live state, but the wave clock is state of its own).
+        h.write_u64(self.ai.next_wave_tick);
         h.finish()
     }
 
     /// State hash as a 16-character lowercase hex string.
     pub fn state_hash_hex(&self) -> String {
         format!("{:016x}", self.state_hash())
+    }
+}
+
+/// The stockpile slot of a player owner tag (M5): the human is
+/// slot 0, the opponent slot 1. Gaia has no slot.
+fn player_slot(owner: u8) -> Option<usize> {
+    match owner {
+        entity::OWNER_PLAYER => Some(0),
+        entity::OWNER_OPPONENT => Some(1),
+        _ => None,
     }
 }
 
@@ -2291,5 +2977,132 @@ mod tests {
             food_before,
             "carry must not be deposited by a Move override"
         );
+    }
+
+    // ---- M5: match state (Conquest) -------------------------------
+    //
+    // The elimination predicate is derived state; these tests set up
+    // the board directly (in-module access) rather than simulating
+    // whole battles — the full combat path to Victory/Defeat is
+    // covered end-to-end in tests/match.rs.
+
+    /// Mark every entity of `owner` dead (the tombstone way: hp < 1
+    /// and the dead flag, as the death sweep leaves them).
+    fn wipe_units(sim: &mut Sim, owner: u8) {
+        for e in &mut sim.entities {
+            if e.owner == owner {
+                e.hp = I16F16::ZERO;
+                e.dead = true;
+            }
+        }
+    }
+
+    #[test]
+    fn sandbox_never_decides() {
+        let mut sim = Sim::new(11);
+        wipe_units(&mut sim, entity::OWNER_PLAYER);
+        assert_eq!(sim.match_state(), MatchState::Ongoing);
+    }
+
+    #[test]
+    fn fresh_match_is_ongoing_for_both_profiles() {
+        for mode in [MatchMode::AiEasy, MatchMode::AiNormal] {
+            let sim = Sim::new_match(11, mode);
+            assert_eq!(sim.match_state(), MatchState::Ongoing);
+            // The mirrored start: two Town Centers, two stockpiles,
+            // mirrored node layout appended.
+            assert_eq!(
+                sim.entities()
+                    .iter()
+                    .filter(|e| e.kind == EntityKind::TownCenter)
+                    .count(),
+                2
+            );
+            assert_eq!(sim.stockpile_of(entity::OWNER_OPPONENT), sim.stockpile());
+            assert!(sim.nodes().len() > econ::NODE_SPECS.len());
+            assert_eq!(sim.population_of(entity::OWNER_OPPONENT), 4);
+            assert_eq!(sim.population_cap_of(entity::OWNER_OPPONENT), 5);
+        }
+    }
+
+    #[test]
+    fn eliminating_the_opponent_is_victory() {
+        let mut sim = Sim::new_match(11, MatchMode::AiNormal);
+        wipe_units(&mut sim, entity::OWNER_OPPONENT);
+        assert_eq!(sim.match_state(), MatchState::Victory);
+    }
+
+    #[test]
+    fn eliminating_the_human_is_defeat_even_on_a_tie() {
+        let mut sim = Sim::new_match(11, MatchMode::AiNormal);
+        wipe_units(&mut sim, entity::OWNER_PLAYER);
+        assert_eq!(sim.match_state(), MatchState::Defeat);
+        // Both gone on the same read: the human loses the tie.
+        wipe_units(&mut sim, entity::OWNER_OPPONENT);
+        assert_eq!(sim.match_state(), MatchState::Defeat);
+    }
+
+    /// A bare-bones placed building record for predicate tests.
+    fn placed_house(owner: u8) -> Building {
+        Building {
+            id: 0,
+            kind: BuildingKind::House,
+            owner,
+            hp: I16F16::from_num(BuildingKind::House.max_hp()),
+            cell_x: 30,
+            cell_y: 30,
+            pos_x: I16F16::ZERO,
+            pos_y: I16F16::ZERO,
+            progress_thirds: 0,
+            complete: false,
+            node_id: None,
+            queue: Vec::new(),
+            train_progress: 0,
+            rally: None,
+            rally_node: None,
+        }
+    }
+
+    #[test]
+    fn a_lone_building_keeps_its_owner_alive() {
+        // The human has no resignation rule: with every unit gone
+        // but a House standing, Conquest has not eliminated them —
+        // the building must fall too. (Under construction counts:
+        // this record is incomplete.)
+        let mut sim = Sim::new_match(11, MatchMode::AiNormal);
+        sim.buildings.push(placed_house(entity::OWNER_PLAYER));
+        wipe_units(&mut sim, entity::OWNER_PLAYER);
+        assert_eq!(sim.match_state(), MatchState::Ongoing);
+        sim.buildings.clear();
+        assert_eq!(sim.match_state(), MatchState::Defeat);
+        // The opponent mirror ends as Victory — there the AI-05
+        // resignation (no Town Center, no villagers) fires before
+        // the building clause is even consulted.
+        let mut sim2 = Sim::new_match(11, MatchMode::AiNormal);
+        sim2.buildings.push(placed_house(entity::OWNER_OPPONENT));
+        wipe_units(&mut sim2, entity::OWNER_OPPONENT);
+        assert_eq!(sim2.match_state(), MatchState::Victory);
+    }
+
+    #[test]
+    fn ai_resignation_needs_no_villagers_either() {
+        // Opponent Town Center dead but a villager alive: no
+        // resignation, no elimination — the match goes on (the
+        // villager could, in principle, be the seed of a rebuild).
+        let mut sim = Sim::new_match(11, MatchMode::AiNormal);
+        let opp_tc = sim.tc_entity_of(entity::OWNER_OPPONENT).unwrap().id;
+        let i = sim.entity_index(opp_tc).unwrap();
+        sim.entities[i].hp = I16F16::ZERO;
+        sim.entities[i].dead = true;
+        assert_eq!(sim.match_state(), MatchState::Ongoing);
+        // Kill the villagers too (Scout left alive): resignation —
+        // Victory even though an opponent unit still stands.
+        for e in &mut sim.entities {
+            if e.owner == entity::OWNER_OPPONENT && e.kind == EntityKind::Villager {
+                e.hp = I16F16::ZERO;
+                e.dead = true;
+            }
+        }
+        assert_eq!(sim.match_state(), MatchState::Victory);
     }
 }

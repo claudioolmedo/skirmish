@@ -157,6 +157,37 @@ impl BuildingKind {
     pub fn is_production(self) -> bool {
         matches!(self, BuildingKind::Barracks)
     }
+
+    /// Hit points of a fresh building of this kind (M5 — buildings
+    /// take damage now; study §5, Dark Age row where the value is
+    /// age-keyed). Death is HP < 1, the entity rule (CMB-02).
+    pub fn max_hp(self) -> i32 {
+        match self {
+            BuildingKind::House => 550,
+            BuildingKind::Farm => 480,
+            BuildingKind::Barracks => 1200,
+        }
+    }
+
+    /// Melee armor (study §5, Dark Age row). The House's is
+    /// *negative* in the Dark Age — early houses are soft to melee,
+    /// exactly as the study's table records.
+    pub fn armor_melee(self) -> i32 {
+        match self {
+            BuildingKind::House => -2,
+            BuildingKind::Farm => 0,
+            BuildingKind::Barracks => 0,
+        }
+    }
+
+    /// Pierce armor (study §5, Dark Age row).
+    pub fn armor_pierce(self) -> i32 {
+        match self {
+            BuildingKind::House => 7,
+            BuildingKind::Farm => 0,
+            BuildingKind::Barracks => 7,
+        }
+    }
 }
 
 /// Progress a building gains per tick, in thirds of a tick, while
@@ -177,6 +208,19 @@ pub fn build_rate_thirds(builders: u32) -> u64 {
 pub struct Building {
     pub id: u32,
     pub kind: BuildingKind,
+    /// The player who placed this building (M5): `OWNER_PLAYER` or
+    /// `OWNER_OPPONENT`. Placement spends that player's wood, the
+    /// population support counts for that player, a production
+    /// building trains for that player, and Conquest counts the
+    /// building as that player's. Part of the hashed state.
+    pub owner: u8,
+    /// Current hit points (M5): a placed building can be attacked
+    /// and destroyed (see `combat::damage_building`). Set to the
+    /// kind's table maximum at placement — an under-construction
+    /// building has full HP in M5 (the reference scales HP with
+    /// construction progress; recorded v1 simplification). Part of
+    /// the hashed state.
+    pub hp: I16F16,
     pub cell_x: u32,
     pub cell_y: u32,
     pub pos_x: I16F16,
@@ -240,6 +284,18 @@ impl Building {
                 ((done * 65536) / total) as i32
             }
         }
+    }
+
+    /// Remaining HP as a fraction of the kind's maximum, in raw
+    /// fixed-point bits (0 … 65536). Presentation aid for the ABI
+    /// (the damaged-building HP bar).
+    pub fn hp_frac_bits(&self) -> i32 {
+        let total = self.kind.max_hp() as i64;
+        if total <= 0 {
+            return 65536;
+        }
+        let left = (self.hp.to_bits() as i64).clamp(0, total << 16);
+        ((left * 65536) / (total << 16)) as i32
     }
 }
 
@@ -311,6 +367,18 @@ mod tests {
         assert_eq!(BuildingKind::Barracks.footprint_size(), 3);
         assert!(BuildingKind::Barracks.blocks_footprint());
         assert!(BuildingKind::Barracks.is_production());
+        // M5 building combat numbers (study §5, Dark Age rows):
+        // House 550 HP, −2/7 armor; Farm 480 HP, 0/0; Barracks
+        // 1200 HP, 0/7.
+        assert_eq!(BuildingKind::House.max_hp(), 550);
+        assert_eq!(BuildingKind::House.armor_melee(), -2);
+        assert_eq!(BuildingKind::House.armor_pierce(), 7);
+        assert_eq!(BuildingKind::Farm.max_hp(), 480);
+        assert_eq!(BuildingKind::Farm.armor_melee(), 0);
+        assert_eq!(BuildingKind::Farm.armor_pierce(), 0);
+        assert_eq!(BuildingKind::Barracks.max_hp(), 1200);
+        assert_eq!(BuildingKind::Barracks.armor_melee(), 0);
+        assert_eq!(BuildingKind::Barracks.armor_pierce(), 7);
     }
 
     #[test]
@@ -331,6 +399,8 @@ mod tests {
         let mut b = Building {
             id: 0,
             kind: BuildingKind::House,
+            owner: crate::entity::OWNER_PLAYER,
+            hp: I16F16::from_num(BuildingKind::House.max_hp()),
             cell_x: 0,
             cell_y: 0,
             pos_x: I16F16::ZERO,

@@ -19,6 +19,10 @@
 //! set/get for the Town Center and production buildings), and the
 //! idle lists behind the idle keys and indicators (SEL-08/09,
 //! INF-03).
+//! M5 adds: match construction (`new_match` — Sandbox stays the
+//! plain constructor), the match-state getter (Conquest), the
+//! per-player stockpile getter, building attack orders, and owner +
+//! HP columns on the building list (buildings take damage now).
 
 use wasm_bindgen::prelude::*;
 
@@ -28,7 +32,7 @@ use crate::build::BuildingKind;
 use crate::econ::ResourceKind;
 use crate::entity::EntityKind;
 use crate::grid;
-use crate::{Command, QueuedOrder, Sim};
+use crate::{Command, MatchMode, QueuedOrder, Sim};
 
 /// A `Sim` owned by JavaScript. One instance per match.
 #[wasm_bindgen]
@@ -44,6 +48,34 @@ impl WasmSim {
         WasmSim {
             inner: Sim::new(seed as u64),
         }
+    }
+
+    /// Create a match against the scripted AI opponent (M5):
+    /// `mode_tag` 1 = AI Easy, 2 = AI Normal (the `MatchMode` tags;
+    /// 0 or anything unknown falls back to the plain sandbox
+    /// constructor's game). The opponent spawns mirrored across the
+    /// map and plays through the ordinary command queue from the
+    /// first tick.
+    #[wasm_bindgen]
+    pub fn new_match(seed: u32, mode_tag: u32) -> WasmSim {
+        let mode = MatchMode::from_tag(mode_tag as u8).unwrap_or(MatchMode::Sandbox);
+        WasmSim {
+            inner: Sim::with_mode(seed as u64, mode),
+        }
+    }
+
+    /// The match mode this sim was created with (M5): 0 sandbox,
+    /// 1 AI Easy, 2 AI Normal.
+    pub fn mode(&self) -> u32 {
+        self.inner.mode().tag() as u32
+    }
+
+    /// The match outcome (M5, Conquest): 0 ongoing, 1 victory,
+    /// 2 defeat — from the human player's seat. Always 0 in
+    /// Sandbox. The client polls this; the sim keeps ticking
+    /// harmlessly after a decision.
+    pub fn match_state(&self) -> u32 {
+        self.inner.match_state().tag() as u32
     }
 
     /// Advance exactly one 60 Hz tick. Returns the per-tick state hash
@@ -102,6 +134,19 @@ impl WasmSim {
         let ok = self.inner.can_attack(entity, target);
         if ok {
             self.inner.push_command(Command::Attack { entity, target });
+        }
+        ok
+    }
+
+    /// Order a unit to attack a placed building (M5): chase its
+    /// footprint and strike until it is destroyed or a new order
+    /// lands. Only another player's building is a valid target.
+    /// Returns whether the order *would* be accepted.
+    pub fn push_attack_building(&mut self, entity: u32, building: u32) -> bool {
+        let ok = self.inner.can_attack_building(entity, building);
+        if ok {
+            self.inner
+                .push_command(Command::AttackBuilding { entity, building });
         }
         ok
     }
@@ -309,18 +354,21 @@ impl WasmSim {
         self.inner.idle_military()
     }
 
-    /// Placed buildings as a flat array: eleven values per building —
-    /// `[id, kind, x, y, progress, complete, cell_x, cell_y, size,
-    /// queue_len, train_progress]` — in building id order. `kind`
-    /// tags: 0 house, 1 farm, 2 barracks (M3). `progress` is the
-    /// construction fraction 0..1 (1 when complete); `complete` is
-    /// 0/1; `size` is the footprint edge in cells; `queue_len` and
-    /// `train_progress` (0..1 on the queue's head) describe a
-    /// production building's queue. A completed farm is listed here
-    /// (its food shows up as a node in `nodes()`); an
-    /// under-construction farm appears only here.
+    /// Placed buildings as a flat array: thirteen values per
+    /// building — `[id, kind, x, y, progress, complete, cell_x,
+    /// cell_y, size, queue_len, train_progress, owner, hp]` — in
+    /// building id order. `kind` tags: 0 house, 1 farm, 2 barracks
+    /// (M3). `progress` is the construction fraction 0..1 (1 when
+    /// complete); `complete` is 0/1; `size` is the footprint edge in
+    /// cells; `queue_len` and `train_progress` (0..1 on the queue's
+    /// head) describe a production building's queue. M5 adds `owner`
+    /// (0 human, 2 opponent — the entity owner tags) and `hp`, the
+    /// remaining-HP fraction 0..1 (buildings take damage now; a
+    /// destroyed building leaves the list entirely). A completed
+    /// farm is listed here (its food shows up as a node in
+    /// `nodes()`); an under-construction farm appears only here.
     pub fn buildings(&self) -> Vec<f64> {
-        let mut out = Vec::with_capacity(self.inner.buildings().len() * 11);
+        let mut out = Vec::with_capacity(self.inner.buildings().len() * 13);
         for b in self.inner.buildings() {
             out.push(b.id as f64);
             out.push(b.kind.tag() as f64);
@@ -333,6 +381,8 @@ impl WasmSim {
             out.push(b.kind.footprint_size() as f64);
             out.push(b.queue.len() as f64);
             out.push(I16F16::from_bits(b.train_frac_bits()).to_num::<f64>());
+            out.push(b.owner as f64);
+            out.push(I16F16::from_bits(b.hp_frac_bits()).to_num::<f64>());
         }
         out
     }
@@ -380,8 +430,9 @@ impl WasmSim {
         self.inner.entities().iter().map(|e| e.kind.tag()).collect()
     }
 
-    /// Per-entity owner tags in id order (M3): 0 = the player,
-    /// 1 = Gaia. A sheep flips 1 → 0 when captured.
+    /// Per-entity owner tags in id order (M3): 0 = the human player,
+    /// 1 = Gaia, 2 = the AI opponent (M5). A sheep flips 1 → its
+    /// capturer's tag when captured.
     pub fn entity_owners(&self) -> Vec<u8> {
         self.inner.entities().iter().map(|e| e.owner).collect()
     }
@@ -443,9 +494,22 @@ impl WasmSim {
     }
 
     /// Stockpile as `[food, wood, gold, stone]` (f64 at the boundary).
+    /// The human player's — unchanged since M2; use `stockpile_for`
+    /// for another seat (M5).
     pub fn stockpile(&self) -> Vec<f64> {
         self.inner
             .stockpile()
+            .amounts()
+            .iter()
+            .map(|a| a.to_num::<f64>())
+            .collect()
+    }
+
+    /// Any player's stockpile by owner tag (M5): `[food, wood, gold,
+    /// stone]` for owner 0 (human) or 2 (opponent).
+    pub fn stockpile_for(&self, owner: u32) -> Vec<f64> {
+        self.inner
+            .stockpile_of(owner as u8)
             .amounts()
             .iter()
             .map(|a| a.to_num::<f64>())

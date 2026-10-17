@@ -19,9 +19,20 @@ use crate::units;
 /// Owner tag: the (single, for now) human player.
 pub const OWNER_PLAYER: u8 = 0;
 /// Owner tag: Gaia — the neutral world (wild animals). Captured
-/// herdables flip to `OWNER_PLAYER`; future multiplayer adds per-player
-/// tags beside these two.
+/// herdables flip to the capturing player's tag; future multiplayer adds
+/// per-player tags beside these.
 pub const OWNER_GAIA: u8 = 1;
+/// Owner tag: the second player (M5) — the scripted AI opponent's
+/// seat. Everything the sim does for `OWNER_PLAYER` it does for this
+/// tag too (own stockpile, own Town Center, own population): the sim
+/// has no favorite seat (RULEBOOK AI-01).
+pub const OWNER_OPPONENT: u8 = 2;
+
+/// Whether an owner tag belongs to a player (human or opponent) as
+/// opposed to Gaia.
+pub fn is_player_owner(owner: u8) -> bool {
+    owner != OWNER_GAIA
+}
 
 /// What an entity is. Villagers move and work; the Town Center is a static
 /// building (drop-off point and villager producer). M3 adds military
@@ -268,6 +279,12 @@ pub struct Entity {
     /// retaliation, or a boar's aggro), if any. The combat phase
     /// chases it, strikes it, and clears this when it dies.
     pub attack_target: Option<u32>,
+    /// The placed building this one is attacking (M5), if any — the
+    /// building counterpart of `attack_target` (placed buildings are
+    /// not entities, so they need their own slot). Mutually exclusive
+    /// with `attack_target`; the combat phase's building step chases
+    /// and strikes it, and building destruction clears it.
+    pub attack_building: Option<u32>,
     /// Tick at which a pending strike lands (the attack-delay window
     /// of an engagement's first attack — CMB-04). `None` when no
     /// strike is pending.
@@ -335,6 +352,7 @@ impl Entity {
             hp: I16F16::from_num(units::spec(kind).max_hp),
             dead: false,
             attack_target: None,
+            attack_building: None,
             strike_tick: None,
             next_attack_tick: 0,
             attack_engaged: false,
@@ -374,6 +392,7 @@ impl Entity {
     /// target becomes invalid.
     pub fn clear_combat(&mut self) {
         self.attack_target = None;
+        self.attack_building = None;
         self.strike_tick = None;
         self.attack_engaged = false;
     }

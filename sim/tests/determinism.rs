@@ -127,11 +127,23 @@ fn golden_hash_regression() {
     // every rally unset — the stream changes through the wider
     // coverage alone. New value verified stable across independent
     // runs (replay example, seed 42, 360 ticks, run twice).
+    //
+    // M5 deliberate update: the hash now also covers the match mode,
+    // BOTH players' stockpiles (the opponent slot sits untouched at
+    // its starting values in this sandbox), the per-Town-Center
+    // production states (queue/progress/rally, replacing the single
+    // global TC fields), building owner + HP, the entities'
+    // building-attack target, projectiles' building target, and the
+    // AI's wave clock. No commands are issued in this scenario and
+    // the sandbox start is unchanged — the stream changes through
+    // the wider coverage alone. New value verified stable across
+    // independent runs (replay example, seed 42, 360 ticks, run
+    // twice).
     let mut sim = Sim::new(42);
     let mut hash = 0;
     for _ in 0..360 {
         hash = sim.tick();
     }
     assert_eq!(sim.tick_count(), 360);
-    assert_eq!(format!("{:016x}", hash), "d80ebd51f8fe6844");
+    assert_eq!(format!("{:016x}", hash), "aa30c8206075caa7");
 }

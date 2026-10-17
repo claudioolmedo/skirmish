@@ -1,0 +1,599 @@
+//! Match tests (M5): the mirrored opponent start, the scripted AI
+//! playing a real game through the command queue alone, Conquest
+//! victory/defeat end-to-end, and bit-identical AI replays.
+//!
+//! The AI tests give the human *no commands at all* (or a fixed
+//! script): everything the opponent does — its economy, its army,
+//! its waves — is the AI script acting through `Command`s, exactly
+//! like a second player would.
+
+use fixed::types::I16F16;
+use skirmish_sim::{
+    BuildingKind, Command, EntityKind, MatchMode, MatchState, ResourceKind, Sim, OWNER_OPPONENT,
+    OWNER_PLAYER,
+};
+
+fn f(v: I16F16) -> f64 {
+    v.to_num::<f64>()
+}
+
+fn living(sim: &Sim, owner: u8, kind: EntityKind) -> u32 {
+    sim.entities()
+        .iter()
+        .filter(|e| e.owner == owner && e.kind == kind && !e.dead)
+        .count() as u32
+}
+
+fn military_count(sim: &Sim, owner: u8) -> u32 {
+    sim.entities()
+        .iter()
+        .filter(|e| e.owner == owner && !e.dead && e.kind.is_military())
+        .count() as u32
+}
+
+fn stockpile_total(sim: &Sim, owner: u8) -> f64 {
+    sim.stockpile_of(owner)
+        .amounts()
+        .iter()
+        .map(|a| f(*a))
+        .sum()
+}
+
+#[test]
+fn opponent_start_is_mirrored_and_complete() {
+    let sim = Sim::new_match(3, MatchMode::AiNormal);
+    // Two Town Centers: the human's at the standard cell, the
+    // opponent's mirrored through the map center.
+    let tcs: Vec<_> = sim
+        .entities()
+        .iter()
+        .filter(|e| e.kind == EntityKind::TownCenter)
+        .collect();
+    assert_eq!(tcs.len(), 2);
+    let human_tc = tcs.iter().find(|e| e.owner == OWNER_PLAYER).unwrap();
+    let enemy_tc = tcs.iter().find(|e| e.owner == OWNER_OPPONENT).unwrap();
+    assert_eq!((f(human_tc.pos_x), f(human_tc.pos_y)), (-6.0, -6.0));
+    assert_eq!((f(enemy_tc.pos_x), f(enemy_tc.pos_y)), (6.0, 6.0));
+    // Mirrored start package: 3 villagers + 1 Scout, own stockpile,
+    // own population room.
+    assert_eq!(living(&sim, OWNER_OPPONENT, EntityKind::Villager), 3);
+    assert_eq!(living(&sim, OWNER_OPPONENT, EntityKind::ScoutCavalry), 1);
+    assert_eq!(sim.population_of(OWNER_OPPONENT), 4);
+    assert_eq!(sim.population_cap_of(OWNER_OPPONENT), 5);
+    assert_eq!(stockpile_total(&sim, OWNER_OPPONENT), 700.0);
+    // The resource layout is doubled (20 shared + 20 mirrored).
+    assert_eq!(sim.nodes().len(), 40);
+    // The opponent has its own sheep: the Gaia herd doubles too.
+    assert_eq!(living(&sim, 1, EntityKind::Sheep), 16);
+    // Nobody starts inside a wall (the mirrored villager whose
+    // exact mirror cell is wall must have been re-seated nearby).
+    for e in sim.entities() {
+        let (cx, cy) = sim.grid().world_to_cell(e.pos_x, e.pos_y);
+        assert!(
+            !sim.grid().is_blocked(cx, cy),
+            "entity {} starts inside a wall",
+            e.id
+        );
+    }
+    // And the whole start is deterministic.
+    let again = Sim::new_match(3, MatchMode::AiNormal);
+    assert_eq!(sim.entities(), again.entities());
+    assert_eq!(sim.nodes(), again.nodes());
+}
+
+#[test]
+fn ai_economy_grows_without_human_commands() {
+    let mut sim = Sim::new_match(7, MatchMode::AiNormal);
+    // Eleven game-minutes, zero human commands — long enough for
+    // the AI to finish its buildup (it invests everything early,
+    // so the stockpile only turns net-positive once its villager
+    // and army targets are met and the spending stops).
+    for _ in 0..39_600 {
+        sim.tick();
+    }
+    // It trained villagers well past the starting three…
+    assert!(
+        living(&sim, OWNER_OPPONENT, EntityKind::Villager) >= 14,
+        "AI villagers: {}",
+        living(&sim, OWNER_OPPONENT, EntityKind::Villager)
+    );
+    // …grew its population far past the starting four…
+    assert!(
+        sim.population_of(OWNER_OPPONENT) >= 20,
+        "AI population: {}",
+        sim.population_of(OWNER_OPPONENT)
+    );
+    // …built houses and its Barracks…
+    assert!(
+        sim.buildings()
+            .iter()
+            .filter(|b| b.owner == OWNER_OPPONENT)
+            .count()
+            >= 3,
+        "AI buildings: {}",
+        sim.buildings()
+            .iter()
+            .filter(|b| b.owner == OWNER_OPPONENT)
+            .count()
+    );
+    // …and its stockpile ends net-positive against the 700 it
+    // started with, *after* paying for all those villagers,
+    // buildings and soldiers: the gather loop really deposits.
+    assert!(
+        stockpile_total(&sim, OWNER_OPPONENT) > 800.0,
+        "AI stockpile total: {}",
+        stockpile_total(&sim, OWNER_OPPONENT)
+    );
+    // The human side never issued a command: its stockpile is the
+    // untouched 700 it started with (the AI plays only its own
+    // seat — no cross-player leakage), and its Town Center still
+    // stands, so the match is Ongoing. Its villagers are *not*
+    // asserted on: by minute eight the first waves have landed,
+    // and a passive player's workers die — that is the wave test's
+    // subject, not this one's.
+    assert_eq!(stockpile_total(&sim, OWNER_PLAYER), 700.0);
+    assert_eq!(sim.match_state(), MatchState::Ongoing);
+}
+
+#[test]
+fn ai_raises_army_and_wave_engages_the_human() {
+    let mut sim = Sim::new_match(9, MatchMode::AiNormal);
+    let mut saw_barracks = false;
+    let mut saw_army = false;
+    let mut engaged = false;
+    // Up to ten game-minutes; the human does nothing at all.
+    for _ in 0..36_000 {
+        sim.tick();
+        saw_barracks |= sim.buildings().iter().any(|b| {
+            b.owner == OWNER_OPPONENT && b.kind == BuildingKind::Barracks && b.complete
+        });
+        saw_army |= military_count(&sim, OWNER_OPPONENT) >= 5;
+        // Engagement: an AI soldier has a human target, or a human
+        // unit has taken damage.
+        engaged |= sim.entities().iter().any(|e| {
+            (e.owner == OWNER_OPPONENT
+                && e.kind.is_military()
+                && e.attack_target
+                    .map(|t| {
+                        sim.entities()
+                            .iter()
+                            .find(|x| x.id == t)
+                            .map(|x| x.owner == OWNER_PLAYER)
+                            .unwrap_or(false)
+                    })
+                    .unwrap_or(false))
+                || (e.owner == OWNER_PLAYER
+                    && e.kind.counts_population()
+                    && (e.dead || e.hp < I16F16::from_num(max_hp(e.kind))))
+        });
+        if saw_barracks && saw_army && engaged {
+            break;
+        }
+    }
+    assert!(saw_barracks, "AI never completed a Barracks");
+    assert!(saw_army, "AI never raised an army of 5");
+    assert!(engaged, "no AI wave ever engaged the human side");
+}
+
+fn max_hp(kind: EntityKind) -> i32 {
+    skirmish_sim::unit_spec(kind).max_hp
+}
+
+#[test]
+fn ai_match_replays_bit_identically() {
+    let run = |seed: u64| -> Vec<u64> {
+        let mut sim = Sim::new_match(seed, MatchMode::AiNormal);
+        let mut hashes = Vec::new();
+        for _ in 0..5_400 {
+            hashes.push(sim.tick());
+        }
+        hashes
+    };
+    assert_eq!(run(13), run(13), "identical AI matches diverged");
+}
+
+#[test]
+fn scripted_siege_wins_the_match() {
+    let mut sim = Sim::new_match(21, MatchMode::AiEasy);
+    let mut driver = HumanScript::default();
+    let mut won_at = None;
+    for _ in 0..120_000 {
+        driver.drive(&mut sim);
+        sim.tick();
+        if sim.match_state() == MatchState::Victory {
+            won_at = Some(sim.tick_count());
+            break;
+        }
+        assert_eq!(
+            sim.match_state(),
+            MatchState::Ongoing,
+            "the scripted human must not lose its own siege"
+        );
+    }
+    assert!(won_at.is_some(), "scripted siege never won the match");
+}
+
+#[test]
+fn passive_human_loses_the_match() {
+    let mut sim = Sim::new_match(33, MatchMode::AiNormal);
+    let mut lost_at = None;
+    for _ in 0..200_000 {
+        sim.tick();
+        if sim.match_state() == MatchState::Defeat {
+            lost_at = Some(sim.tick_count());
+            break;
+        }
+    }
+    assert!(
+        lost_at.is_some(),
+        "a passive human was never defeated by the AI"
+    );
+}
+
+/// A fixed scripted build order for the human side of
+/// `scripted_siege_wins_the_match` — deliberately the same shape a
+/// player would follow (and the same shape the AI script follows):
+/// grow to ~12 villagers, two Barracks, a mixed Militia/Archer
+/// army, then a committed push — rallies set to the enemy Town
+/// Center, reinforcements streaming — until the enemy Town Center
+/// falls and the mop-up triggers its resignation. Deterministic:
+/// every decision reads live sim state in id order, like the AI's.
+#[derive(Default)]
+struct HumanScript {
+    acted: Vec<u32>,
+    pushing: bool,
+}
+
+impl HumanScript {
+    fn drive(&mut self, sim: &mut Sim) {
+        self.acted.clear();
+        let me = OWNER_PLAYER;
+        let foe = OWNER_OPPONENT;
+        // Town Center: train toward 12 villagers.
+        let villagers = living(sim, me, EntityKind::Villager);
+        if villagers + sim.train_queue_len() < 12 && sim.can_train_villager() {
+            sim.push_command(Command::TrainVillager);
+        }
+        // Barracks production: a mixed army, alternating kinds,
+        // toward 16 — and kept up during the push (reinforcements).
+        let army = living(sim, me, EntityKind::Militia) + living(sim, me, EntityKind::Archer);
+        let barracks_ids: Vec<u32> = sim
+            .buildings()
+            .iter()
+            .filter(|b| b.owner == me && b.kind == BuildingKind::Barracks && b.complete)
+            .map(|b| b.id)
+            .collect();
+        for bid in barracks_ids {
+            if army < 16 {
+                let preferred = if army % 2 == 0 {
+                    EntityKind::Militia
+                } else {
+                    EntityKind::Archer
+                };
+                let fallback = if preferred == EntityKind::Militia {
+                    EntityKind::Archer
+                } else {
+                    EntityKind::Militia
+                };
+                if sim.can_train_at(bid, preferred) {
+                    sim.push_command(Command::TrainAt {
+                        building: bid,
+                        kind: preferred,
+                    });
+                } else if sim.can_train_at(bid, fallback) {
+                    sim.push_command(Command::TrainAt {
+                        building: bid,
+                        kind: fallback,
+                    });
+                }
+            }
+        }
+        // Construction: two Barracks, then houses ahead of the
+        // cap — one placement per pass, by the first idle villager.
+        let barracks = sim
+            .buildings()
+            .iter()
+            .filter(|b| b.owner == me && b.kind == BuildingKind::Barracks)
+            .count();
+        let wood = f(sim.stockpile_of(me).amount(ResourceKind::Wood));
+        let want = if barracks < 2 && villagers >= 5 && wood >= 175.0 {
+            Some(BuildingKind::Barracks)
+        } else if sim.population_of(me) + 1 >= sim.population_cap_of(me) && wood >= 25.0 {
+            Some(BuildingKind::House)
+        } else {
+            None
+        };
+        if let Some(kind) = want {
+            if let Some(builder) = self.first_idle_villager(sim) {
+                if let Some((x, y)) = find_anchor(sim, builder, kind) {
+                    sim.push_command(Command::Build {
+                        entity: builder,
+                        kind,
+                        x,
+                        y,
+                    });
+                    self.acted.push(builder);
+                }
+            }
+        }
+        // Idle villagers to work: food 6 / wood 4 / gold 3, surplus
+        // to food; hunt own sheep when no food source is near home.
+        self.assign_workers(sim);
+        // The push: at a dozen soldiers the script commits. Both
+        // Barracks rally to the enemy Town Center (fresh troops
+        // walk to the front), and every free soldier is ordered in
+        // — Town Center first, then the nearest enemy unit, then
+        // the nearest enemy building. The latch stays on: this is
+        // a siege, not a raid.
+        if army >= 12 {
+            self.pushing = true;
+        }
+        if self.pushing {
+            let foe_tc = sim
+                .entities()
+                .iter()
+                .find(|e| e.owner == foe && e.kind == EntityKind::TownCenter && !e.dead)
+                .map(|e| (e.id, e.pos_x, e.pos_y));
+            if let Some((_, tx, ty)) = foe_tc {
+                let rally_bids: Vec<u32> = sim
+                    .buildings()
+                    .iter()
+                    .filter(|b| {
+                        b.owner == me
+                            && b.kind == BuildingKind::Barracks
+                            && b.complete
+                            && b.rally != Some((tx, ty))
+                    })
+                    .map(|b| b.id)
+                    .collect();
+                for bid in rally_bids {
+                    sim.push_command(Command::SetRally {
+                        building: Some(bid),
+                        x: tx,
+                        y: ty,
+                    });
+                }
+            }
+            // Snapshot the free soldiers first (commands mutate).
+            let soldiers: Vec<(u32, I16F16, I16F16)> = sim
+                .entities()
+                .iter()
+                .filter(|e| {
+                    e.owner == me
+                        && !e.dead
+                        && e.kind.is_military()
+                        && e.attack_target.is_none()
+                        && e.attack_building.is_none()
+                })
+                .map(|e| (e.id, e.pos_x, e.pos_y))
+                .collect();
+            for (id, mx, my) in soldiers {
+                if let Some((tc, _, _)) = foe_tc {
+                    sim.push_command(Command::Attack {
+                        entity: id,
+                        target: tc,
+                    });
+                    continue;
+                }
+                if let Some(t) = nearest_living_unit(sim, foe, mx, my) {
+                    sim.push_command(Command::Attack {
+                        entity: id,
+                        target: t,
+                    });
+                    continue;
+                }
+                if let Some(b) = nearest_building(sim, foe, mx, my) {
+                    sim.push_command(Command::AttackBuilding {
+                        entity: id,
+                        building: b,
+                    });
+                }
+            }
+        }
+    }
+
+    fn first_idle_villager(&self, sim: &Sim) -> Option<u32> {
+        sim.entities()
+            .iter()
+            .find(|e| {
+                e.owner == OWNER_PLAYER
+                    && e.kind == EntityKind::Villager
+                    && !e.dead
+                    && e.task == skirmish_sim::Task::Idle
+                    && e.order.is_none()
+                    && e.attack_target.is_none()
+                    && !self.acted.contains(&e.id)
+            })
+            .map(|e| e.id)
+    }
+
+    fn assign_workers(&mut self, sim: &mut Sim) {
+        let me = OWNER_PLAYER;
+        let tc = sim.town_center();
+        let (tc_x, tc_y) = (tc.pos_x, tc.pos_y);
+        let targets = [6u32, 4, 3]; // food, wood, gold
+        let mut counts = [0u32; 3];
+        for e in sim.entities() {
+            if e.owner != me || e.kind != EntityKind::Villager || e.dead {
+                continue;
+            }
+            if e.task != skirmish_sim::Task::Idle {
+                if let Some(nid) = e.task_node {
+                    if let Some(n) = sim.nodes().iter().find(|n| n.id == nid) {
+                        if !n.is_depleted() {
+                            counts[match n.resource() {
+                                ResourceKind::Food => 0,
+                                ResourceKind::Wood => 1,
+                                ResourceKind::Gold => 2,
+                                ResourceKind::Stone => 0,
+                            }] += 1;
+                        }
+                    }
+                }
+            }
+        }
+        let idle: Vec<u32> = sim
+            .entities()
+            .iter()
+            .filter(|e| {
+                e.owner == me
+                    && e.kind == EntityKind::Villager
+                    && !e.dead
+                    && e.task == skirmish_sim::Task::Idle
+                    && e.order.is_none()
+                    && e.attack_target.is_none()
+                    && !self.acted.contains(&e.id)
+            })
+            .map(|e| e.id)
+            .collect();
+        let food_near = nearest_node(sim, ResourceKind::Food, tc_x, tc_y)
+            .and_then(|nid| sim.nodes().iter().find(|n| n.id == nid))
+            .map(|n| dist(n.pos_x - tc_x, n.pos_y - tc_y) <= 20.0)
+            .unwrap_or(false);
+        for vid in idle {
+            let mut slot = 0usize;
+            let mut best = i64::MIN;
+            for s in 0..3 {
+                let d = targets[s] as i64 - counts[s] as i64;
+                if d > best {
+                    best = d;
+                    slot = s;
+                }
+            }
+            let resource = [
+                ResourceKind::Food,
+                ResourceKind::Wood,
+                ResourceKind::Gold,
+            ][slot];
+            if resource == ResourceKind::Food && !food_near {
+                if let Some(sheep) = sim
+                    .entities()
+                    .iter()
+                    .find(|e| e.kind == EntityKind::Sheep && e.owner == me && !e.dead)
+                    .map(|e| e.id)
+                {
+                    sim.push_command(Command::Attack {
+                        entity: vid,
+                        target: sheep,
+                    });
+                    self.acted.push(vid);
+                    counts[0] += 1;
+                    continue;
+                }
+            }
+            if let Some(nid) = nearest_node(sim, resource, tc_x, tc_y) {
+                sim.push_command(Command::Gather {
+                    entity: vid,
+                    node: nid,
+                });
+                self.acted.push(vid);
+                counts[slot] += 1;
+            }
+        }
+    }
+}
+
+fn dist(dx: I16F16, dy: I16F16) -> f64 {
+    let (x, y) = (f(dx), f(dy));
+    (x * x + y * y).sqrt()
+}
+
+fn nearest_node(sim: &Sim, resource: ResourceKind, x: I16F16, y: I16F16) -> Option<u32> {
+    // Own side of the map only — the same rule the AI plays by:
+    // the layout's first block of nodes is the human's set, the
+    // mirrored block is the opponent's, and dynamic nodes
+    // (carcasses) belong to the nearer Town Center. (Plain
+    // distance would send miners to the enemy's far gold mine,
+    // which sits a hair nearer this Town Center than its own.)
+    let shared = 20u32; // NODE_SPECS length; the layout is 2 blocks
+    let foe_tc = sim
+        .entities()
+        .iter()
+        .find(|e| e.owner == OWNER_OPPONENT && e.kind == EntityKind::TownCenter && !e.dead);
+    let mut best: Option<(f64, u32)> = None;
+    for n in sim.nodes() {
+        if n.is_depleted() || n.resource() != resource {
+            continue;
+        }
+        let mine = if n.id < shared * 2 {
+            n.id < shared
+        } else {
+            match foe_tc {
+                Some(ftc) => {
+                    dist(n.pos_x - x, n.pos_y - y)
+                        <= dist(n.pos_x - ftc.pos_x, n.pos_y - ftc.pos_y)
+                }
+                None => true,
+            }
+        };
+        if !mine {
+            continue;
+        }
+        let d = dist(n.pos_x - x, n.pos_y - y);
+        if best.map(|(bd, _)| d < bd).unwrap_or(true) {
+            best = Some((d, n.id));
+        }
+    }
+    best.map(|(_, id)| id)
+}
+
+fn nearest_living_unit(sim: &Sim, owner: u8, x: I16F16, y: I16F16) -> Option<u32> {
+    let mut best: Option<(f64, u32)> = None;
+    for e in sim.entities() {
+        if e.owner != owner || e.dead || !e.kind.counts_population() {
+            continue;
+        }
+        let d = dist(e.pos_x - x, e.pos_y - y);
+        if best.map(|(bd, _)| d < bd).unwrap_or(true) {
+            best = Some((d, e.id));
+        }
+    }
+    best.map(|(_, id)| id)
+}
+
+fn nearest_building(sim: &Sim, owner: u8, x: I16F16, y: I16F16) -> Option<u32> {
+    let mut best: Option<(f64, u32)> = None;
+    for b in sim.buildings() {
+        if b.owner != owner {
+            continue;
+        }
+        let d = dist(b.pos_x - x, b.pos_y - y);
+        if best.map(|(bd, _)| d < bd).unwrap_or(true) {
+            best = Some((d, b.id));
+        }
+    }
+    best.map(|(_, id)| id)
+}
+
+/// First legal anchor (footprint top-left cell) on expanding rings
+/// around the human Town Center, validated by `Sim::can_build` —
+/// the same search shape the AI uses.
+fn find_anchor(sim: &Sim, builder: u32, kind: BuildingKind) -> Option<(I16F16, I16F16)> {
+    let tc = sim.town_center();
+    let (tcx, tcy) = sim.grid().world_to_cell(tc.pos_x, tc.pos_y);
+    let size = kind.footprint_size();
+    for r in 3..=9i32 {
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if dx.abs() != r && dy.abs() != r {
+                    continue;
+                }
+                let (ax, ay) = (tcx as i32 + dx, tcy as i32 + dy);
+                if ax < 0 || ay < 0 {
+                    continue;
+                }
+                let (ax, ay) = (ax as u32, ay as u32);
+                // Footprint center from the anchor cell (build.rs's
+                // formula, restated): the anchor center plus half
+                // the remaining footprint extent.
+                let (ccx, ccy) = sim.grid().cell_center(ax, ay);
+                let off = I16F16::from_num((size as i32 - 1) * 2);
+                let (x, y) = (ccx + off, ccy + off);
+                if sim.can_build(builder, kind, x, y) {
+                    return Some((x, y));
+                }
+            }
+        }
+    }
+    None
+}

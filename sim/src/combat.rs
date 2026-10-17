@@ -37,9 +37,10 @@
 
 use fixed::types::I16F16;
 
+use crate::build::BuildingKind;
 use crate::classes as cls;
 use crate::econ::{NodeKind, ResourceNode};
-use crate::entity::{EntityKind, Task, OWNER_GAIA, OWNER_PLAYER};
+use crate::entity::{is_player_owner, EntityKind, Task, OWNER_GAIA};
 use crate::units::{self, UnitSpec};
 use crate::{steer, Sim};
 
@@ -84,6 +85,10 @@ pub struct Projectile {
     /// The unit the shot was aimed at (release-time position is the
     /// aim point — no Ballistics tech in M3, PRJ-05).
     pub intended: Option<u32>,
+    /// The placed building the shot was aimed at (M5), when the
+    /// target was a building rather than a unit. Mutually exclusive
+    /// with `intended`.
+    pub intended_building: Option<u32>,
     /// Attacker entity id (kill credit).
     pub attacker: u32,
     /// Attacker owner (friendly-fire exclusion).
@@ -127,6 +132,37 @@ pub fn compute_damage(attacks: &[(u8, i32)], target: &UnitSpec) -> i32 {
     }
 }
 
+/// The damage-table view of a placed building kind (M5): HP and
+/// armor from the study's building table (`BuildingKind::max_hp` /
+/// `armor_melee` / `armor_pierce`), classes All Buildings + Standard
+/// Buildings (the same membership the Town Center entity carries in
+/// the unit tables). Everything else is inert — a building never
+/// moves, shoots, or trains through this view.
+pub(crate) fn building_spec(kind: BuildingKind) -> UnitSpec {
+    UnitSpec {
+        max_hp: kind.max_hp(),
+        attacks: &[],
+        armor_melee: kind.armor_melee(),
+        armor_pierce: kind.armor_pierce(),
+        classes: cls::mask(&[cls::ALL_BUILDINGS, cls::STANDARD_BUILDINGS]),
+        range_max: I16F16::ZERO,
+        reload_ticks: 0,
+        attack_delay_ticks: 0,
+        accuracy: 0,
+        projectile_speed: I16F16::ZERO,
+        scatter: I16F16::ZERO,
+        speed: I16F16::ZERO,
+        los: I16F16::ZERO,
+        radius: I16F16::ZERO,
+        carcass_food: 0,
+        carcass_decay_bits: 0,
+        food_cost: 0,
+        wood_cost: 0,
+        gold_cost: 0,
+        train_ticks: 0,
+    }
+}
+
 impl Sim {
     /// The combat phase of a tick (SIM-07: after movement, before
     /// economy). Fixed internal order: capture, animal AI,
@@ -144,14 +180,22 @@ impl Sim {
         for idx in 0..self.entities.len() {
             self.attack_step(idx);
         }
+        // M5: building attackers run their own step, after the
+        // entity attackers (same ascending-id discipline).
+        for idx in 0..self.entities.len() {
+            self.attack_building_step(idx);
+        }
         self.projectile_step();
         self.death_sweep();
     }
 
-    /// Sheep capture (ECO-13): a Gaia sheep with any living player
-    /// unit (not the Town Center) within capture range changes sides.
-    /// Ownership then stays — stealing a captured sheep back is a
-    /// multiplayer rule for later.
+    /// Sheep capture (ECO-13 / AI-06): a Gaia sheep with any living
+    /// player unit (not the Town Center) within capture range
+    /// changes sides — to the first such unit's player, in id order
+    /// (M5: either player can capture; with two players near one
+    /// sheep the lower id decides, deterministically). Ownership
+    /// then stays — stealing a captured sheep back is a multiplayer
+    /// rule for later.
     fn capture_sheep(&mut self) {
         for idx in 0..self.entities.len() {
             let e = &self.entities[idx];
@@ -159,14 +203,15 @@ impl Sim {
                 continue;
             }
             let (sx, sy) = (e.pos_x, e.pos_y);
-            let captured = self.entities.iter().any(|u| {
-                u.owner == OWNER_PLAYER
+            let captor = self.entities.iter().find(|u| {
+                is_player_owner(u.owner)
                     && !u.dead
                     && u.kind.is_mobile()
                     && steer::vec_len(u.pos_x - sx, u.pos_y - sy) <= CAPTURE_RANGE
             });
-            if captured {
-                self.entities[idx].owner = OWNER_PLAYER;
+            if let Some(u) = captor {
+                let owner = u.owner;
+                self.entities[idx].owner = owner;
             }
         }
     }
@@ -244,7 +289,7 @@ impl Sim {
             let (bx, by) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
             let los = units::spec(EntityKind::Boar).los;
             let threat_near = self.entities.iter().any(|u| {
-                u.owner == OWNER_PLAYER
+                is_player_owner(u.owner)
                     && !u.dead
                     && u.kind.is_mobile()
                     && steer::vec_len(u.pos_x - bx, u.pos_y - by) <= los
@@ -283,28 +328,40 @@ impl Sim {
         self.set_move_order(idx, dest_x, dest_y);
     }
 
-    /// Auto-acquisition (CMB-08): idle Militia and Archers engage the
-    /// closest boar inside their LoS. Only boars qualify in M3 —
-    /// herdables and deer are never auto-targeted (killing them is
-    /// always an explicit order), villagers never auto-attack, and
-    /// the Scout's Dark Age default stance is Stand Ground (CMB-09),
-    /// so it does not acquire either.
+    /// Auto-acquisition (CMB-08): idle Militia and Archers of *any*
+    /// player engage the closest enemy inside their LoS. In M3 the
+    /// only enemies were boars; since M5 an opposing player's units
+    /// qualify too (its Town Center never does — razing a Town
+    /// Center is always an explicit order, never an accident of
+    /// proximity). Herdables and deer are never auto-targeted
+    /// (killing them is always an explicit order), villagers never
+    /// auto-attack, and the Scout's Dark Age default stance is Stand
+    /// Ground (CMB-09), so it does not acquire either.
     fn acquire_targets(&mut self) {
         for idx in 0..self.entities.len() {
             let e = &self.entities[idx];
             if e.dead
-                || e.owner != OWNER_PLAYER
+                || !is_player_owner(e.owner)
                 || !matches!(e.kind, EntityKind::Militia | EntityKind::Archer)
                 || e.attack_target.is_some()
+                || e.attack_building.is_some()
                 || e.order.is_some()
             {
                 continue;
             }
+            let owner = e.owner;
             let spec = units::spec(e.kind);
             let (px, py) = (e.pos_x, e.pos_y);
             let mut best: Option<(i64, u32)> = None; // (distance² bits, id)
             for t in &self.entities {
-                if t.kind != EntityKind::Boar || t.dead {
+                if t.dead || t.id == e.id {
+                    continue;
+                }
+                let qualifies = t.kind == EntityKind::Boar
+                    || (is_player_owner(t.owner)
+                        && t.owner != owner
+                        && t.kind != EntityKind::TownCenter);
+                if !qualifies {
                     continue;
                 }
                 let d = steer::vec_len(t.pos_x - px, t.pos_y - py);
@@ -437,6 +494,7 @@ impl Sim {
                 spawn_tick: self.tick,
                 impact_tick: self.tick + flight,
                 intended: Some(self.entities[ti].id),
+                intended_building: None,
                 attacker: attacker_id,
                 owner,
                 attacks: spec.attacks.to_vec(),
@@ -490,7 +548,7 @@ impl Sim {
                         self.entities[ai].dead,
                         self.entities[ai].kind,
                     );
-                    if aowner == OWNER_PLAYER && !adead {
+                    if aowner != OWNER_GAIA && !adead {
                         let b = &mut self.entities[ti];
                         b.aggro_target = Some(attacker_id);
                         b.returning_home = false;
@@ -510,14 +568,248 @@ impl Sim {
                 t.flee_from_y = threat.1;
             }
             EntityKind::Militia | EntityKind::Archer => {
-                // Retaliation: an idle military unit answers its
-                // attacker. (Villagers never auto-attack — task rule.)
+                // Retaliation: an idle military unit of either
+                // player answers its attacker (M5). (Villagers never
+                // auto-attack — task rule.)
                 let t = &self.entities[ti];
-                if t.owner == OWNER_PLAYER && t.attack_target.is_none() && t.order.is_none() {
+                if is_player_owner(t.owner) && t.attack_target.is_none() && t.order.is_none() {
                     self.entities[ti].attack_target = Some(attacker_id);
                 }
             }
             _ => {}
+        }
+    }
+
+    /// One building-attacker's tick (M5): the `attack_step`
+    /// counterpart for placed buildings. Range is measured to the
+    /// footprint's edge (the nearest point of its rectangle), chase
+    /// targets a ring cell beside the footprint — its center is
+    /// solid ground a unit can never stand on — and strikes follow
+    /// the same delay/reload discipline as entity combat (CMB-04/05).
+    fn attack_building_step(&mut self, idx: usize) {
+        let tick = self.tick;
+        let (bid, kind) = match self.entities[idx].attack_building {
+            Some(b) if !self.entities[idx].dead => (b, self.entities[idx].kind),
+            _ => return,
+        };
+        let spec = units::spec(kind);
+        if spec.attacks.is_empty() {
+            self.entities[idx].clear_combat();
+            return;
+        }
+        let bi = match self.building_index(bid) {
+            Some(bi) => bi,
+            None => {
+                // The building is gone (destroyed by someone else, or
+                // a depleted farm retiring): the order is complete.
+                self.entities[idx].clear_combat();
+                return;
+            }
+        };
+        let b = &self.buildings[bi];
+        let (bx, by, size) = (b.pos_x, b.pos_y, b.kind.footprint_size());
+        let (ax, ay) = (b.cell_x, b.cell_y);
+        // Distance to the footprint rectangle (0 when beside it).
+        let half = I16F16::from_num(size as i32 * 2);
+        let (px, py) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
+        let qx = (px - bx).clamp(-half, half) + bx;
+        let qy = (py - by).clamp(-half, half) + by;
+        let dist = steer::vec_len(px - qx, py - qy);
+        let in_range = if spec.range_max > I16F16::ZERO {
+            dist <= spec.range_max
+        } else {
+            dist <= MELEE_REACH
+        };
+
+        if let Some(st) = self.entities[idx].strike_tick {
+            if tick >= st {
+                self.resolve_building_strike(idx, bi);
+            }
+        }
+        // The strike may have destroyed the building (which clears
+        // this attacker's target): nothing more to do this tick.
+        if self.entities[idx].attack_building != Some(bid) {
+            return;
+        }
+
+        if in_range {
+            if self.entities[idx].order.is_some() {
+                let e = &mut self.entities[idx];
+                e.order = None;
+                e.vel_x = I16F16::ZERO;
+                e.vel_y = I16F16::ZERO;
+            }
+            if spec.range_max == I16F16::ZERO {
+                self.entities[idx].suppress_separation = true;
+            }
+            let ready = tick >= self.entities[idx].next_attack_tick;
+            if self.entities[idx].strike_tick.is_none() && ready {
+                if self.entities[idx].attack_engaged {
+                    // The building record may have shifted since
+                    // `bi` was read (another building destroyed
+                    // earlier this phase): re-resolve by id.
+                    if let Some(bi2) = self.building_index(bid) {
+                        self.resolve_building_strike(idx, bi2);
+                    }
+                } else {
+                    self.entities[idx].strike_tick = Some(tick + spec.attack_delay_ticks);
+                }
+            }
+        } else {
+            // Chase the nearest standable ring cell; re-path when the
+            // current order no longer leads beside the footprint.
+            let need = match &self.entities[idx].order {
+                None => true,
+                Some(o) => {
+                    let (ox, oy) = (o.target_x, o.target_y);
+                    let qx2 = (ox - bx).clamp(-half, half) + bx;
+                    let qy2 = (oy - by).clamp(-half, half) + by;
+                    steer::vec_len(ox - qx2, oy - qy2) > I16F16::from_num(6)
+                }
+            };
+            if need {
+                if let Some((gx, gy)) = self.building_approach_point(idx, ax, ay, size) {
+                    self.set_move_order(idx, gx, gy);
+                }
+            }
+        }
+    }
+
+    /// The standing spot for attacking the footprint anchored at
+    /// `(ax, ay)`: the first ring cell (fixed order) that is open and
+    /// reachable from the attacker's position — the same search the
+    /// builder approach uses (see `Sim::approach_point`, which serves
+    /// construction; kept separate so neither path's semantics drift
+    /// into the other).
+    fn building_approach_point(
+        &self,
+        idx: usize,
+        ax: u32,
+        ay: u32,
+        size: u32,
+    ) -> Option<(I16F16, I16F16)> {
+        let from = (self.entities[idx].pos_x, self.entities[idx].pos_y);
+        for (cx, cy) in crate::build::ring_cells(ax, ay, size) {
+            if cx >= crate::GRID_DIM || cy >= crate::GRID_DIM {
+                continue;
+            }
+            if self.grid.is_blocked(cx, cy) {
+                continue;
+            }
+            let center = self.grid.cell_center(cx, cy);
+            if self.grid.find_path(from, center).is_some() {
+                return Some(center);
+            }
+        }
+        None
+    }
+
+    /// Land one strike from attacker `idx` on building `bi` (M5):
+    /// melee damage now (when still in reach of the footprint edge),
+    /// or a projectile release aimed at the building's center for a
+    /// ranged attacker — with the same release-time accuracy roll
+    /// discipline (PRJ-03). Reload restarts from the landing tick.
+    fn resolve_building_strike(&mut self, idx: usize, bi: usize) {
+        let spec = units::spec(self.entities[idx].kind);
+        let attacker_id = self.entities[idx].id;
+        let owner = self.entities[idx].owner;
+        let (ax, ay) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
+        let b = &self.buildings[bi];
+        let (bx, by, bid, size) = (b.pos_x, b.pos_y, b.id, b.kind.footprint_size());
+        if spec.range_max > I16F16::ZERO {
+            let roll = self.rng.below(100);
+            let mut impact = (bx, by);
+            if roll >= spec.accuracy {
+                let sb = spec.scatter.to_bits();
+                let span = (2 * sb + 1) as u32;
+                let dx = self.rng.below(span) as i32 - sb;
+                let dy = self.rng.below(span) as i32 - sb;
+                impact = (bx + I16F16::from_bits(dx), by + I16F16::from_bits(dy));
+            }
+            let dist_bits = steer::vec_len(bx - ax, by - ay).to_bits() as i64;
+            let speed_bits = spec.projectile_speed.to_bits() as i64;
+            let flight = ((dist_bits + speed_bits - 1) / speed_bits).max(1) as u64;
+            self.projectiles.push(Projectile {
+                spawn_x: ax,
+                spawn_y: ay,
+                impact_x: impact.0,
+                impact_y: impact.1,
+                spawn_tick: self.tick,
+                impact_tick: self.tick + flight,
+                intended: None,
+                intended_building: Some(bid),
+                attacker: attacker_id,
+                owner,
+                attacks: spec.attacks.to_vec(),
+            });
+        } else {
+            let half = I16F16::from_num(size as i32 * 2);
+            let qx = (ax - bx).clamp(-half, half) + bx;
+            let qy = (ay - by).clamp(-half, half) + by;
+            if steer::vec_len(ax - qx, ay - qy) <= MELEE_REACH {
+                self.damage_building(bid, spec.attacks);
+            }
+        }
+        let e = &mut self.entities[idx];
+        e.strike_tick = None;
+        e.next_attack_tick = self.tick + spec.reload_ticks;
+        e.attack_engaged = true;
+    }
+
+    /// Apply one landed hit's damage to a placed building (M5) and
+    /// destroy it when its HP falls below 1 (CMB-02's death rule,
+    /// applied to buildings). Damage runs through the ordinary
+    /// formula against a synthetic spec carrying the building table's
+    /// armor and the All Buildings + Standard Buildings classes —
+    /// so class bonuses (e.g. a future anti-building row) work
+    /// against buildings with no special cases (CMB-01/03).
+    pub(crate) fn damage_building(&mut self, bid: u32, attacks: &[(u8, i32)]) {
+        let bi = match self.building_index(bid) {
+            Some(bi) => bi,
+            None => return,
+        };
+        let spec = building_spec(self.buildings[bi].kind);
+        let dmg = compute_damage(attacks, &spec);
+        self.buildings[bi].hp -= I16F16::from_num(dmg);
+        if self.buildings[bi].hp < I16F16::from_num(1) {
+            self.destroy_building(bid);
+        }
+    }
+
+    /// Remove a destroyed building (M5): free its footprint cells,
+    /// retire a farm's node with it, put its builders back to idle
+    /// (a *completed* building's loss leaves its queue and rally
+    /// moot — the record is gone), and clear every attacker aimed at
+    /// it. Cost is not refunded (no rule grants one).
+    fn destroy_building(&mut self, bid: u32) {
+        let bi = match self.building_index(bid) {
+            Some(bi) => bi,
+            None => return,
+        };
+        let b = self.buildings.remove(bi);
+        if b.kind.blocks_footprint() {
+            for (cx, cy) in b.footprint_cells() {
+                self.grid.set_dynamic(cx, cy, false);
+            }
+        }
+        if let Some(nid) = b.node_id {
+            if let Some(ni) = self.node_index(nid) {
+                self.nodes[ni].amount_left = I16F16::ZERO;
+            }
+        }
+        for e in &mut self.entities {
+            if e.attack_building == Some(bid) {
+                e.clear_combat();
+            }
+            if e.task_building == Some(bid)
+                && matches!(e.task, Task::ToBuild | Task::Building)
+            {
+                e.task = Task::Idle;
+                e.task_building = None;
+                e.order = None;
+                e.vel_x = I16F16::ZERO;
+                e.vel_y = I16F16::ZERO;
+            }
         }
     }
 
@@ -538,6 +830,24 @@ impl Sim {
     }
 
     fn resolve_projectile(&mut self, p: &Projectile) {
+        // A shot fired at a building (M5): it hits when the impact
+        // point lands on (or within the slack of) the footprint;
+        // buildings neither dodge nor move, so a surviving building
+        // always takes its aimed shot. A destroyed building's shots
+        // land in the dirt (no mishit scan — the aim was the site).
+        if let Some(bid) = p.intended_building {
+            if let Some(bi) = self.building_index(bid) {
+                let b = &self.buildings[bi];
+                let half =
+                    I16F16::from_num(b.kind.footprint_size() as i32 * 2) + HIT_SLACK;
+                if (p.impact_x - b.pos_x).abs() <= half
+                    && (p.impact_y - b.pos_y).abs() <= half
+                {
+                    self.damage_building(bid, &p.attacks);
+                }
+            }
+            return;
+        }
         if let Some(tid) = p.intended {
             if let Some(ti) = self.entity_index(tid) {
                 if !self.entities[ti].dead {

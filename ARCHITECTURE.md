@@ -394,6 +394,51 @@ touches the sim, its tick rate, or any command.
   each rendered frame so the guard rarely has to bite; it adds no
   timing behavior of its own.
 
+## M5 — scripted AI opponent + Conquest (shipped 2026-10-16)
+
+The sandbox became a match. The sim now carries **two player seats**:
+stockpiles, population/pop-cap, building ownership, production queues
+and deposits are all per-player (owner 0 = human, owner 2 = opponent,
+owner 1 = Gaia, unchanged). Player 0's sandbox start is byte-identical
+to before; the per-player plumbing is covered by the state hash, as is
+the match mode and the AI's wave timer.
+
+- **The opponent** (`sim/src/ai.rs`) is a scripted player *inside* the
+  sim that plays only through the same `Command` queue the human uses
+  — Train, Gather, Build, Attack, rally — on a fixed decision cadence.
+  It reads live sim state only (no RNG calls at all in v1), so an AI
+  match replays bit-identically like any other. Its script: villagers
+  to an economy target with deficit-balanced resource assignment
+  (food first, sheep hunted when its own food runs out), houses ahead
+  of the pop cap, one Barracks, alternating Militia/Archer production,
+  a rally staged toward the enemy, attack waves at an army threshold,
+  and a small home-defense reaction. **Easy/Normal** are parameter
+  profiles (cadence, targets, wave size/cooldown) — the sim has no
+  difficulty concept of its own, only the match mode tag. **Sandbox**
+  spawns no opponent and runs no AI: the pre-M5 game, preserved.
+- **Buildings became combat state.** They carry owner + HP (study §5
+  values), take ordinary formula damage (archers pierce their high
+  pierce armor poorly; melee grinds), and can be ordered attacked
+  (`AttackBuilding`) as well as auto-acquired never — a Town Center is
+  only ever attacked on an explicit order or as a wave's fallback.
+  Destruction frees the footprint, zeroes farm nodes, and retargets
+  or idles everyone who was working on it.
+- **Conquest (VIC-01).** A player with no buildings (under
+  construction counts) and no population-counting units is
+  eliminated; the AI also resigns when it has no TC and no villagers
+  (AI-05). `match_state()` reports ongoing / victory / defeat from
+  the human's seat; human elimination is checked first, so a
+  same-tick double elimination is a defeat. The state is a pure
+  function of hashed state, and the sim keeps ticking harmlessly
+  after the decision.
+- **Client.** The start overlay chooses Sandbox / AI Easy / AI Normal
+  (default Normal); the enemy renders in red (minimap dots, TC
+  pennant, unit cloth, a palette-swapped red villager sheet generated
+  client-side from the same sprite pipeline output), the enemy TC
+  and buildings are selectable for information only, and a
+  victory/defeat overlay closes the match with Restart (same mode)
+  and Back to menu. The HUD still shows player 0 only.
+
 ## The sim may
 
 - Use fixed-point arithmetic (`I16F16`: ±32768 range, 1/65536 precision —

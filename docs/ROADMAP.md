@@ -78,7 +78,7 @@ From the [Gap Analysis](GAP-ANALYSIS.md): the items that most make Skirmish II
 
 1. **Minimap** — ✅ shipped on the play page, orders via minimap included (SEL-16, M4)
 2. **Combat core** — ✅ shipped in M3 (queued orders ✅ M4; attack-move itself still open)
-3. **Scripted AI opponent + conquest win/lose** — M5; turns the sandbox into a match
+3. **Scripted AI opponent + conquest win/lose** — ✅ shipped in M5; the sandbox is now a match
 4. **Control groups** — ✅ shipped in M4 (SEL-07, groups 1–9); pure muscle memory for anyone who has played
 5. **Idle villager key + idle indicator** — ✅ shipped in M4 (SEL-08, INF-03); the heartbeat of economy play
 6. **Queued orders + rally points** — ✅ shipped in M4 (SEL-12, SEL-13); orders feel professional instead of one-shot
@@ -99,9 +99,15 @@ From the [Gap Analysis](GAP-ANALYSIS.md): the items that most make Skirmish II
   points, minimap orders, selection cap 60; formation-keeping group
   moves; the ECO-09 retargeting fix. (Rulebook §B: SEL, INF, MOV-06…08 —
   stop/delete moved to M5 with SEL-14.)
-- **M5 — Scripted AI opponent + win/lose.** A computer opponent that plays
-  the opening and fights back, difficulty levels, conquest victory/defeat.
-  Animals and the economy completed around it.
+- **M5 — Scripted AI opponent + win/lose.** ✅ Shipped 2026-10-16. A
+  deterministic scripted opponent inside the sim (`sim/src/ai.rs`)
+  playing only through the Command queue: mirrored enemy start,
+  per-player stockpiles/population/buildings, an economy script
+  (villagers, houses, Barracks, Militia/Archers) with Easy/Normal
+  profiles, attack waves, home defense, and Conquest victory/defeat
+  (hash-covered match state). Sandbox remains as a mode. (Rulebook §B
+  and §15/§16 carry the per-rule record; stop/delete (SEL-14) and the
+  animal-economy tags (ECO-11…13) remain open.)
 - **M6 — Ages & technologies.** The Feudal/Castle/Imperial ladder, the full
   generic building set (Mill, Lumber/Mining Camps, Blacksmith, Market,
   Monastery, University…), research, garrison + Town Bell, monks and

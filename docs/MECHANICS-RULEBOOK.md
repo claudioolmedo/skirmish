@@ -1708,7 +1708,13 @@ human. The simulation neither knows nor cares which seat is human.
 *Source:* GAP §9 (skirmish AI structure); Bettner & Terrano (command
 model). · *Impl:* the AI is a separate crate/process producing `Command`
 lists per tick; the sim has no AI hooks. This also makes AI-vs-AI test
-games and replay verification free. · *Status:* **MISSING** (no AI).
+games and replay verification free. · *Status:* **DIFFERS** (M5,
+2026-10-16: the opponent ships as a deterministic module inside the sim
+crate (`sim/src/ai.rs`), not the separate crate/process the sketch
+above envisions — but the discipline the rule protects holds exactly:
+it issues only ordinary Commands through the same queue, on a fixed
+decision cadence, derived from sim state alone, so AI matches replay
+bit-identically and the sim treats both seats alike.)
 
 **AI-02 — DE-class AI does not cheat resources.** On every difficulty,
 the AI gathers, pays, and trains under the same costs and rules as a
@@ -1718,7 +1724,10 @@ and Skirmish II does not adopt).
 *Source:* wiki, Artificial intelligence (DE AI behavior). · *Impl:*
 verification rule: AI command streams are replayable headless
 (SIM-12) — any resource anomaly would surface as an impossible command
-stream. · *Status:* **MISSING** (rule recorded for M5).
+stream. · *Status:* **MATCHES** (M5, 2026-10-16: the scripted AI gathers,
+pays full costs and trains under the human's rules at both
+difficulties; no resource grants exist anywhere in the sim. Verified
+by replay: an AI match's hash stream reproduces bit-for-bit.)
 
 **AI-03 — Difficulty changes behavior, not physics.** The difficulty
 ladder (Easiest → Extreme in DE) varies: time of first attack, army
@@ -1729,7 +1738,12 @@ difficulty.
 *Source:* wiki, Artificial intelligence (difficulty table). · *Impl:*
 AI parameters live in a per-difficulty profile table consumed by the AI
 crate only; the sim crate contains no difficulty concept. · *Status:*
-**MISSING**.
+**MATCHES** (M5, 2026-10-16: two rungs of the ladder ship — Easy and
+Normal — as pure behavior parameters in the AI's own config (decision
+cadence, economy and army targets, wave size and cooldown). Unit
+stats, costs and the damage formula are identical at both; the sim's
+only difficulty-shaped state is the match mode tag that selects the
+profile.)
 
 **AI-04 — The AI follows an economy script.** AI economy behavior mirrors
 a build order: continuous villager production, age-up timings, expansion
@@ -1738,14 +1752,23 @@ parameterized by AI-03's profile.
 *Source:* wiki, Artificial intelligence; GAP 9.1–9.3. · *Impl:* Skirmish II's
 M5 AI is a scripted build-order player (GAP roadmap), issuing commands on
 a tick schedule with state checks; open-ended strategic AI is future
-work, not a rule change. · *Status:* **MISSING**.
+work, not a rule change. · *Status:* **MATCHES** (M5, 2026-10-16, at v1
+depth: continuous villager production to a profile target,
+deficit-balanced resource assignment with food first, houses built
+ahead of the population cap, a Barracks, alternating Militia/Archer
+production, and a rally staged toward the enemy. Age-up timings and
+expansion camps wait for their systems (M6).)
 
 **AI-05 — The AI resigns when hopeless.** An AI with no Town Center, no
 villagers, and no path to rebuild resigns rather than playing to the
 last unit; human players resign manually (VIC-11).
 *Source:* wiki, Artificial intelligence (resignation behavior). · *Impl:*
 an AI-side predicate evaluated on a slow cadence (every ~30 s of game
-time); resignation is a command like any other. · *Status:* **MISSING**.
+time); resignation is a command like any other. · *Status:* **MATCHES**
+(M5, 2026-10-16: the predicate is evaluated on the AI's decision
+cadence — no Town Center and no villagers left means resigned, and the
+match checker reads it as the opponent's win even if a stray building
+or soldier remains. Manual human resignation (VIC-11) is not shipped.)
 
 **AI-06 — Herdable capture by proximity.** An unowned herdable animal
 becomes the property of the player whose unit comes within capture
@@ -1757,7 +1780,11 @@ passes, ownership transfers to them (sheep can be stolen this way).
 order; nearest qualifying player wins ties by player id); ownership is
 the entity `owner` field (MAP-12). The capture radius is UNVERIFIED in
 the sources consulted — adopt ~2 tiles as a tuned constant. · *Status:*
-**MISSING**.
+**DIFFERS** (M3, 2026-10-16: proximity capture ships for either player —
+the first in-range player unit's owner takes the sheep, and the AI
+herds its own the same way. The steal-back half does not ship: an owned
+sheep never re-captures to a passer-by, so herds cannot be stolen by
+walking past.)
 
 **AI-07 — Huntable behavior: deer flee, boars fight.** Deer and similar
 prey graze idly and flee from an attacker that wounds or approaches them.
@@ -1772,7 +1799,10 @@ adopted default.)
 (animal behavior classes). · *Impl:* animals get a minimal state machine
 in the combat phase (idle / flee / chase-attacker) driven by the same
 damage events as CMB-01; no separate animal engine. · *Status:*
-**MISSING**.
+**DIFFERS** (M3, 2026-10-16: deer flee and boars charge their attacker,
+disengaging when it dies or escapes. One deliberate divergence from the
+adopted default above: a disengaged boar returns to its original post
+and heals there, instead of wandering near the disengage point.)
 
 **AI-08 — Predators hunt villagers.** Wolves and similar predators are
 Gaia combat units: idle until a unit (typically a villager) enters their
@@ -1804,8 +1834,17 @@ converted). The last surviving player — or team, under allied victory
 (VIC-12) — wins.
 *Source:* GAP 8.1; wiki, Victory. · *Impl:* an elimination predicate
 evaluated on the slow cadence after death sweeps; eliminated players'
-state follows VIC-11. · *Status:* **MISSING** (no win/lose at all —
-GAP 8.1).
+state follows VIC-11. · *Status:* **DIFFERS** (M5, 2026-10-16: Conquest
+ships with a stricter predicate than the rule's letter — a player is
+eliminated only when they have no buildings of any kind left
+(under-construction counts as a building) AND no population-counting
+units; the rule as written would also eliminate a player whose
+production buildings stand but who fields no units, where the shipped
+game keeps them alive on the building alone. Two match-ending details:
+if both players fall on the same tick the human loses (defeat is
+checked first), and AI resignation (AI-05) ends the match as a win.
+The match state is hash-covered and exposed as ongoing / victory /
+defeat; the sim keeps ticking harmlessly after the decision.)
 
 **VIC-02 — Wonder victory (standard games).** In Standard victory mode,
 holding a completed Wonder starts a countdown; if the Wonder still stands
@@ -2138,11 +2177,11 @@ this document (2026-10-16).
 | 12 | Monks, conversion & relics (MNK) | 13 | 0 | 0 | 13 |
 | 13 | Trade, market & tribute (TRD) | 8 | 0 | 0 | 8 |
 | 14 | Garrison, transport & repair (GAR) | 10 | 0 | 0 | 10 |
-| 15 | AI behavior & difficulty (AI) | 9 | 0 | 0 | 9 |
-| 16 | Victory, scoring & game modes (VIC) | 12 | 0 | 0 | 12 |
+| 15 | AI behavior & difficulty (AI) | 9 | 4 | 3 | 2 |
+| 16 | Victory, scoring & game modes (VIC) | 12 | 0 | 1 | 11 |
 | 17 | Multiplayer determinism (NET) | 11 | 2 | 1 | 8 |
 | 18 | Information rules (INF) | 11 | 2 | 4 | 5 |
-| | **Total** | **213** | **47** | **22** | **144** |
+| | **Total** | **213** | **51** | **26** | **136** |
 
 Reading: the foundation systems (§1, §4–§7 client/economy halves) are
 largely in place; the entire combat stack (§8–§10, §12) is greenfield,
@@ -2184,7 +2223,13 @@ completed forms still open.)*
 (herdables/huntables/predators), ECO-11, ECO-12, ECO-13 (animals complete
 the economy), VIC-01 (conquest win/lose — the first victory rule; the
 rest of §16 waits for its systems), SEL-14 (stop/delete), BLD-02
-(cancel/refund).
+(cancel/refund). *(Shipped 2026-10-16: AI-01…05 — a deterministic
+scripted opponent (Easy/Normal profiles) inside the sim, playing only
+through the Command queue against per-player state (stockpiles,
+population, building ownership); AI-06/AI-07 confirmed in their M3
+forms and exercised by the AI; VIC-01 Conquest with the stricter
+all-buildings-and-units predicate (see §16). ECO-11…13, SEL-14, BLD-02
+and AI-08 stay open.)*
 
 **M6 — Ages, techs, full building set.** TEC-01…11 (age ladder, patch
 engine), BLD-06 (real footprints), BLD-07 (repair), BLD-11, BLD-15,

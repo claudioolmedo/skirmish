@@ -117,6 +117,35 @@ html, body {
 .overlay-card .btn-ghost:hover { border-color: #8a5a10; color: #8a5a10; }
 .pause-actions { display: flex; gap: 10px; justify-content: center; }
 
+/* Match mode choice (M5): the Sandbox / AI Easy / AI Normal radios
+   on the start card, in the same parchment-chip language as the
+   how-to box; the chosen one carries the gold outline. */
+.mode-row {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin: 0 0 16px;
+  flex-wrap: wrap;
+}
+.mode-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 1px solid rgba(61, 42, 18, 0.35);
+  border-radius: 999px;
+  background: rgba(61, 42, 18, 0.08);
+  color: #43300f;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.mode-opt:has(input:checked) {
+  border-color: #8a5a10;
+  background: rgba(217, 164, 65, 0.22);
+  font-weight: 700;
+}
+.mode-opt input { accent-color: #8a5a10; margin: 0; }
+
 /* Quality override (adaptive quality governor): mode buttons in the
    pause menu; the active mode gets the .btn.active gold outline. */
 .quality-row {
