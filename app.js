@@ -89,6 +89,8 @@ const restartBtn = document.getElementById('restart-btn');
 const helpBtn = document.getElementById('help-btn');
 const helpOverlay = document.getElementById('help-overlay');
 const helpClose = document.getElementById('help-close');
+const menuClose = document.getElementById('menu-close');
+const helpCloseX = document.getElementById('help-close-x');
 // M5 match-end overlay + start-overlay mode radios.
 const endOverlay = document.getElementById('end-overlay');
 const endTitle = document.getElementById('end-title');
@@ -1023,6 +1025,8 @@ async function main() {
   idleVilBtn.addEventListener('click', () => { if (sim) cycleIdle('villager', false); });
   idleMilBtn.addEventListener('click', () => { if (sim) cycleIdle('military', false); });
   resumeBtn.addEventListener('click', () => setPaused(false));
+  menuClose.addEventListener('click', () => setPaused(false));
+  helpCloseX.addEventListener('click', () => { helpOverlay.style.display = 'none'; });
   helpBtn.addEventListener('click', () => { helpOverlay.style.display = 'flex'; });
   helpClose.addEventListener('click', () => { helpOverlay.style.display = 'none'; });
   helpOverlay.addEventListener('click', (e) => {
