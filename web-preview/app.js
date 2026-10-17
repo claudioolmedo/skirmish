@@ -83,8 +83,6 @@ const selGrid = document.getElementById('sel-grid');
 const minimapCanvas = document.getElementById('minimap');
 const mmCtx = minimapCanvas.getContext('2d');
 const toast = document.getElementById('toast');
-const startOverlay = document.getElementById('start-overlay');
-const playBtn = document.getElementById('play-btn');
 const pauseMenu = document.getElementById('pause-menu');
 const resumeBtn = document.getElementById('resume-btn');
 const restartBtn = document.getElementById('restart-btn');
@@ -178,7 +176,7 @@ const queueEntryName = (code) => (code < 100
   : (TECH_NAME[code - 100] || 'Research'));
 
 // --- Game shell state (client-only; never sim input) -------------------
-let playing = false; // Play pressed: the sim ticks
+let playing = false; // the match is live: the sim ticks (set at init — no start screen)
 let paused = false; // pause menu open: the sim holds
 let selection = new Set(); // selected unit ids — orders go ONLY to these (AoE2-style)
 // The selected building, if any: { type: 'tc', id } for the Town
@@ -1008,18 +1006,17 @@ async function main() {
   }
 
   // --- Menus -----------------------------------------------------------
-  // The mode radios reflect the active choice (?mode= may have set
-  // it); Play reads the checked radio and rebuilds the sim if the
-  // player changed their mind since the current sim was built.
+  // No start screen (Claudio's direction, 2026-10-17): the match
+  // starts immediately in the active mode (?mode= may have set it).
+  // The mode radios live in the pause menu; Restart applies the
+  // checked one.
   for (const inp of modeInputs) inp.checked = inp.value === matchMode;
-  playBtn.addEventListener('click', () => {
+  function chosenMode() {
     const chosen = document.querySelector('input[name="match-mode"]:checked');
-    matchMode = chosen ? chosen.value : 'normal';
-    if (builtMode !== matchMode) resetSim(matchMode);
-    startOverlay.style.display = 'none';
-    playing = true;
-    paused = false;
-  });
+    return chosen ? chosen.value : matchMode;
+  }
+  playing = true;
+  paused = false;
   pauseBtn.addEventListener('click', () => setPaused(true));
   // Idle indicators double as buttons: the same cycle the '.' / ','
   // keys run (SEL-08/09).
@@ -1032,26 +1029,23 @@ async function main() {
     if (e.target === helpOverlay) helpOverlay.style.display = 'none';
   });
   restartBtn.addEventListener('click', () => {
-    // M5: Restart re-enters the SAME mode the current match was
-    // built with (the pause menu has no mode choice of its own).
-    resetSim(builtMode || matchMode);
+    // Restart begins a fresh match in the mode checked in the menu.
+    resetSim(chosenMode());
     setPaused(false);
     playing = true;
   });
-  // Match end (M5): Restart runs the same mode again from the same
-  // seed; Back to menu returns to the start overlay, where the
-  // mode can be changed before the next Play.
+  // Match end (M5): Restart runs the menu's checked mode again from
+  // the same seed; Back to menu resets a fresh match and opens the
+  // pause menu over it (there is no start screen anymore).
   endRestartBtn.addEventListener('click', () => {
-    resetSim(builtMode || matchMode);
+    resetSim(chosenMode());
     playing = true;
     paused = false;
   });
   endMenuBtn.addEventListener('click', () => {
-    endOverlay.style.display = 'none';
-    matchEnded = false;
-    playing = false;
-    paused = false;
-    startOverlay.style.display = 'flex';
+    resetSim(builtMode || matchMode);
+    playing = true;
+    setPaused(true);
   });
   // Quality override (pause menu): Auto / High / Medium / Low.
   for (const [mode, btn] of Object.entries(qualityModeBtns)) {

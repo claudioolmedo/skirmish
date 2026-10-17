@@ -133,21 +133,6 @@
 
 <div id="toast" class="toast" style="display:none"></div>
 
-<div id="start-overlay" class="overlay">
-  <div class="overlay-card">
-    <h1 class="game-title">SKIRMISH II</h1>
-    <p class="overlay-sub">An open browser RTS, built from scratch. Grow the little village: gather, build, train.</p>
-    <div class="mode-row" role="radiogroup" aria-label="Match mode">
-      <label class="mode-opt"><input type="radio" name="match-mode" value="sandbox"> Sandbox</label>
-      <label class="mode-opt"><input type="radio" name="match-mode" value="easy"> AI · Easy</label>
-      <label class="mode-opt"><input type="radio" name="match-mode" value="normal" checked> AI · Normal</label>
-    </div>
-    <button id="play-btn" class="btn btn-gold btn-big" type="button">▶ Play</button>
-    <p class="overlay-note">New here? The full guide lives in the menu — press <strong>Esc</strong> in the game and choose <strong>How to play</strong>.</p>
-    <p class="overlay-note">Test build · M6 — ages and technologies: Loom, the Feudal Age, drop-off camps, the Archery Range, Stable and Blacksmith, on top of the M5 match (scripted AI opponent or Sandbox, Conquest victory and defeat). Placeholder art is being replaced piece by piece with our own.</p>
-  </div>
-</div>
-
 <div id="pause-menu" class="overlay" style="display:none">
   <div class="overlay-card">
     <h2 class="game-title-sm">Paused</h2>
@@ -156,7 +141,12 @@
       <button id="help-btn" class="btn btn-ghost" type="button">How to play</button>
       <button id="restart-btn" class="btn btn-ghost" type="button">Restart</button>
     </div>
-    <p class="overlay-note">Restart begins a fresh, identical match (same seed).</p>
+    <div class="mode-row" role="radiogroup" aria-label="Match mode">
+      <label class="mode-opt"><input type="radio" name="match-mode" value="sandbox"> Sandbox</label>
+      <label class="mode-opt"><input type="radio" name="match-mode" value="easy"> AI · Easy</label>
+      <label class="mode-opt"><input type="radio" name="match-mode" value="normal" checked> AI · Normal</label>
+    </div>
+    <p class="overlay-note">Pick a mode and press Restart to begin a fresh match in it (same seed).</p>
     <div class="quality-row" role="group" aria-label="Visual quality">
       <span class="quality-title">Quality</span>
       <div class="quality-btns">
@@ -167,6 +157,7 @@
       </div>
     </div>
     <p class="overlay-note">Quality changes only the picture — sprites, sharpness, shadows. The game is identical on every device, from an old Chromebook to a gaming PC.</p>
+    <p class="overlay-note">Test build · M6 — ages and technologies: Loom, the Feudal Age, drop-off camps, the Archery Range, Stable and Blacksmith, on top of the M5 match (scripted AI opponent or Sandbox, Conquest victory and defeat). Placeholder art is being replaced piece by piece with our own.</p>
   </div>
 </div>
 
