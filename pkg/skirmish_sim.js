@@ -141,6 +141,29 @@ export class WasmSim {
         return ret >>> 0;
     }
     /**
+     * Ids of the idle military units (Scout, Militia, Archer), in
+     * id order. The mirror of `idle_villagers`.
+     * @returns {Uint32Array}
+     */
+    idle_military() {
+        const ret = wasm.wasmsim_idle_military(this.__wbg_ptr);
+        var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * Ids of the idle villagers (no work task, no move order, no
+     * attack target), in id order. Behind the client's idle-villager
+     * key and the top-bar idle indicator.
+     * @returns {Uint32Array}
+     */
+    idle_villagers() {
+        const ret = wasm.wasmsim_idle_villagers(this.__wbg_ptr);
+        var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
      * Create a simulation from a seed.
      * @param {number} seed
      */
@@ -229,6 +252,16 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Queue an attack order behind the unit's current order.
+     * @param {number} entity
+     * @param {number} target
+     * @returns {boolean}
+     */
+    push_attack_queued(entity, target) {
+        const ret = wasm.wasmsim_push_attack_queued(this.__wbg_ptr, entity, target);
+        return ret !== 0;
+    }
+    /**
      * Order a villager to build a Barracks (175 wood, 3×3-cell
      * footprint) — see `push_build_house`.
      * @param {number} entity
@@ -241,6 +274,17 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Queue a Barracks build — see `push_build_house_queued`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_barracks_queued(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_barracks_queued(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
      * Order a villager to build a Farm (60 wood) — see
      * `push_build_house`.
      * @param {number} entity
@@ -250,6 +294,17 @@ export class WasmSim {
      */
     push_build_farm(entity, x, y) {
         const ret = wasm.wasmsim_push_build_farm(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Queue a Farm build — see `push_build_house_queued`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_farm_queued(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_farm_queued(this.__wbg_ptr, entity, x, y);
         return ret !== 0;
     }
     /**
@@ -269,6 +324,19 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Queue a House build behind the villager's current order. The
+     * wood is charged when the order *executes*, not when queued —
+     * see `Sim::can_queue`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_house_queued(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_house_queued(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
      * Order a villager to work a resource node (gather → haul → deposit
      * → repeat). Ids only — no floats cross this boundary here.
      * @param {number} entity
@@ -276,6 +344,16 @@ export class WasmSim {
      */
     push_gather(entity, node) {
         wasm.wasmsim_push_gather(this.__wbg_ptr, entity, node);
+    }
+    /**
+     * Queue a gather order behind the villager's current order.
+     * @param {number} entity
+     * @param {number} node
+     * @returns {boolean}
+     */
+    push_gather_queued(entity, node) {
+        const ret = wasm.wasmsim_push_gather_queued(this.__wbg_ptr, entity, node);
+        return ret !== 0;
     }
     /**
      * Order one entity to move to a world point.
@@ -290,10 +368,46 @@ export class WasmSim {
         wasm.wasmsim_push_move(this.__wbg_ptr, entity, x, y);
     }
     /**
+     * Queue a move order behind the entity's current order.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_move_queued(entity, x, y) {
+        const ret = wasm.wasmsim_push_move_queued(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
      * Placeholder command input.
      */
     push_noop() {
         wasm.wasmsim_push_noop(this.__wbg_ptr);
+    }
+    /**
+     * Set a production building's rally point (M4: the Barracks).
+     * Returns whether the building accepts a rally point.
+     * @param {number} building
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_set_rally_building(building, x, y) {
+        const ret = wasm.wasmsim_push_set_rally_building(this.__wbg_ptr, building, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Set the Town Center's rally point: new villagers walk there on
+     * spawn — or straight to work, when the point snaps to a live
+     * resource node (within snap range). Returns whether the order
+     * would be accepted (the Town Center always accepts).
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_set_rally_tc(x, y) {
+        const ret = wasm.wasmsim_push_set_rally_tc(this.__wbg_ptr, x, y);
+        return ret !== 0;
     }
     /**
      * Enqueue an Archer at a completed Barracks (M3) — see
@@ -326,6 +440,20 @@ export class WasmSim {
     push_train_villager() {
         const ret = wasm.wasmsim_push_train_villager(this.__wbg_ptr);
         return ret !== 0;
+    }
+    /**
+     * All rally points as a flat array, four values per entry —
+     * `[x, y, node, has]` — entry 0 is the Town Center, entries
+     * 1.. follow `buildings()` order. `node` is the snapped resource
+     * node id, or -1; `has` is 0 when no rally is set there (the
+     * x/y are then 0 and meaningless).
+     * @returns {Float64Array}
+     */
+    rally_points() {
+        const ret = wasm.wasmsim_rally_points(this.__wbg_ptr);
+        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v1;
     }
     /**
      * Current state hash as hex, without advancing the sim.
@@ -459,6 +587,11 @@ function getArrayF64FromWasm0(ptr, len) {
     return getFloat64ArrayMemory0().subarray(ptr / 8, ptr / 8 + len);
 }
 
+function getArrayU32FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getUint32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
+}
+
 function getArrayU8FromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
@@ -474,6 +607,14 @@ function getFloat64ArrayMemory0() {
 
 function getStringFromWasm0(ptr, len) {
     return decodeText(ptr >>> 0, len);
+}
+
+let cachedUint32ArrayMemory0 = null;
+function getUint32ArrayMemory0() {
+    if (cachedUint32ArrayMemory0 === null || cachedUint32ArrayMemory0.byteLength === 0) {
+        cachedUint32ArrayMemory0 = new Uint32Array(wasm.memory.buffer);
+    }
+    return cachedUint32ArrayMemory0;
 }
 
 let cachedUint8ArrayMemory0 = null;
@@ -504,6 +645,7 @@ function __wbg_finalize_init(instance, module) {
     wasm = instance.exports;
     wasmModule = module;
     cachedFloat64ArrayMemory0 = null;
+    cachedUint32ArrayMemory0 = null;
     cachedUint8ArrayMemory0 = null;
     wasm.__wbindgen_start();
     return wasm;

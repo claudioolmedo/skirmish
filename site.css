@@ -194,6 +194,16 @@ a { color: var(--gold-bright); }
   text-shadow: 0 2px 10px rgba(0, 0, 0, 0.85);
 }
 
+.hero .chess-line {
+  max-width: 640px;
+  margin: 16px auto 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-style: italic;
+  font-size: 15.5px;
+  color: #ddd2ab;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.85);
+}
+
 /* ---------- sections ---------- */
 
 .section {

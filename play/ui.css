@@ -90,6 +90,39 @@
 .res .res-val { font-variant-numeric: tabular-nums; }
 .res-pop .res-val.warn { color: var(--ui-warn); } /* at cap / housed */
 
+/* Idle indicators (M4, INF-03): quiet while nobody is idle, lit
+   gold while someone stands free. They are buttons — clicking runs
+   the idle key's cycle (SEL-08/09). */
+.idle-ind {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px 2px 3px;
+  background: rgba(22, 11, 3, 0.45);
+  border: 1px solid rgba(201, 162, 39, 0.35);
+  border-radius: 4px;
+  color: var(--ui-text);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  opacity: 0.55;
+  white-space: nowrap;
+}
+.idle-ind .ui-icon {
+  width: 18px;
+  height: 18px;
+  background: #241407;
+  border: 1px solid var(--ui-edge);
+  border-radius: 3px;
+}
+.idle-ind.has-idle {
+  opacity: 1;
+  border-color: var(--ui-gold, #c9a227);
+  box-shadow: 0 0 6px rgba(201, 162, 39, 0.45);
+}
+.idle-ind:hover { filter: brightness(1.25); }
+.idle-ind:active { transform: translateY(1px); }
+
 .ui-topbar-spacer { flex: 1; }
 
 .ui-clock {

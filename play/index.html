@@ -53,6 +53,14 @@
     <span class="res res-pop"><svg class="ui-icon"><use href="#i-pop"/></svg><span class="res-val" id="res-pop">3 / 5</span></span>
   </div>
   <div class="ui-topbar-spacer"></div>
+  <!-- Idle indicators (M4, INF-03): always-visible idle counts; the
+       buttons run the same cycle as the '.' / ',' keys (SEL-08/09). -->
+  <button id="idle-vil-btn" class="idle-ind" type="button" title="Idle villagers — click (or press .) to select the next one">
+    <svg class="ui-icon"><use href="#i-villager"/></svg><span id="idle-vil-count">0</span>
+  </button>
+  <button id="idle-mil-btn" class="idle-ind" type="button" title="Idle military — click (or press ,) to select the next one">
+    <svg class="ui-icon"><use href="#i-militia"/></svg><span id="idle-mil-count">0</span>
+  </button>
   <span class="ui-clock" id="game-clock">00:00</span>
   <span class="ui-quality" id="quality-label" title="Visual quality — auto adapts to this device. The game itself is identical at every level.">Quality: —</span>
   <button id="pause-btn" class="btn btn-ghost btn-sm" type="button" title="Menu (Esc)">
@@ -118,16 +126,18 @@
     <div class="howto">
       <h2>How to play</h2>
       <ul>
-        <li><strong>Click a villager</strong> to select it; <strong>drag</strong> to select a group; <strong>Shift+click</strong> adds or removes one; <strong>double-click</strong> selects every villager on screen. Click empty ground to deselect.</li>
-        <li><strong>Right-click a tree, bush, gold or stone</strong> to gather it; <strong>right-click the ground</strong> to move. Orders go only to the selected villagers.</li>
+        <li><strong>Click a villager</strong> to select it; <strong>drag</strong> to select a group; <strong>Shift+click</strong> adds or removes one; <strong>double-click</strong> selects every villager on screen. Click empty ground to deselect. One selection holds at most <strong>60</strong> units.</li>
+        <li><strong>Right-click a tree, bush, gold or stone</strong> to gather it; <strong>right-click the ground</strong> to move. Orders go only to the selected villagers. <strong>Shift+right-click</strong> <em>queues</em> the order — the unit finishes what it is doing, then runs the queued ones in order. Right-clicking the <strong>minimap</strong> orders there too.</li>
+        <li><strong>Control groups:</strong> <strong>Ctrl+1–9</strong> stores the selection, the <strong>number</strong> recalls it, pressing it twice centers the camera, <strong>Shift+number</strong> adds the group to the selection. <strong>.</strong> selects the next idle villager, <strong>,</strong> the next idle soldier (watch the counters in the top bar), <strong>H</strong> jumps to the Town Center.</li>
         <li><strong>Drag right button / WASD / arrows</strong> to pan, <strong>mouse wheel</strong> to zoom. Click the <strong>minimap</strong> to jump the camera.</li>
         <li><strong>Commands panel</strong> (bottom-left): with a villager selected, build a <strong>House</strong> (25 wood, +5 population room), a <strong>Farm</strong> (60 wood, 175 food) or a <strong>Barracks</strong> (175 wood). Select the <strong>Town Center</strong> to train villagers (50 food) — training stalls at the population cap.</li>
+        <li><strong>Rally points:</strong> with the Town Center or Barracks selected, <strong>right-click the map</strong> to set where new units walk to. Right-click a <strong>resource</strong> and new villagers go straight to work on it.</li>
         <li><strong>Combat:</strong> you start with a <strong>Scout Cavalry</strong> and sheep nearby. Walk any unit next to a <strong>sheep</strong> to claim it; <strong>right-click an animal</strong> with a unit selected to attack and hunt it — the carcass feeds your villagers (a hunter carries 35). <strong>Boars fight back</strong> and chase whoever hurt them; lure one toward your village instead of fighting it alone.</li>
         <li>Select the <strong>Barracks</strong> to train <strong>Militia</strong> (60 food, 20 gold) and <strong>Archers</strong> (25 wood, 45 gold). Idle Militia and Archers guard against boars on their own; damaged units show an <strong>HP bar</strong>.</li>
         <li><strong>Esc</strong> pauses.</li>
       </ul>
     </div>
-    <p class="overlay-note">Test build · M3 — combat core: Scout, hunting, Barracks, Militia & Archers. Placeholder art is being replaced piece by piece with our own.</p>
+    <p class="overlay-note">Test build · M4 — input & command completion: queued orders, rally points, control groups, idle keys, minimap orders. Placeholder art is being replaced piece by piece with our own.</p>
   </div>
 </div>
 

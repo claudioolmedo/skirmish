@@ -69,6 +69,17 @@ export class WasmSim {
      */
     grid_width(): number;
     /**
+     * Ids of the idle military units (Scout, Militia, Archer), in
+     * id order. The mirror of `idle_villagers`.
+     */
+    idle_military(): Uint32Array;
+    /**
+     * Ids of the idle villagers (no work task, no move order, no
+     * attack target), in id order. Behind the client's idle-villager
+     * key and the top-bar idle indicator.
+     */
+    idle_villagers(): Uint32Array;
+    /**
      * Create a simulation from a seed.
      */
     constructor(seed: number);
@@ -113,15 +124,27 @@ export class WasmSim {
      */
     push_attack(entity: number, target: number): boolean;
     /**
+     * Queue an attack order behind the unit's current order.
+     */
+    push_attack_queued(entity: number, target: number): boolean;
+    /**
      * Order a villager to build a Barracks (175 wood, 3×3-cell
      * footprint) — see `push_build_house`.
      */
     push_build_barracks(entity: number, x: number, y: number): boolean;
     /**
+     * Queue a Barracks build — see `push_build_house_queued`.
+     */
+    push_build_barracks_queued(entity: number, x: number, y: number): boolean;
+    /**
      * Order a villager to build a Farm (60 wood) — see
      * `push_build_house`.
      */
     push_build_farm(entity: number, x: number, y: number): boolean;
+    /**
+     * Queue a Farm build — see `push_build_house_queued`.
+     */
+    push_build_farm_queued(entity: number, x: number, y: number): boolean;
     /**
      * Order a villager to build a House with its 2×2-cell footprint
      * anchored at the cell containing the world point `(x, y)`. The
@@ -132,10 +155,20 @@ export class WasmSim {
      */
     push_build_house(entity: number, x: number, y: number): boolean;
     /**
+     * Queue a House build behind the villager's current order. The
+     * wood is charged when the order *executes*, not when queued —
+     * see `Sim::can_queue`.
+     */
+    push_build_house_queued(entity: number, x: number, y: number): boolean;
+    /**
      * Order a villager to work a resource node (gather → haul → deposit
      * → repeat). Ids only — no floats cross this boundary here.
      */
     push_gather(entity: number, node: number): void;
+    /**
+     * Queue a gather order behind the villager's current order.
+     */
+    push_gather_queued(entity: number, node: number): boolean;
     /**
      * Order one entity to move to a world point.
      *
@@ -144,9 +177,25 @@ export class WasmSim {
      */
     push_move(entity: number, x: number, y: number): void;
     /**
+     * Queue a move order behind the entity's current order.
+     */
+    push_move_queued(entity: number, x: number, y: number): boolean;
+    /**
      * Placeholder command input.
      */
     push_noop(): void;
+    /**
+     * Set a production building's rally point (M4: the Barracks).
+     * Returns whether the building accepts a rally point.
+     */
+    push_set_rally_building(building: number, x: number, y: number): boolean;
+    /**
+     * Set the Town Center's rally point: new villagers walk there on
+     * spawn — or straight to work, when the point snaps to a live
+     * resource node (within snap range). Returns whether the order
+     * would be accepted (the Town Center always accepts).
+     */
+    push_set_rally_tc(x: number, y: number): boolean;
     /**
      * Enqueue an Archer at a completed Barracks (M3) — see
      * `push_train_militia`.
@@ -165,6 +214,14 @@ export class WasmSim {
      * re-validates when the command is applied.
      */
     push_train_villager(): boolean;
+    /**
+     * All rally points as a flat array, four values per entry —
+     * `[x, y, node, has]` — entry 0 is the Town Center, entries
+     * 1.. follow `buildings()` order. `node` is the snapped resource
+     * node id, or -1; `has` is 0 when no rally is set there (the
+     * x/y are then 0 and meaningless).
+     */
+    rally_points(): Float64Array;
     /**
      * Current state hash as hex, without advancing the sim.
      */
@@ -221,6 +278,8 @@ export interface InitOutput {
     readonly wasmsim_gold: (a: number) => number;
     readonly wasmsim_grid_height: (a: number) => number;
     readonly wasmsim_grid_width: (a: number) => number;
+    readonly wasmsim_idle_military: (a: number) => [number, number];
+    readonly wasmsim_idle_villagers: (a: number) => [number, number];
     readonly wasmsim_new: (a: number) => number;
     readonly wasmsim_nodes: (a: number) => [number, number];
     readonly wasmsim_obstacles: (a: number) => [number, number];
@@ -229,15 +288,24 @@ export interface InitOutput {
     readonly wasmsim_positions: (a: number) => [number, number];
     readonly wasmsim_projectiles: (a: number) => [number, number];
     readonly wasmsim_push_attack: (a: number, b: number, c: number) => number;
+    readonly wasmsim_push_attack_queued: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_build_barracks: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_barracks_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_farm: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_farm_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_house: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_house_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_gather: (a: number, b: number, c: number) => void;
+    readonly wasmsim_push_gather_queued: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_move: (a: number, b: number, c: number, d: number) => void;
+    readonly wasmsim_push_move_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_noop: (a: number) => void;
+    readonly wasmsim_push_set_rally_building: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_set_rally_tc: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_train_archer: (a: number, b: number) => number;
     readonly wasmsim_push_train_militia: (a: number, b: number) => number;
     readonly wasmsim_push_train_villager: (a: number) => number;
+    readonly wasmsim_rally_points: (a: number) => [number, number];
     readonly wasmsim_state_hash: (a: number) => [number, number];
     readonly wasmsim_stockpile: (a: number) => [number, number];
     readonly wasmsim_stone: (a: number) => number;
