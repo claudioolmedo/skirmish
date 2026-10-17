@@ -97,8 +97,9 @@ export function diamondPath(ctx, g) {
 }
 
 // Node colors by sim NodeKind tag (0 tree, 1 berry, 2 gold, 3 stone,
-// 4 farm). Our own minimap palette — flat and readable at 2 px.
-export const NODE_COLORS = ['#2e7d32', '#e0497e', '#ffd23e', '#a8adb5', '#86c860'];
+// 4 farm, 5 hunt carcass, 6 herd carcass — M3). Our own minimap
+// palette — flat and readable at 2 px.
+export const NODE_COLORS = ['#2e7d32', '#e0497e', '#ffd23e', '#a8adb5', '#86c860', '#b5542c', '#c97b4a'];
 export const GROUND_COLOR = '#44512f'; // muted moss — the unexplored-later base
 export const OBSTACLE_COLOR = '#232a20'; // wall cells read as dark blocks
 export const BUILDING_COLOR = '#e8e3d5'; // own buildings when no color is given
@@ -129,8 +130,10 @@ function drawDiamond(ctx, g, cxWorld, cyWorld, halfWorld, fill) {
  *   gridW, gridH, cellSize,
  *   obstacles: flat row-major array (truthy = blocked cell),
  *   nodes:     [{ x, y, kind, amount }],          // amount <= 0 skipped
- *   buildings: [{ x, y, kind, complete, color? }], // kind: 0 house, 1 farm
- *   entities:  [{ x, y, kind, color, selected? }],  // kind: 0 villager, 1 TC
+ *   buildings: [{ x, y, kind, complete, color?, size? }], // size = footprint
+ *                        // edge in cells (2 or 3); default 2 (M3)
+ *   entities:  [{ x, y, kind, color, selected? }],  // kind: 0 villager, 1 TC,
+ *                        // 2 scout, 3 militia, 4 archer, 5+ animals
  *   cam:       { s, ox, oy, viewW, viewH } | null,  // null = no viewport rect
  * }
  *
@@ -175,19 +178,21 @@ export function renderMinimap(ctx, g, state) {
     ctx.fill();
   }
 
-  // Buildings as footprint diamonds (2x2 cells in the sim). Complete
-  // buildings are solid; under construction they are hollow.
+  // Buildings as footprint diamonds (2x2 cells in the sim; the
+  // Barracks is 3x3 — `size` carries the footprint edge, default 2).
+  // Complete buildings are solid; under construction they are hollow.
   for (const b of state.buildings || []) {
     if (b.kind === 1 && b.complete) continue; // a finished farm reads as a node
     const color = b.color || BUILDING_COLOR;
+    const half = (cellSize * (b.size || 2)) / 2;
     if (b.complete) {
-      drawDiamond(ctx, g, b.x, b.y, cellSize, color);
+      drawDiamond(ctx, g, b.x, b.y, half, color);
     } else {
       const pts = [
-        worldToMinimap(g, b.x - cellSize, b.y - cellSize),
-        worldToMinimap(g, b.x + cellSize, b.y - cellSize),
-        worldToMinimap(g, b.x + cellSize, b.y + cellSize),
-        worldToMinimap(g, b.x - cellSize, b.y + cellSize),
+        worldToMinimap(g, b.x - half, b.y - half),
+        worldToMinimap(g, b.x + half, b.y - half),
+        worldToMinimap(g, b.x + half, b.y + half),
+        worldToMinimap(g, b.x - half, b.y + half),
       ];
       ctx.strokeStyle = color;
       ctx.lineWidth = 1;

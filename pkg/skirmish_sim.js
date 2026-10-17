@@ -15,11 +15,28 @@ export class WasmSim {
         wasm.__wbg_wasmsim_free(ptr, 0);
     }
     /**
-     * Placed buildings as a flat array: eight values per building —
-     * `[id, kind, x, y, progress, complete, cell_x, cell_y]` — in
-     * building id order. `kind` tags: 0 house, 1 farm. `progress` is
-     * 0..1 (1 when complete); `complete` is 0/1. A completed farm is
-     * listed here (its food shows up as a node in `nodes()`); an
+     * Why training `kind_tag` (3 militia, 4 archer) at `building`
+     * cannot currently proceed: same tags as `train_block_reason`
+     * (0 ok, 1 cannot afford, 2 queue full / not trainable here,
+     * 3 housed). UI affordance only.
+     * @param {number} building
+     * @param {number} kind_tag
+     * @returns {number}
+     */
+    building_train_block(building, kind_tag) {
+        const ret = wasm.wasmsim_building_train_block(this.__wbg_ptr, building, kind_tag);
+        return ret >>> 0;
+    }
+    /**
+     * Placed buildings as a flat array: eleven values per building —
+     * `[id, kind, x, y, progress, complete, cell_x, cell_y, size,
+     * queue_len, train_progress]` — in building id order. `kind`
+     * tags: 0 house, 1 farm, 2 barracks (M3). `progress` is the
+     * construction fraction 0..1 (1 when complete); `complete` is
+     * 0/1; `size` is the footprint edge in cells; `queue_len` and
+     * `train_progress` (0..1 on the queue's head) describe a
+     * production building's queue. A completed farm is listed here
+     * (its food shows up as a node in `nodes()`); an
      * under-construction farm appears only here.
      * @returns {Float64Array}
      */
@@ -46,11 +63,37 @@ export class WasmSim {
         return ret >>> 0;
     }
     /**
-     * Per-entity kind tags in id order: 0 = villager, 1 = town center.
+     * Per-entity hit points as flat `[hp, max_hp, …]` pairs in id
+     * order (M3). An entity with hp < 1 is dead (the CMB-02 rule) —
+     * the renderer skips it. The Town Center reports its full table
+     * HP; buildings take no damage in M3.
+     * @returns {Float64Array}
+     */
+    entity_hp() {
+        const ret = wasm.wasmsim_entity_hp(this.__wbg_ptr);
+        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v1;
+    }
+    /**
+     * Per-entity kind tags in id order: 0 = villager, 1 = town center,
+     * 2 = scout cavalry, 3 = militia, 4 = archer, 5 = sheep, 6 = boar,
+     * 7 = deer (M3).
      * @returns {Uint8Array}
      */
     entity_kinds() {
         const ret = wasm.wasmsim_entity_kinds(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * Per-entity owner tags in id order (M3): 0 = the player,
+     * 1 = Gaia. A sheep flips 1 → 0 when captured.
+     * @returns {Uint8Array}
+     */
+    entity_owners() {
+        const ret = wasm.wasmsim_entity_owners(this.__wbg_ptr);
         var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
         return v1;
@@ -111,8 +154,9 @@ export class WasmSim {
      * Resource nodes as a flat array: five values per node —
      * `[id, x, y, kind, amount_left]` — in node id order. `kind` tags:
      * 0 tree, 1 berry bush, 2 gold mine, 3 stone mine, 4 farm (M2.5 —
-     * a completed farm). Depleted nodes are included with
-     * `amount_left` 0 (the preview hides them).
+     * a completed farm), 5 hunt carcass, 6 herd carcass (M3).
+     * Depleted nodes are included with `amount_left` 0 (the preview
+     * hides them).
      * @returns {Float64Array}
      */
     nodes() {
@@ -157,6 +201,44 @@ export class WasmSim {
         var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
         return v1;
+    }
+    /**
+     * Projectiles in flight (M3), flat: six values per projectile —
+     * `[spawn_x, spawn_y, impact_x, impact_y, spawn_tick,
+     * impact_tick]` — in spawn order. The renderer interpolates the
+     * current position from `tick_count()`; the sim owns the truth.
+     * @returns {Float64Array}
+     */
+    projectiles() {
+        const ret = wasm.wasmsim_projectiles(this.__wbg_ptr);
+        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v1;
+    }
+    /**
+     * Order a unit to attack a target entity (M3): chase and strike
+     * until the target dies or a new order lands. Returns whether
+     * the order *would* be accepted against the current state (the
+     * sim re-validates when the command is applied).
+     * @param {number} entity
+     * @param {number} target
+     * @returns {boolean}
+     */
+    push_attack(entity, target) {
+        const ret = wasm.wasmsim_push_attack(this.__wbg_ptr, entity, target);
+        return ret !== 0;
+    }
+    /**
+     * Order a villager to build a Barracks (175 wood, 3×3-cell
+     * footprint) — see `push_build_house`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_barracks(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_barracks(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
     }
     /**
      * Order a villager to build a Farm (60 wood) — see
@@ -212,6 +294,27 @@ export class WasmSim {
      */
     push_noop() {
         wasm.wasmsim_push_noop(this.__wbg_ptr);
+    }
+    /**
+     * Enqueue an Archer at a completed Barracks (M3) — see
+     * `push_train_militia`.
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_train_archer(building) {
+        const ret = wasm.wasmsim_push_train_archer(this.__wbg_ptr, building);
+        return ret !== 0;
+    }
+    /**
+     * Enqueue a Militia at a completed Barracks (M3). Returns
+     * whether the order *would* be accepted (queue room + funds);
+     * the cost is deducted when the command is applied next tick.
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_train_militia(building) {
+        const ret = wasm.wasmsim_push_train_militia(this.__wbg_ptr, building);
+        return ret !== 0;
     }
     /**
      * Enqueue a villager at the Town Center (50 food, deducted when the

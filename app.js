@@ -12,6 +12,11 @@
 // sim validates every order itself), construction rendering, and the
 // AoE2-style interface layout: top resource bar, bottom-left command
 // panel, bottom-center selection panel, bottom-right minimap.
+// M3 adds the combat view: the starting Scout Cavalry, Gaia animals
+// (sheep/boars/deer) with capture and carcasses, the Barracks with
+// Militia/Archer training, right-click attack orders, HP bars, and
+// arrow rendering — all read from the sim through the ABI (owners,
+// HP, projectiles); the client never simulates any of it.
 //
 // Asset URLs are resolved relative to THIS module (import.meta.url),
 // so the page works from /play/, from the site root, and from the
@@ -62,24 +67,41 @@ const COLORS = [
 ];
 
 // Node kind tags (must match the sim's NodeKind::tag): 0 tree, 1 berry,
-// 2 gold, 3 stone, 4 farm. NODE_MAX is each kind's starting amount in
-// the sim (for the remaining-amount bar / farm crop tint); CARRY_COLORS
+// 2 gold, 3 stone, 4 farm, 5 hunt carcass (boar/deer), 6 herd carcass
+// (sheep). NODE_MAX is each kind's nominal full amount in the sim (for
+// the remaining-amount bar / farm crop tint) — a carcass starts at what
+// the animal was carrying, so its bar starts below full; CARRY_COLORS
 // is the load dot shown above a hauling villager.
-const NODE_MAX = [100, 125, 800, 350, 175];
-const CARRY_COLORS = ['#d9a05b', '#ff5da2', '#ffd700', '#c3c8cd', '#ff5da2'];
-const KIND_TC = 1; // entity kind tag: 0 villager, 1 town center
-const KIND_NAME = { 0: 'Villager', 1: 'Town Center' }; // HUD labels; grows with M3 kinds
+const NODE_MAX = [100, 125, 800, 350, 175, 340, 100];
+const CARRY_COLORS = ['#d9a05b', '#ff5da2', '#ffd700', '#c3c8cd', '#ff5da2', '#ff5da2', '#ff5da2'];
+// Entity kind tags (must match the sim's EntityKind::tag).
+const KIND_TC = 1;
+const KIND_SHEEP = 5;
+const KIND_NAME = {
+  0: 'Villager', 1: 'Town Center', 2: 'Scout Cavalry', 3: 'Militia',
+  4: 'Archer', 5: 'Sheep', 6: 'Boar', 7: 'Deer',
+};
+// Selection-panel portraits per unit kind (SVG symbol ids in
+// play/index.html).
+const KIND_ICON = {
+  0: 'i-villager', 2: 'i-villager', 3: 'i-militia', 4: 'i-archer', 5: 'i-pop',
+};
 
 // Building kind tags (must match the sim's BuildingKind::tag):
-// 0 house, 1 farm. Costs mirror the sim (MECHANICS-STUDY §5).
-const BUILD_COST = [25, 60];
-const BUILD_NAME = ['House', 'Farm'];
+// 0 house, 1 farm, 2 barracks. Costs and footprints mirror the sim
+// (MECHANICS-STUDY §5).
+const BUILD_COST = [25, 60, 175];
+const BUILD_NAME = ['House', 'Farm', 'Barracks'];
+const BUILD_SIZE = [2, 2, 3];
 
 // --- Game shell state (client-only; never sim input) -------------------
 let playing = false; // Play pressed: the sim ticks
 let paused = false; // pause menu open: the sim holds
 let selection = new Set(); // selected unit ids — orders go ONLY to these (AoE2-style)
-let selectedBuilding = null; // Town Center entity id while selected, else null
+// The selected building, if any: { type: 'tc', id } for the Town
+// Center (an entity) or { type: 'building', id, kind } for a placed
+// building (House/Farm/Barracks). Null when units are selected.
+let selectedBuilding = null;
 
 // Selection invariants: the unit selection and the building selection
 // are mutually exclusive — selecting one clears the other — and
@@ -89,8 +111,8 @@ function selectUnits(set) {
   selection = set;
   selectedBuilding = null;
 }
-function selectBuilding(idOrNull) {
-  selectedBuilding = idOrNull;
+function selectBuilding(descOrNull) {
+  selectedBuilding = descOrNull;
   selection = new Set();
 }
 
@@ -123,6 +145,7 @@ for (const [key, file] of Object.entries({
   stone: 'stone.png',
   tc: 'town-center.png',
   house: 'house.png',
+  barracks: 'barracks.png',
 })) {
   const im = new Image();
   im.src = assetUrl('assets-placeholder/' + file);
@@ -292,38 +315,58 @@ function nodeList() {
   return out;
 }
 
-// Building data is a flat array of 8 per building:
-// [id, kind, x, y, progress, complete, cell_x, cell_y].
+// Building data is a flat array of 11 per building (M3):
+// [id, kind, x, y, progress, complete, cell_x, cell_y, size,
+//  queue_len, train_progress].
 function buildingList() {
   const flat = sim.buildings();
   const out = [];
-  for (let i = 0; i < flat.length; i += 8) {
+  for (let i = 0; i < flat.length; i += 11) {
     out.push({
       id: flat[i], kind: flat[i + 1], x: flat[i + 2], y: flat[i + 3],
       progress: flat[i + 4], complete: flat[i + 5] > 0.5,
-      cellX: flat[i + 6], cellY: flat[i + 7],
+      cellX: flat[i + 6], cellY: flat[i + 7], size: flat[i + 8],
+      queue: flat[i + 9], trainFrac: flat[i + 10],
     });
   }
   return out;
 }
 
-function villagerIds() {
-  const kinds = sim.entity_kinds();
+// One snapshot of the entity arrays (entity index === entity id —
+// the sim never reorders or removes entities; the dead are
+// tombstones with hp < 1). `hp` is flat [hp, max_hp] pairs.
+function entityState() {
+  return {
+    kinds: sim.entity_kinds(),
+    owners: sim.entity_owners(),
+    hp: sim.entity_hp(),
+    pos: sim.positions(),
+    count: sim.entity_count(),
+  };
+}
+// A living unit of ours: player-owned, not the Town Center, hp >= 1
+// (the sim's death rule is hp < 1).
+const isOwnUnit = (st, i) =>
+  st.owners[i] === 0 && st.kinds[i] !== KIND_TC && st.hp[i * 2] >= 1;
+
+// Every selectable unit of ours (for box select / double-click).
+function ownUnitIds() {
+  const st = entityState();
   const ids = [];
-  for (let i = 0; i < kinds.length; i++) {
-    if (kinds[i] !== KIND_TC) ids.push(i); // entities are id-ordered
+  for (let i = 0; i < st.count; i++) {
+    if (isOwnUnit(st, i)) ids.push(i);
   }
   return ids;
 }
 
-// The current selection as an id list, restricted to selectable units
-// (buildings are never in the selection — the filter keeps it true even
-// if a future caller slips one in). Kind-agnostic on purpose: when M3
-// adds military kinds, they flow through here unchanged.
+// The current selection as an id list, restricted to our living
+// units (buildings are never in the selection — the filter keeps it
+// true even if a future caller slips one in; the dead drop out the
+// frame they die).
 function selectedUnits() {
   if (!sim) return [];
-  const kinds = sim.entity_kinds();
-  return [...selection].filter((i) => kinds[i] !== KIND_TC);
+  const st = entityState();
+  return [...selection].filter((i) => isOwnUnit(st, i));
 }
 
 function worldToCell(wx, wy) {
@@ -345,7 +388,8 @@ function tcCell() {
 // the ghost is honest. The sim re-validates every order itself — this
 // mirror is a courtesy, never the authority.
 function mirrorValid(kind, cx, cy) {
-  if (cx < 0 || cy < 0 || cx + 1 >= GW || cy + 1 >= GH) return false;
+  const size = BUILD_SIZE[kind];
+  if (cx < 0 || cy < 0 || cx + size > GW || cy + size > GH) return false;
   const buildings = buildingList();
   // Resuming an incomplete building of the same kind at this anchor.
   for (const b of buildings) {
@@ -353,15 +397,21 @@ function mirrorValid(kind, cx, cy) {
       return true;
     }
   }
-  const cells = [[cx, cy], [cx + 1, cy], [cx, cy + 1], [cx + 1, cy + 1]];
+  // Any standing building's footprint (square range overlap).
+  for (const b of buildings) {
+    const bs = b.size || BUILD_SIZE[b.kind] || 2;
+    if (cx < b.cellX + bs && b.cellX < cx + size &&
+        cy < b.cellY + bs && b.cellY < cy + size) return false;
+  }
+  const cells = [];
+  for (let dx = 0; dx < size; dx++) {
+    for (let dy = 0; dy < size; dy++) cells.push([cx + dx, cy + dy]);
+  }
   const tc = tcCell();
   const nodes = nodeList();
   for (const [x, y] of cells) {
     if (OBST[y * GW + x]) return false; // static wall
     if (tc && x === tc[0] && y === tc[1]) return false; // Town Center
-    for (const b of buildings) { // any standing building's footprint
-      if (Math.abs(b.cellX - cx) <= 1 && Math.abs(b.cellY - cy) <= 1) return false;
-    }
     for (const n of nodes) { // a live node on this cell
       if (n.amount <= 0) continue;
       const nc = worldToCell(n.x, n.y);
@@ -384,9 +434,15 @@ const lastNodeKind = new Map();
 const carryKind = new Map();
 const atNodeNow = new Set(); // villagers currently within gather range of a node
 
-function updateCarry(nodes, tcPos, pos, kinds) {
+function updateCarry(nodes, tcPos, pos, kinds, hp) {
   for (let i = 0; i < kinds.length; i++) {
-    if (kinds[i] === KIND_TC) continue;
+    if (kinds[i] !== 0) continue; // villagers only — animals/military carry nothing
+    if (hp && hp[i * 2] < 1) { // the dead drop out of the heuristic
+      carryKind.delete(i);
+      lastNodeKind.delete(i);
+      atNodeNow.delete(i);
+      continue;
+    }
     const wx = pos[i * 2];
     const wy = pos[i * 2 + 1];
     let atKind = null;
@@ -539,6 +595,20 @@ async function main() {
       placement = placement && placement.kind === 0 ? null : { kind: 0 };
     } else if (btn.id === 'build-farm') {
       placement = placement && placement.kind === 1 ? null : { kind: 1 };
+    } else if (btn.id === 'build-barracks') {
+      placement = placement && placement.kind === 2 ? null : { kind: 2 };
+    } else if (btn.id === 'train-militia' || btn.id === 'train-archer') {
+      const kindTag = btn.id === 'train-militia' ? 3 : 4;
+      const ok = selectedBuilding && selectedBuilding.type === 'building'
+        ? (kindTag === 3
+          ? sim.push_train_militia(selectedBuilding.id)
+          : sim.push_train_archer(selectedBuilding.id))
+        : false;
+      if (!ok && selectedBuilding) {
+        const reason = sim.building_train_block(selectedBuilding.id, kindTag);
+        flash(['', 'Not enough resources for that unit.',
+          'The training queue is full.', 'Housed — build a House first.'][reason] || 'Cannot train right now.');
+      }
     }
   });
 
@@ -583,14 +653,15 @@ async function main() {
     ];
   }
 
-  function villagerAt(wx, wy) {
-    const kinds = sim.entity_kinds();
-    const pos = sim.positions();
+  // Left-click pick: one of OUR living units (villagers, Scout,
+  // military, captured sheep) — Gaia's animals are never selected.
+  function unitAt(wx, wy) {
+    const st = entityState();
     let best = null;
     let bestD2 = 1.9 * 1.9;
-    for (let i = 0; i < kinds.length; i++) {
-      if (kinds[i] === KIND_TC) continue;
-      const d2 = (pos[i * 2] - wx) ** 2 + (pos[i * 2 + 1] - wy) ** 2;
+    for (let i = 0; i < st.count; i++) {
+      if (!isOwnUnit(st, i)) continue;
+      const d2 = (st.pos[i * 2] - wx) ** 2 + (st.pos[i * 2 + 1] - wy) ** 2;
       if (d2 < bestD2) {
         bestD2 = d2;
         best = i;
@@ -599,9 +670,37 @@ async function main() {
     return best;
   }
 
+  // Right-click target pick: ANY living entity (ours or Gaia's —
+  // the attack-target test). Slightly more generous radius: boars
+  // are big, and a missed click should still read as an attack.
+  function entityAt(wx, wy) {
+    const st = entityState();
+    let best = null;
+    let bestD2 = 2.2 * 2.2;
+    for (let i = 0; i < st.count; i++) {
+      if (st.kinds[i] === KIND_TC || st.hp[i * 2] < 1) continue;
+      const d2 = (st.pos[i * 2] - wx) ** 2 + (st.pos[i * 2 + 1] - wy) ** 2;
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  // Placed-building hit test (Barracks selection): the building
+  // whose footprint box contains the point.
+  function buildingAt(wx, wy) {
+    for (const b of buildingList()) {
+      const half = (b.size * CS) / 2;
+      if (Math.abs(b.x - wx) <= half && Math.abs(b.y - wy) <= half) return b;
+    }
+    return null;
+  }
+
   // Town Center hit test: the TC whose footprint box (pos ± TC_HALF
   // on both axes) contains the point — deliberately more generous
-  // than villagerAt's pick radius, since the TC is a big building.
+  // than unitAt's pick radius, since the TC is a big building.
   function tcAt(wx, wy) {
     const kinds = sim.entity_kinds();
     const pos = sim.positions();
@@ -627,32 +726,51 @@ async function main() {
     return best;
   }
 
-  // Context order at a point: gather the node there, else move. Goes
-  // ONLY to the current selection (AoE2-style) — with an empty
-  // selection the order does nothing but flash the hint.
+  // Context order at a point (M3): an entity there (Gaia animal or
+  // our own sheep) means Attack for everyone who can fight; a node
+  // means Gather for villagers and Move for the rest; ground means
+  // Move. Goes ONLY to the current selection (AoE2-style) — with an
+  // empty selection the order does nothing but flash the hint.
   function orderAt(wx, wy) {
     const targets = selectedUnits();
     if (targets.length === 0) {
       flash(selectedBuilding != null
-        ? 'The Town Center trains villagers from the Commands panel.'
-        : 'Select a villager first.');
+        ? (selectedBuilding.type === 'tc'
+          ? 'The Town Center trains villagers from the Commands panel.'
+          : 'Train units from the Commands panel.')
+        : 'Select a unit first.');
       return;
+    }
+    const st = entityState();
+    const t = entityAt(wx, wy);
+    if (t != null && (st.owners[t] === 1 || st.kinds[t] === KIND_SHEEP)) {
+      let any = false;
+      for (const id of targets) {
+        if (st.kinds[id] === KIND_SHEEP) continue; // sheep don't fight
+        if (sim.push_attack(id, t)) any = true;
+      }
+      if (any) return;
+      // Nobody could attack (e.g. only sheep selected): fall through
+      // to a plain move toward the point.
     }
     const n = nodeAt(wx, wy);
     for (const id of targets) {
-      if (n) sim.push_gather(id, n.id);
+      if (n && st.kinds[id] === 0) sim.push_gather(id, n.id);
       else sim.push_move(id, wx, wy);
     }
   }
 
   function attemptPlace(wx, wy) {
-    // The builder is the selected villager NEAREST the placement
+    // The builder is the selected VILLAGER nearest the placement
     // point: with a group selected, the closest pair of hands does
-    // the work (the sim's Build command names a single builder).
-    const pos = sim.positions();
+    // the work (the sim's Build command names a single builder, and
+    // only villagers build).
+    const st = entityState();
+    const pos = st.pos;
     let builder = null;
     let bestD2 = Infinity;
     for (const id of selectedUnits()) {
+      if (st.kinds[id] !== 0) continue;
       const d2 = (pos[id * 2] - wx) ** 2 + (pos[id * 2 + 1] - wy) ** 2;
       if (d2 < bestD2) {
         bestD2 = d2;
@@ -671,7 +789,9 @@ async function main() {
     const py = -HALF + cy * CS + 0.01;
     const ok = placement.kind === 0
       ? sim.push_build_house(builder, px, py)
-      : sim.push_build_farm(builder, px, py);
+      : placement.kind === 1
+        ? sim.push_build_farm(builder, px, py)
+        : sim.push_build_barracks(builder, px, py);
     if (ok) {
       placement = null;
     } else {
@@ -719,7 +839,7 @@ async function main() {
       const y1 = Math.max(d.y0, d.y1);
       const pos = sim.positions();
       const boxed = [];
-      for (const id of villagerIds()) {
+      for (const id of ownUnitIds()) {
         const [sx, sy] = worldToScreen(pos[id * 2], pos[id * 2 + 1]);
         if (sx >= x0 && sx <= x1 && sy >= y0 && sy <= y1) boxed.push(id);
       }
@@ -733,7 +853,7 @@ async function main() {
       return;
     }
     // Plain click.
-    const v = villagerAt(wx, wy);
+    const v = unitAt(wx, wy);
     if (v != null) {
       if (ev.shiftKey) {
         const next = new Set(selection);
@@ -744,22 +864,28 @@ async function main() {
         selectUnits(new Set([v]));
       }
     } else if (!ev.shiftKey) {
-      // No unit hit: the Town Center is a selection of its own (kept
-      // OUT of the unit Set); empty ground clears both selections.
+      // No unit hit: the Town Center and placed buildings are
+      // selections of their own (kept OUT of the unit Set); empty
+      // ground clears both selections.
       const tc = tcAt(wx, wy);
-      if (tc != null) selectBuilding(tc);
-      else selectUnits(new Set());
+      if (tc != null) {
+        selectBuilding({ type: 'tc', id: tc });
+      } else {
+        const b = buildingAt(wx, wy);
+        if (b) selectBuilding({ type: 'building', id: b.id, kind: b.kind });
+        else selectUnits(new Set());
+      }
     }
   });
   canvas.addEventListener('dblclick', (ev) => {
     const [wx, wy] = eventWorld(ev);
-    const v = villagerAt(wx, wy);
+    const v = unitAt(wx, wy);
     if (v == null) return;
     const kinds = sim.entity_kinds();
     const kind = kinds[v];
     const pos = sim.positions();
     const same = [];
-    for (const id of villagerIds()) {
+    for (const id of ownUnitIds()) {
       if (kinds[id] !== kind) continue;
       const [sx, sy] = worldToScreen(pos[id * 2], pos[id * 2 + 1]);
       if (sx >= 0 && sx <= canvas.width && sy >= 0 && sy <= canvas.height) same.push(id);
@@ -1017,7 +1143,32 @@ function drawFarm(sx, sy, frac, wx, wy) {
   drawFarmPlot(wx, wy, frac);
 }
 
-const NODE_DRAW = [drawTree, drawBerry, drawGold, drawStone, drawFarm];
+// A carcass (M3): a fallen animal — meat mound in two red tones with
+// pale bone ticks. Same painter family as the other node vectors; the
+// amount bar above it (drawn by the caller) shows the meat left, and
+// it decays visibly over time. `frac` is amount / nominal full.
+function drawCarcass(sx, sy, frac) {
+  const u = camS;
+  shadow(sx, sy, 1.5 * u);
+  ctx.fillStyle = '#7c3f2a';
+  ctx.beginPath();
+  ctx.ellipse(sx, sy - 0.35 * u, 1.25 * u, 0.62 * u, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#a2542f';
+  ctx.beginPath();
+  ctx.ellipse(sx - 0.25 * u, sy - 0.55 * u, 0.85 * u, 0.45 * u, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#e8ddc8';
+  ctx.lineWidth = Math.max(1, 0.22 * u);
+  for (const [dx, dy, a] of [[-0.8, -0.5, -0.5], [0.1, -0.85, 0.2], [0.8, -0.45, 0.6]]) {
+    ctx.beginPath();
+    ctx.moveTo(sx + dx * u, sy + dy * u);
+    ctx.lineTo(sx + (dx + Math.sin(a) * 0.45) * u, sy + (dy - 0.45) * u);
+    ctx.stroke();
+  }
+}
+
+const NODE_DRAW = [drawTree, drawBerry, drawGold, drawStone, drawFarm, drawCarcass, drawCarcass];
 
 // --- Building sprites -----------------------------------------------------
 const TC_HALF = 3.6; // world units: TC footprint half-extent
@@ -1095,6 +1246,51 @@ function drawHouse(b) {
   if (!b.complete) progressBar(sx, sy - 4.9 * camS, b.progress);
 }
 
+// Barracks rendering (M3): the CC0 placeholder keep sprite
+// (assets-placeholder/barracks.png) clip-revealed over a 3-cell
+// foundation diamond while under construction, full-size when done;
+// a stone-block vector is the fallback. The footprint is 3×3 cells.
+function drawBarracks(b) {
+  const [sx, sy] = worldToScreen(b.x, b.y);
+  const half = (b.size * CS) / 2; // footprint half-extent, world units
+  shadow(sx, sy, half * 1.45 * camS);
+  const t = worldToScreen(b.x - half, b.y - half);
+  const r = worldToScreen(b.x + half, b.y - half);
+  const bt = worldToScreen(b.x + half, b.y + half);
+  const l = worldToScreen(b.x - half, b.y + half);
+  poly([t, r, bt, l], b.complete ? 'rgba(0,0,0,0.12)' : '#8d8578');
+  const im = SPRITES.barracks;
+  if (spriteReady(im)) {
+    const w = 13.5 * camS;
+    const h = w * (im.naturalHeight / im.naturalWidth);
+    const base = sy + 2.6 * camS;
+    if (b.complete) {
+      ctx.drawImage(im, sx - w / 2, base - h, w, h);
+    } else {
+      const hh = Math.max(1, h * b.progress);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(sx - w / 2, base - hh, w, hh);
+      ctx.clip();
+      ctx.drawImage(im, sx - w / 2, base - h, w, h);
+      ctx.restore();
+    }
+  } else {
+    // Vector fallback: a wide stone block that grows with progress,
+    // with a banner slit when complete.
+    const hh = (b.complete ? 3.4 : 3.4 * b.progress) * camS;
+    poly([l, bt, up(bt, hh), up(l, hh)], '#8f9299');
+    poly([bt, r, up(r, hh), up(bt, hh)], '#6d7076');
+    if (b.complete) {
+      poly([up(t, hh), up(r, hh), up(bt, hh), up(l, hh)], '#7a4a35');
+      ctx.fillStyle = '#b03a2e';
+      const cx = (t[0] + bt[0]) / 2;
+      ctx.fillRect(cx - 0.3 * camS, (t[1] + bt[1]) / 2 - hh, 0.6 * camS, 1.6 * camS);
+    }
+  }
+  if (!b.complete) progressBar(sx, sy - 6.4 * camS, b.progress);
+}
+
 function drawBuilding(b) {
   if (b.kind === 1) {
     // Farm under construction: bare tilled plot + progress bar.
@@ -1103,22 +1299,41 @@ function drawBuilding(b) {
     shadow(sx, sy, 3.4 * camS);
     drawFarmPlot(b.x, b.y, null);
     progressBar(sx, sy - 3.4 * camS, b.progress);
+  } else if (b.kind === 2) {
+    drawBarracks(b);
   } else {
     drawHouse(b);
   }
+}
+
+// Gold selection ring under a unit (shared by every unit draw).
+function drawSelRing(sx, sy, rWorld) {
+  ctx.strokeStyle = '#ffcf4d';
+  ctx.lineWidth = Math.max(1.5, camS * 0.22);
+  ctx.beginPath();
+  ctx.ellipse(sx, sy, rWorld * camS, (rWorld / 2) * camS, 0, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
+// Thin HP bar (green → red as HP falls), drawn above a damaged unit.
+function hpBar(sx, sy, frac) {
+  const w = 2.6 * camS;
+  const h = Math.max(2, camS * 0.42);
+  const x = sx - w / 2;
+  const f = Math.max(0, Math.min(1, frac));
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(x - 1, sy - 1, w + 2, h + 2);
+  ctx.fillStyle = '#20261c';
+  ctx.fillRect(x, sy, w, h);
+  ctx.fillStyle = f > 0.5 ? '#7dd87d' : f > 0.25 ? '#e0a13c' : '#d84a35';
+  ctx.fillRect(x, sy, w * f, h);
 }
 
 function drawVillager(i, wx, wy) {
   const [sx, sy] = worldToScreen(wx, wy);
   const u = camS;
   shadow(sx, sy, 0.95 * u);
-  if (selection.has(i)) {
-    ctx.strokeStyle = '#ffcf4d';
-    ctx.lineWidth = Math.max(1.5, u * 0.22);
-    ctx.beginPath();
-    ctx.ellipse(sx, sy, 1.25 * u, 0.62 * u, 0, 0, Math.PI * 2);
-    ctx.stroke();
-  }
+  if (selection.has(i)) drawSelRing(sx, sy, 1.25);
   const anim = updateVilAnim(i, wx, wy, performance.now());
   const orig = drawOriginalVillager(anim, sx, sy);
   const spr = orig || drawSpriteH(SPRITES.villager, sx, sy, 2.4);
@@ -1149,6 +1364,188 @@ function drawVillager(i, wx, wy) {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(String(i), sx, spr ? sy + 0.5 * u : by);
+}
+
+// --- M3 unit drawings (v1: clean original vectors) --------------------
+// Flat shapes in the same painter family as the node vectors, drawn
+// from the unit's ground point (sx, sy); the sprite pipeline replaces
+// them piece by piece like it did the villager. No HP bar here — the
+// painter loop adds it above any damaged unit.
+
+function legs(sx, sy, u, dxs, color) {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(1, 0.22 * u);
+  for (const dx of dxs) {
+    ctx.beginPath();
+    ctx.moveTo(sx + dx * u, sy - 0.55 * u);
+    ctx.lineTo(sx + dx * u, sy);
+    ctx.stroke();
+  }
+}
+
+function drawScout(i, wx, wy) {
+  const [sx, sy] = worldToScreen(wx, wy);
+  const u = camS;
+  shadow(sx, sy, 1.2 * u);
+  if (selection.has(i)) drawSelRing(sx, sy, 1.5);
+  legs(sx, sy, u, [-0.75, -0.3, 0.45, 0.85], '#5d4630');
+  ctx.fillStyle = '#8a6844'; // horse body
+  ctx.beginPath();
+  ctx.ellipse(sx, sy - 0.95 * u, 1.15 * u, 0.55 * u, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#8a6844'; // neck
+  ctx.lineWidth = 0.5 * u;
+  ctx.beginPath();
+  ctx.moveTo(sx + 0.85 * u, sy - 1.2 * u);
+  ctx.lineTo(sx + 1.3 * u, sy - 1.75 * u);
+  ctx.stroke();
+  ctx.fillStyle = '#77572f'; // head
+  ctx.beginPath();
+  ctx.ellipse(sx + 1.45 * u, sy - 1.8 * u, 0.38 * u, 0.22 * u, 0.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#31579e'; // rider torso (player blue)
+  ctx.beginPath();
+  ctx.ellipse(sx - 0.05 * u, sy - 1.85 * u, 0.42 * u, 0.55 * u, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#e8c39a'; // rider head
+  ctx.beginPath();
+  ctx.arc(sx - 0.05 * u, sy - 2.55 * u, 0.26 * u, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#d8d8d8'; // spear, held diagonal
+  ctx.lineWidth = Math.max(1, 0.14 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx + 0.25 * u, sy - 2.5 * u);
+  ctx.lineTo(sx + 1.05 * u, sy - 1.15 * u);
+  ctx.stroke();
+}
+
+function drawMilitia(i, wx, wy) {
+  const [sx, sy] = worldToScreen(wx, wy);
+  const u = camS;
+  shadow(sx, sy, 0.95 * u);
+  if (selection.has(i)) drawSelRing(sx, sy, 1.25);
+  ctx.fillStyle = '#31579e'; // tunic (player blue)
+  ctx.beginPath();
+  ctx.ellipse(sx, sy - 0.85 * u, 0.62 * u, 0.8 * u, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#e8c39a'; // head
+  ctx.beginPath();
+  ctx.arc(sx, sy - 1.95 * u, 0.34 * u, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#7a4a21'; // shield
+  ctx.beginPath();
+  ctx.arc(sx - 0.75 * u, sy - 1.0 * u, 0.42 * u, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#e8e8e8'; // sword
+  ctx.lineWidth = Math.max(1, 0.16 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx + 0.55 * u, sy - 1.5 * u);
+  ctx.lineTo(sx + 1.15 * u, sy - 2.2 * u);
+  ctx.stroke();
+}
+
+function drawArcher(i, wx, wy) {
+  const [sx, sy] = worldToScreen(wx, wy);
+  const u = camS;
+  shadow(sx, sy, 0.95 * u);
+  if (selection.has(i)) drawSelRing(sx, sy, 1.25);
+  ctx.fillStyle = '#4a6e46'; // tunic (archer green)
+  ctx.beginPath();
+  ctx.ellipse(sx, sy - 0.85 * u, 0.58 * u, 0.8 * u, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#e8c39a'; // head
+  ctx.beginPath();
+  ctx.arc(sx, sy - 1.95 * u, 0.34 * u, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#8a6844'; // bow arc
+  ctx.lineWidth = Math.max(1, 0.16 * u);
+  ctx.beginPath();
+  ctx.arc(sx + 0.75 * u, sy - 1.35 * u, 0.62 * u, -1.1, 1.1);
+  ctx.stroke();
+  ctx.strokeStyle = '#e8e8e8'; // bowstring
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(sx + 1.12 * u, sy - 1.92 * u);
+  ctx.lineTo(sx + 1.12 * u, sy - 0.78 * u);
+  ctx.stroke();
+}
+
+function drawSheep(i, wx, wy) {
+  const [sx, sy] = worldToScreen(wx, wy);
+  const u = camS;
+  shadow(sx, sy, 0.9 * u);
+  if (selection.has(i)) drawSelRing(sx, sy, 1.2);
+  legs(sx, sy, u, [-0.5, 0.5], '#4a4038');
+  ctx.fillStyle = '#e9e6df'; // wool: three overlapping puffs
+  for (const [dx, dy, r] of [[-0.45, -0.8, 0.5], [0.35, -0.85, 0.55], [0, -1.1, 0.5]]) {
+    ctx.beginPath();
+    ctx.arc(sx + dx * u, sy + dy * u, r * u, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.fillStyle = '#4a4038'; // head
+  ctx.beginPath();
+  ctx.ellipse(sx + 0.95 * u, sy - 0.8 * u, 0.3 * u, 0.22 * u, 0.4, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawBoar(i, wx, wy) {
+  const [sx, sy] = worldToScreen(wx, wy);
+  const u = camS;
+  shadow(sx, sy, 1.25 * u);
+  if (selection.has(i)) drawSelRing(sx, sy, 1.55);
+  legs(sx, sy, u, [-0.7, -0.25, 0.5, 0.9], '#3a2a20');
+  ctx.fillStyle = '#5d4030'; // bulky body
+  ctx.beginPath();
+  ctx.ellipse(sx, sy - 0.85 * u, 1.3 * u, 0.68 * u, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#4c3424'; // head wedge
+  ctx.beginPath();
+  ctx.ellipse(sx + 1.25 * u, sy - 0.7 * u, 0.55 * u, 0.42 * u, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#f2ead8'; // tusks
+  ctx.lineWidth = Math.max(1, 0.18 * u);
+  for (const dy of [-0.55, -0.85]) {
+    ctx.beginPath();
+    ctx.moveTo(sx + 1.55 * u, sy + dy * u);
+    ctx.lineTo(sx + 1.8 * u, sy + (dy - 0.3) * u);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = '#3a2a20'; // bristle ridge
+  ctx.lineWidth = Math.max(1, 0.2 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx - 1.0 * u, sy - 1.35 * u);
+  ctx.lineTo(sx + 0.6 * u, sy - 1.5 * u);
+  ctx.stroke();
+}
+
+function drawDeer(i, wx, wy) {
+  const [sx, sy] = worldToScreen(wx, wy);
+  const u = camS;
+  shadow(sx, sy, 1.1 * u);
+  if (selection.has(i)) drawSelRing(sx, sy, 1.4);
+  legs(sx, sy, u, [-0.65, -0.25, 0.45, 0.8], '#8a6a42');
+  ctx.fillStyle = '#b98d54'; // body
+  ctx.beginPath();
+  ctx.ellipse(sx, sy - 1.05 * u, 1.05 * u, 0.5 * u, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#b98d54'; // neck
+  ctx.lineWidth = 0.42 * u;
+  ctx.beginPath();
+  ctx.moveTo(sx + 0.8 * u, sy - 1.3 * u);
+  ctx.lineTo(sx + 1.2 * u, sy - 1.95 * u);
+  ctx.stroke();
+  ctx.fillStyle = '#a87f49'; // head
+  ctx.beginPath();
+  ctx.ellipse(sx + 1.35 * u, sy - 2.05 * u, 0.34 * u, 0.2 * u, 0.4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#7a5c33'; // antlers
+  ctx.lineWidth = Math.max(1, 0.13 * u);
+  for (const s of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(sx + 1.3 * u, sy - 2.2 * u);
+    ctx.lineTo(sx + (1.3 + 0.3 * s) * u, sy - 2.65 * u);
+    ctx.stroke();
+  }
 }
 
 // --- Interface panels (top bar / commands / selection / toast) ------
@@ -1192,21 +1589,42 @@ function cmdButton({ id, icon, label, costIcon, cost, title, disabled, active, b
 
 let cmdSig = ''; // signature of the last-rendered command context
 
-// Contextual commands, bottom-left: villagers selected -> build
-// buttons (driving the existing placement flow); Town Center
-// selected -> train button (existing push_train_villager semantics);
-// nothing -> a hint line. Button ids (#build-house / #build-farm /
-// #train) are stable across rebuilds; clicks are handled by the one
-// delegated listener on #cmd-grid in main().
+// Train-block explanations, indexed by the sim's TrainBlock tag
+// (shared shape for the Town Center and production buildings).
+const TRAIN_BLOCK_TITLES = [
+  '',
+  'Not enough resources.',
+  'The training queue is full.',
+  'Housed: population is at capacity — training cannot finish until a House stands.',
+];
+
+// Contextual commands, bottom-left: units selected (with a villager
+// among them) -> build buttons (driving the existing placement
+// flow); Town Center selected -> train Villager; Barracks selected
+// -> train Militia/Archer; nothing -> a hint line. Button ids are
+// stable across rebuilds; clicks are handled by the one delegated
+// listener on #cmd-grid in main().
 function renderCommands() {
   const selUnits = selectedUnits();
+  const st = entityState();
+  const hasVillager = selUnits.some((id) => st.kinds[id] === 0);
   const wood = sim.wood();
   const reason = sim.train_block_reason();
   const queue = sim.train_queue_len();
-  const context = selUnits.length > 0 ? 'build'
-    : selectedBuilding != null ? 'tc' : 'none';
-  const sig = [context, Math.floor(wood), reason, queue,
-    placement ? placement.kind : -1].join('|');
+  const bk = selectedBuilding && selectedBuilding.type === 'building'
+    ? buildingList().find((b) => b.id === selectedBuilding.id) || null
+    : null;
+  const context = selUnits.length > 0
+    ? (hasVillager ? 'build' : 'units')
+    : selectedBuilding
+      ? (selectedBuilding.type === 'tc' ? 'tc'
+        : bk && bk.kind === 2 ? 'barracks' : 'none')
+      : 'none';
+  const blockM = bk && context === 'barracks' ? sim.building_train_block(bk.id, 3) : -1;
+  const blockA = bk && context === 'barracks' ? sim.building_train_block(bk.id, 4) : -1;
+  const sig = [context, Math.floor(wood), Math.floor(sim.food()), Math.floor(sim.gold()),
+    reason, queue, bk ? bk.id : -1, bk ? bk.queue : -1, bk && bk.complete ? 1 : 0,
+    blockM, blockA, placement ? placement.kind : -1].join('|');
   if (sig === cmdSig) return;
   cmdSig = sig;
   cmdGrid.innerHTML = '';
@@ -1230,6 +1648,15 @@ function renderCommands() {
           ? `Farm — needs ${BUILD_COST[1]} wood`
           : 'Farm — 60 wood, 175 food',
       }),
+      cmdButton({
+        id: 'build-barracks', icon: 'i-tc', label: BUILD_NAME[2],
+        costIcon: 'i-wood', cost: BUILD_COST[2],
+        disabled: wood < BUILD_COST[2],
+        active: !!placement && placement.kind === 2,
+        title: wood < BUILD_COST[2]
+          ? `Barracks — needs ${BUILD_COST[2]} wood`
+          : 'Barracks — 175 wood, trains Militia and Archers',
+      }),
     );
   } else if (context === 'tc') {
     cmdGrid.append(cmdButton({
@@ -1237,13 +1664,36 @@ function renderCommands() {
       costIcon: 'i-food', cost: 50,
       disabled: reason === 2, // queue full; other blocks flash on click
       badge: queue > 0 ? `+${queue}` : null,
-      title: [
-        'Train a villager at the Town Center (50 food).',
-        'Not enough food.',
-        'The training queue is full.',
-        'Housed: population is at capacity — queued villagers cannot finish training until a House stands.',
-      ][reason] || 'Train a villager at the Town Center (50 food).',
+      title: TRAIN_BLOCK_TITLES[reason]
+        ? `Train Villager — ${TRAIN_BLOCK_TITLES[reason]}`
+        : 'Train a villager at the Town Center (50 food).',
     }));
+  } else if (context === 'barracks') {
+    const underConstruction = !bk.complete;
+    cmdGrid.append(
+      cmdButton({
+        id: 'train-militia', icon: 'i-militia', label: 'Militia',
+        costIcon: 'i-food', cost: 60,
+        disabled: underConstruction || blockM === 2,
+        badge: bk.queue > 0 ? `+${bk.queue}` : null,
+        title: underConstruction
+          ? 'Militia — the Barracks is under construction.'
+          : `Train Militia — 60 food · 20 gold.${TRAIN_BLOCK_TITLES[blockM] ? ' ' + TRAIN_BLOCK_TITLES[blockM] : ''}`,
+      }),
+      cmdButton({
+        id: 'train-archer', icon: 'i-archer', label: 'Archer',
+        costIcon: 'i-wood', cost: 25,
+        disabled: underConstruction || blockA === 2,
+        title: underConstruction
+          ? 'Archer — the Barracks is under construction.'
+          : `Train Archer — 25 wood · 45 gold.${TRAIN_BLOCK_TITLES[blockA] ? ' ' + TRAIN_BLOCK_TITLES[blockA] : ''}`,
+      }),
+    );
+  } else if (context === 'units') {
+    const hint = document.createElement('p');
+    hint.className = 'ui-cmd-hint';
+    hint.textContent = 'Right-click an animal or enemy to attack, ground to move.';
+    cmdGrid.append(hint);
   } else {
     const hint = document.createElement('p');
     hint.className = 'ui-cmd-hint';
@@ -1255,29 +1705,50 @@ function renderCommands() {
 let selSig = ''; // signature of the last-rendered selection panel
 
 // Selection panel, bottom-center: single unit -> portrait + name +
-// hint; group -> count + one cell per unit (capped at 12 + "+k");
-// Town Center -> portrait + queue state; nothing -> guidance.
+// HP + hint; group -> count + one cell per unit (capped at 12 +
+// "+k"); Town Center / Barracks -> portrait + queue state; nothing
+// -> guidance.
 function updateSelPanel() {
   const selUnits = selectedUnits();
+  const st = entityState();
   const queue = sim.train_queue_len();
   const reason = sim.train_block_reason();
+  const bk = selectedBuilding && selectedBuilding.type === 'building'
+    ? buildingList().find((b) => b.id === selectedBuilding.id) || null
+    : null;
   const context = selUnits.length > 0 ? 'units'
-    : selectedBuilding != null ? 'tc' : 'none';
-  const sig = [context, selUnits.join(','), selectedBuilding, queue, reason].join('|');
+    : selectedBuilding
+      ? (selectedBuilding.type === 'tc' ? 'tc'
+        : bk && bk.kind === 2 ? 'barracks' : 'building')
+      : 'none';
+  const singleHp = selUnits.length === 1 ? Math.floor(st.hp[selUnits[0] * 2]) : -1;
+  const bkBlock = bk ? sim.building_train_block(bk.id, 3) : -1;
+  const sig = [context, selUnits.join(','), JSON.stringify(selectedBuilding),
+    queue, reason, singleHp, bk ? bk.queue : -1, bkBlock,
+    bk && bk.complete ? 1 : 0].join('|');
   if (sig === selSig) return;
   selSig = sig;
 
   selGrid.innerHTML = '';
   selInfo.classList.remove('warn');
   if (context === 'units') {
-    const kinds = sim.entity_kinds();
-    const kindName = KIND_NAME[kinds[selUnits[0]]] || 'Unit';
+    const kind = st.kinds[selUnits[0]];
+    const kindName = KIND_NAME[kind] || 'Unit';
     selPortrait.classList.remove('empty');
-    selPortrait.innerHTML = '<svg class="ui-icon"><use href="#i-villager"/></svg>';
+    selPortrait.innerHTML =
+      `<svg class="ui-icon"><use href="#${KIND_ICON[kind] || 'i-villager'}"/></svg>`;
     if (selUnits.length === 1) {
+      const id = selUnits[0];
+      const hpTxt = `HP ${Math.ceil(st.hp[id * 2])} / ${st.hp[id * 2 + 1]}`;
       selName.textContent = kindName;
-      selInfo.textContent =
-        `Villager ${selUnits[0]} — right-click a node to gather, ground to move.`;
+      if (kind === 0) {
+        selInfo.textContent =
+          `${hpTxt} — right-click a node to gather, ground to move, an animal to attack.`;
+      } else if (kind === KIND_SHEEP) {
+        selInfo.textContent = `${hpTxt} — your sheep. Right-click the ground to move it.`;
+      } else {
+        selInfo.textContent = `${hpTxt} — right-click an animal or enemy to attack.`;
+      }
     } else {
       selName.textContent = `${selUnits.length} · ${kindName}`;
       selInfo.textContent = 'Right-click to order the group.';
@@ -1307,12 +1778,31 @@ function updateSelPanel() {
     } else {
       selInfo.textContent = 'Train villagers from the Commands panel.';
     }
+  } else if (context === 'barracks') {
+    selPortrait.classList.remove('empty');
+    selPortrait.innerHTML = '<svg class="ui-icon"><use href="#i-tc"/></svg>';
+    selName.textContent = 'Barracks';
+    if (!bk.complete) {
+      selInfo.textContent = 'Under construction…';
+    } else if (bkBlock === 3) {
+      selInfo.textContent = 'Housed — training stalls until a House stands.';
+      selInfo.classList.add('warn');
+    } else if (bk.queue > 0) {
+      selInfo.textContent = `Training… · Queue ${bk.queue}`;
+    } else {
+      selInfo.textContent = 'Train Militia or Archers from the Commands panel.';
+    }
+  } else if (context === 'building') {
+    selPortrait.classList.remove('empty');
+    selPortrait.innerHTML = '<svg class="ui-icon"><use href="#i-house"/></svg>';
+    selName.textContent = bk ? BUILD_NAME[bk.kind] : 'Building';
+    selInfo.textContent = bk && !bk.complete ? 'Under construction…' : '';
   } else {
     selPortrait.classList.add('empty');
     selPortrait.innerHTML = '<svg class="ui-icon"><use href="#i-villager"/></svg>';
     selName.textContent = 'No selection';
     selInfo.textContent =
-      'Click a villager, drag to select a group, or click the Town Center.';
+      'Click a unit, drag to select a group, or click the Town Center.';
   }
 }
 
@@ -1361,20 +1851,22 @@ function draw() {
 
   const nodes = nodeList();
   const buildings = buildingList();
-  const kinds = sim.entity_kinds();
-  const pos = sim.positions();
-  const count = sim.entity_count();
+  const st = entityState();
+  const kinds = st.kinds;
+  const pos = st.pos;
+  const count = st.count;
 
   let tcPos = null;
   for (let i = 0; i < count; i++) {
     if (kinds[i] === KIND_TC) tcPos = [pos[i * 2], pos[i * 2 + 1]];
   }
-  updateCarry(nodes, tcPos, pos, kinds);
+  updateCarry(nodes, tcPos, pos, kinds, st.hp);
 
-  // Active paths as thin ground lines (villagers only — the TC never moves).
+  // Active paths as thin ground lines (our living units only — the
+  // TC never moves, and Gaia's routes stay hidden).
   ctx.lineWidth = 1.5;
   for (let i = 0; i < count; i++) {
-    if (kinds[i] === KIND_TC) continue;
+    if (!isOwnUnit(st, i)) continue;
     const path = sim.entity_path(i);
     if (path.length >= 4) {
       ctx.strokeStyle = COLORS[i % COLORS.length] + '88';
@@ -1415,38 +1907,90 @@ function draw() {
     if (b.kind === 1 && b.complete) continue; // drawn as a farm node
     draws.push({ key: b.x + b.y + CS, fn: () => drawBuilding(b) });
   }
+  // Unit draws dispatch by kind (M3); the dead are skipped (they
+  // are tombstones in the sim, invisible here). A damaged unit gets
+  // an HP bar above it.
+  const UNIT_DRAW = [drawVillager, null, drawScout, drawMilitia, drawArcher,
+    drawSheep, drawBoar, drawDeer];
   for (let i = 0; i < count; i++) {
     const wx = pos[i * 2];
     const wy = pos[i * 2 + 1];
     if (kinds[i] === KIND_TC) {
       // Sort by the TC's base/front edge so units in front overlap it.
       draws.push({ key: wx + wy + TC_HALF, fn: () => drawTC(wx, wy) });
-    } else {
-      draws.push({ key: wx + wy, fn: () => drawVillager(i, wx, wy) });
+    } else if (st.hp[i * 2] >= 1) {
+      const drawFn = UNIT_DRAW[kinds[i]] || drawVillager;
+      const hp = st.hp[i * 2];
+      const maxHp = st.hp[i * 2 + 1];
+      draws.push({
+        key: wx + wy,
+        fn: () => {
+          drawFn(i, wx, wy);
+          if (hp < maxHp) {
+            const [sx, sy] = worldToScreen(wx, wy);
+            hpBar(sx, sy - 3.3 * camS, hp / maxHp);
+          }
+        },
+      });
     }
   }
   draws.sort((a, b) => a.key - b.key);
   for (const d of draws) d.fn();
 
-  // Town Center selection: a gold outline around its footprint —
-  // the building counterpart of the villager selection ring.
-  if (selectedBuilding != null && kinds[selectedBuilding] === KIND_TC) {
-    const bx = pos[selectedBuilding * 2];
-    const by = pos[selectedBuilding * 2 + 1];
-    const pts = [
-      worldToScreen(bx - TC_HALF, by - TC_HALF),
-      worldToScreen(bx + TC_HALF, by - TC_HALF),
-      worldToScreen(bx + TC_HALF, by + TC_HALF),
-      worldToScreen(bx - TC_HALF, by + TC_HALF),
-    ];
-    poly(pts, 'rgba(255, 207, 77, 0.10)');
-    ctx.strokeStyle = 'rgba(255, 207, 77, 0.95)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(pts[0][0], pts[0][1]);
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
-    ctx.closePath();
-    ctx.stroke();
+  // Arrows in flight (M3): interpolate along the sim's fixed
+  // trajectory with a small cosmetic arc; drawn as short lines
+  // aligned with the travel direction.
+  {
+    const proj = sim.projectiles();
+    const now = sim.tick_count();
+    ctx.strokeStyle = '#e8ddc8';
+    ctx.lineWidth = Math.max(1, camS * 0.16);
+    for (let p = 0; p < proj.length; p += 6) {
+      const span = Math.max(1, proj[p + 5] - proj[p + 4]);
+      const t = Math.max(0, Math.min(1, (now - proj[p + 4]) / span));
+      const wx = proj[p] + (proj[p + 2] - proj[p]) * t;
+      const wy = proj[p + 1] + (proj[p + 3] - proj[p + 1]) * t;
+      const [sx, sy] = worldToScreen(wx, wy);
+      const lift = Math.sin(Math.PI * t) * 1.2 * camS;
+      const dx = proj[p + 2] - proj[p];
+      const dy = proj[p + 3] - proj[p + 1];
+      const dl = Math.hypot(dx, dy) || 1;
+      const tail = 0.9 * camS;
+      ctx.beginPath();
+      ctx.moveTo(sx - (dx / dl) * tail, sy - lift - (dy / dl) * tail * 0.5);
+      ctx.lineTo(sx, sy - lift);
+      ctx.stroke();
+    }
+  }
+
+  // Building selection: a gold outline around the footprint — the
+  // building counterpart of the unit selection ring.
+  {
+    let outline = null; // [centerX, centerY, halfExtent]
+    if (selectedBuilding && selectedBuilding.type === 'tc') {
+      const id = selectedBuilding.id;
+      outline = [pos[id * 2], pos[id * 2 + 1], TC_HALF];
+    } else if (selectedBuilding && selectedBuilding.type === 'building') {
+      const b = buildings.find((bb) => bb.id === selectedBuilding.id);
+      if (b) outline = [b.x, b.y, (b.size * CS) / 2];
+    }
+    if (outline) {
+      const [bx, by, half] = outline;
+      const pts = [
+        worldToScreen(bx - half, by - half),
+        worldToScreen(bx + half, by - half),
+        worldToScreen(bx + half, by + half),
+        worldToScreen(bx - half, by + half),
+      ];
+      poly(pts, 'rgba(255, 207, 77, 0.10)');
+      ctx.strokeStyle = 'rgba(255, 207, 77, 0.95)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+      ctx.closePath();
+      ctx.stroke();
+    }
   }
 
   // Placement ghost: the footprint under the cursor, green when the
@@ -1454,13 +1998,14 @@ function draw() {
   if (placement && mouseWorld) {
     const [cx, cy] = worldToCell(mouseWorld[0], mouseWorld[1]);
     const ok = mirrorValid(placement.kind, cx, cy);
+    const size = BUILD_SIZE[placement.kind];
     const x0 = -HALF + cx * CS;
     const y0 = -HALF + cy * CS;
     const pts = [
       worldToScreen(x0, y0),
-      worldToScreen(x0 + 2 * CS, y0),
-      worldToScreen(x0 + 2 * CS, y0 + 2 * CS),
-      worldToScreen(x0, y0 + 2 * CS),
+      worldToScreen(x0 + size * CS, y0),
+      worldToScreen(x0 + size * CS, y0 + size * CS),
+      worldToScreen(x0, y0 + size * CS),
     ];
     poly(pts, ok ? 'rgba(90, 230, 120, 0.30)' : 'rgba(240, 70, 55, 0.30)');
     ctx.strokeStyle = ok ? 'rgba(140, 255, 170, 0.9)' : 'rgba(255, 110, 95, 0.9)';
@@ -1490,14 +2035,18 @@ function draw() {
   updateSelPanel();
   updateToast();
 
-  // Minimap: reuses this frame's nodes/buildings/kinds/pos, so it
-  // costs no extra ABI calls.
+  // Minimap: reuses this frame's nodes/buildings/entity state, so
+  // it costs no extra ABI calls. Gaia animals get their own dot
+  // colors; the dead are skipped.
   if (mmGeom) {
+    const GAIA_COLORS = { 5: '#cfd4d8', 6: '#a2532f', 7: '#c9a35f' };
     const mmEntities = [];
     for (let i = 0; i < count; i++) {
+      if (kinds[i] !== KIND_TC && st.hp[i * 2] < 1) continue;
       mmEntities.push({
         x: pos[i * 2], y: pos[i * 2 + 1], kind: kinds[i],
-        color: OWN_COLOR, selected: selection.has(i),
+        color: st.owners[i] === 1 ? (GAIA_COLORS[kinds[i]] || '#9a9a9a') : OWN_COLOR,
+        selected: selection.has(i),
       });
     }
     renderMinimap(mmCtx, mmGeom, {

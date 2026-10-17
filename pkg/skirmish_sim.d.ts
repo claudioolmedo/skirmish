@@ -8,11 +8,22 @@ export class WasmSim {
     free(): void;
     [Symbol.dispose](): void;
     /**
-     * Placed buildings as a flat array: eight values per building —
-     * `[id, kind, x, y, progress, complete, cell_x, cell_y]` — in
-     * building id order. `kind` tags: 0 house, 1 farm. `progress` is
-     * 0..1 (1 when complete); `complete` is 0/1. A completed farm is
-     * listed here (its food shows up as a node in `nodes()`); an
+     * Why training `kind_tag` (3 militia, 4 archer) at `building`
+     * cannot currently proceed: same tags as `train_block_reason`
+     * (0 ok, 1 cannot afford, 2 queue full / not trainable here,
+     * 3 housed). UI affordance only.
+     */
+    building_train_block(building: number, kind_tag: number): number;
+    /**
+     * Placed buildings as a flat array: eleven values per building —
+     * `[id, kind, x, y, progress, complete, cell_x, cell_y, size,
+     * queue_len, train_progress]` — in building id order. `kind`
+     * tags: 0 house, 1 farm, 2 barracks (M3). `progress` is the
+     * construction fraction 0..1 (1 when complete); `complete` is
+     * 0/1; `size` is the footprint edge in cells; `queue_len` and
+     * `train_progress` (0..1 on the queue's head) describe a
+     * production building's queue. A completed farm is listed here
+     * (its food shows up as a node in `nodes()`); an
      * under-construction farm appears only here.
      */
     buildings(): Float64Array;
@@ -25,9 +36,23 @@ export class WasmSim {
      */
     entity_count(): number;
     /**
-     * Per-entity kind tags in id order: 0 = villager, 1 = town center.
+     * Per-entity hit points as flat `[hp, max_hp, …]` pairs in id
+     * order (M3). An entity with hp < 1 is dead (the CMB-02 rule) —
+     * the renderer skips it. The Town Center reports its full table
+     * HP; buildings take no damage in M3.
+     */
+    entity_hp(): Float64Array;
+    /**
+     * Per-entity kind tags in id order: 0 = villager, 1 = town center,
+     * 2 = scout cavalry, 3 = militia, 4 = archer, 5 = sheep, 6 = boar,
+     * 7 = deer (M3).
      */
     entity_kinds(): Uint8Array;
+    /**
+     * Per-entity owner tags in id order (M3): 0 = the player,
+     * 1 = Gaia. A sheep flips 1 → 0 when captured.
+     */
+    entity_owners(): Uint8Array;
     /**
      * Remaining waypoints of an entity's active move order, flat
      * `[x0, y0, …]`. Empty when the entity has no order.
@@ -51,8 +76,9 @@ export class WasmSim {
      * Resource nodes as a flat array: five values per node —
      * `[id, x, y, kind, amount_left]` — in node id order. `kind` tags:
      * 0 tree, 1 berry bush, 2 gold mine, 3 stone mine, 4 farm (M2.5 —
-     * a completed farm). Depleted nodes are included with
-     * `amount_left` 0 (the preview hides them).
+     * a completed farm), 5 hunt carcass, 6 herd carcass (M3).
+     * Depleted nodes are included with `amount_left` 0 (the preview
+     * hides them).
      */
     nodes(): Float64Array;
     /**
@@ -72,6 +98,25 @@ export class WasmSim {
      * the sim itself never sees these floats.
      */
     positions(): Float64Array;
+    /**
+     * Projectiles in flight (M3), flat: six values per projectile —
+     * `[spawn_x, spawn_y, impact_x, impact_y, spawn_tick,
+     * impact_tick]` — in spawn order. The renderer interpolates the
+     * current position from `tick_count()`; the sim owns the truth.
+     */
+    projectiles(): Float64Array;
+    /**
+     * Order a unit to attack a target entity (M3): chase and strike
+     * until the target dies or a new order lands. Returns whether
+     * the order *would* be accepted against the current state (the
+     * sim re-validates when the command is applied).
+     */
+    push_attack(entity: number, target: number): boolean;
+    /**
+     * Order a villager to build a Barracks (175 wood, 3×3-cell
+     * footprint) — see `push_build_house`.
+     */
+    push_build_barracks(entity: number, x: number, y: number): boolean;
     /**
      * Order a villager to build a Farm (60 wood) — see
      * `push_build_house`.
@@ -102,6 +147,17 @@ export class WasmSim {
      * Placeholder command input.
      */
     push_noop(): void;
+    /**
+     * Enqueue an Archer at a completed Barracks (M3) — see
+     * `push_train_militia`.
+     */
+    push_train_archer(building: number): boolean;
+    /**
+     * Enqueue a Militia at a completed Barracks (M3). Returns
+     * whether the order *would* be accepted (queue room + funds);
+     * the cost is deducted when the command is applied next tick.
+     */
+    push_train_militia(building: number): boolean;
     /**
      * Enqueue a villager at the Town Center (50 food, deducted when the
      * command is applied next tick). Returns whether the order *would*
@@ -153,10 +209,13 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_wasmsim_free: (a: number, b: number) => void;
+    readonly wasmsim_building_train_block: (a: number, b: number, c: number) => number;
     readonly wasmsim_buildings: (a: number) => [number, number];
     readonly wasmsim_cell_size: (a: number) => number;
     readonly wasmsim_entity_count: (a: number) => number;
+    readonly wasmsim_entity_hp: (a: number) => [number, number];
     readonly wasmsim_entity_kinds: (a: number) => [number, number];
+    readonly wasmsim_entity_owners: (a: number) => [number, number];
     readonly wasmsim_entity_path: (a: number, b: number) => [number, number];
     readonly wasmsim_food: (a: number) => number;
     readonly wasmsim_gold: (a: number) => number;
@@ -168,11 +227,16 @@ export interface InitOutput {
     readonly wasmsim_population: (a: number) => number;
     readonly wasmsim_population_cap: (a: number) => number;
     readonly wasmsim_positions: (a: number) => [number, number];
+    readonly wasmsim_projectiles: (a: number) => [number, number];
+    readonly wasmsim_push_attack: (a: number, b: number, c: number) => number;
+    readonly wasmsim_push_build_barracks: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_farm: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_house: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_gather: (a: number, b: number, c: number) => void;
     readonly wasmsim_push_move: (a: number, b: number, c: number, d: number) => void;
     readonly wasmsim_push_noop: (a: number) => void;
+    readonly wasmsim_push_train_archer: (a: number, b: number) => number;
+    readonly wasmsim_push_train_militia: (a: number, b: number) => number;
     readonly wasmsim_push_train_villager: (a: number) => number;
     readonly wasmsim_state_hash: (a: number) => [number, number];
     readonly wasmsim_stockpile: (a: number) => [number, number];

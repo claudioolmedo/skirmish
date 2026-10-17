@@ -66,25 +66,27 @@
 <main>
   <section class="section" id="play">
     <h2>Play the test build</h2>
-    <p class="lede">This is the live <strong>M2.5 test build</strong> &mdash; a working economy
-    plus construction. Send villagers to gather wood, berries, gold and stone, train more at
-    the Town Center, then build: Houses raise your population room, Farms grow food your
-    villagers harvest. The villager is already our own original art; the landscape still uses
-    clearly-marked placeholder test art while our own sprites replace it, piece by piece.
-    The game opens fullscreen, on its own page.</p>
+    <p class="lede">This is the live <strong>M3 test build</strong> &mdash; a working economy,
+    construction, and now combat. Send villagers to gather wood, berries, gold and stone, train
+    more at the Town Center, then build: Houses raise your population room, Farms grow food your
+    villagers harvest. Your Scout Cavalry rides with the village from the start; sheep, boars and
+    deer roam the map, and a Barracks trains Militia and Archers to hunt and defend. The villager
+    is already our own original art; the landscape still uses clearly-marked placeholder test art
+    while our own sprites replace it, piece by piece. The game opens fullscreen, on its own page.</p>
 
     <div class="play-layout">
       <div class="game-frame">
-        <span class="build-badge">Test build · M2.5 — economy + construction</span>
+        <span class="build-badge">Test build · M3 — economy, construction + combat</span>
         <img class="showcase-art" src="art/hero-key-art.jpg" alt="Skirmish — a little village of workers, trees and a town center, in original art">
         <p class="showcase-link">
           <a href="play/">Play the test build &rarr;</a>
         </p>
-        <div class="hint">How to play: click a villager to select it, then click a tree, bush,
-          gold or stone to gather &mdash; or the ground to move. Train villagers at the Town Center,
-          but training stalls at the population cap: build Houses (+5 room, 25 wood) and Farms
-          (175 food, 60 wood) from the build menu. Pan with WASD / arrow keys or right-mouse
-          drag; zoom with the mouse wheel; Esc pauses.</div>
+        <div class="hint">How to play: click a villager to select it, then right-click a tree,
+          bush, gold or stone to gather &mdash; or the ground to move. Train villagers at the Town
+          Center, but training stalls at the population cap: build Houses (+5 room, 25 wood),
+          Farms (175 food, 60 wood) and a Barracks (175 wood) from the build menu. Right-click an
+          animal to hunt it; build the Barracks to train Militia and Archers. Pan with WASD /
+          arrow keys or right-mouse drag; zoom with the mouse wheel; Esc pauses.</div>
       </div>
 
       <aside class="play-side">
@@ -129,14 +131,15 @@
 
   <section class="section" id="roadmap">
     <h2>Roadmap</h2>
-    <p class="lede">Small milestones, shipped one at a time. The economy and construction are
-    playable today &mdash; combat is next.</p>
+    <p class="lede">Small milestones, shipped one at a time. The economy, construction and
+    combat are playable today &mdash; the input shell and a scripted opponent are next.</p>
     <div class="roadmap">
       <div class="step done"><span class="m">M0</span>Deterministic sim core<span class="state"> — done</span></div>
       <div class="step done"><span class="m">M1</span>Movement &amp; pathfinding<span class="state"> — done</span></div>
       <div class="step done"><span class="m">M2</span>Economy loop<span class="state"> — done</span></div>
       <div class="step done"><span class="m">M2.5</span>Construction — houses, farms, population<span class="state"> — done, playable now</span></div>
-      <div class="step next"><span class="m">M3</span>Combat<span class="state"> — next</span></div>
+      <div class="step done"><span class="m">M3</span>Combat — Scout, hunting, Barracks, Militia &amp; Archers<span class="state"> — done, playable now</span></div>
+      <div class="step next"><span class="m">M4</span>Input shell — control groups, queued orders, attack-move<span class="state"> — next</span></div>
       <div class="step"><span class="m">Later</span>Multiplayer lobby<span class="state"> — send a link, play a friend</span></div>
     </div>
   </section>
