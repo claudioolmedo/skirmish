@@ -1,4 +1,4 @@
-// Skirmish minimap — standalone module for the play page.
+// Skirmish II minimap — standalone module for the play page.
 //
 // Pure functions only: no DOM access, no sim access. The caller (app.js)
 // feeds it a plain state snapshot each frame and a 2D context; all

@@ -1,6 +1,6 @@
-# Skirmish
+# Skirmish II
 
-**Skirmish** is a from-scratch browser real-time strategy game inspired by
+**Skirmish II** is a from-scratch browser real-time strategy game inspired by
 Age of Empires II, built in Rust and compiled to WebAssembly. Same familiar
 feel and mechanics — zero relearning for RTS players — with all-original
 code, art, and interface. One build adapts its visual quality to any machine,

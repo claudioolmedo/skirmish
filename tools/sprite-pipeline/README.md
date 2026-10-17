@@ -1,6 +1,6 @@
 # Sprite pipeline — tools
 
-Generates Skirmish's original sprite sheets from procedural low-poly
+Generates Skirmish II's original sprite sheets from procedural low-poly
 models. The full method spec lives in `SPRITE-PIPELINE.md` in the goal
 files (camera, tiers, animation states, anchor and player-color
 conventions).

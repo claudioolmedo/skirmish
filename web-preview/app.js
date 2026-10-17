@@ -1,4 +1,4 @@
-// Skirmish play page — dependency-free Canvas 2D view of the sim.
+// Skirmish II play page — dependency-free Canvas 2D view of the sim.
 // Loaded by play/index.html (../app.js); it is the game's fullscreen
 // page. The landing page no longer embeds the game.
 //

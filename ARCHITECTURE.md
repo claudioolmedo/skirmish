@@ -1,4 +1,4 @@
-# Skirmish — ARCHITECTURE
+# Skirmish II — ARCHITECTURE
 
 > **Source of truth.** Every agent (human or AI) working on this codebase must
 > follow this document. If a change conflicts with it, the change is wrong —
@@ -7,7 +7,7 @@
 
 ## What this is
 
-Skirmish is a from-scratch browser RTS inspired by Age of Empires II,
+Skirmish II is a from-scratch browser RTS inspired by Age of Empires II,
 built in Rust and compiled to WebAssembly. Clean room: every line of code,
 every sprite, and every UI layout is original. Tuning targets come only from
 public, documented numbers (community wikis). Never the commercial game's
