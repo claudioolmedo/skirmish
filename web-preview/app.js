@@ -1539,6 +1539,37 @@ async function main() {
     camS = ns;
   }, { passive: false });
 
+  // Pinch zoom (touch, Claudio 2026-10-17): two fingers on the
+  // canvas zoom the CAMERA toward the pinch midpoint — fast, direct
+  // ratio — while the page itself never zooms (touch-action:none on
+  // the canvas, viewport maximum-scale, and the preventDefaults
+  // here; iOS Safari also gets the gesturestart block below).
+  let pinchD = 0;
+  const pinchDist = (e) => Math.hypot(
+    e.touches[0].clientX - e.touches[1].clientX,
+    e.touches[0].clientY - e.touches[1].clientY);
+  canvas.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 2) { pinchD = pinchDist(e); e.preventDefault(); }
+  }, { passive: false });
+  canvas.addEventListener('touchmove', (e) => {
+    if (e.touches.length === 2 && pinchD > 0) {
+      e.preventDefault();
+      const d = pinchDist(e);
+      const r = canvas.getBoundingClientRect();
+      const mx = ((e.touches[0].clientX + e.touches[1].clientX) / 2 - r.left) * (canvas.width / r.width);
+      const my = ((e.touches[0].clientY + e.touches[1].clientY) / 2 - r.top) * (canvas.height / r.height);
+      const ns = Math.min(S_MAX, Math.max(S_MIN, camS * (d / pinchD)));
+      camOx = mx - (mx - camOx) * (ns / camS);
+      camOy = my - (my - camOy) * (ns / camS);
+      camS = ns;
+      pinchD = d;
+    }
+  }, { passive: false });
+  const pinchEnd = (e) => { if (e.touches.length < 2) pinchD = 0; };
+  canvas.addEventListener('touchend', pinchEnd);
+  canvas.addEventListener('touchcancel', pinchEnd);
+  document.addEventListener('gesturestart', (e) => e.preventDefault());
+
   // Pan by dragging with the right mouse button; a right *click*
   // (no drag) issues a context order without changing the selection —
   // or cancels placement mode.
