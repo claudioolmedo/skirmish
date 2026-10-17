@@ -54,6 +54,7 @@
   </div>
   <div class="ui-topbar-spacer"></div>
   <span class="ui-clock" id="game-clock">00:00</span>
+  <span class="ui-quality" id="quality-label" title="Visual quality — auto adapts to this device. The game itself is identical at every level.">Quality: —</span>
   <button id="pause-btn" class="btn btn-ghost btn-sm" type="button" title="Menu (Esc)">
     <svg class="ui-icon" style="width:15px;height:15px"><use href="#i-menu"/></svg> Menu
   </button>
@@ -138,6 +139,16 @@
       <button id="restart-btn" class="btn btn-ghost" type="button">Restart</button>
     </div>
     <p class="overlay-note">Restart begins a fresh, identical match (same seed).</p>
+    <div class="quality-row" role="group" aria-label="Visual quality">
+      <span class="quality-title">Quality</span>
+      <div class="quality-btns">
+        <button id="q-auto" class="btn btn-ghost btn-sm" type="button">Auto</button>
+        <button id="q-high" class="btn btn-ghost btn-sm" type="button">High</button>
+        <button id="q-medium" class="btn btn-ghost btn-sm" type="button">Medium</button>
+        <button id="q-low" class="btn btn-ghost btn-sm" type="button">Low</button>
+      </div>
+    </div>
+    <p class="overlay-note">Quality changes only the picture — sprites, sharpness, shadows. The game is identical on every device, from an old Chromebook to a gaming PC.</p>
   </div>
 </div>
 
