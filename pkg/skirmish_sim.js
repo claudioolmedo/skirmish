@@ -21,10 +21,30 @@ export class WasmSim {
         wasm.__wbg_wasmsim_free(ptr, 0);
     }
     /**
-     * Why training `kind_tag` (3 militia, 4 archer) at `building`
-     * cannot currently proceed: same tags as `train_block_reason`
-     * (0 ok, 1 cannot afford, 2 queue full / not trainable here,
-     * 3 housed). UI affordance only.
+     * The human player's current age (M6): 0 Dark Age, 1 Feudal.
+     * @returns {number}
+     */
+    age() {
+        const ret = wasm.wasmsim_age(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * A placed building's queue as flat entry codes (M6) — see
+     * `tc_queue`.
+     * @param {number} building
+     * @returns {Uint32Array}
+     */
+    building_queue(building) {
+        const ret = wasm.wasmsim_building_queue(this.__wbg_ptr, building);
+        var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * Why training `kind_tag` (3 militia, 4 archer, 2 scout) at
+     * `building` cannot currently proceed: same tags as
+     * `train_block_reason` (0 ok, 1 cannot afford, 2 queue full /
+     * not trainable here, 3 housed). UI affordance only.
      * @param {number} building
      * @param {number} kind_tag
      * @returns {number}
@@ -38,7 +58,8 @@ export class WasmSim {
      * building — `[id, kind, x, y, progress, complete, cell_x,
      * cell_y, size, queue_len, train_progress, owner, hp]` — in
      * building id order. `kind` tags: 0 house, 1 farm, 2 barracks
-     * (M3). `progress` is the construction fraction 0..1 (1 when
+     * (M3); 3 lumber camp, 4 mill, 5 mining camp, 6 archery range,
+     * 7 stable, 8 blacksmith (M6). `progress` is the construction fraction 0..1 (1 when
      * complete); `complete` is 0/1; `size` is the footprint edge in
      * cells; `queue_len` and `train_progress` (0..1 on the queue's
      * head) describe a production building's queue. M5 adds `owner`
@@ -75,7 +96,8 @@ export class WasmSim {
      * Per-entity hit points as flat `[hp, max_hp, …]` pairs in id
      * order (M3). An entity with hp < 1 is dead (the CMB-02 rule) —
      * the renderer skips it. The Town Center reports its full table
-     * HP; buildings take no damage in M3.
+     * HP; buildings take no damage in M3. M6: `max_hp` is the
+     * owner's *effective* maximum (a Loomed villager reads 40).
      * @returns {Float64Array}
      */
     entity_hp() {
@@ -87,7 +109,7 @@ export class WasmSim {
     /**
      * Per-entity kind tags in id order: 0 = villager, 1 = town center,
      * 2 = scout cavalry, 3 = militia, 4 = archer, 5 = sheep, 6 = boar,
-     * 7 = deer (M3).
+     * 7 = deer (M3), 8 = man-at-arms (M6).
      * @returns {Uint8Array}
      */
     entity_kinds() {
@@ -320,6 +342,30 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Order a villager to build an Archery Range (175 wood, 3×3 —
+     * M6; Feudal Age, requires a Barracks) — see
+     * `push_build_house`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_archery_range(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_archery_range(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Queue an Archery Range build (M6) — see `push_build_house_queued`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_archery_range_queued(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_archery_range_queued(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
      * Order a villager to build a Barracks (175 wood, 3×3-cell
      * footprint) — see `push_build_house`.
      * @param {number} entity
@@ -340,6 +386,29 @@ export class WasmSim {
      */
     push_build_barracks_queued(entity, x, y) {
         const ret = wasm.wasmsim_push_build_barracks_queued(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Order a villager to build a Blacksmith (150 wood, 3×3 — M6;
+     * Feudal Age; the technology host) — see `push_build_house`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_blacksmith(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_blacksmith(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Queue a Blacksmith build (M6) — see `push_build_house_queued`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_blacksmith_queued(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_blacksmith_queued(this.__wbg_ptr, entity, x, y);
         return ret !== 0;
     }
     /**
@@ -395,6 +464,111 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Order a villager to build a Lumber Camp (100 wood, 2×2 —
+     * M6; the wood drop-off) — see `push_build_house`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_lumber_camp(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_lumber_camp(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Queue a Lumber Camp build (M6) — see `push_build_house_queued`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_lumber_camp_queued(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_lumber_camp_queued(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Order a villager to build a Mill (100 wood, 2×2 — M6; the
+     * food drop-off, and the Farm prerequisite) — see
+     * `push_build_house`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_mill(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_mill(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Queue a Mill build (M6) — see `push_build_house_queued`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_mill_queued(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_mill_queued(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Order a villager to build a Mining Camp (100 wood, 2×2 —
+     * M6; the gold + stone drop-off) — see `push_build_house`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_mining_camp(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_mining_camp(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Queue a Mining Camp build (M6) — see `push_build_house_queued`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_mining_camp_queued(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_mining_camp_queued(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Order a villager to build a Stable (175 wood, 3×3 — M6;
+     * Feudal Age, requires a Barracks) — see `push_build_house`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_stable(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_stable(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Queue a Stable build (M6) — see `push_build_house_queued`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_stable_queued(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_stable_queued(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Force drop-off (M6, ECO-07): order a loaded villager to haul
+     * its carry to the nearest valid drop-off now, then return to
+     * its previous work on its own. Returns whether the order
+     * *would* be accepted (carrying something, somewhere to go).
+     * @param {number} entity
+     * @returns {boolean}
+     */
+    push_force_deposit(entity) {
+        const ret = wasm.wasmsim_push_force_deposit(this.__wbg_ptr, entity);
+        return ret !== 0;
+    }
+    /**
      * Order a villager to work a resource node (gather → haul → deposit
      * → repeat). Ids only — no floats cross this boundary here.
      * @param {number} entity
@@ -443,6 +617,37 @@ export class WasmSim {
         wasm.wasmsim_push_noop(this.__wbg_ptr);
     }
     /**
+     * Enqueue a technology at a placed building by tech tag
+     * (2 fletching, 3 scale mail, 4 padded archer armor at the
+     * Blacksmith; 5 man-at-arms at the Barracks). Returns whether
+     * the order *would* be accepted.
+     * @param {number} building
+     * @param {number} tech_tag
+     * @returns {boolean}
+     */
+    push_research_at(building, tech_tag) {
+        const ret = wasm.wasmsim_push_research_at(this.__wbg_ptr, building, tech_tag);
+        return ret !== 0;
+    }
+    /**
+     * Enqueue the Feudal Age advancement at the Town Center
+     * (500 food, 130 s; needs 2 completed Dark-Age buildings).
+     * @returns {boolean}
+     */
+    push_research_feudal() {
+        const ret = wasm.wasmsim_push_research_feudal(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * Enqueue Loom at the Town Center (50 gold, 25 s). Returns
+     * whether the order *would* be accepted against current state.
+     * @returns {boolean}
+     */
+    push_research_loom() {
+        const ret = wasm.wasmsim_push_research_loom(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * Set a production building's rally point (M4: the Barracks).
      * Returns whether the building accepts a rally point.
      * @param {number} building
@@ -468,8 +673,9 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
-     * Enqueue an Archer at a completed Barracks (M3) — see
-     * `push_train_militia`.
+     * Enqueue an Archer at a completed Archery Range (M6 — the
+     * Range is the Archer's home since M6; in M3 the Barracks
+     * trained them by brief). See `push_train_militia`.
      * @param {number} building
      * @returns {boolean}
      */
@@ -486,6 +692,16 @@ export class WasmSim {
      */
     push_train_militia(building) {
         const ret = wasm.wasmsim_push_train_militia(this.__wbg_ptr, building);
+        return ret !== 0;
+    }
+    /**
+     * Enqueue a Scout Cavalry at a completed Stable (M6). See
+     * `push_train_militia`.
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_train_scout(building) {
+        const ret = wasm.wasmsim_push_train_scout(this.__wbg_ptr, building);
         return ret !== 0;
     }
     /**
@@ -512,6 +728,29 @@ export class WasmSim {
         var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
         return v1;
+    }
+    /**
+     * Why research `tech_tag` at `building` cannot currently
+     * proceed: same tags as `research_block_tc`. UI affordance.
+     * @param {number} building
+     * @param {number} tech_tag
+     * @returns {number}
+     */
+    research_block_at(building, tech_tag) {
+        const ret = wasm.wasmsim_research_block_at(this.__wbg_ptr, building, tech_tag);
+        return ret >>> 0;
+    }
+    /**
+     * Why research `tech_tag` at the Town Center cannot currently
+     * proceed: 0 ok, 1 cannot afford, 2 queue full / not a Town
+     * Center technology, 3 already researched or queued,
+     * 4 requirements not met. UI affordance only.
+     * @param {number} tech_tag
+     * @returns {number}
+     */
+    research_block_tc(tech_tag) {
+        const ret = wasm.wasmsim_research_block_tc(this.__wbg_ptr, tech_tag);
+        return ret >>> 0;
     }
     /**
      * Current state hash as hex, without advancing the sim.
@@ -561,6 +800,36 @@ export class WasmSim {
         return ret;
     }
     /**
+     * Progress on the Town Center queue's head entry, 0..1 (M6).
+     * @returns {number}
+     */
+    tc_progress() {
+        const ret = wasm.wasmsim_tc_progress(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * The Town Center's queue as flat entry codes, head first
+     * (M6): unit kinds keep their entity tag; technologies are
+     * `100 + tech tag`. Behind the panel's queue display.
+     * @returns {Uint32Array}
+     */
+    tc_queue() {
+        const ret = wasm.wasmsim_tc_queue(this.__wbg_ptr);
+        var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * The human player's researched-technology bitmask (M6): bit
+     * per tech tag (`TechId::tag`); the Feudal bit reads set while
+     * the player stands in the Feudal Age.
+     * @returns {number}
+     */
+    tech_mask() {
+        const ret = wasm.wasmsim_tech_mask(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
      * Ticks elapsed. Returned as u32 (wraps after ~2.26 years at 60 Hz —
      * fine for the prototype; widen if a match ever needs more).
      * @returns {number}
@@ -596,7 +865,8 @@ export class WasmSim {
         return ret >>> 0;
     }
     /**
-     * Villagers waiting in the Town Center training queue.
+     * Entries waiting in the Town Center queue (villagers and,
+     * since M6, research — the queue is shared).
      * @returns {number}
      */
     train_queue_len() {

@@ -57,14 +57,16 @@ const seed = parseInt(params.get('seed') || '7', 10);
 const canvas = document.getElementById('view');
 const ctx = canvas.getContext('2d');
 // Interface chrome (play/index.html + play/ui.css). The command-grid
-// buttons (#train / #build-house / #build-farm) are REBUILT per
-// selection context by renderCommands(), so they are reached through
-// one delegated listener on #cmd-grid, never through stored refs.
+// buttons (#train / #build-0 / #build-1 / the research buttons) are
+// REBUILT per selection context by renderCommands(), so they are
+// reached through one delegated listener on #cmd-grid, never through
+// stored refs.
 const resFood = document.getElementById('res-food');
 const resWood = document.getElementById('res-wood');
 const resGold = document.getElementById('res-gold');
 const resStone = document.getElementById('res-stone');
 const resPop = document.getElementById('res-pop');
+const resAge = document.getElementById('res-age'); // M6: the player's age
 const gameClock = document.getElementById('game-clock');
 const pauseBtn = document.getElementById('pause-btn');
 // Idle indicators (M4, INF-03): always-visible counts in the top bar;
@@ -114,23 +116,63 @@ const KIND_TC = 1;
 const KIND_SHEEP = 5;
 const KIND_NAME = {
   0: 'Villager', 1: 'Town Center', 2: 'Scout Cavalry', 3: 'Militia',
-  4: 'Archer', 5: 'Sheep', 6: 'Boar', 7: 'Deer',
+  4: 'Archer', 5: 'Sheep', 6: 'Boar', 7: 'Deer', 8: 'Man-at-Arms',
 };
 // Selection-panel portraits per unit kind (SVG symbol ids in
 // play/index.html).
 const KIND_ICON = {
   0: 'i-villager', 2: 'i-villager', 3: 'i-militia', 4: 'i-archer', 5: 'i-pop',
+  8: 'i-militia',
 };
 
 // Building kind tags (must match the sim's BuildingKind::tag):
-// 0 house, 1 farm, 2 barracks. Costs and footprints mirror the sim
-// (MECHANICS-STUDY §5).
-const BUILD_COST = [25, 60, 175];
-const BUILD_NAME = ['House', 'Farm', 'Barracks'];
-const BUILD_SIZE = [2, 2, 3];
+// 0 house, 1 farm, 2 barracks (M2.5/M3); 3 lumber camp, 4 mill,
+// 5 mining camp, 6 archery range, 7 stable, 8 blacksmith (M6).
+// Costs and footprints mirror the sim (MECHANICS-STUDY §5).
+const BUILD_COST = [25, 60, 175, 100, 100, 100, 175, 175, 150];
+const BUILD_NAME = ['House', 'Farm', 'Barracks', 'Lumber Camp', 'Mill',
+  'Mining Camp', 'Archery Range', 'Stable', 'Blacksmith'];
+const BUILD_SIZE = [2, 2, 3, 2, 2, 2, 3, 3, 3];
+const BUILD_ICON = ['i-house', 'i-farm', 'i-tc', 'i-lumber', 'i-mill',
+  'i-mining', 'i-range', 'i-stable', 'i-blacksmith'];
 // Building max HP by kind tag (the sim's building table, study
 // §5) — for the enemy-building info panel (M5).
-const BUILD_MAXHP = [550, 480, 1200];
+const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200];
+// WASM build commands by kind tag (M6 completes the set).
+const PUSH_BUILD = ['push_build_house', 'push_build_farm', 'push_build_barracks',
+  'push_build_lumber_camp', 'push_build_mill', 'push_build_mining_camp',
+  'push_build_archery_range', 'push_build_stable', 'push_build_blacksmith'];
+const PUSH_BUILD_QUEUED = PUSH_BUILD.map((n) => `${n}_queued`);
+// Own-building minimap colors by kind tag (M6); kinds without an
+// entry keep the minimap's parchment default, the enemy's
+// buildings are always ENEMY_COLOR.
+const BUILDING_MINIMAP_COLOR = {
+  3: '#8a6b42', 4: '#e5d9a8', 5: '#b9a24a', 6: '#c98f4e', 7: '#9a6a44', 8: '#6f6f76',
+};
+
+// Ages and technologies (M6). Age tags match the sim's Age::tag;
+// tech tags match TechId::tag. Costs/times mirror the sim's table
+// (study §8, OPENING-SPEC §2.6–2.7).
+const AGE_NAMES = ['Dark Age', 'Feudal Age'];
+const TECH_NAME = {
+  0: 'Loom', 1: 'Feudal Age', 2: 'Fletching', 3: 'Scale Mail Armor',
+  4: 'Padded Archer Armor', 5: 'Man-at-Arms',
+};
+// Research-block explanations, indexed by the sim's ResearchBlock
+// tag (0 ok — unused, 1 funds, 2 queue full, 3 already done,
+// 4 requirements).
+const RESEARCH_BLOCK_TITLES = [
+  '',
+  'Not enough resources.',
+  'The queue is full.',
+  'Already researched.',
+  'Requirements not met yet.',
+];
+// A queue entry's display name: unit codes are entity kind tags;
+// research codes are 100 + tech tag.
+const queueEntryName = (code) => (code < 100
+  ? (KIND_NAME[code] || 'Unit')
+  : (TECH_NAME[code - 100] || 'Research'));
 
 // --- Game shell state (client-only; never sim input) -------------------
 let playing = false; // Play pressed: the sim ticks
@@ -642,6 +684,13 @@ function mirrorValid(kind, cx, cy) {
       return true;
     }
   }
+  // M6 gates (mirrors of the sim's validate_build): Farms need a
+  // completed Mill of ours; the Feudal buildings need the Feudal
+  // Age; the Range and the Stable need a completed Barracks.
+  const ownDone = buildings.filter((b) => b.owner === 0 && b.complete);
+  if (kind === 1 && !ownDone.some((b) => b.kind === 4)) return false;
+  if (kind >= 6 && sim.age() < 1) return false;
+  if ((kind === 6 || kind === 7) && !ownDone.some((b) => b.kind === 2)) return false;
   // Any standing building's footprint (square range overlap).
   for (const b of buildings) {
     const bs = b.size || BUILD_SIZE[b.kind] || 2;
@@ -1012,12 +1061,40 @@ async function main() {
         flash(['', 'Not enough food for a villager.',
           'The training queue is full.', 'Housed — build a House first.'][reason] || 'Cannot train right now.');
       }
-    } else if (btn.id === 'build-house') {
-      placement = placement && placement.kind === 0 ? null : { kind: 0 };
-    } else if (btn.id === 'build-farm') {
-      placement = placement && placement.kind === 1 ? null : { kind: 1 };
-    } else if (btn.id === 'build-barracks') {
-      placement = placement && placement.kind === 2 ? null : { kind: 2 };
+    } else if (btn.id.startsWith('build-')) {
+      const kind = Number(btn.id.slice(6));
+      placement = placement && placement.kind === kind ? null : { kind };
+    } else if (btn.id === 'research-loom' || btn.id === 'research-feudal') {
+      // M6: Town Center research (shared queue with training).
+      const tag = btn.id === 'research-loom' ? 0 : 1;
+      const ok = tag === 0 ? sim.push_research_loom() : sim.push_research_feudal();
+      if (!ok) {
+        const rb = sim.research_block_tc(tag);
+        flash(tag === 1 && rb === 4
+          ? 'Feudal Age needs 2 completed Dark-Age buildings first (Houses and Farms do not count).'
+          : RESEARCH_BLOCK_TITLES[rb] || 'Cannot research right now.');
+      }
+    } else if (btn.id.startsWith('research-')) {
+      // M6: building research — Blacksmith lines + Man-at-Arms.
+      const tag = {
+        'research-fletching': 2, 'research-scalemail': 3,
+        'research-padded': 4, 'research-maa': 5,
+      }[btn.id];
+      if (tag != null && selectedBuilding && selectedBuilding.type === 'building') {
+        if (!sim.push_research_at(selectedBuilding.id, tag)) {
+          flash(RESEARCH_BLOCK_TITLES[sim.research_block_at(selectedBuilding.id, tag)]
+            || 'Cannot research right now.');
+        }
+      }
+    } else if (btn.id === 'train-scout') {
+      const ok = selectedBuilding && selectedBuilding.type === 'building'
+        ? sim.push_train_scout(selectedBuilding.id)
+        : false;
+      if (!ok && selectedBuilding) {
+        const reason = sim.building_train_block(selectedBuilding.id, 2);
+        flash(['', 'Not enough resources for that unit.',
+          'The training queue is full.', 'Housed — build a House first.'][reason] || 'Cannot train right now.');
+      }
     } else if (btn.id === 'train-militia' || btn.id === 'train-archer') {
       const kindTag = btn.id === 'train-militia' ? 3 : 4;
       const ok = selectedBuilding && selectedBuilding.type === 'building'
@@ -1176,7 +1253,7 @@ async function main() {
         sim.push_set_rally_tc(wx, wy);
         return;
       }
-      if (!foe && selectedBuilding.type === 'building' && selectedBuilding.kind === 2) {
+      if (!foe && selectedBuilding.type === 'building' && [2, 6, 7].includes(selectedBuilding.kind)) {
         sim.push_set_rally_building(selectedBuilding.id, wx, wy);
         return;
       }
@@ -1272,6 +1349,20 @@ async function main() {
       }
       if (any) return;
     }
+    // Force drop-off (M6, ECO-07): the click lands on OUR Town
+    // Center or one of our camps — every selected villager the
+    // carry heuristic sees loaded hauls its load in now, then
+    // returns to its work on its own. The heuristic is the client's
+    // carry view; the sim re-validates each order itself.
+    const ownDrop = (tcT != null && st.owners[tcT] === 0)
+      || (bT && bT.owner === 0 && bT.kind >= 3 && bT.kind <= 5);
+    if (ownDrop) {
+      let any = false;
+      for (const id of targets) {
+        if (st.kinds[id] === 0 && carryKind.has(id) && sim.push_force_deposit(id)) any = true;
+      }
+      if (any) return;
+    }
     const n = nodeAt(wx, wy);
     for (const id of targets) {
       if (n && st.kinds[id] === 0) {
@@ -1316,16 +1407,8 @@ async function main() {
     // (The queued form validates at execution — see Sim::can_queue —
     // so its acceptance here only proves the builder can build.)
     const ok = queued
-      ? (placement.kind === 0
-        ? sim.push_build_house_queued(builder, px, py)
-        : placement.kind === 1
-          ? sim.push_build_farm_queued(builder, px, py)
-          : sim.push_build_barracks_queued(builder, px, py))
-      : (placement.kind === 0
-        ? sim.push_build_house(builder, px, py)
-        : placement.kind === 1
-          ? sim.push_build_farm(builder, px, py)
-          : sim.push_build_barracks(builder, px, py));
+      ? sim[PUSH_BUILD_QUEUED[placement.kind]](builder, px, py)
+      : sim[PUSH_BUILD[placement.kind]](builder, px, py);
     if (ok) {
       if (!queued) placement = null;
     } else {
@@ -1866,6 +1949,8 @@ function drawBuilding(b) {
     progressBar(sx, sy - 3.4 * camS, b.progress);
   } else if (b.kind === 2) {
     drawBarracks(b);
+  } else if (b.kind >= 3) {
+    drawNewBuilding(b);
   } else {
     drawHouse(b);
   }
@@ -1874,7 +1959,110 @@ function drawBuilding(b) {
   // never stripped by the quality governor.
   if (b.hpFrac < 0.999) {
     const [sx, sy] = worldToScreen(b.x, b.y);
-    hpBar(sx, sy - (b.kind === 2 ? 7.3 : 5.8) * camS, b.hpFrac);
+    hpBar(sx, sy - (b.size === 3 ? 7.3 : 5.8) * camS, b.hpFrac);
+  }
+}
+
+// The M6 buildings (Lumber Camp, Mill, Mining Camp, Archery Range,
+// Stable, Blacksmith): original vector draws in the Barracks'
+// family — foundation diamond, a block growing with progress in a
+// per-kind palette, a small feature on completion, and the owner's
+// pennant (red for the enemy, the M5 treatment).
+const NEW_BUILDING_STYLE = {
+  3: { wall: '#8a6b42', wall2: '#6f5533', roof: '#5d4630' }, // Lumber Camp: timber
+  4: { wall: '#b09a68', wall2: '#8f7a4e', roof: '#c9a86a' }, // Mill: pale timber
+  5: { wall: '#9a8f6a', wall2: '#7a7050', roof: '#6b6248' }, // Mining Camp
+  6: { wall: '#a3763f', wall2: '#82592c', roof: '#7a4a35' }, // Archery Range
+  7: { wall: '#96684a', wall2: '#77503a', roof: '#5d4630' }, // Stable
+  8: { wall: '#6f6f76', wall2: '#54545c', roof: '#3f3f45' }, // Blacksmith: dark stone
+};
+
+function drawNewBuilding(b) {
+  const [sx, sy] = worldToScreen(b.x, b.y);
+  const half = (b.size * CS) / 2;
+  shadow(sx, sy, half * 1.45 * camS);
+  const t = worldToScreen(b.x - half, b.y - half);
+  const r = worldToScreen(b.x + half, b.y - half);
+  const bt = worldToScreen(b.x + half, b.y + half);
+  const l = worldToScreen(b.x - half, b.y + half);
+  poly([t, r, bt, l], b.complete ? 'rgba(0,0,0,0.12)' : '#8d8578');
+  const st = NEW_BUILDING_STYLE[b.kind];
+  const hgt = (b.size === 3 ? 3.2 : 2.1) * (b.complete ? 1 : b.progress) * camS;
+  poly([l, bt, up(bt, hgt), up(l, hgt)], st.wall);
+  poly([bt, r, up(r, hgt), up(bt, hgt)], st.wall2);
+  if (b.complete) {
+    poly([up(t, hgt), up(r, hgt), up(bt, hgt), up(l, hgt)], st.roof);
+    drawBuildingFeature(b.kind, sx, sy, hgt);
+    if (b.owner === 2) {
+      // The enemy's pennant above the roof (M5's owner treatment).
+      poly([[sx, sy - hgt - 1.9 * camS], [sx + 1.15 * camS, sy - hgt - 1.55 * camS],
+        [sx, sy - hgt - 1.2 * camS]], ENEMY_COLOR);
+      ctx.fillStyle = '#3a2c1c';
+      ctx.fillRect(sx - 0.06 * camS, sy - hgt - 1.9 * camS, 0.12 * camS, 1.9 * camS);
+    }
+  }
+  if (!b.complete) progressBar(sx, sy - (b.size === 3 ? 6.4 : 4.9) * camS, b.progress);
+}
+
+// One small identifying feature per M6 building kind, drawn on the
+// roof point (sx, sy - hgt): logs for the Lumber Camp, the Mill's
+// sail cross, ore flecks for the Mining Camp, a target for the
+// Range, a fence line for the Stable, a chimney with an ember for
+// the Blacksmith.
+function drawBuildingFeature(kind, sx, sy, hgt) {
+  const u = camS;
+  const top = sy - hgt;
+  ctx.lineWidth = Math.max(1, 0.14 * u);
+  if (kind === 3) {
+    ctx.fillStyle = '#6f4f2a';
+    for (const dx of [-1.5, -0.5, 0.5]) {
+      ctx.beginPath();
+      ctx.ellipse(sx + dx * u, top + 0.5 * u, 0.42 * u, 0.22 * u, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else if (kind === 4) {
+    ctx.strokeStyle = '#e8dcc0';
+    for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      ctx.beginPath();
+      ctx.moveTo(sx, top - 0.9 * u);
+      ctx.lineTo(sx + dx * 1.05 * u, top - 0.9 * u + dy * 1.05 * u);
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#5d4630';
+    ctx.beginPath();
+    ctx.arc(sx, top - 0.9 * u, 0.18 * u, 0, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (kind === 5) {
+    ctx.fillStyle = '#ffd75e';
+    for (const [dx, dy] of [[-1.1, 0.3], [0.1, 0.55], [1.15, 0.25]]) {
+      ctx.beginPath();
+      ctx.arc(sx + dx * u, top + dy * u, 0.17 * u, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else if (kind === 6) {
+    ctx.strokeStyle = '#e8e8e8';
+    ctx.beginPath();
+    ctx.arc(sx + 1.5 * u, top + 0.4 * u, 0.55 * u, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = '#b03a2e';
+    ctx.beginPath();
+    ctx.arc(sx + 1.5 * u, top + 0.4 * u, 0.28 * u, 0, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (kind === 7) {
+    ctx.strokeStyle = '#5d4630';
+    for (const dy of [0.15, 0.6]) {
+      ctx.beginPath();
+      ctx.moveTo(sx - 1.9 * u, top + dy * u);
+      ctx.lineTo(sx + 1.9 * u, top + dy * u);
+      ctx.stroke();
+    }
+  } else if (kind === 8) {
+    ctx.fillStyle = '#2e2e33';
+    ctx.fillRect(sx + 0.9 * u, top - 0.95 * u, 0.5 * u, 0.95 * u);
+    ctx.fillStyle = '#ff9a3c';
+    ctx.beginPath();
+    ctx.arc(sx - 0.8 * u, top + 0.45 * u, 0.2 * u, 0, 0, Math.PI * 2);
+    ctx.fill();
   }
 }
 
@@ -2139,6 +2327,7 @@ function drawDeer(i, wx, wy) {
 
 let lastIdleVil = -1;
 let lastIdleMil = -1;
+let lastAge = -1; // M6: the last age tag shown in the top bar
 
 function updateTopBar() {
   const [food, wood, gold, stone] = sim.stockpile();
@@ -2146,6 +2335,12 @@ function updateTopBar() {
   resWood.textContent = Math.floor(wood);
   resGold.textContent = Math.floor(gold);
   resStone.textContent = Math.floor(stone);
+  // M6: the age chip — the player's current age, always visible.
+  const age = sim.age();
+  if (age !== lastAge) {
+    lastAge = age;
+    resAge.textContent = AGE_NAMES[age] || 'Dark Age';
+  }
   const pop = sim.population();
   const cap = sim.population_cap();
   resPop.textContent = `${pop} / ${cap}`;
@@ -2217,63 +2412,101 @@ function renderCommands() {
   // M5: an enemy building/TC selection is information-only — its
   // context renders a hint, never command buttons.
   const foeSel = !!selectedBuilding && selectedBuilding.owner === 2;
+  // M6: each production/research building gets its own context.
+  const BUILDING_CONTEXT = { 2: 'barracks', 6: 'range', 7: 'stable', 8: 'blacksmith' };
   const context = selUnits.length > 0
     ? (hasVillager ? 'build' : 'units')
     : selectedBuilding
       ? (foeSel ? 'foe'
         : selectedBuilding.type === 'tc' ? 'tc'
-        : bk && bk.kind === 2 ? 'barracks' : 'none')
+        : (bk && BUILDING_CONTEXT[bk.kind]) || 'none')
       : 'none';
+  const age = sim.age();
+  const techMask = sim.tech_mask();
   const blockM = bk && context === 'barracks' ? sim.building_train_block(bk.id, 3) : -1;
-  const blockA = bk && context === 'barracks' ? sim.building_train_block(bk.id, 4) : -1;
+  const blockA = bk && context === 'range' ? sim.building_train_block(bk.id, 4) : -1;
+  const blockS = bk && context === 'stable' ? sim.building_train_block(bk.id, 2) : -1;
+  // Research blocks: the TC pair (Loom 0, Feudal 1) and the
+  // building techs (Fletching 2, Scale Mail 3, Padded 4, MAA 5).
+  const rbTc = context === 'tc'
+    ? [sim.research_block_tc(0), sim.research_block_tc(1)] : [-1, -1];
+  const rbBk = bk && (context === 'blacksmith' || context === 'barracks')
+    ? [2, 3, 4, 5].map((t) => sim.research_block_at(bk.id, t)) : [];
+  const tcQueueCodes = context === 'tc' ? sim.tc_queue().join('.') : '';
+  const bkQueueCodes = bk ? sim.building_queue(bk.id).join('.') : '';
   const sig = [context, Math.floor(wood), Math.floor(sim.food()), Math.floor(sim.gold()),
     reason, queue, bk ? bk.id : -1, bk ? bk.queue : -1, bk && bk.complete ? 1 : 0,
-    blockM, blockA, placement ? placement.kind : -1].join('|');
+    blockM, blockA, blockS, age, techMask, rbTc.join('.'), rbBk.join('.'),
+    tcQueueCodes, bkQueueCodes,
+    placement ? placement.kind : -1].join('|');
   if (sig === cmdSig) return;
   cmdSig = sig;
   cmdGrid.innerHTML = '';
   if (context === 'build') {
+    // M6: the full building set. Availability gates mirror the sim:
+    // Farms need a completed Mill; the Feudal buildings show locked
+    // (with their requirement in the title) until the age advances;
+    // the Range and the Stable also need a completed Barracks.
+    const all = buildingList();
+    const hasMill = all.some((b) => b.owner === 0 && b.kind === 4 && b.complete);
+    const hasBarracks = all.some((b) => b.owner === 0 && b.kind === 2 && b.complete);
+    const buttons = [];
+    for (let kind = 0; kind <= 8; kind++) {
+      let gate = null;
+      if (kind === 1 && !hasMill) gate = 'Requires a Mill';
+      else if (kind >= 6 && age < 1) gate = 'Requires Feudal Age';
+      else if ((kind === 6 || kind === 7) && !hasBarracks) gate = 'Requires a Barracks';
+      const lacksWood = wood < BUILD_COST[kind];
+      buttons.push(cmdButton({
+        id: `build-${kind}`, icon: BUILD_ICON[kind], label: BUILD_NAME[kind],
+        costIcon: 'i-wood', cost: BUILD_COST[kind],
+        disabled: !!gate || lacksWood,
+        active: !!placement && placement.kind === kind,
+        title: gate
+          ? `${BUILD_NAME[kind]} — ${gate}.`
+          : lacksWood
+            ? `${BUILD_NAME[kind]} — needs ${BUILD_COST[kind]} wood`
+            : `${BUILD_NAME[kind]} — ${BUILD_COST[kind]} wood`,
+      }));
+    }
+    cmdGrid.append(...buttons);
+  } else if (context === 'tc') {
+    // M6: the Town Center also researches — Loom and the Feudal
+    // advancement share its queue with villager training (TEC-03).
+    const loomDone = (techMask & 1) !== 0;
+    const feudalDone = age >= 1;
     cmdGrid.append(
       cmdButton({
-        id: 'build-house', icon: 'i-house', label: BUILD_NAME[0],
-        costIcon: 'i-wood', cost: BUILD_COST[0],
-        disabled: wood < BUILD_COST[0],
-        active: !!placement && placement.kind === 0,
-        title: wood < BUILD_COST[0]
-          ? `House — needs ${BUILD_COST[0]} wood`
-          : 'House — 25 wood, +5 population room',
+        id: 'train', icon: 'i-train', label: 'Villager',
+        costIcon: 'i-food', cost: 50,
+        disabled: reason === 2, // queue full; other blocks flash on click
+        badge: queue > 0 ? `+${queue}` : null,
+        title: TRAIN_BLOCK_TITLES[reason]
+          ? `Train Villager — ${TRAIN_BLOCK_TITLES[reason]}`
+          : 'Train a villager at the Town Center (50 food).',
       }),
       cmdButton({
-        id: 'build-farm', icon: 'i-farm', label: BUILD_NAME[1],
-        costIcon: 'i-wood', cost: BUILD_COST[1],
-        disabled: wood < BUILD_COST[1],
-        active: !!placement && placement.kind === 1,
-        title: wood < BUILD_COST[1]
-          ? `Farm — needs ${BUILD_COST[1]} wood`
-          : 'Farm — 60 wood, 175 food',
+        id: 'research-loom', icon: 'i-loom', label: 'Loom',
+        costIcon: 'i-gold', cost: 50,
+        disabled: loomDone || rbTc[0] === 2 || rbTc[0] === 3,
+        title: loomDone
+          ? 'Loom — researched. Villagers: +15 HP, +1 melee / +2 pierce armor.'
+          : `Research Loom — 50 gold · 25 s. Villagers gain +15 HP and armor.${RESEARCH_BLOCK_TITLES[rbTc[0]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[0]] : ''}`,
       }),
       cmdButton({
-        id: 'build-barracks', icon: 'i-tc', label: BUILD_NAME[2],
-        costIcon: 'i-wood', cost: BUILD_COST[2],
-        disabled: wood < BUILD_COST[2],
-        active: !!placement && placement.kind === 2,
-        title: wood < BUILD_COST[2]
-          ? `Barracks — needs ${BUILD_COST[2]} wood`
-          : 'Barracks — 175 wood, trains Militia and Archers',
+        id: 'research-feudal', icon: 'i-feudal', label: 'Feudal Age',
+        costIcon: 'i-food', cost: 500,
+        disabled: feudalDone || rbTc[1] === 2 || rbTc[1] === 3,
+        title: feudalDone
+          ? 'Feudal Age — you stand in the Feudal Age.'
+          : rbTc[1] === 4
+            ? 'Advance to the Feudal Age — needs 2 completed Dark-Age buildings first (Houses and Farms do not count).'
+            : `Advance to the Feudal Age — 500 food · 130 s. Unlocks the Archery Range, Stable and Blacksmith.${RESEARCH_BLOCK_TITLES[rbTc[1]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[1]] : ''}`,
       }),
     );
-  } else if (context === 'tc') {
-    cmdGrid.append(cmdButton({
-      id: 'train', icon: 'i-train', label: 'Villager',
-      costIcon: 'i-food', cost: 50,
-      disabled: reason === 2, // queue full; other blocks flash on click
-      badge: queue > 0 ? `+${queue}` : null,
-      title: TRAIN_BLOCK_TITLES[reason]
-        ? `Train Villager — ${TRAIN_BLOCK_TITLES[reason]}`
-        : 'Train a villager at the Town Center (50 food).',
-    }));
   } else if (context === 'barracks') {
     const underConstruction = !bk.complete;
+    const maaDone = (techMask & 32) !== 0;
     cmdGrid.append(
       cmdButton({
         id: 'train-militia', icon: 'i-militia', label: 'Militia',
@@ -2285,13 +2518,61 @@ function renderCommands() {
           : `Train Militia — 60 food · 20 gold.${TRAIN_BLOCK_TITLES[blockM] ? ' ' + TRAIN_BLOCK_TITLES[blockM] : ''}`,
       }),
       cmdButton({
-        id: 'train-archer', icon: 'i-archer', label: 'Archer',
-        costIcon: 'i-wood', cost: 25,
-        disabled: underConstruction || blockA === 2,
+        id: 'research-maa', icon: 'i-maa', label: 'Man-at-Arms',
+        costIcon: 'i-food', cost: 100,
+        disabled: underConstruction || maaDone || rbBk[3] === 2 || rbBk[3] === 3,
         title: underConstruction
-          ? 'Archer — the Barracks is under construction.'
-          : `Train Archer — 25 wood · 45 gold.${TRAIN_BLOCK_TITLES[blockA] ? ' ' + TRAIN_BLOCK_TITLES[blockA] : ''}`,
+          ? 'Man-at-Arms — the Barracks is under construction.'
+          : maaDone
+            ? 'Man-at-Arms — researched. Your Militia fight as Men-at-Arms.'
+            : `Upgrade to Man-at-Arms — 100 food · 40 gold · 40 s. Every Militia becomes a Man-at-Arms.${RESEARCH_BLOCK_TITLES[rbBk[3]] ? ' ' + RESEARCH_BLOCK_TITLES[rbBk[3]] : ''}`,
       }),
+    );
+  } else if (context === 'range') {
+    const underConstruction = !bk.complete;
+    cmdGrid.append(cmdButton({
+      id: 'train-archer', icon: 'i-archer', label: 'Archer',
+      costIcon: 'i-wood', cost: 25,
+      disabled: underConstruction || blockA === 2,
+      badge: bk.queue > 0 ? `+${bk.queue}` : null,
+      title: underConstruction
+        ? 'Archer — the Archery Range is under construction.'
+        : `Train Archer — 25 wood · 45 gold.${TRAIN_BLOCK_TITLES[blockA] ? ' ' + TRAIN_BLOCK_TITLES[blockA] : ''}`,
+    }));
+  } else if (context === 'stable') {
+    const underConstruction = !bk.complete;
+    cmdGrid.append(cmdButton({
+      id: 'train-scout', icon: 'i-villager', label: 'Scout Cavalry',
+      costIcon: 'i-food', cost: 80,
+      disabled: underConstruction || blockS === 2,
+      badge: bk.queue > 0 ? `+${bk.queue}` : null,
+      title: underConstruction
+        ? 'Scout Cavalry — the Stable is under construction.'
+        : `Train Scout Cavalry — 80 food · 30 s.${TRAIN_BLOCK_TITLES[blockS] ? ' ' + TRAIN_BLOCK_TITLES[blockS] : ''}`,
+    }));
+  } else if (context === 'blacksmith') {
+    // M6: the Blacksmith's three Feudal researches.
+    const underConstruction = !bk.complete;
+    const techBtn = (id, tag, icon, label, title) => {
+      const done = (techMask & (1 << tag)) !== 0;
+      const rb = rbBk[tag - 2];
+      return cmdButton({
+        id, icon, label, costIcon: 'i-food', cost: 100,
+        disabled: underConstruction || done || rb === 2 || rb === 3,
+        title: underConstruction
+          ? `${label} — the Blacksmith is under construction.`
+          : done
+            ? `${label} — researched.`
+            : `${title}${RESEARCH_BLOCK_TITLES[rb] ? ' ' + RESEARCH_BLOCK_TITLES[rb] : ''}`,
+      });
+    };
+    cmdGrid.append(
+      techBtn('research-fletching', 2, 'i-fletching', 'Fletching',
+        'Research Fletching — 100 food · 50 gold · 30 s. Archers: +1 attack, +1 range.'),
+      techBtn('research-scalemail', 3, 'i-scalemail', 'Scale Mail',
+        'Research Scale Mail Armor — 100 food · 40 s. Infantry: +1/+1 armor.'),
+      techBtn('research-padded', 4, 'i-padded', 'Padded Armor',
+        'Research Padded Archer Armor — 100 food · 40 s. Archers: +1/+1 armor.'),
     );
   } else if (context === 'units') {
     const hint = document.createElement('p');
@@ -2327,15 +2608,22 @@ function updateSelPanel() {
     : null;
   // M5: enemy selections get their own info-only contexts.
   const foeSel = !!selectedBuilding && selectedBuilding.owner === 2;
+  // M6: the production/research buildings share one info shape.
+  const PROD_KINDS = [2, 6, 7, 8];
   const context = selUnits.length > 0 ? 'units'
     : selectedBuilding
       ? (selectedBuilding.type === 'tc'
         ? (foeSel ? 'foe-tc' : 'tc')
         : foeSel ? 'foe-building'
-        : bk && bk.kind === 2 ? 'barracks' : 'building')
+        : bk && PROD_KINDS.includes(bk.kind) ? 'production' : 'building')
       : 'none';
   const singleHp = selUnits.length === 1 ? Math.floor(st.hp[selUnits[0] * 2]) : -1;
-  const bkBlock = bk ? sim.building_train_block(bk.id, 3) : -1;
+  const TRAINS_TAG = { 2: 3, 6: 4, 7: 2 };
+  const bkBlock = bk && TRAINS_TAG[bk.kind] != null
+    ? sim.building_train_block(bk.id, TRAINS_TAG[bk.kind]) : -1;
+  const tcQueueCodes = sim.tc_queue().join('.');
+  const tcProgBucket = Math.floor(sim.tc_progress() * 20);
+  const bkQueueCodes = bk ? sim.building_queue(bk.id).join('.') : '';
   // The selected TC's HP joins the signature (M5): the enemy TC
   // panel must tick down live while it is being razed. Same for a
   // selected building's HP fraction.
@@ -2343,7 +2631,8 @@ function updateSelPanel() {
     ? Math.floor(st.hp[selectedBuilding.id * 2]) : -1;
   const sig = [context, selUnits.join(','), JSON.stringify(selectedBuilding),
     queue, reason, singleHp, bk ? bk.queue : -1, bkBlock,
-    bk && bk.complete ? 1 : 0, selTcHp,
+    bk && bk.complete ? 1 : 0, selTcHp, tcQueueCodes, bkQueueCodes, tcProgBucket,
+    sim.age(), sim.tech_mask(),
     bk ? Math.round(bk.hpFrac * 40) : -1].join('|');
   if (sig === selSig) return;
   selSig = sig;
@@ -2389,27 +2678,38 @@ function updateSelPanel() {
     selPortrait.classList.remove('empty');
     selPortrait.innerHTML = '<svg class="ui-icon"><use href="#i-tc"/></svg>';
     selName.textContent = 'Town Center';
+    const codes = sim.tc_queue();
     if (reason === 3) {
       selInfo.textContent = 'Housed — training stalls until a House stands.';
       selInfo.classList.add('warn');
-    } else if (queue > 0) {
-      selInfo.textContent = `Training a villager… · Queue ${queue}`;
+    } else if (codes.length > 0) {
+      const head = codes[0];
+      selInfo.textContent = head >= 100
+        ? `Researching ${queueEntryName(head)}… ${Math.round(sim.tc_progress() * 100)}% · Queue ${codes.length}`
+        : `Training a villager… · Queue ${codes.length}`;
     } else {
-      selInfo.textContent = 'Train villagers from the Commands panel. Right-click the map to set a rally point.';
+      selInfo.textContent = 'Train villagers and research from the Commands panel. Right-click the map to set a rally point.';
     }
-  } else if (context === 'barracks') {
+  } else if (context === 'production') {
     selPortrait.classList.remove('empty');
-    selPortrait.innerHTML = '<svg class="ui-icon"><use href="#i-tc"/></svg>';
-    selName.textContent = 'Barracks';
+    selPortrait.innerHTML =
+      `<svg class="ui-icon"><use href="#${BUILD_ICON[bk.kind]}"/></svg>`;
+    selName.textContent = BUILD_NAME[bk.kind];
+    const codes = sim.building_queue(bk.id);
     if (!bk.complete) {
       selInfo.textContent = 'Under construction…';
     } else if (bkBlock === 3) {
       selInfo.textContent = 'Housed — training stalls until a House stands.';
       selInfo.classList.add('warn');
-    } else if (bk.queue > 0) {
-      selInfo.textContent = `Training… · Queue ${bk.queue}`;
+    } else if (codes.length > 0) {
+      const head = codes[0];
+      selInfo.textContent = head >= 100
+        ? `Researching ${queueEntryName(head)}… · Queue ${codes.length}`
+        : `Training ${queueEntryName(head)}… · Queue ${codes.length}`;
     } else {
-      selInfo.textContent = 'Train Militia or Archers from the Commands panel. Right-click the map to set a rally point.';
+      selInfo.textContent = bk.kind === 8
+        ? 'Research technologies from the Commands panel.'
+        : 'Train from the Commands panel. Right-click the map to set a rally point.';
     }
   } else if (context === 'foe-tc') {
     selPortrait.classList.remove('empty');
@@ -2421,14 +2721,15 @@ function updateSelPanel() {
   } else if (context === 'foe-building') {
     selPortrait.classList.remove('empty');
     selPortrait.innerHTML =
-      `<svg class="ui-icon"><use href="#${bk && bk.kind === 2 ? 'i-tc' : 'i-house'}"/></svg>`;
+      `<svg class="ui-icon"><use href="#${(bk && BUILD_ICON[bk.kind]) || 'i-house'}"/></svg>`;
     selName.textContent = bk ? `Enemy ${BUILD_NAME[bk.kind]}` : 'Enemy Building';
     selInfo.textContent = bk
       ? `HP ${Math.round(bk.hpFrac * BUILD_MAXHP[bk.kind])} / ${BUILD_MAXHP[bk.kind]}${bk.complete ? '' : ' · under construction'} — information only.`
       : '';
   } else if (context === 'building') {
     selPortrait.classList.remove('empty');
-    selPortrait.innerHTML = '<svg class="ui-icon"><use href="#i-house"/></svg>';
+    selPortrait.innerHTML =
+      `<svg class="ui-icon"><use href="#${(bk && BUILD_ICON[bk.kind]) || 'i-house'}"/></svg>`;
     selName.textContent = bk ? BUILD_NAME[bk.kind] : 'Building';
     selInfo.textContent = bk && !bk.complete ? 'Under construction…' : '';
   } else {
@@ -2558,7 +2859,7 @@ function draw() {
   // are tombstones in the sim, invisible here). A damaged unit gets
   // an HP bar above it.
   const UNIT_DRAW = [drawVillager, null, drawScout, drawMilitia, drawArcher,
-    drawSheep, drawBoar, drawDeer];
+    drawSheep, drawBoar, drawDeer, drawMilitia]; // 8: Man-at-Arms (M6) — the Militia draw for now
   for (let i = 0; i < count; i++) {
     const wx = pos[i * 2];
     const wy = pos[i * 2 + 1];
@@ -2785,10 +3086,12 @@ function draw() {
     renderMinimap(mmCtx, mmGeom, {
       gridW: GW, gridH: GH, cellSize: CS, obstacles: OBST,
       nodes,
-      // M5: enemy buildings plot in enemy red; ours keep the
-      // parchment default (no color → the minimap's BUILDING_COLOR).
-      buildings: buildings.map((b) =>
-        b.owner === 2 ? { ...b, color: ENEMY_COLOR } : b),
+      // M5: enemy buildings plot in enemy red. M6: our buildings
+      // plot in their per-kind colors (camps/range/stable/smith);
+      // House/Farm/Barracks keep the parchment default.
+      buildings: buildings.map((b) => (b.owner === 2
+        ? { ...b, color: ENEMY_COLOR }
+        : { ...b, color: BUILDING_MINIMAP_COLOR[b.kind] })),
       entities: mmEntities,
       cam: { s: camS, ox: camOx, oy: camOy, viewW: W, viewH: H },
     });

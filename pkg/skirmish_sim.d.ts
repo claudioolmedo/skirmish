@@ -8,10 +8,19 @@ export class WasmSim {
     free(): void;
     [Symbol.dispose](): void;
     /**
-     * Why training `kind_tag` (3 militia, 4 archer) at `building`
-     * cannot currently proceed: same tags as `train_block_reason`
-     * (0 ok, 1 cannot afford, 2 queue full / not trainable here,
-     * 3 housed). UI affordance only.
+     * The human player's current age (M6): 0 Dark Age, 1 Feudal.
+     */
+    age(): number;
+    /**
+     * A placed building's queue as flat entry codes (M6) — see
+     * `tc_queue`.
+     */
+    building_queue(building: number): Uint32Array;
+    /**
+     * Why training `kind_tag` (3 militia, 4 archer, 2 scout) at
+     * `building` cannot currently proceed: same tags as
+     * `train_block_reason` (0 ok, 1 cannot afford, 2 queue full /
+     * not trainable here, 3 housed). UI affordance only.
      */
     building_train_block(building: number, kind_tag: number): number;
     /**
@@ -19,7 +28,8 @@ export class WasmSim {
      * building — `[id, kind, x, y, progress, complete, cell_x,
      * cell_y, size, queue_len, train_progress, owner, hp]` — in
      * building id order. `kind` tags: 0 house, 1 farm, 2 barracks
-     * (M3). `progress` is the construction fraction 0..1 (1 when
+     * (M3); 3 lumber camp, 4 mill, 5 mining camp, 6 archery range,
+     * 7 stable, 8 blacksmith (M6). `progress` is the construction fraction 0..1 (1 when
      * complete); `complete` is 0/1; `size` is the footprint edge in
      * cells; `queue_len` and `train_progress` (0..1 on the queue's
      * head) describe a production building's queue. M5 adds `owner`
@@ -42,13 +52,14 @@ export class WasmSim {
      * Per-entity hit points as flat `[hp, max_hp, …]` pairs in id
      * order (M3). An entity with hp < 1 is dead (the CMB-02 rule) —
      * the renderer skips it. The Town Center reports its full table
-     * HP; buildings take no damage in M3.
+     * HP; buildings take no damage in M3. M6: `max_hp` is the
+     * owner's *effective* maximum (a Loomed villager reads 40).
      */
     entity_hp(): Float64Array;
     /**
      * Per-entity kind tags in id order: 0 = villager, 1 = town center,
      * 2 = scout cavalry, 3 = militia, 4 = archer, 5 = sheep, 6 = boar,
-     * 7 = deer (M3).
+     * 7 = deer (M3), 8 = man-at-arms (M6).
      */
     entity_kinds(): Uint8Array;
     /**
@@ -160,6 +171,16 @@ export class WasmSim {
      */
     push_attack_queued(entity: number, target: number): boolean;
     /**
+     * Order a villager to build an Archery Range (175 wood, 3×3 —
+     * M6; Feudal Age, requires a Barracks) — see
+     * `push_build_house`.
+     */
+    push_build_archery_range(entity: number, x: number, y: number): boolean;
+    /**
+     * Queue an Archery Range build (M6) — see `push_build_house_queued`.
+     */
+    push_build_archery_range_queued(entity: number, x: number, y: number): boolean;
+    /**
      * Order a villager to build a Barracks (175 wood, 3×3-cell
      * footprint) — see `push_build_house`.
      */
@@ -168,6 +189,15 @@ export class WasmSim {
      * Queue a Barracks build — see `push_build_house_queued`.
      */
     push_build_barracks_queued(entity: number, x: number, y: number): boolean;
+    /**
+     * Order a villager to build a Blacksmith (150 wood, 3×3 — M6;
+     * Feudal Age; the technology host) — see `push_build_house`.
+     */
+    push_build_blacksmith(entity: number, x: number, y: number): boolean;
+    /**
+     * Queue a Blacksmith build (M6) — see `push_build_house_queued`.
+     */
+    push_build_blacksmith_queued(entity: number, x: number, y: number): boolean;
     /**
      * Order a villager to build a Farm (60 wood) — see
      * `push_build_house`.
@@ -193,6 +223,50 @@ export class WasmSim {
      */
     push_build_house_queued(entity: number, x: number, y: number): boolean;
     /**
+     * Order a villager to build a Lumber Camp (100 wood, 2×2 —
+     * M6; the wood drop-off) — see `push_build_house`.
+     */
+    push_build_lumber_camp(entity: number, x: number, y: number): boolean;
+    /**
+     * Queue a Lumber Camp build (M6) — see `push_build_house_queued`.
+     */
+    push_build_lumber_camp_queued(entity: number, x: number, y: number): boolean;
+    /**
+     * Order a villager to build a Mill (100 wood, 2×2 — M6; the
+     * food drop-off, and the Farm prerequisite) — see
+     * `push_build_house`.
+     */
+    push_build_mill(entity: number, x: number, y: number): boolean;
+    /**
+     * Queue a Mill build (M6) — see `push_build_house_queued`.
+     */
+    push_build_mill_queued(entity: number, x: number, y: number): boolean;
+    /**
+     * Order a villager to build a Mining Camp (100 wood, 2×2 —
+     * M6; the gold + stone drop-off) — see `push_build_house`.
+     */
+    push_build_mining_camp(entity: number, x: number, y: number): boolean;
+    /**
+     * Queue a Mining Camp build (M6) — see `push_build_house_queued`.
+     */
+    push_build_mining_camp_queued(entity: number, x: number, y: number): boolean;
+    /**
+     * Order a villager to build a Stable (175 wood, 3×3 — M6;
+     * Feudal Age, requires a Barracks) — see `push_build_house`.
+     */
+    push_build_stable(entity: number, x: number, y: number): boolean;
+    /**
+     * Queue a Stable build (M6) — see `push_build_house_queued`.
+     */
+    push_build_stable_queued(entity: number, x: number, y: number): boolean;
+    /**
+     * Force drop-off (M6, ECO-07): order a loaded villager to haul
+     * its carry to the nearest valid drop-off now, then return to
+     * its previous work on its own. Returns whether the order
+     * *would* be accepted (carrying something, somewhere to go).
+     */
+    push_force_deposit(entity: number): boolean;
+    /**
      * Order a villager to work a resource node (gather → haul → deposit
      * → repeat). Ids only — no floats cross this boundary here.
      */
@@ -217,6 +291,23 @@ export class WasmSim {
      */
     push_noop(): void;
     /**
+     * Enqueue a technology at a placed building by tech tag
+     * (2 fletching, 3 scale mail, 4 padded archer armor at the
+     * Blacksmith; 5 man-at-arms at the Barracks). Returns whether
+     * the order *would* be accepted.
+     */
+    push_research_at(building: number, tech_tag: number): boolean;
+    /**
+     * Enqueue the Feudal Age advancement at the Town Center
+     * (500 food, 130 s; needs 2 completed Dark-Age buildings).
+     */
+    push_research_feudal(): boolean;
+    /**
+     * Enqueue Loom at the Town Center (50 gold, 25 s). Returns
+     * whether the order *would* be accepted against current state.
+     */
+    push_research_loom(): boolean;
+    /**
      * Set a production building's rally point (M4: the Barracks).
      * Returns whether the building accepts a rally point.
      */
@@ -229,8 +320,9 @@ export class WasmSim {
      */
     push_set_rally_tc(x: number, y: number): boolean;
     /**
-     * Enqueue an Archer at a completed Barracks (M3) — see
-     * `push_train_militia`.
+     * Enqueue an Archer at a completed Archery Range (M6 — the
+     * Range is the Archer's home since M6; in M3 the Barracks
+     * trained them by brief). See `push_train_militia`.
      */
     push_train_archer(building: number): boolean;
     /**
@@ -239,6 +331,11 @@ export class WasmSim {
      * the cost is deducted when the command is applied next tick.
      */
     push_train_militia(building: number): boolean;
+    /**
+     * Enqueue a Scout Cavalry at a completed Stable (M6). See
+     * `push_train_militia`.
+     */
+    push_train_scout(building: number): boolean;
     /**
      * Enqueue a villager at the Town Center (50 food, deducted when the
      * command is applied next tick). Returns whether the order *would*
@@ -254,6 +351,18 @@ export class WasmSim {
      * x/y are then 0 and meaningless).
      */
     rally_points(): Float64Array;
+    /**
+     * Why research `tech_tag` at `building` cannot currently
+     * proceed: same tags as `research_block_tc`. UI affordance.
+     */
+    research_block_at(building: number, tech_tag: number): number;
+    /**
+     * Why research `tech_tag` at the Town Center cannot currently
+     * proceed: 0 ok, 1 cannot afford, 2 queue full / not a Town
+     * Center technology, 3 already researched or queued,
+     * 4 requirements not met. UI affordance only.
+     */
+    research_block_tc(tech_tag: number): number;
     /**
      * Current state hash as hex, without advancing the sim.
      */
@@ -271,6 +380,22 @@ export class WasmSim {
     stockpile_for(owner: number): Float64Array;
     stone(): number;
     /**
+     * Progress on the Town Center queue's head entry, 0..1 (M6).
+     */
+    tc_progress(): number;
+    /**
+     * The Town Center's queue as flat entry codes, head first
+     * (M6): unit kinds keep their entity tag; technologies are
+     * `100 + tech tag`. Behind the panel's queue display.
+     */
+    tc_queue(): Uint32Array;
+    /**
+     * The human player's researched-technology bitmask (M6): bit
+     * per tech tag (`TechId::tag`); the Feudal bit reads set while
+     * the player stands in the Feudal Age.
+     */
+    tech_mask(): number;
+    /**
      * Ticks elapsed. Returned as u32 (wraps after ~2.26 years at 60 Hz —
      * fine for the prototype; widen if a match ever needs more).
      */
@@ -286,7 +411,8 @@ export class WasmSim {
      */
     train_block_reason(): number;
     /**
-     * Villagers waiting in the Town Center training queue.
+     * Entries waiting in the Town Center queue (villagers and,
+     * since M6, research — the queue is shared).
      */
     train_queue_len(): number;
     /**
@@ -305,6 +431,8 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_wasmsim_free: (a: number, b: number) => void;
+    readonly wasmsim_age: (a: number) => number;
+    readonly wasmsim_building_queue: (a: number, b: number) => [number, number];
     readonly wasmsim_building_train_block: (a: number, b: number, c: number) => number;
     readonly wasmsim_buildings: (a: number) => [number, number];
     readonly wasmsim_cell_size: (a: number) => number;
@@ -332,27 +460,49 @@ export interface InitOutput {
     readonly wasmsim_push_attack: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_attack_building: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_attack_queued: (a: number, b: number, c: number) => number;
+    readonly wasmsim_push_build_archery_range: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_archery_range_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_barracks: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_barracks_queued: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_blacksmith: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_blacksmith_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_farm: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_farm_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_house: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_house_queued: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_lumber_camp: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_lumber_camp_queued: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_mill: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_mill_queued: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_mining_camp: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_mining_camp_queued: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_stable: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_stable_queued: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_force_deposit: (a: number, b: number) => number;
     readonly wasmsim_push_gather: (a: number, b: number, c: number) => void;
     readonly wasmsim_push_gather_queued: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_move: (a: number, b: number, c: number, d: number) => void;
     readonly wasmsim_push_move_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_noop: (a: number) => void;
+    readonly wasmsim_push_research_at: (a: number, b: number, c: number) => number;
+    readonly wasmsim_push_research_feudal: (a: number) => number;
+    readonly wasmsim_push_research_loom: (a: number) => number;
     readonly wasmsim_push_set_rally_building: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_set_rally_tc: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_train_archer: (a: number, b: number) => number;
     readonly wasmsim_push_train_militia: (a: number, b: number) => number;
+    readonly wasmsim_push_train_scout: (a: number, b: number) => number;
     readonly wasmsim_push_train_villager: (a: number) => number;
     readonly wasmsim_rally_points: (a: number) => [number, number];
+    readonly wasmsim_research_block_at: (a: number, b: number, c: number) => number;
+    readonly wasmsim_research_block_tc: (a: number, b: number) => number;
     readonly wasmsim_state_hash: (a: number) => [number, number];
     readonly wasmsim_stockpile: (a: number) => [number, number];
     readonly wasmsim_stockpile_for: (a: number, b: number) => [number, number];
     readonly wasmsim_stone: (a: number) => number;
+    readonly wasmsim_tc_progress: (a: number) => number;
+    readonly wasmsim_tc_queue: (a: number) => [number, number];
+    readonly wasmsim_tech_mask: (a: number) => number;
     readonly wasmsim_tick: (a: number) => [number, number];
     readonly wasmsim_tick_count: (a: number) => number;
     readonly wasmsim_train_block_reason: (a: number) => number;
