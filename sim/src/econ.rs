@@ -268,6 +268,19 @@ pub const TRAIN_QUEUE_CAP: u32 = 15;
 pub const GATHER_RANGE: I16F16 = I16F16::from_bits(163_840); // 2.5
 /// A villager this close to the Town Center deposits instantly: 3.0 units.
 pub const DEPOSIT_RANGE: I16F16 = I16F16::from_bits(196_608); // 3.0
+/// ECO-09 retarget search radius (M4): when a gatherer's node
+/// depletes, the nearest live node of the same resource *around the
+/// depleted node* is searched within this radius (the same woodline /
+/// berry patch / mine cluster). ECO-09 records the exact radius as
+/// UNVERIFIED in public sources — this is a tuned constant: 12 world
+/// units = 3 cells, which chains a cluster (its nodes sit 4 apart)
+/// but never reaches a different cluster or patch.
+pub const RETARGET_RADIUS: I16F16 = I16F16::from_bits(786_432); // 12.0
+/// Rally-point node snap radius (M4, SEL-13): a rally point set
+/// within this distance of a live node snaps to it — new villagers
+/// then go straight to work on that node. Matches the client's
+/// right-click node pick radius (4 world units).
+pub const RALLY_NODE_SNAP_RADIUS: I16F16 = I16F16::from_bits(262_144); // 4.0
 
 /// Static node layout: (kind, cell_x, cell_y), ids assigned in table
 /// order. All cells are free (not walls) and every node is reachable from

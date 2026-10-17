@@ -149,7 +149,13 @@ fn farm_completes_is_gatherable_depletes_and_frees_the_ground() {
     let mut sim = Sim::new(41);
     let start_wood = sim.stockpile().amount(ResourceKind::Wood);
     let start_food = sim.stockpile().amount(ResourceKind::Food);
-    build(&mut sim, 1, BuildingKind::Farm, 20, 27);
+    // M4 note: the plot sits east of the wall, far from every other
+    // food node — when the field dries, ECO-09 retargeting must find
+    // nothing within its radius and the farmer goes idle, which is
+    // the lifecycle this test pins. (At the old spot by the berries
+    // the farmer would — correctly, per ECO-09 — walk to the berry
+    // patch and keep working.)
+    build(&mut sim, 1, BuildingKind::Farm, 28, 20);
     sim.tick();
     assert_eq!(
         sim.stockpile().amount(ResourceKind::Wood),
@@ -157,7 +163,7 @@ fn farm_completes_is_gatherable_depletes_and_frees_the_ground() {
         "60 wood must be deducted at placement"
     );
     // A farm never blocks cells — the farmer works standing on it.
-    assert!(!sim.grid().is_dynamic(20, 27));
+    assert!(!sim.grid().is_dynamic(28, 20));
 
     let raised = run_until(&mut sim, 20_000, |s| {
         s.nodes().iter().any(|n| n.kind == NodeKind::Farm)
@@ -195,7 +201,7 @@ fn farm_completes_is_gatherable_depletes_and_frees_the_ground() {
         sim.buildings().iter().all(|b| b.node_id != Some(farm_id)),
         "depleted farm's building record did not retire"
     );
-    let (fx, fy) = anchor_point(&sim, 20, 27);
+    let (fx, fy) = anchor_point(&sim, 28, 20);
     assert!(
         sim.can_build(2, BuildingKind::Farm, fx, fy),
         "a new farm cannot be placed on the freed ground"

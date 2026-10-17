@@ -15,7 +15,11 @@
 //! combat — HP and table-driven damage, attack orders, Gaia animals
 //! (sheep/boar/deer) and hunting with decaying carcasses, the starting
 //! Scout Cavalry, the Barracks training Militia and Archers, and
-//! projectiles as the first consumer of the seeded RNG.
+//! projectiles as the first consumer of the seeded RNG. M4 scope:
+//! input & command completion — per-entity queued orders (SEL-12),
+//! rally points on the Town Center and production buildings (SEL-13),
+//! gatherer retargeting when a node depletes (ECO-09), and the idle
+//! queries behind the idle keys and indicators (SEL-08/09, INF-03).
 
 mod build;
 mod classes;
@@ -39,9 +43,10 @@ pub use build::{
 pub use combat::{compute_damage, Projectile, MELEE_REACH};
 pub use econ::{
     NodeKind, ResourceKind, ResourceNode, Stockpile, CARRY_CAPACITY, DEPOSIT_RANGE, GATHER_RANGE,
-    HUNT_CARRY_CAPACITY, TRAIN_QUEUE_CAP, VILLAGER_FOOD_COST, VILLAGER_TRAIN_TICKS,
+    HUNT_CARRY_CAPACITY, RALLY_NODE_SNAP_RADIUS, RETARGET_RADIUS, TRAIN_QUEUE_CAP,
+    VILLAGER_FOOD_COST, VILLAGER_TRAIN_TICKS,
 };
-pub use entity::{Entity, EntityKind, MoveOrder, Task, OWNER_GAIA, OWNER_PLAYER};
+pub use entity::{Entity, EntityKind, MoveOrder, QueuedOrder, Task, OWNER_GAIA, OWNER_PLAYER};
 pub use grid::{Grid, CELL_SIZE, GRID_DIM, WORLD_HALF};
 pub use hash::Fnv1a64;
 pub use rng::Pcg32;
@@ -116,13 +121,21 @@ pub const ANIMAL_SPECS: &[(EntityKind, u32, u32)] = &[
 const MIN_POS: I16F16 = I16F16::from_bits(-6_488_064);
 const MAX_POS: I16F16 = I16F16::from_bits(6_488_064);
 
+/// Maximum queued orders held behind an entity's current order
+/// (M4, SEL-12). A queue-deeper-than-playable bound: shift-click
+/// chains in real play are a handful of orders; beyond the cap,
+/// further `Queue` commands are ignored. (An implementation bound —
+/// the rulebook records no cap for the reference game.)
+pub const ORDER_QUEUE_CAP: usize = 16;
+
 /// Commands are *data*, pushed by the outside world and applied in FIFO
 /// order at tick start. This shape is what makes future lockstep
 /// multiplayer and replays possible: a match is (seed, settings,
 /// commands).
 ///
 /// M1 adds `Move`; M2 adds `Gather` and `TrainVillager`; M2.5 adds
-/// `Build`; M3 adds `Attack` and `TrainAt`.
+/// `Build`; M3 adds `Attack` and `TrainAt`; M4 adds `Queue` and
+/// `SetRally`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
     /// Does nothing. Exists so the command pipeline is exercised.
@@ -170,6 +183,24 @@ pub enum Command {
     /// unfinished, not a production building, the kind is not
     /// trainable there, funds are short, or the queue is full (15).
     TrainAt { building: u32, kind: EntityKind },
+    /// Queue an order behind an entity's current one (M4, SEL-12 —
+    /// the Shift+click form of an order). The entity executes its
+    /// current order first, then the queued ones FIFO. A *non-queued*
+    /// command for the same entity replaces its current order and
+    /// clears the whole queue (the pre-M4 semantics). Queued orders
+    /// for an idle entity start on the same tick's queue-advance step.
+    Queue { entity: u32, order: QueuedOrder },
+    /// Set a rally point (M4, SEL-13): `building: None` targets the
+    /// Town Center, `Some(id)` a production building. The point is
+    /// clamped into the world; if it lands within snap range of a
+    /// live resource node it also records that node, so new villagers
+    /// go straight to work on it. Rally points are pure data — they
+    /// take effect when the next unit finishes training there.
+    SetRally {
+        building: Option<u32>,
+        x: I16F16,
+        y: I16F16,
+    },
 }
 
 /// Why Town Center training cannot currently proceed (M2.5). The
@@ -228,6 +259,13 @@ pub struct Sim {
     train_queue: u32,
     /// Ticks of training progress on the villager at the queue's head.
     train_progress: u64,
+    /// Town Center rally point (M4, SEL-13): where a freshly trained
+    /// villager walks on spawn. `None` = unset — the villager stays at
+    /// its spawn point just outside the Town Center (the reference
+    /// game's default). `tc_rally_node` is the node the point snapped
+    /// to, if any: the new villager gathers it instead of walking.
+    tc_rally: Option<(I16F16, I16F16)>,
+    tc_rally_node: Option<u32>,
     /// Placed buildings in id order (M2.5): under construction and
     /// complete. A completed Farm's record stays while its node lives
     /// (footprint registry), then retires with it.
@@ -304,6 +342,8 @@ impl Sim {
             nodes,
             train_queue: 0,
             train_progress: 0,
+            tc_rally: None,
+            tc_rally_node: None,
             buildings: Vec::new(),
             next_building_id: 0,
             projectiles: Vec::new(),
@@ -508,6 +548,98 @@ impl Sim {
             && self.stockpile.amount(ResourceKind::Food) >= VILLAGER_FOOD_COST
     }
 
+    /// Would a `Queue` command be accepted right now? (M4, SEL-12.)
+    /// Light validation only — the order re-validates fully when it
+    /// *executes*, because the world can change while it waits: a
+    /// target can die, a node can deplete, a build spot can fill.
+    /// Here we check the entity can take orders at all, the
+    /// order-specific shape (Gather/Build are villager work, Attack
+    /// must be legal right now), and the queue cap.
+    pub fn can_queue(&self, entity: u32, order: QueuedOrder) -> bool {
+        let idx = match self.entity_index(entity) {
+            Some(i) => i,
+            None => return false,
+        };
+        if !self.orderable(idx) || self.entities[idx].order_queue.len() >= ORDER_QUEUE_CAP {
+            return false;
+        }
+        match order {
+            QueuedOrder::Move { .. } => true,
+            QueuedOrder::Gather { node } => {
+                self.entities[idx].kind == EntityKind::Villager
+                    && self.node_index(node).is_some()
+            }
+            QueuedOrder::Attack { target } => self.can_attack(entity, target),
+            QueuedOrder::Build { .. } => self.entities[idx].kind == EntityKind::Villager,
+        }
+    }
+
+    /// Would a `SetRally` command be accepted right now? (M4,
+    /// SEL-13.) The Town Center always holds a rally point; placed
+    /// buildings only if they are production buildings (in M4: the
+    /// Barracks). Setting a rally on a building still under
+    /// construction is allowed, as in the reference game.
+    pub fn can_set_rally(&self, building: Option<u32>) -> bool {
+        match building {
+            None => true,
+            Some(bid) => self
+                .building_index(bid)
+                .map(|bi| self.buildings[bi].kind.is_production())
+                .unwrap_or(false),
+        }
+    }
+
+    /// The Town Center's rally point as `(x, y, snapped_node)`, or
+    /// `None` when unset (M4, SEL-13). For the client's flag render.
+    pub fn tc_rally(&self) -> Option<(I16F16, I16F16, Option<u32>)> {
+        self.tc_rally.map(|(x, y)| (x, y, self.tc_rally_node))
+    }
+
+    /// A placed building's rally point, same shape as `tc_rally`.
+    /// `None` when the building is unknown or its rally is unset.
+    pub fn building_rally(&self, building: u32) -> Option<(I16F16, I16F16, Option<u32>)> {
+        let bi = self.building_index(building)?;
+        let b = &self.buildings[bi];
+        b.rally.map(|(x, y)| (x, y, b.rally_node))
+    }
+
+    /// Idle villagers (M4, SEL-08): living player villagers with no
+    /// work task, no move order, and no attack target — the
+    /// definition the rulebook gives ("no work task and no move
+    /// order"). Id order. Behind the client's idle-villager key and
+    /// indicator (INF-03).
+    pub fn idle_villagers(&self) -> Vec<u32> {
+        self.entities
+            .iter()
+            .filter(|e| {
+                e.kind == EntityKind::Villager
+                    && e.owner == entity::OWNER_PLAYER
+                    && !e.dead
+                    && e.task == Task::Idle
+                    && e.order.is_none()
+                    && e.attack_target.is_none()
+            })
+            .map(|e| e.id)
+            .collect()
+    }
+
+    /// Idle military (M4, SEL-09): living player military units
+    /// (Scout, Militia, Archer) with no move order and no attack
+    /// target. Id order. The mirror of `idle_villagers`.
+    pub fn idle_military(&self) -> Vec<u32> {
+        self.entities
+            .iter()
+            .filter(|e| {
+                e.kind.is_military()
+                    && e.owner == entity::OWNER_PLAYER
+                    && !e.dead
+                    && e.order.is_none()
+                    && e.attack_target.is_none()
+            })
+            .map(|e| e.id)
+            .collect()
+    }
+
     /// The Town Center entity.
     pub fn town_center(&self) -> &Entity {
         &self.entities[TOWN_CENTER_ID as usize]
@@ -530,6 +662,8 @@ impl Sim {
                 Command::Build { entity, kind, x, y } => self.issue_build(entity, kind, x, y),
                 Command::Attack { entity, target } => self.issue_attack(entity, target),
                 Command::TrainAt { building, kind } => self.issue_train_at(building, kind),
+                Command::Queue { entity, order } => self.issue_queue(entity, order),
+                Command::SetRally { building, x, y } => self.issue_set_rally(building, x, y),
             }
         }
 
@@ -609,6 +743,11 @@ impl Sim {
         //    then villager work cycles and construction.
         self.economy_tick();
 
+        // 5. Order queues (M4, SEL-12): an entity that became fully
+        //    idle this tick starts its next queued order, so a chain
+        //    has no dead tick between links.
+        self.advance_queues();
+
         self.tick += 1;
         self.state_hash()
     }
@@ -624,6 +763,13 @@ impl Sim {
         units::spec(e.kind).speed
     }
 
+    /// Can this entity take player orders at all? Living, player-owned,
+    /// mobile. Shared by the `Move` path and the queue validation.
+    fn orderable(&self, idx: usize) -> bool {
+        let e = &self.entities[idx];
+        !e.dead && e.owner == entity::OWNER_PLAYER && e.kind.is_mobile()
+    }
+
     /// Apply a `Move` command: clamp the target into the world, recompute
     /// the A* path immediately (deterministically), and install the order.
     /// Unknown entities and unreachable/blocked targets clear the order —
@@ -633,18 +779,24 @@ impl Sim {
     /// cancels any attack engagement. Orderable entities (M3): living
     /// player units — villagers, military, the Scout, and captured
     /// sheep. The Town Center, the dead, and Gaia's wild animals
-    /// ignore the command.
+    /// ignore the command. A non-queued `Move` also clears the
+    /// entity's order queue (M4, SEL-12: replace semantics).
     fn issue_move(&mut self, entity: u32, x: I16F16, y: I16F16) {
         let idx = match self.entity_index(entity) {
             Some(i) => i,
             None => return,
         };
-        {
-            let e = &self.entities[idx];
-            if e.dead || e.owner != entity::OWNER_PLAYER || !e.kind.is_mobile() {
-                return;
-            }
+        if !self.orderable(idx) {
+            return;
         }
+        self.entities[idx].order_queue.clear();
+        self.apply_move(idx, x, y);
+    }
+
+    /// The mechanics of a move order, shared by the `Move` command
+    /// and by queued-order execution (which must not clear the rest
+    /// of the queue behind it).
+    fn apply_move(&mut self, idx: usize, x: I16F16, y: I16F16) {
         {
             let e = &mut self.entities[idx];
             e.task = Task::Idle;
@@ -658,12 +810,20 @@ impl Sim {
     /// Apply an `Attack` command (M3): validate (same rules as
     /// `can_attack`), cancel the attacker's current work/move, and set
     /// its attack target. The combat phase handles the chase, the
-    /// strikes, and the kill.
+    /// strikes, and the kill. A non-queued `Attack` also clears the
+    /// entity's order queue (M4, SEL-12: replace semantics).
     fn issue_attack(&mut self, entity: u32, target: u32) {
         if !self.can_attack(entity, target) {
             return;
         }
         let idx = self.entity_index(entity).expect("validated");
+        self.entities[idx].order_queue.clear();
+        self.apply_attack(idx, target);
+    }
+
+    /// The mechanics of an attack order, shared by the `Attack`
+    /// command and by queued-order execution.
+    fn apply_attack(&mut self, idx: usize, target: u32) {
         let e = &mut self.entities[idx];
         e.task = Task::Idle;
         e.task_node = None;
@@ -690,7 +850,9 @@ impl Sim {
     /// Apply a `Gather` command: assign the villager to the node. If it
     /// carries a *different* resource, it first hauls that home (the
     /// assignment is kept, so work resumes at the new node after the
-    /// deposit); otherwise it heads straight for the node.
+    /// deposit); otherwise it heads straight for the node. A
+    /// non-queued `Gather` also clears the villager's order queue
+    /// (M4, SEL-12: replace semantics).
     fn issue_gather(&mut self, entity: u32, node: u32) {
         let idx = match self.entity_index(entity) {
             Some(i) => i,
@@ -703,6 +865,7 @@ impl Sim {
             Some(ni) if !self.nodes[ni].is_depleted() => {}
             _ => return,
         }
+        self.entities[idx].order_queue.clear();
         self.begin_gather(idx, node);
     }
 
@@ -751,21 +914,41 @@ impl Sim {
     /// placement, register the building (blocking its footprint cells
     /// when the kind is solid), and send the villager to the site. On
     /// any validation failure the order is rejected whole — no partial
-    /// spends, no phantom buildings.
+    /// spends, no phantom buildings. A non-queued `Build` that takes
+    /// effect also clears the villager's order queue (M4, SEL-12:
+    /// replace semantics); a rejected one changes nothing at all,
+    /// queue included — the pre-M4 contract.
     fn issue_build(&mut self, entity: u32, kind: BuildingKind, x: I16F16, y: I16F16) {
         let idx = match self.entity_index(entity) {
             Some(i) => i,
             None => return,
         };
+        if self.apply_build(entity, kind, x, y) {
+            self.entities[idx].order_queue.clear();
+        }
+    }
+
+    /// The mechanics of a build order, shared by the `Build` command
+    /// and by queued-order execution (which must not clear the rest
+    /// of the queue behind it). Returns whether the order took
+    /// effect (builder assigned: new placement or a resume).
+    fn apply_build(&mut self, entity: u32, kind: BuildingKind, x: I16F16, y: I16F16) -> bool {
+        let idx = match self.entity_index(entity) {
+            Some(i) => i,
+            None => return false,
+        };
         match self.validate_build(entity, kind, clamp_pos(x), clamp_pos(y)) {
-            BuildVerdict::Reject => {}
-            BuildVerdict::Resume(bid) => self.assign_builder(idx, bid),
+            BuildVerdict::Reject => false,
+            BuildVerdict::Resume(bid) => {
+                self.assign_builder(idx, bid);
+                true
+            }
             BuildVerdict::Place(cell_x, cell_y) => {
                 // Validation proved the stockpile covers the cost; the
                 // spend re-checks anyway so a failure can never place a
                 // free building.
                 if !self.stockpile.spend(ResourceKind::Wood, kind.wood_cost()) {
-                    return;
+                    return false;
                 }
                 let id = self.next_building_id;
                 self.next_building_id += 1;
@@ -783,6 +966,8 @@ impl Sim {
                     node_id: None,
                     queue: Vec::new(),
                     train_progress: 0,
+                    rally: None,
+                    rally_node: None,
                 };
                 if kind.blocks_footprint() {
                     for (cx, cy) in building.footprint_cells() {
@@ -791,8 +976,158 @@ impl Sim {
                 }
                 self.buildings.push(building);
                 self.assign_builder(idx, id);
+                true
             }
         }
+    }
+
+    /// Apply a `Queue` command (M4, SEL-12): append the order to the
+    /// entity's queue. If the entity is idle the queue-advance step
+    /// later this same tick starts it — a queued order for an idle
+    /// unit behaves like a plain order with no visible delay.
+    fn issue_queue(&mut self, entity: u32, order: QueuedOrder) {
+        if !self.can_queue(entity, order) {
+            return;
+        }
+        let idx = self.entity_index(entity).expect("validated");
+        self.entities[idx].order_queue.push(order);
+    }
+
+    /// Start the next queued order of an idle entity (M4, SEL-12).
+    /// Runs once per tick, after the economy phase: any entity that
+    /// is fully idle — no work task, no move order, no attack target —
+    /// pops its queue head and executes it exactly like the
+    /// corresponding base command. An order that no longer validates
+    /// at execution time (its target died, its node depleted, its
+    /// build spot or budget vanished) is dropped and the next one is
+    /// tried, so a stale link never wedges the chain.
+    fn advance_queues(&mut self) {
+        for idx in 0..self.entities.len() {
+            {
+                let e = &self.entities[idx];
+                if e.dead
+                    || e.order_queue.is_empty()
+                    || e.task != Task::Idle
+                    || e.order.is_some()
+                    || e.attack_target.is_some()
+                {
+                    continue;
+                }
+            }
+            while !self.entities[idx].order_queue.is_empty() {
+                let order = self.entities[idx].order_queue.remove(0);
+                if self.execute_queued(idx, order) {
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Execute one queued order for entity `idx` — the apply-half of
+    /// the corresponding base command, without the replace
+    /// semantics. Returns whether the order took effect.
+    fn execute_queued(&mut self, idx: usize, order: QueuedOrder) -> bool {
+        let entity = self.entities[idx].id;
+        match order {
+            QueuedOrder::Move { x, y } => {
+                if !self.orderable(idx) {
+                    return false;
+                }
+                self.apply_move(idx, x, y);
+                true
+            }
+            QueuedOrder::Gather { node } => {
+                if self.entities[idx].kind != EntityKind::Villager || self.entities[idx].dead {
+                    return false;
+                }
+                match self.node_index(node) {
+                    Some(ni) if !self.nodes[ni].is_depleted() => {}
+                    _ => return false,
+                }
+                self.begin_gather(idx, node);
+                true
+            }
+            QueuedOrder::Attack { target } => {
+                if !self.can_attack(entity, target) {
+                    return false;
+                }
+                self.apply_attack(idx, target);
+                true
+            }
+            QueuedOrder::Build { kind, x, y } => self.apply_build(entity, kind, x, y),
+        }
+    }
+
+    /// Apply a `SetRally` command (M4, SEL-13): store the point (and
+    /// the node it snaps to, if any) on the Town Center or the
+    /// production building. Takes effect on the next spawn there.
+    fn issue_set_rally(&mut self, building: Option<u32>, x: I16F16, y: I16F16) {
+        if !self.can_set_rally(building) {
+            return;
+        }
+        let (x, y) = (clamp_pos(x), clamp_pos(y));
+        let node = self.rally_snap_node(x, y);
+        match building {
+            None => {
+                self.tc_rally = Some((x, y));
+                self.tc_rally_node = node;
+            }
+            Some(bid) => {
+                let bi = self.building_index(bid).expect("validated");
+                self.buildings[bi].rally = Some((x, y));
+                self.buildings[bi].rally_node = node;
+            }
+        }
+    }
+
+    /// The live node a rally point at `(x, y)` snaps to: the nearest
+    /// non-depleted node within `RALLY_NODE_SNAP_RADIUS`, ties broken
+    /// by lowest id (nodes are scanned in id order and only a strictly
+    /// nearer node replaces the current best — the same discipline
+    /// as combat's target acquisition).
+    fn rally_snap_node(&self, x: I16F16, y: I16F16) -> Option<u32> {
+        let mut best: Option<(i64, u32)> = None; // (distance² bits, id)
+        for n in &self.nodes {
+            if n.is_depleted() {
+                continue;
+            }
+            let d = steer::vec_len(n.pos_x - x, n.pos_y - y);
+            if d > econ::RALLY_NODE_SNAP_RADIUS {
+                continue;
+            }
+            let db = d.to_bits() as i64;
+            let key = (db * db, n.id);
+            if best.map(|b| key < b).unwrap_or(true) {
+                best = Some(key);
+            }
+        }
+        best.map(|(_, id)| id)
+    }
+
+    /// Send a freshly trained unit to its building's rally point
+    /// (M4, SEL-13): a villager whose rally snapped to a still-live
+    /// node goes straight to work on it; anyone else walks to the
+    /// rally point. No rally set → the unit stays at its spawn point,
+    /// just outside the building (the reference game's default).
+    fn apply_spawn_rally(
+        &mut self,
+        idx: usize,
+        rally: Option<(I16F16, I16F16)>,
+        rally_node: Option<u32>,
+    ) {
+        let (rx, ry) = match rally {
+            Some(p) => p,
+            None => return,
+        };
+        if self.entities[idx].kind == EntityKind::Villager {
+            if let Some(nid) = rally_node {
+                if self.live_node_pos(nid).is_some() {
+                    self.begin_gather(idx, nid);
+                    return;
+                }
+            }
+        }
+        self.set_move_order(idx, rx, ry);
     }
 
     /// The single source of build validation, shared by the `Build`
@@ -1024,6 +1359,7 @@ impl Sim {
         let b = &self.buildings[bi];
         let (ax, ay, size) = (b.cell_x, b.cell_y, b.kind.footprint_size());
         let (cx0, cy0) = (b.pos_x, b.pos_y);
+        let (rally, rally_node) = (b.rally, b.rally_node);
         let mut pos = None;
         for (cx, cy) in build::ring_cells(ax, ay, size) {
             if cx >= GRID_DIM || cy >= GRID_DIM {
@@ -1059,6 +1395,11 @@ impl Sim {
             px,
             py,
         ));
+        // Rally (M4, SEL-13): the new unit walks to the building's
+        // rally point (military units just walk — only villagers can
+        // be sent straight to a node, and Barracks train none).
+        let idx = self.entities.len() - 1;
+        self.apply_spawn_rally(idx, rally, rally_node);
     }
 
     /// One villager's work state machine step. Transitions trigger on
@@ -1107,9 +1448,14 @@ impl Sim {
                     Some(ni) if !self.nodes[ni].is_depleted() => ni,
                     _ => {
                         // Depleted (by this or another villager).
+                        // With a load on its back the villager hauls
+                        // it home first (the deposit step resolves
+                        // what comes next); empty-handed, it looks
+                        // for the node's same-resource neighbor right
+                        // away (ECO-09).
                         if self.entities[idx].carry > I16F16::ZERO {
                             self.begin_return(idx);
-                        } else {
+                        } else if !self.retarget_after_depletion(idx, node_id) {
                             self.stop_task(idx);
                         }
                         return;
@@ -1338,8 +1684,10 @@ impl Sim {
         }
     }
 
-    /// Deposit the villager's carry into the stockpile, then resume the
-    /// gather assignment if its node is still alive; otherwise go idle.
+    /// Deposit the villager's carry into the stockpile, then resume
+    /// the gather assignment if its node is still alive; if it died,
+    /// retarget to a same-resource neighbor (ECO-09); otherwise go
+    /// idle.
     fn deposit(&mut self, idx: usize) {
         let (carry, kind) = {
             let e = &mut self.entities[idx];
@@ -1362,9 +1710,62 @@ impl Sim {
                     self.entities[idx].task = Task::ToNode;
                     self.set_move_order(idx, nx, ny);
                 }
-                None => self.stop_task(idx),
+                // The assignment died while the villager hauled its
+                // last load home: ECO-09's "or after depositing"
+                // case — continue at a same-resource neighbor of the
+                // dead node if one is in reach, else go idle.
+                None => {
+                    if !self.retarget_after_depletion(idx, node_id) {
+                        self.stop_task(idx);
+                    }
+                }
             },
             None => self.stop_task(idx),
+        }
+    }
+
+    /// ECO-09 retargeting (M4): villager `idx`'s node `dead_node`
+    /// just ran dry — find the nearest live node of the *same
+    /// resource* within `RETARGET_RADIUS` **of the depleted node**
+    /// (the same woodline / berry patch / mine cluster; the radius is
+    /// a tuned constant, UNVERIFIED in public sources — see
+    /// `econ::RETARGET_RADIUS`) and put the villager to work on it.
+    /// Carcass nodes count like any other node of their resource
+    /// (Food): the rulebook's ECO-09 text excludes nothing, and the
+    /// retarget only ever happens empty-handed or right after a
+    /// deposit, so the hunt carry cap (35) can never leak into a
+    /// half-filled load. Ties break to the lowest node id (id-order
+    /// scan, strictly-nearer replaces). Returns whether a new
+    /// assignment was made.
+    fn retarget_after_depletion(&mut self, idx: usize, dead_node: u32) -> bool {
+        let (resource, dx, dy) = match self.node_index(dead_node) {
+            Some(ni) => {
+                let n = &self.nodes[ni];
+                (n.resource(), n.pos_x, n.pos_y)
+            }
+            None => return false,
+        };
+        let mut best: Option<(i64, u32)> = None; // (distance² bits, id)
+        for n in &self.nodes {
+            if n.id == dead_node || n.is_depleted() || n.resource() != resource {
+                continue;
+            }
+            let d = steer::vec_len(n.pos_x - dx, n.pos_y - dy);
+            if d > econ::RETARGET_RADIUS {
+                continue;
+            }
+            let db = d.to_bits() as i64;
+            let key = (db * db, n.id);
+            if best.map(|b| key < b).unwrap_or(true) {
+                best = Some(key);
+            }
+        }
+        match best {
+            Some((_, nid)) => {
+                self.begin_gather(idx, nid);
+                true
+            }
+            None => false,
         }
     }
 
@@ -1377,12 +1778,20 @@ impl Sim {
 
     /// The villager's node vanished mid-task: haul the carry home if
     /// there is one (the deposit step then retires the assignment),
-    /// otherwise stop where it stands.
+    /// otherwise retarget to a same-resource neighbor of the dead
+    /// node (ECO-09) or stop where it stands.
     fn leave_for_deposit_or_idle(&mut self, idx: usize) {
         if self.entities[idx].carry > I16F16::ZERO {
             self.begin_return(idx);
         } else {
-            self.stop_task(idx);
+            let dead = self.entities[idx].task_node;
+            let retargeted = match dead {
+                Some(nid) => self.retarget_after_depletion(idx, nid),
+                None => false,
+            };
+            if !retargeted {
+                self.stop_task(idx);
+            }
         }
     }
 
@@ -1414,6 +1823,12 @@ impl Sim {
         // removed (M3), so the next id is always the current count.
         let id = self.entities.len() as u32;
         self.entities.push(Entity::villager(id, pos.0, pos.1));
+        // Rally (M4, SEL-13): a new villager walks to the Town
+        // Center's rally point — or straight to work, when the rally
+        // snapped to a live resource node.
+        let (rally, rally_node) = (self.tc_rally, self.tc_rally_node);
+        let idx = self.entities.len() - 1;
+        self.apply_spawn_rally(idx, rally, rally_node);
     }
 
     fn entity_index(&self, id: u32) -> Option<usize> {
@@ -1495,6 +1910,23 @@ impl Sim {
         }
         h.write_u32(self.train_queue);
         h.write_u64(self.train_progress);
+        // M4: the Town Center rally point and its snapped node
+        // (SEL-13).
+        match self.tc_rally {
+            None => h.write_u8(0),
+            Some((x, y)) => {
+                h.write_u8(1);
+                h.write_i32(x.to_bits());
+                h.write_i32(y.to_bits());
+            }
+        }
+        match self.tc_rally_node {
+            None => h.write_u8(0),
+            Some(n) => {
+                h.write_u8(1);
+                h.write_u32(n);
+            }
+        }
         // M2.5: buildings (id order), construction state included.
         // M3: production queues join.
         h.write_u32(self.buildings.len() as u32);
@@ -1519,6 +1951,22 @@ impl Sim {
                 h.write_u8(q.tag());
             }
             h.write_u64(b.train_progress);
+            // M4: rally point + snapped node (SEL-13).
+            match b.rally {
+                None => h.write_u8(0),
+                Some((x, y)) => {
+                    h.write_u8(1);
+                    h.write_i32(x.to_bits());
+                    h.write_i32(y.to_bits());
+                }
+            }
+            match b.rally_node {
+                None => h.write_u8(0),
+                Some(n) => {
+                    h.write_u8(1);
+                    h.write_u32(n);
+                }
+            }
         }
         h.write_u32(self.entities.len() as u32);
         for e in &self.entities {
@@ -1539,6 +1987,25 @@ impl Sim {
                     for &(wx, wy) in &o.waypoints {
                         h.write_i32(wx.to_bits());
                         h.write_i32(wy.to_bits());
+                    }
+                }
+            }
+            // M4: the order queue behind the current order (SEL-12) —
+            // length and every queued order's data.
+            h.write_u32(e.order_queue.len() as u32);
+            for q in &e.order_queue {
+                h.write_u8(q.tag());
+                match *q {
+                    QueuedOrder::Move { x, y } => {
+                        h.write_i32(x.to_bits());
+                        h.write_i32(y.to_bits());
+                    }
+                    QueuedOrder::Gather { node } => h.write_u32(node),
+                    QueuedOrder::Attack { target } => h.write_u32(target),
+                    QueuedOrder::Build { kind, x, y } => {
+                        h.write_u8(kind.tag());
+                        h.write_i32(x.to_bits());
+                        h.write_i32(y.to_bits());
                     }
                 }
             }

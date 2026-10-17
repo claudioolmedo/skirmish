@@ -17,6 +17,14 @@
 // Militia/Archer training, right-click attack orders, HP bars, and
 // arrow rendering — all read from the sim through the ABI (owners,
 // HP, projectiles); the client never simulates any of it.
+// M4 adds the input & command completion: Shift+right-click queued
+// orders (SEL-12), rally points set by right-clicking with the Town
+// Center / Barracks selected, with the flag rendered (SEL-13),
+// control groups on Ctrl/number keys (SEL-07), the idle villager /
+// idle military keys and top-bar indicators (SEL-08/09, INF-03),
+// H for the Town Center (SEL-10), the 60-unit selection cap
+// (SEL-05), right-click orders on the minimap (SEL-16), and
+// formation-keeping group moves.
 //
 // The ADAPTIVE QUALITY governor (play/quality.js) sits over all of
 // this: it probes the device, picks a level (sprite direction tier,
@@ -37,6 +45,9 @@ import {
   collectProbeSignals, scoreProbe, resolveMode, levelForMode,
   settingsFor, createGovernor,
 } from './play/quality.js';
+import {
+  createControlGroups, createTapTracker, nextInCycle,
+} from './play/groups.js';
 
 const assetUrl = (rel) => new URL(rel, import.meta.url).href;
 
@@ -56,6 +67,12 @@ const resStone = document.getElementById('res-stone');
 const resPop = document.getElementById('res-pop');
 const gameClock = document.getElementById('game-clock');
 const pauseBtn = document.getElementById('pause-btn');
+// Idle indicators (M4, INF-03): always-visible counts in the top bar;
+// clicking one does what the '.' / ',' keys do (SEL-08/09).
+const idleVilBtn = document.getElementById('idle-vil-btn');
+const idleVilCount = document.getElementById('idle-vil-count');
+const idleMilBtn = document.getElementById('idle-mil-btn');
+const idleMilCount = document.getElementById('idle-mil-count');
 const cmdGrid = document.getElementById('cmd-grid');
 const selPortrait = document.getElementById('sel-portrait');
 const selName = document.getElementById('sel-name');
@@ -119,13 +136,30 @@ let selectedBuilding = null;
 // buildings never enter the unit Set (selectedUnits() also filters).
 // Every selection change goes through these two helpers.
 function selectUnits(set) {
-  selection = set;
+  // SEL-05: one selection holds at most 60 units. Every path that
+  // builds a selection (click, box, shift, double-click, control
+  // groups, idle keys) funnels through here, so the cap lives here.
+  selection = new Set([...set].slice(0, SELECTION_CAP));
   selectedBuilding = null;
 }
 function selectBuilding(descOrNull) {
   selectedBuilding = descOrNull;
   selection = new Set();
 }
+
+// SEL-05: the selection cap (the rulebook's number).
+const SELECTION_CAP = 60;
+
+// Control groups (M4, SEL-07): membership by entity id, client-side
+// only — the store (play/groups.js) is pure logic; the sim stays the
+// truth about which members are alive. The tap tracker powers the
+// double-tap-to-center gesture.
+const controlGroups = createControlGroups();
+const groupTaps = createTapTracker();
+// Idle-key cycling memory (SEL-08/09): the last id each key handed
+// out, so pressing again moves to the NEXT idle unit.
+let idleCycleVil = -1;
+let idleCycleMil = -1;
 
 let mmGeom = null; // minimap geometry, created once the grid is known
 const OWN_COLOR = '#4da3ff'; // our player blue on the minimap (villager tunic family)
@@ -615,9 +649,116 @@ addEventListener('keydown', (e) => {
     }
     return;
   }
+  // M4 game hotkeys (control groups, idle keys, go-to TC): consumed
+  // keys never reach the pan-key set below.
+  if (playing && sim && handleGameKey(e)) return;
   keys.add(e.code);
 });
 addEventListener('keyup', (e) => keys.delete(e.code));
+
+// --- M4 hotkeys ---------------------------------------------------------
+// Control groups (SEL-07), idle keys (SEL-08/09), go-to Town Center
+// (SEL-10). Returns true when the key was consumed. Everything here
+// is client-side selection/camera work on top of the sim's queries —
+// the only sim writes are the orders the player then issues.
+
+/// Center the camera on a world point (keeps the current zoom).
+function centerOn(wx, wy) {
+  const [ox, oy] = centerCamera(wx, wy, camS, canvas.width, canvas.height);
+  camOx = ox;
+  camOy = oy;
+}
+
+/// Group n's members that are still ours and alive (the sim is the
+/// truth; group membership is just remembered ids).
+function liveGroupMembers(n) {
+  const st = entityState();
+  return controlGroups.recall(n, (id) => id < st.count && isOwnUnit(st, id));
+}
+
+/// The idle key (SEL-08/09): select + center the NEXT idle unit of
+/// the kind ('villager' | 'military'), cycling; with `selectAll`,
+/// select every idle one instead (the Shift variant). Shared by the
+/// '.' / ',' keys and the top-bar idle indicators.
+function cycleIdle(kind, selectAll) {
+  const ids = kind === 'villager' ? [...sim.idle_villagers()] : [...sim.idle_military()];
+  if (!ids.length) {
+    flash(kind === 'villager' ? 'No idle villagers.' : 'No idle military units.');
+    return;
+  }
+  if (selectAll) {
+    selectUnits(new Set(ids));
+    return;
+  }
+  const id = nextInCycle(ids, kind === 'villager' ? idleCycleVil : idleCycleMil);
+  if (kind === 'villager') idleCycleVil = id;
+  else idleCycleMil = id;
+  selectUnits(new Set([id]));
+  const pos = sim.positions();
+  centerOn(pos[id * 2], pos[id * 2 + 1]);
+}
+
+function handleGameKey(e) {
+  // Control groups: Ctrl+1–9 assigns the selection, 1–9 recalls it,
+  // a double-tap centers the camera on it, Shift+number adds the
+  // group to the current selection (SEL-07).
+  const digit = /^Digit([1-9])$/.exec(e.code);
+  if (digit) {
+    const n = Number(digit[1]);
+    if (e.altKey) return false; // the Alt layer (groups 11–20) is not implemented
+    e.preventDefault();
+    if (e.repeat) return true;
+    if (e.ctrlKey || e.metaKey) {
+      const sel = selectedUnits();
+      if (sel.length) controlGroups.assign(n, sel);
+      return true;
+    }
+    if (e.shiftKey) {
+      const next = new Set(selection);
+      for (const id of liveGroupMembers(n)) next.add(id);
+      selectUnits(next);
+      return true;
+    }
+    const members = liveGroupMembers(n);
+    if (!members.length) return true;
+    selectUnits(new Set(members));
+    if (groupTaps.tap(n, performance.now()) === 'center') {
+      const pos = sim.positions();
+      let sx = 0;
+      let sy = 0;
+      for (const id of members) {
+        sx += pos[id * 2];
+        sy += pos[id * 2 + 1];
+      }
+      centerOn(sx / members.length, sy / members.length);
+    }
+    return true;
+  }
+  switch (e.code) {
+    case 'Period': // '.' — next idle villager (SEL-08)
+      e.preventDefault();
+      if (!e.repeat) cycleIdle('villager', e.shiftKey);
+      return true;
+    case 'Comma': // ',' — next idle military unit (SEL-09)
+      e.preventDefault();
+      if (!e.repeat) cycleIdle('military', e.shiftKey);
+      return true;
+    case 'KeyH': { // 'H' — go to the Town Center (SEL-10)
+      if (e.ctrlKey || e.metaKey || e.altKey) return false;
+      e.preventDefault();
+      if (e.repeat) return true;
+      const tc = sim.entity_kinds().indexOf(KIND_TC);
+      if (tc >= 0) {
+        selectBuilding({ type: 'tc', id: tc });
+        const pos = sim.positions();
+        centerOn(pos[tc * 2], pos[tc * 2 + 1]);
+      }
+      return true;
+    }
+    default:
+      return false;
+  }
+}
 
 function applyKeys() {
   const P = 14; // screen px per frame while a pan key is held
@@ -644,6 +785,12 @@ function resetSim() {
   atNodeNow.clear();
   selectUnits(new Set()); // also clears any building selection
   placement = null;
+  // M4 client state resets with the match: control groups and the
+  // idle-key cycling memory belong to the old game.
+  controlGroups.clear();
+  groupTaps.reset();
+  idleCycleVil = -1;
+  idleCycleMil = -1;
 
   // Camera: centered on the Town Center.
   const kinds = sim.entity_kinds();
@@ -713,6 +860,10 @@ async function main() {
     paused = false;
   });
   pauseBtn.addEventListener('click', () => setPaused(true));
+  // Idle indicators double as buttons: the same cycle the '.' / ','
+  // keys run (SEL-08/09).
+  idleVilBtn.addEventListener('click', () => { if (sim) cycleIdle('villager', false); });
+  idleMilBtn.addEventListener('click', () => { if (sim) cycleIdle('military', false); });
   resumeBtn.addEventListener('click', () => setPaused(false));
   restartBtn.addEventListener('click', () => {
     resetSim();
@@ -763,16 +914,27 @@ async function main() {
   // the canvas selection/pan handlers. Client px are converted to
   // canvas px through the bounding rect — the CSS display size
   // differs from the attribute size on narrow screens.
+  // M4 (SEL-16): a RIGHT-click on the minimap instead issues the
+  // smart order (or sets a rally point) at that world point.
   let mmDrag = false;
-  function minimapJump(ev) {
-    if (!mmGeom) return;
+  function minimapPointerWorld(ev) {
+    if (!mmGeom) return null;
     const r = minimapCanvas.getBoundingClientRect();
     const mx = (ev.clientX - r.left) * (minimapCanvas.width / r.width);
     const my = (ev.clientY - r.top) * (minimapCanvas.height / r.height);
-    const [wx, wy] = minimapToWorld(mmGeom, mx, my);
-    [camOx, camOy] = cameraCenteredOn(wx, wy, camS, canvas.width, canvas.height);
+    return minimapToWorld(mmGeom, mx, my);
+  }
+  function minimapJump(ev) {
+    const w = minimapPointerWorld(ev);
+    if (!w) return;
+    [camOx, camOy] = cameraCenteredOn(w[0], w[1], camS, canvas.width, canvas.height);
   }
   minimapCanvas.addEventListener('pointerdown', (ev) => {
+    if (ev.button === 2) {
+      const w = minimapPointerWorld(ev);
+      if (w) smartOrderAt(w[0], w[1], ev.shiftKey);
+      return;
+    }
     mmDrag = true;
     minimapCanvas.setPointerCapture(ev.pointerId);
     minimapJump(ev);
@@ -782,6 +944,7 @@ async function main() {
   });
   minimapCanvas.addEventListener('pointerup', () => { mmDrag = false; });
   minimapCanvas.addEventListener('pointercancel', () => { mmDrag = false; });
+  minimapCanvas.addEventListener('contextmenu', (ev) => ev.preventDefault());
 
   // --- Pointer ---------------------------------------------------------
   function eventWorld(ev) {
@@ -872,12 +1035,32 @@ async function main() {
     return best;
   }
 
+  // The smart order at a point, from the main view OR the minimap
+  // (SEL-16): with the Town Center or a Barracks selected, a
+  // right-click sets that building's rally point (SEL-13); with
+  // units selected it is the context order below. `queued` is the
+  // Shift form (SEL-12): the order lines up behind each unit's
+  // current one instead of replacing it.
+  function smartOrderAt(wx, wy, queued = false) {
+    if (selectedBuilding) {
+      if (selectedBuilding.type === 'tc') {
+        sim.push_set_rally_tc(wx, wy);
+        return;
+      }
+      if (selectedBuilding.type === 'building' && selectedBuilding.kind === 2) {
+        sim.push_set_rally_building(selectedBuilding.id, wx, wy);
+        return;
+      }
+    }
+    orderAt(wx, wy, queued);
+  }
+
   // Context order at a point (M3): an entity there (Gaia animal or
   // our own sheep) means Attack for everyone who can fight; a node
   // means Gather for villagers and Move for the rest; ground means
   // Move. Goes ONLY to the current selection (AoE2-style) — with an
   // empty selection the order does nothing but flash the hint.
-  function orderAt(wx, wy) {
+  function orderAt(wx, wy, queued = false) {
     const targets = selectedUnits();
     if (targets.length === 0) {
       flash(selectedBuilding != null
@@ -888,12 +1071,46 @@ async function main() {
       return;
     }
     const st = entityState();
+    // Group-move shape: with 2+ units ordered onto open ground, each
+    // keeps its offset from the group's centroid (clamped to 6
+    // units), so a group arrives in the shape it left in instead of
+    // stacking onto one point. An offset that would land inside a
+    // static wall falls back to the plain shared target.
+    let moveDest = null;
+    if (targets.length >= 2) {
+      let cx = 0;
+      let cy = 0;
+      for (const id of targets) {
+        cx += st.pos[id * 2];
+        cy += st.pos[id * 2 + 1];
+      }
+      cx /= targets.length;
+      cy /= targets.length;
+      moveDest = (id) => {
+        let dx = st.pos[id * 2] - cx;
+        let dy = st.pos[id * 2 + 1] - cy;
+        const len = Math.hypot(dx, dy);
+        if (len > 6) {
+          dx *= 6 / len;
+          dy *= 6 / len;
+        }
+        const tx = wx + dx;
+        const ty = wy + dy;
+        const [ccx, ccy] = worldToCell(tx, ty);
+        return OBST[ccy * GW + ccx] ? [wx, wy] : [tx, ty];
+      };
+    }
+    const sendMove = (id) => {
+      const [mx, my] = moveDest ? moveDest(id) : [wx, wy];
+      if (queued) sim.push_move_queued(id, mx, my);
+      else sim.push_move(id, mx, my);
+    };
     const t = entityAt(wx, wy);
     if (t != null && (st.owners[t] === 1 || st.kinds[t] === KIND_SHEEP)) {
       let any = false;
       for (const id of targets) {
         if (st.kinds[id] === KIND_SHEEP) continue; // sheep don't fight
-        if (sim.push_attack(id, t)) any = true;
+        if (queued ? sim.push_attack_queued(id, t) : sim.push_attack(id, t)) any = true;
       }
       if (any) return;
       // Nobody could attack (e.g. only sheep selected): fall through
@@ -901,12 +1118,16 @@ async function main() {
     }
     const n = nodeAt(wx, wy);
     for (const id of targets) {
-      if (n && st.kinds[id] === 0) sim.push_gather(id, n.id);
-      else sim.push_move(id, wx, wy);
+      if (n && st.kinds[id] === 0) {
+        if (queued) sim.push_gather_queued(id, n.id);
+        else sim.push_gather(id, n.id);
+      } else {
+        sendMove(id);
+      }
     }
   }
 
-  function attemptPlace(wx, wy) {
+  function attemptPlace(wx, wy, queued = false) {
     // The builder is the selected VILLAGER nearest the placement
     // point: with a group selected, the closest pair of hands does
     // the work (the sim's Build command names a single builder, and
@@ -933,13 +1154,24 @@ async function main() {
     // the footprint at the cell containing the point.
     const px = -HALF + cx * CS + 0.01;
     const py = -HALF + cy * CS + 0.01;
-    const ok = placement.kind === 0
-      ? sim.push_build_house(builder, px, py)
-      : placement.kind === 1
-        ? sim.push_build_farm(builder, px, py)
-        : sim.push_build_barracks(builder, px, py);
+    // Queued (Shift) placement: the build lines up behind the
+    // builder's current order and placement mode STAYS armed, so a
+    // row of buildings can be queued with repeated Shift+clicks.
+    // (The queued form validates at execution — see Sim::can_queue —
+    // so its acceptance here only proves the builder can build.)
+    const ok = queued
+      ? (placement.kind === 0
+        ? sim.push_build_house_queued(builder, px, py)
+        : placement.kind === 1
+          ? sim.push_build_farm_queued(builder, px, py)
+          : sim.push_build_barracks_queued(builder, px, py))
+      : (placement.kind === 0
+        ? sim.push_build_house(builder, px, py)
+        : placement.kind === 1
+          ? sim.push_build_farm(builder, px, py)
+          : sim.push_build_barracks(builder, px, py));
     if (ok) {
-      placement = null;
+      if (!queued) placement = null;
     } else {
       flash(`Cannot build a ${BUILD_NAME[placement.kind]} there.`);
     }
@@ -974,7 +1206,7 @@ async function main() {
     lDrag = null;
     const [wx, wy] = eventWorld(ev);
     if (placement) {
-      if (!d.moved) attemptPlace(wx, wy); // a placement click, not a drag
+      if (!d.moved) attemptPlace(wx, wy, ev.shiftKey); // a placement click, not a drag
       return;
     }
     if (d.moved) {
@@ -1085,7 +1317,7 @@ async function main() {
       return;
     }
     const [wx, wy] = eventWorld(e);
-    orderAt(wx, wy);
+    smartOrderAt(wx, wy, e.shiftKey);
   });
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
@@ -1715,6 +1947,9 @@ function drawDeer(i, wx, wy) {
 // selection) are signature-gated so they only touch the DOM when
 // something they display actually changed — never at 60 fps.
 
+let lastIdleVil = -1;
+let lastIdleMil = -1;
+
 function updateTopBar() {
   const [food, wood, gold, stone] = sim.stockpile();
   resFood.textContent = Math.floor(food);
@@ -1726,6 +1961,20 @@ function updateTopBar() {
   resPop.textContent = `${pop} / ${cap}`;
   // Warn tint when housed (reason 3) or simply at the cap.
   resPop.classList.toggle('warn', sim.train_block_reason() === 3 || pop >= cap);
+  // Idle indicators (INF-03): live counts from the sim's idle
+  // queries; the buttons light up while anyone is standing free.
+  const nVil = sim.idle_villagers().length;
+  if (nVil !== lastIdleVil) {
+    lastIdleVil = nVil;
+    idleVilCount.textContent = String(nVil);
+    idleVilBtn.classList.toggle('has-idle', nVil > 0);
+  }
+  const nMil = sim.idle_military().length;
+  if (nMil !== lastIdleMil) {
+    lastIdleMil = nMil;
+    idleMilCount.textContent = String(nMil);
+    idleMilBtn.classList.toggle('has-idle', nMil > 0);
+  }
   const secs = Math.floor(sim.tick_count() / 60); // the sim ticks at 60 Hz
   const mm = String(Math.floor(secs / 60)).padStart(2, '0');
   const ss = String(secs % 60).padStart(2, '0');
@@ -1937,7 +2186,7 @@ function updateSelPanel() {
     } else if (queue > 0) {
       selInfo.textContent = `Training a villager… · Queue ${queue}`;
     } else {
-      selInfo.textContent = 'Train villagers from the Commands panel.';
+      selInfo.textContent = 'Train villagers from the Commands panel. Right-click the map to set a rally point.';
     }
   } else if (context === 'barracks') {
     selPortrait.classList.remove('empty');
@@ -1951,7 +2200,7 @@ function updateSelPanel() {
     } else if (bk.queue > 0) {
       selInfo.textContent = `Training… · Queue ${bk.queue}`;
     } else {
-      selInfo.textContent = 'Train Militia or Archers from the Commands panel.';
+      selInfo.textContent = 'Train Militia or Archers from the Commands panel. Right-click the map to set a rally point.';
     }
   } else if (context === 'building') {
     selPortrait.classList.remove('empty');
@@ -2166,6 +2415,62 @@ function draw() {
       for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
       ctx.closePath();
       ctx.stroke();
+    }
+  }
+
+  // Rally flag (SEL-13): when the Town Center or a Barracks is
+  // selected and holds a rally point, a dashed gold line runs from
+  // the building to the point, with a small flag planted there. A
+  // rally that snapped to a resource node shows a gold ring on the
+  // node as well. Only the selected building's flag shows.
+  if (selectedBuilding) {
+    const rallies = sim.rally_points();
+    let entry = -1;
+    let from = null;
+    if (selectedBuilding.type === 'tc') {
+      entry = 0;
+      from = [pos[selectedBuilding.id * 2], pos[selectedBuilding.id * 2 + 1]];
+    } else if (selectedBuilding.type === 'building') {
+      const bi = buildings.findIndex((b) => b.id === selectedBuilding.id);
+      if (bi >= 0) {
+        entry = 1 + bi;
+        from = [buildings[bi].x, buildings[bi].y];
+      }
+    }
+    if (entry >= 0 && rallies[entry * 4 + 3] > 0.5) {
+      const rx = rallies[entry * 4];
+      const ry = rallies[entry * 4 + 1];
+      const nodeId = rallies[entry * 4 + 2];
+      const [fx, fy] = worldToScreen(from[0], from[1]);
+      const [tx, ty] = worldToScreen(rx, ry);
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255, 207, 77, 0.75)';
+      ctx.fillStyle = '#ffcf4d';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath();
+      ctx.moveTo(fx, fy);
+      ctx.lineTo(tx, ty);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // The flag: a pole and a triangular pennant at the point.
+      const pole = 2.4 * camS;
+      ctx.beginPath();
+      ctx.moveTo(tx, ty);
+      ctx.lineTo(tx, ty - pole);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(tx, ty - pole);
+      ctx.lineTo(tx + 1.1 * camS, ty - pole + 0.38 * camS);
+      ctx.lineTo(tx, ty - pole + 0.76 * camS);
+      ctx.closePath();
+      ctx.fill();
+      if (nodeId >= 0) {
+        ctx.beginPath();
+        ctx.arc(tx, ty, 0.9 * camS, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
     }
   }
 

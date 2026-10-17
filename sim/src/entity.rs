@@ -12,6 +12,7 @@
 
 use fixed::types::I16F16;
 
+use crate::build::BuildingKind;
 use crate::econ::ResourceKind;
 use crate::units;
 
@@ -100,6 +101,55 @@ impl EntityKind {
     pub fn is_trainable(self) -> bool {
         matches!(self, EntityKind::Militia | EntityKind::Archer)
     }
+
+    /// Military kinds for the idle-military query (SEL-09): the
+    /// fighting units. Villagers have their own idle query (SEL-08)
+    /// and herdables are livestock, not military.
+    pub fn is_military(self) -> bool {
+        matches!(
+            self,
+            EntityKind::ScoutCavalry | EntityKind::Militia | EntityKind::Archer
+        )
+    }
+}
+
+/// One queued order (M4, SEL-12): a data-only record of a player
+/// command, stored per entity behind whatever the entity is doing
+/// now. When the entity becomes idle, the queue's head executes
+/// exactly like a freshly issued command of the same kind. Queued
+/// orders are player intent, so — like `Command` — they carry world
+/// points and ids, never paths; the path is recomputed when the
+/// order executes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QueuedOrder {
+    /// Walk to a world point.
+    Move { x: I16F16, y: I16F16 },
+    /// Work a resource node (villagers).
+    Gather { node: u32 },
+    /// Attack a target entity.
+    Attack { target: u32 },
+    /// Build a building anchored at the cell containing `(x, y)`
+    /// (villagers). Validation and the wood deduction happen when the
+    /// order *executes*, like the base command — a queued build whose
+    /// spot or funds have gone bad by then is dropped.
+    Build {
+        kind: BuildingKind,
+        x: I16F16,
+        y: I16F16,
+    },
+}
+
+impl QueuedOrder {
+    /// Stable tag for the state hash: 0 move, 1 gather, 2 attack,
+    /// 3 build.
+    pub fn tag(self) -> u8 {
+        match self {
+            QueuedOrder::Move { .. } => 0,
+            QueuedOrder::Gather { .. } => 1,
+            QueuedOrder::Attack { .. } => 2,
+            QueuedOrder::Build { .. } => 3,
+        }
+    }
 }
 
 /// The villager work state machine (M2). A villager's persistent *order*
@@ -180,6 +230,12 @@ pub struct Entity {
     /// Movement is the *mechanism*; the work state machine (re)issues
     /// move orders to get villagers where their task needs them.
     pub order: Option<MoveOrder>,
+    /// Queued orders behind the current one (M4, SEL-12), FIFO.
+    /// A non-queued command replaces the current order *and* clears
+    /// this queue; a queued command appends. The queue advances when
+    /// the entity is fully idle (no work task, no move order, no
+    /// attack target). Plain data — part of the hashed state.
+    pub order_queue: Vec<QueuedOrder>,
     /// Current phase of the work cycle (villagers only).
     pub task: Task,
     /// The persistent gather assignment: the node this villager works
@@ -269,6 +325,7 @@ impl Entity {
             vel_x: I16F16::ZERO,
             vel_y: I16F16::ZERO,
             order: None,
+            order_queue: Vec::new(),
             task: Task::Idle,
             task_node: None,
             task_building: None,

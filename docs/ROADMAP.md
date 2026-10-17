@@ -41,9 +41,9 @@ as milestones land):
 | 1 | Simulation & time (SIM) | 12 | 10 | 1 | 1 |
 | 2 | Map, terrain & elevation (MAP) | 12 | 2 | 2 | 8 |
 | 3 | Visibility & exploration (VIS) | 10 | 1 | 1 | 8 |
-| 4 | Selection & orders (SEL) | 16 | 6 | 3 | 7 |
+| 4 | Selection & orders (SEL) | 16 | 12 | 3 | 1 |
 | 5 | Movement, pathfinding & collision (MOV) | 12 | 3 | 4 | 5 |
-| 6 | Economy & drop-off (ECO) | 17 | 7 | 4 | 6 |
+| 6 | Economy & drop-off (ECO) | 17 | 8 | 3 | 6 |
 | 7 | Buildings & placement (BLD) | 15 | 7 | 2 | 6 |
 | 8 | Combat & damage (CMB) | 16 | 0 | 0 | 16 |
 | 9 | Projectiles & ballistics (PRJ) | 10 | 0 | 0 | 10 |
@@ -55,8 +55,8 @@ as milestones land):
 | 15 | AI behavior & difficulty (AI) | 9 | 0 | 0 | 9 |
 | 16 | Victory, scoring & game modes (VIC) | 12 | 0 | 0 | 12 |
 | 17 | Multiplayer determinism (NET) | 11 | 2 | 1 | 8 |
-| 18 | Information rules (INF) | 11 | 1 | 5 | 5 |
-| | **Total** | **213** | **39** | **24** | **150** |
+| 18 | Information rules (INF) | 11 | 2 | 4 | 5 |
+| | **Total** | **213** | **47** | **22** | **144** |
 
 Companion documents: the [Gap Analysis](GAP-ANALYSIS.md) inventories every
 missing feature against the code; [Opening Spec](OPENING-SPEC.md) specifies
@@ -76,12 +76,12 @@ opponent, conquest + standard victory, and 2-player lockstep multiplayer.
 From the [Gap Analysis](GAP-ANALYSIS.md): the items that most make Skirmish II
 *feel like the same game*, in order. Status notes are current.
 
-1. **Minimap** — ✅ shipped on the play page (orders via minimap still open, SEL-16)
-2. **Combat core** — ✅ shipped in M3 (attack-move arrives with SEL-12 in M4)
+1. **Minimap** — ✅ shipped on the play page, orders via minimap included (SEL-16, M4)
+2. **Combat core** — ✅ shipped in M3 (queued orders ✅ M4; attack-move itself still open)
 3. **Scripted AI opponent + conquest win/lose** — M5; turns the sandbox into a match
-4. **Control groups** — M4 (SEL-07); pure muscle memory for anyone who has played
-5. **Idle villager key + idle indicator** — M4 (SEL-08, INF-03); the heartbeat of economy play
-6. **Queued orders + rally points** — M4 (SEL-12, SEL-13); orders feel professional instead of one-shot
+4. **Control groups** — ✅ shipped in M4 (SEL-07, groups 1–9); pure muscle memory for anyone who has played
+5. **Idle villager key + idle indicator** — ✅ shipped in M4 (SEL-08, INF-03); the heartbeat of economy play
+6. **Queued orders + rally points** — ✅ shipped in M4 (SEL-12, SEL-13); orders feel professional instead of one-shot
 7. **Stances + formations** — army control stops feeling like a blob
 8. **Combat collision feel** — bump-stop in melee, overlap while engaged (partly in via MOV-04)
 9. **Ages** — Feudal/Castle/Imperial progression visibly growing the town — M6
@@ -94,10 +94,11 @@ From the [Gap Analysis](GAP-ANALYSIS.md): the items that most make Skirmish II
 
 ## Milestone order
 
-- **M4 — Input & HUD completion.** Control groups, idle keys, go-to keys,
-  queued (shift) orders, rally points, minimap orders, stop/delete;
-  formations groundwork; the ECO-09 retargeting fix. (Rulebook §B: SEL,
-  INF, MOV-06…08.)
+- **M4 — Input & HUD completion.** ✅ Shipped 2026-10-16. Control groups,
+  idle keys + indicators, go-to TC (H), queued (shift) orders, rally
+  points, minimap orders, selection cap 60; formation-keeping group
+  moves; the ECO-09 retargeting fix. (Rulebook §B: SEL, INF, MOV-06…08 —
+  stop/delete moved to M5 with SEL-14.)
 - **M5 — Scripted AI opponent + win/lose.** A computer opponent that plays
   the opening and fights back, difficulty levels, conquest victory/defeat.
   Animals and the economy completed around it.
@@ -117,15 +118,19 @@ From the [Gap Analysis](GAP-ANALYSIS.md): the items that most make Skirmish II
 Small, self-contained, and each one closes a named rule. The rulebook entry
 for each ID gives the exact behavior and an implementation note.
 
-| Rule | What to build | Scope note |
+*The first batch below all landed in M4 (2026-10-16) — kept as a record of
+what a good first contribution looks like here. New candidates are gathered
+from the rulebook's DIFFERS/MISSING entries as issues are opened.*
+
+| Rule | What was built | Scope note |
 |------|---------------|------------|
-| **ECO-09** | Gatherers retarget to a same-type neighbor node when theirs depletes, instead of going idle | Sim-only; a bounded deterministic search at depletion time + a replay test |
-| **SEL-05** | Cap any single selection at 60 units | Client-only; box and double-click selection stop at the cap |
-| **SEL-16** | Right-click on the minimap issues the smart order at that world point | Client-only; minimap geometry conversion already exists both ways |
-| **SEL-07** | Control groups: Ctrl+number assigns, number recalls, double-press centers | Client-only; groups store unit ids, the sim stays the truth |
-| **SEL-10** | Go-to keys: H selects and centers the Town Center; Space centers the selection | Client-only keymap; the TC is already selectable |
-| **SEL-08** (+ **INF-03**) | Idle villager key that cycles idle villagers, plus the always-visible idle indicator in the top bar | One small ABI addition (a per-entity task-tag array) + client key/indicator wiring |
-| **SEL-09** | Idle military key, the mirror of SEL-08 | Rides on SEL-08's ABI; needs the military flag per unit kind in the data table |
+| **ECO-09** ✅ | Gatherers retarget to a same-resource neighbor node when theirs depletes, instead of going idle | Sim-only; a bounded deterministic search at depletion time + tests |
+| **SEL-05** ✅ | Any single selection is capped at 60 units | Client-only; enforced in the one selection funnel |
+| **SEL-16** ✅ | Right-click on the minimap issues the smart order at that world point | Client-only; minimap geometry conversion existed both ways |
+| **SEL-07** ✅ | Control groups: Ctrl+number assigns, number recalls, double-press centers | Client-only; groups store unit ids, the sim stays the truth |
+| **SEL-10** ✅ (H) | Go-to keys: H selects and centers the Town Center | Client-only keymap; the TC was already selectable |
+| **SEL-08** (+ **INF-03**) ✅ | Idle villager key that cycles idle villagers, plus the always-visible idle indicator in the top bar | One small ABI addition (idle id lists) + client key/indicator wiring |
+| **SEL-09** ✅ | Idle military key, the mirror of SEL-08 | Rode on SEL-08's ABI; the military flag per unit kind in the data table |
 
 Want something bigger? Anything marked MISSING in the rulebook is fair
 game — open an issue or a draft PR describing the rule IDs you intend to

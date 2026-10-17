@@ -53,10 +53,16 @@ pub const HOUSE_POP_SUPPORT: u32 = 5;
 /// Population room from the Town Center: +5 (study §5, §9.4).
 pub const TOWN_CENTER_POP_SUPPORT: u32 = 5;
 /// A builder this close to the building's center is actively building:
-/// 9.0 world units. Derived from the grid (not the study): a 2×2-cell
+/// 10.0 world units. Derived from the grid (not the study): a 2×2-cell
 /// footprint is 8 units wide, so a builder standing on any cell of the
-/// ring around it is at most ~8.5 units from the center.
-pub const BUILD_RANGE: I16F16 = I16F16::from_bits(589_824); // 9.0
+/// ring around it is at most ~8.5 units from the center — plus up to
+/// 1.0 of steering arrival shortfall (a move order completes up to
+/// WAYPOINT_REACH short of the ring cell's center). 9.0 did not cover
+/// the corner ring cell plus that shortfall and could stall a builder
+/// forever in an arrive/re-approach loop (found by M4's queued-build
+/// test); 10.0 covers the whole ring with margin, like the Barracks
+/// range below.
+pub const BUILD_RANGE: I16F16 = I16F16::from_bits(655_360); // 10.0
 /// The Barracks' build range: its 3×3 footprint is 12 units wide, so a
 /// builder on a ring cell can stand ~11.3 units from the center
 /// (corner ring cell) — 12.5 covers the whole ring.
@@ -192,6 +198,16 @@ pub struct Building {
     pub queue: Vec<EntityKind>,
     /// Ticks of production progress on the queue's head unit.
     pub train_progress: u64,
+    /// Rally point (M4, SEL-13; production buildings only): where a
+    /// freshly trained unit walks on spawn. `None` = unset — the unit
+    /// simply stays at its spawn point just outside the building
+    /// (the reference game's default). Part of the hashed state.
+    pub rally: Option<(I16F16, I16F16)>,
+    /// The resource node the rally point snapped to, if any (M4,
+    /// SEL-13): a new *villager* goes straight to work on it instead
+    /// of merely walking to the point. Resolved when the rally is
+    /// set; re-checked (still live?) when a unit spawns.
+    pub rally_node: Option<u32>,
 }
 
 impl Building {
@@ -324,6 +340,8 @@ mod tests {
             node_id: None,
             queue: Vec::new(),
             train_progress: 0,
+            rally: None,
+            rally_node: None,
         };
         assert_eq!(b.progress_frac_bits(), 0);
         b.progress_thirds = 2250; // half of 4500

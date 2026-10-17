@@ -14,6 +14,11 @@
 //! M3 adds: attack orders, the Barracks build command, Barracks
 //! training (Militia/Archer) with its block-reason query, entity
 //! HP/owner arrays, and the projectile list.
+//! M4 adds: queued orders (SEL-12 — the `*_queued` variants of the
+//! move/gather/attack/build commands), rally points (SEL-13 —
+//! set/get for the Town Center and production buildings), and the
+//! idle lists behind the idle keys and indicators (SEL-08/09,
+//! INF-03).
 
 use wasm_bindgen::prelude::*;
 
@@ -23,7 +28,7 @@ use crate::build::BuildingKind;
 use crate::econ::ResourceKind;
 use crate::entity::EntityKind;
 use crate::grid;
-use crate::{Command, Sim};
+use crate::{Command, QueuedOrder, Sim};
 
 /// A `Sim` owned by JavaScript. One instance per match.
 #[wasm_bindgen]
@@ -167,6 +172,141 @@ impl WasmSim {
             });
         }
         ok
+    }
+
+    // --- M4: queued orders (SEL-12) --------------------------------
+    // The Shift+click forms: the order is appended behind the
+    // entity's current one and executes when the entity goes idle.
+    // Acceptance mirrors `Sim::can_queue` (light validation — the
+    // order re-validates fully when it executes).
+
+    /// Queue a move order behind the entity's current order.
+    pub fn push_move_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_queued(
+            entity,
+            QueuedOrder::Move {
+                x: I16F16::from_num(x),
+                y: I16F16::from_num(y),
+            },
+        )
+    }
+
+    /// Queue a gather order behind the villager's current order.
+    pub fn push_gather_queued(&mut self, entity: u32, node: u32) -> bool {
+        self.push_queued(entity, QueuedOrder::Gather { node })
+    }
+
+    /// Queue an attack order behind the unit's current order.
+    pub fn push_attack_queued(&mut self, entity: u32, target: u32) -> bool {
+        self.push_queued(entity, QueuedOrder::Attack { target })
+    }
+
+    /// Queue a House build behind the villager's current order. The
+    /// wood is charged when the order *executes*, not when queued —
+    /// see `Sim::can_queue`.
+    pub fn push_build_house_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build_queued(entity, BuildingKind::House, x, y)
+    }
+
+    /// Queue a Farm build — see `push_build_house_queued`.
+    pub fn push_build_farm_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build_queued(entity, BuildingKind::Farm, x, y)
+    }
+
+    /// Queue a Barracks build — see `push_build_house_queued`.
+    pub fn push_build_barracks_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build_queued(entity, BuildingKind::Barracks, x, y)
+    }
+
+    fn push_build_queued(&mut self, entity: u32, kind: BuildingKind, x: f64, y: f64) -> bool {
+        self.push_queued(
+            entity,
+            QueuedOrder::Build {
+                kind,
+                x: I16F16::from_num(x),
+                y: I16F16::from_num(y),
+            },
+        )
+    }
+
+    fn push_queued(&mut self, entity: u32, order: QueuedOrder) -> bool {
+        let ok = self.inner.can_queue(entity, order);
+        if ok {
+            self.inner.push_command(Command::Queue { entity, order });
+        }
+        ok
+    }
+
+    // --- M4: rally points (SEL-13) ---------------------------------
+
+    /// Set the Town Center's rally point: new villagers walk there on
+    /// spawn — or straight to work, when the point snaps to a live
+    /// resource node (within snap range). Returns whether the order
+    /// would be accepted (the Town Center always accepts).
+    pub fn push_set_rally_tc(&mut self, x: f64, y: f64) -> bool {
+        let ok = self.inner.can_set_rally(None);
+        if ok {
+            self.inner.push_command(Command::SetRally {
+                building: None,
+                x: I16F16::from_num(x),
+                y: I16F16::from_num(y),
+            });
+        }
+        ok
+    }
+
+    /// Set a production building's rally point (M4: the Barracks).
+    /// Returns whether the building accepts a rally point.
+    pub fn push_set_rally_building(&mut self, building: u32, x: f64, y: f64) -> bool {
+        let ok = self.inner.can_set_rally(Some(building));
+        if ok {
+            self.inner.push_command(Command::SetRally {
+                building: Some(building),
+                x: I16F16::from_num(x),
+                y: I16F16::from_num(y),
+            });
+        }
+        ok
+    }
+
+    /// All rally points as a flat array, four values per entry —
+    /// `[x, y, node, has]` — entry 0 is the Town Center, entries
+    /// 1.. follow `buildings()` order. `node` is the snapped resource
+    /// node id, or -1; `has` is 0 when no rally is set there (the
+    /// x/y are then 0 and meaningless).
+    pub fn rally_points(&self) -> Vec<f64> {
+        fn push(out: &mut Vec<f64>, r: Option<(I16F16, I16F16, Option<u32>)>) {
+            match r {
+                Some((x, y, node)) => {
+                    out.push(x.to_num::<f64>());
+                    out.push(y.to_num::<f64>());
+                    out.push(node.map(|n| n as f64).unwrap_or(-1.0));
+                    out.push(1.0);
+                }
+                None => out.extend_from_slice(&[0.0, 0.0, -1.0, 0.0]),
+            }
+        }
+        let mut out = Vec::with_capacity((self.inner.buildings().len() + 1) * 4);
+        push(&mut out, self.inner.tc_rally());
+        for b in self.inner.buildings() {
+            push(&mut out, self.inner.building_rally(b.id));
+        }
+        out
+    }
+
+    // --- M4: idle queries (SEL-08/09, INF-03) -----------------------
+
+    /// Ids of the idle villagers (no work task, no move order, no
+    /// attack target), in id order. Behind the client's idle-villager
+    /// key and the top-bar idle indicator.
+    pub fn idle_villagers(&self) -> Vec<u32> {
+        self.inner.idle_villagers()
+    }
+
+    /// Ids of the idle military units (Scout, Militia, Archer), in
+    /// id order. The mirror of `idle_villagers`.
+    pub fn idle_military(&self) -> Vec<u32> {
+        self.inner.idle_military()
     }
 
     /// Placed buildings as a flat array: eleven values per building —

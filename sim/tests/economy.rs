@@ -99,15 +99,26 @@ fn node_depletion_is_bit_exact_and_node_goes_inert() {
         node: tree,
     });
 
-    // One villager works the 100-wood tree dry. Every bit taken from the
-    // node must land in the stockpile: totals are conserved exactly.
+    // One villager works the 100-wood tree dry. Every bit taken from
+    // the node must land in the stockpile: totals are conserved
+    // exactly. The "finished" moment is the deposit of the tree's
+    // last load: the node is dry, the carry is in the bank, and the
+    // assignment has moved on.
+    //
+    // M4 deliberate update (ECO-09): "moved on" is no longer "idle"
+    // — the villager retargets to the tree's same-resource neighbor
+    // (id 1, the tree 4 units east; the tie with the tree 4 units
+    // south breaks to the lower id). The conservation assertion is
+    // unchanged: it is taken at the deposit tick, before any wood
+    // from the *next* tree can land.
     let mut finished = false;
     for _ in 0..60_000 {
         sim.tick();
         let v = villager(&sim, 1);
         if node_amount(&sim, tree) == I16F16::ZERO
             && v.carry == I16F16::ZERO
-            && v.task == Task::Idle
+            && v.task_node != Some(tree)
+            && sim.stockpile().amount(ResourceKind::Wood) > start_wood
         {
             finished = true;
             break;
@@ -119,6 +130,10 @@ fn node_depletion_is_bit_exact_and_node_goes_inert() {
         start_wood + I16F16::from_num(100),
         "total gathered must equal the node's full amount exactly"
     );
+    // ECO-09: the villager continued at the neighboring tree instead
+    // of going idle (the west forest chains; see tests/input.rs for
+    // the dedicated retarget scenarios).
+    assert_eq!(villager(&sim, 1).task_node, Some(1));
 
     // A depleted node rejects new gather orders: the villager stays idle.
     sim.push_command(Command::Gather {

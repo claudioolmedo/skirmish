@@ -119,11 +119,19 @@ fn golden_hash_regression() {
     // or fights — the stream changes through the new spawns and the
     // wider coverage alone. New value verified stable across
     // independent runs (replay example, seed 42, 360 ticks, run twice).
+    //
+    // M4 deliberate update: the hash now also covers the per-entity
+    // order queues (SEL-12) and the rally points — the Town Center's
+    // and every building's, with their snapped nodes (SEL-13). No
+    // commands are issued in this scenario, every queue is empty and
+    // every rally unset — the stream changes through the wider
+    // coverage alone. New value verified stable across independent
+    // runs (replay example, seed 42, 360 ticks, run twice).
     let mut sim = Sim::new(42);
     let mut hash = 0;
     for _ in 0..360 {
         hash = sim.tick();
     }
     assert_eq!(sim.tick_count(), 360);
-    assert_eq!(format!("{:016x}", hash), "003aeb1846760b2c");
+    assert_eq!(format!("{:016x}", hash), "d80ebd51f8fe6844");
 }

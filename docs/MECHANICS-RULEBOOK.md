@@ -348,9 +348,11 @@ so future military kinds inherit it. · *Status:* **MATCHES**.
 
 **SEL-05 — Selection cap is 60.** One selection holds at most 60 units;
 box/double-click selection stops at the cap.
-*Source:* GAP 1.11. · *Impl:* one constant in the client's selection code.
-· *Status:* **DIFFERS** (our Set is unbounded — harmless with a handful of
-villagers, wrong at army scale).
+*Source:* GAP 1.11. · *Impl:* shipped (M4) — one constant
+(`SELECTION_CAP = 60`) enforced in the client's `selectUnits()`, the
+single funnel every selection path uses (click, box, shift, double-click,
+control-group recall, idle keys), so all of them stop at the cap. ·
+*Status:* **MATCHES**.
 
 **SEL-06 — Orders go only to the selection.** A command is issued to the
 currently selected units/building and to nothing else. With an empty
@@ -364,31 +366,42 @@ removed 2026-10-16. · *Status:* **MATCHES**.
 double-pressing (or pressing Space with the group selected) centers the
 camera on it; Shift+number adds the selection to the group. The Alt layer
 provides groups 11–20 (20 groups total).
-*Source:* GAP 1.5; wiki, Hotkey. · *Impl:* client-only map group→id set;
-groups store *ids*, and dead ids are filtered at recall time (the sim
-remains the truth). · *Status:* **MISSING**.
+*Source:* GAP 1.5; wiki, Hotkey. · *Impl:* shipped (M4) for groups 1–9 —
+client-only store (`play/groups.js`: assign / recall / double-tap
+tracking, unit-tested); groups store *ids*, dead ids filtered at recall
+time (the sim remains the truth); double-tap centers on the group's
+centroid. Divergences from the reference text: Shift+number adds the
+*group* to the current selection (the reference adds the *selection* to
+the group); Space-to-center is not bound (double-tap serves); the Alt
+layer (11–20) is not implemented. · *Status:* **DIFFERS** (core shipped;
+Shift semantics and the Alt layer differ).
 
 **SEL-08 — Idle villager key.** A dedicated key cycles through idle
 villagers one by one (selecting each, camera following); its Shift variant
 selects all idle villagers at once. A villager is idle when it has no work
 task and no move order.
-*Source:* GAP 1.6; wiki, Hotkey. · *Impl:* needs the sim to expose per-
-entity task state (or an `idle` flag) in the ABI — today `Task` is not
-exported; add a task-tag array next to `entity_kinds()`. · *Status:*
-**MISSING**.
+*Source:* GAP 1.6; wiki, Hotkey. · *Impl:* shipped (M4) — the sim exposes
+`idle_villagers()` over the ABI (living player villagers with
+`Task::Idle`, no move order, no attack target — the definition above);
+`.` cycles with select + camera-follow, Shift+`.` selects all. The
+top-bar indicator (INF-03) is the same query as a button. · *Status:*
+**MATCHES**.
 
 **SEL-09 — Idle military key.** The mirror key cycles idle military units
 (Shift: all idle military). Becomes meaningful when military kinds exist.
-*Source:* GAP 1.7. · *Impl:* same ABI as SEL-08 + kind classification in
-the data table (military flag per kind). · *Status:* **MISSING**.
+*Source:* GAP 1.7. · *Impl:* shipped (M4) — `idle_military()` on the same
+ABI + `EntityKind::is_military` in the data table (Scout, Militia,
+Archer); `,` cycles, Shift+`,` selects all. · *Status:* **MATCHES**.
 
 **SEL-10 — Go-to keys.** H selects and centers the Town Center; Ctrl+letter
 cycles buildings of each production type; Space centers on the current
 selection; Backspace jumps the camera to the location of the most recent
 alert (INF-01).
-*Source:* GAP 1.8; wiki, Hotkey. · *Impl:* client keymap + an alert-
-location memory (INF-01). TC is already selectable, which unblocks H. ·
-*Status:* **MISSING** (no keymap beyond camera pan/zoom and Esc).
+*Source:* GAP 1.8; wiki, Hotkey. · *Impl:* H shipped (M4) — it selects
+and centers the Town Center through the existing building selection.
+Still open: Ctrl+letter cycling of production buildings, Space centering
+the selection, and the Backspace alert jump (waits on INF-01 alerts). ·
+*Status:* **DIFFERS** (H only).
 
 **SEL-11 — Right-click is a smart order.** Right-clicking with a selection
 issues the context order implied by the target: resource node → gather;
@@ -405,20 +418,38 @@ unit executes them in sequence. The client draws a flag per queued order.
 This applies to moves, gathers, builds, attacks — and to sheep/task
 assignments in the opening (see OPENING-SPEC).
 *Source:* GAP 2.11; wiki, Early Economy ("queue up multiple tasks … by
-holding down the Shift key" — a DE feature). · *Impl:* `Entity.order`
-becomes a small queue (Vec of order records) in the sim, hash-covered;
-work tasks (gather/build) are queue entries like any other. · *Status:*
-**MISSING** (single order slot; commands replace).
+holding down the Shift key" — a DE feature). · *Impl:* shipped (M4) —
+each entity carries an `order_queue` (Vec of data-only order records) in
+the sim, hash-covered; `Command::Queue` appends, any non-queued command
+replaces the current order *and* clears the queue; a queue-advance step
+at the end of each tick starts the next order whenever an entity is
+fully idle (no work task, no move order, no attack target), and an order
+that no longer validates at execution (target died, node depleted,
+build spot/funds gone) is dropped rather than wedging the chain. Covers
+move, gather, attack and build; a queued build's wood is charged at
+*execution*. Client: Shift+right-click on the canvas or minimap,
+Shift+click in placement mode (placement stays armed). Per-entity cap:
+16 queued orders (an implementation bound; no cap is recorded for the
+reference game). Not shipped: the per-queued-order flag rendering (the
+queue is not exposed to the renderer) and attack-move (an
+engage-en-route order — it rides on this queue when it lands). ·
+*Status:* **MATCHES** (behavior; the flag rendering is INF-09's).
 
 **SEL-13 — Rally (gather) points.** Every production building and the Town
 Center holds a rally point, set by selecting the building and right-
 clicking a target. Newly created units walk to it automatically; a rally
 on a resource sends new villagers straight to work there; a rally on a
 garrisonable building makes them garrison inside on creation (GAR-09).
-*Source:* GAP 2.12; wiki, Gather Point. · *Impl:* one rally record per
-building in the sim (hashed); spawn logic issues the implied order at
-creation. · *Status:* **MISSING** (trained villagers spawn idle beside the
-TC).
+*Source:* GAP 2.12; wiki, Gather Point. · *Impl:* shipped (M4) — one
+rally record per building in the sim (hashed), plus the Town Center's;
+set by selecting the building and right-clicking (main view or
+minimap). New units walk to the point on spawn; a point within snap
+range (4 units) of a live node records that node, and a new *villager*
+goes straight to work on it (re-checked live at spawn; if it died, the
+villager walks to the point). Unset rally = the unit stays at its spawn
+point just outside the building (the reference default). The client
+draws the selected building's flag with a dashed line. Garrison-on-
+creation stays open with GAR-09 (M6). · *Status:* **MATCHES**.
 
 **SEL-14 — Stop and Delete.** The Stop command halts the selected units'
 current order immediately (they become idle; a villager keeps what it
@@ -439,9 +470,11 @@ M6 systems. · *Status:* **MATCHES** (mechanism); content partial.
 **SEL-16 — Minimap orders.** On the minimap, left-click moves the camera;
 right-click issues the smart order (SEL-11) at the corresponding world
 point for the current selection.
-*Source:* GAP 11.1. · *Impl:* `minimap.js` geometry already converts both
-directions; camera-jump shipped, right-click orders wire into the same
-conversion. · *Status:* **DIFFERS** (camera jump works; no minimap orders).
+*Source:* GAP 11.1. · *Impl:* shipped (M4) — `minimap.js` geometry
+converts both directions; left-click/drag moves the camera, right-click
+issues the smart order (SEL-11, via the same `smartOrderAt` the main
+view uses — including rally-setting with a building selected, and the
+Shift-queued form). · *Status:* **MATCHES**.
 
 ---
 
@@ -645,10 +678,17 @@ gatherer's node depletes and it carries nothing (or after depositing,
 ECO-04), it seeks the nearest node of the *same resource* within a short
 search radius instead of going idle. (The exact radius is UNVERIFIED in
 public sources; it is a tuned constant, documented in the data table.)
-*Source:* GAP 3.2 end; DE Villager behavior. · *Impl:* a bounded radial
-search over the node set in id order at depletion time (deterministic);
-today our villagers simply go idle — a real behavioral gap: woodlines in
-Skirmish II need manual re-tasking. · *Status:* **DIFFERS** (no retarget).
+*Source:* GAP 3.2 end; DE Villager behavior. · *Impl:* shipped (M4) — a
+bounded radial search over the node set in id order at depletion time
+(deterministic; nearest wins, ties to the lowest id). The search is
+centered on the *depleted node* and matches on the node's **resource**
+(carcasses included — they are Food nodes like any other; the retarget
+only ever happens empty-handed or right after a deposit, so the hunt
+carry cap can never leak into a half-filled load). Radius:
+`econ::RETARGET_RADIUS` = 12 world units (3 cells) — the tuned constant,
+UNVERIFIED as above. Discovery points: the gather step noticing the
+depletion, the trip home (deposit resolves it — ECO-04's case), and the
+walk to a node that died en route. · *Status:* **MATCHES**.
 
 **ECO-10 — Node amounts.** Tree 100, Berry Bush 125, Gold Mine 800, Stone
 Mine 350 (MECHANICS-STUDY §6.3, full table there).
@@ -1994,10 +2034,11 @@ side. · *Status:* **MISSING**.
 a live idle-villager indicator (with the SEL-08 key behind it), an idle-
 military indicator, and a housed warning when production is stalled by
 BLD-10.
-*Source:* GAP 11.3, 11.9. · *Impl:* the housed warning ships today (the
-top bar tints population at cap; the Train button explains itself). Idle
-indicators wait on the task-state ABI (SEL-08). · *Status:* **DIFFERS**
-(housed yes; idle indicators no).
+*Source:* GAP 11.3, 11.9. · *Impl:* shipped (M4) — the top bar carries
+both idle indicators (icon + live count, lit while anyone stands free),
+each a button running the SEL-08/09 cycle; the housed warning ships as
+before (the top bar tints population at cap; the Train button explains
+itself). · *Status:* **MATCHES**.
 
 **INF-04 — Minimap signals.** The minimap shows terrain, resources,
 player-colored units/buildings through fog states (VIS-10), flashes at
@@ -2051,8 +2092,10 @@ attack pings, queued-order flags (SEL-12), and the placement ghost are
 pure client renderings of commands the player just gave; they appear in
 no hash and no replay data beyond the commands themselves.
 *Source:* GAP 11.8; NET-08/10 (what replays contain). · *Impl:* the
-placement ghost ships (invalid = red); order markers/flags arrive with
-the order queue (SEL-12). · *Status:* **DIFFERS**.
+placement ghost ships (invalid = red); the order queue shipped with M4
+(SEL-12), but move/attack markers and queued-order flags are still not
+rendered — the sim's queue is not exposed to the renderer. · *Status:*
+**DIFFERS**.
 
 **INF-10 — Sound is an information channel.** Unit acknowledgements,
 work sounds, combat noise scaled by distance to the camera, alert horns
@@ -2084,9 +2127,9 @@ this document (2026-10-16).
 | 1 | Simulation & time (SIM) | 12 | 10 | 1 | 1 |
 | 2 | Map, terrain & elevation (MAP) | 12 | 2 | 2 | 8 |
 | 3 | Visibility & exploration (VIS) | 10 | 1 | 1 | 8 |
-| 4 | Selection & orders (SEL) | 16 | 6 | 3 | 7 |
+| 4 | Selection & orders (SEL) | 16 | 12 | 3 | 1 |
 | 5 | Movement, pathfinding & collision (MOV) | 12 | 3 | 4 | 5 |
-| 6 | Economy & drop-off (ECO) | 17 | 7 | 4 | 6 |
+| 6 | Economy & drop-off (ECO) | 17 | 8 | 3 | 6 |
 | 7 | Buildings & placement (BLD) | 15 | 7 | 2 | 6 |
 | 8 | Combat & damage (CMB) | 16 | 0 | 0 | 16 |
 | 9 | Projectiles & ballistics (PRJ) | 10 | 0 | 0 | 10 |
@@ -2098,8 +2141,8 @@ this document (2026-10-16).
 | 15 | AI behavior & difficulty (AI) | 9 | 0 | 0 | 9 |
 | 16 | Victory, scoring & game modes (VIC) | 12 | 0 | 0 | 12 |
 | 17 | Multiplayer determinism (NET) | 11 | 2 | 1 | 8 |
-| 18 | Information rules (INF) | 11 | 1 | 5 | 5 |
-| | **Total** | **213** | **39** | **24** | **150** |
+| 18 | Information rules (INF) | 11 | 2 | 4 | 5 |
+| | **Total** | **213** | **47** | **22** | **144** |
 
 Reading: the foundation systems (§1, §4–§7 client/economy halves) are
 largely in place; the entire combat stack (§8–§10, §12) is greenfield,
@@ -2129,7 +2172,13 @@ INF-03, INF-05, INF-06 completed forms; MOV-06, MOV-07, MOV-08
 (groups/formations ride on the order queue). Also the known
 *behavioral divergences* worth fixing while touching economy code:
 ECO-09 (gatherer retargeting). (BLD-04, the multi-builder formula, was
-fixed ahead of schedule on 2026-10-16 — see §7.)
+fixed ahead of schedule on 2026-10-16 — see §7.) *(Shipped
+2026-10-16: SEL-05/08/09/12/13/16, ECO-09 and INF-03 complete;
+SEL-07 core (groups 1–9; the Alt layer and the reference Shift
+semantics stay open); SEL-10 partial — H only; MOV-06/07/08
+formation groundwork landed as formation-keeping group moves in
+the client, the rules themselves stay open; INF-05/INF-06
+completed forms still open.)*
 
 **M5 — Feel, AI, animals, win/lose.** AI-01…05 (scripted AI), AI-06…08
 (herdables/huntables/predators), ECO-11, ECO-12, ECO-13 (animals complete
