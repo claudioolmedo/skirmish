@@ -439,6 +439,108 @@ the match mode and the AI's wave timer.
   victory/defeat overlay closes the match with Restart (same mode)
   and Back to menu. The HUD still shows player 0 only.
 
+## M6 — ages, technologies & the economy buildings (shipped 2026-10-16)
+
+The first age rung and the technology substrate. Each player seat now
+also carries an **age** (Dark → Feudal) and a **researched-technology
+bitset** (`players: [PlayerState; 2]`), both hashed.
+
+- **The tech substrate** (`sim/src/tech.rs`). Technologies are a data
+  table — id, host building, required age, cost, research ticks —
+  and their effects are *patches folded into stat lookups*, never
+  code branches in consumers: `Sim::stats_for(owner, kind)` returns
+  the base row plus the owner's age layer (the Scout Cavalry's
+  Feudal jump, CLS-04) plus the owner's researched patches (Loom's
+  villager +15 HP / +1/+2 armor / +0.1 speed; Fletching's archer
+  +1 attack & +1 range; Scale Mail and Padded Archer Armor's +1/+1
+  armor). Gaia always reads base rows. Combat, movement speed, spawn
+  HP and the ABI's HP readout all consume the effective row, so a
+  patch lands everywhere at once. Man-at-Arms is the one *sweep*:
+  on completion the owner's Militia change kind in id order (HP
+  kept, max rises — CLS-03) and future production spawns the tier.
+- **Queues generalized.** Both production queue types now hold
+  `ProdEntry` — `Unit(kind)` or `Tech(id)` — in one FIFO per
+  building, TC included: Feudal Age and Loom research *in the Town
+  Center's queue*, behind or ahead of villagers exactly as ordered.
+  Costs are charged at enqueue; progress accrues on the head only;
+  a Unit head stalls while its owner is housed, a Tech head never
+  does. There is still no cancel, so TEC-05's refund half stays
+  open. Research block reasons mirror the training pattern
+  (Ok / NoFunds / QueueFull / AlreadyDone / Locked).
+- **Drop-off routing.** The Returning phase re-resolves the nearest
+  valid drop-off *for the carried resource* every tick — Town Center
+  (everything), Lumber Camp (wood), Mill (food), Mining Camp
+  (gold + stone) — so a camp completing mid-haul reroutes the trip.
+  Arrival at a camp is measured to its footprint edge; hauls steer
+  to a point pushed just outside the footprint, because the camp's
+  center cell is inside its own blocked footprint and a path *to the
+  center* does not exist (the TC never had this problem — it never
+  marks the grid). `ForceDeposit` flips a loaded villager to
+  Returning with its gather/construction assignment kept — the kept
+  assignment *is* the resume marker. A builder finishing a camp
+  deposits a carried load there on the spot when the camp accepts
+  it (OPENING-SPEC Bucket B).
+- **Gates live in `validate_build`**, so the command path, the ABI
+  verdict and the client's ghost all agree: Farms require a
+  completed Mill; the Feudal buildings require the Feudal Age; the
+  Archery Range and Stable additionally require a completed
+  Barracks. Production moved with the gates: Archers train at the
+  Range, Scout Cavalry at the Stable, the Barracks keeps Militia.
+- **The AI learned the layer lightly**: a Mill by its berries and a
+  Lumber Camp by its woodline (its Feudal pair), Loom once its
+  economy rolls, the age-up when the food allows, then an Archery
+  Range for its archers. Still only through the Command queue.
+- **Perf fix found by the milestone's own replay test.** An AI match
+  past ~30k ticks fell off a cliff (a 10k-tick chunk went from ~6 s
+  to ~138 s in debug): any unit whose destination became
+  unreachable — typically a gatherer whose node a new building had
+  enclosed — re-ran a failing full-grid A* *every tick*, forever.
+  `set_move_order` now reports failure, and the per-tick callers
+  (gather, haul, build-approach, combat chase, building approach,
+  boar homecoming) take a terminal transition instead — idle, or
+  the order completes — matching what the player would conclude:
+  the target cannot be reached. Reachability only changes when
+  buildings complete or fall, and those events re-task the affected
+  units through other paths. (The same audit caught Man-at-Arms
+  missing from the auto-acquisition set; it is included now.)
+  The fix exposed a second latent issue the retry loop had been
+  masking: the AI's own buildings can plug the map's wall gap, and
+  its wave targeted the nearest human units — two of which stand
+  in that gap — whether or not a path to them exists. Wave target
+  selection now walks candidates nearest-first and takes the first
+  *reachable* one (Town Center and building fallbacks unchanged).
+  Defense targeting got the same reachability filter for the
+  mirror-image reason: an unreachable intruder at the edge of the
+  defense radius (the human's forward Scout, drifted inside it)
+  re-absorbed every defender on every decision, and the `acted`
+  bookkeeping then starved the wave step entirely — on Easy the
+  AI never attacked at all. The same entombment could strand a
+  sheep inside a completed building's footprint, beyond hunting;
+  placement now refuses to cover a standing unit (farms exempt),
+  and completion displaces anything that moved onto the footprint
+  while the building rose to the nearest open cell. A per-tick
+  grid-integrity pass closes the last door: separation alone can
+  push a unit into a blocked cell (one Scout ended a match
+  entombed in the wall column itself), so no living unit ends a
+  tick inside one — it is displaced the same way. The golden
+  scenario never triggers any of this; its hash is unchanged.
+  Three AI lessons shipped with the same work: the build step
+  may pull a villager off gathering (in the deposit → resume
+  steady state nobody is ever idle at a decision boundary, and
+  construction starved); the anchor search now looks 512
+  candidates deep (a grown base crowds the inner rings); and
+  military production pauses while the script saves for the
+  Feudal Age once a minimal guard stands — otherwise the army's
+  food draw keeps the stockpile under the age's cost forever.
+- **Hash changes (deliberate).** Per-player age + tech bitset; queue
+  entries hash as typed codes (unit = kind tag, tech = 100 + tech
+  tag); each entity's current drop-off target (`task_dropoff`) is
+  hashed. The golden hash moved to `09e22978bb8876db` with M6.
+- **Recorded simplifications.** Building HP/armor do not step up
+  with age yet (BLD-11); "nearest drop-off" is straight-line
+  distance, not path distance; under-construction buildings carry
+  full HP (BLD-05, from M5).
+
 ## The sim may
 
 - Use fixed-point arithmetic (`I16F16`: ±32768 range, 1/65536 precision —

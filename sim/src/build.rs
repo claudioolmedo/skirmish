@@ -1,16 +1,32 @@
-//! Construction model (M2.5, M3): buildings a villager raises on a
-//! chosen patch of ground — Houses and Farms, and (M3) the Barracks —
-//! plus the population they support.
+//! Construction model (M2.5, M3, M6): buildings a villager raises on a
+//! chosen patch of ground — Houses and Farms, the Barracks (M3), and
+//! (M6) the economy and Feudal buildings: Lumber Camp, Mill, Mining
+//! Camp, Archery Range, Stable, Blacksmith — plus the population
+//! they support.
 //!
 //! Numbers come from the public mechanics study
-//! (`MECHANICS-STUDY.md` §5 and §9.4), converted once, by hand, at
-//! authoring time:
+//! (`MECHANICS-STUDY.md` §5 and §9.4) and the OPENING-SPEC camps
+//! table (§2.4), converted once, by hand, at authoring time:
 //!
 //! - House: 25 wood, 25 s build time (1500 ticks), +5 population room.
 //! - Farm: 60 wood, 15 s build time (900 ticks), holds 175 food
-//!   (§6.3 — the base amount; 250 is post-Horse-Collar).
+//!   (§6.3 — the base amount; 250 is post-Horse-Collar). M6 gates
+//!   Farms on owning a completed Mill (OPENING-SPEC §2.4).
 //! - Barracks (M3): 175 wood, 50 s build time (3000 ticks), 3×3
 //!   footprint — the study's footprint, honored for this kind.
+//! - Drop-off camps (M6): Lumber Camp / Mill / Mining Camp —
+//!   100 wood, 35 s (2100 ticks), 2×2 each (OPENING-SPEC §2.4).
+//!   Each accepts only its resources as a drop-off (ECO-06).
+//! - Archery Range / Stable (M6): 175 wood, 50 s, 3×3, Feudal Age,
+//!   require a standing Barracks (study §5). HP 1500, armor 1/8 —
+//!   the study's Feudal row (the first of its age-keyed values).
+//! - Blacksmith (M6): 150 wood (brief-pinned), Feudal Age, the
+//!   generic tech host. Its build time (40 s), 3×3 footprint and
+//!   1200 HP / 0/7 armor are NOT in the project docs — adopted
+//!   values, flagged UNVERIFIED in the M6 report. The camps' HP
+//!   (550) and armor (0/7) are likewise adopted (UNVERIFIED): the
+//!   study's §5 table does not list the camps; the values follow
+//!   its Dark-Age pattern for comparable economic buildings.
 //! - Town Center: +5 population room (§5 function notes, §9.4).
 //! - Multi-builder speed (GAP 4.18): total build time is
 //!   T × 3/(n+2) for n builders — 1 builder takes T, 2 builders
@@ -29,8 +45,10 @@
 
 use fixed::types::I16F16;
 
+use crate::econ::ResourceKind;
 use crate::entity::EntityKind;
 use crate::grid::{CELL_SIZE, WORLD_HALF};
+use crate::tech::{Age, ProdEntry};
 
 /// Footprint edge length, in grid cells, of the original M2.5 kinds
 /// (House and Farm). The Barracks is 3 (`BuildingKind::footprint_size`).
@@ -48,6 +66,24 @@ pub const FARM_BUILD_TICKS: u64 = 900;
 pub const BARRACKS_WOOD_COST: I16F16 = I16F16::from_bits(11_468_800); // 175
 /// Barracks build time: 50 s at 60 Hz (study §5).
 pub const BARRACKS_BUILD_TICKS: u64 = 3000;
+/// Drop-off camp construction cost: 100 wood each — Lumber Camp,
+/// Mill, Mining Camp (OPENING-SPEC §2.4).
+pub const CAMP_WOOD_COST: I16F16 = I16F16::from_bits(6_553_600); // 100
+/// Drop-off camp build time: 35 s at 60 Hz (OPENING-SPEC §2.4).
+pub const CAMP_BUILD_TICKS: u64 = 2100;
+/// Archery Range construction cost: 175 wood (study §5).
+pub const ARCHERY_RANGE_WOOD_COST: I16F16 = I16F16::from_bits(11_468_800); // 175
+/// Archery Range build time: 50 s at 60 Hz (study §5).
+pub const ARCHERY_RANGE_BUILD_TICKS: u64 = 3000;
+/// Stable construction cost: 175 wood (study §5).
+pub const STABLE_WOOD_COST: I16F16 = I16F16::from_bits(11_468_800); // 175
+/// Stable build time: 50 s at 60 Hz (study §5).
+pub const STABLE_BUILD_TICKS: u64 = 3000;
+/// Blacksmith construction cost: 150 wood (M6 brief).
+pub const BLACKSMITH_WOOD_COST: I16F16 = I16F16::from_bits(9_830_400); // 150
+/// Blacksmith build time: 40 s at 60 Hz. UNVERIFIED — not in the
+/// project docs (see the module docs).
+pub const BLACKSMITH_BUILD_TICKS: u64 = 2400;
 /// Population room from one completed House: +5 (study §5, §9.4).
 pub const HOUSE_POP_SUPPORT: u32 = 5;
 /// Population room from the Town Center: +5 (study §5, §9.4).
@@ -73,18 +109,42 @@ pub const BARRACKS_BUILD_RANGE: I16F16 = I16F16::from_bits(819_200); // 12.5
 pub enum BuildingKind {
     House,
     Farm,
-    /// M3: trains Militia and Archers; solid 3×3 footprint.
+    /// M3: trains Militia; solid 3×3 footprint. (Archers trained
+    /// here in M3 by brief; M6 moves them to the Archery Range,
+    /// where the reference trains them.)
     Barracks,
+    /// M6: wood drop-off (ECO-06), Dark Age, 2×2.
+    LumberCamp,
+    /// M6: food drop-off and the Farm prerequisite (OPENING-SPEC
+    /// §2.4), Dark Age, 2×2.
+    Mill,
+    /// M6: gold + stone drop-off, Dark Age, 2×2.
+    MiningCamp,
+    /// M6: trains Archers; Feudal Age, 3×3, requires a Barracks.
+    ArcheryRange,
+    /// M6: trains Scout Cavalry; Feudal Age, 3×3, requires a
+    /// Barracks.
+    Stable,
+    /// M6: the generic technology host (Fletching and the armor
+    /// lines); Feudal Age, 3×3.
+    Blacksmith,
 }
 
 impl BuildingKind {
     /// Stable tag for the state hash and the WASM building array:
-    /// 0 = house, 1 = farm, 2 = barracks.
+    /// 0 = house, 1 = farm, 2 = barracks, 3 = lumber camp, 4 = mill,
+    /// 5 = mining camp, 6 = archery range, 7 = stable, 8 = blacksmith.
     pub fn tag(self) -> u8 {
         match self {
             BuildingKind::House => 0,
             BuildingKind::Farm => 1,
             BuildingKind::Barracks => 2,
+            BuildingKind::LumberCamp => 3,
+            BuildingKind::Mill => 4,
+            BuildingKind::MiningCamp => 5,
+            BuildingKind::ArcheryRange => 6,
+            BuildingKind::Stable => 7,
+            BuildingKind::Blacksmith => 8,
         }
     }
 
@@ -94,6 +154,12 @@ impl BuildingKind {
             BuildingKind::House => HOUSE_WOOD_COST,
             BuildingKind::Farm => FARM_WOOD_COST,
             BuildingKind::Barracks => BARRACKS_WOOD_COST,
+            BuildingKind::LumberCamp | BuildingKind::Mill | BuildingKind::MiningCamp => {
+                CAMP_WOOD_COST
+            }
+            BuildingKind::ArcheryRange => ARCHERY_RANGE_WOOD_COST,
+            BuildingKind::Stable => STABLE_WOOD_COST,
+            BuildingKind::Blacksmith => BLACKSMITH_WOOD_COST,
         }
     }
 
@@ -103,6 +169,12 @@ impl BuildingKind {
             BuildingKind::House => HOUSE_BUILD_TICKS,
             BuildingKind::Farm => FARM_BUILD_TICKS,
             BuildingKind::Barracks => BARRACKS_BUILD_TICKS,
+            BuildingKind::LumberCamp | BuildingKind::Mill | BuildingKind::MiningCamp => {
+                CAMP_BUILD_TICKS
+            }
+            BuildingKind::ArcheryRange => ARCHERY_RANGE_BUILD_TICKS,
+            BuildingKind::Stable => STABLE_BUILD_TICKS,
+            BuildingKind::Blacksmith => BLACKSMITH_BUILD_TICKS,
         }
     }
 
@@ -119,9 +191,8 @@ impl BuildingKind {
     /// works on.
     pub fn blocks_footprint(self) -> bool {
         match self {
-            BuildingKind::House => true,
             BuildingKind::Farm => false,
-            BuildingKind::Barracks => true,
+            _ => true,
         }
     }
 
@@ -129,63 +200,158 @@ impl BuildingKind {
     pub fn pop_support(self) -> u32 {
         match self {
             BuildingKind::House => HOUSE_POP_SUPPORT,
-            BuildingKind::Farm => 0,
-            BuildingKind::Barracks => 0,
+            _ => 0,
         }
     }
 
-    /// Footprint edge length in grid cells: 2 for House/Farm, 3 for
-    /// the Barracks (the study's footprint for that building).
+    /// Footprint edge length in grid cells: 2 for House/Farm and the
+    /// camps, 3 for the Barracks and the Feudal buildings (the
+    /// study's footprints where it gives them; the Blacksmith's 3×3
+    /// is adopted — UNVERIFIED, see the module docs).
     pub fn footprint_size(self) -> u32 {
         match self {
-            BuildingKind::House => FOOTPRINT_CELLS,
-            BuildingKind::Farm => FOOTPRINT_CELLS,
-            BuildingKind::Barracks => 3,
+            BuildingKind::House
+            | BuildingKind::Farm
+            | BuildingKind::LumberCamp
+            | BuildingKind::Mill
+            | BuildingKind::MiningCamp => FOOTPRINT_CELLS,
+            BuildingKind::Barracks
+            | BuildingKind::ArcheryRange
+            | BuildingKind::Stable
+            | BuildingKind::Blacksmith => 3,
         }
     }
 
     /// A builder this close to the building's center is actively
     /// building (see the range constants for the geometry).
     pub fn build_range(self) -> I16F16 {
-        match self {
-            BuildingKind::Barracks => BARRACKS_BUILD_RANGE,
-            _ => BUILD_RANGE,
+        if self.footprint_size() == 3 {
+            BARRACKS_BUILD_RANGE
+        } else {
+            BUILD_RANGE
         }
     }
 
-    /// Whether this building is a production building (trains units).
+    /// Whether this building trains units (a production building —
+    /// it also holds a rally point, SEL-13).
     pub fn is_production(self) -> bool {
-        matches!(self, BuildingKind::Barracks)
+        matches!(
+            self,
+            BuildingKind::Barracks | BuildingKind::ArcheryRange | BuildingKind::Stable
+        )
+    }
+
+    /// The unit kind this building trains, if any (M6): the
+    /// per-building half of the trainable relation — the Barracks
+    /// trains Militia, the Archery Range trains Archers, the
+    /// Stable trains Scout Cavalry.
+    pub fn trains(self, kind: EntityKind) -> bool {
+        matches!(
+            (self, kind),
+            (BuildingKind::Barracks, EntityKind::Militia)
+                | (BuildingKind::ArcheryRange, EntityKind::Archer)
+                | (BuildingKind::Stable, EntityKind::ScoutCavalry)
+        )
+    }
+
+    /// The age a player must stand in to place this building
+    /// (BLD-15: availability keys on the owner's age and built set).
+    pub fn age_required(self) -> Age {
+        match self {
+            BuildingKind::ArcheryRange | BuildingKind::Stable | BuildingKind::Blacksmith => {
+                Age::Feudal
+            }
+            _ => Age::Dark,
+        }
+    }
+
+    /// A building that must already stand *completed* before this
+    /// kind can be placed (BLD-15's chain; study §5): the Archery
+    /// Range and the Stable both require a Barracks.
+    pub fn requires_building(self) -> Option<BuildingKind> {
+        match self {
+            BuildingKind::ArcheryRange | BuildingKind::Stable => Some(BuildingKind::Barracks),
+            _ => None,
+        }
+    }
+
+    /// Whether this building is a resource drop-off point (M6,
+    /// ECO-06): the three camps. The Town Center is the other
+    /// drop-off — it is an entity, not a placed building, and
+    /// accepts everything.
+    pub fn is_dropoff(self) -> bool {
+        matches!(
+            self,
+            BuildingKind::LumberCamp | BuildingKind::Mill | BuildingKind::MiningCamp
+        )
+    }
+
+    /// Whether a completed building of this kind accepts `resource`
+    /// as a deposit (ECO-06's per-resource validity): Lumber Camp
+    /// wood, Mill food, Mining Camp gold + stone; every other kind
+    /// accepts nothing.
+    pub fn accepts(self, resource: ResourceKind) -> bool {
+        match self {
+            BuildingKind::LumberCamp => resource == ResourceKind::Wood,
+            BuildingKind::Mill => resource == ResourceKind::Food,
+            BuildingKind::MiningCamp => {
+                resource == ResourceKind::Gold || resource == ResourceKind::Stone
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether this kind counts toward the Feudal Age research
+    /// requirement (TEC-01): any completed Dark-Age building other
+    /// than Houses and Farms (and walls/Outposts, which do not
+    /// exist yet).
+    pub fn counts_toward_feudal(self) -> bool {
+        matches!(
+            self,
+            BuildingKind::Barracks
+                | BuildingKind::LumberCamp
+                | BuildingKind::Mill
+                | BuildingKind::MiningCamp
+        )
     }
 
     /// Hit points of a fresh building of this kind (M5 — buildings
     /// take damage now; study §5, Dark Age row where the value is
     /// age-keyed). Death is HP < 1, the entity rule (CMB-02).
+    /// M6 kinds: Range/Stable 1500 (study §5, Feudal row); the
+    /// camps' 550 and the Blacksmith's 1200 are adopted values —
+    /// UNVERIFIED (see the module docs).
     pub fn max_hp(self) -> i32 {
         match self {
             BuildingKind::House => 550,
             BuildingKind::Farm => 480,
             BuildingKind::Barracks => 1200,
+            BuildingKind::LumberCamp | BuildingKind::Mill | BuildingKind::MiningCamp => 550,
+            BuildingKind::ArcheryRange | BuildingKind::Stable => 1500,
+            BuildingKind::Blacksmith => 1200,
         }
     }
 
-    /// Melee armor (study §5, Dark Age row). The House's is
-    /// *negative* in the Dark Age — early houses are soft to melee,
-    /// exactly as the study's table records.
+    /// Melee armor (study §5, Dark Age row; Feudal row for the
+    /// M6 Feudal buildings). The House's is *negative* in the Dark
+    /// Age — early houses are soft to melee, exactly as the
+    /// study's table records. The camps' and Blacksmith's values
+    /// are adopted — UNVERIFIED (see the module docs).
     pub fn armor_melee(self) -> i32 {
         match self {
             BuildingKind::House => -2,
-            BuildingKind::Farm => 0,
-            BuildingKind::Barracks => 0,
+            BuildingKind::ArcheryRange | BuildingKind::Stable => 1,
+            _ => 0,
         }
     }
 
-    /// Pierce armor (study §5, Dark Age row).
+    /// Pierce armor (study §5, Dark/Feudal rows as above).
     pub fn armor_pierce(self) -> i32 {
         match self {
             BuildingKind::House => 7,
             BuildingKind::Farm => 0,
-            BuildingKind::Barracks => 7,
+            BuildingKind::ArcheryRange | BuildingKind::Stable => 8,
+            _ => 7,
         }
     }
 }
@@ -235,12 +401,17 @@ pub struct Building {
     /// record stays as the footprint registry until the node depletes,
     /// then both retire together (see `Sim` construction phase).
     pub node_id: Option<u32>,
-    /// Production queue (M3, Barracks only): unit kinds waiting to
-    /// train, head first. Cost is paid on enqueue, like the Town
-    /// Center's queue; progress stalls while the population is at
-    /// capacity (the same "housed" rule).
-    pub queue: Vec<EntityKind>,
-    /// Ticks of production progress on the queue's head unit.
+    /// Production/research queue (M3 as unit kinds; M6 generalized
+    /// to `ProdEntry`): units waiting to train and technologies
+    /// waiting to research, head first, in one shared FIFO
+    /// (TEC-03). Cost is paid on enqueue, like the Town Center's
+    /// queue; unit progress stalls while the population is at
+    /// capacity (the same "housed" rule), research progress does
+    /// not. Any building can hold research (Blacksmith lines, the
+    /// Barracks' Man-at-Arms upgrade); only production buildings
+    /// hold units.
+    pub queue: Vec<ProdEntry>,
+    /// Ticks of progress on the queue's head entry.
     pub train_progress: u64,
     /// Rally point (M4, SEL-13; production buildings only): where a
     /// freshly trained unit walks on spawn. `None` = unset — the unit
@@ -270,13 +441,13 @@ impl Building {
     }
 
     /// Production progress on the queue's head as a fraction of its
-    /// train time, in raw fixed-point bits (0 … 65536). Zero when the
-    /// queue is empty. Presentation aid for the ABI.
+    /// train/research time, in raw fixed-point bits (0 … 65536).
+    /// Zero when the queue is empty. Presentation aid for the ABI.
     pub fn train_frac_bits(&self) -> i32 {
         match self.queue.first() {
             None => 0,
-            Some(&kind) => {
-                let total = crate::units::spec(kind).train_ticks as i64;
+            Some(&head) => {
+                let total = head.ticks() as i64;
                 if total <= 0 {
                     return 0;
                 }
@@ -284,6 +455,15 @@ impl Building {
                 ((done * 65536) / total) as i32
             }
         }
+    }
+
+    /// How many *units* wait in this building's queue (research
+    /// entries do not occupy population — M6).
+    pub fn queued_units(&self) -> u32 {
+        self.queue
+            .iter()
+            .filter(|e| matches!(e, ProdEntry::Unit(_)))
+            .count() as u32
     }
 
     /// Remaining HP as a fraction of the kind's maximum, in raw
@@ -379,6 +559,43 @@ mod tests {
         assert_eq!(BuildingKind::Barracks.max_hp(), 1200);
         assert_eq!(BuildingKind::Barracks.armor_melee(), 0);
         assert_eq!(BuildingKind::Barracks.armor_pierce(), 7);
+        // M6 numbers: camps 100 wood / 35 s / 2×2 (OPENING-SPEC
+        // §2.4); Range/Stable 175 wood / 50 s / 3×3 with the
+        // study's Feudal combat row (1500 HP, 1/8); Blacksmith
+        // 150 wood (brief).
+        for camp in [
+            BuildingKind::LumberCamp,
+            BuildingKind::Mill,
+            BuildingKind::MiningCamp,
+        ] {
+            assert_eq!(camp.wood_cost(), I16F16::from_num(100));
+            assert_eq!(camp.build_ticks(), 35 * 60);
+            assert_eq!(camp.footprint_size(), 2);
+            assert!(camp.is_dropoff());
+            assert!(camp.counts_toward_feudal());
+        }
+        assert!(BuildingKind::LumberCamp.accepts(ResourceKind::Wood));
+        assert!(BuildingKind::Mill.accepts(ResourceKind::Food));
+        assert!(BuildingKind::MiningCamp.accepts(ResourceKind::Gold));
+        assert!(BuildingKind::MiningCamp.accepts(ResourceKind::Stone));
+        assert!(!BuildingKind::Mill.accepts(ResourceKind::Wood));
+        for kind in [BuildingKind::ArcheryRange, BuildingKind::Stable] {
+            assert_eq!(kind.wood_cost(), I16F16::from_num(175));
+            assert_eq!(kind.build_ticks(), 50 * 60);
+            assert_eq!(kind.footprint_size(), 3);
+            assert_eq!(kind.max_hp(), 1500);
+            assert_eq!(kind.armor_melee(), 1);
+            assert_eq!(kind.armor_pierce(), 8);
+            assert_eq!(kind.age_required(), Age::Feudal);
+            assert_eq!(kind.requires_building(), Some(BuildingKind::Barracks));
+        }
+        assert_eq!(BuildingKind::Blacksmith.wood_cost(), I16F16::from_num(150));
+        assert_eq!(BuildingKind::Blacksmith.age_required(), Age::Feudal);
+        // The trainable relation (M6): one home per unit kind.
+        assert!(BuildingKind::Barracks.trains(EntityKind::Militia));
+        assert!(!BuildingKind::Barracks.trains(EntityKind::Archer));
+        assert!(BuildingKind::ArcheryRange.trains(EntityKind::Archer));
+        assert!(BuildingKind::Stable.trains(EntityKind::ScoutCavalry));
     }
 
     #[test]

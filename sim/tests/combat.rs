@@ -9,7 +9,8 @@
 
 use fixed::types::I16F16;
 use skirmish_sim::{
-    BuildingKind, Command, Entity, EntityKind, NodeKind, Sim, OWNER_GAIA, OWNER_PLAYER,
+    Age, BuildingKind, Command, Entity, EntityKind, NodeKind, ResourceKind, Sim, TechId,
+    OWNER_GAIA, OWNER_PLAYER,
 };
 
 fn f(v: I16F16) -> f64 {
@@ -281,30 +282,108 @@ fn melee_fight_replays_bit_identically() {
     assert_eq!(run(), run(), "identical fight scripts diverged");
 }
 
-/// Scripted build-up shared by the archer test: Barracks east of the
-/// wall, then an Archer trained there. Returns nothing; asserts as it
+/// Scripted build-up shared by the archer test: walk the real
+/// production path to an Archer. Returns nothing; asserts as it
 /// goes.
+///
+/// M6 adaptation: in M3 this trained the Archer at the Barracks.
+/// Since M6 the Archer's home is the Archery Range — Feudal-gated
+/// and Barracks-gated — so the helper now plays the opening the
+/// way the game does: Mill + Lumber Camp (the Feudal pair), gather
+/// up, click Feudal, Barracks east of the wall, Range beside it,
+/// then train. The behavior under test (ranged kills, projectile
+/// RNG) is unchanged.
 fn build_barracks_and_archer(sim: &mut Sim) {
-    let (x, y) = cell_point(sim, 27, 20);
-    sim.push_command(Command::Build {
+    let build_at = |sim: &mut Sim, entity: u32, kind: BuildingKind, cx: u32, cy: u32| {
+        let (x, y) = cell_point(sim, cx, cy);
+        sim.push_command(Command::Build {
+            entity,
+            kind,
+            x,
+            y,
+        });
+    };
+    let first_node = |sim: &Sim, kind: NodeKind| {
+        sim.nodes()
+            .iter()
+            .find(|n| n.kind == kind)
+            .unwrap()
+            .id
+    };
+    // The Feudal pair first: Mill north-west of the Town Center,
+    // Lumber Camp west of it; villager 3 chops from the start.
+    // (Anchors are footprint top-left cells; column 25 is the wall.
+    // The Lumber Camp sits at (16, 20): a sheep stands on (18, 21)
+    // and placement refuses to cover a standing unit.)
+    build_at(sim, 1, BuildingKind::Mill, 21, 20);
+    build_at(sim, 2, BuildingKind::LumberCamp, 16, 20);
+    let tree = first_node(sim, NodeKind::Tree);
+    sim.push_command(Command::Gather {
+        entity: 3,
+        node: tree,
+    });
+    let camps_up = run_until(sim, 30000, |s| {
+        s.buildings().iter().filter(|b| b.complete).count() >= 2
+    });
+    assert!(camps_up, "the camps never completed");
+    // Work: villager 1 to the berries, villager 2 to the woodline.
+    let berry = first_node(sim, NodeKind::BerryBush);
+    sim.push_command(Command::Gather {
         entity: 1,
-        kind: BuildingKind::Barracks,
-        x,
-        y,
+        node: berry,
     });
-    let built = run_until(sim, 30000, |s| {
-        s.buildings().iter().any(|b| b.kind == BuildingKind::Barracks && b.complete)
+    sim.push_command(Command::Gather {
+        entity: 2,
+        node: tree,
     });
-    assert!(built, "barracks never completed");
-    let bid = sim
+    // Barracks as soon as its wood is in hand.
+    let wood_ready = run_until(sim, 60000, |s| {
+        s.stockpile().amount(ResourceKind::Wood) >= I16F16::from_num(175)
+    });
+    assert!(wood_ready, "never gathered the barracks wood");
+    build_at(sim, 1, BuildingKind::Barracks, 27, 20);
+    let barracks_up = run_until(sim, 30000, |s| {
+        s.buildings()
+            .iter()
+            .any(|b| b.kind == BuildingKind::Barracks && b.complete)
+    });
+    assert!(barracks_up, "barracks never completed");
+    // Villager 1 back on food; click Feudal when the 500 is in hand.
+    sim.push_command(Command::Gather {
+        entity: 1,
+        node: berry,
+    });
+    let food_ready = run_until(sim, 90000, |s| {
+        s.stockpile().amount(ResourceKind::Food) >= I16F16::from_num(500)
+    });
+    assert!(food_ready, "never gathered the feudal food");
+    assert!(sim.can_research_tc(TechId::FeudalAge));
+    sim.push_command(Command::ResearchTc {
+        tech: TechId::FeudalAge,
+    });
+    let feudal = run_until(sim, 30000, |s| s.age_of(OWNER_PLAYER) == Age::Feudal);
+    assert!(feudal, "never reached the Feudal Age");
+    // The Range beside the Barracks; the Archer trains there.
+    let wood_ready = run_until(sim, 60000, |s| {
+        s.stockpile().amount(ResourceKind::Wood) >= I16F16::from_num(175)
+    });
+    assert!(wood_ready, "never gathered the range wood");
+    build_at(sim, 2, BuildingKind::ArcheryRange, 27, 24);
+    let range_up = run_until(sim, 30000, |s| {
+        s.buildings()
+            .iter()
+            .any(|b| b.kind == BuildingKind::ArcheryRange && b.complete)
+    });
+    assert!(range_up, "archery range never completed");
+    let rid = sim
         .buildings()
         .iter()
-        .find(|b| b.kind == BuildingKind::Barracks)
+        .find(|b| b.kind == BuildingKind::ArcheryRange)
         .unwrap()
         .id;
-    assert!(sim.can_train_at(bid, EntityKind::Archer));
+    assert!(sim.can_train_at(rid, EntityKind::Archer));
     sim.push_command(Command::TrainAt {
-        building: bid,
+        building: rid,
         kind: EntityKind::Archer,
     });
     let trained = run_until(sim, 10000, |s| {

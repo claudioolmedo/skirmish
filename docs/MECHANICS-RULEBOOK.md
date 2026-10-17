@@ -628,8 +628,9 @@ hunted animals, of which they carry 35. Carry technologies raise the cap
 *Source:* MECHANICS-STUDY §2.4, §6.2 (hunt exception + Wheelbarrow +25% /
 Hand Cart +50% capacity figures). · *Impl:* `CARRY_CAPACITY` per task
 source + per-player cap patch; the 35 case keys off the node kind (hunt
-carcass), not a villager state. · *Status:* **DIFFERS** (flat 10 for all
-sources; the hunt exception arrives with animals in M5/M6).
+carcass), not a villager state. · *Status:* **DIFFERS** (the flat 10 and
+the hunt 35 both ship — M3; the carry-cap technologies do not exist
+yet).
 
 **ECO-04 — The gather loop.** Gather until the carry is full or the node
 empties, travel to a drop-off, deposit instantly, return to the node, and
@@ -643,7 +644,9 @@ see ECO-09).
 tick the villager comes within deposit range of a valid drop-off building
 (ECO-06). There is no deposit duration and no partial deposit.
 *Source:* GAP 3.2. · *Impl:* shipped (`DEPOSIT_RANGE` check in the
-Returning phase). · *Status:* **MATCHES**.
+Returning phase; since M6 measured to the Town Center's center or to a
+camp's footprint edge — a camp's center is unreachable inside its own
+solid footprint). · *Status:* **MATCHES**.
 
 **ECO-06 — Drop-off buildings are resource-specific.** The Town Center
 accepts all four resources. The Mill accepts food; the Lumber Camp wood;
@@ -651,20 +654,23 @@ the Mining Camp gold and stone; the Dock accepts a Fishing Ship's food. A
 gatherer returns to the nearest valid drop-off *for the resource it is
 carrying* (nearest by travel distance). Building a closer camp is the
 core economy optimization of the game.
-*Source:* GAP 3.2; MECHANICS-STUDY §5. · *Impl:* drop-off validity becomes
-a per-building-kind data mask (food/wood/gold/stone) queried in the
-Returning phase; "nearest" uses the same A* the unit will travel. Today
-only the TC exists and accepts everything. · *Status:* **DIFFERS**
-(TC-only deposit; the zero-learning rule makes Mill/Lumber/Mining camps
-M6-mandatory — see OPENING-SPEC note).
+*Source:* GAP 3.2; MECHANICS-STUDY §5. · *Impl:* shipped (M6) — the
+accepts relation is per-kind data on the building table; the Returning
+phase re-resolves the nearest valid drop-off for the carried resource
+every tick (the Town Center included in the same comparison), so a
+camp completing mid-haul reroutes the trip. "Nearest" is straight-line
+distance, not path distance — a recorded simplification. The Dock
+clause awaits water (MAP-08). · *Status:* **MATCHES**.
 
 **ECO-07 — Force drop-off.** The player can order carrying villagers to
 deposit immediately (at their nearest valid drop-off); afterwards they
 resume the task they were on.
-*Source:* GAP 3.13. · *Impl:* a command that flips a carrying worker's
-phase to Returning with a resume marker (one extra field in the task
-record). · *Status:* **MISSING** (a Move order cancels the task entirely;
-the villager keeps its load until next deposited — documented M2 choice).
+*Source:* GAP 3.13. · *Impl:* shipped (M6) — the `ForceDeposit`
+command flips a carrying worker's phase to Returning; the resume
+marker is the kept gather assignment (or construction site), which
+the deposit step resumes on its own. A builder who finishes a camp
+also deposits its carried load there on the spot when the camp
+accepts it (OPENING-SPEC §2.4). · *Status:* **MATCHES**.
 
 **ECO-08 — Depletion frees the world.** A node at zero is removed: trees
 stop blocking (MAP-04), berry bushes/mines/farms disappear, carcasses
@@ -700,10 +706,11 @@ animal converts it into a carcass holding its food value (Sheep 100,
 Cow 150, Deer 140, Boar 340, and the full animal table in MECHANICS-STUDY
 §3.10/§6.3). Villagers gather from the carcass at the hunt rate and carry
 35 per trip (ECO-03). Animal combat behavior is AI-07.
-*Source:* GAP 3.4; wiki, Hunt / Early Economy. · *Impl:* animals are
-entities with an HP field (M3 entity model); on death a land animal
-spawns a carcass node keyed to its position. · *Status:* **MISSING** (no
-animals).
+*Source:* GAP 3.4; wiki, Hunt / Early Economy. · *Impl:* shipped (M3) —
+animals are entities with an HP field; on death a land animal spawns a
+carcass node keyed to its position (Sheep 100, Deer 140, Boar 340 from
+the study table; the Cow has no instance — no cow exists). · *Status:*
+**MATCHES**.
 
 **ECO-12 — Carcasses decay.** Food in an unworked carcass is lost
 continuously — approximately 0.25 food per second (e.g. a Sheep worked
@@ -713,18 +720,22 @@ the reference play pattern kills and works one animal at a time.
 published worked examples — treat as a tuned constant pending a better
 source.)
 *Source:* wiki, Early Economy (decay stated explicitly); StrategyWiki
-tactics (worked examples implying ≈0.25/s). · *Impl:* carcasses are the
-only nodes with a per-tick amount decrease (fixed-point decrement in the
-node phase); all other nodes are gather-only. · *Status:* **MISSING**.
+tactics (worked examples implying ≈0.25/s). · *Impl:* shipped (M3) —
+carcasses are the only nodes with a per-tick amount decrease
+(fixed-point decrement in the node phase); the rates are pinned per
+carcass family by tests: herdable carcasses exactly 0.25/s (273
+bits/tick), hunt carcasses 0.40/s (437 bits/tick, MECHANICS-STUDY
+§6.3). · *Status:* **MATCHES**.
 
 **ECO-13 — Herdables are captured, not gathered alive.** Sheep and similar
 animals become units of the player whose unit comes near them (AI-06);
 the owner moves them like units and kills them with villagers to create
 carcasses (ECO-11), worked at the shepherd rate 0.330/s.
 *Source:* wiki, Sheep / Herdable animal; MECHANICS-STUDY §6.1. · *Impl:*
-ownership transfer in the animal rule set (AI-06); killing is an ordinary
-attack order against an own animal (special-cased: own herdables are
-valid attack targets for own villagers). · *Status:* **MISSING**.
+shipped (M3) — ownership transfers by proximity in the combat phase's
+capture step; killing is an ordinary attack order against an own
+animal, and the killer auto-harvests the carcass (worked at the
+0.330/s shepherd rate for herd carcasses). · *Status:* **MATCHES**.
 
 **ECO-14 — Farms.** A Farm is a 3×3 building holding 175 food. Only one
 villager works a farm; the farm's own inherent work rate (0.4 food/s)
@@ -778,7 +789,8 @@ changes nothing and charges nothing.
 way observably). · *Impl:* shipped — `validate_build` in `build.rs`,
 called from `push_build` (the ABI returns its verdict) and re-checked in
 `apply_command`; ordering onto an incomplete same-kind building resumes
-it instead of double-charging. · *Status:* **MATCHES**.
+it instead of double-charging. Since M6 the same function also
+evaluates the availability gates (BLD-15). · *Status:* **MATCHES**.
 
 **BLD-02 — Cost is paid at placement; foundation cancel refunds fully.**
 Laying a foundation deducts the full cost immediately. Cancelling a
@@ -815,19 +827,22 @@ construction has HP proportional to its progress; it reaches full HP
 exactly at completion. Foundations can be attacked and destroyed (CMB-15)
 and can never be converted (MNK-08). (The exact starting fraction is
 UNVERIFIED; proportional growth is the documented behavior.)
-*Source:* GAP 4.19. · *Impl:* HP field (M3) computed as max_hp × progress
-for incomplete buildings at damage time — store progress, derive HP, so
-the hash stays small. · *Status:* **MISSING** (no building HP yet).
+*Source:* GAP 4.19. · *Impl:* buildings have HP since M5 and can be
+attacked and destroyed at any stage — but an under-construction
+building carries its *full* HP from placement, not a
+progress-proportional value: a recorded v1 simplification.
+· *Status:* **DIFFERS**.
 
 **BLD-06 — Footprints are data.** Every building kind has a footprint in
 tiles (TC 4×4, House 2×2, Farm 3×3, Tower 1×1, Castle 4×4,
 MECHANICS-STUDY §5). The footprint blocks pathing (except farms, BLD-12)
 and defines placement validity (BLD-01).
 *Source:* MECHANICS-STUDY §5. · *Impl:* footprint columns in the building
-table. Today houses *and* farms both use a uniform 2×2-cell footprint —
-wrong for farms (should be 3×3 tiles) and the TC is a zero-footprint
-point at a fixed cell. Converges when the tile convention (MAP-01) and
-full building set land (M6). · *Status:* **DIFFERS**.
+table; the full set landed with M6 (2×2 House/Farm/camps, 3×3
+Barracks/Range/Stable/Blacksmith). Two divergences remain: the Farm
+uses a 2×2-cell footprint where the reference's is 3×3 tiles (ECO-14),
+and the TC is a zero-footprint point entity at a fixed cell rather
+than a placed 4×4 building. · *Status:* **DIFFERS**.
 
 **BLD-07 — Repair.** Villagers repair damaged buildings, ships, and siege.
 Restoring a building from 1 HP to full costs 50% of its original build
@@ -857,9 +872,11 @@ completed buildings each time it changes. · *Status:* **MATCHES**.
 shared FIFO (TEC-05), capped at 15 entries. Cost is paid on enqueue;
 cancelling an entry refunds 100% (TEC-05).
 *Source:* GAP 4.10; Skirmish II TC behavior (queue cap 15 shipped). · *Impl:*
-shipped for the TC (`train_queue` + `TrainBlock` verdicts); generalize
-the record per building with M6. · *Status:* **MATCHES** (TC); other
-buildings pending their existence.
+shipped — every production building (TC, Barracks, Archery Range,
+Stable) and research host (Blacksmith, Barracks) holds the same typed
+queue record (`ProdEntry`: unit | technology), cap 15, since M6. The
+cancel/refund half lives in TEC-05 and is still open. · *Status:*
+**MATCHES**.
 
 **BLD-10 — The housed rule.** Units may be *queued* at the population
 cap, but production progress stalls while population ≥ cap and resumes
@@ -874,9 +891,11 @@ opening house urgent (see OPENING-SPEC).
 (and, for later ages, armor) follows its owner's Age column in the data
 table with no research and no player action: e.g. House 550 HP (Dark) →
 750 (Feudal) → 900 (Castle/Imperial).
-*Source:* MECHANICS-STUDY §5 preamble. · *Impl:* stats are looked up as
-(base row × owner's age) at use time — age is a per-player field, so this
-is free once players exist. · *Status:* **MISSING** (no ages, no HP).
+*Source:* MECHANICS-STUDY §5 preamble. · *Impl:* ages are per-player
+state since M6 and building HP exists since M5 — but the step-up is
+not implemented: a building keeps its base row at every age (the
+Range/Stable rows are Feudal-keyed only in that the buildings
+themselves are Feudal). · *Status:* **DIFFERS**.
 
 **BLD-12 — Farms do not block; other buildings do.** A placed farm never
 enters the obstacle grid (its farmer walks and stands on it). Every other
@@ -907,10 +926,14 @@ kind has an available Age and, where applicable, a prerequisite building
 (Mill → Market; Barracks → Blacksmith/Stable chain…, full data in
 MECHANICS-STUDY §5 notes). The command panel offers only what is
 available (INF-06).
-*Source:* GAP 4.2–4.9; MECHANICS-STUDY §5. · *Impl:* availability =
-(age, built-set) evaluated against the building table — the panel reads
-the same function the validator uses. · *Status:* **MISSING** (two
-buildings, both Dark Age, no prerequisites).
+*Source:* GAP 4.2–4.9; MECHANICS-STUDY §5. · *Impl:* shipped for the
+in-game building set (M6) — availability = (age, built-set) evaluated
+in `validate_build`, the same function the client's ghost and build
+menu mirror: Farms require a completed Mill; the Archery Range,
+Stable and Blacksmith require the Feudal Age; the Range and Stable
+also require a completed Barracks. Buildings not yet in the game
+(Market, Monastery, …) arrive with their milestones. · *Status:*
+**MATCHES**.
 
 ---
 
@@ -926,27 +949,28 @@ Only classes the attacker actually has an attack value in participate
 (CLS-02, CMB-03). Bonus attacks against classes the target belongs to are
 just more terms in the sum.
 *Source:* MECHANICS-STUDY §1.1, §1.2 (formula pinned, with worked
-examples). · *Impl:* pure fixed-point function in a new `combat.rs` over
-(class → value) slices from the unit tables; 1/3-style fractions must be
-stored as rationals (MECHANICS-STUDY §10.2). · *Status:* **MISSING** (no
-HP or damage anywhere in the sim).
+examples). · *Impl:* shipped (M3) — `compute_damage` in `combat.rs` over
+(class → value) slices from the unit tables, exactly this shape;
+the elevation factor is 1 everywhere (no elevation exists yet — §2).
+· *Status:* **MATCHES**.
 
 **CMB-02 — HP is fractional; death at HP < 1.** Entities carry fractional
 hit points (fixed-point). A unit dies the tick its HP drops below 1 — not
 at 0 — and displayed HP is the floored value.
-*Source:* MECHANICS-STUDY §1.1. · *Impl:* `hp: Fx` on the M3 entity model;
-death processed in a single sweep at the end of the combat phase
-(ascending id order) so simultaneous kills are deterministic. · *Status:*
-**MISSING**.
+*Source:* MECHANICS-STUDY §1.1. · *Impl:* shipped (M3) — `hp: Fx` on
+the entity model; death processed in a single sweep at the end of the
+combat phase (ascending id order) so simultaneous kills are
+deterministic. · *Status:* **MATCHES**.
 
 **CMB-03 — Non-member classes contribute exactly zero.** If a target does
 not belong to an armor class, that class's bonus deals 0 — implemented as
 a membership test, never as a sentinel armor value (a sentinel would let
 negative-armor cases leak damage).
 *Source:* MECHANICS-STUDY §1.2, §10.4 (ambiguity #1, resolved). · *Impl:*
-class membership is a bitmask per entity (the class taxonomy fits in a
-u64 — CLS-01); the formula iterates the attacker's attack list and masks.
-· *Status:* **MISSING**.
+shipped (M3) — class membership is a bitset per entity (CLS-01); the
+formula iterates the attacker's attack list and tests membership, so
+non-member classes contribute exactly zero by construction.
+· *Status:* **MATCHES**.
 
 **CMB-04 — Attack delay (frame delay).** The first attack of an
 engagement lands only after the attacker's attack-delay ticks (Archer
@@ -954,18 +978,18 @@ engagement lands only after the attacker's attack-delay ticks (Archer
 MECHANICS-STUDY §2.2). If the unit is re-tasked during the delay, the
 pending attack is aborted, not stored. Later attacks in the same
 engagement are governed by reload alone (CMB-05).
-*Source:* MECHANICS-STUDY §2.2. · *Impl:* the delay is a column in the
-unit table — the *same row* as the renderer's attack-frame index, per
-OPENAGE-RESEARCH §2.4 (they are one fact). · *Status:* **MISSING**.
+*Source:* MECHANICS-STUDY §2.2. · *Impl:* shipped (M3) — the delay is a
+column in the unit table; a re-task clears the combat state, aborting
+the pending strike. · *Status:* **MATCHES**.
 
 **CMB-05 — Reload (rate of fire).** After an attack lands, the next
 attack is available after the unit's reload time (modal value 2.0 s;
 Spearman/Skirmisher 3.0 s; Knight 1.8 s; Ram 5.0 s; Mangonel 6.0 s;
 Trebuchet 10.0 s — MECHANICS-STUDY §2.1). Reload starts at the landing
 tick.
-*Source:* MECHANICS-STUDY §2.1. · *Impl:* per-entity next-attack tick in
-the combat state; all times authored in ticks (1.8 s = 108 ticks exactly).
-· *Status:* **MISSING**.
+*Source:* MECHANICS-STUDY §2.1. · *Impl:* shipped (M3) — per-entity
+attack clock in the combat state; all times authored in ticks (1.8 s =
+108 ticks exactly). · *Status:* **MATCHES**.
 
 **CMB-06 — Melee lands at range at the landing tick.** A melee attack
 deals its damage only if the target is still within the attacker's melee
@@ -973,17 +997,17 @@ range (0 + unit radii) when the delay completes; otherwise the attack
 whiffs and the reload still applies. Melee units therefore chase: the
 attack state machine keeps them moving into range between attacks.
 *Source:* MECHANICS-STUDY §2.2 (abort semantics); observed reference
-behavior. · *Impl:* range check at the landing tick in `combat.rs`; the
-chase is an internal move-toward-target order refreshed per tick (not a
-player order, not queued). · *Status:* **MISSING**.
+behavior. · *Impl:* shipped (M3) — range check at the landing tick in
+`combat.rs`; the chase is the attack state machine's move-toward-target
+step (an internal order, not a player order, not queued). · *Status:*
+**MATCHES**.
 
 **CMB-07 — Kiting asymmetry is emergent, not coded.** Fast-reload,
 fast-move ranged units beat slow melee by repositioning between shots
 purely from CMB-04/05 + MOV-01. No rule may special-case "kiting".
-*Source:* MECHANICS-STUDY §2 (analysis). · *Impl:* nothing to build —
-this rule exists to forbid hacks; the acceptance test is that an Archer
-vs. Militia duel reproduces the documented outcome from the tables alone.
-· *Status:* **MISSING** (rule for M3 acceptance).
+*Source:* MECHANICS-STUDY §2 (analysis). · *Impl:* nothing is built —
+no code path special-cases kiting; ranged/melee outcomes emerge from
+CMB-04/05 + MOV-01 and the tables. · *Status:* **MATCHES**.
 
 **CMB-08 — Auto-targeting priority.** A military unit with no explicit
 target acquires, in order: (1) the closest attackable enemy *unit*;
@@ -993,9 +1017,13 @@ attacked by units. Trebuchets target buildings and other Trebuchets.
 Farms, walls, gates, and herdables are never auto-targeted; killing sheep
 is always an explicit order (ECO-13).
 *Source:* MECHANICS-STUDY §9.2 (priority chain pinned). · *Impl:* a single
-acquisition function in `combat.rs` run on engagement-state entry; ties by
-squared distance then lowest entity id (MECHANICS-STUDY §10.3) — never
-sqrt, never float. · *Status:* **MISSING** (GAP 6.2).
+acquisition function in `combat.rs`; ties by squared distance then lowest
+entity id — never sqrt, never float. Shipped narrower than the chain
+(M3/M5): an idle Militia, Man-at-Arms or Archer with no order acquires
+the closest *unit* in line of sight — a boar, or an enemy player's
+unit (the enemy Town Center expressly excluded). Buildings and Town
+Centers are never auto-acquired; razing is always an explicit order
+(or the AI's wave orders, AI-04). · *Status:* **DIFFERS**.
 
 **CMB-09 — Stances govern pursuit, not damage.** Four stances:
 *Aggressive* — pursue targets indefinitely. *Defensive* — engage nearby
@@ -1006,9 +1034,10 @@ nothing; just stands). Defaults: military units Aggressive; the starting
 Scout is Stand Ground. (Exact leash distances are UNVERIFIED anywhere
 public — they are adopted tuning constants, recorded in the data table as
 design decisions, not reference facts.)
-*Source:* MECHANICS-STUDY §9.1; GAP 2.6. · *Impl:* stance is a per-entity
-enum in the combat state; the acquisition function (CMB-08) takes stance
-and post position as inputs. · *Status:* **MISSING**.
+*Source:* MECHANICS-STUDY §9.1; GAP 2.6. · *Impl:* no stance state
+exists yet. Two defaults are observable today: the starting Scout never
+auto-acquires (its Stand-Ground default), and other military
+auto-acquire only boars (a narrow Aggressive). · *Status:* **DIFFERS**.
 
 **CMB-10 — Attack-move.** Ordered to a point, units move there engaging
 every enemy encountered on the way (per stance acquisition, CMB-08),
@@ -1030,17 +1059,19 @@ damage friendly units. Attacks flagged as blast in the data (Mangonel
 line, Bombard Cannons, Cannon Galleons, Warwolf Trebuchets) damage
 *everyone* in the blast, friend or foe — Scorpions are notably not
 flagged.
-*Source:* MECHANICS-STUDY §2.3. · *Impl:* the blast resolution (PRJ-07)
-checks the weapon's `friendly_fire` flag before filtering targets by
-diplomacy. · *Status:* **MISSING**.
+*Source:* MECHANICS-STUDY §2.3. · *Impl:* shipped for the ordinary half
+(M3) — no attack damages a friendly unit, mishits included (PRJ
+resolution only ever selects non-friendly bystanders). No blast-flagged
+weapon exists yet. · *Status:* **MATCHES** (for the shipped weapon set).
 
 **CMB-13 — Mishits deal half.** A projectile that strikes a unit other
 than its intended target deals 50% damage to that unit (certain units are
 exempt by data flag — e.g. rams take structured reduced projectile damage
 via their armor row instead; see MECHANICS-STUDY §1.3 ram armor).
-*Source:* MECHANICS-STUDY §2.3. · *Impl:* projectile impact resolution
-(PRJ-01) passes a ½ damage multiplier into CMB-01 for non-intended
-targets; the exemption is a data flag. · *Status:* **MISSING**.
+*Source:* MECHANICS-STUDY §2.3. · *Impl:* shipped (M3) — projectile
+impact resolution (PRJ-01) passes a ½ damage multiplier into CMB-01 for
+non-intended targets; the exemption is a data flag. · *Status:*
+**MATCHES**.
 
 **CMB-14 — Death frees everything.** On death, a unit's population is
 freed the same tick, its orders and carried resources vanish with it (a
@@ -1048,19 +1079,24 @@ killed villager's load is lost, not dropped), and any garrison inside it
 (transport, ram) is handled by the container rules (GAR-03 analog: ram
 passengers eject; transport cargo dies with the ship — GAR-10). The
 corpse is a client-side cosmetic with a decay timer, not sim state.
-*Source:* MECHANICS-STUDY §9.4 (population timing); GAP 6.1. · *Impl:* the
-death sweep (CMB-02) removes the entity from the Vec (ids are never
-reused — the id counter is hashed state). · *Status:* **MISSING**.
+*Source:* MECHANICS-STUDY §9.4 (population timing); GAP 6.1. · *Impl:*
+the death sweep (CMB-02) frees population, orders and carry the same
+tick — but the entity record stays as a *tombstone* (ids are never
+reused; the record is hashed state) instead of being removed from the
+Vec: a deliberate deviation from this rule's letter, recorded in
+ARCHITECTURE.md. Garrison effects have no instance (no garrison).
+· *Status:* **DIFFERS**.
 
 **CMB-15 — Buildings burn, then free their ground.** A destroyed building
 is removed, its footprint freed for pathing and placement, its queue
 cancelled (no refund — the buildings are gone), its garrison ejected
 alive (GAR-03), and its support (BLD-08) withdrawn. Technologies it
 already researched persist for the owner.
-*Source:* GAP 4.19–4.20; GAR-03. · *Impl:* building removal mirrors the
-farm-retire cleanup already shipped; blocking-layer cells are cleared on
-removal (houses already write/clear them). · *Status:* **MISSING** (no
-building HP/destruction yet; farm retirement is the existing pattern).
+*Source:* GAP 4.19–4.20; GAR-03. · *Impl:* shipped (M5) — destruction
+removes the record, frees the footprint cells, drops the queue without
+refund, withdraws support, and leaves the owner's researched
+technologies untouched. Garrison ejection has no instance (no
+garrison exists). · *Status:* **MATCHES**.
 
 **CMB-16 — Attack ground.** Certain siege units can be ordered to attack
 a *point*: projectiles land there with their blast (PRJ-07) whether or
@@ -1079,18 +1115,21 @@ An arrow/bolt/stone is spawned at release with a fixed target point and a
 precomputed flight time; it travels ballistically and resolves on arrival.
 There is no homing and no mid-flight retargeting.
 *Source:* MECHANICS-STUDY §2.3, §10.3 (flight time precomputed in ticks at
-spawn). · *Impl:* a projectile list in sim state (hashed), each record
-(spawn tick, impact tick, origin, target point, weapon row, intended
-target id); iteration in spawn order after entity-id order
-(MECHANICS-STUDY §10.3). · *Status:* **MISSING**.
+spawn). · *Impl:* shipped (M3) — a projectile list in sim state (hashed),
+each record (spawn tick, impact tick, origin, target point, weapon row,
+intended target id); iteration in spawn order after entity-id order
+(MECHANICS-STUDY §10.3). · *Status:* **MATCHES**.
 
 **PRJ-02 — Flight time comes from distance ÷ projectile speed at spawn.**
 Each weapon has a projectile-speed stat (documented for individuals only:
 Mangonel stone 3.5 tiles/s, Janissary bullet 7.5 — the generic arrow speed
 is UNVERIFIED; it is adopted as a per-weapon data constant). Elevation
 difference does not change flight time in the documented model.
-*Source:* MECHANICS-STUDY §10.4 (#12). · *Impl:* integer division at spawn;
-the value lives in the weapon row. · *Status:* **MISSING**.
+*Source:* MECHANICS-STUDY §10.4 (#12). · *Impl:* shipped (M3) — ceiling
+division at spawn; the value lives in the weapon row. The generic arrow
+speed is an adopted constant (UNVERIFIED, as this rule records).
+· *Status:* **DIFFERS** (mechanism shipped; the arrow-speed constant is
+adopted, not documented).
 
 **PRJ-03 — Accuracy is one roll per shot, at release.** A ranged attack
 rolls once against the attacker's accuracy (Archer 80/85/90% by tier,
@@ -1100,10 +1139,10 @@ flies true to its aim point or scatters (PRJ-04). The roll is drawn from
 the sim RNG in fixed iteration order (ascending attacker id, then
 projectile spawn order) — this is the first gameplay RNG consumer and the
 reason SIM-04 exists.
-*Source:* MECHANICS-STUDY §2.3, §10.3. · *Impl:* the draw happens in the
-combat phase inside `tick()`, never at command time (commands may arrive
-in any real-time order across clients; the draw must not). · *Status:*
-**MISSING**.
+*Source:* MECHANICS-STUDY §2.3, §10.3. · *Impl:* shipped (M3) — the draw
+happens in the combat phase inside `tick()`, never at command time
+(commands may arrive in any real-time order across clients; the draw
+must not). · *Status:* **MATCHES**.
 
 **PRJ-04 — Misses scatter around the aim point.** A failed accuracy roll
 (or a target that moved away, PRJ-06) puts the impact at a scattered
@@ -1111,19 +1150,20 @@ point within the weapon's dispersion radius of the aim point. Dispersion
 radii are per-weapon data and are UNVERIFIED in public sources (a
 prototype program exists to measure the reference — MECHANICS-STUDY
 §10.4 #11); adopt tuned constants and record them as design values.
-*Source:* MECHANICS-STUDY §2.3, §10.4. · *Impl:* scatter direction and
-distance from two further RNG draws in the same fixed order (PRJ-03);
-fixed-point trig via a table or integer vector — never float sin/cos in
-the sim. · *Status:* **MISSING**.
+*Source:* MECHANICS-STUDY §2.3, §10.4. · *Impl:* shipped (M3) — scatter
+direction and distance from two further RNG draws in the same fixed
+order (PRJ-03); fixed-point integer vector math — never float sin/cos
+in the sim. The dispersion radius is an adopted constant (UNVERIFIED,
+as this rule records). · *Status:* **DIFFERS**.
 
 **PRJ-05 — Ballistics leads the target; without it, aim is at the
 release-time position.** Aiming is decided once, at release: with the
 Ballistics technology, the aim point is the target's position led by its
 current velocity over the flight time; without it, the aim point is where
 the target stood at release. There is no other target leading.
-*Source:* MECHANICS-STUDY §2.3. · *Impl:* a flag on the attacker (tech
-patch, TEC-06) consulted at spawn; the lead computation is fixed-point
-velocity × flight ticks. · *Status:* **MISSING**.
+*Source:* MECHANICS-STUDY §2.3. · *Impl:* the no-Ballistics half ships
+(M3) — aim is fixed at the target's release-time position, always. The
+Ballistics technology does not exist yet. · *Status:* **DIFFERS**.
 
 **PRJ-06 — Moving targets dodge geometrically.** A hit on a moving target
 is never re-rolled: if the target has left the impact point (true or
@@ -1132,9 +1172,9 @@ bystander, CMB-13) instead. This is what makes staggered formations and
 zig-zag micro work, and it applies even to 100%-accuracy Thumb Ring
 archers.
 *Source:* MECHANICS-STUDY §2.3 (explicit: accuracy % is measured against a
-stationary target). · *Impl:* impact resolution tests "intended target
-within its radius of the impact point" — nothing else. · *Status:*
-**MISSING**.
+stationary target). · *Impl:* shipped (M3) — impact resolution tests
+"intended target within its radius of the impact point" — nothing else.
+· *Status:* **MATCHES**.
 
 **PRJ-07 — Blast damage falls off and rolls per unit.** Weapons with a
 blast radius damage every unit in the radius at impact, at the weapon's
@@ -1155,9 +1195,11 @@ Skirmisher 1, Scorpion 2, towers/Castle 1, archers 0 — MECHANICS-STUDY
 §2.3). The Murder Holes technology removes building minimum range.
 Targets inside the dead zone must be engaged by moving away (ranged
 units do so automatically when able) or not at all.
-*Source:* MECHANICS-STUDY §2.3. · *Impl:* a range-band check in the attack
-state machine (min ≤ d ≤ max) before both acquisition and firing. ·
-*Status:* **MISSING**.
+*Source:* MECHANICS-STUDY §2.3. · *Impl:* the range band is data
+(`range_min` in the unit row) and every shipped ranged row has minimum
+0 — the Archer's 0 included — so the dead zone is observable only as
+its absence. No minimum-range weapon (and no Murder Holes) exists yet.
+· *Status:* **DIFFERS**.
 
 **PRJ-09 — Some projectiles pass through.** Scorpion bolts damage every
 unit along their path (friend and foe alike take pass-through damage,
@@ -1173,8 +1215,9 @@ enters projectile combat only through the damage multiplier (CMB-01)
 comparing attacker and target elevation. There is no line-of-sight ray
 blocking by hills (VIS-05) and no plunging-fire bonus.
 *Source:* MECHANICS-STUDY §1.4; OPENAGE-RESEARCH §2.3. · *Impl:* nothing
-to build — the impact test (PRJ-06) is purely positional. · *Status:*
-**MISSING** (recorded to prevent an occlusion implementation).
+is built — the impact test (PRJ-06) is purely positional, and no
+elevation exists to compare. · *Status:* **MATCHES** (recorded to
+prevent an occlusion implementation).
 
 ---
 
@@ -1187,10 +1230,9 @@ Siege, Ships, Monks, Villagers, …; building classes: Towers, Castles,
 Walls & Gates, …; Gaia classes: Huntable and Predator animals — the full
 ID table is MECHANICS-STUDY §1.3). Membership drives the damage formula
 (CMB-01/03), acquisition rules (CMB-08), and tech patching (TEC-06).
-*Source:* MECHANICS-STUDY §1.3. · *Impl:* membership as a bitmask computed
-from the unit table row at spawn (and re-stamped on line upgrades,
-CLS-03); class ids are stable constants in one `classes.rs`. · *Status:*
-**MISSING**.
+*Source:* MECHANICS-STUDY §1.3. · *Impl:* shipped (M3) — membership as a
+bitset on the unit table row in `classes.rs` (13 classes); buildings
+carry their classes in the building table. · *Status:* **MATCHES**.
 
 **CLS-02 — Counters are emergent from bonus rows.** There is no
 "Pikeman beats Knight" code anywhere: a counter exists exactly where a
@@ -1198,9 +1240,10 @@ unit's attack table carries a bonus against a class the victim belongs
 to (Spearman-line +22 vs Cavalry being the canonical case). Balance work
 edits tables; the engine never branches on unit *identity* for damage.
 *Source:* MECHANICS-STUDY §1.2, §3 (line tables carry the bonuses). ·
-*Impl:* enforced by CMB-01's shape — attack data is (class, value) pairs,
-so there is nothing else to branch on. · *Status:* **MISSING** (the
-architecture already guarantees it; no tables exist yet).
+*Impl:* shipped (M3) — CMB-01's shape enforces it: attack data is
+(class, value) pairs (the Archer's anti-spearman row, the Boar's
+anti-cavalry rows), so there is nothing else to branch on. · *Status:*
+**MATCHES**.
 
 **CLS-03 — Line upgrades transform existing units in place.** When a unit-
 line upgrade research completes (Militia → Man-at-Arms, Archer →
@@ -1209,17 +1252,21 @@ new tier, keeping its position, HP *fraction* behavior per the new max
 (the standard: current HP is kept, max rises — units do not heal from
 upgrading), orders, and stance. New production uses the new tier.
 *Source:* GAP 5.2 (unit upgrade lines); standard reference behavior. ·
-*Impl:* on tech completion (TEC-06), sweep entities in id order and swap
-their kind/table row; kind is hashed state, the sweep order is fixed. ·
-*Status:* **MISSING** (no military kinds, no research).
+*Impl:* shipped for the first line (M6, Man-at-Arms at the Barracks) —
+on completion the sim sweeps the owner's Militia in id order and swaps
+their kind; kind is hashed state, the sweep order is fixed, current HP
+is kept while the max rises, and new production spawns the new tier.
+· *Status:* **MATCHES**.
 
 **CLS-04 — Some bonuses arrive free with the Age.** A few units change
 stats automatically when their owner advances an Age, with no research:
 Scout Cavalry gains attack, speed (1.2 → 1.55), and LoS on reaching
 Feudal. These are age-keyed patches in the unit's data row, applied by
 the same mechanism as BLD-11.
-*Source:* MECHANICS-STUDY §3.6, §4.1 (Scout line note). · *Impl:* stat
-lookup = (row, owner age); no special code. · *Status:* **MISSING**.
+*Source:* MECHANICS-STUDY §3.6, §4.1 (Scout line note). · *Impl:*
+shipped (M6) — the Scout's Feudal layer (attack 3→5, speed 1.20→1.55
+tiles/s, LoS 4→6 tiles) is applied in `Sim::stats_for`, the same lookup
+the tech patches use; no special code. · *Status:* **MATCHES**.
 
 **CLS-05 — Villagers are civilians with a weak attack.** Villagers carry
 a small melee attack (3, plus bonuses vs a few classes — MECHANICS-STUDY
@@ -1227,10 +1274,12 @@ a small melee attack (3, plus bonuses vs a few classes — MECHANICS-STUDY
 never treated as military by stance defaults (CMB-09) or the idle-
 military key (SEL-09). Their attack upgrades come from their own data
 row and Loom (villager HP/armor/speed tech), not from the infantry lines.
-*Source:* MECHANICS-STUDY §3.1; GAP 2.15. · *Impl:* kind flag
-`civilian` in the unit table drives UI/key behavior; combat treats them
-as an ordinary melee attacker. · *Status:* **MISSING** (villagers exist
-but cannot attack; no HP).
+*Source:* MECHANICS-STUDY §3.1; GAP 2.15. · *Impl:* shipped — the
+villager row carries its 3 melee attack and fights as an ordinary melee
+attacker when ordered; it is excluded from the idle-military key and
+from military acquisition; Loom patches its row through TEC-06. (The
+study's minor villager bonus rows are not in the table.) · *Status:*
+**MATCHES**.
 
 **CLS-06 — Kings and heroes are special entities.** A King is a unit
 whose death eliminates its owner in Regicide (VIC-06); heroes (scenario
@@ -1270,7 +1319,9 @@ Castle → Imperial: 1000 food + 800 gold, 190 s. Age research happens at
 the Town Center.
 *Source:* MECHANICS-STUDY §7. · *Impl:* the age ladder is a tiny data
 table keyed by (from-age); the TC queue holds an "age research" entry
-like any other (TEC-03). · *Status:* **MISSING** (GAP 5.1).
+like any other (TEC-03). · *Status:* **DIFFERS** (the Dark → Feudal
+rung ships with M6 at exactly these numbers — 500 food, 130 s; the
+Castle and Imperial rungs wait for their content).
 
 **TEC-02 — Age-up requires two qualifying buildings.** Advancing requires
 owning any two buildings of the *current* age's tier, with exclusions:
@@ -1278,28 +1329,34 @@ for Feudal, Houses, Farms, walls, and Outposts don't count; for Castle,
 walls and towers don't count; for Imperial, a Castle alone suffices, or
 any two Castle-Age buildings.
 *Source:* MECHANICS-STUDY §7 (requirements pinned, incl. exclusions). ·
-*Impl:* a predicate over the owner's completed-building set, evaluated at
-enqueue time (the UI disables the button with the same function). ·
-*Status:* **MISSING**.
+*Impl:* shipped for the Feudal rung (M6) — a predicate over the owner's
+completed-building set (`BuildingKind::counts_toward_feudal`: the
+Barracks and the three camps count; Houses and Farms do not),
+evaluated at enqueue time; the client disables the button from the
+same rule. Later rungs arrive with their ages. · *Status:*
+**MATCHES**.
 
 **TEC-03 — Age research occupies the Town Center.** While an Age is
 researching, the TC's queue is busy: villager production queued behind it
 waits, and nothing else can be inserted ahead. On completion, the owner's
 age flips for the whole empire at once (TEC-04).
-*Source:* GAP 5.1; standard reference behavior. · *Impl:* the shipped
-train queue generalizes to a queue of (unit | tech | age) entries per
-building — one record type, so stalls (BLD-10) and refunds (TEC-05)
-behave identically. · *Status:* **MISSING** (queue exists; only villager
-entries).
+*Source:* GAP 5.1; standard reference behavior. · *Impl:* shipped (M6) —
+the train queue is a queue of typed entries (unit | technology) per
+building, one record type, so stalls (BLD-10) behave identically for
+units and research (a technology head is never population-stalled).
+· *Status:* **MATCHES**.
 
 **TEC-04 — Age-up applies empire-wide at the completion tick.** At the
 tick research completes: building HP/armor columns step up (BLD-11),
 automatic unit bonuses apply (CLS-04), and the new age's buildings,
 units, and techs unlock (BLD-15) — all as lookups against the owner's new
 age, so there is no empire-wide state sweep to get wrong.
-*Source:* MECHANICS-STUDY §5 preamble, §7. · *Impl:* age is one field per
-player; every stat lookup already keys on it (the nyan-patch shape:
-age is a patch layer, OPENAGE-RESEARCH §2.7). · *Status:* **MISSING**.
+*Source:* MECHANICS-STUDY §5 preamble, §7. · *Impl:* shipped in part
+(M6) — age is one field per player; the automatic unit bonuses
+(CLS-04) and the unlocks (BLD-15) apply as lookups against the new
+age at the completion tick, with no empire-wide sweep to get wrong.
+The building HP/armor step-up (BLD-11) does not happen. · *Status:*
+**DIFFERS**.
 
 **TEC-05 — Research is queued, paid up front, refunded on cancel.** A
 technology is researched by one building, one item at a time in its
@@ -1309,10 +1366,11 @@ progress when its building is destroyed is lost with the building
 (cancelled without refund only in the destruction case — the queue dies
 with the building, CMB-15).
 *Source:* GAP 5.1; standard reference behavior (queue/cancel model). ·
-*Impl:* one queue implementation reused by all production buildings;
-refunds flow through the same atomic stockpile API as costs (ECO-01). ·
-*Status:* **DIFFERS** (TC unit queue + enqueue-payment shipped; no cancel,
-no techs, no per-building queues).
+*Impl:* one queue implementation reused by all production buildings —
+units and technologies, Town Center included — since M6; costs flow
+through the same atomic stockpile API as everything else (ECO-01).
+· *Status:* **DIFFERS** (queued + paid at enqueue shipped for units
+and techs; cancelling — and therefore refunds — does not exist yet).
 
 **TEC-06 — Tech effects are data patches applied at completion.** A
 technology's effect is a named patch: flat additions to attack/armor
@@ -1323,9 +1381,13 @@ villager +15 HP, +1/+2 armor, +0.1 speed). Patches apply to all owned
 (base row + line-upgrade row + patch objects) at lookup time.
 *Source:* MECHANICS-STUDY §8 (the generic tech list with costs/times/
 effects); OPENAGE-RESEARCH §2.7 (patch-object data shape). · *Impl:* the
-owner's researched-tech set is hashed per-player state; stat lookups fold
-the patches deterministically. No tech ever becomes a code branch. ·
-*Status:* **MISSING** (GAP §5 entire).
+owner's researched-tech set is hashed per-player state; `Sim::stats_for`
+folds the owner's age layer and researched patches into the base row at
+lookup time, so no tech is a code branch in the consumers. Shipped
+patches (M6) are all flat: Loom (exactly the example above, +0.1 speed
+included), Fletching, Scale Mail Armor, Padded Archer Armor, and the
+Man-at-Arms line upgrade (CLS-03). Percentage patches have no instance
+yet. · *Status:* **MATCHES**.
 
 **TEC-07 — Techs chain by prerequisites.** Technologies require an age, a
 building, and often a prior tech (Wheelbarrow → Hand Cart; Devotion →
@@ -1333,7 +1395,10 @@ Faith; Double-Bit Axe → Bow Saw → Two-Man Saw). The tech tree UI shows
 the whole graph with met/unmet prerequisites (INF-06).
 *Source:* MECHANICS-STUDY §8; Technology wiki (full generic list). ·
 *Impl:* prerequisite fields in the tech table, evaluated by the same
-availability function as BLD-15. · *Status:* **MISSING**.
+availability function as BLD-15. Shipped prerequisites are (age,
+host building) pairs — the first two links of every chain; no shipped
+technology yet requires a prior technology, and the tree UI (INF-06)
+does not exist. · *Status:* **DIFFERS**.
 
 **TEC-08 — Percent effects apply before armor subtraction; flat effects
 are part of the stat.** Where a tech grants "attack +X%", it scales the
@@ -1343,8 +1408,10 @@ to the attack/armor stat — both are just patch arithmetic (TEC-06), but
 the *order* matters and is fixed here: percentages act on the pre-armor
 attack value, per class.
 *Source:* MECHANICS-STUDY §1.1 (post/pre-armor clarifications). · *Impl:*
-the layered lookup applies flat adds, then percentage scalars, per class
-column; CMB-01 sees only final values. · *Status:* **MISSING**.
+the layered lookup applies flat adds into the stat row before CMB-01
+ever sees it — true for every shipped technology (M6). No percentage
+technology exists yet to exercise the ordering's other half.
+· *Status:* **DIFFERS**.
 
 **TEC-09 — Production-speed techs scale work rates.** Technologies like
 Conscription (+33% work rate at military production buildings, Siege
@@ -1756,8 +1823,12 @@ work, not a rule change. · *Status:* **MATCHES** (M5, 2026-10-16, at v1
 depth: continuous villager production to a profile target,
 deficit-balanced resource assignment with food first, houses built
 ahead of the population cap, a Barracks, alternating Militia/Archer
-production, and a rally staged toward the enemy. Age-up timings and
-expansion camps wait for their systems (M6).)
+production, and a rally staged toward the enemy. M6, 2026-10-16: the
+script also raises a Mill by its berries and a Lumber Camp by its
+woodline — its Feudal pair — researches Loom once the economy rolls,
+advances to the Feudal Age when the food allows, and fields its
+Archers from an Archery Range; it does not use Farms, the Mining
+Camp, the Stable, the Blacksmith or Man-at-Arms yet.)
 
 **AI-05 — The AI resigns when hopeless.** An AI with no Town Center, no
 villagers, and no path to rebuild resigns rather than playing to the
@@ -2093,9 +2164,11 @@ unit/building shows its portrait, HP bar, attack/armor stats, and (for
 your production buildings) queue and rally (INF-06). A group selection
 shows a grid of portraits with per-unit HP tinting. Enemy entities show
 HP when visible; their orders, queues, and cargo never.
-*Source:* GAP 11.5, 11.6. · *Impl:* the selection panel ships in basic
-form (kind name + count; building panel for the TC). HP display waits on
-the M3 HP model + ABI exposure. · *Status:* **DIFFERS**.
+*Source:* GAP 11.5, 11.6. · *Impl:* the selection panel ships with kind
+name + HP (M3's HP model + ABI) and, for production buildings, the
+queue contents — units and research alike (M6); attack/armor stats
+are not shown, and rally points have no visual marker yet.
+· *Status:* **DIFFERS**.
 
 **INF-06 — The command panel is the tech tree's front door.** A selected
 unit/building's panel shows exactly its available actions (build menu,
@@ -2168,12 +2241,12 @@ this document (2026-10-16).
 | 3 | Visibility & exploration (VIS) | 10 | 1 | 1 | 8 |
 | 4 | Selection & orders (SEL) | 16 | 12 | 3 | 1 |
 | 5 | Movement, pathfinding & collision (MOV) | 12 | 3 | 4 | 5 |
-| 6 | Economy & drop-off (ECO) | 17 | 8 | 3 | 6 |
-| 7 | Buildings & placement (BLD) | 15 | 7 | 2 | 6 |
-| 8 | Combat & damage (CMB) | 16 | 0 | 0 | 16 |
-| 9 | Projectiles & ballistics (PRJ) | 10 | 0 | 0 | 10 |
-| 10 | Unit classes & counters (CLS) | 8 | 0 | 0 | 8 |
-| 11 | Technologies & age advancement (TEC) | 11 | 0 | 1 | 10 |
+| 6 | Economy & drop-off (ECO) | 17 | 13 | 2 | 2 |
+| 7 | Buildings & placement (BLD) | 15 | 8 | 4 | 3 |
+| 8 | Combat & damage (CMB) | 16 | 10 | 3 | 3 |
+| 9 | Projectiles & ballistics (PRJ) | 10 | 4 | 4 | 2 |
+| 10 | Unit classes & counters (CLS) | 8 | 5 | 0 | 3 |
+| 11 | Technologies & age advancement (TEC) | 11 | 3 | 5 | 3 |
 | 12 | Monks, conversion & relics (MNK) | 13 | 0 | 0 | 13 |
 | 13 | Trade, market & tribute (TRD) | 8 | 0 | 0 | 8 |
 | 14 | Garrison, transport & repair (GAR) | 10 | 0 | 0 | 10 |
@@ -2181,11 +2254,14 @@ this document (2026-10-16).
 | 16 | Victory, scoring & game modes (VIC) | 12 | 0 | 1 | 11 |
 | 17 | Multiplayer determinism (NET) | 11 | 2 | 1 | 8 |
 | 18 | Information rules (INF) | 11 | 2 | 4 | 5 |
-| | **Total** | **213** | **51** | **26** | **136** |
+| | **Total** | **213** | **79** | **38** | **96** |
 
-Reading: the foundation systems (§1, §4–§7 client/economy halves) are
-largely in place; the entire combat stack (§8–§10, §12) is greenfield,
-which is exactly what the milestone plan (§B) assumes.
+Reading: the foundation systems (§1, §4–§7) are largely in place; the
+combat stack (§8–§10) landed with M3 and the age/technology layer
+(§11) with M6, so the remaining greenfield is concentrated in the
+systems whose content has not been built yet — monks (§12), trade
+(§13), garrison (§14), the world itself (§2/§3: terrain, fog, water)
+and multiplayer (§17).
 
 ---
 
@@ -2237,7 +2313,19 @@ ECO-06 (Mill/Lumber/Mining camps — zero-learning-critical), ECO-07
 (force drop-off), ECO-14 completed (farm techs, reseed), GAR-01…08
 (garrison, arrows, Town Bell), MNK-01…13 (monks, conversion, relics),
 TRD-01…08 (market, trade), VIC-02…05 (standard victory, score), INF-07,
-INF-11.
+INF-11. *(Shipped 2026-10-16, scoped to the first age rung: the
+Dark → Feudal ladder with TEC-02/03 and the shared TC queue; Loom and
+the first Blacksmith line (Fletching, Scale Mail, Padded Archer
+Armor) plus the Man-at-Arms line upgrade through the TEC-06 patch
+engine; ECO-06/07 complete (nearest-valid drop-off routing, force
+drop-off, the Farm-needs-Mill gate); the Feudal buildings (Archery
+Range — Archers move there from the Barracks — Stable, Blacksmith)
+with BLD-15 gating; CLS-03/04. Carried to later milestones: the
+Castle/Imperial rungs, BLD-07 repair, BLD-11's automatic building
+step-up, ECO-14's farm techs/reseed, GAR-01…08 garrison + Town Bell,
+MNK-01…13 monks, TRD-01…08 market/trade, VIC-02…05, and queue
+cancel/refund (TEC-05). §8–§10 were also re-audited against the
+shipped M3 code in this pass — their MISSING tags were stale.)*
 
 **M7 — World: maps, terrain, fog, water.** MAP-02…09 (sizes, terrain,
 elevation, random maps), MAP-04 completed (trees as blocking nodes),

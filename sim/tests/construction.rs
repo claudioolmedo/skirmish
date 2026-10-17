@@ -149,6 +149,32 @@ fn farm_completes_is_gatherable_depletes_and_frees_the_ground() {
     let mut sim = Sim::new(41);
     let start_wood = sim.stockpile().amount(ResourceKind::Wood);
     let start_food = sim.stockpile().amount(ResourceKind::Food);
+    // M6: Farms are gated behind a standing Mill (OPENING-SPEC
+    // §2.4) — raise one first, at (20,20), west of the farm plot.
+    // The gate itself is pinned in the tech suite; here the Mill is
+    // setup, and it also becomes the farm's nearest food drop-off
+    // (deposits count the same either way).
+    build(&mut sim, 2, BuildingKind::Mill, 20, 20);
+    let mill_up = run_until(&mut sim, 20_000, |s| {
+        s.buildings()
+            .iter()
+            .any(|b| b.kind == BuildingKind::Mill && b.complete)
+    });
+    assert!(mill_up, "mill never completed");
+    assert_eq!(
+        sim.stockpile().amount(ResourceKind::Wood),
+        start_wood - I16F16::from_num(100),
+        "the mill costs 100 wood at placement"
+    );
+    // Villager 2 chops wood for the rest of the test — the final
+    // re-placement check needs 60 wood in hand again.
+    let tree = sim
+        .nodes()
+        .iter()
+        .find(|n| n.kind == NodeKind::Tree)
+        .unwrap()
+        .id;
+    sim.push_command(Command::Gather { entity: 2, node: tree });
     // M4 note: the plot sits east of the wall, far from every other
     // food node — when the field dries, ECO-09 retargeting must find
     // nothing within its radius and the farmer goes idle, which is
@@ -159,8 +185,8 @@ fn farm_completes_is_gatherable_depletes_and_frees_the_ground() {
     sim.tick();
     assert_eq!(
         sim.stockpile().amount(ResourceKind::Wood),
-        start_wood - I16F16::from_num(60),
-        "60 wood must be deducted at placement"
+        start_wood - I16F16::from_num(160),
+        "60 wood must be deducted at placement (after the mill's 100)"
     );
     // A farm never blocks cells — the farmer works standing on it.
     assert!(!sim.grid().is_dynamic(28, 20));
@@ -268,26 +294,38 @@ fn invalid_placements_are_rejected_whole() {
 #[test]
 fn unaffordable_placement_is_rejected() {
     let mut sim = Sim::new(47);
-    // Three farms = 180 of the 200 starting wood; the fourth cannot
-    // be paid for and must be rejected without deduction.
-    for (i, (cx, cy)) in [(18, 20), (27, 20), (33, 27)].iter().enumerate() {
-        build(&mut sim, 1 + (i as u32) % 3, BuildingKind::Farm, *cx, *cy);
-    }
+    // M6 adaptation: the scenario spends the 200 starting wood
+    // through the Farm gate's own buildings — a Mill (100) and a
+    // Farm (60) leave 40, and a second Farm (60) cannot be paid
+    // for: it must be rejected without deduction. (Pre-M6 this was
+    // three Farms at 60; the rejection semantics under test are
+    // unchanged.)
+    build(&mut sim, 1, BuildingKind::Mill, 16, 20); // (18, 20) has a sheep on a corner cell
     sim.tick();
-    assert_eq!(sim.buildings().len(), 3);
+    assert_eq!(sim.buildings().len(), 1);
     assert_eq!(
         sim.stockpile().amount(ResourceKind::Wood),
-        I16F16::from_num(20)
+        I16F16::from_num(100)
     );
-    build(&mut sim, 1, BuildingKind::Farm, 38, 33);
+    // The Farm gate needs the Mill *standing* — wait for it.
+    let mill_up = run_until(&mut sim, 20_000, |s| s.buildings()[0].complete);
+    assert!(mill_up, "mill never completed");
+    build(&mut sim, 2, BuildingKind::Farm, 27, 20);
     sim.tick();
-    assert_eq!(sim.buildings().len(), 3, "unpayable farm was placed");
+    assert_eq!(sim.buildings().len(), 2);
     assert_eq!(
         sim.stockpile().amount(ResourceKind::Wood),
-        I16F16::from_num(20),
+        I16F16::from_num(40)
+    );
+    build(&mut sim, 3, BuildingKind::Farm, 33, 27);
+    sim.tick();
+    assert_eq!(sim.buildings().len(), 2, "unpayable farm was placed");
+    assert_eq!(
+        sim.stockpile().amount(ResourceKind::Wood),
+        I16F16::from_num(40),
         "rejected placement deducted wood"
     );
-    let (fx, fy) = anchor_point(&sim, 38, 33);
+    let (fx, fy) = anchor_point(&sim, 33, 27);
     assert!(!sim.can_build(1, BuildingKind::Farm, fx, fy));
 }
 
@@ -329,10 +367,15 @@ fn build_script_replays_bit_identically() {
                     });
                 }
                 10 => {
+                    // M6 adaptation: this slot built a Farm in M2.5;
+                    // Farms now require a standing Mill (the gate
+                    // this suite's farm test pins), so the script
+                    // raises the Mill itself — the replay property
+                    // under test is unchanged.
                     let (x, y) = anchor_point(&sim, 20, 27);
                     sim.push_command(Command::Build {
                         entity: 2,
-                        kind: BuildingKind::Farm,
+                        kind: BuildingKind::Mill,
                         x,
                         y,
                     });
@@ -359,7 +402,7 @@ fn build_script_replays_bit_identically() {
     assert_eq!(a, b, "identical build scripts diverged");
     let c = run(42, true);
     assert_ne!(a, c, "an extra build order did not change the hash stream");
-    // Sanity: the script really exercised the systems (house done, farm
+    // Sanity: the script really exercised the systems (house done, mill
     // raised, training completed).
     let mut probe = Sim::new(42);
     let (hx, hy) = anchor_point(&probe, 18, 27);

@@ -55,12 +55,17 @@ pub enum EntityKind {
     Boar,
     /// M3: passive Gaia animal — flees when attacked.
     Deer,
+    /// M6: the Militia line's Feudal tier (CLS-03) — never trained
+    /// directly: existing Militia become Man-at-Arms when the
+    /// Barracks upgrade completes, and later Militia production
+    /// spawns as Man-at-Arms while the upgrade stands.
+    ManAtArms,
 }
 
 impl EntityKind {
     /// Stable tag for the state hash and the WASM kind array:
     /// 0 = villager, 1 = town center, 2 = scout cavalry, 3 = militia,
-    /// 4 = archer, 5 = sheep, 6 = boar, 7 = deer.
+    /// 4 = archer, 5 = sheep, 6 = boar, 7 = deer, 8 = man-at-arms (M6).
     pub fn tag(self) -> u8 {
         match self {
             EntityKind::Villager => 0,
@@ -71,6 +76,7 @@ impl EntityKind {
             EntityKind::Sheep => 5,
             EntityKind::Boar => 6,
             EntityKind::Deer => 7,
+            EntityKind::ManAtArms => 8,
         }
     }
 
@@ -85,6 +91,7 @@ impl EntityKind {
             5 => Some(EntityKind::Sheep),
             6 => Some(EntityKind::Boar),
             7 => Some(EntityKind::Deer),
+            8 => Some(EntityKind::ManAtArms),
             _ => None,
         }
     }
@@ -105,12 +112,19 @@ impl EntityKind {
                 | EntityKind::ScoutCavalry
                 | EntityKind::Militia
                 | EntityKind::Archer
+                | EntityKind::ManAtArms
         )
     }
 
-    /// Kinds a production building can train in M3 (the Barracks set).
+    /// Kinds a production building can train *somewhere* (M6: the
+    /// per-building relation is `BuildingKind::trains` — Militia at
+    /// the Barracks, Archers at the Archery Range since M6, Scout
+    /// Cavalry at the Stable).
     pub fn is_trainable(self) -> bool {
-        matches!(self, EntityKind::Militia | EntityKind::Archer)
+        matches!(
+            self,
+            EntityKind::Militia | EntityKind::Archer | EntityKind::ScoutCavalry
+        )
     }
 
     /// Military kinds for the idle-military query (SEL-09): the
@@ -119,7 +133,10 @@ impl EntityKind {
     pub fn is_military(self) -> bool {
         matches!(
             self,
-            EntityKind::ScoutCavalry | EntityKind::Militia | EntityKind::Archer
+            EntityKind::ScoutCavalry
+                | EntityKind::Militia
+                | EntityKind::Archer
+                | EntityKind::ManAtArms
         )
     }
 }
@@ -217,6 +234,33 @@ impl Task {
     }
 }
 
+/// A deposit destination (M6, ECO-06): where a hauling villager
+/// delivers its carry. Before M6 the only destination was the
+/// owner's Town Center; the drop-off buildings (Lumber Camp, Mill,
+/// Mining Camp) join it, each accepting only its resources — the
+/// sim routes every haul to the *nearest valid* destination for
+/// the resource carried.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Dropoff {
+    /// The owner's Town Center (accepts every resource).
+    TownCenter,
+    /// A placed drop-off building, by building id (accepts per its
+    /// kind's resource mask — see `BuildingKind::accepts`).
+    Building(u32),
+}
+
+impl Dropoff {
+    /// Stable tag for the state hash: 1 = town center, 2 = building
+    /// (0 is the hash's "no destination" marker, written by the
+    /// caller for `None`).
+    pub fn tag(self) -> u8 {
+        match self {
+            Dropoff::TownCenter => 1,
+            Dropoff::Building(_) => 2,
+        }
+    }
+}
+
 /// An entity: id, kind, fixed-point position/velocity, an optional move
 /// order, and (for villagers) work state. M3 adds hit points, ownership,
 /// combat state, and animal state.
@@ -257,6 +301,15 @@ pub struct Entity {
     /// is travelling to or actively building. Mutually exclusive with
     /// `task_node` — a fresh order of either kind clears the other.
     pub task_building: Option<u32>,
+    /// The current deposit destination while hauling (M6, ECO-06):
+    /// the nearest valid drop-off for the carried resource, resolved
+    /// when the haul starts and re-resolved every tick of the
+    /// `Returning` phase (a nearer camp completing mid-haul, or the
+    /// destination falling, reroutes the trip). The assignment it
+    /// serves — `task_node`, or `task_building` after a force
+    /// drop-off — is ECO-07's resume marker: it survives the deposit
+    /// and the work cycle resumes from it.
+    pub task_dropoff: Option<Dropoff>,
     /// Resources currently carried. Counted in the stockpile only when
     /// deposited at the Town Center. A `Move` override keeps the carry —
     /// it is neither deposited nor lost, just still on the villager.
@@ -346,6 +399,7 @@ impl Entity {
             task: Task::Idle,
             task_node: None,
             task_building: None,
+            task_dropoff: None,
             carry: I16F16::ZERO,
             carry_kind: None,
             owner,

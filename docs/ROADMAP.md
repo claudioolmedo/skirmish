@@ -25,6 +25,9 @@ it: [The Self-Sustaining System](SUSTAINABILITY.md).
 | **M2** ✅ | Economy: 4 resources, nodes (tree / berry / gold / stone), villagers that gather → carry → deposit at reference rates, Town Center trains villagers |
 | **M2.5** ✅ | Construction: House (+5 population) and Farm built by villagers with in-sim placement validation, population cap, start/pause menus, fullscreen play page at skirmish.online/play |
 | **M3** ✅ | Combat core: HP and damage with armor classes, attack command + auto-acquisition, projectiles with seeded-RNG accuracy, Gaia animals (sheep, boar, deer) with the hunt economy (carcasses, decay, hunt carry 35), starting Scout Cavalry, Barracks training Militia and Archer |
+| **M4** ✅ | Command completeness: queued (shift) orders, rally points, control groups, idle villager/military keys, selection cap 60, minimap orders, formation-keeping group moves, gatherer retargeting |
+| **M5** ✅ | Scripted AI opponent + Conquest: per-player stockpiles/population/buildings, mirrored enemy start, an economy-and-army script (Easy/Normal) playing only through the command queue, victory/defeat |
+| **M6** ✅ | Ages & technologies (first rung): Dark → Feudal research and Loom in the Town Center's shared queue, per-player tech patches applied at stat lookup, the drop-off camps (Lumber Camp / Mill / Mining Camp) with nearest-valid-deposit routing and force drop-off, Farm gated on a Mill, Feudal buildings (Archery Range — Archers move there — Stable, Blacksmith with Fletching / Scale Mail / Padded Archer Armor), the Man-at-Arms line upgrade, and the AI taught the same layer |
 
 The interface on the play page already follows the classic layout — top
 resource bar, bottom-left command panel, bottom-center selection panel,
@@ -43,20 +46,20 @@ as milestones land):
 | 3 | Visibility & exploration (VIS) | 10 | 1 | 1 | 8 |
 | 4 | Selection & orders (SEL) | 16 | 12 | 3 | 1 |
 | 5 | Movement, pathfinding & collision (MOV) | 12 | 3 | 4 | 5 |
-| 6 | Economy & drop-off (ECO) | 17 | 8 | 3 | 6 |
-| 7 | Buildings & placement (BLD) | 15 | 7 | 2 | 6 |
-| 8 | Combat & damage (CMB) | 16 | 0 | 0 | 16 |
-| 9 | Projectiles & ballistics (PRJ) | 10 | 0 | 0 | 10 |
-| 10 | Unit classes & counters (CLS) | 8 | 0 | 0 | 8 |
-| 11 | Technologies & age advancement (TEC) | 11 | 0 | 1 | 10 |
+| 6 | Economy & drop-off (ECO) | 17 | 13 | 2 | 2 |
+| 7 | Buildings & placement (BLD) | 15 | 8 | 4 | 3 |
+| 8 | Combat & damage (CMB) | 16 | 10 | 3 | 3 |
+| 9 | Projectiles & ballistics (PRJ) | 10 | 4 | 4 | 2 |
+| 10 | Unit classes & counters (CLS) | 8 | 5 | 0 | 3 |
+| 11 | Technologies & age advancement (TEC) | 11 | 3 | 5 | 3 |
 | 12 | Monks, conversion & relics (MNK) | 13 | 0 | 0 | 13 |
 | 13 | Trade, market & tribute (TRD) | 8 | 0 | 0 | 8 |
 | 14 | Garrison, transport & repair (GAR) | 10 | 0 | 0 | 10 |
-| 15 | AI behavior & difficulty (AI) | 9 | 0 | 0 | 9 |
-| 16 | Victory, scoring & game modes (VIC) | 12 | 0 | 0 | 12 |
+| 15 | AI behavior & difficulty (AI) | 9 | 4 | 3 | 2 |
+| 16 | Victory, scoring & game modes (VIC) | 12 | 0 | 1 | 11 |
 | 17 | Multiplayer determinism (NET) | 11 | 2 | 1 | 8 |
 | 18 | Information rules (INF) | 11 | 2 | 4 | 5 |
-| | **Total** | **213** | **47** | **22** | **144** |
+| | **Total** | **213** | **79** | **38** | **96** |
 
 Companion documents: the [Gap Analysis](GAP-ANALYSIS.md) inventories every
 missing feature against the code; [Opening Spec](OPENING-SPEC.md) specifies
@@ -84,11 +87,11 @@ From the [Gap Analysis](GAP-ANALYSIS.md): the items that most make Skirmish II
 6. **Queued orders + rally points** — ✅ shipped in M4 (SEL-12, SEL-13); orders feel professional instead of one-shot
 7. **Stances + formations** — army control stops feeling like a blob
 8. **Combat collision feel** — bump-stop in melee, overlap while engaged (partly in via MOV-04)
-9. **Ages** — Feudal/Castle/Imperial progression visibly growing the town — M6
+9. **Ages** — ✅ shipped in M6 (the Dark → Feudal rung, with Loom and the first technology lines; Castle/Imperial rungs come with their content)
 10. **Fog of war + exploration** — M7; scouting, tension, surprise
 11. **Random maps** — M7; a different Arabia every match; replayability itself
 12. **Selection panel + command card with HP** — ✅ shipped on the play page
-13. **Garrison + Town Bell** — M6; defense drama: bell rings, villagers run, arrows fly
+13. **Garrison + Town Bell** — defense drama: bell rings, villagers run, arrows fly (planned for M6; carried to a later milestone)
 14. **Sound: unit barks + alert horn + completion chimes** — feel is half audio
 15. **Military variety** — knight/archer/siege/monk lines with real counters (archer line started in M3)
 
@@ -106,12 +109,20 @@ From the [Gap Analysis](GAP-ANALYSIS.md): the items that most make Skirmish II
   (villagers, houses, Barracks, Militia/Archers) with Easy/Normal
   profiles, attack waves, home defense, and Conquest victory/defeat
   (hash-covered match state). Sandbox remains as a mode. (Rulebook §B
-  and §15/§16 carry the per-rule record; stop/delete (SEL-14) and the
-  animal-economy tags (ECO-11…13) remain open.)
-- **M6 — Ages & technologies.** The Feudal/Castle/Imperial ladder, the full
-  generic building set (Mill, Lumber/Mining Camps, Blacksmith, Market,
-  Monastery, University…), research, garrison + Town Bell, monks and
-  relics, market and trade, first original empires.
+  and §15/§16 carry the per-rule record; stop/delete (SEL-14) remains
+  open. The animal-economy tags ECO-11…13 were confirmed MATCHES in
+  the M6 re-audit.)
+- **M6 — Ages & technologies.** ✅ Shipped 2026-10-16, scoped to the
+  first rung. The Dark → Feudal ladder (500 food, 130 s, two qualifying
+  buildings) and Loom, researched in queues shared with unit production;
+  a per-player technology substrate (age layers + researched patches
+  folded into every stat lookup, hash-covered); the economy buildings —
+  Lumber Camp, Mill, Mining Camp — with nearest-valid-deposit routing,
+  force drop-off, and Farms gated on a Mill; the Feudal buildings
+  (Archery Range, Stable, Blacksmith) and the Man-at-Arms upgrade; the
+  scripted AI taught the same layer. Carried to later milestones: the
+  Castle/Imperial rungs, Market/Monastery/University, garrison + Town
+  Bell, monks and relics, market and trade, repair, and queue cancel.
 - **M7 — Terrain, fog & random maps.** Map sizes and terrain, elevation,
   Arabia-style random map generation, fog of war + black map, water and
   fishing.

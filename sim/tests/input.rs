@@ -260,7 +260,10 @@ fn queued_attack_executes_after_the_current_move() {
 fn queued_build_executes_after_the_current_move() {
     let mut sim = Sim::new(7);
     let near = cell_point(&sim, 18, 23);
-    let site = cell_point(&sim, 20, 27); // house anchor (M2.5's spot)
+    // House anchor east of the wall: the old (20, 27) spot has a
+    // sheep standing on it, and placement refuses to cover a
+    // standing unit (M6 rule).
+    let site = cell_point(&sim, 28, 30);
     let start_wood = sim.stockpile().amount(ResourceKind::Wood);
     sim.push_command(Command::Move {
         entity: 1,

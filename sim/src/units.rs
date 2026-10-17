@@ -97,8 +97,21 @@ pub fn spec(kind: EntityKind) -> &'static UnitSpec {
         EntityKind::Sheep => &SHEEP,
         EntityKind::Boar => &BOAR,
         EntityKind::Deer => &DEER,
+        EntityKind::ManAtArms => &MAN_AT_ARMS,
     }
 }
+
+/// The Archer's attack table with Fletching researched (M6, study
+/// §8: +1 pierce attack; the +1 range is patched separately — see
+/// `Sim::stats_for`). A second static table rather than a computed
+/// row, so every attack table in the game stays `&'static` data.
+pub(crate) static ARCHER_FLETCHING_ATTACKS: &[(u8, i32)] =
+    &[(cls::PIERCE, 5), (cls::SPEARMAN, 3)];
+
+/// The Scout Cavalry's Feudal attack table (M6, CLS-04: attack
+/// 3 → 5 on reaching the Feudal Age; speed and LoS are patched
+/// separately — see `Sim::stats_for`).
+pub(crate) static SCOUT_FEUDAL_ATTACKS: &[(u8, i32)] = &[(cls::MELEE, 5)];
 
 /// Villager (study §3.1): HP 25, attack 3 melee, armor 0/0, RoF 2.0 s,
 /// attack delay ≈0.64 s (community table), speed 0.8, LoS 4.
@@ -237,6 +250,43 @@ static ARCHER: UnitSpec = UnitSpec {
     train_ticks: 2100, // 35 s
 };
 
+/// Man-at-Arms (M6, study §3.2): the Militia line's Feudal tier —
+/// HP 45, attack 6 melee with +2 vs Shock Infantry and +2 vs
+/// Standard Buildings (the bonuses the base tier lacks), armor 0/1,
+/// RoF 2.0 s, speed 0.96, LoS 4. Attack delay 30 ticks matches the
+/// Militia row's adopted community value (the study's FD column
+/// reads 0 for the whole line; the shipped Militia row records the
+/// same choice). The cost fields carry the line's study cost
+/// (50 F / 20 G) but are inert: Man-at-Arms is never trained
+/// directly — it is produced by the Barracks upgrade (CLS-03), and
+/// post-upgrade Militia production spawns this row instead.
+static MAN_AT_ARMS: UnitSpec = UnitSpec {
+    max_hp: 45,
+    attacks: &[
+        (cls::MELEE, 6),
+        (cls::SHOCK_INFANTRY, 2),
+        (cls::STANDARD_BUILDINGS, 2),
+    ],
+    armor_melee: 0,
+    armor_pierce: 1,
+    classes: cls::mask(&[cls::INFANTRY]),
+    range_max: I16F16::ZERO,
+    reload_ticks: 120,
+    attack_delay_ticks: 30,
+    accuracy: 100,
+    projectile_speed: I16F16::ZERO,
+    scatter: I16F16::ZERO,
+    speed: I16F16::from_bits(78_643), // 1.2 (0.96 tiles/s × 1.25)
+    los: I16F16::from_bits(1_048_576), // 16 (4 tiles)
+    radius: I16F16::from_bits(65_536),
+    carcass_food: 0,
+    carcass_decay_bits: 0,
+    food_cost: 50,
+    wood_cost: 0,
+    gold_cost: 20,
+    train_ticks: 1260, // inert (upgrade-only kind); mirrors Militia
+};
+
 /// Sheep (OPENING-SPEC §2.2): 100 food, speed 0.7, LoS ~3, worked at
 /// the shepherd rate once dead. HP is UNVERIFIED — no provided doc
 /// pins sheep HP; 7 is adopted as a tuning constant (a villager's
@@ -348,6 +398,18 @@ mod tests {
         assert_eq!(a.attacks, &[(cls::PIERCE, 4), (cls::SPEARMAN, 3)]);
         let s = spec(EntityKind::ScoutCavalry);
         assert_eq!((s.max_hp, s.armor_pierce), (45, 2));
+        // Man-at-Arms (M6, study §3.2): HP 45, attack 6 + the two
+        // bonus rows, armor 0/1.
+        let maa = spec(EntityKind::ManAtArms);
+        assert_eq!((maa.max_hp, maa.armor_melee, maa.armor_pierce), (45, 0, 1));
+        assert_eq!(
+            maa.attacks,
+            &[
+                (cls::MELEE, 6),
+                (cls::SHOCK_INFANTRY, 2),
+                (cls::STANDARD_BUILDINGS, 2)
+            ]
+        );
         let b = spec(EntityKind::Boar);
         assert_eq!((b.max_hp, b.carcass_food), (75, 340));
         assert_eq!(spec(EntityKind::Sheep).carcass_food, 100);

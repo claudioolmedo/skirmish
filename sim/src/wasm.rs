@@ -23,6 +23,13 @@
 //! plain constructor), the match-state getter (Conquest), the
 //! per-player stockpile getter, building attack orders, and owner +
 //! HP columns on the building list (buildings take damage now).
+//! M6 adds: the six new build commands (camps, Archery Range,
+//! Stable, Blacksmith) with their queued variants, Scout training
+//! (the Stable), research commands and block-reason queries for
+//! the Town Center and placed buildings, the age/tech getters, the
+//! typed queue arrays (units and research share the queues), the
+//! Town Center's head-progress getter, and force drop-off. Entity
+//! HP maximums are now the owner's *effective* maxima (Loom).
 
 use wasm_bindgen::prelude::*;
 
@@ -32,6 +39,7 @@ use crate::build::BuildingKind;
 use crate::econ::ResourceKind;
 use crate::entity::EntityKind;
 use crate::grid;
+use crate::tech::TechId;
 use crate::{Command, MatchMode, QueuedOrder, Sim};
 
 /// A `Sim` owned by JavaScript. One instance per match.
@@ -158,10 +166,17 @@ impl WasmSim {
         self.push_train_at(building, EntityKind::Militia)
     }
 
-    /// Enqueue an Archer at a completed Barracks (M3) — see
-    /// `push_train_militia`.
+    /// Enqueue an Archer at a completed Archery Range (M6 — the
+    /// Range is the Archer's home since M6; in M3 the Barracks
+    /// trained them by brief). See `push_train_militia`.
     pub fn push_train_archer(&mut self, building: u32) -> bool {
         self.push_train_at(building, EntityKind::Archer)
+    }
+
+    /// Enqueue a Scout Cavalry at a completed Stable (M6). See
+    /// `push_train_militia`.
+    pub fn push_train_scout(&mut self, building: u32) -> bool {
+        self.push_train_at(building, EntityKind::ScoutCavalry)
     }
 
     fn push_train_at(&mut self, building: u32, kind: EntityKind) -> bool {
@@ -172,15 +187,122 @@ impl WasmSim {
         ok
     }
 
-    /// Why training `kind_tag` (3 militia, 4 archer) at `building`
-    /// cannot currently proceed: same tags as `train_block_reason`
-    /// (0 ok, 1 cannot afford, 2 queue full / not trainable here,
-    /// 3 housed). UI affordance only.
+    /// Why training `kind_tag` (3 militia, 4 archer, 2 scout) at
+    /// `building` cannot currently proceed: same tags as
+    /// `train_block_reason` (0 ok, 1 cannot afford, 2 queue full /
+    /// not trainable here, 3 housed). UI affordance only.
     pub fn building_train_block(&self, building: u32, kind_tag: u32) -> u32 {
         match EntityKind::from_tag(kind_tag as u8) {
             Some(kind) => self.inner.train_at_block(building, kind).tag() as u32,
             None => 2,
         }
+    }
+
+    // --- M6: research ---------------------------------------------
+    // Research rides the same enqueue pattern as training: the
+    // cost is charged when the command applies, the item occupies
+    // its host's shared queue (TEC-03/05).
+
+    /// Enqueue Loom at the Town Center (50 gold, 25 s). Returns
+    /// whether the order *would* be accepted against current state.
+    pub fn push_research_loom(&mut self) -> bool {
+        self.push_research_tc(TechId::Loom)
+    }
+
+    /// Enqueue the Feudal Age advancement at the Town Center
+    /// (500 food, 130 s; needs 2 completed Dark-Age buildings).
+    pub fn push_research_feudal(&mut self) -> bool {
+        self.push_research_tc(TechId::FeudalAge)
+    }
+
+    fn push_research_tc(&mut self, tech: TechId) -> bool {
+        let ok = self.inner.can_research_tc(tech);
+        if ok {
+            self.inner.push_command(Command::ResearchTc { tech });
+        }
+        ok
+    }
+
+    /// Enqueue a technology at a placed building by tech tag
+    /// (2 fletching, 3 scale mail, 4 padded archer armor at the
+    /// Blacksmith; 5 man-at-arms at the Barracks). Returns whether
+    /// the order *would* be accepted.
+    pub fn push_research_at(&mut self, building: u32, tech_tag: u32) -> bool {
+        let Some(tech) = TechId::from_tag(tech_tag as u8) else {
+            return false;
+        };
+        let ok = self.inner.can_research_at(building, tech);
+        if ok {
+            self.inner
+                .push_command(Command::ResearchAt { building, tech });
+        }
+        ok
+    }
+
+    /// Why research `tech_tag` at the Town Center cannot currently
+    /// proceed: 0 ok, 1 cannot afford, 2 queue full / not a Town
+    /// Center technology, 3 already researched or queued,
+    /// 4 requirements not met. UI affordance only.
+    pub fn research_block_tc(&self, tech_tag: u32) -> u32 {
+        match TechId::from_tag(tech_tag as u8) {
+            Some(tech) => self.inner.research_block_tc(tech).tag() as u32,
+            None => 2,
+        }
+    }
+
+    /// Why research `tech_tag` at `building` cannot currently
+    /// proceed: same tags as `research_block_tc`. UI affordance.
+    pub fn research_block_at(&self, building: u32, tech_tag: u32) -> u32 {
+        match TechId::from_tag(tech_tag as u8) {
+            Some(tech) => self.inner.research_block_at(building, tech).tag() as u32,
+            None => 2,
+        }
+    }
+
+    /// The human player's current age (M6): 0 Dark Age, 1 Feudal.
+    pub fn age(&self) -> u32 {
+        self.inner.age_of(crate::entity::OWNER_PLAYER).tag() as u32
+    }
+
+    /// The human player's researched-technology bitmask (M6): bit
+    /// per tech tag (`TechId::tag`); the Feudal bit reads set while
+    /// the player stands in the Feudal Age.
+    pub fn tech_mask(&self) -> u32 {
+        self.inner.tech_mask_of(crate::entity::OWNER_PLAYER) as u32
+    }
+
+    /// The Town Center's queue as flat entry codes, head first
+    /// (M6): unit kinds keep their entity tag; technologies are
+    /// `100 + tech tag`. Behind the panel's queue display.
+    pub fn tc_queue(&self) -> Vec<u32> {
+        self.inner.tc_queue().iter().map(|e| e.code()).collect()
+    }
+
+    /// A placed building's queue as flat entry codes (M6) — see
+    /// `tc_queue`.
+    pub fn building_queue(&self, building: u32) -> Vec<u32> {
+        self.inner
+            .building_queue(building)
+            .iter()
+            .map(|e| e.code())
+            .collect()
+    }
+
+    /// Progress on the Town Center queue's head entry, 0..1 (M6).
+    pub fn tc_progress(&self) -> f64 {
+        I16F16::from_bits(self.inner.tc_progress_bits()).to_num::<f64>()
+    }
+
+    /// Force drop-off (M6, ECO-07): order a loaded villager to haul
+    /// its carry to the nearest valid drop-off now, then return to
+    /// its previous work on its own. Returns whether the order
+    /// *would* be accepted (carrying something, somewhere to go).
+    pub fn push_force_deposit(&mut self, entity: u32) -> bool {
+        let ok = self.inner.can_force_deposit(entity);
+        if ok {
+            self.inner.push_command(Command::ForceDeposit { entity });
+        }
+        ok
     }
 
     /// Order a villager to build a House with its 2×2-cell footprint
@@ -203,6 +325,44 @@ impl WasmSim {
     /// footprint) — see `push_build_house`.
     pub fn push_build_barracks(&mut self, entity: u32, x: f64, y: f64) -> bool {
         self.push_build(entity, BuildingKind::Barracks, x, y)
+    }
+
+    /// Order a villager to build a Lumber Camp (100 wood, 2×2 —
+    /// M6; the wood drop-off) — see `push_build_house`.
+    pub fn push_build_lumber_camp(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build(entity, BuildingKind::LumberCamp, x, y)
+    }
+
+    /// Order a villager to build a Mill (100 wood, 2×2 — M6; the
+    /// food drop-off, and the Farm prerequisite) — see
+    /// `push_build_house`.
+    pub fn push_build_mill(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build(entity, BuildingKind::Mill, x, y)
+    }
+
+    /// Order a villager to build a Mining Camp (100 wood, 2×2 —
+    /// M6; the gold + stone drop-off) — see `push_build_house`.
+    pub fn push_build_mining_camp(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build(entity, BuildingKind::MiningCamp, x, y)
+    }
+
+    /// Order a villager to build an Archery Range (175 wood, 3×3 —
+    /// M6; Feudal Age, requires a Barracks) — see
+    /// `push_build_house`.
+    pub fn push_build_archery_range(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build(entity, BuildingKind::ArcheryRange, x, y)
+    }
+
+    /// Order a villager to build a Stable (175 wood, 3×3 — M6;
+    /// Feudal Age, requires a Barracks) — see `push_build_house`.
+    pub fn push_build_stable(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build(entity, BuildingKind::Stable, x, y)
+    }
+
+    /// Order a villager to build a Blacksmith (150 wood, 3×3 — M6;
+    /// Feudal Age; the technology host) — see `push_build_house`.
+    pub fn push_build_blacksmith(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build(entity, BuildingKind::Blacksmith, x, y)
     }
 
     fn push_build(&mut self, entity: u32, kind: BuildingKind, x: f64, y: f64) -> bool {
@@ -261,6 +421,36 @@ impl WasmSim {
     /// Queue a Barracks build — see `push_build_house_queued`.
     pub fn push_build_barracks_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
         self.push_build_queued(entity, BuildingKind::Barracks, x, y)
+    }
+
+    /// Queue a Lumber Camp build (M6) — see `push_build_house_queued`.
+    pub fn push_build_lumber_camp_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build_queued(entity, BuildingKind::LumberCamp, x, y)
+    }
+
+    /// Queue a Mill build (M6) — see `push_build_house_queued`.
+    pub fn push_build_mill_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build_queued(entity, BuildingKind::Mill, x, y)
+    }
+
+    /// Queue a Mining Camp build (M6) — see `push_build_house_queued`.
+    pub fn push_build_mining_camp_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build_queued(entity, BuildingKind::MiningCamp, x, y)
+    }
+
+    /// Queue an Archery Range build (M6) — see `push_build_house_queued`.
+    pub fn push_build_archery_range_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build_queued(entity, BuildingKind::ArcheryRange, x, y)
+    }
+
+    /// Queue a Stable build (M6) — see `push_build_house_queued`.
+    pub fn push_build_stable_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build_queued(entity, BuildingKind::Stable, x, y)
+    }
+
+    /// Queue a Blacksmith build (M6) — see `push_build_house_queued`.
+    pub fn push_build_blacksmith_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build_queued(entity, BuildingKind::Blacksmith, x, y)
     }
 
     fn push_build_queued(&mut self, entity: u32, kind: BuildingKind, x: f64, y: f64) -> bool {
@@ -358,7 +548,8 @@ impl WasmSim {
     /// building — `[id, kind, x, y, progress, complete, cell_x,
     /// cell_y, size, queue_len, train_progress, owner, hp]` — in
     /// building id order. `kind` tags: 0 house, 1 farm, 2 barracks
-    /// (M3). `progress` is the construction fraction 0..1 (1 when
+    /// (M3); 3 lumber camp, 4 mill, 5 mining camp, 6 archery range,
+    /// 7 stable, 8 blacksmith (M6). `progress` is the construction fraction 0..1 (1 when
     /// complete); `complete` is 0/1; `size` is the footprint edge in
     /// cells; `queue_len` and `train_progress` (0..1 on the queue's
     /// head) describe a production building's queue. M5 adds `owner`
@@ -418,14 +609,15 @@ impl WasmSim {
         self.inner.villager_count()
     }
 
-    /// Villagers waiting in the Town Center training queue.
+    /// Entries waiting in the Town Center queue (villagers and,
+    /// since M6, research — the queue is shared).
     pub fn train_queue_len(&self) -> u32 {
         self.inner.train_queue_len()
     }
 
     /// Per-entity kind tags in id order: 0 = villager, 1 = town center,
     /// 2 = scout cavalry, 3 = militia, 4 = archer, 5 = sheep, 6 = boar,
-    /// 7 = deer (M3).
+    /// 7 = deer (M3), 8 = man-at-arms (M6).
     pub fn entity_kinds(&self) -> Vec<u8> {
         self.inner.entities().iter().map(|e| e.kind.tag()).collect()
     }
@@ -440,12 +632,13 @@ impl WasmSim {
     /// Per-entity hit points as flat `[hp, max_hp, …]` pairs in id
     /// order (M3). An entity with hp < 1 is dead (the CMB-02 rule) —
     /// the renderer skips it. The Town Center reports its full table
-    /// HP; buildings take no damage in M3.
+    /// HP; buildings take no damage in M3. M6: `max_hp` is the
+    /// owner's *effective* maximum (a Loomed villager reads 40).
     pub fn entity_hp(&self) -> Vec<f64> {
         let mut out = Vec::with_capacity(self.inner.entities().len() * 2);
         for e in self.inner.entities() {
             out.push(e.hp.to_num::<f64>());
-            out.push(crate::units::spec(e.kind).max_hp as f64);
+            out.push(self.inner.stats_for(e.owner, e.kind).max_hp as f64);
         }
         out
     }

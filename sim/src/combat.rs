@@ -276,8 +276,13 @@ impl Sim {
         if self.entities[idx].returning_home {
             let (hx, hy) = (self.entities[idx].home_x, self.entities[idx].home_y);
             if self.distance_to(idx, hx, hy) > HOME_ARRIVE {
-                if self.entities[idx].order.is_none() {
-                    self.set_move_order(idx, hx, hy);
+                if self.entities[idx].order.is_none()
+                    && !self.set_move_order(idx, hx, hy)
+                {
+                    // Home is unreachable (a building completed over
+                    // the post): rest here instead of re-pathing
+                    // every tick (M6 perf fix).
+                    self.entities[idx].returning_home = false;
                 }
                 return;
             }
@@ -328,7 +333,7 @@ impl Sim {
         self.set_move_order(idx, dest_x, dest_y);
     }
 
-    /// Auto-acquisition (CMB-08): idle Militia and Archers of *any*
+    /// Auto-acquisition (CMB-08): idle Militia-line units and Archers of *any*
     /// player engage the closest enemy inside their LoS. In M3 the
     /// only enemies were boars; since M5 an opposing player's units
     /// qualify too (its Town Center never does — razing a Town
@@ -342,7 +347,10 @@ impl Sim {
             let e = &self.entities[idx];
             if e.dead
                 || !is_player_owner(e.owner)
-                || !matches!(e.kind, EntityKind::Militia | EntityKind::Archer)
+                || !matches!(
+                    e.kind,
+                    EntityKind::Militia | EntityKind::ManAtArms | EntityKind::Archer
+                )
                 || e.attack_target.is_some()
                 || e.attack_building.is_some()
                 || e.order.is_some()
@@ -350,7 +358,7 @@ impl Sim {
                 continue;
             }
             let owner = e.owner;
-            let spec = units::spec(e.kind);
+            let spec = self.unit_stats(idx); // M6: the owner's effective LoS
             let (px, py) = (e.pos_x, e.pos_y);
             let mut best: Option<(i64, u32)> = None; // (distance² bits, id)
             for t in &self.entities {
@@ -388,11 +396,13 @@ impl Sim {
     /// their ground (order cleared) and suppress separation (MOV-04).
     fn attack_step(&mut self, idx: usize) {
         let tick = self.tick;
-        let (tid, kind) = match self.entities[idx].attack_target {
-            Some(t) if !self.entities[idx].dead => (t, self.entities[idx].kind),
+        let tid = match self.entities[idx].attack_target {
+            Some(t) if !self.entities[idx].dead => t,
             _ => return,
         };
-        let spec = units::spec(kind);
+        // M6: the attacker's effective row (owner's techs/age —
+        // Fletching's range and attack enter here, via the lookups).
+        let spec = self.unit_stats(idx);
         if spec.attacks.is_empty() {
             self.entities[idx].clear_combat();
             return;
@@ -452,7 +462,14 @@ impl Sim {
                 Some(o) => steer::vec_len(o.target_x - tx, o.target_y - ty) > CHASE_REPATH,
             };
             if need {
-                self.set_move_order(idx, tx, ty);
+                if !self.set_move_order(idx, tx, ty) {
+                    // The victim cannot be reached from here (it
+                    // stands inside a footprint pocket, or this
+                    // attacker is enclosed): the chase is over —
+                    // retrying would re-run a failing full-grid A*
+                    // every tick (M6 perf fix).
+                    self.entities[idx].clear_combat();
+                }
             }
         }
     }
@@ -462,7 +479,10 @@ impl Sim {
     /// ranged attacker. Either way the reload restarts from this
     /// landing tick (CMB-05) and the engagement is underway.
     fn resolve_strike(&mut self, idx: usize, ti: usize) {
-        let spec = units::spec(self.entities[idx].kind);
+        // M6: release-time snapshot of the attacker's *effective*
+        // attacks — a Fletching completing mid-flight does not
+        // upgrade an arrow already in the air (TEC-06 discipline).
+        let spec = self.unit_stats(idx);
         let attacker_id = self.entities[idx].id;
         let owner = self.entities[idx].owner;
         let (ax, ay) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
@@ -526,8 +546,11 @@ impl Sim {
         ti: usize,
         mishit: bool,
     ) {
-        let tspec = units::spec(self.entities[ti].kind);
-        let full = compute_damage(attacks, tspec);
+        // M6: damage reads the target's *effective* armor — Loom's
+        // +1/+2 and the Blacksmith armor lines land here (CMB-01
+        // against the patched row, TEC-06).
+        let tspec = self.unit_stats(ti);
+        let full = compute_damage(attacks, &tspec);
         let dmg = if mishit {
             // CMB-13: a mishit deals 50% (fixed-point halving is exact).
             I16F16::from_num(full) / I16F16::from_num(2)
@@ -588,11 +611,11 @@ impl Sim {
     /// the same delay/reload discipline as entity combat (CMB-04/05).
     fn attack_building_step(&mut self, idx: usize) {
         let tick = self.tick;
-        let (bid, kind) = match self.entities[idx].attack_building {
-            Some(b) if !self.entities[idx].dead => (b, self.entities[idx].kind),
+        let bid = match self.entities[idx].attack_building {
+            Some(b) if !self.entities[idx].dead => b,
             _ => return,
         };
-        let spec = units::spec(kind);
+        let spec = self.unit_stats(idx); // M6: effective row (as attack_step)
         if spec.attacks.is_empty() {
             self.entities[idx].clear_combat();
             return;
@@ -668,8 +691,16 @@ impl Sim {
                 }
             };
             if need {
-                if let Some((gx, gy)) = self.building_approach_point(idx, ax, ay, size) {
-                    self.set_move_order(idx, gx, gy);
+                match self.building_approach_point(idx, ax, ay, size) {
+                    Some((gx, gy)) => {
+                        self.set_move_order(idx, gx, gy);
+                    }
+                    // No ring cell is reachable — the building is
+                    // enclosed: the order cannot be carried out.
+                    // (Probing again next tick would burn a
+                    // find_path per ring cell per tick — M6 perf
+                    // fix.)
+                    None => self.entities[idx].clear_combat(),
                 }
             }
         }
@@ -710,7 +741,7 @@ impl Sim {
     /// ranged attacker — with the same release-time accuracy roll
     /// discipline (PRJ-03). Reload restarts from the landing tick.
     fn resolve_building_strike(&mut self, idx: usize, bi: usize) {
-        let spec = units::spec(self.entities[idx].kind);
+        let spec = self.unit_stats(idx); // M6: effective row (release snapshot)
         let attacker_id = self.entities[idx].id;
         let owner = self.entities[idx].owner;
         let (ax, ay) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
@@ -806,6 +837,7 @@ impl Sim {
             {
                 e.task = Task::Idle;
                 e.task_building = None;
+                e.task_dropoff = None;
                 e.order = None;
                 e.vel_x = I16F16::ZERO;
                 e.vel_y = I16F16::ZERO;
@@ -898,6 +930,7 @@ impl Sim {
                 e.task = Task::Idle;
                 e.task_node = None;
                 e.task_building = None;
+                e.task_dropoff = None;
                 e.carry = I16F16::ZERO;
                 e.carry_kind = None;
                 e.clear_combat();

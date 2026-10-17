@@ -89,6 +89,7 @@
 }
 .res .res-val { font-variant-numeric: tabular-nums; }
 .res-pop .res-val.warn { color: var(--ui-warn); } /* at cap / housed */
+.res-age .res-val { color: #ffd75e; font-weight: 600; } /* M6: the age chip */
 
 /* Idle indicators (M4, INF-03): quiet while nobody is idle, lit
    gold while someone stands free. They are buttons — clicking runs

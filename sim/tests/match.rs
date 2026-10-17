@@ -9,8 +9,8 @@
 
 use fixed::types::I16F16;
 use skirmish_sim::{
-    BuildingKind, Command, EntityKind, MatchMode, MatchState, ResourceKind, Sim, OWNER_OPPONENT,
-    OWNER_PLAYER,
+    Age, BuildingKind, Command, EntityKind, MatchMode, MatchState, ResourceKind, Sim, TechId,
+    OWNER_OPPONENT, OWNER_PLAYER,
 };
 
 fn f(v: I16F16) -> f64 {
@@ -141,8 +141,13 @@ fn ai_raises_army_and_wave_engages_the_human() {
     let mut saw_barracks = false;
     let mut saw_army = false;
     let mut engaged = false;
-    // Up to ten game-minutes; the human does nothing at all.
-    for _ in 0..36_000 {
+    // Up to twenty game-minutes; the human does nothing at all.
+    // (M6: the window doubled from ten — the script now builds
+    // its economy layer, researches Loom and saves for the Feudal
+    // Age before the first full wave, so the wave lands later
+    // than the M5 script's did. It is a Feudal timing attack now,
+    // which is the pacing the milestone asked the AI to learn.)
+    for _ in 0..72_000 {
         sim.tick();
         saw_barracks |= sim.buildings().iter().any(|b| {
             b.owner == OWNER_OPPONENT && b.kind == BuildingKind::Barracks && b.complete
@@ -238,6 +243,16 @@ fn passive_human_loses_the_match() {
 /// Center, reinforcements streaming — until the enemy Town Center
 /// falls and the mop-up triggers its resignation. Deterministic:
 /// every decision reads live sim state in id order, like the AI's.
+///
+/// M6 adaptation (the game changed under the script, so the script
+/// plays the new layer, like the AI does): Loom once the village
+/// is grown, a Mill + Lumber Camp for the Feudal requirement,
+/// Feudal Age, and Archers from an Archery Range — the Barracks
+/// no longer trains them, and an all-Militia army bankrupts the
+/// script's food (Archers are paid in wood/gold). Free soldiers
+/// also defend the home Town Center before pushing: the AI's
+/// waves genuinely arrive now, and an undefended economy bleeds
+/// out before the push ever forms.
 #[derive(Default)]
 struct HumanScript {
     acted: Vec<u32>,
@@ -249,55 +264,85 @@ impl HumanScript {
         self.acted.clear();
         let me = OWNER_PLAYER;
         let foe = OWNER_OPPONENT;
-        // Town Center: train toward 12 villagers.
+        // Town Center research (M6): Loom once the village is
+        // grown; Feudal Age when a food spare exists (its two
+        // building requirements are the Mill + Lumber Camp from
+        // the construction chain below). Research is tried before
+        // training so a topped-up villager queue cannot starve it.
         let villagers = living(sim, me, EntityKind::Villager);
-        if villagers + sim.train_queue_len() < 12 && sim.can_train_villager() {
+        let food = f(sim.stockpile_of(me).amount(ResourceKind::Food));
+        if sim.can_research_tc(TechId::Loom) && villagers >= 8 {
+            sim.push_command(Command::ResearchTc {
+                tech: TechId::Loom,
+            });
+        } else if sim.can_research_tc(TechId::FeudalAge) && food >= 550.0 {
+            sim.push_command(Command::ResearchTc {
+                tech: TechId::FeudalAge,
+            });
+        } else if villagers + sim.train_queue_len() < 12 && sim.can_train_villager() {
+            // Town Center: train toward 12 villagers.
             sim.push_command(Command::TrainVillager);
         }
-        // Barracks production: a mixed army, alternating kinds,
-        // toward 16 — and kept up during the push (reinforcements).
+        // Military production at the M6 homes: Militia from the
+        // Barracks, Archers from the Archery Range — a mixed army
+        // toward 16, kept up during the push (reinforcements).
         let army = living(sim, me, EntityKind::Militia) + living(sim, me, EntityKind::Archer);
-        let barracks_ids: Vec<u32> = sim
-            .buildings()
-            .iter()
-            .filter(|b| b.owner == me && b.kind == BuildingKind::Barracks && b.complete)
-            .map(|b| b.id)
-            .collect();
-        for bid in barracks_ids {
-            if army < 16 {
-                let preferred = if army % 2 == 0 {
-                    EntityKind::Militia
-                } else {
-                    EntityKind::Archer
-                };
-                let fallback = if preferred == EntityKind::Militia {
-                    EntityKind::Archer
-                } else {
-                    EntityKind::Militia
-                };
-                if sim.can_train_at(bid, preferred) {
+        if army < 16 {
+            let producers: Vec<(u32, EntityKind)> = sim
+                .buildings()
+                .iter()
+                .filter(|b| b.owner == me && b.complete)
+                .filter_map(|b| match b.kind {
+                    BuildingKind::Barracks => Some((b.id, EntityKind::Militia)),
+                    BuildingKind::ArcheryRange => Some((b.id, EntityKind::Archer)),
+                    _ => None,
+                })
+                .collect();
+            for (bid, kind) in producers {
+                if sim.can_train_at(bid, kind) {
                     sim.push_command(Command::TrainAt {
                         building: bid,
-                        kind: preferred,
-                    });
-                } else if sim.can_train_at(bid, fallback) {
-                    sim.push_command(Command::TrainAt {
-                        building: bid,
-                        kind: fallback,
+                        kind,
                     });
                 }
             }
         }
-        // Construction: two Barracks, then houses ahead of the
-        // cap — one placement per pass, by the first idle villager.
-        let barracks = sim
-            .buildings()
-            .iter()
-            .filter(|b| b.owner == me && b.kind == BuildingKind::Barracks)
-            .count();
+        // Construction: the M6 opening chain — Mill, Lumber Camp
+        // (the Feudal requirement pair), Barracks, Archery Range
+        // once Feudal, a second Barracks — then houses ahead of
+        // the cap. One placement per pass, by the first idle
+        // villager.
+        let count_kind = |kind: BuildingKind| {
+            sim.buildings()
+                .iter()
+                .filter(|b| b.owner == me && b.kind == kind)
+                .count()
+        };
+        let barracks = count_kind(BuildingKind::Barracks);
         let wood = f(sim.stockpile_of(me).amount(ResourceKind::Wood));
-        let want = if barracks < 2 && villagers >= 5 && wood >= 175.0 {
+        let want = if count_kind(BuildingKind::Mill) == 0 && villagers >= 5 && wood >= 100.0 {
+            Some(BuildingKind::Mill)
+        } else if count_kind(BuildingKind::LumberCamp) == 0 && villagers >= 6 && wood >= 100.0 {
+            Some(BuildingKind::LumberCamp)
+        } else if barracks < 1 && villagers >= 8 && wood >= 175.0 {
             Some(BuildingKind::Barracks)
+        } else if sim.age_of(me) == Age::Feudal
+            && count_kind(BuildingKind::ArcheryRange) == 0
+            && wood >= 175.0
+        {
+            Some(BuildingKind::ArcheryRange)
+        } else if barracks < 2 && villagers >= 8 && wood >= 175.0 {
+            Some(BuildingKind::Barracks)
+        } else if count_kind(BuildingKind::Farm) < 6
+            && count_kind(BuildingKind::Mill) > 0
+            && villagers >= 10
+            && wood >= 120.0
+        {
+            // Farms (M6): the Mill-gated fields are the script's
+            // renewable food — without them its food ceiling
+            // (~1,300 from berries + sheep) cannot pay for twelve
+            // villagers, the Feudal Age and a twelve-soldier army.
+            Some(BuildingKind::Farm)
         } else if sim.population_of(me) + 1 >= sim.population_cap_of(me) && wood >= 25.0 {
             Some(BuildingKind::House)
         } else {
@@ -319,6 +364,44 @@ impl HumanScript {
         // Idle villagers to work: food 6 / wood 4 / gold 3, surplus
         // to food; hunt own sheep when no food source is near home.
         self.assign_workers(sim);
+        // Home defense (M6): free soldiers engage raiders near the
+        // home Town Center — the same shape as the AI's own
+        // defense step — instead of idling until the push forms.
+        {
+            let tc = sim.town_center();
+            let (tc_x, tc_y) = (tc.pos_x, tc.pos_y);
+            let raiders: Vec<u32> = sim
+                .entities()
+                .iter()
+                .filter(|e| {
+                    e.owner == foe
+                        && !e.dead
+                        && e.kind.is_military()
+                        && dist(e.pos_x - tc_x, e.pos_y - tc_y) <= 18.0
+                })
+                .map(|e| e.id)
+                .collect();
+            if let Some(&first_raider) = raiders.first() {
+                let free: Vec<u32> = sim
+                    .entities()
+                    .iter()
+                    .filter(|e| {
+                        e.owner == me
+                            && !e.dead
+                            && e.kind.is_military()
+                            && e.attack_target.is_none()
+                            && e.attack_building.is_none()
+                    })
+                    .map(|e| e.id)
+                    .collect();
+                for id in free {
+                    sim.push_command(Command::Attack {
+                        entity: id,
+                        target: first_raider,
+                    });
+                }
+            }
+        }
         // The push: at a dozen soldiers the script commits. Both
         // Barracks rally to the enemy Town Center (fresh troops
         // walk to the front), and every free soldier is ordered in
@@ -340,7 +423,8 @@ impl HumanScript {
                     .iter()
                     .filter(|b| {
                         b.owner == me
-                            && b.kind == BuildingKind::Barracks
+                            && (b.kind == BuildingKind::Barracks
+                                || b.kind == BuildingKind::ArcheryRange)
                             && b.complete
                             && b.rally != Some((tx, ty))
                     })

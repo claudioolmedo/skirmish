@@ -139,11 +139,22 @@ fn golden_hash_regression() {
     // the wider coverage alone. New value verified stable across
     // independent runs (replay example, seed 42, 360 ticks, run
     // twice).
+    //
+    // M6 deliberate update: the hash now also covers the per-player
+    // progression state (age + researched-tech mask), the typed
+    // production queues (unit/research entry codes, replacing the
+    // bare queue count and kind tags), and each villager's current
+    // deposit destination. No commands are issued in this scenario —
+    // every queue is empty, every player is in the Dark Age with no
+    // research, and nobody hauls — the stream changes through the
+    // wider coverage alone. New value verified stable across
+    // independent runs (replay example, seed 42, 360 ticks, run
+    // twice).
     let mut sim = Sim::new(42);
     let mut hash = 0;
     for _ in 0..360 {
         hash = sim.tick();
     }
     assert_eq!(sim.tick_count(), 360);
-    assert_eq!(format!("{:016x}", hash), "aa30c8206075caa7");
+    assert_eq!(format!("{:016x}", hash), "09e22978bb8876db");
 }

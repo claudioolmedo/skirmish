@@ -28,6 +28,15 @@
 //! and Conquest decides the match (VIC-01): a player with no
 //! buildings and no units has lost, and the AI resigns when it has
 //! no Town Center and no villagers left (AI-05).
+//! M6 scope: ages, technologies, and the economy buildings —
+//! per-player age (Dark → Feudal) and researched-tech state
+//! (TEC-01/04/06), research as timed entries in the hosts' shared
+//! production queues (the Town Center's queue is shared with
+//! villager training, TEC-03), the drop-off camps with
+//! nearest-valid-drop-off routing and force drop-off (ECO-05/06/07),
+//! the Mill gate on Farms, and the Feudal buildings (Archery Range,
+//! Stable, Blacksmith) with the Militia line's Man-at-Arms upgrade
+//! (CLS-03/04).
 
 mod ai;
 mod build;
@@ -39,15 +48,18 @@ mod grid;
 mod hash;
 mod rng;
 mod steer;
+mod tech;
 mod units;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
 
 pub use build::{
-    build_rate_thirds, Building, BuildingKind, BARRACKS_BUILD_TICKS, BARRACKS_WOOD_COST,
-    BUILD_RANGE, FARM_BUILD_TICKS, FARM_WOOD_COST, FOOTPRINT_CELLS, HOUSE_BUILD_TICKS,
-    HOUSE_POP_SUPPORT, HOUSE_WOOD_COST, TOWN_CENTER_POP_SUPPORT,
+    build_rate_thirds, Building, BuildingKind, ARCHERY_RANGE_BUILD_TICKS, ARCHERY_RANGE_WOOD_COST,
+    BARRACKS_BUILD_TICKS, BARRACKS_WOOD_COST, BLACKSMITH_BUILD_TICKS, BLACKSMITH_WOOD_COST,
+    BUILD_RANGE, CAMP_BUILD_TICKS, CAMP_WOOD_COST, FARM_BUILD_TICKS, FARM_WOOD_COST,
+    FOOTPRINT_CELLS, HOUSE_BUILD_TICKS, HOUSE_POP_SUPPORT, HOUSE_WOOD_COST, STABLE_BUILD_TICKS,
+    STABLE_WOOD_COST, TOWN_CENTER_POP_SUPPORT,
 };
 pub use combat::{compute_damage, Projectile, MELEE_REACH};
 pub use econ::{
@@ -56,13 +68,14 @@ pub use econ::{
     VILLAGER_FOOD_COST, VILLAGER_TRAIN_TICKS,
 };
 pub use entity::{
-    is_player_owner, Entity, EntityKind, MoveOrder, QueuedOrder, Task, OWNER_GAIA, OWNER_OPPONENT,
-    OWNER_PLAYER,
+    is_player_owner, Dropoff, Entity, EntityKind, MoveOrder, QueuedOrder, Task, OWNER_GAIA,
+    OWNER_OPPONENT, OWNER_PLAYER,
 };
 pub use grid::{Grid, CELL_SIZE, GRID_DIM, WORLD_HALF};
 pub use hash::Fnv1a64;
 pub use rng::Pcg32;
 pub use steer::{MAX_SPEED, SEPARATION_RADIUS, SLOW_RADIUS, WAYPOINT_REACH};
+pub use tech::{Age, ProdEntry, ResearchBlock, TechHost, TechId};
 pub use units::{spec as unit_spec, UnitSpec};
 
 use fixed::types::I16F16;
@@ -149,7 +162,9 @@ pub const ORDER_QUEUE_CAP: usize = 16;
 /// `Build`; M3 adds `Attack` and `TrainAt`; M4 adds `Queue` and
 /// `SetRally`; M5 adds `TrainVillagerAt` (the per-Town-Center form
 /// the AI opponent uses — `TrainVillager` remains the human Town
-/// Center shorthand) and `AttackBuilding`.
+/// Center shorthand) and `AttackBuilding`; M6 adds the research
+/// commands (`ResearchTc`, `ResearchTcAt`, `ResearchAt`) and
+/// `ForceDeposit` (the force-drop-off gesture, ECO-07).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
     /// Does nothing. Exists so the command pipeline is exercised.
@@ -228,6 +243,34 @@ pub enum Command {
         x: I16F16,
         y: I16F16,
     },
+    /// Enqueue a technology at the human player's Town Center (M6):
+    /// Loom or the Feudal Age advancement — the only technologies
+    /// the Town Center hosts. The cost is charged on enqueue and the
+    /// item shares the queue (and its head-of-line progress) with
+    /// villager training (TEC-03/05). Rejected silently when the
+    /// tech is foreign to the Town Center, already researched, its
+    /// requirements are unmet, the queue is full, or funds are
+    /// short (see `Sim::research_block_tc`).
+    ResearchTc { tech: TechId },
+    /// Enqueue a technology at a specific Town Center (M6) — the
+    /// form the AI opponent uses for its own Town Center; identical
+    /// rules to `ResearchTc`, charged to that Town Center's owner.
+    ResearchTcAt { tc: u32, tech: TechId },
+    /// Enqueue a technology at a placed building (M6): the
+    /// Blacksmith's lines, or the Man-at-Arms upgrade at the
+    /// Barracks. The item shares the building's queue with any
+    /// units in line (TEC-03). Same rejection discipline as
+    /// `ResearchTc` (see `Sim::research_block_at`).
+    ResearchAt { building: u32, tech: TechId },
+    /// Force drop-off (M6, ECO-07): a villager carrying resources is
+    /// ordered to haul them to the nearest valid drop-off for what
+    /// it carries *now* — and, the deposit made, to return to its
+    /// previous work on its own: its gather assignment (or its
+    /// construction site) is kept as the resume marker and the work
+    /// cycle resumes from it. This is the order behind the player's
+    /// right-click on their own Town Center or camp. Rejected when
+    /// the villager carries nothing or no valid drop-off stands.
+    ForceDeposit { entity: u32 },
 }
 
 /// Why Town Center training cannot currently proceed (M2.5). The
@@ -337,7 +380,7 @@ impl MatchState {
     }
 }
 
-/// One Town Center's production state (M5): its villager queue,
+/// One Town Center's production state (M5): its production queue,
 /// progress, and rally point. Before M5 these lived as loose fields
 /// on `Sim` for the single Town Center; a match has two Town Centers
 /// (one per player), each with its own — the state a `TrainVillagerAt`
@@ -346,9 +389,13 @@ impl MatchState {
 struct TcState {
     /// The Town Center entity this state belongs to.
     tc_id: u32,
-    /// Villagers waiting in this Town Center's training queue.
-    queue: u32,
-    /// Ticks of training progress on the queue's head villager.
+    /// The shared production queue (M6, TEC-03): villagers in
+    /// training and technologies in research, head first — before
+    /// M6 this was a bare villager count. Progress accrues on the
+    /// head only; a unit head stalls while its owner is housed, a
+    /// research head does not (population gates units, not ideas).
+    queue: Vec<ProdEntry>,
+    /// Ticks of progress on the queue's head entry.
     progress: u64,
     /// Rally point (SEL-13): where a freshly trained villager walks
     /// on spawn. `None` = unset — the villager stays at its spawn
@@ -357,6 +404,30 @@ struct TcState {
     /// any: the new villager gathers it instead of walking.
     rally: Option<(I16F16, I16F16)>,
     rally_node: Option<u32>,
+}
+
+impl TcState {
+    /// Villagers waiting in this queue (research entries do not
+    /// occupy population — M6).
+    fn queued_villagers(&self) -> u32 {
+        self.queue
+            .iter()
+            .filter(|e| matches!(e, ProdEntry::Unit(_)))
+            .count() as u32
+    }
+}
+
+/// One player's progression state (M6): the age they stand in and
+/// the technologies they have researched — per player slot, like
+/// the stockpiles. Effects are never stored on units; every stat
+/// lookup layers this state over the base table (TEC-06, see
+/// `Sim::stats_for`). Part of the hashed state.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct PlayerState {
+    age: Age,
+    /// Bitmask of researched `TechId`s (`TechId::bit`). The Feudal
+    /// Age advancement is recorded by `age` itself, not a bit.
+    techs: u64,
 }
 
 /// The headless deterministic simulation.
@@ -379,6 +450,9 @@ pub struct Sim {
     /// human, slot 1 the opponent. In Sandbox slot 1 simply sits at
     /// its starting values, unused.
     stockpiles: [Stockpile; 2],
+    /// The players' progression state (M6): age + researched
+    /// technologies, indexed by player slot like the stockpiles.
+    players: [PlayerState; 2],
     /// Resource nodes in id order (M2). Depleted nodes stay in the list
     /// with zero amount — inert, but still hashed.
     nodes: Vec<ResourceNode>,
@@ -480,10 +554,11 @@ impl Sim {
             entities,
             commands: Vec::new(),
             stockpiles: [Stockpile::starting(), Stockpile::starting()],
+            players: [PlayerState::default(), PlayerState::default()],
             nodes,
             tc_states: vec![TcState {
                 tc_id: TOWN_CENTER_ID,
-                queue: 0,
+                queue: Vec::new(),
                 progress: 0,
                 rally: None,
                 rally_node: None,
@@ -528,7 +603,7 @@ impl Sim {
         next_id += 1;
         self.tc_states.push(TcState {
             tc_id: enemy_tc,
-            queue: 0,
+            queue: Vec::new(),
             progress: 0,
             rally: None,
             rally_node: None,
@@ -717,6 +792,125 @@ impl Sim {
         self.mode
     }
 
+    /// The age a player stands in (M6, TEC-01). Gaia has no age;
+    /// asking for it yields the Dark Age.
+    pub fn age_of(&self, owner: u8) -> Age {
+        match player_slot(owner) {
+            Some(slot) => self.players[slot].age,
+            None => Age::Dark,
+        }
+    }
+
+    /// Whether a player has completed a technology (M6). The
+    /// Feudal Age "technology" reads off the age state itself.
+    pub fn has_tech(&self, owner: u8, tech: TechId) -> bool {
+        if tech == TechId::FeudalAge {
+            return self.age_of(owner) >= Age::Feudal;
+        }
+        match player_slot(owner) {
+            Some(slot) => self.players[slot].techs & tech.bit() != 0,
+            None => false,
+        }
+    }
+
+    /// A player's researched-technology bitmask (M6), with the
+    /// Feudal Age bit set while the player stands in Feudal — the
+    /// client's one-call view of "what do I have".
+    pub fn tech_mask_of(&self, owner: u8) -> u64 {
+        let mut mask = match player_slot(owner) {
+            Some(slot) => self.players[slot].techs,
+            None => 0,
+        };
+        if self.age_of(owner) >= Age::Feudal {
+            mask |= TechId::FeudalAge.bit();
+        }
+        mask
+    }
+
+    /// The effective stat row of a unit kind for an owner (M6,
+    /// TEC-06): the base table row layered with the owner's age
+    /// (CLS-04 — the Scout's Feudal row) and researched technologies
+    /// (Loom, Fletching, the Blacksmith armor lines). Every stat
+    /// consumer — movement speed, combat, the HP display — reads
+    /// through here, so a completed research changes the whole
+    /// empire's numbers the tick it lands, with no per-unit state
+    /// to sweep (the two completion *sweeps* that do exist — Loom's
+    /// current-HP grant and the Man-at-Arms kind swap — are in
+    /// `apply_research`). Gaia's rows are never patched.
+    pub fn stats_for(&self, owner: u8, kind: EntityKind) -> UnitSpec {
+        let mut s = *units::spec(kind);
+        let Some(slot) = player_slot(owner) else {
+            return s;
+        };
+        let p = self.players[slot];
+        // CLS-04: the Scout Cavalry's automatic Feudal row —
+        // attack 3 → 5, speed 1.20 → 1.55 tiles/s, LoS 4 → 6.
+        if kind == EntityKind::ScoutCavalry && p.age >= Age::Feudal {
+            s.attacks = units::SCOUT_FEUDAL_ATTACKS;
+            s.speed = I16F16::from_bits(126_976); // 1.9375 (1.55 × 1.25)
+            s.los = I16F16::from_bits(1_572_864); // 24 (6 tiles)
+        }
+        // TEC-04 (Loom): villagers +15 HP, +1 melee / +2 pierce
+        // armor, +0.1 tiles/s (RULEBOOK TEC-06/CLS-05 — see the
+        // tech module docs for the study discrepancy note).
+        if kind == EntityKind::Villager && p.techs & TechId::Loom.bit() != 0 {
+            s.max_hp += 15;
+            s.armor_melee += 1;
+            s.armor_pierce += 2;
+            s.speed += I16F16::from_bits(8_192); // +0.125 (0.1 × 1.25)
+        }
+        // Fletching (study §8): archers +1 attack, +1 tile of range.
+        if kind == EntityKind::Archer && p.techs & TechId::Fletching.bit() != 0 {
+            s.attacks = units::ARCHER_FLETCHING_ATTACKS;
+            s.range_max += I16F16::from_bits(262_144); // +4.0 (1 tile)
+        }
+        // Scale Mail Armor (study §8): infantry +1/+1 armor.
+        if matches!(kind, EntityKind::Militia | EntityKind::ManAtArms)
+            && p.techs & TechId::ScaleMail.bit() != 0
+        {
+            s.armor_melee += 1;
+            s.armor_pierce += 1;
+        }
+        // Padded Archer Armor (study §8): archers +1/+1 armor.
+        if kind == EntityKind::Archer && p.techs & TechId::PaddedArcherArmor.bit() != 0 {
+            s.armor_melee += 1;
+            s.armor_pierce += 1;
+        }
+        s
+    }
+
+    /// The effective stat row of the entity at `idx` (M6): its
+    /// owner's row via `stats_for`. The combat phase's standard
+    /// read — damage, range, LoS and HP all key on the owner.
+    pub(crate) fn unit_stats(&self, idx: usize) -> UnitSpec {
+        let e = &self.entities[idx];
+        self.stats_for(e.owner, e.kind)
+    }
+
+    /// How many completed buildings of `kind` a player owns (M6) —
+    /// the built-set half of BLD-15's availability rule.
+    pub fn completed_buildings(&self, owner: u8, kind: BuildingKind) -> u32 {
+        self.buildings
+            .iter()
+            .filter(|b| b.owner == owner && b.kind == kind && b.complete)
+            .count() as u32
+    }
+
+    /// Whether a player owns a completed building of `kind` (M6).
+    fn has_completed_building(&self, owner: u8, kind: BuildingKind) -> bool {
+        self.completed_buildings(owner, kind) > 0
+    }
+
+    /// Completed buildings counting toward the Feudal Age research
+    /// requirement (M6, TEC-01): Dark-Age buildings other than
+    /// Houses and Farms (see `BuildingKind::counts_toward_feudal`).
+    pub fn feudal_building_count(&self, owner: u8) -> u32 {
+        self.buildings
+            .iter()
+            .filter(|b| b.owner == owner && b.complete && b.kind.counts_toward_feudal())
+            .count() as u32
+    }
+
     /// A Town Center's production state, by Town Center entity id.
     fn tc_state(&self, tc_id: u32) -> Option<&TcState> {
         self.tc_states.iter().find(|s| s.tc_id == tc_id)
@@ -729,11 +923,123 @@ impl Sim {
         })
     }
 
-    /// Where `owner`'s villagers deposit: their living Town Center's
-    /// position, or `None` when it is gone (a villager with no Town
-    /// Center has nowhere to haul to — it keeps its carry and idles).
-    fn deposit_pos(&self, owner: u8) -> Option<(I16F16, I16F16)> {
-        self.tc_entity_of(owner).map(|tc| (tc.pos_x, tc.pos_y))
+    /// The nearest valid drop-off for `owner`'s load of `kind`,
+    /// measured from `(from_x, from_y)` (M6, ECO-06): the owner's
+    /// living Town Center (accepts everything, distance to its
+    /// center) and the owner's *completed* drop-off buildings that
+    /// accept the resource (distance to the footprint's edge, the
+    /// same clamp math combat uses against buildings). Nearest by
+    /// straight-line distance; ties break Town Center first, then
+    /// lowest building id (scan order + strictly-nearer replaces).
+    /// `None` when nowhere accepts the load — the villager keeps
+    /// its carry and idles, the pre-M6 no-Town-Center behavior.
+    fn deposit_target(
+        &self,
+        owner: u8,
+        kind: ResourceKind,
+        from_x: I16F16,
+        from_y: I16F16,
+    ) -> Option<Dropoff> {
+        let mut best: Option<(i64, Dropoff)> = None;
+        if let Some(tc) = self.tc_entity_of(owner) {
+            let d = steer::vec_len(tc.pos_x - from_x, tc.pos_y - from_y);
+            let db = d.to_bits() as i64;
+            best = Some((db * db, Dropoff::TownCenter));
+        }
+        for b in &self.buildings {
+            if b.owner != owner || !b.complete || !b.kind.accepts(kind) {
+                continue;
+            }
+            let d = self.distance_to_footprint(from_x, from_y, b.pos_x, b.pos_y, b.kind);
+            let db = d.to_bits() as i64;
+            let key = db * db;
+            if best.map(|(bk, _)| key < bk).unwrap_or(true) {
+                best = Some((key, Dropoff::Building(b.id)));
+            }
+        }
+        best.map(|(_, t)| t)
+    }
+
+    /// Distance from a point to a building's footprint rectangle
+    /// (0 when the point is beside or inside it): the point clamped
+    /// into the rect, then the offset length — combat's building
+    /// geometry, shared.
+    fn distance_to_footprint(
+        &self,
+        px: I16F16,
+        py: I16F16,
+        bx: I16F16,
+        by: I16F16,
+        kind: BuildingKind,
+    ) -> I16F16 {
+        let half = I16F16::from_num(kind.footprint_size() as i32 * 2);
+        let qx = (px - bx).clamp(-half, half) + bx;
+        let qy = (py - by).clamp(-half, half) + by;
+        steer::vec_len(px - qx, py - qy)
+    }
+
+    /// The world point a hauler at `(from_x, from_y)` steers toward
+    /// for a deposit target (M6). The Town Center is its center —
+    /// it never blocks the nav grid, so pathing straight at it
+    /// works (the M2 behavior). A camp's center is inside its own
+    /// solid footprint, and `find_path` refuses a blocked goal — so
+    /// a camp is steered to the point 2 units outside its
+    /// footprint's edge along the hauler's approach line (the
+    /// footprint-clamp point pushed outward): inside the deposit
+    /// range by construction, in a free ring cell in every normal
+    /// placement.
+    fn dropoff_steer_point(
+        &self,
+        owner: u8,
+        target: Dropoff,
+        from_x: I16F16,
+        from_y: I16F16,
+    ) -> Option<(I16F16, I16F16)> {
+        match target {
+            Dropoff::TownCenter => {
+                self.tc_entity_of(owner).map(|tc| (tc.pos_x, tc.pos_y))
+            }
+            Dropoff::Building(bid) => {
+                let bi = self.building_index(bid)?;
+                let b = &self.buildings[bi];
+                let half = I16F16::from_num(b.kind.footprint_size() as i32 * 2);
+                let qx = from_x.clamp(b.pos_x - half, b.pos_x + half);
+                let qy = from_y.clamp(b.pos_y - half, b.pos_y + half);
+                let (dx, dy) = (from_x - qx, from_y - qy);
+                if dx == I16F16::ZERO && dy == I16F16::ZERO {
+                    // The hauler is somehow inside the footprint:
+                    // steer to the east edge's standing point.
+                    return Some((b.pos_x + half + I16F16::from_num(2), b.pos_y));
+                }
+                let len = steer::vec_len(dx, dy);
+                let out = I16F16::from_num(2);
+                Some((qx + dx * out / len, qy + dy * out / len))
+            }
+        }
+    }
+
+    /// Whether a hauler of `owner` at `(px, py)` has arrived at its
+    /// deposit target (M6): the Town Center by the center-distance
+    /// `DEPOSIT_RANGE` rule M2 shipped; a camp by distance to the
+    /// footprint's edge against the same range (a camp's center is
+    /// unreachable — its footprint is solid). A target that no
+    /// longer exists has not been arrived at (the caller
+    /// re-resolves instead).
+    fn dropoff_arrived(&self, owner: u8, px: I16F16, py: I16F16, target: Dropoff) -> bool {
+        match target {
+            Dropoff::TownCenter => match self.tc_entity_of(owner) {
+                Some(tc) => steer::vec_len(px - tc.pos_x, py - tc.pos_y) <= DEPOSIT_RANGE,
+                None => false,
+            },
+            Dropoff::Building(bid) => match self.building_index(bid) {
+                Some(bi) => {
+                    let b = &self.buildings[bi];
+                    self.distance_to_footprint(px, py, b.pos_x, b.pos_y, b.kind)
+                        <= DEPOSIT_RANGE
+                }
+                None => false,
+            },
+        }
     }
 
     /// The match outcome from the human's seat (M5, VIC-01): in a
@@ -791,10 +1097,52 @@ impl Sim {
         &self.nodes
     }
 
-    /// Villagers currently waiting in the human Town Center's
-    /// training queue.
+    /// Entries waiting in the human Town Center's production queue
+    /// (M6: villagers in training *and* technologies in research —
+    /// the queue is shared, TEC-03).
     pub fn train_queue_len(&self) -> u32 {
-        self.tc_state(TOWN_CENTER_ID).map(|s| s.queue).unwrap_or(0)
+        self.tc_state(TOWN_CENTER_ID)
+            .map(|s| s.queue.len() as u32)
+            .unwrap_or(0)
+    }
+
+    /// The human Town Center's queue entries in order (M6) — for the
+    /// client's queue display (head first).
+    pub fn tc_queue(&self) -> &[ProdEntry] {
+        match self.tc_state(TOWN_CENTER_ID) {
+            Some(s) => &s.queue,
+            None => &[],
+        }
+    }
+
+    /// A placed building's queue entries in order (M6). Empty for an
+    /// unknown building.
+    pub fn building_queue(&self, building: u32) -> &[ProdEntry] {
+        match self.building_index(building) {
+            Some(bi) => &self.buildings[bi].queue,
+            None => &[],
+        }
+    }
+
+    /// Progress on the human Town Center queue's head entry as a
+    /// fraction in raw bits (0 … 65536) — the `train_frac_bits`
+    /// counterpart for the Town Center (M6).
+    pub fn tc_progress_bits(&self) -> i32 {
+        let s = match self.tc_state(TOWN_CENTER_ID) {
+            Some(s) => s,
+            None => return 0,
+        };
+        match s.queue.first() {
+            None => 0,
+            Some(&head) => {
+                let total = head.ticks() as i64;
+                if total <= 0 {
+                    return 0;
+                }
+                let done = (s.progress as i64).min(total);
+                ((done * 65536) / total) as i32
+            }
+        }
     }
 
     /// Placed buildings in id order, under construction and complete.
@@ -833,13 +1181,13 @@ impl Sim {
         let tc_queue = self
             .tc_entity_of(owner)
             .and_then(|tc| self.tc_state(tc.id))
-            .map(|s| s.queue)
+            .map(|s| s.queued_villagers())
             .unwrap_or(0);
         let queued: u32 = self
             .buildings
             .iter()
             .filter(|b| b.owner == owner)
-            .map(|b| b.queue.len() as u32)
+            .map(|b| b.queued_units())
             .sum();
         self.living_population_of(owner) + tc_queue + queued
     }
@@ -883,7 +1231,7 @@ impl Sim {
     fn train_block_at(&self, tc: u32) -> TrainBlock {
         let (owner, queue) = match (self.entity_index(tc), self.tc_state(tc)) {
             (Some(i), Some(s)) if !self.entities[i].dead => {
-                (self.entities[i].owner, s.queue)
+                (self.entities[i].owner, s.queue.len() as u32)
             }
             _ => return TrainBlock::QueueFull,
         };
@@ -955,7 +1303,7 @@ impl Sim {
             None => return TrainBlock::QueueFull,
         };
         let b = &self.buildings[bi];
-        if !b.complete || !b.kind.is_production() || !kind.is_trainable() {
+        if !b.complete || !b.kind.is_production() || !b.kind.trains(kind) {
             return TrainBlock::QueueFull;
         }
         if b.queue.len() as u32 >= TRAIN_QUEUE_CAP {
@@ -982,7 +1330,7 @@ impl Sim {
         let b = &self.buildings[bi];
         b.complete
             && b.kind.is_production()
-            && kind.is_trainable()
+            && b.kind.trains(kind)
             && (b.queue.len() as u32) < TRAIN_QUEUE_CAP
             && self.can_afford(b.owner, kind)
     }
@@ -1030,12 +1378,285 @@ impl Sim {
     fn can_train_villager_at(&self, tc: u32) -> bool {
         let (owner, queue) = match (self.entity_index(tc), self.tc_state(tc)) {
             (Some(i), Some(s)) if !self.entities[i].dead => {
-                (self.entities[i].owner, s.queue)
+                (self.entities[i].owner, s.queue.len() as u32)
             }
             _ => return false,
         };
         queue < TRAIN_QUEUE_CAP
             && self.stockpile_of(owner).amount(ResourceKind::Food) >= VILLAGER_FOOD_COST
+    }
+
+    /// Whether a player's stockpile covers a technology's full
+    /// cost (M6).
+    fn can_afford_tech(&self, owner: u8, tech: TechId) -> bool {
+        let (food, wood, gold, stone) = tech.cost();
+        let s = self.stockpile_of(owner);
+        s.amount(ResourceKind::Food) >= I16F16::from_num(food)
+            && s.amount(ResourceKind::Wood) >= I16F16::from_num(wood)
+            && s.amount(ResourceKind::Gold) >= I16F16::from_num(gold)
+            && s.amount(ResourceKind::Stone) >= I16F16::from_num(stone)
+    }
+
+    /// Deduct a technology's full cost from a player's stockpile.
+    /// Callers check `can_afford_tech` first, so the spends cannot
+    /// fail partway.
+    fn spend_tech(&mut self, owner: u8, tech: TechId) {
+        let (food, wood, gold, stone) = tech.cost();
+        for (kind, amount) in [
+            (ResourceKind::Food, food),
+            (ResourceKind::Wood, wood),
+            (ResourceKind::Gold, gold),
+            (ResourceKind::Stone, stone),
+        ] {
+            if amount > 0 {
+                self.stockpile_mut(owner)
+                    .spend(kind, I16F16::from_num(amount));
+            }
+        }
+    }
+
+    /// The shared research gates (M6), checked against a host
+    /// queue the caller resolved (the host's existence/completeness
+    /// and the tech's host relation are the caller's part — a
+    /// missing host reports as `QueueFull`, the generic refusal,
+    /// mirroring the training pattern): already researched or
+    /// already queued anywhere → `AlreadyDone`; age unmet or (for
+    /// the Feudal advancement) fewer than 2 qualifying buildings →
+    /// `Locked`; queue at cap → `QueueFull`; funds short →
+    /// `NoFunds`. TEC-07's prerequisites, in order.
+    fn check_research(&self, owner: u8, tech: TechId, queue: &[ProdEntry]) -> ResearchBlock {
+        if self.has_tech(owner, tech) {
+            return ResearchBlock::AlreadyDone;
+        }
+        // A technology may only be researched once at a time, in
+        // whichever of the owner's queues already holds it.
+        let queued_somewhere = self
+            .tc_states
+            .iter()
+            .filter(|s| {
+                self.entity_index(s.tc_id)
+                    .map(|i| self.entities[i].owner == owner)
+                    .unwrap_or(false)
+            })
+            .any(|s| s.queue.contains(&ProdEntry::Tech(tech)))
+            || self
+                .buildings
+                .iter()
+                .filter(|b| b.owner == owner)
+                .any(|b| b.queue.contains(&ProdEntry::Tech(tech)));
+        if queued_somewhere {
+            return ResearchBlock::AlreadyDone;
+        }
+        if self.age_of(owner) < tech.age_required() {
+            return ResearchBlock::Locked;
+        }
+        if tech == TechId::FeudalAge && self.feudal_building_count(owner) < 2 {
+            return ResearchBlock::Locked;
+        }
+        if queue.len() as u32 >= TRAIN_QUEUE_CAP {
+            return ResearchBlock::QueueFull;
+        }
+        if !self.can_afford_tech(owner, tech) {
+            return ResearchBlock::NoFunds;
+        }
+        ResearchBlock::Ok
+    }
+
+    /// Why research at the human Town Center cannot currently
+    /// proceed (M6) — for the client's button states.
+    pub fn research_block_tc(&self, tech: TechId) -> ResearchBlock {
+        self.research_block_at_tc(TOWN_CENTER_ID, tech)
+    }
+
+    /// Why research at Town Center `tc` cannot currently proceed
+    /// (M6): the per-Town-Center form of `research_block_tc`.
+    /// Technologies foreign to the Town Center report as
+    /// `QueueFull` (the generic refusal).
+    fn research_block_at_tc(&self, tc: u32, tech: TechId) -> ResearchBlock {
+        if tech.host() != TechHost::TownCenter {
+            return ResearchBlock::QueueFull;
+        }
+        let (owner, queue) = match (self.entity_index(tc), self.tc_state(tc)) {
+            (Some(i), Some(s)) if !self.entities[i].dead => {
+                (self.entities[i].owner, &s.queue)
+            }
+            _ => return ResearchBlock::QueueFull,
+        };
+        self.check_research(owner, tech, queue)
+    }
+
+    /// Why research at a placed building cannot currently proceed
+    /// (M6): a missing building reports as `QueueFull`, an
+    /// unfinished one or a tech foreign to it as `Locked`.
+    pub fn research_block_at(&self, building: u32, tech: TechId) -> ResearchBlock {
+        let bi = match self.building_index(building) {
+            Some(bi) => bi,
+            None => return ResearchBlock::QueueFull,
+        };
+        let b = &self.buildings[bi];
+        if tech.host() != TechHost::Building(b.kind) {
+            return ResearchBlock::Locked;
+        }
+        if !b.complete {
+            return ResearchBlock::Locked;
+        }
+        self.check_research(b.owner, tech, &b.queue)
+    }
+
+    /// Would a Town Center research command be accepted right now?
+    pub fn can_research_tc(&self, tech: TechId) -> bool {
+        self.research_block_tc(tech) == ResearchBlock::Ok
+    }
+
+    /// Would a building research command be accepted right now?
+    pub fn can_research_at(&self, building: u32, tech: TechId) -> bool {
+        self.research_block_at(building, tech) == ResearchBlock::Ok
+    }
+
+    /// Apply a `ResearchTc` command (M6): charge and enqueue at the
+    /// human Town Center, or reject silently (see
+    /// `research_block_tc` for the gates).
+    fn issue_research_tc(&mut self, tech: TechId) {
+        self.issue_research_tc_at(TOWN_CENTER_ID, tech);
+    }
+
+    /// The shared Town Center research mechanics behind `ResearchTc`
+    /// and `ResearchTcAt` (M6) — exactly how the AI opponent
+    /// researches at its own Town Center (AI-01).
+    fn issue_research_tc_at(&mut self, tc: u32, tech: TechId) {
+        if self.research_block_at_tc(tc, tech) != ResearchBlock::Ok {
+            return;
+        }
+        let owner = self.entities[self.entity_index(tc).expect("validated")].owner;
+        self.spend_tech(owner, tech);
+        if let Some(s) = self.tc_states.iter_mut().find(|s| s.tc_id == tc) {
+            s.queue.push(ProdEntry::Tech(tech));
+        }
+    }
+
+    /// Apply a `ResearchAt` command (M6): charge the building's
+    /// owner and enqueue at the building, or reject silently.
+    fn issue_research_at(&mut self, building: u32, tech: TechId) {
+        if self.research_block_at(building, tech) != ResearchBlock::Ok {
+            return;
+        }
+        let bi = self.building_index(building).expect("validated");
+        let owner = self.buildings[bi].owner;
+        self.spend_tech(owner, tech);
+        self.buildings[bi].queue.push(ProdEntry::Tech(tech));
+    }
+
+    /// A completed research lands (M6): record it on the owner and
+    /// run its completion sweep, if any. Effects that are pure data
+    /// patches (Fletching, the armor lines) need no sweep — every
+    /// lookup reads the owner's researched set (TEC-06). Two do:
+    /// - Feudal Age flips the owner's age (TEC-04: empire-wide, at
+    ///   once — lookups key on the age, so nothing else moves).
+    /// - Loom grants existing villagers the +15 HP with the new
+    ///   maximum (id order; the DE behavior for a stat research —
+    ///   their current HP rises with the max).
+    /// - Man-at-Arms swaps every living Militia of the owner to
+    ///   the Man-at-Arms kind (CLS-03's line upgrade: position,
+    ///   orders and current HP are kept; the max rises — no heal).
+    fn apply_research(&mut self, owner: u8, tech: TechId) {
+        let Some(slot) = player_slot(owner) else {
+            return;
+        };
+        match tech {
+            TechId::FeudalAge => {
+                self.players[slot].age = Age::Feudal;
+            }
+            TechId::Loom => {
+                self.players[slot].techs |= tech.bit();
+                for e in &mut self.entities {
+                    if e.owner == owner && e.kind == EntityKind::Villager && !e.dead {
+                        e.hp += I16F16::from_num(15);
+                    }
+                }
+            }
+            TechId::ManAtArms => {
+                self.players[slot].techs |= tech.bit();
+                for e in &mut self.entities {
+                    if e.owner == owner && e.kind == EntityKind::Militia && !e.dead {
+                        e.kind = EntityKind::ManAtArms;
+                    }
+                }
+            }
+            _ => {
+                self.players[slot].techs |= tech.bit();
+            }
+        }
+    }
+
+    /// Villagers waiting in Town Center `tc`'s queue (M6) — the
+    /// AI's production accounting (research entries excluded).
+    pub(crate) fn tc_queued_villagers(&self, tc: u32) -> u32 {
+        self.tc_state(tc).map(|s| s.queued_villagers()).unwrap_or(0)
+    }
+
+    /// Whether a Town Center's queue is empty (M6) — the AI only
+    /// starts research on an empty queue, so research never delays
+    /// a villager already in line behind it (and vice versa).
+    pub(crate) fn tc_queue_empty(&self, tc: u32) -> bool {
+        self.tc_state(tc).map(|s| s.queue.is_empty()).unwrap_or(true)
+    }
+
+    /// Would a `ForceDeposit` command be accepted right now? (M6,
+    /// ECO-07.) The villager must be alive, carrying something, and
+    /// have somewhere valid to take it.
+    pub fn can_force_deposit(&self, entity: u32) -> bool {
+        let idx = match self.entity_index(entity) {
+            Some(i) => i,
+            None => return false,
+        };
+        let e = &self.entities[idx];
+        if e.kind != EntityKind::Villager || e.dead || e.carry <= I16F16::ZERO {
+            return false;
+        }
+        match e.carry_kind {
+            Some(kind) => self
+                .deposit_target(e.owner, kind, e.pos_x, e.pos_y)
+                .is_some(),
+            None => false,
+        }
+    }
+
+    /// Apply a `ForceDeposit` command (M6, ECO-07): the villager's
+    /// phase flips to `Returning` toward the nearest valid drop-off
+    /// for its load, *keeping* its gather assignment (or its
+    /// construction site) as the resume marker — the deposit step
+    /// sends it back to that work on its own. Like every non-queued
+    /// order it clears the villager's order queue and any combat
+    /// engagement; the carry is untouched until the deposit lands.
+    fn issue_force_deposit(&mut self, entity: u32) {
+        let idx = match self.entity_index(entity) {
+            Some(i) => i,
+            None => return,
+        };
+        let (owner, kind, px, py) = {
+            let e = &self.entities[idx];
+            if e.kind != EntityKind::Villager || e.dead || e.carry <= I16F16::ZERO {
+                return;
+            }
+            match e.carry_kind {
+                Some(k) => (e.owner, k, e.pos_x, e.pos_y),
+                None => return,
+            }
+        };
+        let Some(target) = self.deposit_target(owner, kind, px, py) else {
+            return;
+        };
+        let Some((tx, ty)) = self.dropoff_steer_point(owner, target, px, py) else {
+            return;
+        };
+        {
+            let e = &mut self.entities[idx];
+            e.order_queue.clear();
+            e.clear_combat();
+            e.task = Task::Returning;
+            e.task_dropoff = Some(target);
+        }
+        self.set_move_order(idx, tx, ty);
     }
 
     /// Would an `AttackBuilding` command be accepted right now?
@@ -1182,6 +1803,10 @@ impl Sim {
                 Command::TrainAt { building, kind } => self.issue_train_at(building, kind),
                 Command::Queue { entity, order } => self.issue_queue(entity, order),
                 Command::SetRally { building, x, y } => self.issue_set_rally(building, x, y),
+                Command::ResearchTc { tech } => self.issue_research_tc(tech),
+                Command::ResearchTcAt { tc, tech } => self.issue_research_tc_at(tc, tech),
+                Command::ResearchAt { building, tech } => self.issue_research_at(building, tech),
+                Command::ForceDeposit { entity } => self.issue_force_deposit(entity),
             }
         }
 
@@ -1252,6 +1877,25 @@ impl Sim {
             }
         }
 
+        // 2.5 Grid integrity (M6): separation can push a unit into
+        //    a blocked cell (a wall cell, a building footprint) —
+        //    and a unit left standing there can never be pathed to
+        //    again, stranding it beyond any attacker (a Conquest
+        //    match once hinged on a Scout entombed in the wall
+        //    column). No living unit ends a tick inside a blocked
+        //    cell: it is displaced to the nearest open cell.
+        for idx in 0..self.entities.len() {
+            if self.entities[idx].dead {
+                continue;
+            }
+            let cell = self
+                .grid
+                .world_to_cell(self.entities[idx].pos_x, self.entities[idx].pos_y);
+            if self.grid.is_blocked(cell.0, cell.1) {
+                self.displace_out_of_blocked(idx);
+            }
+        }
+
         // 3. Combat (M3, SIM-07: after movement, before economy):
         //    animal behavior, attack machines, projectiles, deaths,
         //    carcass decay lives in the economy phase below.
@@ -1288,7 +1932,9 @@ impl Sim {
         if e.kind == EntityKind::Boar && e.attack_target.is_some() {
             return units::BOAR_CHASE_SPEED;
         }
-        units::spec(e.kind).speed
+        // M6: the owner's effective row — Loom's villager speed and
+        // the Scout's Feudal speed enter movement here (TEC-06).
+        self.unit_stats(idx).speed
     }
 
     /// Can this entity take player orders at all? Living, owned by a
@@ -1332,6 +1978,7 @@ impl Sim {
             e.task = Task::Idle;
             e.task_node = None;
             e.task_building = None;
+            e.task_dropoff = None;
             e.clear_combat();
         }
         self.set_move_order(idx, clamp_pos(x), clamp_pos(y));
@@ -1358,6 +2005,7 @@ impl Sim {
         e.task = Task::Idle;
         e.task_node = None;
         e.task_building = None;
+        e.task_dropoff = None;
         e.order = None;
         e.attack_target = Some(target);
         e.attack_building = None;
@@ -1382,6 +2030,7 @@ impl Sim {
         e.task = Task::Idle;
         e.task_node = None;
         e.task_building = None;
+        e.task_dropoff = None;
         e.order = None;
         e.attack_target = None;
         e.attack_building = Some(building);
@@ -1400,7 +2049,7 @@ impl Sim {
         let bi = self.building_index(building).expect("validated");
         let owner = self.buildings[bi].owner;
         self.spend_cost(owner, kind);
-        self.buildings[bi].queue.push(kind);
+        self.buildings[bi].queue.push(ProdEntry::Unit(kind));
     }
 
     /// Apply a `Gather` command: assign the villager to the node. If it
@@ -1440,14 +2089,23 @@ impl Sim {
         self.entities[idx].task_building = None;
         match self.entities[idx].carry_kind {
             Some(k) if k != resource && self.entities[idx].carry > I16F16::ZERO => {
-                // Haul the other resource home first — to *its own*
-                // player's Town Center (M5). With no Town Center left
-                // there is nowhere to haul to: head for the node and
+                // Haul the other resource home first — to the
+                // nearest valid drop-off for *that* load (M6,
+                // ECO-06; before M6, always the Town Center). With
+                // nowhere valid to haul to, head for the node and
                 // keep the carry (it tops up what it can and idles
                 // full — see `begin_return`).
-                match self.deposit_pos(self.entities[idx].owner) {
-                    Some((tx, ty)) => {
+                let (owner, px, py) = {
+                    let e = &self.entities[idx];
+                    (e.owner, e.pos_x, e.pos_y)
+                };
+                match self.deposit_target(owner, k, px, py) {
+                    Some(target) => {
+                        let (tx, ty) = self
+                            .dropoff_steer_point(owner, target, px, py)
+                            .expect("target resolved");
                         self.entities[idx].task = Task::Returning;
+                        self.entities[idx].task_dropoff = Some(target);
                         self.set_move_order(idx, tx, ty);
                     }
                     None => {
@@ -1487,7 +2145,7 @@ impl Sim {
             return;
         }
         if let Some(s) = self.tc_states.iter_mut().find(|s| s.tc_id == tc) {
-            s.queue += 1;
+            s.queue.push(ProdEntry::Unit(EntityKind::Villager));
         }
     }
 
@@ -1757,6 +2415,22 @@ impl Sim {
                 return BuildVerdict::Resume(b.id);
             }
         }
+        // M6 placement gates (BLD-15: availability keys on the
+        // owner's age and built set) — checked for fresh placements
+        // only; resuming a standing foundation is always allowed.
+        let builder_owner = self.entities[idx].owner;
+        if kind == BuildingKind::Farm && !self.has_completed_building(builder_owner, BuildingKind::Mill) {
+            // Farms require a standing Mill (OPENING-SPEC §2.4).
+            return BuildVerdict::Reject;
+        }
+        if self.age_of(builder_owner) < kind.age_required() {
+            return BuildVerdict::Reject;
+        }
+        if let Some(req) = kind.requires_building() {
+            if !self.has_completed_building(builder_owner, req) {
+                return BuildVerdict::Reject;
+            }
+        }
         // The whole footprint must be inside the grid.
         if ax + size > GRID_DIM || ay + size > GRID_DIM {
             return BuildVerdict::Reject;
@@ -1775,6 +2449,25 @@ impl Sim {
                     && self.grid.world_to_cell(e.pos_x, e.pos_y) == (cx, cy)
                 {
                     return BuildVerdict::Reject;
+                }
+            }
+            // A living unit standing on the footprint blocks
+            // placement (any owner, Gaia included — the reference
+            // game's rule). It is also what keeps a completed
+            // building from entombing a unit in a cell no attacker
+            // can path to, which used to make Conquest unwinnable
+            // when the entombed unit was the loser's last (M6 fix).
+            // Farms are exempt: they never block, and their farmer
+            // stands on them by design. The ordering builder is
+            // exempt: it steps to the ring to work.
+            if kind != BuildingKind::Farm {
+                for e in &self.entities {
+                    if e.id != entity
+                        && !e.dead
+                        && self.grid.world_to_cell(e.pos_x, e.pos_y) == (cx, cy)
+                    {
+                        return BuildVerdict::Reject;
+                    }
                 }
             }
             // Resource nodes sit on cell centers; a footprint may not
@@ -1802,7 +2495,6 @@ impl Sim {
         }
         // The wood must be payable at placement — by the *builder's*
         // owner (M5: each player builds from their own stockpile).
-        let builder_owner = self.entities[idx].owner;
         if self.stockpile_of(builder_owner).amount(ResourceKind::Wood) < kind.wood_cost() {
             return BuildVerdict::Reject;
         }
@@ -1831,10 +2523,13 @@ impl Sim {
             e.task_node = None;
         }
         match self.approach_point(idx, ax, ay, size) {
-            Some((px, py)) => self.set_move_order(idx, px, py),
+            Some((px, py)) => {
+                self.set_move_order(idx, px, py);
+            }
             None => {
-                // No standing spot right now (crowded site): the work
-                // step retries every tick, like gather/deposit orders.
+                // No standing spot right now (crowded site): the
+                // work step probes again — and gives up to Idle if
+                // the site stays unreachable (M6 perf fix).
                 let e = &mut self.entities[idx];
                 e.order = None;
                 e.vel_x = I16F16::ZERO;
@@ -1869,14 +2564,67 @@ impl Sim {
         None
     }
 
+    /// Nearest cell to `from` that is not blocked (either layer),
+    /// scanning Chebyshev rings in fixed (ring, row, column)
+    /// order; `from` itself is never returned — callers use this
+    /// to displace a unit out of a blocked cell. Bounded; `None`
+    /// if the whole neighborhood is solid.
+    fn nearest_open_cell(&self, from: (u32, u32)) -> Option<(u32, u32)> {
+        for r in 1..=8i32 {
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    if dx.abs() != r && dy.abs() != r {
+                        continue;
+                    }
+                    let (x, y) = (from.0 as i32 + dx, from.1 as i32 + dy);
+                    if x < 0 || y < 0 || x >= GRID_DIM as i32 || y >= GRID_DIM as i32 {
+                        continue;
+                    }
+                    let (x, y) = (x as u32, y as u32);
+                    if !self.grid.is_blocked(x, y) {
+                        return Some((x, y));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Move entity `idx` out of the blocked cell it stands in, to
+    /// the center of the nearest open cell, clearing its move
+    /// order (M6 grid integrity — see the per-tick pass in
+    /// `Sim::tick` and the completion displacement in
+    /// `complete_building`). No-op when no open cell is near.
+    fn displace_out_of_blocked(&mut self, idx: usize) {
+        let cell = self
+            .grid
+            .world_to_cell(self.entities[idx].pos_x, self.entities[idx].pos_y);
+        if let Some((nx, ny)) = self.nearest_open_cell(cell) {
+            let (wx, wy) = self.grid.cell_center(nx, ny);
+            let e = &mut self.entities[idx];
+            e.pos_x = wx;
+            e.pos_y = wy;
+            e.vel_x = I16F16::ZERO;
+            e.vel_y = I16F16::ZERO;
+            e.order = None;
+        }
+    }
+
     fn building_index(&self, id: u32) -> Option<usize> {
         self.buildings.iter().position(|b| b.id == id)
     }
 
     /// Install a freshly computed A* move order toward a world point.
     /// On failure (blocked/unreachable) the order is cleared and the
-    /// entity holds position; work-state callers re-issue as needed.
-    fn set_move_order(&mut self, idx: usize, x: I16F16, y: I16F16) {
+    /// entity holds position. Returns whether an order was
+    /// installed: per-tick callers MUST react to `false` with a
+    /// terminal transition (idle / order complete) — retrying next
+    /// tick re-runs a full-grid A* that will keep failing until the
+    /// building set changes, which froze late-game matches (M6
+    /// perf fix; the building set is the only thing that changes
+    /// reachability, and completion/destruction re-tasks everyone
+    /// affected through other paths).
+    fn set_move_order(&mut self, idx: usize, x: I16F16, y: I16F16) -> bool {
         let (px, py) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
         let order = match self.grid.find_path((px, py), (x, y)) {
             Some(wps) if !wps.is_empty() => Some(MoveOrder {
@@ -1887,6 +2635,7 @@ impl Sim {
             }),
             _ => None,
         };
+        let installed = order.is_some();
         let e = &mut self.entities[idx];
         match order {
             Some(o) => e.order = Some(o),
@@ -1896,6 +2645,7 @@ impl Sim {
                 e.vel_y = I16F16::ZERO;
             }
         }
+        installed
     }
 
     /// The economy phase of a tick: carcass decay (M3), training
@@ -1916,14 +2666,18 @@ impl Sim {
                 };
             }
         }
-        // Training stalls while the population is at capacity — the
-        // "housed" state: the queue keeps its place and its progress,
-        // and resumes the tick housing frees up. Completion spawns only
-        // while there is room, so the cap can never be exceeded.
-        // (M3: the room check counts every living population unit —
-        // villagers, Scout, military — not just villagers. M5: every
-        // Town Center runs its own queue, checked against its owner's
-        // population and capacity.)
+        // Production (M6, TEC-03): every Town Center runs its
+        // shared queue — villagers and research in one FIFO. The
+        // head accrues progress; a *unit* head stalls while its
+        // owner is at the population cap (the "housed" state: the
+        // queue keeps its place and its progress, and resumes the
+        // tick housing frees up, so the cap can never be exceeded),
+        // while a *research* head accrues regardless — population
+        // gates units, not ideas. Completion spawns only while
+        // there is room. (M3: the room check counts every living
+        // population unit — villagers, Scout, military — not just
+        // villagers. M5: every Town Center runs its own queue,
+        // checked against its owner's population and capacity.)
         let tc_ids: Vec<u32> = self.tc_states.iter().map(|s| s.tc_id).collect();
         for tc_id in tc_ids {
             let owner = match self.entity_index(tc_id) {
@@ -1935,37 +2689,47 @@ impl Sim {
                 .iter()
                 .position(|s| s.tc_id == tc_id)
                 .expect("listed");
-            if self.tc_states[si].queue == 0 {
+            let Some(head) = self.tc_states[si].queue.first().copied() else {
                 continue;
-            }
-            if self.living_population_of(owner) >= self.population_cap_of(owner) {
+            };
+            if matches!(head, ProdEntry::Unit(_))
+                && self.living_population_of(owner) >= self.population_cap_of(owner)
+            {
                 continue; // housed: this Town Center's queue stalls
             }
             self.tc_states[si].progress += 1;
-            if self.tc_states[si].progress >= VILLAGER_TRAIN_TICKS {
+            if self.tc_states[si].progress >= head.ticks() {
                 self.tc_states[si].progress = 0;
-                self.tc_states[si].queue -= 1;
-                self.spawn_trained_villager(tc_id);
+                self.tc_states[si].queue.remove(0);
+                match head {
+                    ProdEntry::Unit(_) => self.spawn_trained_villager(tc_id),
+                    ProdEntry::Tech(tech) => self.apply_research(owner, tech),
+                }
             }
         }
-        // Barracks production (M3): same queue/pop rules as the Town
-        // Center — progress only while there is population room (the
-        // building's owner's room, M5).
+        // Placed-building queues (M3 production; M6 research
+        // shares them): the same discipline as the Town Center's —
+        // unit heads stall while housed, research heads do not.
         for bi in 0..self.buildings.len() {
             if !self.buildings[bi].complete || self.buildings[bi].queue.is_empty() {
                 continue;
             }
             let owner = self.buildings[bi].owner;
-            if self.living_population_of(owner) >= self.population_cap_of(owner) {
+            let head = self.buildings[bi].queue[0];
+            if matches!(head, ProdEntry::Unit(_))
+                && self.living_population_of(owner) >= self.population_cap_of(owner)
+            {
                 continue; // housed: this building's queue stalls too
             }
             self.buildings[bi].train_progress += 1;
-            let head = self.buildings[bi].queue[0];
-            if self.buildings[bi].train_progress >= units::spec(head).train_ticks {
+            if self.buildings[bi].train_progress >= head.ticks() {
                 self.buildings[bi].train_progress = 0;
                 self.buildings[bi].queue.remove(0);
                 let bid = self.buildings[bi].id;
-                self.spawn_trained_unit(bid, head);
+                match head {
+                    ProdEntry::Unit(kind) => self.spawn_trained_unit(bid, kind),
+                    ProdEntry::Tech(tech) => self.apply_research(owner, tech),
+                }
             }
         }
         for idx in 0..self.entities.len() {
@@ -2017,12 +2781,24 @@ impl Sim {
             }
         }
         let (px, py) = pos.unwrap_or((cx0, cy0));
+        // CLS-03 (M6): with the Man-at-Arms upgrade researched, new
+        // Militia production uses the new tier's row — the queue
+        // entry still says Militia; the spawn is a Man-at-Arms.
+        let kind = if kind == EntityKind::Militia && self.has_tech(owner, TechId::ManAtArms) {
+            EntityKind::ManAtArms
+        } else {
+            kind
+        };
         let id = self.entities.len() as u32;
         self.entities.push(Entity::spawned(id, kind, owner, px, py));
+        // Spawn at the owner's *effective* maximum (M6: a villager
+        // trained after Loom starts at 40 HP, not the base 25).
+        let idx = self.entities.len() - 1;
+        let max_hp = self.unit_stats(idx).max_hp;
+        self.entities[idx].hp = I16F16::from_num(max_hp);
         // Rally (M4, SEL-13): the new unit walks to the building's
         // rally point (military units just walk — only villagers can
         // be sent straight to a node, and Barracks train none).
-        let idx = self.entities.len() - 1;
         self.apply_spawn_rally(idx, rally, rally_node);
     }
 
@@ -2056,8 +2832,15 @@ impl Sim {
                     e.order = None;
                     e.vel_x = I16F16::ZERO;
                     e.vel_y = I16F16::ZERO;
-                } else if self.entities[idx].order.is_none() {
-                    self.set_move_order(idx, nx, ny);
+                } else if self.entities[idx].order.is_none()
+                    && !self.set_move_order(idx, nx, ny)
+                {
+                    // The node cannot be reached from here (a
+                    // building completed around it, or around the
+                    // villager): drop the assignment and idle —
+                    // retrying would re-run a failing full-grid A*
+                    // every tick (M6 perf fix).
+                    self.stop_task(idx);
                 }
             }
             Task::Gathering => {
@@ -2114,19 +2897,49 @@ impl Sim {
                 }
             }
             Task::Returning => {
-                // Haul to the villager's *own* Town Center (M5). If
-                // it is gone the load has nowhere to go: the villager
-                // idles with its carry kept.
-                match self.deposit_pos(self.entities[idx].owner) {
-                    Some((tx, ty)) => {
-                        let d = self.distance_to(idx, tx, ty);
-                        if d <= DEPOSIT_RANGE {
+                // Haul to the nearest valid drop-off for the load
+                // (M6, ECO-06) — re-resolved every tick, so a camp
+                // completing mid-haul (or the destination falling)
+                // reroutes the trip, and the recorded target is
+                // always the current one. The move order itself is
+                // re-issued only when the target *changes* or the
+                // order runs out: a camp's steering point depends on
+                // the approach line, and re-issuing it every tick
+                // would re-path forever. With nowhere valid to go
+                // the villager stops, carry kept — the pre-M6
+                // no-Town-Center behavior, generalized.
+                let (owner, kind, px, py) = {
+                    let e = &self.entities[idx];
+                    (e.owner, e.carry_kind, e.pos_x, e.pos_y)
+                };
+                let target = match kind {
+                    Some(k) => self.deposit_target(owner, k, px, py),
+                    None => None,
+                };
+                match target {
+                    Some(t) => {
+                        if self.dropoff_arrived(owner, px, py, t) {
                             self.deposit(idx);
-                        } else if self.entities[idx].order.is_none() {
-                            self.set_move_order(idx, tx, ty);
+                        } else if self.entities[idx].task_dropoff != Some(t)
+                            || self.entities[idx].order.is_none()
+                        {
+                            self.entities[idx].task_dropoff = Some(t);
+                            let (tx, ty) = self
+                                .dropoff_steer_point(owner, t, px, py)
+                                .expect("target resolved");
+                            if !self.set_move_order(idx, tx, ty) {
+                                // The drop-off cannot be reached
+                                // from here: stop with the load kept
+                                // (re-taskable) instead of re-pathing
+                                // every tick (M6 perf fix).
+                                self.stop_task(idx);
+                            }
                         }
                     }
-                    None => self.stop_task(idx),
+                    None => {
+                        self.entities[idx].task_dropoff = None;
+                        self.stop_task(idx);
+                    }
                 }
             }
             Task::ToBuild => {
@@ -2162,8 +2975,15 @@ impl Sim {
                     e.vel_x = I16F16::ZERO;
                     e.vel_y = I16F16::ZERO;
                 } else if self.entities[idx].order.is_none() {
-                    if let Some((px, py)) = self.approach_point(idx, ax, ay, size) {
-                        self.set_move_order(idx, px, py);
+                    match self.approach_point(idx, ax, ay, size) {
+                        Some((px, py)) => {
+                            self.set_move_order(idx, px, py);
+                        }
+                        // No standable ring cell is reachable: the
+                        // site is enclosed — give up and idle
+                        // instead of probing the ring (a find_path
+                        // per cell) every tick (M6 perf fix).
+                        None => self.stop_task(idx),
                     }
                 }
             }
@@ -2287,6 +3107,61 @@ impl Sim {
             return;
         }
         self.buildings[bi].complete = true;
+        // Entombment cure (M6): a unit that wandered (or was
+        // pushed) onto the footprint while the building rose is
+        // displaced to the nearest open cell when it completes —
+        // a unit left standing inside a blocking footprint sits in
+        // a cell no path can target, which used to strand sheep
+        // beyond hunting and could strand a player's last unit
+        // beyond any attacker. Placement already refuses *new*
+        // overlaps (validate_build); this covers everything that
+        // moved in afterwards. Deterministic: entities in id
+        // order, the ring search in fixed order.
+        if self.buildings[bi].kind != BuildingKind::Farm {
+            let (ax, ay, size) = (
+                self.buildings[bi].cell_x,
+                self.buildings[bi].cell_y,
+                self.buildings[bi].kind.footprint_size(),
+            );
+            let cells = build::footprint_cells(ax, ay, size);
+            for idx in 0..self.entities.len() {
+                if self.entities[idx].dead {
+                    continue;
+                }
+                let cell = self.grid
+                    .world_to_cell(self.entities[idx].pos_x, self.entities[idx].pos_y);
+                if cells.contains(&cell) {
+                    self.displace_out_of_blocked(idx);
+                }
+            }
+        }
+        // M6 (OPENING-SPEC §2.4, Bucket B): a builder who finishes
+        // a drop-off building deposits whatever it carries into the
+        // new building on the spot, when the building accepts the
+        // load — the classic "build a camp on the woodline, keep
+        // chopping" flow. Only the active builders (the `Building`
+        // phase) are on site to do it; the credit is the building
+        // owner's, like every deposit.
+        if self.buildings[bi].kind.is_dropoff() {
+            let kind = self.buildings[bi].kind;
+            for idx in 0..self.entities.len() {
+                let e = &self.entities[idx];
+                if e.task != Task::Building || e.task_building != Some(bid) {
+                    continue;
+                }
+                if e.carry > I16F16::ZERO {
+                    if let Some(res) = e.carry_kind {
+                        if kind.accepts(res) {
+                            let (carry, owner) = (e.carry, e.owner);
+                            let e = &mut self.entities[idx];
+                            e.carry = I16F16::ZERO;
+                            e.carry_kind = None;
+                            self.stockpile_mut(owner).add(res, carry);
+                        }
+                    }
+                }
+            }
+        }
         if self.buildings[bi].kind != BuildingKind::Farm {
             // House: active builders are done; travellers notice the
             // completion in their own work step and stand down.
@@ -2316,15 +3191,18 @@ impl Sim {
     }
 
     /// Deposit the villager's carry into *its owner's* stockpile
-    /// (M5), then resume the gather assignment if its node is still
-    /// alive; if it died, retarget to a same-resource neighbor
-    /// (ECO-09); otherwise go idle.
+    /// (M5), then resume the kept assignment: the gather node if it
+    /// is still alive (retargeting to a same-resource neighbor when
+    /// it died — ECO-09), or the construction site it was pulled
+    /// from by a force drop-off (M6, ECO-07's resume); otherwise go
+    /// idle.
     fn deposit(&mut self, idx: usize) {
         let (carry, kind) = {
             let e = &mut self.entities[idx];
             let taken = (e.carry, e.carry_kind);
             e.carry = I16F16::ZERO;
             e.carry_kind = None;
+            e.task_dropoff = None;
             e.order = None;
             e.vel_x = I16F16::ZERO;
             e.vel_y = I16F16::ZERO;
@@ -2352,7 +3230,20 @@ impl Sim {
                     }
                 }
             },
-            None => self.stop_task(idx),
+            None => match self.entities[idx].task_building {
+                // M6: a force-dropped builder returns to its site —
+                // back on construction duty if the building is still
+                // rising, or through the finished-site path if it
+                // completed meanwhile.
+                Some(bid) => match self.building_index(bid) {
+                    Some(bi) if !self.buildings[bi].complete => {
+                        self.assign_builder(idx, bid);
+                    }
+                    Some(_) => self.leave_finished_site(idx),
+                    None => self.stop_task(idx),
+                },
+                None => self.stop_task(idx),
+            },
         }
     }
 
@@ -2402,12 +3293,26 @@ impl Sim {
     }
 
     /// Send the villager home to deposit, keeping its gather
-    /// assignment. "Home" is its owner's Town Center (M5); with none
-    /// left the villager simply stops, carry kept.
+    /// assignment. "Home" is the nearest valid drop-off for the
+    /// load (M6, ECO-06; before M6, always the owner's Town
+    /// Center); with nowhere valid left the villager simply stops,
+    /// carry kept.
     fn begin_return(&mut self, idx: usize) {
-        match self.deposit_pos(self.entities[idx].owner) {
-            Some((tx, ty)) => {
+        let (owner, kind, px, py) = {
+            let e = &self.entities[idx];
+            (e.owner, e.carry_kind, e.pos_x, e.pos_y)
+        };
+        let target = match kind {
+            Some(k) => self.deposit_target(owner, k, px, py),
+            None => None,
+        };
+        match target {
+            Some(t) => {
+                let (tx, ty) = self
+                    .dropoff_steer_point(owner, t, px, py)
+                    .expect("target resolved");
                 self.entities[idx].task = Task::Returning;
+                self.entities[idx].task_dropoff = Some(t);
                 self.set_move_order(idx, tx, ty);
             }
             None => self.stop_task(idx),
@@ -2440,6 +3345,7 @@ impl Sim {
         e.task = Task::Idle;
         e.task_node = None;
         e.task_building = None;
+        e.task_dropoff = None;
         e.order = None;
         e.vel_x = I16F16::ZERO;
         e.vel_y = I16F16::ZERO;
@@ -2469,6 +3375,11 @@ impl Sim {
         let id = self.entities.len() as u32;
         self.entities
             .push(Entity::spawned(id, EntityKind::Villager, owner, pos.0, pos.1));
+        // Spawn at the owner's effective maximum (M6, Loom — see
+        // `spawn_trained_unit`).
+        let idx0 = self.entities.len() - 1;
+        let max_hp = self.unit_stats(idx0).max_hp;
+        self.entities[idx0].hp = I16F16::from_num(max_hp);
         // Rally (M4, SEL-13): a new villager walks to its Town
         // Center's rally point — or straight to work, when the rally
         // snapped to a live resource node.
@@ -2540,6 +3451,14 @@ impl Sim {
         // M5: the match mode — a sandbox and a match with identical
         // openings must never share a hash stream.
         h.write_u8(self.mode.tag());
+        // M6: per-player progression — age and the researched-tech
+        // mask, in slot order. New hashed state (TEC-06: research is
+        // state, so replays diverge the tick a research lands — as
+        // they must). This deliberately changes the golden hash.
+        for p in &self.players {
+            h.write_u8(p.age.tag());
+            h.write_u64(p.techs);
+        }
         // M2: stockpiles in canonical resource order. M5: both
         // players' stockpiles, in slot order (human, opponent).
         for slot in &self.stockpiles {
@@ -2560,10 +3479,16 @@ impl Sim {
         }
         // M5: every Town Center's production state (queue, progress,
         // rally — M4's SEL-13 fields, now per Town Center).
+        // M6: the queue is a typed entry list (units + research,
+        // TEC-03) — entries are written as their flat codes. This
+        // deliberately changes the golden hash.
         h.write_u32(self.tc_states.len() as u32);
         for s in &self.tc_states {
             h.write_u32(s.tc_id);
-            h.write_u32(s.queue);
+            h.write_u32(s.queue.len() as u32);
+            for e in &s.queue {
+                h.write_u32(e.code());
+            }
             h.write_u64(s.progress);
             match s.rally {
                 None => h.write_u8(0),
@@ -2605,7 +3530,9 @@ impl Sim {
             }
             h.write_u32(b.queue.len() as u32);
             for &q in &b.queue {
-                h.write_u8(q.tag());
+                // M6: entries are typed (unit/research) — the flat
+                // entry code replaces M3's bare kind tag.
+                h.write_u32(q.code());
             }
             h.write_u64(b.train_progress);
             // M4: rally point + snapped node (SEL-13).
@@ -2681,6 +3608,18 @@ impl Sim {
                 Some(b) => {
                     h.write_u8(1);
                     h.write_u32(b);
+                }
+            }
+            // M6: the current deposit destination (ECO-06) — a
+            // hauler's rerouting is state, so it is hashed like
+            // every other work field. Deliberate hash change.
+            match e.task_dropoff {
+                None => h.write_u8(0),
+                Some(d) => {
+                    h.write_u8(d.tag());
+                    if let Dropoff::Building(b) = d {
+                        h.write_u32(b);
+                    }
                 }
             }
             h.write_i32(e.carry.to_bits());

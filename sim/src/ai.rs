@@ -19,21 +19,28 @@
 //! 1. Keep the Town Center training villagers until the economy
 //!    target is reached.
 //! 2. Build ahead of the population cap (a House whenever the
-//!    population closes on it), then raise a Barracks once the
-//!    economy is large enough to feed an army.
+//!    population closes on it); raise the economy buildings first
+//!    (a Mill by the berries, a Lumber Camp by the woodline), then
+//!    a Barracks once the economy is large enough to feed an army,
+//!    and an Archery Range once Feudal stands (M6).
 //! 3. Put every idle villager to work, balancing food / wood / gold
 //!    toward fixed worker targets (surplus to food); food comes
 //!    from the nearest food source — berries or carcasses first,
 //!    and when no food source is near the Town Center it hunts its
 //!    own sheep (the killer auto-harvests, ECO-13).
-//! 4. Rally the Barracks toward the human's base and train a mixed
-//!    Militia/Archer army up to the army target.
-//! 5. Launch attack waves: when the idle army at home reaches the
-//!    wave size, every idle soldier attacks — the nearest human
-//!    unit, else the human Town Center, else the nearest human
-//!    building — then regroups for the cooldown. Idle soldiers also
-//!    defend: a human unit near the AI's Town Center is engaged on
-//!    sight.
+//! 4. Research at the Town Center when the queue stands empty:
+//!    Loom once the village is grown, then the Feudal Age when
+//!    its requirement buildings stand and a food spare exists
+//!    (M6).
+//! 5. Rally each production building toward the human's base and
+//!    train a mixed Militia/Archer army — each kind at its own
+//!    building — up to the army target.
+//! 6. Launch attack waves: when the idle army at home reaches the
+//!    wave size, every idle soldier attacks — the nearest
+//!    *reachable* human unit, else the human Town Center, else the
+//!    nearest human building — then regroups for the cooldown.
+//!    Idle soldiers also defend: a reachable human unit near the
+//!    AI's Town Center is engaged on sight.
 //!
 //! Difficulty (AI-03) is *behavior only* — the config below. Costs,
 //! stats, production times and the damage formula are the human's;
@@ -150,25 +157,34 @@ pub(crate) fn decide(sim: &mut Sim) {
     // 1. Villager production: keep the Town Center busy until the
     //    economy target (living + already queued) is met.
     if let Some((tc_id, _, _)) = my_tc {
-        let queued = sim.tc_state(tc_id).map(|s| s.queue).unwrap_or(0);
+        let queued = sim.tc_queued_villagers(tc_id);
         if my_villagers + queued < cfg.villager_target && sim.can_train_villager_at(tc_id) {
             sim.push_command(Command::TrainVillagerAt { tc: tc_id });
         }
     }
 
     // 2. Construction (at most one placement per decision): houses
-    //    ahead of the cap first, then the Barracks.
+    //    ahead of the cap first, then the economy buildings.
     plan_build(sim, &cfg, &mut acted);
 
-    // 3. Barracks rally: once, toward a staging point short of the
-    //    human's Town Center, so fresh troops walk toward the front.
+    // 2.5 Research (M6): Loom, then the Feudal advancement — only
+    //     ever onto an *empty* Town Center queue, so research
+    //     never jumps the villager line (or delays it by more than
+    //     its own duration once started).
+    plan_research(sim, &cfg);
+
+    // 3. Production-building rally: once each, toward a staging
+    //    point short of the human's Town Center, so fresh troops
+    //    walk toward the front.
     plan_rally(sim);
 
-    // 4. Military production: fill the Barracks queue (one enqueue
-    //    per decision) toward the army target, alternating Militia
-    //    and Archers so the mix — and the resource draw — stays
-    //    balanced; if the preferred kind is unaffordable, try the
-    //    other before giving up.
+    // 4. Military production: keep the producing building's queue
+    //    busy (one enqueue per decision) toward the army target,
+    //    alternating Militia and Archers so the mix — and the
+    //    resource draw — stays balanced; each kind is trained at
+    //    its M6 home (Militia at the Barracks, Archers at the
+    //    Archery Range). If the preferred kind cannot be trained,
+    //    try the other before giving up.
     plan_train_military(sim, &cfg);
 
     // 5. Idle villagers to work.
@@ -216,8 +232,15 @@ fn is_idle(sim: &Sim, id: u32) -> bool {
 
 /// Construction step: one placement per decision, placed by the
 /// first free villager at the first legal anchor the ring search
-/// around the AI's Town Center offers (`Sim::can_build` is the
-/// sim's own validation — the AI plays by the placement rules too).
+/// offers (`Sim::can_build` is the sim's own validation — the AI
+/// plays by the placement rules too). Priority: the Archery
+/// Range once Feudal stands (it outranks housing — see the chain
+/// below) → pop-cap pressure (house) → the Mill by the berries →
+/// the Lumber Camp by the woodline → the Barracks → a house built
+/// ahead while there is still slack for one more. (M6: the Mill
+/// and the Lumber Camp come before the Barracks — they are the
+/// AI's Feudal pair, and their drop-offs shorten every haul the
+/// script makes.)
 fn plan_build(sim: &mut Sim, cfg: &AiConfig, acted: &mut Vec<u32>) {
     let me = OWNER_OPPONENT;
     let Some((_, tc_x, tc_y)) = sim.tc_entity_of(me).map(|tc| (tc.id, tc.pos_x, tc.pos_y)) else {
@@ -226,30 +249,65 @@ fn plan_build(sim: &mut Sim, cfg: &AiConfig, acted: &mut Vec<u32>) {
     let pop = sim.population_of(me);
     let cap = sim.population_cap_of(me);
     let wood = sim.stockpile_of(me).amount(ResourceKind::Wood);
+    let villagers = count_kind(sim, me, EntityKind::Villager);
+    let have = |kind: BuildingKind| {
+        sim.buildings()
+            .iter()
+            .any(|b| b.owner == me && b.kind == kind)
+    };
     let house_in_progress = sim
         .buildings()
         .iter()
         .any(|b| b.owner == me && b.kind == BuildingKind::House && !b.complete);
-    let barracks_any = sim
-        .buildings()
-        .iter()
-        .any(|b| b.owner == me && b.kind == BuildingKind::Barracks);
-    // Priority: pop-cap pressure (house) → the Barracks → a house
-    // built ahead while there is still slack for one more.
-    let want = if pop + 1 >= cap && !house_in_progress && wood >= BuildingKind::House.wood_cost() {
-        Some(BuildingKind::House)
-    } else if !barracks_any
-        && count_kind(sim, me, EntityKind::Villager) >= cfg.barracks_min_villagers
-        && wood >= BuildingKind::Barracks.wood_cost()
-    {
-        Some(BuildingKind::Barracks)
-    } else if pop + 2 >= cap && !house_in_progress && wood >= BuildingKind::House.wood_cost() {
-        Some(BuildingKind::House)
-    } else {
-        None
+    // (kind, anchor center): camps anchor near their resource, the
+    // rest around the Town Center. The Archery Range outranks even
+    // house pressure: it is age-gated (inert in Dark Age), and at
+    // the population cap the house clause would otherwise starve
+    // it forever — the army holds the cap full once Feudal lands.
+    let want: Option<(BuildingKind, (I16F16, I16F16))> =
+        if !have(BuildingKind::ArcheryRange)
+            && sim.age_of(me) >= crate::tech::Age::Feudal
+            && sim.completed_buildings(me, BuildingKind::Barracks) > 0
+            && wood >= BuildingKind::ArcheryRange.wood_cost()
+        {
+            Some((BuildingKind::ArcheryRange, (tc_x, tc_y)))
+        } else if pop + 1 >= cap && !house_in_progress && wood >= BuildingKind::House.wood_cost() {
+            Some((BuildingKind::House, (tc_x, tc_y)))
+        } else if !have(BuildingKind::Mill)
+            && villagers >= 5
+            && wood >= BuildingKind::Mill.wood_cost()
+        {
+            let center = nearest_node_pos(sim, crate::econ::NodeKind::BerryBush, tc_x, tc_y)
+                .unwrap_or((tc_x, tc_y));
+            Some((BuildingKind::Mill, center))
+        } else if !have(BuildingKind::LumberCamp)
+            && villagers >= 6
+            && wood >= BuildingKind::LumberCamp.wood_cost()
+        {
+            let center = nearest_node_pos(sim, crate::econ::NodeKind::Tree, tc_x, tc_y)
+                .unwrap_or((tc_x, tc_y));
+            Some((BuildingKind::LumberCamp, center))
+        } else if !have(BuildingKind::Barracks)
+            && villagers >= cfg.barracks_min_villagers
+            && wood >= BuildingKind::Barracks.wood_cost()
+        {
+            Some((BuildingKind::Barracks, (tc_x, tc_y)))
+        } else if pop + 2 >= cap && !house_in_progress && wood >= BuildingKind::House.wood_cost() {
+            Some((BuildingKind::House, (tc_x, tc_y)))
+        } else {
+            None
+        };
+    let Some((kind, (cx, cy))) = want else {
+        return;
     };
-    let Some(kind) = want else { return };
-    let Some(builder) = sim
+    // Builder: the first idle villager — or, when the whole
+    // village is at work (the steady state once the deposit →
+    // resume loop closes: nobody is ever idle at a decision
+    // boundary, and construction would starve), the first villager
+    // standing at a node gathering. Pulling one worker off the
+    // line is what a player does; interrupting a gatherer costs
+    // nothing but the walk.
+    let builder = sim
         .entities()
         .iter()
         .find(|e| {
@@ -258,11 +316,21 @@ fn plan_build(sim: &mut Sim, cfg: &AiConfig, acted: &mut Vec<u32>) {
                 && is_idle(sim, e.id)
                 && !acted.contains(&e.id)
         })
-        .map(|e| e.id)
-    else {
+        .or_else(|| {
+            sim.entities().iter().find(|e| {
+                e.owner == me
+                    && e.kind == EntityKind::Villager
+                    && !e.dead
+                    && e.task == Task::Gathering
+                    && e.attack_target.is_none()
+                    && !acted.contains(&e.id)
+            })
+        })
+        .map(|e| e.id);
+    let Some(builder) = builder else {
         return;
     };
-    if let Some((x, y)) = find_anchor(sim, builder, kind, tc_x, tc_y) {
+    if let Some((x, y)) = find_anchor(sim, builder, kind, cx, cy) {
         sim.push_command(Command::Build {
             entity: builder,
             kind,
@@ -274,7 +342,7 @@ fn plan_build(sim: &mut Sim, cfg: &AiConfig, acted: &mut Vec<u32>) {
 }
 
 /// Placement search: anchors (footprint top-left cells) on expanding
-/// Chebyshev rings around the Town Center's cell, in fixed order
+/// Chebyshev rings around the given center's cell, in fixed order
 /// (ring, row, column), each validated by the sim's own
 /// `can_build`. Bounded — if nothing legal shows up within the
 /// search, the AI simply tries again next decision.
@@ -282,10 +350,10 @@ fn find_anchor(
     sim: &Sim,
     builder: u32,
     kind: BuildingKind,
-    tc_x: I16F16,
-    tc_y: I16F16,
+    cx: I16F16,
+    cy: I16F16,
 ) -> Option<(I16F16, I16F16)> {
-    let (tcx, tcy) = sim.grid().world_to_cell(tc_x, tc_y);
+    let (tcx, tcy) = sim.grid().world_to_cell(cx, cy);
     let size = kind.footprint_size();
     let mut tried = 0;
     for r in 3..=9i32 {
@@ -301,7 +369,13 @@ fn find_anchor(
                 let (ax, ay) = (ax as u32, ay as u32);
                 let (x, y) = crate::build::footprint_center(ax, ay, size);
                 tried += 1;
-                if tried > 48 {
+                // The cap sits far out on purpose: a grown base
+                // crowds the inner rings with buildings and with
+                // units a placement may not cover, and a 3×3
+                // footprint may only fit several rings out. (At 48
+                // the Archery Range was never placed at all once
+                // the base filled in.)
+                if tried > 512 {
                     return None;
                 }
                 if sim.can_build(builder, kind, x, y) {
@@ -313,24 +387,23 @@ fn find_anchor(
     None
 }
 
-/// Barracks rally: set once, when the first Barracks stands
-/// complete and has no rally yet — toward the human's Town Center,
-/// stopping short of it (the staging point fresh troops gather at).
+/// Production rally: set once per production building (Barracks,
+/// Archery Range), when it stands complete and has no rally yet —
+/// toward the human's Town Center, stopping short of it (the
+/// staging point fresh troops gather at).
 fn plan_rally(sim: &mut Sim) {
     let me = OWNER_OPPONENT;
     let Some(human_tc) = sim.tc_entity_of(OWNER_PLAYER) else {
         return;
     };
     let (hx, hy) = (human_tc.pos_x, human_tc.pos_y);
-    let Some(barracks) = sim
-        .buildings()
-        .iter()
-        .find(|b| b.owner == me && b.kind == BuildingKind::Barracks && b.complete && b.rally.is_none())
-    else {
+    let Some(building) = sim.buildings().iter().find(|b| {
+        b.owner == me && b.kind.is_production() && b.complete && b.rally.is_none()
+    }) else {
         return;
     };
-    let bid = barracks.id;
-    let (bx, by) = (barracks.pos_x, barracks.pos_y);
+    let bid = building.id;
+    let (bx, by) = (building.pos_x, building.pos_y);
     let (dx, dy) = (bx - hx, by - hy);
     let dist = steer::vec_len(dx, dy);
     let short = I16F16::from_num(12);
@@ -350,16 +423,32 @@ fn plan_rally(sim: &mut Sim) {
 /// Military production step (see `decide`).
 fn plan_train_military(sim: &mut Sim, cfg: &AiConfig) {
     let me = OWNER_OPPONENT;
-    let Some(barracks) = sim
-        .buildings()
-        .iter()
-        .find(|b| b.owner == me && b.kind == BuildingKind::Barracks && b.complete)
-    else {
-        return;
-    };
-    let bid = barracks.id;
-    if !barracks.queue.is_empty() {
-        return; // one production line, kept busy one enqueue at a time
+    // Saving for the Feudal Age (M6): once Loom is in, the
+    // requirement pair stands and the village is nearly grown,
+    // military production pauses until the advancement is paid
+    // for — the same discipline `plan_research` assumes. Without
+    // the pause, the army's steady food draw keeps the stockpile
+    // under the age's 500-food cost forever and the AI never
+    // ages up at all. The pause starts only once a minimal guard
+    // stands (the starting Scout and three trained soldiers):
+    // the first soldiers are not the age-up's competition, they
+    // are its escort.
+    if sim.age_of(me) == crate::tech::Age::Dark
+        && sim.has_tech(me, crate::tech::TechId::Loom)
+        && military(sim, me).len() >= 4
+    {
+        let qualifying = sim
+            .buildings()
+            .iter()
+            .filter(|b| b.owner == me && b.complete && b.kind.counts_toward_feudal())
+            .count();
+        let villagers = count_kind(sim, me, EntityKind::Villager);
+        if qualifying >= 2 && villagers + 2 >= cfg.villager_target {
+            let (cost, _, _, _) = crate::tech::TechId::FeudalAge.cost();
+            if sim.stockpile_of(me).amount(ResourceKind::Food) < I16F16::from_num(cost + 50) {
+                return;
+            }
+        }
     }
     let army = military(sim, me).len() as u32;
     if army >= cfg.army_target {
@@ -375,16 +464,71 @@ fn plan_train_military(sim: &mut Sim, cfg: &AiConfig) {
     } else {
         EntityKind::Militia
     };
-    if sim.can_train_at(bid, preferred) {
-        sim.push_command(Command::TrainAt {
-            building: bid,
-            kind: preferred,
-        });
-    } else if sim.can_train_at(bid, fallback) {
-        sim.push_command(Command::TrainAt {
-            building: bid,
-            kind: fallback,
-        });
+    // Each kind trains at its M6 home (Barracks → Militia, Archery
+    // Range → Archer); the host's queue must be empty, as before —
+    // one production line per building, kept busy one enqueue at a
+    // time.
+    for kind in [preferred, fallback] {
+        let Some(host) = sim.buildings().iter().find(|b| {
+            b.owner == me && b.complete && b.kind.trains(kind)
+        }) else {
+            continue;
+        };
+        if !host.queue.is_empty() {
+            continue;
+        }
+        if sim.can_train_at(host.id, kind) {
+            sim.push_command(Command::TrainAt {
+                building: host.id,
+                kind,
+            });
+            return;
+        }
+    }
+}
+
+/// Research step (M6): the script uses the same Town Center
+/// research queue as a player. Research is only ever enqueued
+/// onto an *empty* queue, so it never jumps the villager line.
+/// Loom comes first, once the village is big enough to spare the
+/// gold; the Feudal advancement follows when the two requirement
+/// buildings stand, the village is nearly grown, and a food spare
+/// exists beyond the age's cost — the same discipline the opening
+/// spec asks of a player.
+fn plan_research(sim: &mut Sim, cfg: &AiConfig) {
+    let me = OWNER_OPPONENT;
+    let Some((tc_id, _, _)) = sim.tc_entity_of(me).map(|tc| (tc.id, tc.pos_x, tc.pos_y)) else {
+        return;
+    };
+    if !sim.tc_queue_empty(tc_id) {
+        return;
+    }
+    let villagers = count_kind(sim, me, EntityKind::Villager);
+    if !sim.has_tech(me, crate::tech::TechId::Loom) {
+        let (_, _, gold, _) = crate::tech::TechId::Loom.cost();
+        if villagers >= 8
+            && sim.stockpile_of(me).amount(ResourceKind::Gold) >= I16F16::from_num(gold)
+        {
+            sim.push_command(Command::ResearchTcAt {
+                tc: tc_id,
+                tech: crate::tech::TechId::Loom,
+            });
+        }
+        return;
+    }
+    if sim.age_of(me) == crate::tech::Age::Dark {
+        let qualifying = sim
+            .buildings()
+            .iter()
+            .filter(|b| b.owner == me && b.complete && b.kind.counts_toward_feudal())
+            .count();
+        let food = sim.stockpile_of(me).amount(ResourceKind::Food);
+        if qualifying >= 2 && villagers + 2 >= cfg.villager_target && food >= I16F16::from_num(550) {
+            sim.push_command(Command::ResearchTcAt {
+                tc: tc_id,
+                tech: crate::tech::TechId::FeudalAge,
+            });
+        }
     }
 }
 
@@ -487,14 +631,25 @@ fn assign_idle_villagers(sim: &mut Sim, cfg: &AiConfig, acted: &mut Vec<u32>) {
                 })
                 .count();
             if hunters < 2 {
-                if let Some(sheep) = nearest_owned_sheep(sim, me, tc_x, tc_y) {
-                    sim.push_command(Command::Attack {
-                        entity: vid,
-                        target: sheep,
-                    });
-                    acted.push(vid);
-                    counts[0] += 1;
-                    continue;
+                // Reachability and distance are measured from the
+                // hunter itself, not the Town Center (M6): the
+                // sheep it can actually hunt is the one *it* can
+                // path to.
+                let hunter_pos = sim
+                    .entities()
+                    .iter()
+                    .find(|e| e.id == vid)
+                    .map(|e| (e.pos_x, e.pos_y));
+                if let Some((hx, hy)) = hunter_pos {
+                    if let Some(sheep) = nearest_owned_sheep(sim, me, hx, hy) {
+                        sim.push_command(Command::Attack {
+                            entity: vid,
+                            target: sheep,
+                        });
+                        acted.push(vid);
+                        counts[0] += 1;
+                        continue;
+                    }
                 }
             }
         }
@@ -540,6 +695,30 @@ fn resource_slot(resource: ResourceKind) -> usize {
 /// (id past the layout: carcasses, farms) belong to whichever
 /// Town Center is nearer — a carcass falls where the kill
 /// happened.
+/// Position of the nearest live node of a kind to a point — the
+/// camp anchor centers for `plan_build` (M6): a Mill goes by the
+/// berries, a Lumber Camp by the woodline.
+fn nearest_node_pos(
+    sim: &Sim,
+    kind: crate::econ::NodeKind,
+    x: I16F16,
+    y: I16F16,
+) -> Option<(I16F16, I16F16)> {
+    let mut best: Option<(i64, u32, I16F16, I16F16)> = None;
+    for n in sim.nodes() {
+        if n.is_depleted() || n.kind != kind {
+            continue;
+        }
+        let d = steer::vec_len(n.pos_x - x, n.pos_y - y);
+        let db = d.to_bits() as i64;
+        let key = (db * db, n.id);
+        if best.map(|b| (b.0, b.1) < key).unwrap_or(true) {
+            best = Some((key.0, key.1, n.pos_x, n.pos_y));
+        }
+    }
+    best.map(|(_, _, px, py)| (px, py))
+}
+
 fn nearest_node(sim: &Sim, resource: ResourceKind, x: I16F16, y: I16F16) -> Option<u32> {
     let shared = crate::econ::NODE_SPECS.len() as u32;
     let foe_tc = sim.tc_entity_of(OWNER_PLAYER);
@@ -573,28 +752,33 @@ fn nearest_node(sim: &Sim, resource: ResourceKind, x: I16F16, y: I16F16) -> Opti
 }
 
 /// The nearest living sheep owned by `owner` to a point.
+/// The nearest sheep owned by `owner` *that can be reached* from
+/// (x, y) — an entombed sheep (standing in a blocked cell) is
+/// skipped rather than absorbing every hunter forever (M6 fix).
 fn nearest_owned_sheep(sim: &Sim, owner: u8, x: I16F16, y: I16F16) -> Option<u32> {
-    let mut best: Option<(i64, u32)> = None;
-    for e in sim.entities() {
-        if e.kind != EntityKind::Sheep || e.owner != owner || e.dead {
-            continue;
-        }
-        let d = steer::vec_len(e.pos_x - x, e.pos_y - y);
-        let db = d.to_bits() as i64;
-        let key = (db * db, e.id);
-        if best.map(|b| key < b).unwrap_or(true) {
-            best = Some(key);
-        }
-    }
-    best.map(|(_, id)| id)
+    let mut candidates: Vec<(i64, u32, I16F16, I16F16)> = sim
+        .entities()
+        .iter()
+        .filter(|e| e.kind == EntityKind::Sheep && e.owner == owner && !e.dead)
+        .map(|e| {
+            let d = steer::vec_len(e.pos_x - x, e.pos_y - y);
+            let db = d.to_bits() as i64;
+            (db * db, e.id, e.pos_x, e.pos_y)
+        })
+        .collect();
+    candidates.sort();
+    candidates
+        .iter()
+        .find(|c| sim.grid().find_path((x, y), (c.2, c.3)).is_some())
+        .map(|c| c.1)
 }
 
 /// Defense step: an idle soldier with a human unit near the AI's
-/// Town Center engages the nearest such unit. (Soldiers already
-/// fighting, walking a rally, or out on a wave are not recalled —
-/// auto-acquisition also covers part of this; the explicit step
-/// exists so even the Scout, which never auto-acquires, defends
-/// its home.)
+/// Town Center engages the nearest such unit *it can reach*.
+/// (Soldiers already fighting, walking a rally, or out on a wave
+/// are not recalled — auto-acquisition also covers part of this;
+/// the explicit step exists so even the Scout, which never
+/// auto-acquires, defends its home.)
 fn plan_defense(sim: &mut Sim, acted: &mut Vec<u32>) {
     let me = OWNER_OPPONENT;
     let Some(tc) = sim.tc_entity_of(me) else {
@@ -605,6 +789,14 @@ fn plan_defense(sim: &mut Sim, acted: &mut Vec<u32>) {
         if !is_idle(sim, mid) || acted.contains(&mid) {
             continue;
         }
+        let Some((sx, sy)) = sim
+            .entities()
+            .iter()
+            .find(|e| e.id == mid)
+            .map(|e| (e.pos_x, e.pos_y))
+        else {
+            continue;
+        };
         let mut best: Option<(i64, u32)> = None;
         for e in sim.entities() {
             if e.owner != OWNER_PLAYER || e.dead || !e.kind.counts_population() {
@@ -612,6 +804,14 @@ fn plan_defense(sim: &mut Sim, acted: &mut Vec<u32>) {
             }
             let d = steer::vec_len(e.pos_x - tc_x, e.pos_y - tc_y);
             if d > DEFENSE_RADIUS {
+                continue;
+            }
+            // Only engage targets the defender can actually reach
+            // (M6 fix): an unreachable one — classically the human's
+            // forward Scout standing in a plugged wall gap — would
+            // otherwise re-absorb every defender on every decision,
+            // starving the wave step below via `acted`.
+            if sim.grid().find_path((sx, sy), (e.pos_x, e.pos_y)).is_none() {
                 continue;
             }
             let db = d.to_bits() as i64;
@@ -633,10 +833,10 @@ fn plan_defense(sim: &mut Sim, acted: &mut Vec<u32>) {
 /// The wave step: when the cooldown has passed and at least
 /// `wave_size` trained soldiers (Militia/Archers) stand idle at
 /// home, they all attack at once. Each picks the same kind of
-/// target the script always picks: the nearest human population
-/// unit to itself; if the human has none left, the human Town
-/// Center; if that is gone too, the nearest human building (via
-/// `AttackBuilding`). The cooldown restarts on launch — win or
+/// target the script always picks: the nearest *reachable* human
+/// population unit to itself; if none can be reached, the human
+/// Town Center; if that is gone too, the nearest human building
+/// (via `AttackBuilding`). The cooldown restarts on launch — win or
 /// lose, the survivors' state (dead, fighting, walking home via
 /// rally-less idleness) is simply re-read next decision.
 fn plan_wave(sim: &mut Sim, cfg: &AiConfig, acted: &mut Vec<u32>) {
@@ -659,7 +859,10 @@ fn plan_wave(sim: &mut Sim, cfg: &AiConfig, acted: &mut Vec<u32>) {
     if wave.len() < cfg.wave_size {
         return;
     }
-    let human_tc = sim.tc_entity_of(OWNER_PLAYER).map(|tc| tc.id);
+    let human_tc = sim
+        .tc_entity_of(OWNER_PLAYER)
+        .filter(|tc| !tc.dead)
+        .map(|tc| (tc.id, tc.pos_x, tc.pos_y));
     for mid in &wave {
         let (mx, my) = sim
             .entities()
@@ -667,20 +870,34 @@ fn plan_wave(sim: &mut Sim, cfg: &AiConfig, acted: &mut Vec<u32>) {
             .find(|e| e.id == *mid)
             .map(|e| (e.pos_x, e.pos_y))
             .unwrap_or((I16F16::ZERO, I16F16::ZERO));
-        // Nearest human population unit.
-        let mut best: Option<(i64, u32)> = None;
-        for e in sim.entities() {
-            if e.owner != OWNER_PLAYER || e.dead || !e.kind.counts_population() {
-                continue;
-            }
-            let d = steer::vec_len(e.pos_x - mx, e.pos_y - my);
-            let db = d.to_bits() as i64;
-            let key = (db * db, e.id);
-            if best.map(|b| key < b).unwrap_or(true) {
-                best = Some(key);
-            }
-        }
-        if let Some((_, tid)) = best {
+        // Nearest human population unit *that can actually be
+        // reached*. A target standing inside a building footprint
+        // (or behind a plugged chokepoint) has no path; ordering the
+        // wave onto it fizzles every soldier at once (M6 fix — the
+        // AI's own base can plug the map's wall gap, and the two
+        // forward human units stand in it). Candidates are walked
+        // nearest-first; the reachability probe is one A* per
+        // candidate per soldier, once per wave — affordable, and
+        // deterministic like every other path query.
+        let mut candidates: Vec<(i64, u32, I16F16, I16F16)> = sim
+            .entities()
+            .iter()
+            .filter(|e| e.owner == OWNER_PLAYER && !e.dead && e.kind.counts_population())
+            .map(|e| {
+                let d = steer::vec_len(e.pos_x - mx, e.pos_y - my);
+                let db = d.to_bits() as i64;
+                (db * db, e.id, e.pos_x, e.pos_y)
+            })
+            .collect();
+        candidates.sort();
+        let reachable = |sim: &Sim, x: I16F16, y: I16F16| {
+            sim.grid().find_path((mx, my), (x, y)).is_some()
+        };
+        let tid = candidates
+            .iter()
+            .find(|c| reachable(sim, c.2, c.3))
+            .map(|c| c.1);
+        if let Some(tid) = tid {
             sim.push_command(Command::Attack {
                 entity: *mid,
                 target: tid,
@@ -688,14 +905,16 @@ fn plan_wave(sim: &mut Sim, cfg: &AiConfig, acted: &mut Vec<u32>) {
             acted.push(*mid);
             continue;
         }
-        // No human units left: the Town Center, then its buildings.
-        if let Some(tc_id) = human_tc {
-            sim.push_command(Command::Attack {
-                entity: *mid,
-                target: tc_id,
-            });
-            acted.push(*mid);
-            continue;
+        // No reachable human units: the Town Center, then buildings.
+        if let Some((tc_id, tx, ty)) = human_tc {
+            if reachable(sim, tx, ty) {
+                sim.push_command(Command::Attack {
+                    entity: *mid,
+                    target: tc_id,
+                });
+                acted.push(*mid);
+                continue;
+            }
         }
         let mut best_b: Option<(i64, u32)> = None;
         for b in sim.buildings() {
