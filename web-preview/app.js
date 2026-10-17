@@ -469,19 +469,10 @@ function resetSim() {
   camOx = ox;
   camOy = oy;
 
-  // Opening demo orders so the economy starts moving immediately:
-  // two villagers on the nearest berries, one on the nearest tree.
-  const nodes = nodeList();
-  const berry = nodes.find((n) => n.kind === 1);
-  const tree = nodes.find((n) => n.kind === 0);
-  const vils = villagerIds();
-  if (berry && vils.length > 1) {
-    sim.push_gather(vils[0], berry.id);
-    sim.push_gather(vils[1], berry.id);
-  }
-  if (tree && vils.length > 2) {
-    sim.push_gather(vils[2], tree.id);
-  }
+  // No opening orders: the villagers start idle beside the Town
+  // Center, and the player's clicks are the first orders of the
+  // match — the AoE2 standard start (OPENING-SPEC.md §2.1). The
+  // client never auto-plays the opening.
 }
 
 function fitCanvas() {

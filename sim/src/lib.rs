@@ -26,8 +26,9 @@ mod steer;
 mod wasm;
 
 pub use build::{
-    Building, BuildingKind, BUILD_RANGE, FARM_BUILD_TICKS, FARM_WOOD_COST, FOOTPRINT_CELLS,
-    HOUSE_BUILD_TICKS, HOUSE_POP_SUPPORT, HOUSE_WOOD_COST, TOWN_CENTER_POP_SUPPORT,
+    build_rate_thirds, Building, BuildingKind, BUILD_RANGE, FARM_BUILD_TICKS, FARM_WOOD_COST,
+    FOOTPRINT_CELLS, HOUSE_BUILD_TICKS, HOUSE_POP_SUPPORT, HOUSE_WOOD_COST,
+    TOWN_CENTER_POP_SUPPORT,
 };
 pub use econ::{
     NodeKind, ResourceKind, ResourceNode, Stockpile, CARRY_CAPACITY, DEPOSIT_RANGE, GATHER_RANGE,
@@ -520,7 +521,7 @@ impl Sim {
                     cell_y,
                     pos_x,
                     pos_y,
-                    progress_ticks: 0,
+                    progress_thirds: 0,
                     complete: false,
                     node_id: None,
                 };
@@ -874,28 +875,39 @@ impl Sim {
         }
     }
 
-    /// The construction phase of a tick (M2.5): every villager in the
-    /// `Building` phase adds one tick of progress to its building;
-    /// buildings reaching their build time complete. Depleted farms
-    /// retire (their footprint frees up for new placement).
+    /// The construction phase of a tick (M2.5): every building with
+    /// at least one villager in the `Building` phase gains progress
+    /// at the AoE2 multi-builder rate — total time T × 3/(n+2) for
+    /// n active builders, accrued in thirds of a tick so the rate is
+    /// exact (see `build::build_rate_thirds`). The builder count is
+    /// taken fresh each tick, so builders joining or leaving
+    /// mid-build simply change the pace from that tick on. Buildings
+    /// reaching their build total complete. Depleted farms retire
+    /// (their footprint frees up for new placement).
     fn construction_tick(&mut self) {
-        let mut completed: Vec<u32> = Vec::new();
-        for idx in 0..self.entities.len() {
-            if self.entities[idx].task != Task::Building {
+        // Count the active builders of each building, in building
+        // order (ids are assigned in placement order, so this — like
+        // every other sim iteration — is deterministic).
+        let mut counts: Vec<u32> = vec![0; self.buildings.len()];
+        for e in &self.entities {
+            if e.task != Task::Building {
                 continue;
             }
-            let bid = match self.entities[idx].task_building {
-                Some(b) => b,
-                None => continue,
-            };
-            if let Some(bi) = self.building_index(bid) {
-                if !self.buildings[bi].complete {
-                    self.buildings[bi].progress_ticks += 1;
-                    if self.buildings[bi].progress_ticks >= self.buildings[bi].kind.build_ticks()
-                    {
-                        completed.push(bid);
-                    }
+            if let Some(bid) = e.task_building {
+                if let Some(bi) = self.building_index(bid) {
+                    counts[bi] += 1;
                 }
+            }
+        }
+        let mut completed: Vec<u32> = Vec::new();
+        for (bi, &n) in counts.iter().enumerate() {
+            if n == 0 || self.buildings[bi].complete {
+                continue;
+            }
+            let b = &mut self.buildings[bi];
+            b.progress_thirds += build::build_rate_thirds(n);
+            if b.progress_thirds >= b.kind.build_thirds() {
+                completed.push(b.id);
             }
         }
         for bid in completed {
@@ -1134,7 +1146,7 @@ impl Sim {
             h.write_u32(b.cell_y);
             h.write_i32(b.pos_x.to_bits());
             h.write_i32(b.pos_y.to_bits());
-            h.write_u64(b.progress_ticks);
+            h.write_u64(b.progress_thirds);
             h.write_u8(u8::from(b.complete));
             match b.node_id {
                 None => h.write_u8(0),

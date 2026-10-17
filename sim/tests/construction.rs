@@ -367,3 +367,152 @@ fn build_script_replays_bit_identically() {
     assert!(done);
     assert_eq!(probe.population_cap(), 10);
 }
+
+/// Tick until the first building completes, asserting the exact
+/// accrual invariant on every tick: progress grows by precisely
+/// (n + 2) thirds, where n is the number of the given builders
+/// observed in the `Building` phase on that building after the
+/// tick — the AoE2 rate (n+2)/3 applied to whoever is actually
+/// building, tick by tick. (A builder can briefly drop back to
+/// `ToBuild` when a colleague's arrival shoves it out of build
+/// range; the invariant follows the count, so such ticks accrue
+/// at the lower rate.) Returns (ticks used, ticks with the full
+/// listed crew observed building — the completing tick is not
+/// counted, since completion itself resets the builders' tasks
+/// before they can be observed).
+fn tick_building(sim: &mut Sim, builders: &[u32]) -> (u64, u64) {
+    let bid = sim.buildings()[0].id;
+    let mut ticks = 0;
+    let mut full_crew = 0;
+    loop {
+        let before = sim.buildings()[0].progress_thirds;
+        sim.tick();
+        ticks += 1;
+        assert!(ticks < 20_000, "building never completed");
+        if sim.buildings()[0].complete {
+            return (ticks, full_crew);
+        }
+        let n = builders
+            .iter()
+            .filter(|&&id| {
+                let v = villager(sim, id);
+                v.task == Task::Building && v.task_building == Some(bid)
+            })
+            .count() as u64;
+        if n == builders.len() as u64 {
+            full_crew += 1;
+        }
+        let expected = if n == 0 { 0 } else { n + 2 };
+        assert_eq!(
+            sim.buildings()[0].progress_thirds - before,
+            expected,
+            "progress did not accrue at the AoE2 rate for {n} builder(s)"
+        );
+    }
+}
+
+#[test]
+fn solo_house_takes_exactly_1500_ticks_of_work() {
+    let mut sim = Sim::new(59);
+    build(&mut sim, 1, BuildingKind::House, 18, 27);
+    sim.tick(); // placement applied here
+    let started = run_until(&mut sim, 20_000, |s| villager(s, 1).task == Task::Building);
+    assert!(started, "the builder never started building");
+    // The arrival tick itself already accrued one solo tick of work:
+    // 3 thirds. The remaining 4497 thirds take exactly 1499 ticks —
+    // 1500 ticks of active building in total, unchanged by the
+    // multi-builder formula (rate (1+2)/3 = 1).
+    assert_eq!(sim.buildings()[0].progress_thirds, 3);
+    let (ticks, full_crew) = tick_building(&mut sim, &[1]);
+    assert_eq!(ticks, 1499, "solo house must take exactly 1500 ticks of work");
+    // Every observable tick had the builder on site (the completing
+    // tick itself is unobservable — see tick_building).
+    assert_eq!(full_crew, ticks - 1, "the solo builder was interrupted");
+    assert_eq!(sim.population_cap(), 10);
+}
+
+#[test]
+fn two_builders_finish_a_house_in_about_1125_ticks() {
+    let mut sim = Sim::new(67);
+    build(&mut sim, 1, BuildingKind::House, 18, 27);
+    sim.tick();
+    build(&mut sim, 2, BuildingKind::House, 18, 27); // resume: second builder
+    sim.tick();
+    assert_eq!(sim.buildings().len(), 1);
+
+    let both = run_until(&mut sim, 20_000, |s| {
+        villager(s, 1).task == Task::Building && villager(s, 2).task == Task::Building
+    });
+    assert!(both, "the two builders never worked side by side");
+    assert!(!sim.buildings()[0].complete);
+    // tick_building pins the per-tick rate exactly; here we assert
+    // the aggregate: the two builders share essentially the whole
+    // build (a couple of jostle ticks aside), so the house stands
+    // after ≈1125 ticks of work plus the walk to the plot — the
+    // ≈19 s two-builder house the opening depends on, not the
+    // 750 ticks linear stacking (T/2) would give.
+    let (ticks, full_crew) = tick_building(&mut sim, &[1, 2]);
+    assert!(
+        full_crew >= 1000,
+        "the builders shared only {full_crew} ticks of the build"
+    );
+    assert!(
+        ticks - full_crew <= 10,
+        "a builder was shoved out for {} ticks",
+        ticks - full_crew
+    );
+    let total = sim.tick_count();
+    assert!(
+        (1125..=1125 + 150).contains(&total),
+        "house completed at tick {total}, expected ≈1125 + travel"
+    );
+    assert_eq!(sim.population_cap(), 10);
+}
+
+#[test]
+fn a_builder_joining_mid_build_changes_the_pace() {
+    let mut sim = Sim::new(61);
+    build(&mut sim, 1, BuildingKind::House, 18, 27);
+    sim.tick();
+    let started = run_until(&mut sim, 20_000, |s| villager(s, 1).task == Task::Building);
+    assert!(started, "the builder never started building");
+
+    // Solo pace: exactly 3 thirds per tick.
+    let p0 = sim.buildings()[0].progress_thirds;
+    for _ in 0..100 {
+        sim.tick();
+    }
+    assert_eq!(
+        sim.buildings()[0].progress_thirds,
+        p0 + 300,
+        "solo accrual is not exactly 1 tick of work per tick"
+    );
+    // Work past halfway solo (2250 of 4500 thirds).
+    let half = run_until(&mut sim, 20_000, |s| s.buildings()[0].progress_thirds >= 2250);
+    assert!(half);
+    assert!(!sim.buildings()[0].complete);
+
+    // The second builder joins the standing foundation mid-build.
+    build(&mut sim, 2, BuildingKind::House, 18, 27);
+    let joined = run_until(&mut sim, 20_000, |s| villager(s, 2).task == Task::Building);
+    assert!(joined, "the second builder never joined the build");
+    assert!(!sim.buildings()[0].complete);
+
+    // From the join, the per-tick invariant runs at the two-builder
+    // rate (pinned inside tick_building), and the remaining work
+    // finishes well ahead of the solo projection for the same
+    // remainder (remaining thirds / 3 ticks).
+    let remaining = BuildingKind::House.build_thirds() - sim.buildings()[0].progress_thirds;
+    let (ticks, full_crew) = tick_building(&mut sim, &[1, 2]);
+    assert!(
+        ticks < remaining / 3,
+        "joining mid-build did not speed up the remaining work: {ticks} ticks vs a {}-tick solo projection",
+        remaining / 3
+    );
+    assert!(
+        ticks - full_crew <= 10,
+        "a builder was shoved out for {} ticks",
+        ticks - full_crew
+    );
+    assert_eq!(sim.population_cap(), 10);
+}

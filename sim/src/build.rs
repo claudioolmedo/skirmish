@@ -12,6 +12,11 @@
 //! - Farm: 60 wood, 15 s build time (900 ticks), holds 175 food
 //!   (§6.3 — the base amount; 250 is post-Horse-Collar).
 //! - Town Center: +5 population room (§5 function notes, §9.4).
+//! - Multi-builder speed (GAP 4.18): total build time is
+//!   T × 3/(n+2) for n builders — 1 builder takes T, 2 builders
+//!   ≈ 0.75 T (the 25 s house in ≈19 s), 3 builders 0.6 T. Progress
+//!   is therefore tracked in **thirds of a tick**, in which the rate
+//!   is exact integer math: n builders add (n+2) thirds per tick.
 //!
 //! Placement is defined on the coarse grid: a building occupies a
 //! **2×2-cell footprint** anchored at its minimum cell. Houses block
@@ -77,6 +82,13 @@ impl BuildingKind {
         }
     }
 
+    /// Total construction progress needed to complete, in thirds of
+    /// a tick (`build_ticks() * 3`) — the unit `Building` progress is
+    /// accumulated in, so the multi-builder rate below stays exact.
+    pub fn build_thirds(self) -> u64 {
+        self.build_ticks() * 3
+    }
+
     /// Whether a completed (and under-construction) building of this
     /// kind blocks its footprint cells for pathing. Houses are solid;
     /// farms are ground a villager walks and works on.
@@ -96,6 +108,17 @@ impl BuildingKind {
     }
 }
 
+/// Progress a building gains per tick, in thirds of a tick, while
+/// `builders` villagers are actively building it (≥ 1): the AoE2
+/// multi-builder rule — total build time T × 3/(n+2) — expressed as
+/// a rate. One builder works at exactly 1 tick/tick (3 thirds);
+/// every extra builder adds a further third of a tick per tick, so
+/// 2 builders accrue 4 thirds/tick (a 1500-tick house in 1125
+/// ticks), 3 builders 5 thirds/tick, and so on.
+pub fn build_rate_thirds(builders: u32) -> u64 {
+    builders as u64 + 2
+}
+
 /// One placed building, under construction or complete. Position is the
 /// footprint's center in world coordinates; `cell_x`/`cell_y` are the
 /// anchor (minimum) cell of the 2×2 footprint.
@@ -107,9 +130,11 @@ pub struct Building {
     pub cell_y: u32,
     pub pos_x: I16F16,
     pub pos_y: I16F16,
-    /// Ticks of active building applied so far. The building is
-    /// non-functional until `progress_ticks >= kind.build_ticks()`.
-    pub progress_ticks: u64,
+    /// Construction progress so far, in thirds of a tick of solo
+    /// work (accrues at `build_rate_thirds(n)` while n villagers
+    /// build). The building is non-functional until
+    /// `progress_thirds >= kind.build_thirds()`.
+    pub progress_thirds: u64,
     pub complete: bool,
     /// For a completed Farm: the resource node it became. The building
     /// record stays as the footprint registry until the node depletes,
@@ -123,12 +148,12 @@ impl Building {
         footprint_cells(self.cell_x, self.cell_y)
     }
 
-    /// Build progress as a fraction of the kind's build time, in raw
+    /// Build progress as a fraction of the kind's build total, in raw
     /// fixed-point bits via integer math (0 … 65536). Presentation aid
-    /// for the ABI; the sim compares tick counts, never this value.
+    /// for the ABI; the sim compares third counts, never this value.
     pub fn progress_frac_bits(&self) -> i32 {
-        let total = self.kind.build_ticks() as i64;
-        let done = (self.progress_ticks as i64).min(total);
+        let total = self.kind.build_thirds() as i64;
+        let done = (self.progress_thirds as i64).min(total);
         ((done * 65536) / total) as i32
     }
 }
@@ -186,6 +211,45 @@ mod tests {
         assert_eq!(FARM_BUILD_TICKS, 15 * 60);
         assert_eq!(HOUSE_POP_SUPPORT, 5);
         assert_eq!(TOWN_CENTER_POP_SUPPORT, 5);
+        // Build totals in thirds: house 4500, farm 2700.
+        assert_eq!(BuildingKind::House.build_thirds(), 4500);
+        assert_eq!(BuildingKind::Farm.build_thirds(), 2700);
+    }
+
+    #[test]
+    fn multi_builder_rate_is_the_aoe2_formula() {
+        // Total time T × 3/(n+2), as a per-tick rate in thirds:
+        // n builders add (n+2) thirds per tick. Solo is exactly 1×;
+        // 2 builders finish a 1500-tick house in 4500/4 = 1125 ticks
+        // (≈19 s — the opening's first timing trick).
+        assert_eq!(build_rate_thirds(1), 3);
+        assert_eq!(build_rate_thirds(2), 4);
+        assert_eq!(build_rate_thirds(3), 5);
+        assert_eq!(build_rate_thirds(4), 6);
+        assert_eq!(BuildingKind::House.build_thirds() / build_rate_thirds(2), 1125);
+    }
+
+    #[test]
+    fn progress_fraction_is_measured_in_thirds() {
+        let mut b = Building {
+            id: 0,
+            kind: BuildingKind::House,
+            cell_x: 0,
+            cell_y: 0,
+            pos_x: I16F16::ZERO,
+            pos_y: I16F16::ZERO,
+            progress_thirds: 0,
+            complete: false,
+            node_id: None,
+        };
+        assert_eq!(b.progress_frac_bits(), 0);
+        b.progress_thirds = 2250; // half of 4500
+        assert_eq!(b.progress_frac_bits(), 32768);
+        b.progress_thirds = 4500;
+        assert_eq!(b.progress_frac_bits(), 65536);
+        // Overshoot (the completing tick can pass the total) clamps.
+        b.progress_thirds = 4503;
+        assert_eq!(b.progress_frac_bits(), 65536);
     }
 
     #[test]
