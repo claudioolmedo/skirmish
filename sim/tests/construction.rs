@@ -50,7 +50,8 @@ fn run_until(sim: &mut Sim, cap: u64, mut done: impl FnMut(&Sim) -> bool) -> boo
 #[test]
 fn house_completes_raises_cap_and_blocks_its_footprint() {
     let mut sim = Sim::new(31);
-    assert_eq!(sim.population(), 3);
+    // M3 standard start: 3 villagers + the Scout Cavalry = 4 pop.
+    assert_eq!(sim.population(), 4);
     assert_eq!(sim.population_cap(), 5, "Town Center alone gives +5");
 
     let start_wood = sim.stockpile().amount(ResourceKind::Wood);
@@ -105,11 +106,12 @@ fn house_completes_raises_cap_and_blocks_its_footprint() {
 #[test]
 fn training_stalls_at_cap_and_resumes_after_a_house() {
     let mut sim = Sim::new(37);
-    // Fill the starting room: 3 villagers + 2 trained = 5 = cap.
+    // Fill the starting room (M3 start: 3 villagers + 1 Scout = 4;
+    // one trained villager fills it to the cap of 5).
     sim.push_command(Command::TrainVillager);
-    sim.push_command(Command::TrainVillager);
-    let filled = run_until(&mut sim, 20_000, |s| s.villager_count() == 5);
-    assert!(filled, "the first two villagers never trained");
+    let filled = run_until(&mut sim, 20_000, |s| s.villager_count() == 4);
+    assert!(filled, "the first villager never trained");
+    assert_eq!(sim.population(), 5);
     assert_eq!(sim.train_queue_len(), 0);
     assert_eq!(sim.train_block_reason(), TrainBlock::Housed);
 
@@ -122,7 +124,7 @@ fn training_stalls_at_cap_and_resumes_after_a_house() {
         sim.tick();
         assert_eq!(
             sim.villager_count(),
-            5,
+            4,
             "a villager completed training while housed"
         );
         assert_eq!(sim.train_queue_len(), 1, "stalled queue must keep its place");
@@ -137,7 +139,7 @@ fn training_stalls_at_cap_and_resumes_after_a_house() {
     });
     assert!(housed_no_more, "house never completed");
     assert_eq!(sim.population_cap(), 10);
-    let spawned = run_until(&mut sim, 5_000, |s| s.villager_count() == 6);
+    let spawned = run_until(&mut sim, 5_000, |s| s.villager_count() == 5);
     assert!(spawned, "stalled training did not resume after housing");
     assert_eq!(sim.train_queue_len(), 0);
 }

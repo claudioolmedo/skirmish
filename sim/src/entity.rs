@@ -13,6 +13,14 @@
 use fixed::types::I16F16;
 
 use crate::econ::ResourceKind;
+use crate::units;
+
+/// Owner tag: the (single, for now) human player.
+pub const OWNER_PLAYER: u8 = 0;
+/// Owner tag: Gaia — the neutral world (wild animals). Captured
+/// herdables flip to `OWNER_PLAYER`; future multiplayer adds per-player
+/// tags beside these two.
+pub const OWNER_GAIA: u8 = 1;
 
 /// What an entity is. Villagers move and work; the Town Center is a static
 /// building (drop-off point and villager producer). M3 adds military
@@ -21,16 +29,76 @@ use crate::econ::ResourceKind;
 pub enum EntityKind {
     Villager,
     TownCenter,
+    /// M3: the starting cavalry — fast, wide-sighted, weak attack.
+    ScoutCavalry,
+    /// M3: Barracks infantry.
+    Militia,
+    /// M3: Barracks ranged infantry (projectiles).
+    Archer,
+    /// M3: herdable Gaia animal — captured by proximity, then tasked
+    /// like a unit; killed, it leaves a carcass node.
+    Sheep,
+    /// M3: aggressive Gaia animal — aggros on its attacker, chases,
+    /// gives up and walks home to heal (the lure loop).
+    Boar,
+    /// M3: passive Gaia animal — flees when attacked.
+    Deer,
 }
 
 impl EntityKind {
     /// Stable tag for the state hash and the WASM kind array:
-    /// 0 = villager, 1 = town center.
+    /// 0 = villager, 1 = town center, 2 = scout cavalry, 3 = militia,
+    /// 4 = archer, 5 = sheep, 6 = boar, 7 = deer.
     pub fn tag(self) -> u8 {
         match self {
             EntityKind::Villager => 0,
             EntityKind::TownCenter => 1,
+            EntityKind::ScoutCavalry => 2,
+            EntityKind::Militia => 3,
+            EntityKind::Archer => 4,
+            EntityKind::Sheep => 5,
+            EntityKind::Boar => 6,
+            EntityKind::Deer => 7,
         }
+    }
+
+    /// Inverse of `tag`; unknown values map to `None`.
+    pub fn from_tag(tag: u8) -> Option<EntityKind> {
+        match tag {
+            0 => Some(EntityKind::Villager),
+            1 => Some(EntityKind::TownCenter),
+            2 => Some(EntityKind::ScoutCavalry),
+            3 => Some(EntityKind::Militia),
+            4 => Some(EntityKind::Archer),
+            5 => Some(EntityKind::Sheep),
+            6 => Some(EntityKind::Boar),
+            7 => Some(EntityKind::Deer),
+            _ => None,
+        }
+    }
+
+    /// Mobile units join the steering snapshot and can hold move
+    /// orders; the Town Center is a static building and never moves.
+    pub fn is_mobile(self) -> bool {
+        self != EntityKind::TownCenter
+    }
+
+    /// Player units that occupy one population slot while alive
+    /// (study §9.4: almost every unit costs exactly 1). Herdables never
+    /// count — a captured sheep is livestock, not population.
+    pub fn counts_population(self) -> bool {
+        matches!(
+            self,
+            EntityKind::Villager
+                | EntityKind::ScoutCavalry
+                | EntityKind::Militia
+                | EntityKind::Archer
+        )
+    }
+
+    /// Kinds a production building can train in M3 (the Barracks set).
+    pub fn is_trainable(self) -> bool {
+        matches!(self, EntityKind::Militia | EntityKind::Archer)
     }
 }
 
@@ -89,7 +157,15 @@ impl Task {
 }
 
 /// An entity: id, kind, fixed-point position/velocity, an optional move
-/// order, and (for villagers) work state.
+/// order, and (for villagers) work state. M3 adds hit points, ownership,
+/// combat state, and animal state.
+///
+/// Death is a *tombstone* (RULEBOOK CMB-14 deviation, recorded in
+/// ARCHITECTURE.md): a dead entity stays in the list with `dead` set —
+/// removed from play in every observable way (no movement, work,
+/// targeting, population, or rendering), but its id is never reused and
+/// the Vec never reindexes, which keeps every id ever issued stable as
+/// an array index for the WASM ABI and the renderer's mirrors.
 ///
 /// `Vec` inside `MoveOrder` means `Entity` is `Clone` but not `Copy`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -120,14 +196,74 @@ pub struct Entity {
     pub carry: I16F16,
     /// What `carry` holds. `None` iff `carry` is zero.
     pub carry_kind: Option<ResourceKind>,
+
+    // --- M3: combat state ---
+    /// Who owns this entity: `OWNER_PLAYER` or `OWNER_GAIA`. Sheep
+    /// flip from Gaia to the player on capture.
+    pub owner: u8,
+    /// Current hit points (fractional; the entity dies the tick this
+    /// drops below 1 — CMB-02 — processed in the combat phase's death
+    /// sweep, which sets `dead`).
+    pub hp: I16F16,
+    /// Tombstone flag: set by the death sweep; the entity is out of
+    /// play from that tick on (see the struct doc).
+    pub dead: bool,
+    /// The entity this one is attacking (explicit order, acquisition,
+    /// retaliation, or a boar's aggro), if any. The combat phase
+    /// chases it, strikes it, and clears this when it dies.
+    pub attack_target: Option<u32>,
+    /// Tick at which a pending strike lands (the attack-delay window
+    /// of an engagement's first attack — CMB-04). `None` when no
+    /// strike is pending.
+    pub strike_tick: Option<u64>,
+    /// Earliest tick the next attack may begin (reload — CMB-05:
+    /// counted from the previous strike's landing tick).
+    pub next_attack_tick: u64,
+    /// Whether this attacker has already landed a strike on its
+    /// current target (the attack delay applies only to the first
+    /// strike of an engagement).
+    pub attack_engaged: bool,
+    /// The last entity that damaged this one — kill credit: a villager
+    /// credited with killing an animal starts harvesting its carcass.
+    pub last_hit_by: Option<u32>,
+    /// Set by the combat phase, read by the next tick's movement
+    /// phase: a melee unit actively attacking is not pushed by
+    /// separation (MOV-04).
+    pub suppress_separation: bool,
+
+    // --- M3: animal state (Gaia kinds; inert zeros elsewhere) ---
+    /// The post a boar returns to after it gives up a chase.
+    pub home_x: I16F16,
+    pub home_y: I16F16,
+    /// The boar's current victim (whoever hit it last). The combat
+    /// phase mirrors this into `attack_target`.
+    pub aggro_target: Option<u32>,
+    /// Damage hits the boar has taken since it last rested at its
+    /// post. Two hits (or one villager hit) lock the aggro — the
+    /// spec's lure rule: a single military poke is shrugged off after
+    /// a short chase, a committed lure is followed all the way.
+    pub hits_taken: u32,
+    /// Whether the aggro is locked (see `hits_taken`): a locked boar
+    /// ignores the give-up distances and pursues until its target
+    /// dies or it does.
+    pub aggro_locked: bool,
+    /// The boar is walking back to its post; it heals to full on
+    /// arrival and resets its hit count.
+    pub returning_home: bool,
+    /// Deer: flee until this tick, away from (`flee_from_x`,
+    /// `flee_from_y`) — the point the attack came from.
+    pub flee_until: u64,
+    pub flee_from_x: I16F16,
+    pub flee_from_y: I16F16,
 }
 
 impl Entity {
-    /// A fresh idle villager at a position.
-    pub fn villager(id: u32, pos_x: I16F16, pos_y: I16F16) -> Self {
+    /// The shared blank state every constructor starts from: no
+    /// orders, no work, full HP for its kind.
+    fn blank(id: u32, kind: EntityKind, owner: u8, pos_x: I16F16, pos_y: I16F16) -> Self {
         Entity {
             id,
-            kind: EntityKind::Villager,
+            kind,
             pos_x,
             pos_y,
             vel_x: I16F16::ZERO,
@@ -138,15 +274,51 @@ impl Entity {
             task_building: None,
             carry: I16F16::ZERO,
             carry_kind: None,
+            owner,
+            hp: I16F16::from_num(units::spec(kind).max_hp),
+            dead: false,
+            attack_target: None,
+            strike_tick: None,
+            next_attack_tick: 0,
+            attack_engaged: false,
+            last_hit_by: None,
+            suppress_separation: false,
+            home_x: pos_x,
+            home_y: pos_y,
+            aggro_target: None,
+            hits_taken: 0,
+            aggro_locked: false,
+            returning_home: false,
+            flee_until: 0,
+            flee_from_x: I16F16::ZERO,
+            flee_from_y: I16F16::ZERO,
         }
+    }
+
+    /// A fresh idle villager at a position.
+    pub fn villager(id: u32, pos_x: I16F16, pos_y: I16F16) -> Self {
+        Entity::blank(id, EntityKind::Villager, OWNER_PLAYER, pos_x, pos_y)
+    }
+
+    /// A fresh unit or animal of any kind at a position, with the
+    /// given owner. Animals spawn as Gaia; military units as the
+    /// player's. HP comes from the kind's table row.
+    pub fn spawned(id: u32, kind: EntityKind, owner: u8, pos_x: I16F16, pos_y: I16F16) -> Self {
+        Entity::blank(id, kind, owner, pos_x, pos_y)
     }
 
     /// The static Town Center building at a position.
     pub fn town_center(id: u32, pos_x: I16F16, pos_y: I16F16) -> Self {
-        Entity {
-            kind: EntityKind::TownCenter,
-            ..Entity::villager(id, pos_x, pos_y)
-        }
+        Entity::blank(id, EntityKind::TownCenter, OWNER_PLAYER, pos_x, pos_y)
+    }
+
+    /// Clear all combat engagement state (target, pending strike,
+    /// engagement flag). Used on death, on re-tasking, and when a
+    /// target becomes invalid.
+    pub fn clear_combat(&mut self) {
+        self.attack_target = None;
+        self.strike_tick = None;
+        self.attack_engaged = false;
     }
 }
 

@@ -110,11 +110,20 @@ fn golden_hash_regression() {
     // changes only through the wider hash coverage. New value verified
     // stable across independent runs (replay example, seed 42, 360
     // ticks, run twice).
+    //
+    // M3 deliberate update: the standard start gains the Scout Cavalry
+    // and the Gaia herds (8 sheep, 2 boars, 3 deer at fixed cells), and
+    // the hash now also covers node decay, building production queues,
+    // entity HP/owner/death/combat/animal state, and projectiles in
+    // flight. No commands are issued in this scenario, so nothing moves
+    // or fights — the stream changes through the new spawns and the
+    // wider coverage alone. New value verified stable across
+    // independent runs (replay example, seed 42, 360 ticks, run twice).
     let mut sim = Sim::new(42);
     let mut hash = 0;
     for _ in 0..360 {
         hash = sim.tick();
     }
     assert_eq!(sim.tick_count(), 360);
-    assert_eq!(format!("{:016x}", hash), "171155e840f1f02d");
+    assert_eq!(format!("{:016x}", hash), "003aeb1846760b2c");
 }

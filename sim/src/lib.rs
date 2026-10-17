@@ -11,34 +11,42 @@
 //! villagers that gather/carry/deposit, and a Town Center that trains
 //! villagers. M2.5 scope: construction — villagers build Houses (+5
 //! population room each) and Farms (175-food nodes), training stalls at
-//! the population cap, and placement is validated in the sim. Combat
-//! (M3) arrives later.
+//! the population cap, and placement is validated in the sim. M3 scope:
+//! combat — HP and table-driven damage, attack orders, Gaia animals
+//! (sheep/boar/deer) and hunting with decaying carcasses, the starting
+//! Scout Cavalry, the Barracks training Militia and Archers, and
+//! projectiles as the first consumer of the seeded RNG.
 
 mod build;
+mod classes;
+mod combat;
 mod econ;
 mod entity;
 mod grid;
 mod hash;
 mod rng;
 mod steer;
+mod units;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
 
 pub use build::{
-    build_rate_thirds, Building, BuildingKind, BUILD_RANGE, FARM_BUILD_TICKS, FARM_WOOD_COST,
-    FOOTPRINT_CELLS, HOUSE_BUILD_TICKS, HOUSE_POP_SUPPORT, HOUSE_WOOD_COST,
-    TOWN_CENTER_POP_SUPPORT,
+    build_rate_thirds, Building, BuildingKind, BARRACKS_BUILD_TICKS, BARRACKS_WOOD_COST,
+    BUILD_RANGE, FARM_BUILD_TICKS, FARM_WOOD_COST, FOOTPRINT_CELLS, HOUSE_BUILD_TICKS,
+    HOUSE_POP_SUPPORT, HOUSE_WOOD_COST, TOWN_CENTER_POP_SUPPORT,
 };
+pub use combat::{compute_damage, Projectile, MELEE_REACH};
 pub use econ::{
     NodeKind, ResourceKind, ResourceNode, Stockpile, CARRY_CAPACITY, DEPOSIT_RANGE, GATHER_RANGE,
-    TRAIN_QUEUE_CAP, VILLAGER_FOOD_COST, VILLAGER_TRAIN_TICKS,
+    HUNT_CARRY_CAPACITY, TRAIN_QUEUE_CAP, VILLAGER_FOOD_COST, VILLAGER_TRAIN_TICKS,
 };
-pub use entity::{Entity, EntityKind, MoveOrder, Task};
+pub use entity::{Entity, EntityKind, MoveOrder, Task, OWNER_GAIA, OWNER_PLAYER};
 pub use grid::{Grid, CELL_SIZE, GRID_DIM, WORLD_HALF};
 pub use hash::Fnv1a64;
 pub use rng::Pcg32;
 pub use steer::{MAX_SPEED, SEPARATION_RADIUS, SLOW_RADIUS, WAYPOINT_REACH};
+pub use units::{spec as unit_spec, UnitSpec};
 
 use fixed::types::I16F16;
 
@@ -68,6 +76,41 @@ const TRAIN_SPAWN_OFFSETS: [(i32, i32); 8] = [
     (-4, -4),
 ];
 
+/// The starting Scout Cavalry's offset from the Town Center (M3):
+/// the standard start fields one scout beside the TC (OPENING-SPEC
+/// §2.1). Diagonal, so it never shares a villager's spawn point.
+const START_SCOUT_OFFSET: (i32, i32) = (5, 5);
+
+/// Starting Gaia layout (M3): (kind, cell_x, cell_y), ids assigned in
+/// table order after the player units. Distances are in cells (= the
+/// spec's tiles) from the Town Center cell (23, 23), following
+/// OPENING-SPEC §2.2's bands, adapted to the fixed arena (existing
+/// nodes and walls kept):
+///
+/// - Sheep near group (spec: 4 sheep at ≈4–8): (19,21) 4.5, (20,27)
+///   5.0, (18,23) 5.0, (21,18) 5.4.
+/// - Sheep far pairs (spec: 2+2 at ≈10–16): (13,18)+(14,17) ≈11,
+///   (15,34)+(16,33) ≈13 — the second pair beyond the south wall.
+/// - Boars (spec: 2 per player at ≈15–30, split directions): (8,10)
+///   ≈19.8 north-west, (38,28) ≈15.8 east past the wall gap.
+/// - Deer near herd (spec: 2–4 at ≈12–20): (12,28), (13,29),
+///   (11,27) ≈12 west-south-west.
+pub const ANIMAL_SPECS: &[(EntityKind, u32, u32)] = &[
+    (EntityKind::Sheep, 19, 21),
+    (EntityKind::Sheep, 20, 27),
+    (EntityKind::Sheep, 18, 23),
+    (EntityKind::Sheep, 21, 18),
+    (EntityKind::Sheep, 13, 18),
+    (EntityKind::Sheep, 14, 17),
+    (EntityKind::Sheep, 15, 34),
+    (EntityKind::Sheep, 16, 33),
+    (EntityKind::Boar, 8, 10),
+    (EntityKind::Boar, 38, 28),
+    (EntityKind::Deer, 12, 28),
+    (EntityKind::Deer, 13, 29),
+    (EntityKind::Deer, 11, 27),
+];
+
 /// World position clamp: entities never leave [-99, 99].
 /// (const via raw bits: 99 × 2^16 = 6488064.)
 const MIN_POS: I16F16 = I16F16::from_bits(-6_488_064);
@@ -79,7 +122,7 @@ const MAX_POS: I16F16 = I16F16::from_bits(6_488_064);
 /// commands).
 ///
 /// M1 adds `Move`; M2 adds `Gather` and `TrainVillager`; M2.5 adds
-/// `Build`. Attack commands land in M3.
+/// `Build`; M3 adds `Attack` and `TrainAt`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
     /// Does nothing. Exists so the command pipeline is exercised.
@@ -98,7 +141,7 @@ pub enum Command {
     /// deducted *on enqueue*; rejected (no deduction) when food is
     /// insufficient or the queue is full (15).
     TrainVillager,
-    /// Order a villager to construct a building whose 2×2-cell footprint
+    /// Order a villager to construct a building whose square footprint
     /// is anchored at the cell containing the world point `(x, y)`. The
     /// wood cost is deducted *at placement*; the order is rejected
     /// (nothing deducted, nothing placed) when the villager is invalid,
@@ -113,6 +156,20 @@ pub enum Command {
         x: I16F16,
         y: I16F16,
     },
+    /// Order a unit to attack a target entity (M3). The attacker
+    /// chases and strikes until the target dies or a new order lands.
+    /// Valid attackers: any living player unit with an attack row
+    /// (villager, Scout, Militia, Archer). Valid targets: Gaia
+    /// entities, plus the player's own sheep (killing your own
+    /// herdables is an ordinary order — ECO-13). Anything else is
+    /// ignored.
+    Attack { entity: u32, target: u32 },
+    /// Enqueue a unit at a production building (M3: the Barracks
+    /// trains Militia and Archers). The cost is deducted *on enqueue*;
+    /// rejected (no deduction) when the building is missing,
+    /// unfinished, not a production building, the kind is not
+    /// trainable there, funds are short, or the queue is full (15).
+    TrainAt { building: u32, kind: EntityKind },
 }
 
 /// Why Town Center training cannot currently proceed (M2.5). The
@@ -178,20 +235,25 @@ pub struct Sim {
     /// Next building id. Buildings are occasionally removed (depleted
     /// farms), so ids cannot be derived from the list length.
     next_building_id: u32,
+    /// Projectiles in flight (M3), in spawn order.
+    projectiles: Vec<Projectile>,
 }
 
 impl Sim {
-    /// Create a new simulation from a seed. The M2 starting layout is
-    /// fixed (Town Center, 3 villagers, node layout, stockpile), so the
-    /// seed currently feeds only the in-state RNG — its words are hashed
-    /// every tick, keeping seeds divergent from tick one. Later systems
-    /// (combat, AI) will draw from it.
+    /// Create a new simulation from a seed. The starting layout is
+    /// fixed (Town Center, 3 villagers, the starting Scout, the Gaia
+    /// herds, node layout, stockpile), so the seed feeds only the
+    /// in-state RNG — its words are hashed every tick, keeping seeds
+    /// divergent from tick one. Combat is the first system that draws
+    /// from it (archer accuracy, PRJ-03).
     pub fn new(seed: u64) -> Self {
         let rng = Pcg32::new(seed);
         let grid = Grid::new();
         let (tc_x, tc_y) = grid.cell_center(TC_CELL.0, TC_CELL.1);
 
-        let mut entities = Vec::with_capacity(1 + START_VILLAGER_COUNT as usize);
+        let mut entities = Vec::with_capacity(
+            1 + START_VILLAGER_COUNT as usize + 1 + ANIMAL_SPECS.len(),
+        );
         entities.push(Entity::town_center(TOWN_CENTER_ID, tc_x, tc_y));
         for (i, &(ox, oy)) in START_VILLAGER_OFFSETS.iter().enumerate() {
             entities.push(Entity::villager(
@@ -200,19 +262,35 @@ impl Sim {
                 tc_y + I16F16::from_num(oy),
             ));
         }
+        // The starting Scout Cavalry (M3, OPENING-SPEC §2.1).
+        let mut next_id = TOWN_CENTER_ID + 1 + START_VILLAGER_COUNT;
+        entities.push(Entity::spawned(
+            next_id,
+            EntityKind::ScoutCavalry,
+            entity::OWNER_PLAYER,
+            tc_x + I16F16::from_num(START_SCOUT_OFFSET.0),
+            tc_y + I16F16::from_num(START_SCOUT_OFFSET.1),
+        ));
+        next_id += 1;
+        // Gaia animals at their spec cells (ANIMAL_SPECS).
+        for &(kind, cx, cy) in ANIMAL_SPECS {
+            let (pos_x, pos_y) = grid.cell_center(cx, cy);
+            entities.push(Entity::spawned(
+                next_id,
+                kind,
+                entity::OWNER_GAIA,
+                pos_x,
+                pos_y,
+            ));
+            next_id += 1;
+        }
 
         let nodes = econ::NODE_SPECS
             .iter()
             .enumerate()
             .map(|(i, &(kind, cx, cy))| {
                 let (pos_x, pos_y) = grid.cell_center(cx, cy);
-                ResourceNode {
-                    id: i as u32,
-                    kind,
-                    pos_x,
-                    pos_y,
-                    amount_left: kind.full_amount(),
-                }
+                ResourceNode::placed(i as u32, kind, pos_x, pos_y)
             })
             .collect();
 
@@ -228,6 +306,7 @@ impl Sim {
             train_progress: 0,
             buildings: Vec::new(),
             next_building_id: 0,
+            projectiles: Vec::new(),
         }
     }
 
@@ -261,10 +340,30 @@ impl Sim {
         &self.buildings
     }
 
-    /// Current population: living villagers plus those in the training
-    /// queue (a queued villager is already spoken for).
+    /// Living population: alive player units that occupy a slot —
+    /// villagers, the Scout, Militia, Archers (M3). Captured sheep
+    /// and the Town Center never count (see
+    /// `EntityKind::counts_population`).
+    pub fn living_population(&self) -> u32 {
+        self.entities
+            .iter()
+            .filter(|e| {
+                e.owner == entity::OWNER_PLAYER && !e.dead && e.kind.counts_population()
+            })
+            .count() as u32
+    }
+
+    /// Current population: living population plus every production
+    /// queue (a queued unit is already spoken for) — the Town Center
+    /// queue and all Barracks queues.
     pub fn population(&self) -> u32 {
-        self.villager_count() + self.train_queue
+        let queued: u32 = self.buildings.iter().map(|b| b.queue.len() as u32).sum();
+        self.living_population() + self.train_queue + queued
+    }
+
+    /// Projectiles currently in flight, in spawn order (M3).
+    pub fn projectiles(&self) -> &[Projectile] {
+        &self.projectiles
     }
 
     /// Population capacity: the Town Center's room (+5) plus every
@@ -304,12 +403,101 @@ impl Sim {
         )
     }
 
-    /// Number of villager entities (the Town Center is not counted).
+    /// Number of *living* villagers (the Town Center is not counted,
+    /// and neither are the dead — M3).
     pub fn villager_count(&self) -> u32 {
         self.entities
             .iter()
-            .filter(|e| e.kind == EntityKind::Villager)
+            .filter(|e| e.kind == EntityKind::Villager && !e.dead)
             .count() as u32
+    }
+
+    /// Would an `Attack` command be accepted right now? A pure query
+    /// mirroring `issue_attack`'s validation, for UI affordances; the
+    /// command path re-validates at apply time.
+    pub fn can_attack(&self, entity: u32, target: u32) -> bool {
+        let (Some(ai), Some(ti)) = (self.entity_index(entity), self.entity_index(target))
+        else {
+            return false;
+        };
+        let a = &self.entities[ai];
+        let t = &self.entities[ti];
+        if a.dead || t.dead || entity == target {
+            return false;
+        }
+        if a.owner != entity::OWNER_PLAYER || units::spec(a.kind).attacks.is_empty() {
+            return false;
+        }
+        t.owner == entity::OWNER_GAIA || t.kind == EntityKind::Sheep
+    }
+
+    /// Why training `kind` at `building` cannot currently proceed
+    /// (M3) — the Barracks counterpart of `train_block_reason`, with
+    /// the same tag contract. A missing/unfinished/non-production
+    /// building reports as `QueueFull` (a generic refusal: the client
+    /// only asks for buildings it knows are complete Barracks).
+    pub fn train_at_block(&self, building: u32, kind: EntityKind) -> TrainBlock {
+        let bi = match self.building_index(building) {
+            Some(bi) => bi,
+            None => return TrainBlock::QueueFull,
+        };
+        let b = &self.buildings[bi];
+        if !b.complete || !b.kind.is_production() || !kind.is_trainable() {
+            return TrainBlock::QueueFull;
+        }
+        if b.queue.len() as u32 >= TRAIN_QUEUE_CAP {
+            return TrainBlock::QueueFull;
+        }
+        if self.population() >= self.population_cap() {
+            return TrainBlock::Housed;
+        }
+        if !self.can_afford(kind) {
+            return TrainBlock::NoFood;
+        }
+        TrainBlock::Ok
+    }
+
+    /// Would a `TrainAt` command be accepted right now? Mirrors the
+    /// Town Center contract: queue room and funds gate the enqueue;
+    /// being housed does not (production stalls instead, and resumes
+    /// when housing frees up).
+    pub fn can_train_at(&self, building: u32, kind: EntityKind) -> bool {
+        let bi = match self.building_index(building) {
+            Some(bi) => bi,
+            None => return false,
+        };
+        let b = &self.buildings[bi];
+        b.complete
+            && b.kind.is_production()
+            && kind.is_trainable()
+            && (b.queue.len() as u32) < TRAIN_QUEUE_CAP
+            && self.can_afford(kind)
+    }
+
+    /// Whether the stockpile covers a unit kind's full table cost.
+    fn can_afford(&self, kind: EntityKind) -> bool {
+        let spec = units::spec(kind);
+        self.stockpile.amount(ResourceKind::Food) >= I16F16::from_num(spec.food_cost)
+            && self.stockpile.amount(ResourceKind::Wood) >= I16F16::from_num(spec.wood_cost)
+            && self.stockpile.amount(ResourceKind::Gold) >= I16F16::from_num(spec.gold_cost)
+    }
+
+    /// Deduct a unit kind's full table cost. Callers check
+    /// `can_afford` first, so the spends cannot fail partway.
+    fn spend_cost(&mut self, kind: EntityKind) {
+        let spec = units::spec(kind);
+        if spec.food_cost > 0 {
+            self.stockpile
+                .spend(ResourceKind::Food, I16F16::from_num(spec.food_cost));
+        }
+        if spec.wood_cost > 0 {
+            self.stockpile
+                .spend(ResourceKind::Wood, I16F16::from_num(spec.wood_cost));
+        }
+        if spec.gold_cost > 0 {
+            self.stockpile
+                .spend(ResourceKind::Gold, I16F16::from_num(spec.gold_cost));
+        }
     }
 
     /// Would a `TrainVillager` command be accepted right now? (Food
@@ -340,27 +528,32 @@ impl Sim {
                 Command::Gather { entity, node } => self.issue_gather(entity, node),
                 Command::TrainVillager => self.issue_train_villager(),
                 Command::Build { entity, kind, x, y } => self.issue_build(entity, kind, x, y),
+                Command::Attack { entity, target } => self.issue_attack(entity, target),
+                Command::TrainAt { building, kind } => self.issue_train_at(building, kind),
             }
         }
 
         // 2. Movement. Steering is decided from an immutable snapshot,
         //    then integrated — two phases keep borrows simple and the
-        //    update order deterministic. The snapshot holds *villagers
-        //    only*: buildings neither push nor get pushed, and a hauler
-        //    must be able to reach the Town Center's exact position to
-        //    complete its drop-off order.
-        let snapshot: Vec<(I16F16, I16F16)> = self
+        //    update order deterministic. The snapshot holds every
+        //    *mobile, living* entity (M3: military units and animals
+        //    steer too), each with its table speed and collision
+        //    radius. The Town Center is excluded: buildings neither
+        //    push nor get pushed, and a hauler must be able to reach
+        //    the Town Center's exact position to complete its drop-off
+        //    order. Dead entities neither move nor push.
+        let snapshot: Vec<steer::SnapshotEntry> = self
             .entities
             .iter()
-            .filter(|e| e.kind == EntityKind::Villager)
-            .map(|e| (e.pos_x, e.pos_y))
+            .filter(|e| e.kind.is_mobile() && !e.dead)
+            .map(|e| (e.pos_x, e.pos_y, units::spec(e.kind).radius))
             .collect();
-        // Entity index -> index into the villager-only snapshot.
+        // Entity index -> index into the snapshot.
         let mut snap_idx = vec![usize::MAX; self.entities.len()];
         {
             let mut k = 0;
             for (i, e) in self.entities.iter().enumerate() {
-                if e.kind == EntityKind::Villager {
+                if e.kind.is_mobile() && !e.dead {
                     snap_idx[i] = k;
                     k += 1;
                 }
@@ -368,17 +561,24 @@ impl Sim {
         }
         let mut plans: Vec<(I16F16, I16F16, usize, bool)> = Vec::with_capacity(self.entities.len());
         for (i, e) in self.entities.iter().enumerate() {
+            let speed = self.current_speed(i);
             plans.push(match &e.order {
-                Some(o) if snap_idx[i] != usize::MAX => {
-                    steer::steer(&snapshot, snap_idx[i], &o.waypoints, o.wp_index)
-                }
-                // No order: the villager stands still *except* for the
+                Some(o) if snap_idx[i] != usize::MAX => steer::steer(
+                    &snapshot,
+                    snap_idx[i],
+                    &o.waypoints,
+                    o.wp_index,
+                    speed,
+                    !e.suppress_separation,
+                ),
+                // No order: the unit stands still *except* for the
                 // separation shove — a stationary unit must never be an
                 // immovable wall on another's path (head-on pushes could
                 // otherwise cancel a traveler's velocity exactly, a
-                // deadlock found in M2 testing).
-                None if snap_idx[i] != usize::MAX => {
-                    let (vx, vy) = steer::shove(&snapshot, snap_idx[i]);
+                // deadlock found in M2 testing). A melee unit engaged
+                // in an attack is exempt (MOV-04): it holds its ground.
+                None if snap_idx[i] != usize::MAX && !e.suppress_separation => {
+                    let (vx, vy) = steer::shove(&snapshot, snap_idx[i], speed);
                     (vx, vy, 0, false)
                 }
                 _ => (I16F16::ZERO, I16F16::ZERO, 0, false),
@@ -400,11 +600,28 @@ impl Sim {
             }
         }
 
-        // 3. Economy: Town Center training, then villager work cycles.
+        // 3. Combat (M3, SIM-07: after movement, before economy):
+        //    animal behavior, attack machines, projectiles, deaths,
+        //    carcass decay lives in the economy phase below.
+        self.combat_phase();
+
+        // 4. Economy: carcass decay, training (Town Center + Barracks),
+        //    then villager work cycles and construction.
         self.economy_tick();
 
         self.tick += 1;
         self.state_hash()
+    }
+
+    /// The speed steering uses for an entity this tick: its table
+    /// speed, except a boar with an attack target, which uses its
+    /// faster chase speed.
+    fn current_speed(&self, idx: usize) -> I16F16 {
+        let e = &self.entities[idx];
+        if e.kind == EntityKind::Boar && e.attack_target.is_some() {
+            return units::BOAR_CHASE_SPEED;
+        }
+        units::spec(e.kind).speed
     }
 
     /// Apply a `Move` command: clamp the target into the world, recompute
@@ -412,23 +629,62 @@ impl Sim {
     /// Unknown entities and unreachable/blocked targets clear the order —
     /// the entity simply holds position. For a villager, `Move` cancels
     /// its gather task; the carry is kept (counted only on a later
-    /// deposit — e.g. after a fresh `Gather` order). The Town Center
-    /// cannot move and ignores the command.
+    /// deposit — e.g. after a fresh `Gather` order). A `Move` also
+    /// cancels any attack engagement. Orderable entities (M3): living
+    /// player units — villagers, military, the Scout, and captured
+    /// sheep. The Town Center, the dead, and Gaia's wild animals
+    /// ignore the command.
     fn issue_move(&mut self, entity: u32, x: I16F16, y: I16F16) {
         let idx = match self.entity_index(entity) {
             Some(i) => i,
             None => return,
         };
-        if self.entities[idx].kind != EntityKind::Villager {
-            return;
+        {
+            let e = &self.entities[idx];
+            if e.dead || e.owner != entity::OWNER_PLAYER || !e.kind.is_mobile() {
+                return;
+            }
         }
         {
             let e = &mut self.entities[idx];
             e.task = Task::Idle;
             e.task_node = None;
             e.task_building = None;
+            e.clear_combat();
         }
         self.set_move_order(idx, clamp_pos(x), clamp_pos(y));
+    }
+
+    /// Apply an `Attack` command (M3): validate (same rules as
+    /// `can_attack`), cancel the attacker's current work/move, and set
+    /// its attack target. The combat phase handles the chase, the
+    /// strikes, and the kill.
+    fn issue_attack(&mut self, entity: u32, target: u32) {
+        if !self.can_attack(entity, target) {
+            return;
+        }
+        let idx = self.entity_index(entity).expect("validated");
+        let e = &mut self.entities[idx];
+        e.task = Task::Idle;
+        e.task_node = None;
+        e.task_building = None;
+        e.order = None;
+        e.attack_target = Some(target);
+        e.strike_tick = None;
+        e.attack_engaged = false;
+        e.next_attack_tick = 0;
+    }
+
+    /// Apply a `TrainAt` command (M3): deduct the unit's table cost
+    /// and enqueue it at the production building, or reject silently
+    /// (see `can_train_at` for the gates).
+    fn issue_train_at(&mut self, building: u32, kind: EntityKind) {
+        if !self.can_train_at(building, kind) {
+            return;
+        }
+        self.spend_cost(kind);
+        let bi = self.building_index(building).expect("validated");
+        self.buildings[bi].queue.push(kind);
     }
 
     /// Apply a `Gather` command: assign the villager to the node. If it
@@ -440,7 +696,7 @@ impl Sim {
             Some(i) => i,
             None => return,
         };
-        if self.entities[idx].kind != EntityKind::Villager {
+        if self.entities[idx].kind != EntityKind::Villager || self.entities[idx].dead {
             return;
         }
         match self.node_index(node) {
@@ -513,7 +769,8 @@ impl Sim {
                 }
                 let id = self.next_building_id;
                 self.next_building_id += 1;
-                let (pos_x, pos_y) = build::footprint_center(cell_x, cell_y);
+                let (pos_x, pos_y) =
+                    build::footprint_center(cell_x, cell_y, kind.footprint_size());
                 let building = Building {
                     id,
                     kind,
@@ -524,6 +781,8 @@ impl Sim {
                     progress_thirds: 0,
                     complete: false,
                     node_id: None,
+                    queue: Vec::new(),
+                    train_progress: 0,
                 };
                 if kind.blocks_footprint() {
                     for (cx, cy) in building.footprint_cells() {
@@ -550,9 +809,10 @@ impl Sim {
             Some(i) => i,
             None => return BuildVerdict::Reject,
         };
-        if self.entities[idx].kind != EntityKind::Villager {
+        if self.entities[idx].kind != EntityKind::Villager || self.entities[idx].dead {
             return BuildVerdict::Reject;
         }
+        let size = kind.footprint_size();
         let (ax, ay) = self.grid.world_to_cell(x, y);
         // Resume before placement checks: the footprint of a standing
         // incomplete building is *supposed* to be occupied — by itself.
@@ -561,11 +821,11 @@ impl Sim {
                 return BuildVerdict::Resume(b.id);
             }
         }
-        // The whole 2×2 footprint must be inside the grid.
-        if ax + 1 >= GRID_DIM || ay + 1 >= GRID_DIM {
+        // The whole footprint must be inside the grid.
+        if ax + size > GRID_DIM || ay + size > GRID_DIM {
             return BuildVerdict::Reject;
         }
-        let cells = build::footprint_cells(ax, ay);
+        let cells = build::footprint_cells(ax, ay, size);
         for &(cx, cy) in &cells {
             // Walls and already-blocking buildings.
             if self.grid.is_blocked(cx, cy) {
@@ -590,10 +850,11 @@ impl Sim {
         }
         // Overlap with any standing building's footprint (farms do not
         // block cells, so they are only visible in this registry).
-        // Two 2×2 footprints overlap iff their anchors are within one
-        // cell on both axes.
+        // Two square footprints overlap iff their anchor ranges
+        // intersect on both axes (each spans `size` cells).
         for b in &self.buildings {
-            if ax.abs_diff(b.cell_x) <= 1 && ay.abs_diff(b.cell_y) <= 1 {
+            let bs = b.kind.footprint_size();
+            if ax < b.cell_x + bs && b.cell_x < ax + size && ay < b.cell_y + bs && b.cell_y < ay + size {
                 return BuildVerdict::Reject;
             }
         }
@@ -603,7 +864,7 @@ impl Sim {
         }
         // Reachable-ish: at least one ring cell stands open and the
         // builder has a path to it.
-        if self.approach_point(idx, ax, ay).is_none() {
+        if self.approach_point(idx, ax, ay, size).is_none() {
             return BuildVerdict::Reject;
         }
         BuildVerdict::Place(ax, ay)
@@ -612,10 +873,10 @@ impl Sim {
     /// Put villager `idx` on construction duty for building `bid`:
     /// travel phase, with a move order to the best standing spot.
     fn assign_builder(&mut self, idx: usize, bid: u32) {
-        let (ax, ay) = match self.building_index(bid) {
+        let (ax, ay, size) = match self.building_index(bid) {
             Some(bi) => {
                 let b = &self.buildings[bi];
-                (b.cell_x, b.cell_y)
+                (b.cell_x, b.cell_y, b.kind.footprint_size())
             }
             None => return,
         };
@@ -625,7 +886,7 @@ impl Sim {
             e.task_building = Some(bid);
             e.task_node = None;
         }
-        match self.approach_point(idx, ax, ay) {
+        match self.approach_point(idx, ax, ay, size) {
             Some((px, py)) => self.set_move_order(idx, px, py),
             None => {
                 // No standing spot right now (crowded site): the work
@@ -641,9 +902,15 @@ impl Sim {
     /// The builder's standing spot for the footprint anchored at
     /// `(ax, ay)`: the first ring cell (fixed order) that is in bounds,
     /// unblocked, and reachable from the villager's position.
-    fn approach_point(&self, idx: usize, ax: u32, ay: u32) -> Option<(I16F16, I16F16)> {
+    fn approach_point(
+        &self,
+        idx: usize,
+        ax: u32,
+        ay: u32,
+        size: u32,
+    ) -> Option<(I16F16, I16F16)> {
         let from = (self.entities[idx].pos_x, self.entities[idx].pos_y);
-        for (cx, cy) in build::ring_cells(ax, ay) {
+        for (cx, cy) in build::ring_cells(ax, ay, size) {
             if cx >= GRID_DIM || cy >= GRID_DIM {
                 continue;
             }
@@ -687,15 +954,31 @@ impl Sim {
         }
     }
 
-    /// The economy phase of a tick: training progress at the Town Center,
-    /// then every villager's work state machine, in id order, then
+    /// The economy phase of a tick: carcass decay (M3), training
+    /// progress at the Town Center and the production buildings, then
+    /// every living villager's work state machine, in id order, then
     /// construction progress (M2.5).
     fn economy_tick(&mut self) {
+        // Carcass decay (ECO-12): carcasses — and only carcasses —
+        // lose food continuously from the moment of death, whether or
+        // not anyone is working them. Applied before work, so a
+        // gatherer takes from the post-decay amount.
+        for n in &mut self.nodes {
+            if n.decay_per_tick > I16F16::ZERO && n.amount_left > I16F16::ZERO {
+                n.amount_left = if n.amount_left > n.decay_per_tick {
+                    n.amount_left - n.decay_per_tick
+                } else {
+                    I16F16::ZERO
+                };
+            }
+        }
         // Training stalls while the population is at capacity — the
         // "housed" state: the queue keeps its place and its progress,
         // and resumes the tick housing frees up. Completion spawns only
         // while there is room, so the cap can never be exceeded.
-        if self.train_queue > 0 && self.villager_count() < self.population_cap() {
+        // (M3: the room check counts every living population unit —
+        // villagers, Scout, military — not just villagers.)
+        if self.train_queue > 0 && self.living_population() < self.population_cap() {
             self.train_progress += 1;
             if self.train_progress >= VILLAGER_TRAIN_TICKS {
                 self.train_progress = 0;
@@ -703,12 +986,79 @@ impl Sim {
                 self.spawn_trained_villager();
             }
         }
+        // Barracks production (M3): same queue/pop rules as the Town
+        // Center — progress only while there is population room.
+        for bi in 0..self.buildings.len() {
+            if !self.buildings[bi].complete || self.buildings[bi].queue.is_empty() {
+                continue;
+            }
+            if self.living_population() >= self.population_cap() {
+                continue; // housed: this building's queue stalls too
+            }
+            self.buildings[bi].train_progress += 1;
+            let head = self.buildings[bi].queue[0];
+            if self.buildings[bi].train_progress >= units::spec(head).train_ticks {
+                self.buildings[bi].train_progress = 0;
+                self.buildings[bi].queue.remove(0);
+                let bid = self.buildings[bi].id;
+                self.spawn_trained_unit(bid, head);
+            }
+        }
         for idx in 0..self.entities.len() {
-            if self.entities[idx].kind == EntityKind::Villager {
+            if self.entities[idx].kind == EntityKind::Villager && !self.entities[idx].dead {
                 self.work_tick(idx);
             }
         }
         self.construction_tick();
+    }
+
+    /// Spawn a unit trained at a production building: on the first
+    /// free ring cell around the footprint (fixed order), falling back
+    /// to edge offsets and finally the building's center — a completed
+    /// training must never silently eat the unit.
+    fn spawn_trained_unit(&mut self, building: u32, kind: EntityKind) {
+        let bi = match self.building_index(building) {
+            Some(bi) => bi,
+            None => return,
+        };
+        let b = &self.buildings[bi];
+        let (ax, ay, size) = (b.cell_x, b.cell_y, b.kind.footprint_size());
+        let (cx0, cy0) = (b.pos_x, b.pos_y);
+        let mut pos = None;
+        for (cx, cy) in build::ring_cells(ax, ay, size) {
+            if cx >= GRID_DIM || cy >= GRID_DIM {
+                continue;
+            }
+            if !self.grid.is_blocked(cx, cy) {
+                pos = Some(self.grid.cell_center(cx, cy));
+                break;
+            }
+        }
+        if pos.is_none() {
+            let half = I16F16::from_num(size as i32 * 2) + I16F16::from_num(2);
+            for (ox, oy) in [
+                (half, I16F16::ZERO),
+                (-half, I16F16::ZERO),
+                (I16F16::ZERO, half),
+                (I16F16::ZERO, -half),
+            ] {
+                let p = (cx0 + ox, cy0 + oy);
+                let (ccx, ccy) = self.grid.world_to_cell(p.0, p.1);
+                if !self.grid.is_blocked(ccx, ccy) {
+                    pos = Some(p);
+                    break;
+                }
+            }
+        }
+        let (px, py) = pos.unwrap_or((cx0, cy0));
+        let id = self.entities.len() as u32;
+        self.entities.push(Entity::spawned(
+            id,
+            kind,
+            entity::OWNER_PLAYER,
+            px,
+            py,
+        ));
     }
 
     /// One villager's work state machine step. Transitions trigger on
@@ -766,7 +1116,14 @@ impl Sim {
                     }
                 };
                 let rate = self.nodes[ni].kind.gather_rate();
-                let room = CARRY_CAPACITY - self.entities[idx].carry;
+                // Carry capacity is the node's, not a global (ECO-03):
+                // 35 from a hunt carcass, 10 elsewhere. A villager
+                // arriving already fuller than this node's cap (it
+                // hauled meat, then was re-tasked) has negative room:
+                // `take` clamps to nothing and the full check below
+                // sends it home to deposit first.
+                let cap = self.nodes[ni].kind.carry_cap();
+                let room = cap - self.entities[idx].carry;
                 let take = rate.min(room).min(self.nodes[ni].amount_left);
                 if take > I16F16::ZERO {
                     self.nodes[ni].amount_left -= take;
@@ -777,7 +1134,7 @@ impl Sim {
                         e.carry_kind = Some(resource);
                     }
                 }
-                let full = self.entities[idx].carry >= CARRY_CAPACITY;
+                let full = self.entities[idx].carry >= cap;
                 if full || self.nodes[ni].is_depleted() {
                     if self.entities[idx].carry > I16F16::ZERO {
                         self.begin_return(idx);
@@ -816,15 +1173,19 @@ impl Sim {
                 }
                 let (bx, by) = (self.buildings[bi].pos_x, self.buildings[bi].pos_y);
                 let (ax, ay) = (self.buildings[bi].cell_x, self.buildings[bi].cell_y);
+                let (range, size) = (
+                    self.buildings[bi].kind.build_range(),
+                    self.buildings[bi].kind.footprint_size(),
+                );
                 let d = self.distance_to(idx, bx, by);
-                if d <= BUILD_RANGE {
+                if d <= range {
                     let e = &mut self.entities[idx];
                     e.task = Task::Building;
                     e.order = None;
                     e.vel_x = I16F16::ZERO;
                     e.vel_y = I16F16::ZERO;
                 } else if self.entities[idx].order.is_none() {
-                    if let Some((px, py)) = self.approach_point(idx, ax, ay) {
+                    if let Some((px, py)) = self.approach_point(idx, ax, ay, size) {
                         self.set_move_order(idx, px, py);
                     }
                 }
@@ -853,7 +1214,8 @@ impl Sim {
                 // range, progress itself is applied by the construction
                 // phase — this arm only maintains the phase.
                 let (bx, by) = (self.buildings[bi].pos_x, self.buildings[bi].pos_y);
-                if self.distance_to(idx, bx, by) > BUILD_RANGE {
+                let range = self.buildings[bi].kind.build_range();
+                if self.distance_to(idx, bx, by) > range {
                     self.entities[idx].task = Task::ToBuild;
                 }
             }
@@ -962,13 +1324,7 @@ impl Sim {
         }
         let (px, py) = (self.buildings[bi].pos_x, self.buildings[bi].pos_y);
         let nid = self.nodes.len() as u32;
-        self.nodes.push(ResourceNode {
-            id: nid,
-            kind: NodeKind::Farm,
-            pos_x: px,
-            pos_y: py,
-            amount_left: NodeKind::Farm.full_amount(),
-        });
+        self.nodes.push(ResourceNode::placed(nid, NodeKind::Farm, px, py));
         if let Some(bi) = self.building_index(bid) {
             self.buildings[bi].node_id = Some(nid);
         }
@@ -1054,8 +1410,8 @@ impl Sim {
                 break;
             }
         }
-        // Ids are sequential and entities are never removed in M2, so
-        // the next id is the current count.
+        // Ids are sequential: dead entities are tombstoned, never
+        // removed (M3), so the next id is always the current count.
         let id = self.entities.len() as u32;
         self.entities.push(Entity::villager(id, pos.0, pos.1));
     }
@@ -1127,6 +1483,7 @@ impl Sim {
             h.write_i32(amount.to_bits());
         }
         // M2: nodes (id order), then the Town Center training state.
+        // M3: node decay joins (carcasses are state, not decoration).
         h.write_u32(self.nodes.len() as u32);
         for n in &self.nodes {
             h.write_u32(n.id);
@@ -1134,10 +1491,12 @@ impl Sim {
             h.write_i32(n.pos_x.to_bits());
             h.write_i32(n.pos_y.to_bits());
             h.write_i32(n.amount_left.to_bits());
+            h.write_i32(n.decay_per_tick.to_bits());
         }
         h.write_u32(self.train_queue);
         h.write_u64(self.train_progress);
         // M2.5: buildings (id order), construction state included.
+        // M3: production queues join.
         h.write_u32(self.buildings.len() as u32);
         for b in &self.buildings {
             h.write_u32(b.id);
@@ -1155,6 +1514,11 @@ impl Sim {
                     h.write_u32(n);
                 }
             }
+            h.write_u32(b.queue.len() as u32);
+            for &q in &b.queue {
+                h.write_u8(q.tag());
+            }
+            h.write_u64(b.train_progress);
         }
         h.write_u32(self.entities.len() as u32);
         for e in &self.entities {
@@ -1200,6 +1564,74 @@ impl Sim {
                 None => 0,
                 Some(k) => k.tag(),
             });
+            // M3: ownership, hit points, death, and combat state.
+            h.write_u8(e.owner);
+            h.write_i32(e.hp.to_bits());
+            h.write_u8(u8::from(e.dead));
+            match e.attack_target {
+                None => h.write_u8(0),
+                Some(t) => {
+                    h.write_u8(1);
+                    h.write_u32(t);
+                }
+            }
+            match e.strike_tick {
+                None => h.write_u8(0),
+                Some(t) => {
+                    h.write_u8(1);
+                    h.write_u64(t);
+                }
+            }
+            h.write_u64(e.next_attack_tick);
+            h.write_u8(u8::from(e.attack_engaged));
+            match e.last_hit_by {
+                None => h.write_u8(0),
+                Some(t) => {
+                    h.write_u8(1);
+                    h.write_u32(t);
+                }
+            }
+            h.write_u8(u8::from(e.suppress_separation));
+            // M3: animal state — post, aggro, lure bookkeeping, flight.
+            h.write_i32(e.home_x.to_bits());
+            h.write_i32(e.home_y.to_bits());
+            match e.aggro_target {
+                None => h.write_u8(0),
+                Some(t) => {
+                    h.write_u8(1);
+                    h.write_u32(t);
+                }
+            }
+            h.write_u32(e.hits_taken);
+            h.write_u8(u8::from(e.aggro_locked));
+            h.write_u8(u8::from(e.returning_home));
+            h.write_u64(e.flee_until);
+            h.write_i32(e.flee_from_x.to_bits());
+            h.write_i32(e.flee_from_y.to_bits());
+        }
+        // M3: projectiles in flight, in spawn order.
+        h.write_u32(self.projectiles.len() as u32);
+        for p in &self.projectiles {
+            h.write_i32(p.spawn_x.to_bits());
+            h.write_i32(p.spawn_y.to_bits());
+            h.write_i32(p.impact_x.to_bits());
+            h.write_i32(p.impact_y.to_bits());
+            h.write_u64(p.spawn_tick);
+            h.write_u64(p.impact_tick);
+            match p.intended {
+                None => h.write_u8(0),
+                Some(t) => {
+                    h.write_u8(1);
+                    h.write_u32(t);
+                }
+            }
+            h.write_u32(p.attacker);
+            h.write_u8(p.owner);
+            h.write_u32(p.attacks.len() as u32);
+            for &(class, value) in &p.attacks {
+                h.write_u8(class);
+                h.write_i32(value);
+            }
         }
         h.finish()
     }

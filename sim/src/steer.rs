@@ -7,7 +7,10 @@
 
 use fixed::types::I16F16;
 
-/// Speed in world units per tick (60 units/second at 60 Hz).
+/// The M1/M2 uniform speed in world units per tick — now only the
+/// villager's row of the M3 unit table (`units::spec`); steering takes
+/// each entity's own speed as a parameter. Kept as the snapshot
+/// default and for the steering unit tests.
 /// Constants via raw bits (value × 2^16): from_num is not const in fixed 1.x.
 pub const MAX_SPEED: I16F16 = I16F16::from_bits(65_536); // 1.0
 /// Inside this radius of the final waypoint, speed scales down linearly
@@ -15,8 +18,14 @@ pub const MAX_SPEED: I16F16 = I16F16::from_bits(65_536); // 1.0
 pub const SLOW_RADIUS: I16F16 = I16F16::from_bits(262_144); // 4.0
 /// A waypoint closer than this counts as reached.
 pub const WAYPOINT_REACH: I16F16 = I16F16::from_bits(65_536); // 1.0
-/// Entities closer than this push each other apart.
+/// Separation distance between two standard units (M1/M2 semantics):
+/// since M3 the actual distance is the sum of the two units' table
+/// radii (MOV-05); two 1.0-radius units still separate at 2.0.
 pub const SEPARATION_RADIUS: I16F16 = I16F16::from_bits(131_072); // 2.0
+
+/// One steering-snapshot entry: position + collision radius. The sim
+/// builds the snapshot from the id-ordered entity list each tick.
+pub type SnapshotEntry = (I16F16, I16F16, I16F16);
 /// Separation displacement factor: 0.5 = 32768/65536 raw bits.
 ///
 /// Separation is *displacement*-based: a unit moves half the overlap per
@@ -54,9 +63,12 @@ pub fn vec_len(dx: I16F16, dy: I16F16) -> I16F16 {
 }
 
 /// Separation push for one entity: the summed, *unclamped* displacement
-/// of every neighbor inside `SEPARATION_RADIUS` — half the overlap,
-/// pointing away from the neighbor. (This is the term `steer` adds to
-/// the desired velocity, factored out unchanged.)
+/// of every neighbor inside the pair's separation distance — half the
+/// overlap, pointing away from the neighbor. (This is the term `steer`
+/// adds to the desired velocity, factored out unchanged.) Since M3 the
+/// separation distance of a pair is the sum of their table radii
+/// (MOV-05); for two standard 1.0-radius units it is the historical
+/// `SEPARATION_RADIUS` (2.0).
 ///
 /// The sim also applies it to entities with *no* move order (M2, see
 /// `shove`): a stationary villager must be shovable. If only ordered
@@ -64,18 +76,19 @@ pub fn vec_len(dx: I16F16, dy: I16F16) -> I16F16 {
 /// its desired velocity exactly — a perfect head-on equilibrium, i.e. a
 /// deadlock. With mutual shove, the blocker slides aside (half the
 /// overlap per tick) and the traveler gets through.
-pub fn separation(positions: &[(I16F16, I16F16)], me: usize) -> (I16F16, I16F16) {
-    let (px, py) = positions[me];
+pub fn separation(positions: &[SnapshotEntry], me: usize) -> (I16F16, I16F16) {
+    let (px, py, my_r) = positions[me];
     let mut vx = I16F16::ZERO;
     let mut vy = I16F16::ZERO;
     // Iteration is over the id-ordered snapshot, so the sum is
     // deterministic.
-    let sep_r_bits = SEPARATION_RADIUS.to_bits() as i64;
-    let sep_r2 = sep_r_bits * sep_r_bits;
-    for (j, &(ox, oy)) in positions.iter().enumerate() {
+    for (j, &(ox, oy, other_r)) in positions.iter().enumerate() {
         if j == me {
             continue;
         }
+        let sep_r = my_r + other_r;
+        let sep_r_bits = sep_r.to_bits() as i64;
+        let sep_r2 = sep_r_bits * sep_r_bits;
         let sx = px - ox;
         let sy = py - oy;
         let sxb = sx.to_bits() as i64;
@@ -85,7 +98,7 @@ pub fn separation(positions: &[(I16F16, I16F16)], me: usize) -> (I16F16, I16F16)
             continue;
         }
         let d = I16F16::from_bits(isqrt(d2 as u64) as i32);
-        let push = SEPARATION_RADIUS - d; // overlap, > 0 inside the radius
+        let push = sep_r - d; // overlap, > 0 inside the radius
         vx += sx / d * push * SEPARATION_DISPLACEMENT;
         vy += sy / d * push * SEPARATION_DISPLACEMENT;
     }
@@ -93,30 +106,35 @@ pub fn separation(positions: &[(I16F16, I16F16)], me: usize) -> (I16F16, I16F16)
 }
 
 /// The velocity an entity with *no* move order gets this tick: just the
-/// separation shove, clamped to `MAX_SPEED`. Standing units are nudged
-/// aside by neighbors instead of acting as immovable walls.
-pub fn shove(positions: &[(I16F16, I16F16)], me: usize) -> (I16F16, I16F16) {
+/// separation shove, clamped to the entity's own speed. Standing units
+/// are nudged aside by neighbors instead of acting as immovable walls.
+pub fn shove(positions: &[SnapshotEntry], me: usize, max_speed: I16F16) -> (I16F16, I16F16) {
     let (mut vx, mut vy) = separation(positions, me);
     let vlen = vec_len(vx, vy);
-    if vlen > MAX_SPEED {
-        vx = vx / vlen * MAX_SPEED;
-        vy = vy / vlen * MAX_SPEED;
+    if vlen > max_speed {
+        vx = vx / vlen * max_speed;
+        vy = vy / vlen * max_speed;
     }
     (vx, vy)
 }
 
 /// Steering decision for one entity for one tick.
 ///
-/// `positions` is the id-ordered snapshot of every entity's position;
-/// `me` is this entity's index into it. Returns
-/// `(vel_x, vel_y, new_wp_index, arrived)`.
+/// `positions` is the id-ordered snapshot of every mobile entity;
+/// `me` is this entity's index into it. `max_speed` is the entity's
+/// own table speed (M3: speed is a per-unit stat — MOV-01).
+/// `apply_separation` is false for a melee unit actively attacking:
+/// separation must not push it out of its target's reach (MOV-04).
+/// Returns `(vel_x, vel_y, new_wp_index, arrived)`.
 pub fn steer(
-    positions: &[(I16F16, I16F16)],
+    positions: &[SnapshotEntry],
     me: usize,
     waypoints: &[(I16F16, I16F16)],
     wp_index: usize,
+    max_speed: I16F16,
+    apply_separation: bool,
 ) -> (I16F16, I16F16, usize, bool) {
-    let (px, py) = positions[me];
+    let (px, py, _) = positions[me];
 
     // Advance past already-reached waypoints. Reaching the last one means
     // the order is complete.
@@ -135,9 +153,9 @@ pub fn steer(
 
     // Desired velocity toward the waypoint, slowing inside SLOW_RADIUS on
     // the final leg so the entity settles instead of orbiting the target.
-    let mut speed = MAX_SPEED;
+    let mut speed = max_speed;
     if idx + 1 == waypoints.len() && dist < SLOW_RADIUS && dist > I16F16::ZERO {
-        speed = MAX_SPEED * dist / SLOW_RADIUS;
+        speed = max_speed * dist / SLOW_RADIUS;
     }
     let (mut vx, mut vy) = if dist > I16F16::ZERO {
         // |delta| <= dist always, so delta/dist can never overflow.
@@ -146,16 +164,19 @@ pub fn steer(
         (I16F16::ZERO, I16F16::ZERO)
     };
 
-    // Separation from neighbors, on top of the desired velocity.
-    let (sx, sy) = separation(positions, me);
-    vx += sx;
-    vy += sy;
+    // Separation from neighbors, on top of the desired velocity —
+    // except while a melee attack is engaged (MOV-04).
+    if apply_separation {
+        let (sx, sy) = separation(positions, me);
+        vx += sx;
+        vy += sy;
+    }
 
-    // Clamp the combined velocity to MAX_SPEED.
+    // Clamp the combined velocity to the entity's own speed.
     let vlen = vec_len(vx, vy);
-    if vlen > MAX_SPEED {
-        vx = vx / vlen * MAX_SPEED;
-        vy = vy / vlen * MAX_SPEED;
+    if vlen > max_speed {
+        vx = vx / vlen * max_speed;
+        vy = vy / vlen * max_speed;
     }
     (vx, vy, idx, false)
 }
@@ -184,11 +205,19 @@ mod tests {
         assert_eq!(vec_len(I16F16::ZERO, I16F16::ZERO), I16F16::ZERO);
     }
 
+    fn entry(x: i32, y: i32) -> SnapshotEntry {
+        (
+            I16F16::from_num(x),
+            I16F16::from_num(y),
+            I16F16::from_num(1), // standard 1.0 collision radius
+        )
+    }
+
     #[test]
     fn steer_heads_for_waypoint() {
-        let positions = [(I16F16::ZERO, I16F16::ZERO)];
+        let positions = [entry(0, 0)];
         let wps = [(I16F16::from_num(10), I16F16::ZERO)];
-        let (vx, vy, idx, arrived) = steer(&positions, 0, &wps, 0);
+        let (vx, vy, idx, arrived) = steer(&positions, 0, &wps, 0, MAX_SPEED, true);
         assert!(!arrived);
         assert_eq!(idx, 0);
         assert!(vx > I16F16::ZERO, "must move toward +x");
@@ -198,26 +227,35 @@ mod tests {
 
     #[test]
     fn steer_slows_near_final_waypoint() {
-        let positions = [(I16F16::ZERO, I16F16::ZERO)];
+        let positions = [entry(0, 0)];
         // 2 units away, inside SLOW_RADIUS (4): speed must be scaled to ~half.
         let wps = [(I16F16::from_num(2), I16F16::ZERO)];
-        let (vx, _, _, arrived) = steer(&positions, 0, &wps, 0);
+        let (vx, _, _, arrived) = steer(&positions, 0, &wps, 0, MAX_SPEED, true);
         assert!(!arrived);
         assert!(vx < MAX_SPEED, "arrival slowdown missing: {vx}");
         assert!(vx > I16F16::ZERO);
     }
 
     #[test]
+    fn steer_respects_the_units_own_speed() {
+        // M3 (MOV-01): the clamp is the entity's table speed, not the
+        // old global constant — a sheep (0.875) steers slower than a
+        // villager even on the same order.
+        let positions = [entry(0, 0)];
+        let wps = [(I16F16::from_num(100), I16F16::ZERO)];
+        let slow = I16F16::from_bits(57_344); // 0.875
+        let (vx, _, _, _) = steer(&positions, 0, &wps, 0, slow, true);
+        assert_eq!(vx, slow);
+    }
+
+    #[test]
     fn separation_pushes_apart() {
         // Two entities 1 unit apart on x, both ordered far away: the left
         // one must feel a push toward -x on top of its desired velocity.
-        let p = [
-            (I16F16::ZERO, I16F16::ZERO),
-            (I16F16::from_num(1), I16F16::ZERO),
-        ];
+        let p = [entry(0, 0), entry(1, 0)];
         let wps = [(I16F16::from_num(100), I16F16::ZERO)];
-        let (vx0, _, _, _) = steer(&p, 0, &wps, 0);
-        let (vx1, _, _, _) = steer(&p, 1, &wps, 0);
+        let (vx0, _, _, _) = steer(&p, 0, &wps, 0, MAX_SPEED, true);
+        let (vx1, _, _, _) = steer(&p, 1, &wps, 0, MAX_SPEED, true);
         // Entity 0 is pushed left (negative x contribution)…
         assert!(vx0 < MAX_SPEED, "entity 0 felt no separation push");
         // …entity 1 is pushed right (it keeps full speed toward +x).
@@ -225,23 +263,27 @@ mod tests {
     }
 
     #[test]
+    fn separation_can_be_suppressed_for_an_engaged_attacker() {
+        // MOV-04: with separation suppressed, an overlapped entity
+        // steers purely by its order — no sideways push at all.
+        let p = [entry(0, 0), entry(1, 0)];
+        let wps = [(I16F16::from_num(100), I16F16::ZERO)];
+        let (vx, vy, _, _) = steer(&p, 0, &wps, 0, MAX_SPEED, false);
+        assert_eq!((vx, vy), (MAX_SPEED, I16F16::ZERO));
+    }
+
+    #[test]
     fn shove_moves_half_the_overlap() {
         // Two orderless entities 1 unit apart: each is shoved away from
         // the other by half the overlap (0.5), so one tick of mutual
         // shove separates the pair to exactly the separation radius.
-        let p = [
-            (I16F16::ZERO, I16F16::ZERO),
-            (I16F16::from_num(1), I16F16::ZERO),
-        ];
-        let (vx0, vy0) = shove(&p, 0);
-        let (vx1, vy1) = shove(&p, 1);
+        let p = [entry(0, 0), entry(1, 0)];
+        let (vx0, vy0) = shove(&p, 0, MAX_SPEED);
+        let (vx1, vy1) = shove(&p, 1, MAX_SPEED);
         assert_eq!((vx0, vy0), (I16F16::from_num(-0.5), I16F16::ZERO));
         assert_eq!((vx1, vy1), (I16F16::from_num(0.5), I16F16::ZERO));
         // Beyond the radius there is no shove at all.
-        let far = [
-            (I16F16::ZERO, I16F16::ZERO),
-            (I16F16::from_num(3), I16F16::ZERO),
-        ];
-        assert_eq!(shove(&far, 0), (I16F16::ZERO, I16F16::ZERO));
+        let far = [entry(0, 0), entry(3, 0)];
+        assert_eq!(shove(&far, 0, MAX_SPEED), (I16F16::ZERO, I16F16::ZERO));
     }
 }

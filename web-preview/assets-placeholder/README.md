@@ -20,6 +20,7 @@ anywhere in this project (clean-room rule).
 | `gold.png` | Gold node (gold-flecked rock) | `medievalEnvironment_11.png` from Kenney "RTS Pack: Medieval" | https://kenney.nl/assets/medieval-rts | CC0 1.0 |
 | `stone.png` | Stone node | `medievalEnvironment_09.png` from Kenney "RTS Pack: Medieval" | https://kenney.nl/assets/medieval-rts | CC0 1.0 |
 | `town-center.png` | Town Center building | `medievalStructure_06.png` from Kenney "RTS Pack: Medieval" | https://kenney.nl/assets/medieval-rts | CC0 1.0 |
+| `barracks.png` | Barracks building (M3 placeholder — a grey stone keep; replaced by original art later) | `medievalStructure_05.png` (Retina variant) from Kenney "RTS Pack: Medieval" | https://kenney.nl/assets/medieval-rts | CC0 1.0 |
 | `house.png` | House building — **REPLACED by original art** (`../assets-original/house-{stage0,stage1,stage2,complete}.png`, our sprite pipeline) on 2026-10-16; served as the in-game house sprite (clip-reveal during construction) from M2.5 until then, and is retained only as a load-failure fallback in the renderer's fallback chain | `medievalStructure_18.png` from Kenney "RTS Pack: Medieval" | https://kenney.nl/assets/medieval-rts | CC0 1.0 |
 
 Sprites were trimmed to their opaque bounding box; no other edits.

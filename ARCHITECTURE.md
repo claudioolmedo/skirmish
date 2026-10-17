@@ -76,6 +76,9 @@ skirmish/
     │   ├── entity.rs     # entities, move orders, villager work state
     │   ├── econ.rs       # M2: resources, nodes, stockpile, econ numbers
     │   ├── build.rs      # M2.5: buildings, placement, population numbers
+    │   ├── classes.rs    # M3: armor-class ids (membership bitmasks)
+    │   ├── units.rs      # M3: the unit table (data: stats/costs/speeds)
+    │   ├── combat.rs     # M3: damage formula, combat phase, projectiles
     │   ├── grid.rs       # M1: coarse grid + deterministic A*
     │   ├── steer.rs      # M1: separation + arrival (integer sqrt)
     │   └── wasm.rs       # thin wasm-bindgen ABI (commands in, state out)
@@ -84,7 +87,8 @@ skirmish/
     │   │                 # replay equality, golden-hash tripwire
     │   ├── movement.rs   # M1: A* routing, arrival, separation, determinism
     │   ├── economy.rs    # M2: gather cycle, depletion, training, replay
-    │   └── construction.rs # M2.5: houses, farms, population, placement
+    │   ├── construction.rs # M2.5: houses, farms, population, placement
+    │   └── combat.rs     # M3: animals, hunting, production, replays
     └── examples/
         └── replay.rs     # headless runner: N ticks from a seed, print hashes
 ```
@@ -96,7 +100,7 @@ Future crates plug in beside `sim/` (never inside it):
 | M0 ✅     | `sim` (harness)     | fixed-point math, seeded RNG, tick loop, determinism harness |
 | M1 ✅     | `sim` (entities)    | A* + steering, command queue, real `Command` set |
 | M2 ✅     | `sim` (entities)    | economy: workers, resources, buildings |
-| M3        | `sim` (entities)    | combat, projectiles, first original empire |
+| M3 ✅     | `sim` (entities)    | combat core, projectiles, animals, Barracks (first empire is M6) |
 | M4        | `web/`              | Canvas 2D renderer, input shell, adaptive-quality governor |
 | M5        | `sim` + `web/`      | feel tuning, scripted AI, playtest loop |
 
@@ -243,6 +247,105 @@ population room. Numbers are from the public mechanics study (house
   start overlay, pause menu, villager selection, build menu with
   sim-mirrored placement ghost, and population HUD. The landing page
   links to it; ad slots stay on the landing page only.
+
+## M3 — combat core (shipped 2026-10-16)
+
+Units fight, animals live and die, and the village gains its first
+military. All numbers come from the mechanics study / rulebook
+(MECHANICS-STUDY.md, MECHANICS-RULEBOOK.md §§8–10) and the opening
+spec; anything the sources don't pin down is marked UNVERIFIED in
+`units.rs` and never silently invented.
+
+- **Phase order (SIM-07).** commands → movement → **combat** →
+  economy. The combat phase runs, in fixed order: sheep capture,
+  animal behavior, target acquisition, attack machines (ascending
+  attacker id), projectile impacts (spawn order), and the death
+  sweep (ascending id). Carcass decay is economy, before work.
+- **The unit table is data** (`units.rs::spec`): HP, attack rows
+  (armor class + value), melee/pierce armor, class membership
+  bitmask (`classes.rs`), range, reload, attack delay, accuracy,
+  projectile speed/scatter, speed, LoS, collision radius, carcass
+  yield/decay, cost, train time. Eight kinds: Villager, Town Center
+  (stats for display — buildings take no damage yet), Scout Cavalry,
+  Militia, Archer, Sheep, Boar, Deer.
+- **Damage (CMB-01).** Per attack row whose class the target belongs
+  to: `max(0, attack − armor of that class)`; melee/pierce rows use
+  the armor *values*, all other classes are flat bonuses; the total
+  clamps to a minimum of 1 when any row applies. Elevation factor is
+  1 (flat map). Worked anchors: boar hits Scout for 7 + 3 (cavalry
+  bonus) = 10; archer hits Militia for 4 − 1 (pierce armor) = 3.
+- **Attack machines (CMB-04/05/06).** An Attack order (or an
+  acquired target) chases; in range, the first strike lands after
+  the table's attack delay, later strikes every reload ticks
+  measured from the landing tick; a melee strike that finds its
+  target out of range at the landing tick whiffs (reload still
+  applies). Re-tasking aborts a pending strike.
+- **Per-unit speeds.** Steering takes the table speed per entity
+  (the old uniform speed is gone). Scale: study tiles/s × 1.25
+  units/tick, anchored so the villager keeps its shipped 1.0
+  units/tick pace — every unit-to-unit ratio is the study's.
+  Ranges/LoS are tiles × 4 (one cell = one tile).
+- **MOV-04.** A melee unit in range of its target with an attack
+  engaged is exempt from separation steering, both as the pushed
+  and the pusher's problem: it holds its ground mid-swing.
+- **Death is a tombstone (deliberate deviation from CMB-14's
+  letter).** HP is fractional; an entity dies when HP < 1 (CMB-02),
+  in the death sweep at the end of the combat phase. The entity
+  stays in the Vec flagged `dead` — out of play in every observable
+  way (no motion, work, targeting, population, rendering), its carry
+  lost, its pop slot freed the same tick — but ids are never reused
+  and indices never shift, which keeps the client's index==id
+  invariant and `spawn id = entities.len()` true forever.
+- **Gaia animals.** Entities with `owner = Gaia`. Sheep are
+  captured by proximity (any living player unit within 1 tile flips
+  ownership; a majority of one — no second player exists yet) and
+  then take move orders like units. Boars hold a post; damage
+  aggros them (a villager's hit locks the aggro, any two hits lock
+  it, otherwise they give up when the chase runs long or the target
+  leaves the post's area), they chase at their faster chase speed,
+  and on disengaging they walk home and heal — but only once no
+  player unit is nearby, so a boar never resets mid-brawl. Deer
+  flee when hurt. Wolves are out of scope (no source-verified need
+  yet).
+- **Carcasses (ECO-12).** A dead animal becomes a food node at its
+  death position (new NodeKinds: hunt carcass — boar/deer;
+  herd carcass — sheep) carrying the meat the animal held. Carcass
+  nodes decay at a per-node rate (0.40 food/s hunt, 0.25 herd) from
+  the moment of death. Villagers gather them at the hunt/shepherd
+  rates with the node's carry capacity: **35 from a hunt carcass**,
+  10 elsewhere (ECO-03). The villager who lands the killing blow
+  starts harvesting unprompted.
+- **Auto-acquisition (narrow M3 scope of CMB-08/09).** Idle Militia
+  and Archers acquire the closest *boar* inside their LoS — never
+  sheep or deer (herdables are never auto-targeted) — and idle
+  military retaliate against whoever hit them. The Scout defaults
+  to Stand Ground and never acquires. Full stances are M4/M5.
+- **Projectiles (PRJ-01..06).** Arrows are sim entities: spawn point,
+  impact point, spawn/impact ticks (flight = distance ÷ speed,
+  integer), the weapon row, the intended target. Accuracy is rolled
+  once per shot at release from the seeded RNG — the sim's first RNG
+  consumer — in ascending attacker order (SIM-04/PRJ-03): a hit aims
+  at the target's release-time position; a miss scatters uniformly.
+  At impact, the intended target takes full damage if it is within
+  its radius (+ slack) of the point; otherwise the first
+  non-friendly unit there takes a 50% mishit. No homing, no
+  re-rolls: moving targets dodge geometrically.
+- **Barracks.** 175 W, 3000 ticks, **3×3 footprint** (the study's;
+  placement/blocking machinery generalized from 2×2). Trains
+  Militia (60 F / 20 G — the M3 brief's figure; the study's table
+  lists the reference game's later-patch 50 F — recorded divergence,
+  one-line change in `units.rs`) and Archer (25 W / 45 G) with the
+  Town Center's queue/pop rules: enqueue needs queue room + funds;
+  progress stalls while housed and resumes by itself.
+- **Standard start (OPENING-SPEC §2).** 3 villagers + Scout Cavalry
+  (which occupies a population slot: the start is 4/5) + fixed Gaia:
+  4 sheep ≈4–5 tiles out, two pairs farther, 2 boars (≈16–20 tiles,
+  split directions), a 3-deer herd. Placement table in `lib.rs`
+  (`ANIMAL_SPECS`).
+- **Hash.** Extended to cover node decay, building production
+  queues, entity HP/owner/death/combat/animal state, and in-flight
+  projectiles. Golden hash updated deliberately (see
+  `tests/determinism.rs`).
 
 ## The sim may
 

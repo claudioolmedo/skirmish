@@ -11,6 +11,9 @@
 //! villager and training-queue counts.
 //! M2.5 adds: build commands (House/Farm), the building list, and
 //! population / training-block accessors.
+//! M3 adds: attack orders, the Barracks build command, Barracks
+//! training (Militia/Archer) with its block-reason query, entity
+//! HP/owner arrays, and the projectile list.
 
 use wasm_bindgen::prelude::*;
 
@@ -18,6 +21,7 @@ use fixed::types::I16F16;
 
 use crate::build::BuildingKind;
 use crate::econ::ResourceKind;
+use crate::entity::EntityKind;
 use crate::grid;
 use crate::{Command, Sim};
 
@@ -85,6 +89,50 @@ impl WasmSim {
         ok
     }
 
+    /// Order a unit to attack a target entity (M3): chase and strike
+    /// until the target dies or a new order lands. Returns whether
+    /// the order *would* be accepted against the current state (the
+    /// sim re-validates when the command is applied).
+    pub fn push_attack(&mut self, entity: u32, target: u32) -> bool {
+        let ok = self.inner.can_attack(entity, target);
+        if ok {
+            self.inner.push_command(Command::Attack { entity, target });
+        }
+        ok
+    }
+
+    /// Enqueue a Militia at a completed Barracks (M3). Returns
+    /// whether the order *would* be accepted (queue room + funds);
+    /// the cost is deducted when the command is applied next tick.
+    pub fn push_train_militia(&mut self, building: u32) -> bool {
+        self.push_train_at(building, EntityKind::Militia)
+    }
+
+    /// Enqueue an Archer at a completed Barracks (M3) — see
+    /// `push_train_militia`.
+    pub fn push_train_archer(&mut self, building: u32) -> bool {
+        self.push_train_at(building, EntityKind::Archer)
+    }
+
+    fn push_train_at(&mut self, building: u32, kind: EntityKind) -> bool {
+        let ok = self.inner.can_train_at(building, kind);
+        if ok {
+            self.inner.push_command(Command::TrainAt { building, kind });
+        }
+        ok
+    }
+
+    /// Why training `kind_tag` (3 militia, 4 archer) at `building`
+    /// cannot currently proceed: same tags as `train_block_reason`
+    /// (0 ok, 1 cannot afford, 2 queue full / not trainable here,
+    /// 3 housed). UI affordance only.
+    pub fn building_train_block(&self, building: u32, kind_tag: u32) -> u32 {
+        match EntityKind::from_tag(kind_tag as u8) {
+            Some(kind) => self.inner.train_at_block(building, kind).tag() as u32,
+            None => 2,
+        }
+    }
+
     /// Order a villager to build a House with its 2×2-cell footprint
     /// anchored at the cell containing the world point `(x, y)`. The
     /// 25-wood cost is deducted at placement (next tick). Returns
@@ -101,6 +149,12 @@ impl WasmSim {
         self.push_build(entity, BuildingKind::Farm, x, y)
     }
 
+    /// Order a villager to build a Barracks (175 wood, 3×3-cell
+    /// footprint) — see `push_build_house`.
+    pub fn push_build_barracks(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build(entity, BuildingKind::Barracks, x, y)
+    }
+
     fn push_build(&mut self, entity: u32, kind: BuildingKind, x: f64, y: f64) -> bool {
         let (fx, fy) = (I16F16::from_num(x), I16F16::from_num(y));
         let ok = self.inner.can_build(entity, kind, fx, fy);
@@ -115,14 +169,18 @@ impl WasmSim {
         ok
     }
 
-    /// Placed buildings as a flat array: eight values per building —
-    /// `[id, kind, x, y, progress, complete, cell_x, cell_y]` — in
-    /// building id order. `kind` tags: 0 house, 1 farm. `progress` is
-    /// 0..1 (1 when complete); `complete` is 0/1. A completed farm is
-    /// listed here (its food shows up as a node in `nodes()`); an
+    /// Placed buildings as a flat array: eleven values per building —
+    /// `[id, kind, x, y, progress, complete, cell_x, cell_y, size,
+    /// queue_len, train_progress]` — in building id order. `kind`
+    /// tags: 0 house, 1 farm, 2 barracks (M3). `progress` is the
+    /// construction fraction 0..1 (1 when complete); `complete` is
+    /// 0/1; `size` is the footprint edge in cells; `queue_len` and
+    /// `train_progress` (0..1 on the queue's head) describe a
+    /// production building's queue. A completed farm is listed here
+    /// (its food shows up as a node in `nodes()`); an
     /// under-construction farm appears only here.
     pub fn buildings(&self) -> Vec<f64> {
-        let mut out = Vec::with_capacity(self.inner.buildings().len() * 8);
+        let mut out = Vec::with_capacity(self.inner.buildings().len() * 11);
         for b in self.inner.buildings() {
             out.push(b.id as f64);
             out.push(b.kind.tag() as f64);
@@ -132,6 +190,9 @@ impl WasmSim {
             out.push(if b.complete { 1.0 } else { 0.0 });
             out.push(b.cell_x as f64);
             out.push(b.cell_y as f64);
+            out.push(b.kind.footprint_size() as f64);
+            out.push(b.queue.len() as f64);
+            out.push(I16F16::from_bits(b.train_frac_bits()).to_num::<f64>());
         }
         out
     }
@@ -172,9 +233,47 @@ impl WasmSim {
         self.inner.train_queue_len()
     }
 
-    /// Per-entity kind tags in id order: 0 = villager, 1 = town center.
+    /// Per-entity kind tags in id order: 0 = villager, 1 = town center,
+    /// 2 = scout cavalry, 3 = militia, 4 = archer, 5 = sheep, 6 = boar,
+    /// 7 = deer (M3).
     pub fn entity_kinds(&self) -> Vec<u8> {
         self.inner.entities().iter().map(|e| e.kind.tag()).collect()
+    }
+
+    /// Per-entity owner tags in id order (M3): 0 = the player,
+    /// 1 = Gaia. A sheep flips 1 → 0 when captured.
+    pub fn entity_owners(&self) -> Vec<u8> {
+        self.inner.entities().iter().map(|e| e.owner).collect()
+    }
+
+    /// Per-entity hit points as flat `[hp, max_hp, …]` pairs in id
+    /// order (M3). An entity with hp < 1 is dead (the CMB-02 rule) —
+    /// the renderer skips it. The Town Center reports its full table
+    /// HP; buildings take no damage in M3.
+    pub fn entity_hp(&self) -> Vec<f64> {
+        let mut out = Vec::with_capacity(self.inner.entities().len() * 2);
+        for e in self.inner.entities() {
+            out.push(e.hp.to_num::<f64>());
+            out.push(crate::units::spec(e.kind).max_hp as f64);
+        }
+        out
+    }
+
+    /// Projectiles in flight (M3), flat: six values per projectile —
+    /// `[spawn_x, spawn_y, impact_x, impact_y, spawn_tick,
+    /// impact_tick]` — in spawn order. The renderer interpolates the
+    /// current position from `tick_count()`; the sim owns the truth.
+    pub fn projectiles(&self) -> Vec<f64> {
+        let mut out = Vec::with_capacity(self.inner.projectiles().len() * 6);
+        for p in self.inner.projectiles() {
+            out.push(p.spawn_x.to_num::<f64>());
+            out.push(p.spawn_y.to_num::<f64>());
+            out.push(p.impact_x.to_num::<f64>());
+            out.push(p.impact_y.to_num::<f64>());
+            out.push(p.spawn_tick as f64);
+            out.push(p.impact_tick as f64);
+        }
+        out
     }
 
     /// Flat `[x0, y0, x1, y1, …]` entity positions as f64. Rendering only —
@@ -245,8 +344,9 @@ impl WasmSim {
     /// Resource nodes as a flat array: five values per node —
     /// `[id, x, y, kind, amount_left]` — in node id order. `kind` tags:
     /// 0 tree, 1 berry bush, 2 gold mine, 3 stone mine, 4 farm (M2.5 —
-    /// a completed farm). Depleted nodes are included with
-    /// `amount_left` 0 (the preview hides them).
+    /// a completed farm), 5 hunt carcass, 6 herd carcass (M3).
+    /// Depleted nodes are included with `amount_left` 0 (the preview
+    /// hides them).
     pub fn nodes(&self) -> Vec<f64> {
         let mut out = Vec::with_capacity(self.inner.nodes().len() * 5);
         for n in self.inner.nodes() {

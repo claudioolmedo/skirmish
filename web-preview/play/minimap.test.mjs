@@ -135,5 +135,6 @@ test('renderMinimap: obstacles, live nodes only, entities, viewport', () => {
   // underlay + 2 villagers + TC counted via fillRect; fill() itself:
   // ground, 2 obstacles, 2 nodes, house, underlay, 2 villagers = 9.
   assert.equal(ctx.calls.fill, 9, `fill calls ${ctx.calls.fill}`);
-  assert.equal(NODE_COLORS.length, 5);
+  // M3: two carcass node kinds (hunt + herd) extend the palette 5 -> 7.
+  assert.equal(NODE_COLORS.length, 7);
 });
