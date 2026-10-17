@@ -133,7 +133,7 @@ From the [Gap Analysis](GAP-ANALYSIS.md): the items that most make Skirmish II
   product, players are matched to their nearest region, and capacity
   grows by adding regions, not bigger machines. Anonymous match
   telemetry and replay submission land with it, feeding the
-  self-improvement loop (SUSTAINABILITY.md §5).
+  fidelity-and-quality loop (SUSTAINABILITY.md §5).
 
 ## Good first contributions
 

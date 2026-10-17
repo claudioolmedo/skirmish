@@ -1,7 +1,7 @@
 # Skirmish II — The Self-Sustaining System
 
 This document is engineering doctrine: how Skirmish II is designed to keep
-running, keep improving, and pay for itself for decades — without depending
+running, stay faithful, and pay for itself for decades — without depending
 on any single person, company, or server staying alive. The ambition is
 stated plainly: a game still running in 200 years. That sounds like a
 slogan until you look at the reference game's history, which is the whole
@@ -118,7 +118,7 @@ two small, clearly labeled ad slots ──► revenue
    │              2. the AI-token development fund
    │                                      │
    ▼                                      ▼
-retention ◄── automated improvement cycles (section 6)
+retention ◄── automated fidelity & maintenance cycles (section 6)
 ```
 
 Rules of the loop:
@@ -129,24 +129,27 @@ Rules of the loop:
   loop must never be allowed to eat the game.
 - **100% of ad revenue is reinvested.** First the running costs (which
   section 4 keeps near zero), then the remainder funds development —
-  specifically, the AI-token budget that powers the automated improvement
-  cycles, plus human development where tokens cannot do the job. (A paid
+  specifically, the AI-token budget that powers the automated fidelity
+  and maintenance cycles, plus human development where tokens cannot do the job. (A paid
   remove-the-ads option may be added later for players who prefer it; it
   would feed the same loop, not a different one.)
 - **Retention comes before new features.** The loop spends on making the
   game *right* — parity, feel, reliability — before making it *bigger*,
   because retention is what feeds the top of the funnel.
-- **Play feeds the improvement, not just the revenue.** From the first
+- **Play keeps the game faithful — it never redesigns it.** The game's
+  mechanics are not a work in progress: they are the chess, finished.
+  What play feeds is *convergence and survival*. From the first
   multiplayer build (M8), the client reports anonymous match telemetry —
   device and quality-tier performance, desync events, match length,
-  what gets built and what wins — and players can attach a replay. The
-  more the game is played, the more evidence the improvement cycles
-  have to work with: quality is tuned per device class from real frame
-  data, and fidelity work is aimed at the rulebook gaps players
-  actually hit. The loop is gated, never automatic: telemetry
-  proposes, the deterministic tests and the zero-learning rule
-  dispose, and a human reviews what ships. The mechanics stay
-  chess-stable; what improves is quality and fidelity.
+  what gets built and what wins — and players can attach a replay.
+  That evidence is spent in exactly two directions: **fidelity**
+  (finding where this implementation still diverges from the
+  reference mechanics, and closing the gap toward them — never away
+  from them) and **quality** (frame performance per device class,
+  reliability, the operating health of the service). Telemetry never
+  proposes new mechanics or balance changes; the rules are fixed,
+  and every change passes the deterministic tests, the zero-learning
+  rule, and a human review before it ships.
 
 Honest status note: this loop's revenue side is not live yet. Ad revenue
 activates with the AdSense milestone (the slots and their configuration
