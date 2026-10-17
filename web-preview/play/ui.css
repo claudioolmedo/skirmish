@@ -1,26 +1,29 @@
-/* Skirmish play page — AoE2-style interface layout (Phase: ui.css).
+/* Skirmish play page — AoE2-style interface layout + painterly chrome.
  *
  * Functional organization in the classic RTS pattern: a resource bar
  * across the TOP, a contextual COMMAND PANEL bottom-left, a SELECTION
  * PANEL bottom-center, and a MINIMAP bottom-right. The layout idea is
- * the genre-standard one; every visual here is ours — flat dark-slate
- * panels, parchment text, gold accents, original geometric SVG icons
- * (defined in the page, see the <symbol> block in index.html).
+ * the genre-standard one; every visual is ours — original generated
+ * art (ui-art/: walnut wood and parchment textures, a carved medallion
+ * frame, and the painterly icon set v2) in a warm walnut / aged-gold /
+ * parchment scheme. Nothing is copied from any other game.
  *
  * Loaded AFTER play.css. Everything is namespaced under .ui-* /
- * .cmd-* / .sel-* / .res-* so it cannot collide with the legacy
- * .hud-bar / .build-menu rules it replaces (those rules are retired
- * with the markup in the integration step). */
+ * .cmd-* / .sel-* / .res-* so it cannot collide with other rules. */
 
 :root {
-  --ui-panel-bg: rgba(13, 17, 22, 0.94);
-  --ui-panel-edge: rgba(232, 227, 213, 0.22);
-  --ui-panel-edge-strong: rgba(217, 164, 65, 0.55);
-  --ui-text: #e8e3d5;
-  --ui-dim: #b9b2a0;
-  --ui-faint: #8d8672;
-  --ui-cell-bg: rgba(232, 227, 213, 0.06);
-  --ui-cell-bg-hover: rgba(232, 227, 213, 0.12);
+  --ui-wood: #2a1a0e;
+  --ui-gold: #c9a227;
+  --ui-gold-bright: #e8c95a;
+  --ui-edge: rgba(201, 162, 39, 0.38);
+  --ui-edge-strong: rgba(201, 162, 39, 0.65);
+  --ui-text: #f0e5c8;
+  --ui-dim: #cdbfa4;
+  --ui-faint: #a8915f;
+  --ui-warn: #ff9d7a;
+  --ui-ink: #3d2a12;        /* dark umber text on parchment */
+  --ui-ink-dim: #6f573a;
+  --ui-ink-warn: #9c2b16;   /* rich red, warnings on parchment only */
 }
 
 /* ---------- shared bits ---------- */
@@ -37,6 +40,7 @@
   text-transform: uppercase;
   color: var(--ui-faint);
   margin: 0 0 6px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
 }
 
 /* ---------- top resource bar ---------- */
@@ -53,8 +57,11 @@
   gap: 18px;
   /* left padding leaves room for the floating back link */
   padding: 0 12px 0 132px;
-  background: var(--ui-panel-bg);
-  border-bottom: 1px solid var(--ui-panel-edge);
+  background:
+    linear-gradient(rgba(22, 11, 3, 0.38), rgba(22, 11, 3, 0.38)),
+    var(--ui-wood) url("ui-art/tex-wood.webp") center 30% / cover no-repeat;
+  border-bottom: 2px solid #6d5426;
+  box-shadow: inset 0 -1px 0 rgba(232, 201, 90, 0.35), 0 2px 8px rgba(0, 0, 0, 0.45);
   color: var(--ui-text);
   font: 600 13.5px/1 system-ui, sans-serif;
 }
@@ -71,15 +78,17 @@
   align-items: center;
   gap: 6px;
   white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
-.res .ui-icon { width: 17px; height: 17px; }
+.res .ui-icon {
+  width: 18px;
+  height: 18px;
+  background: #241407;
+  border: 1px solid var(--ui-edge);
+  border-radius: 3px;
+}
 .res .res-val { font-variant-numeric: tabular-nums; }
-.res-food { color: #e8c95a; }
-.res-wood { color: #cf9259; }
-.res-gold { color: #ffd23e; }
-.res-stone { color: #a8adb5; }
-.res-pop { color: var(--ui-text); }
-.res-pop .res-val.warn { color: #ff9d7a; } /* at cap / housed */
+.res-pop .res-val.warn { color: var(--ui-warn); } /* at cap / housed */
 
 .ui-topbar-spacer { flex: 1; }
 
@@ -87,6 +96,7 @@
   font: 600 13px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
   color: var(--ui-dim);
   white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
 
 /* ---------- bottom strip: commands | selection | minimap ---------- */
@@ -99,8 +109,11 @@
   z-index: 20;
   display: flex;
   align-items: stretch;
-  background: var(--ui-panel-bg);
-  border-top: 1px solid var(--ui-panel-edge);
+  background:
+    linear-gradient(rgba(22, 11, 3, 0.30), rgba(22, 11, 3, 0.30)),
+    var(--ui-wood) url("ui-art/tex-wood.webp") center 65% / cover no-repeat;
+  border-top: 2px solid #6d5426;
+  box-shadow: inset 0 1px 0 rgba(232, 201, 90, 0.30), 0 -2px 10px rgba(0, 0, 0, 0.45);
   color: var(--ui-text);
   font-family: system-ui, sans-serif;
 }
@@ -110,7 +123,7 @@
 .ui-cmd-panel {
   flex: 0 0 292px;
   padding: 8px 10px 10px;
-  border-right: 1px solid var(--ui-panel-edge);
+  border-right: 1px solid rgba(0, 0, 0, 0.5);
 }
 
 .cmd-grid {
@@ -126,26 +139,46 @@
   align-items: center;
   justify-content: center;
   gap: 1px;
-  min-height: 64px;
+  min-height: 68px;
   padding: 6px 4px 5px;
-  background: var(--ui-cell-bg);
-  border: 1px solid var(--ui-panel-edge);
+  background:
+    linear-gradient(rgba(26, 13, 4, 0.52), rgba(26, 13, 4, 0.52)),
+    var(--ui-wood) url("ui-art/tex-wood.webp") center / cover no-repeat;
+  border: 1px solid #7a5c22;
   border-radius: 8px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 220, 150, 0.28),
+    inset 0 -3px 0 rgba(0, 0, 0, 0.45),
+    0 2px 5px rgba(0, 0, 0, 0.45);
   color: var(--ui-text);
   font: inherit;
   cursor: pointer;
 }
 .cmd-btn:hover:not(:disabled) {
-  background: var(--ui-cell-bg-hover);
-  border-color: var(--ui-panel-edge-strong);
+  background:
+    linear-gradient(rgba(70, 42, 10, 0.38), rgba(70, 42, 10, 0.38)),
+    var(--ui-wood) url("ui-art/tex-wood.webp") center / cover no-repeat;
+  border-color: var(--ui-gold);
+}
+.cmd-btn:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow:
+    inset 0 2px 6px rgba(0, 0, 0, 0.55),
+    inset 0 -1px 0 rgba(255, 220, 150, 0.15),
+    0 1px 2px rgba(0, 0, 0, 0.4);
 }
 .cmd-btn:disabled { opacity: 0.42; cursor: not-allowed; }
 .cmd-btn.active { /* placement armed */
   outline: 2px solid var(--gold-bright, #ffcf4d);
   outline-offset: 1px;
 }
-.cmd-btn .cmd-icon { width: 26px; height: 26px; }
-.cmd-btn .cmd-label { font-size: 11.5px; font-weight: 600; line-height: 1.15; }
+.cmd-btn .cmd-icon { width: 30px; height: 30px; }
+.cmd-btn .cmd-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.15;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+}
 .cmd-btn .cmd-cost {
   display: inline-flex;
   align-items: center;
@@ -153,14 +186,16 @@
   font-size: 10.5px;
   color: var(--ui-dim);
   line-height: 1.15;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
 }
-.cmd-btn .cmd-cost .ui-icon { width: 11px; height: 11px; }
+.cmd-btn .cmd-cost .ui-icon { width: 13px; height: 13px; }
 .cmd-btn .cmd-badge { /* e.g. training queue length */
   position: absolute;
   top: 3px;
   right: 5px;
   font: 700 10px/1.4 ui-monospace, Menlo, monospace;
   color: var(--gold-bright, #ffcf4d);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
 }
 
 .ui-cmd-hint {
@@ -170,9 +205,10 @@
   font-size: 12.5px;
   line-height: 1.4;
   padding: 4px 2px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
 
-/* selection panel (bottom-center) */
+/* selection panel (bottom-center) — the parchment slab */
 
 .ui-sel-panel {
   flex: 1 1 auto;
@@ -181,6 +217,9 @@
   align-items: center;
   gap: 14px;
   padding: 8px 16px;
+  background: #d9c49a url("ui-art/tex-parchment.webp") center / cover no-repeat;
+  box-shadow: inset 0 0 24px rgba(101, 72, 28, 0.35);
+  color: var(--ui-ink);
 }
 
 .sel-portrait {
@@ -189,18 +228,19 @@
   height: 74px;
   display: grid;
   place-items: center;
-  background: var(--ui-cell-bg);
-  border: 1px solid var(--ui-panel-edge);
-  border-radius: 10px;
-  color: var(--ui-text);
+  /* the carved medallion is the frame; the icon rests on its center */
+  background: url("ui-art/medallion.webp") center / cover no-repeat;
+  border-radius: 8px;
+  box-shadow: 0 2px 6px rgba(40, 24, 4, 0.45);
+  color: var(--ui-ink);
 }
 .sel-portrait .ui-icon { width: 44px; height: 44px; }
-.sel-portrait.empty { color: var(--ui-faint); }
+.sel-portrait.empty { color: var(--ui-ink-dim); }
 
 .sel-main { min-width: 0; }
 .sel-name { font-size: 15.5px; font-weight: 700; margin: 0 0 2px; }
-.sel-line { font-size: 12.5px; color: var(--ui-dim); line-height: 1.4; margin: 0; }
-.sel-line.warn { color: #ff9d7a; }
+.sel-line { font-size: 12.5px; color: var(--ui-ink-dim); line-height: 1.4; margin: 0; }
+.sel-line.warn { color: var(--ui-ink-warn); }
 
 /* group selection: one mini-cell per unit (cap the row with CSS;
    the panel shows the first N and a "+k more" cell) */
@@ -216,15 +256,15 @@
   height: 27px;
   display: grid;
   place-items: center;
-  background: var(--ui-cell-bg);
-  border: 1px solid var(--ui-panel-edge);
+  background: rgba(61, 42, 18, 0.14);
+  border: 1px solid rgba(61, 42, 18, 0.38);
   border-radius: 5px;
-  color: var(--ui-text);
+  color: var(--ui-ink);
 }
 .sel-cell .ui-icon { width: 16px; height: 16px; }
 .sel-cell.more {
   font: 700 10.5px/1 ui-monospace, Menlo, monospace;
-  color: var(--ui-dim);
+  color: var(--ui-ink-dim);
 }
 
 /* minimap (bottom-right) */
@@ -232,14 +272,15 @@
 .ui-minimap-wrap {
   flex: none;
   padding: 8px 10px 10px;
-  border-left: 1px solid var(--ui-panel-edge);
+  border-left: 1px solid rgba(0, 0, 0, 0.5);
 }
 
 #minimap {
   display: block;
   background: #0b0f14;
-  border: 1px solid var(--ui-panel-edge-strong);
+  border: 2px solid #8a6a1f;
   border-radius: 4px;
+  box-shadow: 0 0 0 1px #2a1a08, 0 0 0 3px rgba(201, 162, 39, 0.25), 0 2px 8px rgba(0, 0, 0, 0.5);
   cursor: pointer;
   touch-action: none;
 }
@@ -248,8 +289,8 @@
 
 @media (max-width: 980px) {
   .ui-cmd-panel { flex-basis: 232px; }
-  .cmd-btn { min-height: 56px; }
-  .cmd-btn .cmd-icon { width: 22px; height: 22px; }
+  .cmd-btn { min-height: 60px; }
+  .cmd-btn .cmd-icon { width: 26px; height: 26px; }
   .sel-portrait { width: 58px; height: 58px; }
   .sel-portrait .ui-icon { width: 34px; height: 34px; }
   #minimap { width: 176px; height: 99px; } /* geometry math uses the
