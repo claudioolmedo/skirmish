@@ -9,6 +9,7 @@ conventions).
 
 ```bash
 python3 tools/sprite-pipeline/render.py                 # default: player blue, into web-preview/assets-original/
+python3 tools/sprite-pipeline/render.py --tiers         # + MEDIUM/HIGH tiers (tier16/, tier32/)
 python3 tools/sprite-pipeline/render.py --only villager # villager sheets only
 python3 tools/sprite-pipeline/render.py --only house    # house stages only
 python3 tools/sprite-pipeline/render.py --player-color c0392b
@@ -18,6 +19,15 @@ python3 tools/sprite-pipeline/render.py --out /tmp/sprites
 Requires Python 3 with numpy and Pillow. One run regenerates every
 sheet (villager: idle / walk / gather / carry, LOW tier = 8 directions;
 house: stage0 / stage1 / stage2 / complete) in a few seconds.
+
+`--tiers` additionally renders the villager sheets at 16 and 32
+directions into `assets-original/tier16/` and `tier32/`, saving those
+sheets palette-optimized (256-color libimagequant — the posterized art
+makes it visually lossless at ~half the bytes), and copies the house
+stages into both folders (the house has one fixed orientation, so its
+art is identical at every tier). The client's adaptive-quality governor
+loads exactly one tier — see `web-preview/play/quality.js` and
+ARCHITECTURE.md ("Adaptive quality governor").
 
 ## Files
 

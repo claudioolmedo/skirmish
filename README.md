@@ -29,8 +29,10 @@ This project is a clean-room implementation:
   same seed always replays bit-identically, including on WebAssembly.
 - **Thin WASM ABI**: commands in, state out. The renderer (M4) will only
   ever read state through this boundary.
-- **Adaptive quality** (M4): one build probes CPU/memory/GPU at load and
-  scales visuals — never the simulation.
+- **Adaptive quality**: one build probes CPU/memory/display at load and
+  scales visuals — sprite tiers, resolution cap, cosmetic density —
+  never the simulation. The governor shipped in the web client ahead
+  of the rest of M4; see ARCHITECTURE.md ("Adaptive quality governor").
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full technical contract.
 

@@ -60,3 +60,19 @@ chimney — in the villager's palette family, same posterized shading
 and world-fixed sun.
 
 Generated 2026-10-16 by `tools/sprite-pipeline/render.py`.
+
+## Quality tiers
+
+The adaptive-quality governor (`web-preview/play/quality.js`) loads
+exactly one tier per device:
+
+- **LOW** — the sheets at this folder's root (8 directions).
+- `tier16/` — **MEDIUM**: the four villager sheets at 16 directions
+  (palette-optimized PNGs) plus copies of the house stages.
+- `tier32/` — **HIGH**: the four villager sheets at 32 directions
+  (palette-optimized PNGs) plus copies of the house stages.
+
+The house has a single fixed orientation, so its stage art is the
+same file at every tier; the copies keep each tier folder a complete,
+self-contained sprite set. Regenerate all tiers with
+`python3 tools/sprite-pipeline/render.py --tiers`.

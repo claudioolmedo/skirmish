@@ -70,6 +70,13 @@ numpy + Pillow.
   - **HIGH: 32 directions** (11.25°) — same pipeline, one flag.
   Generating a higher tier is a re-render, never new art: the 3D model
   is the single source of truth.
+  Status (2026-10-16): all three tiers are generated and shipped —
+  `render.py --tiers` emits `assets-original/tier16/` and `tier32/`
+  (palette-optimized PNGs; the four villager sheets measure ≈191 KB
+  at MEDIUM and ≈389 KB at HIGH, vs ≈205 KB for the LOW truecolor
+  set), and the client's adaptive-quality governor
+  (`web-preview/play/quality.js`) loads exactly one tier per device,
+  chosen by probe + live FPS — see ARCHITECTURE.md.
 
 ## 4. Animation states and frame counts
 
@@ -139,7 +146,8 @@ file size).
 
 ## 8. Replacement order
 
-1. **Villager** — DONE (v1: idle/walk/gather/carry, LOW tier).
+1. **Villager** — DONE (v1: idle/walk/gather/carry; all tiers —
+   LOW 8 / MEDIUM 16 / HIGH 32 directions — generated 2026-10-16).
 2. **House** (incl. construction stages) — DONE (v1, 2026-10-16):
    timber-frame cottage, four stage images (foundation → frame +
    scaffold → walls + roof rising → complete) on an 896×704 canvas

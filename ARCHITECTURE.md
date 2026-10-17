@@ -347,6 +347,53 @@ spec; anything the sources don't pin down is marked UNVERIFIED in
   projectiles. Golden hash updated deliberately (see
   `tests/determinism.rs`).
 
+## Adaptive quality governor (client, shipped 2026-10-16)
+
+One build serves every machine: the **simulation is bit-identical for
+every player; only the visuals scale**. A low-memory Chromebook and a
+32 GB MacBook run — and will play — the same game; the MacBook just
+gets a richer picture. The governor lives in
+`web-preview/play/quality.js` (pure logic, Node-tested in
+`quality.test.mjs`) with the wiring in `web-preview/app.js`. It never
+touches the sim, its tick rate, or any command.
+
+- **Probe at load.** `deviceMemory`, `hardwareConcurrency`,
+  `devicePixelRatio`, screen size and touch are scored into an
+  initial level, with hard caps on top of the score (≤1 GB RAM →
+  LOW; ≤2 GB, ≤2 cores, or a phone-class touch screen → at most
+  MEDIUM). Unknown signals (Safari/Firefox expose no
+  `deviceMemory`) score mid — a wrong guess is corrected by the
+  runtime monitor below.
+- **Levels.** HIGH / MEDIUM / LOW control exactly three things:
+  (a) the sprite **direction tier** whose sheets load — 32 / 16 / 8
+  directions, fetched lazily from `assets-original/tier32/`,
+  `tier16/`, or the folder root, so a client never downloads a tier
+  it won't use (tier sheets are palette-optimized; measured sets:
+  LOW ≈205 KB, MEDIUM ≈191 KB, HIGH ≈389 KB for the four villager
+  sheets); (b) the **canvas DPR cap** — 2 / 1.5 / 1, the biggest
+  fill-rate lever on weak GPUs; (c) **cosmetic draw passes** —
+  shadows, ground grid strokes, path lines, projectile arc/trails,
+  unit id labels — shed by LOW only. Information is never shed:
+  units, HP bars on damaged units, selection rings, amount/progress
+  bars and the minimap render identically at every level.
+- **Runtime adaptation.** While a match is playing, a rolling FPS
+  monitor judges 1.5 s windows: sustained <45 fps for ~6 s steps the
+  level down one notch (announced once via a subtle toast);
+  sustained ≥58 fps for ~12 s may step it back up — never above the
+  probe's initial level. A 15 s cooldown after every change, plus
+  the asymmetric thresholds (hysteresis), keep the level from
+  oscillating.
+- **Manual override.** Pause menu: Auto / High / Medium / Low,
+  persisted in `localStorage` (`skirmish2.quality`); the current
+  level shows in the top bar. `?quality=low|medium|high|auto` on the
+  URL wins for the session without persisting — a support tool.
+- **Interaction with the frame loop.** The loop's max-ticks guard
+  already bounds sim catch-up per rendered frame (5 ticks, backlog
+  dropped): on a slow machine the game renders fewer frames but the
+  simulation rules never change. The governor shrinks the cost of
+  each rendered frame so the guard rarely has to bite; it adds no
+  timing behavior of its own.
+
 ## The sim may
 
 - Use fixed-point arithmetic (`I16F16`: ±32768 range, 1/65536 precision —

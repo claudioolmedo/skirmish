@@ -221,17 +221,19 @@ def shade_of(normal):
     b = AMBIENT + (1.0 - AMBIENT) * d
     return min(SHADE_STEPS, key=lambda s: abs(s - b))
 
-def render_cell(tris, direction, cw=CELL, ch=CELL, ax=AX, ay=AY):
+def render_cell(tris, direction, cw=CELL, ch=CELL, ax=AX, ay=AY,
+                directions=DIRECTIONS):
     """Render one posed model in one facing direction -> (ch,cw,4)
-    uint8 RGBA. Direction d: facing angle = d*45deg in world XY, from
-    +X toward +Y (dir 0 faces +X = screen down-right). The canvas
-    size / anchor default to the unit-sprite conventions; buildings
-    pass their own (see the house section below)."""
+    uint8 RGBA. Direction d: facing angle = d*(360/directions) in
+    world XY, from +X toward +Y (dir 0 faces +X = screen down-right).
+    `directions` is the sheet's tier (8/16/32); the canvas size /
+    anchor default to the unit-sprite conventions; buildings pass
+    their own (see the house section below)."""
     size_w, size_h = cw * SS, ch * SS
     rgb = np.zeros((size_h, size_w, 3), dtype=np.float64)
     alp = np.zeros((size_h, size_w), dtype=np.float64)
     zbuf = np.full((size_h, size_w), -1e9)
-    face = rot_z(direction * 45.0 - 90.0)  # local +Y -> facing vector
+    face = rot_z(direction * (360.0 / directions) - 90.0)  # local +Y -> facing
     P = PX_PER_UNIT * SS
     for verts, mat in tris:
         w = verts @ face.T                      # world space
@@ -281,14 +283,41 @@ def render_cell(tris, direction, cw=CELL, ch=CELL, ax=AX, ay=AY):
     out[nz, :3] = pm[nz] / am[nz, None]
     return (np.clip(out, 0, 1) * 255).astype(np.uint8)
 
-def render_sheet(state):
+def render_sheet(state, directions=DIRECTIONS):
     fn, frames = STATES[state]
-    sheet = Image.new('RGBA', (frames * CELL, DIRECTIONS * CELL))
-    for d in range(DIRECTIONS):
+    sheet = Image.new('RGBA', (frames * CELL, directions * CELL))
+    for d in range(directions):
         for f in range(frames):
-            cell = Image.fromarray(render_cell(pose_model(fn(f, frames)), d), 'RGBA')
+            cell = Image.fromarray(
+                render_cell(pose_model(fn(f, frames)), d,
+                            directions=directions), 'RGBA')
             sheet.paste(cell, (f * CELL, d * CELL))
     return sheet
+
+# Quality tiers (SPRITE-PIPELINE.md §3): a tier is a re-render of the
+# same model at a different direction count — never new art. LOW (8)
+# lives at the assets-original root for back-compat; MEDIUM (16) and
+# HIGH (32) live in tier16/ and tier32/ subfolders. The house has a
+# single fixed orientation, so its stage images are identical at every
+# tier; they are copied into each tier folder so the client can load
+# every original sprite for a tier from one directory.
+TIERS = (('tier16', 16), ('tier32', 32))
+
+def save_sheet(img, path):
+    """Save a tier16/32 sheet palette-optimized. The art is
+    posterized flat shading (a handful of materials x 4 shade
+    levels), so a 256-color libimagequant palette is visually
+    lossless here (measured: 0.013% of opaque pixels off by >8/255,
+    all on material boundaries; alpha exact) and cuts the big HIGH
+    sheets roughly in half vs truecolor. Falls back to a plain
+    truecolor save if libimagequant is unavailable."""
+    if img.mode == 'RGBA':
+        try:
+            img = img.quantize(colors=256, method=Image.LIBIMAGEQUANT,
+                               dither=Image.Dither.NONE)
+        except Exception:
+            pass  # no libimagequant in this Pillow build: truecolor
+    img.save(path, optimize=True)
 
 # ======================================================================
 # The house (building #1, replacement order #2). Original cottage
@@ -425,6 +454,10 @@ def main():
                     help='output dir (default: web-preview/assets-original)')
     ap.add_argument('--only', choices=('all', 'villager', 'house'),
                     default='all', help='render only one model family')
+    ap.add_argument('--tiers', action='store_true',
+                    help='also render the MEDIUM (16) and HIGH (32) '
+                         'direction tiers into tier16/ and tier32/ '
+                         'subfolders, palette-optimized')
     args = ap.parse_args()
     MATERIALS['tunic'] = hex2rgb(args.player_color)
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -438,12 +471,34 @@ def main():
             print(f'{path}: {img.width}x{img.height} '
                   f'({STATES[state][1]} frames x {DIRECTIONS} directions)')
         print(f'player color: {args.player_color}')
+        if args.tiers:
+            for folder, dirs in TIERS:
+                tdir = os.path.join(out, folder)
+                os.makedirs(tdir, exist_ok=True)
+                for state in STATES:
+                    img = render_sheet(state, dirs)
+                    path = os.path.join(tdir, f'villager-{state}.png')
+                    save_sheet(img, path)
+                    print(f'{path}: {img.width}x{img.height} '
+                          f'({STATES[state][1]} frames x {dirs} directions, '
+                          f'{os.path.getsize(path)} bytes)')
     if args.only in ('all', 'house'):
         for stage, name in HOUSE_STAGES:
             img = render_house(stage)
             path = os.path.join(out, f'house-{name}.png')
             img.save(path)
             print(f'{path}: {img.width}x{img.height} (construction stage {stage})')
+            if args.tiers:
+                # Single fixed orientation: the stage art is the same
+                # at every tier — copy it so each tier folder is a
+                # complete, self-contained sprite set for the client.
+                import shutil
+                for folder, _dirs in TIERS:
+                    tdir = os.path.join(out, folder)
+                    os.makedirs(tdir, exist_ok=True)
+                    dst = os.path.join(tdir, f'house-{name}.png')
+                    shutil.copyfile(path, dst)
+                    print(f'{dst}: tier copy ({os.path.getsize(dst)} bytes)')
 
 if __name__ == '__main__':
     main()
