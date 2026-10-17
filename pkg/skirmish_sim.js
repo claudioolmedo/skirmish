@@ -4,6 +4,12 @@
  * A `Sim` owned by JavaScript. One instance per match.
  */
 export class WasmSim {
+    static __wrap(ptr) {
+        const obj = Object.create(WasmSim.prototype);
+        obj.__wbg_ptr = ptr;
+        WasmSimFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
     __destroy_into_raw() {
         const ptr = this.__wbg_ptr;
         this.__wbg_ptr = 0;
@@ -28,16 +34,19 @@ export class WasmSim {
         return ret >>> 0;
     }
     /**
-     * Placed buildings as a flat array: eleven values per building —
-     * `[id, kind, x, y, progress, complete, cell_x, cell_y, size,
-     * queue_len, train_progress]` — in building id order. `kind`
-     * tags: 0 house, 1 farm, 2 barracks (M3). `progress` is the
-     * construction fraction 0..1 (1 when complete); `complete` is
-     * 0/1; `size` is the footprint edge in cells; `queue_len` and
-     * `train_progress` (0..1 on the queue's head) describe a
-     * production building's queue. A completed farm is listed here
-     * (its food shows up as a node in `nodes()`); an
-     * under-construction farm appears only here.
+     * Placed buildings as a flat array: thirteen values per
+     * building — `[id, kind, x, y, progress, complete, cell_x,
+     * cell_y, size, queue_len, train_progress, owner, hp]` — in
+     * building id order. `kind` tags: 0 house, 1 farm, 2 barracks
+     * (M3). `progress` is the construction fraction 0..1 (1 when
+     * complete); `complete` is 0/1; `size` is the footprint edge in
+     * cells; `queue_len` and `train_progress` (0..1 on the queue's
+     * head) describe a production building's queue. M5 adds `owner`
+     * (0 human, 2 opponent — the entity owner tags) and `hp`, the
+     * remaining-HP fraction 0..1 (buildings take damage now; a
+     * destroyed building leaves the list entirely). A completed
+     * farm is listed here (its food shows up as a node in
+     * `nodes()`); an under-construction farm appears only here.
      * @returns {Float64Array}
      */
     buildings() {
@@ -88,8 +97,9 @@ export class WasmSim {
         return v1;
     }
     /**
-     * Per-entity owner tags in id order (M3): 0 = the player,
-     * 1 = Gaia. A sheep flips 1 → 0 when captured.
+     * Per-entity owner tags in id order (M3): 0 = the human player,
+     * 1 = Gaia, 2 = the AI opponent (M5). A sheep flips 1 → its
+     * capturer's tag when captured.
      * @returns {Uint8Array}
      */
     entity_owners() {
@@ -164,6 +174,26 @@ export class WasmSim {
         return v1;
     }
     /**
+     * The match outcome (M5, Conquest): 0 ongoing, 1 victory,
+     * 2 defeat — from the human player's seat. Always 0 in
+     * Sandbox. The client polls this; the sim keeps ticking
+     * harmlessly after a decision.
+     * @returns {number}
+     */
+    match_state() {
+        const ret = wasm.wasmsim_match_state(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * The match mode this sim was created with (M5): 0 sandbox,
+     * 1 AI Easy, 2 AI Normal.
+     * @returns {number}
+     */
+    mode() {
+        const ret = wasm.wasmsim_mode(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
      * Create a simulation from a seed.
      * @param {number} seed
      */
@@ -172,6 +202,21 @@ export class WasmSim {
         this.__wbg_ptr = ret;
         WasmSimFinalization.register(this, this.__wbg_ptr, this);
         return this;
+    }
+    /**
+     * Create a match against the scripted AI opponent (M5):
+     * `mode_tag` 1 = AI Easy, 2 = AI Normal (the `MatchMode` tags;
+     * 0 or anything unknown falls back to the plain sandbox
+     * constructor's game). The opponent spawns mirrored across the
+     * map and plays through the ordinary command queue from the
+     * first tick.
+     * @param {number} seed
+     * @param {number} mode_tag
+     * @returns {WasmSim}
+     */
+    static new_match(seed, mode_tag) {
+        const ret = wasm.wasmsim_new_match(seed, mode_tag);
+        return WasmSim.__wrap(ret);
     }
     /**
      * Resource nodes as a flat array: five values per node —
@@ -237,6 +282,19 @@ export class WasmSim {
         var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
         return v1;
+    }
+    /**
+     * Order a unit to attack a placed building (M5): chase its
+     * footprint and strike until it is destroyed or a new order
+     * lands. Only another player's building is a valid target.
+     * Returns whether the order *would* be accepted.
+     * @param {number} entity
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_attack_building(entity, building) {
+        const ret = wasm.wasmsim_push_attack_building(this.__wbg_ptr, entity, building);
+        return ret !== 0;
     }
     /**
      * Order a unit to attack a target entity (M3): chase and strike
@@ -473,10 +531,24 @@ export class WasmSim {
     }
     /**
      * Stockpile as `[food, wood, gold, stone]` (f64 at the boundary).
+     * The human player's — unchanged since M2; use `stockpile_for`
+     * for another seat (M5).
      * @returns {Float64Array}
      */
     stockpile() {
         const ret = wasm.wasmsim_stockpile(this.__wbg_ptr);
+        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v1;
+    }
+    /**
+     * Any player's stockpile by owner tag (M5): `[food, wood, gold,
+     * stone]` for owner 0 (human) or 2 (opponent).
+     * @param {number} owner
+     * @returns {Float64Array}
+     */
+    stockpile_for(owner) {
+        const ret = wasm.wasmsim_stockpile_for(this.__wbg_ptr, owner);
         var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
         return v1;

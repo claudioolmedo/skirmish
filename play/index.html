@@ -122,6 +122,11 @@
   <div class="overlay-card">
     <h1 class="game-title">SKIRMISH II</h1>
     <p class="overlay-sub">An open browser RTS, built from scratch. Grow the little village: gather, build, train.</p>
+    <div class="mode-row" role="radiogroup" aria-label="Match mode">
+      <label class="mode-opt"><input type="radio" name="match-mode" value="sandbox"> Sandbox</label>
+      <label class="mode-opt"><input type="radio" name="match-mode" value="easy"> AI · Easy</label>
+      <label class="mode-opt"><input type="radio" name="match-mode" value="normal" checked> AI · Normal</label>
+    </div>
     <button id="play-btn" class="btn btn-gold btn-big" type="button">▶ Play</button>
     <div class="howto">
       <h2>How to play</h2>
@@ -134,10 +139,11 @@
         <li><strong>Rally points:</strong> with the Town Center or Barracks selected, <strong>right-click the map</strong> to set where new units walk to. Right-click a <strong>resource</strong> and new villagers go straight to work on it.</li>
         <li><strong>Combat:</strong> you start with a <strong>Scout Cavalry</strong> and sheep nearby. Walk any unit next to a <strong>sheep</strong> to claim it; <strong>right-click an animal</strong> with a unit selected to attack and hunt it — the carcass feeds your villagers (a hunter carries 35). <strong>Boars fight back</strong> and chase whoever hurt them; lure one toward your village instead of fighting it alone.</li>
         <li>Select the <strong>Barracks</strong> to train <strong>Militia</strong> (60 food, 20 gold) and <strong>Archers</strong> (25 wood, 45 gold). Idle Militia and Archers guard against boars on their own; damaged units show an <strong>HP bar</strong>.</li>
+        <li><strong>The match:</strong> <strong>Sandbox</strong> builds in peace. Against the <strong>AI</strong>, an enemy village mirrors yours across the map — it gathers, builds and attacks in waves, wearing <strong>red</strong> (you wear blue). Win by <strong>Conquest</strong>: destroy its Town Center, every building and every unit. Lose all of yours and the match is lost. Click the enemy Town Center to check its health.</li>
         <li><strong>Esc</strong> pauses.</li>
       </ul>
     </div>
-    <p class="overlay-note">Test build · M4 — input & command completion: queued orders, rally points, control groups, idle keys, minimap orders. Placeholder art is being replaced piece by piece with our own.</p>
+    <p class="overlay-note">Test build · M5 — a real match: scripted AI opponent (Easy / Normal) or Sandbox, with Conquest victory and defeat. Placeholder art is being replaced piece by piece with our own.</p>
   </div>
 </div>
 
@@ -159,6 +165,17 @@
       </div>
     </div>
     <p class="overlay-note">Quality changes only the picture — sprites, sharpness, shadows. The game is identical on every device, from an old Chromebook to a gaming PC.</p>
+  </div>
+</div>
+
+<div id="end-overlay" class="overlay" style="display:none">
+  <div class="overlay-card">
+    <h2 class="game-title-sm" id="end-title">Victory!</h2>
+    <p class="overlay-sub" id="end-detail"></p>
+    <div class="pause-actions">
+      <button id="end-restart-btn" class="btn btn-gold" type="button">Restart match</button>
+      <button id="end-menu-btn" class="btn btn-ghost" type="button">Back to menu</button>
+    </div>
   </div>
 </div>
 

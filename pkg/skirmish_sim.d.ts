@@ -15,16 +15,19 @@ export class WasmSim {
      */
     building_train_block(building: number, kind_tag: number): number;
     /**
-     * Placed buildings as a flat array: eleven values per building —
-     * `[id, kind, x, y, progress, complete, cell_x, cell_y, size,
-     * queue_len, train_progress]` — in building id order. `kind`
-     * tags: 0 house, 1 farm, 2 barracks (M3). `progress` is the
-     * construction fraction 0..1 (1 when complete); `complete` is
-     * 0/1; `size` is the footprint edge in cells; `queue_len` and
-     * `train_progress` (0..1 on the queue's head) describe a
-     * production building's queue. A completed farm is listed here
-     * (its food shows up as a node in `nodes()`); an
-     * under-construction farm appears only here.
+     * Placed buildings as a flat array: thirteen values per
+     * building — `[id, kind, x, y, progress, complete, cell_x,
+     * cell_y, size, queue_len, train_progress, owner, hp]` — in
+     * building id order. `kind` tags: 0 house, 1 farm, 2 barracks
+     * (M3). `progress` is the construction fraction 0..1 (1 when
+     * complete); `complete` is 0/1; `size` is the footprint edge in
+     * cells; `queue_len` and `train_progress` (0..1 on the queue's
+     * head) describe a production building's queue. M5 adds `owner`
+     * (0 human, 2 opponent — the entity owner tags) and `hp`, the
+     * remaining-HP fraction 0..1 (buildings take damage now; a
+     * destroyed building leaves the list entirely). A completed
+     * farm is listed here (its food shows up as a node in
+     * `nodes()`); an under-construction farm appears only here.
      */
     buildings(): Float64Array;
     /**
@@ -49,8 +52,9 @@ export class WasmSim {
      */
     entity_kinds(): Uint8Array;
     /**
-     * Per-entity owner tags in id order (M3): 0 = the player,
-     * 1 = Gaia. A sheep flips 1 → 0 when captured.
+     * Per-entity owner tags in id order (M3): 0 = the human player,
+     * 1 = Gaia, 2 = the AI opponent (M5). A sheep flips 1 → its
+     * capturer's tag when captured.
      */
     entity_owners(): Uint8Array;
     /**
@@ -80,9 +84,30 @@ export class WasmSim {
      */
     idle_villagers(): Uint32Array;
     /**
+     * The match outcome (M5, Conquest): 0 ongoing, 1 victory,
+     * 2 defeat — from the human player's seat. Always 0 in
+     * Sandbox. The client polls this; the sim keeps ticking
+     * harmlessly after a decision.
+     */
+    match_state(): number;
+    /**
+     * The match mode this sim was created with (M5): 0 sandbox,
+     * 1 AI Easy, 2 AI Normal.
+     */
+    mode(): number;
+    /**
      * Create a simulation from a seed.
      */
     constructor(seed: number);
+    /**
+     * Create a match against the scripted AI opponent (M5):
+     * `mode_tag` 1 = AI Easy, 2 = AI Normal (the `MatchMode` tags;
+     * 0 or anything unknown falls back to the plain sandbox
+     * constructor's game). The opponent spawns mirrored across the
+     * map and plays through the ordinary command queue from the
+     * first tick.
+     */
+    static new_match(seed: number, mode_tag: number): WasmSim;
     /**
      * Resource nodes as a flat array: five values per node —
      * `[id, x, y, kind, amount_left]` — in node id order. `kind` tags:
@@ -116,6 +141,13 @@ export class WasmSim {
      * current position from `tick_count()`; the sim owns the truth.
      */
     projectiles(): Float64Array;
+    /**
+     * Order a unit to attack a placed building (M5): chase its
+     * footprint and strike until it is destroyed or a new order
+     * lands. Only another player's building is a valid target.
+     * Returns whether the order *would* be accepted.
+     */
+    push_attack_building(entity: number, building: number): boolean;
     /**
      * Order a unit to attack a target entity (M3): chase and strike
      * until the target dies or a new order lands. Returns whether
@@ -228,8 +260,15 @@ export class WasmSim {
     state_hash(): string;
     /**
      * Stockpile as `[food, wood, gold, stone]` (f64 at the boundary).
+     * The human player's — unchanged since M2; use `stockpile_for`
+     * for another seat (M5).
      */
     stockpile(): Float64Array;
+    /**
+     * Any player's stockpile by owner tag (M5): `[food, wood, gold,
+     * stone]` for owner 0 (human) or 2 (opponent).
+     */
+    stockpile_for(owner: number): Float64Array;
     stone(): number;
     /**
      * Ticks elapsed. Returned as u32 (wraps after ~2.26 years at 60 Hz —
@@ -280,7 +319,10 @@ export interface InitOutput {
     readonly wasmsim_grid_width: (a: number) => number;
     readonly wasmsim_idle_military: (a: number) => [number, number];
     readonly wasmsim_idle_villagers: (a: number) => [number, number];
+    readonly wasmsim_match_state: (a: number) => number;
+    readonly wasmsim_mode: (a: number) => number;
     readonly wasmsim_new: (a: number) => number;
+    readonly wasmsim_new_match: (a: number, b: number) => number;
     readonly wasmsim_nodes: (a: number) => [number, number];
     readonly wasmsim_obstacles: (a: number) => [number, number];
     readonly wasmsim_population: (a: number) => number;
@@ -288,6 +330,7 @@ export interface InitOutput {
     readonly wasmsim_positions: (a: number) => [number, number];
     readonly wasmsim_projectiles: (a: number) => [number, number];
     readonly wasmsim_push_attack: (a: number, b: number, c: number) => number;
+    readonly wasmsim_push_attack_building: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_attack_queued: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_build_barracks: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_barracks_queued: (a: number, b: number, c: number, d: number) => number;
@@ -308,6 +351,7 @@ export interface InitOutput {
     readonly wasmsim_rally_points: (a: number) => [number, number];
     readonly wasmsim_state_hash: (a: number) => [number, number];
     readonly wasmsim_stockpile: (a: number) => [number, number];
+    readonly wasmsim_stockpile_for: (a: number, b: number) => [number, number];
     readonly wasmsim_stone: (a: number) => number;
     readonly wasmsim_tick: (a: number) => [number, number];
     readonly wasmsim_tick_count: (a: number) => number;
