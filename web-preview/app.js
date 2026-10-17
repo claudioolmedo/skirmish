@@ -67,7 +67,6 @@ const resGold = document.getElementById('res-gold');
 const resStone = document.getElementById('res-stone');
 const resPop = document.getElementById('res-pop');
 const resAge = document.getElementById('res-age'); // M6: the player's age
-const gameClock = document.getElementById('game-clock');
 const pauseBtn = document.getElementById('pause-btn');
 // Idle indicators (M4, INF-03): always-visible counts in the top bar;
 // clicking one does what the '.' / ',' keys do (SEL-08/09).
@@ -510,7 +509,6 @@ function loadTierSprites(st) {
   }
 }
 
-const qualityLabel = document.getElementById('quality-label');
 const qualityModeBtns = {
   auto: document.getElementById('q-auto'),
   high: document.getElementById('q-high'),
@@ -519,12 +517,8 @@ const qualityModeBtns = {
 };
 
 function updateQualityUi() {
-  const name = governor.level[0].toUpperCase() + governor.level.slice(1);
-  if (qualityLabel) {
-    qualityLabel.textContent = qualityMode === 'auto'
-      ? `Quality: ${name} · Auto`
-      : `Quality: ${name}`;
-  }
+  // No quality readout in the top bar (Claudio, 2026-10-17 — it took
+  // space for nothing); this only marks the active menu button.
   for (const [mode, btn] of Object.entries(qualityModeBtns)) {
     if (btn) btn.classList.toggle('active', qualityMode === mode);
   }
@@ -532,7 +526,7 @@ function updateQualityUi() {
 
 // Apply a level end-to-end. `announce` shows the one subtle toast
 // the spec allows per automatic change; the initial application at
-// load is silent (the top-bar label shows the level instead).
+// load is silent (the level is not displayed anywhere by default).
 function applyQuality(level, { announce = false } = {}) {
   Q = settingsFor(level);
   loadTierSprites(Q);
@@ -2399,10 +2393,6 @@ function updateTopBar() {
     idleMilCount.textContent = String(nMil);
     idleMilBtn.classList.toggle('has-idle', nMil > 0);
   }
-  const secs = Math.floor(sim.tick_count() / 60); // the sim ticks at 60 Hz
-  const mm = String(Math.floor(secs / 60)).padStart(2, '0');
-  const ss = String(secs % 60).padStart(2, '0');
-  gameClock.textContent = `${mm}:${ss}`;
 }
 
 function cmdButton({ id, icon, label, costIcon, cost, title, disabled, active, badge }) {
