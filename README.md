@@ -76,6 +76,25 @@ cd web-preview && python3 -m http.server 8080
 # use the button to train more villagers (50 food)
 ```
 
+## Documentation & contributing
+
+Skirmish II is built in the open — and what is still missing is written
+down, rule by rule, so anyone can pick it up:
+
+- [docs/ROADMAP.md](docs/ROADMAP.md) — what exists, **what's missing**,
+  the most-wanted list, and good first contributions
+- [docs/MECHANICS-RULEBOOK.md](docs/MECHANICS-RULEBOOK.md) — the complete
+  behavioral rulebook (213 rules, each with a status)
+- [docs/GAP-ANALYSIS.md](docs/GAP-ANALYSIS.md) — the parity inventory
+  against the code
+- [docs/OPENING-SPEC.md](docs/OPENING-SPEC.md) — the standard start,
+  minute by minute
+- [docs/MECHANICS-STUDY.md](docs/MECHANICS-STUDY.md) — the numbers
+- [docs/OPENAGE-RESEARCH.md](docs/OPENAGE-RESEARCH.md) — engine lessons
+- [docs/SPRITE-PIPELINE.md](docs/SPRITE-PIPELINE.md) — how the original
+  art is produced
+- [CONTRIBUTING.md](CONTRIBUTING.md) — how to build, test, and submit
+
 ## License
 
 To be decided.
