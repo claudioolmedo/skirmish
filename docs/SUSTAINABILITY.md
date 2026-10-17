@@ -136,6 +136,17 @@ Rules of the loop:
 - **Retention comes before new features.** The loop spends on making the
   game *right* — parity, feel, reliability — before making it *bigger*,
   because retention is what feeds the top of the funnel.
+- **Play feeds the improvement, not just the revenue.** From the first
+  multiplayer build (M8), the client reports anonymous match telemetry —
+  device and quality-tier performance, desync events, match length,
+  what gets built and what wins — and players can attach a replay. The
+  more the game is played, the more evidence the improvement cycles
+  have to work with: quality is tuned per device class from real frame
+  data, and fidelity work is aimed at the rulebook gaps players
+  actually hit. The loop is gated, never automatic: telemetry
+  proposes, the deterministic tests and the zero-learning rule
+  dispose, and a human reviews what ships. The mechanics stay
+  chess-stable; what improves is quality and fidelity.
 
 Honest status note: this loop's revenue side is not live yet. Ad revenue
 activates with the AdSense milestone (the slots and their configuration

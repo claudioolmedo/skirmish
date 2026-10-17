@@ -128,7 +128,12 @@ From the [Gap Analysis](GAP-ANALYSIS.md): the items that most make Skirmish II
   fishing.
 - **M8 — Lockstep multiplayer.** Commands-only networking on the
   deterministic sim (per-tick hash is the desync detector), send-a-link
-  lobby, replay viewer.
+  lobby, replay viewer. **Multi-region from day one**: one relay per
+  match, placed near its players on edge hosting — ping is the
+  product, players are matched to their nearest region, and capacity
+  grows by adding regions, not bigger machines. Anonymous match
+  telemetry and replay submission land with it, feeding the
+  self-improvement loop (SUSTAINABILITY.md §5).
 
 ## Good first contributions
 
