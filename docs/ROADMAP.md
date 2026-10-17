@@ -11,6 +11,8 @@ If you build one of the missing rules, you have moved the game. Pick
 something below, check its rule ID in the
 [Mechanics Rulebook](MECHANICS-RULEBOOK.md), and see
 [CONTRIBUTING.md](../CONTRIBUTING.md) for how to build, test, and submit.
+Why the project is built to outlive its makers — and to fund itself doing
+it: [The Self-Sustaining System](SUSTAINABILITY.md).
 
 ---
 

@@ -95,6 +95,8 @@ down, rule by rule, so anyone can pick it up:
 - [docs/OPENAGE-RESEARCH.md](docs/OPENAGE-RESEARCH.md) — engine lessons
 - [docs/SPRITE-PIPELINE.md](docs/SPRITE-PIPELINE.md) — how the original
   art is produced
+- [docs/SUSTAINABILITY.md](docs/SUSTAINABILITY.md) — the self-sustaining
+  system: how the game funds and maintains itself for the long term
 - [CONTRIBUTING.md](CONTRIBUTING.md) — how to build, test, and submit
 
 ## License
