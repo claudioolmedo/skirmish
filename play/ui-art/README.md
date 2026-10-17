@@ -1,11 +1,11 @@
 # Play-page UI art — provenance
 
-All artwork in this folder is **original to Skirmish**, generated for
+All artwork in this folder is **original to Skirmish II**, generated for
 this project with AI image tools and art-directed by hand (warm walnut
 wood, aged gold, parchment, painterly medieval game icons). It evokes
 the classic RTS genre style; it does **not** reproduce any asset,
 icon, texture, or design from Age of Empires or any other game —
-Skirmish is a clean-room project.
+Skirmish II is a clean-room project.
 
 | File | Used for |
 |---|---|

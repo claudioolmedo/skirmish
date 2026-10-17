@@ -1,5 +1,5 @@
 /* =====================================================================
-   SKIRMISH ADS — the whole ad system lives in this one file.
+   SKIRMISH II ADS — the whole ad system lives in this one file.
    ---------------------------------------------------------------------
    How it works
    - The page has exactly TWO ad slots (see ADS.md for the friendly
@@ -51,7 +51,7 @@
     el.innerHTML =
       '<div class="house-ad">' +
         '<p class="house-title">Your friendly ad will live here soon</p>' +
-        '<p class="house-text">For now — thanks for playing! Skirmish is ' +
+        '<p class="house-text">For now — thanks for playing! Skirmish II is ' +
         'open, and small ads like this one will help pay for the servers ' +
         'and keep development going.</p>' +
         '<p class="house-link"><a href="' + GITHUB_URL + '">' +
