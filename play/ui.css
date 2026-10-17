@@ -55,8 +55,9 @@
   display: flex;
   align-items: center;
   gap: 18px;
-  /* left padding leaves room for the floating back link */
-  padding: 0 12px 0 132px;
+  /* the site link moved into the pause menu (2026-10-17) — the
+     topbar no longer needs to leave room for a floating link */
+  padding: 0 12px;
   background:
     linear-gradient(rgba(22, 11, 3, 0.38), rgba(22, 11, 3, 0.38)),
     var(--ui-wood) url("ui-art/tex-wood.webp") center 30% / cover no-repeat;
@@ -340,7 +341,20 @@
 }
 
 @media (max-width: 700px) {
-  .ui-topbar { padding-left: 12px; padding-top: 40px; height: 76px; flex-wrap: wrap; gap: 8px 14px; }
+  /* no floating site link anymore: the topbar reclaims its row */
+  .ui-topbar { padding: 6px 12px; height: auto; min-height: 42px; flex-wrap: wrap; gap: 6px 14px; }
   .sel-line { display: none; }
   .sel-grid { display: none; }
+  /* bottom strip must FIT a phone: shrink all three panels instead
+     of letting the selection panel and minimap slide off-screen */
+  .ui-cmd-panel { flex-basis: 138px; padding: 6px 6px 8px; }
+  .cmd-grid { gap: 4px; }
+  .cmd-btn { min-height: 48px; }
+  .cmd-btn .cmd-icon { width: 20px; height: 20px; }
+  .ui-sel-panel { padding: 6px 8px; gap: 8px; }
+  .sel-portrait { width: 44px; height: 44px; }
+  .sel-portrait .ui-icon { width: 26px; height: 26px; }
+  .sel-name { font-size: 13px; }
+  .ui-minimap-wrap { padding: 6px 6px 8px; }
+  #minimap { width: 118px; height: 66px; }
 }

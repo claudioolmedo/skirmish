@@ -18,22 +18,12 @@ html, body {
   width: 100vw;
   height: 100vh;
   display: block;
+  /* the game's gestures belong to the game: no page pinch-zoom,
+     no scroll, no double-tap zoom on the canvas (Claudio, 2026-10-17) */
+  touch-action: none;
 }
 
-.back-link {
-  position: fixed;
-  top: 10px;
-  left: 12px;
-  z-index: 30;
-  color: #f0e5c8;
-  background: rgba(30, 17, 7, 0.82);
-  border: 1px solid rgba(201, 162, 39, 0.45);
-  border-radius: 8px;
-  padding: 5px 10px;
-  font: 600 13px/1.2 system-ui, sans-serif;
-  text-decoration: none;
-}
-.back-link:hover { background: rgba(46, 27, 9, 0.95); }
+.overlay-note a { color: #8a5a10; font-weight: 600; }
 
 .btn-sm { padding: 6px 12px; font-size: 13px; }
 .btn-big { padding: 14px 42px; font-size: 20px; }
