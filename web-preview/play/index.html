@@ -137,6 +137,17 @@
       <button id="resume-btn" class="btn btn-gold" type="button">Resume</button>
       <button id="help-btn" class="btn btn-ghost" type="button">How to play</button>
       <button id="restart-btn" class="btn btn-ghost" type="button">Restart</button>
+      <button id="btn-online" class="btn btn-ghost" type="button">Play online</button>
+    </div>
+    <div id="net-status" class="net-status" hidden>
+      <p id="net-status-text" class="overlay-note"></p>
+      <p class="overlay-note">An online match keeps running while this menu is open — your opponent is playing too.</p>
+      <button id="btn-resign" class="btn btn-ghost btn-sm" type="button" hidden>Resign match</button>
+    </div>
+    <div class="pause-actions">
+      <button id="btn-download-replay" class="btn btn-ghost btn-sm" type="button">Download replay</button>
+      <label id="btn-watch-replay" class="btn btn-ghost btn-sm" for="replay-file">Watch replay</label>
+      <input id="replay-file" type="file" accept=".json,application/json" hidden>
     </div>
     <div class="mode-row" role="radiogroup" aria-label="Match mode">
       <label class="mode-opt"><input type="radio" name="match-mode" value="sandbox"> Sandbox</label>
@@ -154,7 +165,7 @@
       </div>
     </div>
     <p class="overlay-note">Quality changes only the picture — sprites, sharpness, shadows. The game is identical on every device, from an old Chromebook to a gaming PC.</p>
-    <p class="overlay-note">Test build · M7 — a new generated Arabia every match: rolling hills, ponds, fog of war. Your start is mirrored fair; what you have not scouted stays black, and the enemy fights under the same fog. On top of the M6 ages and technologies and the M5 match (scripted AI opponent or Sandbox, Conquest victory and defeat). Placeholder art is being replaced piece by piece with our own.</p>
+    <p class="overlay-note">Test build · M8 — send-a-link 1v1 multiplayer: pick a server in the Play online lobby, share the link, and play a friend in the browser — no accounts. The match runs in lockstep: both browsers simulate the same game from the same seed and exchange only orders. On top of the M7 generated Arabia with fog of war, the M6 ages and technologies and the M5 match (scripted AI opponent or Sandbox, Conquest victory and defeat). Placeholder art is being replaced piece by piece with our own.</p>
     <p class="overlay-note"><a href="../">← Back to the Skirmish II site</a></p>
   </div>
 </div>
@@ -193,8 +204,58 @@
     <div class="pause-actions">
       <button id="end-restart-btn" class="btn btn-gold" type="button">Restart match</button>
       <button id="end-menu-btn" class="btn btn-ghost" type="button">Back to menu</button>
+      <button id="end-replay-btn" class="btn btn-ghost" type="button">Download replay</button>
     </div>
   </div>
+</div>
+
+<div id="net-wait" class="net-wait" hidden>Waiting for your opponent…</div>
+
+<div id="online-overlay" class="overlay" style="display:none">
+  <div class="overlay-card">
+    <button id="online-close" class="card-close" type="button" aria-label="Close online play">✕</button>
+    <h2 class="game-title-sm">Play online</h2>
+    <p class="overlay-sub">Pick the server closest to you both — your friend picks the same one. Then create the game and send them the link. No accounts: the link is the invitation.</p>
+    <div id="region-list" class="region-list"></div>
+    <div class="pause-actions">
+      <button id="btn-create-game" class="btn btn-gold" type="button">Create game</button>
+      <button id="btn-start-game" class="btn btn-gold" type="button" disabled>Start match</button>
+    </div>
+    <div id="room-link-row" class="room-link-row" hidden>
+      <input id="room-link" type="text" readonly value="">
+      <button id="btn-copy-link" class="btn btn-ghost btn-sm" type="button">Copy link</button>
+    </div>
+    <p id="lobby-status" class="overlay-note">Pick a server, then create the game.</p>
+  </div>
+</div>
+
+<div id="desync-overlay" class="overlay" style="display:none">
+  <div class="overlay-card">
+    <h2 class="game-title-sm">Desync detected</h2>
+    <p class="overlay-sub" id="desync-detail"></p>
+    <div class="pause-actions">
+      <button id="btn-desync-replay" class="btn btn-gold" type="button">Download replay</button>
+      <button id="btn-desync-close" class="btn btn-ghost" type="button">Back to menu</button>
+    </div>
+  </div>
+</div>
+
+<div id="peer-overlay" class="overlay" style="display:none">
+  <div class="overlay-card">
+    <h2 class="game-title-sm">Opponent disconnected</h2>
+    <p class="overlay-sub" id="peer-detail">Your opponent's connection dropped.</p>
+    <div class="pause-actions">
+      <button id="btn-claim-victory" class="btn btn-gold" type="button" disabled>Claim victory</button>
+      <button id="btn-leave-match" class="btn btn-ghost" type="button">Leave match</button>
+    </div>
+  </div>
+</div>
+
+<div id="playback-bar" class="playback-bar" hidden>
+  <span id="pb-label" class="pb-label">Replay</span>
+  <button id="pb-toggle" class="btn btn-ghost btn-sm" type="button">Pause</button>
+  <button id="pb-speed" class="btn btn-ghost btn-sm" type="button">1×</button>
+  <button id="pb-exit" class="btn btn-ghost btn-sm" type="button">Exit replay</button>
 </div>
 
 <script type="module" src="../app.js"></script>

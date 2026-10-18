@@ -105,7 +105,10 @@ pub(crate) fn config(mode: MatchMode) -> AiConfig {
             wave_size: 4,
             wave_cooldown: 7200,
         },
-        MatchMode::AiNormal | MatchMode::Sandbox => AiConfig {
+        // Sandbox and TwoPlayer never reach `decide` (the tick gate
+        // admits only the AI modes); they share this arm purely so
+        // the match stays exhaustive.
+        MatchMode::AiNormal | MatchMode::Sandbox | MatchMode::TwoPlayer => AiConfig {
             cadence: 30,
             villager_target: 16,
             food_workers: 7,

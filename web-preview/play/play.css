@@ -184,3 +184,95 @@ html, body {
   .game-title { font-size: 34px; }
   .overlay-card { padding: 20px; }
 }
+
+/* --- M8: online lobby, net status, playback bar ------------------- */
+.region-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 16px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.region-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid #c9b48a;
+  border-radius: 8px;
+  background: rgba(255, 252, 244, 0.65);
+  color: #4a3820;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  text-align: left;
+}
+.region-row:hover { border-color: #8a5a10; }
+.region-row.selected {
+  border-color: #8a5a10;
+  outline: 2px solid #ffcf4d;
+  outline-offset: 0;
+  font-weight: 600;
+}
+.region-row.locked { cursor: default; opacity: 0.75; }
+.region-ms { color: #7a6248; font-variant-numeric: tabular-nums; }
+.room-link-row {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 6px;
+}
+.room-link-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #c9b48a;
+  border-radius: 8px;
+  background: #fffdf6;
+  color: #4a3820;
+  font-size: 13px;
+}
+.net-status {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border: 1px solid #c9b48a;
+  border-radius: 8px;
+  background: rgba(255, 252, 244, 0.65);
+}
+.net-status .overlay-note { margin-top: 4px; }
+.net-status .overlay-note:first-child { margin-top: 0; }
+.net-wait {
+  position: fixed;
+  top: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(11, 15, 20, 0.82);
+  color: #f0e5c8;
+  font-size: 13px;
+  pointer-events: none;
+}
+.playback-bar {
+  position: fixed;
+  bottom: 158px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(240, 229, 200, 0.95);
+  border: 1px solid #c9b48a;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+}
+.pb-label { color: #5d4630; font-size: 13px; font-weight: 600; }
+/* [hidden] must win over the flex layouts above (attribute vs class
+   specificity), or hidden rows/bars stay visible. */
+.room-link-row[hidden], .playback-bar[hidden], .net-wait[hidden] {
+  display: none !important;
+}

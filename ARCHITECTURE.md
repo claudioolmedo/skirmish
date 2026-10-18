@@ -687,6 +687,116 @@ bitset** (`players: [PlayerState; 2]`), both hashed.
   changes, as expected — movement feeds everything — and those
   are pinned by their own bit-identity tests.
 
+## M8 — lockstep multiplayer (shipped 2026-10-18)
+
+Networking changed no simulation behavior. The sim gained exactly
+three additive things (flagged in the milestone report): a fourth
+match mode, one command form, and per-seat wrappers over existing
+helpers. Everything else is client code (`web-preview/play/netplay.js`,
+pure and Node-tested; `app.js` integrates it) plus a deliberately
+dumb relay.
+
+- **Model.** Bettner & Terrano lockstep, exactly what the sim was
+  built for: clients exchange ONLY commands. Both sides construct
+  the identical sim from a shared seed — `MatchMode::TwoPlayer`
+  (tag 3): the mirrored start spawns and Conquest applies, but no
+  script drives the second seat; every command for both players
+  arrives from outside. (Seed, mode, command stream) is the match.
+- **Turn structure.** 1 turn = 3 ticks (50 ms), 20 turns/s. Each
+  client assembles one bundle per turn; a turn executes only when
+  BOTH bundles for it have arrived (an empty bundle is a
+  heartbeat), then both bundles apply in slot order (slot 0 first,
+  each in issue order) and the sim ticks 3 times. If a bundle is
+  late, execution waits — the slowest machine sets the pace
+  (NET-03); sim time is never dropped.
+- **Input delay.** Commands are stamped for the turn `delay` turns
+  in the future — 4 turns (200 ms, the reference turnaround) at
+  match start; the first `delay` turns are empty by construction on
+  both sides. The delay adapts UP only: when more than ~35% of the
+  last ~200 turns executed late, the host proposes +1 (cap 10) and
+  both sides apply it to their sending schedules. It never
+  decreases mid-match.
+- **Hash cadence & desync.** After the last tick of every turn,
+  each side sends its state hash. A mismatch stops both clients on
+  the spot: the sim holds, an overlay names the turn, and the
+  recorded replay is offered for download. A desync is never
+  "repaired" — it is a bug report, not a state to patch over.
+- **Commands on the wire.** A small semantic vocabulary (move,
+  gather, attack, attack-building, build, train, research, rally,
+  force-deposit) with JSON numbers for coordinates — JSON's
+  shortest-round-trip formatting reproduces the exact same double
+  on the far side, and the sim's fixed-point conversion is
+  deterministic. Town Center orders carry no Town Center id: the
+  applier resolves the ISSUER's Town Center from its own sim,
+  identically on both clients. Acceptance at execution is the
+  sim's own re-validation, which agrees on both sides by
+  construction. Identical duplicates within one bundle collapse
+  (NET-07), bundle size is capped, and every inbound message is
+  structurally validated before it can reach the sim.
+- **Handshake.** Over the room socket: `hello` both ways (presence
+  is client-side; the relay knows nothing), the host sends `start`
+  with a seed and its construction `state_hash()`; the guest
+  builds the same sim and compares — a mismatch aborts with a
+  version error before a single tick (build compatibility is
+  checked by construction hash, not by a version string). Guest
+  acks, host sends `go`, both anchor a local pacing clock. Roles
+  come from how you entered: the link creator is slot 0
+  (owner 0), the link opener is slot 1 (owner 2). A third opener
+  is told the room is full.
+- **Lobby & regions.** The region list is fixed and identical for
+  everyone (decision 2026-10-18): `wnam`, `enam`, `sam`, `weur`,
+  `eeur`, `apac`, `oc`. Ping is measured honestly: for each region
+  the client opens a fresh probe room — a Durable Object PLACED
+  under that region's location hint — and times an echo round
+  trip, reporting the second (warm) one. The nearest region is
+  pre-highlighted; the pick stays the player's, so friends choose
+  the same location. The match room itself is created under the
+  chosen region's hint, so match traffic lands in the picked
+  region too.
+- **Disconnect & rejoin.** A dropped socket pauses the remaining
+  side ("Opponent disconnected") with a 90-second grace window.
+  Rejoin is by the same link: the remaining peer transfers the
+  setup plus the FULL recorded command stream; the rejoiner
+  rebuilds the sim from the seed, fast-forwards, and both sides
+  rebase to a common frontier turn and resume. Unexecuted bundles
+  from the dropped window are discarded on both sides — orders
+  issued into them are lost, the honest cost of a drop. After the
+  grace window the remaining player may claim victory.
+- **Replay.** Every match — online or local — records (seed,
+  mode, per-turn command bundles) client-side in one format. The
+  end overlay offers a Download replay; the play page's Watch
+  replay re-executes it deterministically (play/pause, 0.5×–4×
+  speed), rendering fog from the recording seat's point of view.
+- **Telemetry.** At match end each client POSTs one small summary
+  (region, duration ticks, result, desync count, build version).
+  The relay stores ONLY running counters in a dedicated Durable
+  Object — matches, ticks, desyncs, per-region / per-result /
+  per-build counts. No per-match records; no IP is read; no
+  identifier exists. It feeds fidelity and quality work
+  (SUSTAINABILITY.md §5), never mechanics changes.
+- **The relay deliberately does NOT** run game logic, see game
+  state (it forwards opaque bytes), track presence, store anything
+  per-match, or authenticate anyone — the link is the capability.
+  Its only extras over the dumb pipe are the probe echo and the
+  telemetry counters. Relay source lives outside this repository
+  while the server-license decision is open.
+- **Sim/ABI additions (purely additive).** `MatchMode::TwoPlayer`
+  (tag 3; the AI step's gate now names the AI modes explicitly so
+  the script can never drive a networked seat);
+  `Command::SetRallyTc` — the per-Town-Center rally form, the one
+  command lockstep application could not express for the second
+  seat (`SetRally { building: None }` names the first seat's Town
+  Center implicitly); public per-TC/per-player wrappers
+  (`train_block_at`, `can_train_villager_at`,
+  `research_block_at_tc`, `tc_queue_of`, `tc_progress_bits_of`,
+  `tc_rally_of`, `idle_villagers_of`, `idle_military_of`) and the
+  matching WASM ABI (`push_train_villager_at`,
+  `push_research_tc_at`, `push_set_rally_tc_of`, the `_for`/`_at`
+  getters). No existing function changed behavior; the golden hash
+  did not move; four new tests in `sim/tests/two_player.rs` pin
+  the mode's contract (mirror start; no script over 36,000 ticks;
+  per-seat play; bit-identical interleaved streams).
+
 ## The sim may
 
 - Use fixed-point arithmetic (`I16F16`: ±32768 range, 1/65536 precision —

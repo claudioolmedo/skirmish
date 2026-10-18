@@ -2074,37 +2074,44 @@ simulates the identical game locally (SIM-02/12). Bandwidth is therefore
 trivial (≈1 command per player per 1.5–2 s in typical play); latency is
 absorbed by scheduling, not by prediction.
 *Source:* Bettner & Terrano (whole paper); OPENAGE-RESEARCH §2.6; GAP
-10.1. · *Impl:* the M8 net layer transports `Command` records only; the
-WASM ABI already enforces the discipline locally. · *Status:* **MISSING**
-(single-player today; the architecture is ready by construction).
+10.1. · *Impl:* the M8 net layer (play/netplay.js) transports only the
+semantic command vocabulary, applied on both clients in slot order;
+state never crosses the wire. · *Status:* **MATCHES** (shipped M8,
+2026-10-18).
 
 **NET-02 — Commands execute two turns ahead.** Commands are stamped for
 execution at tick N+2 communication turns (≈200 ms turns in the reference
 design), giving every packet a full turn to arrive. The delay is fixed
 per match settings, never adaptive mid-match.
-*Source:* Bettner & Terrano (the N+2 rule). · *Impl:* the transport holds
-a per-tick command bundle until its execution tick; local input feeds
-the same bundle path, so single-player and multiplayer share one code
-path (with delay 0 locally or the same delay — either is consistent if
-uniform). · *Status:* **MISSING**.
+*Source:* Bettner & Terrano (the N+2 rule). · *Impl:* the transport
+stamps each bundle for an execution TURN `delay` turns ahead (turns of
+3 ticks / 50 ms, not the reference's ≈200 ms turns) and holds it until
+that turn; the delay starts at 4 turns (200 ms) and adapts UP when the
+link lags, never fixed per match settings; local single-player input
+does not take the bundle path (it applies immediately, delay 0).
+· *Status:* **DIFFERS** (scheduling-ahead matches; turn size,
+adaptivity, and the unshared local path differ).
 
 **NET-03 — The slowest machine sets the pace.** If any client cannot keep
 up, the whole match slows (never drops sim time): the design deliberately
 prefers a steady slower game to a jittery one. A client ahead simply
 waits at the turn boundary.
 *Source:* Bettner & Terrano ("slower-but-steady beats jitter"). ·
-*Impl:* turn gating in the transport; SIM-11's speed setting multiplies
-the *target* pace, NET-03 governs adherence to it. Our current single-
-player max-ticks guard is the same instinct, locally (SIM-11). ·
-*Status:* **MISSING**.
+*Impl:* turn gating in the M8 session: a turn executes only when
+both bundles have arrived; a client ahead waits at the turn boundary
+and sim time is never dropped — a slow peer slows the match's wall
+clock, not its logic. · *Status:* **MATCHES** (shipped M8).
 
 **NET-04 — Per-tick hash comparison catches desyncs.** Clients exchange
 the per-tick checksum (SIM-05); a mismatch means the match has diverged
 and stops with diagnostics (tick, and per SIM-06 the subsystem) rather
 than playing on in two different worlds.
-*Source:* Bettner & Terrano; OPENAGE-RESEARCH §2.6. · *Impl:* the hash
-already exists; the transport compares it at turn boundaries. ·
-*Status:* **MISSING** (hash yes, comparison no — no second client yet).
+*Source:* Bettner & Terrano; OPENAGE-RESEARCH §2.6. · *Impl:* the state
+hash is exchanged and compared after every TURN (every 3 ticks); a
+mismatch stops both clients with the turn number and the recorded
+replay as diagnostics. · *Status:* **DIFFERS** (comparison and stop
+match; the cadence is per-turn, not per-tick, and SIM-06's
+per-subsystem diagnostics are not yet produced).
 
 **NET-05 — No local factor may influence the sim.** Graphics settings,
 adaptive quality tier, hardware speed, frame rate, spare CPU — none may
@@ -2114,7 +2121,9 @@ freely; the simulation is identical for a phone and a desktop.
 time"); OPENAGE-RESEARCH §2.6. · *Impl:* enforced structurally — the sim
 crate has no quality/settings parameters; the adaptive-quality system
 lives entirely in the renderer. · *Status:* **MATCHES** (as an
-architecture rule — the renderer already scales independently).
+architecture rule — the renderer already scales independently, and
+the M8 session's wall clock paces execution without ever entering
+the sim).
 
 **NET-06 — RNG discipline is a networking rule.** Because all machines
 must draw identically (SIM-04), any system that consumes RNG must do so
@@ -2123,25 +2132,33 @@ never from rendering, never from unordered containers, never from
 real-time events. (First application: PRJ-03.)
 *Source:* OPENAGE-RESEARCH §2.6. · *Impl:* code-review rule for the sim
 crate; the RNG is unreachable from `wasm.rs` exports. · *Status:*
-**MATCHES** (discipline in place; consumers arrive with M3).
+**MATCHES** (discipline in place; the first consumer, PRJ-03,
+landed with M3, and the M8 transport consumes no RNG either).
 
 **NET-07 — Spam commands are filtered.** Issuing the identical command
 to the identical location repeatedly (a common accidental double-issue)
 is deduplicated by the command layer; command volume per player is
 bounded by the transport.
 *Source:* Bettner & Terrano (duplicate-command filtering; players average
-an order every 1.5–2 s). · *Impl:* dedup at bundle assembly in the
-transport (M8), not in the sim — the sim executes what it is given. ·
-*Status:* **MISSING**.
+an order every 1.5–2 s). · *Impl:* shipped in M8's bundle assembly:
+exact duplicates within one bundle collapse, bundle size is capped
+(256), and every inbound command is structurally validated before it
+can reach the sim — the sim still executes what it is given.
+· *Status:* **DIFFERS** (the accidental double-issue case and the
+volume bound match; there is no cross-turn dedup or per-player rate
+limit beyond the turn structure itself).
 
 **NET-08 — A replay is the match.** (Seed, settings, command stream) is
 a complete recording (SIM-12); playing it back re-simulates the match,
 with observer controls (free camera, per-player fog choice — VIS states
 are derived, never stored) layered on top.
-*Source:* GAP 8.9, 10.5. · *Impl:* headless replay already works
-(`sim/examples/replay.rs`); the M8 work is the file format + viewer, not
-new sim support. · *Status:* **DIFFERS** (headless mechanism exists; no
-user-facing replay).
+*Source:* GAP 8.9, 10.5. · *Impl:* M8 shipped the file format and the
+viewer: every match (online or local) records (seed, mode, command
+stream) client-side; the play page downloads it and re-executes it
+under Watch replay with play/pause and speed controls and a free
+camera. · *Status:* **DIFFERS** (the recording and re-simulation
+match; playback fog is the recording seat's — there is no per-player
+fog choice in the viewer yet).
 
 **NET-09 — Save/restore snapshots the sim.** A saved game is a full
 serialization of sim state; its hash (SIM-05) verifies the snapshot, and
@@ -2150,7 +2167,8 @@ paused.
 *Source:* GAP 10.6. · *Impl:* the canonical serialization behind
 `state_hash()` is the save format's core (plus a version header); no
 renderer state is saved. · *Status:* **MISSING** (hash serialization
-exists; no save/load API).
+exists; no save/load API — M8's rejoin restores matches by
+re-simulation from the recorded stream, a different mechanism).
 
 **NET-10 — Chat and taunts never enter hashed state.** In-game chat,
 taunts, and flares-as-messages travel beside the command stream; they
@@ -2158,18 +2176,23 @@ must not consume RNG, alter iteration, or be required to reproduce a
 match (a replay need not contain them, though it may record them for
 display).
 *Source:* Bettner & Terrano (command channel discipline); GAP 10.2. ·
-*Impl:* separate message channel in the transport; the sim never sees
+*Impl:* the transport's
+non-command messages (presence, handshake, telemetry) travel beside
+the bundle stream and never enter hashed state; the sim never sees
 them. In-game *effects* of chat-adjacent features (flare position
-INF-04) are client-side rendering. · *Status:* **MISSING**.
+INF-04) are client-side rendering. · *Status:* **DIFFERS** (the
+channel discipline is in place and load-bearing since M8; chat and
+taunts themselves are not implemented yet).
 
 **NET-11 — Diplomacy is match state, not sim physics.** Player stances
 (ally/neutral/enemy) live in a diplomacy table consulted by targeting
 (CMB-08), gates (BLD-13), and trade (TRD-07 — mostly by ignoring it).
 Changing stance is a command; the table is hashed state. In locked-team
 matches it cannot change.
-*Source:* GAP 10.3. · *Impl:* a small per-match table in `Sim` from M8;
-until teams exist, "everyone else is an enemy" is the implicit row. ·
-*Status:* **MISSING**.
+*Source:* GAP 10.3. · *Impl:* a small per-match table in `Sim`;
+M8 shipped 1v1 only, where "everyone else is an enemy" remains the
+implicit row — the table lands with team games. · *Status:*
+**MISSING**.
 
 ---
 
@@ -2288,7 +2311,7 @@ side sampling of public data). · *Status:* **MISSING**.
 ## A. Rule counts
 
 213 rules total. Counts verified mechanically against the status tags in
-this document (2026-10-17, M7 audit).
+this document (2026-10-18, M8 audit).
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
@@ -2308,9 +2331,9 @@ this document (2026-10-17, M7 audit).
 | 14 | Garrison, transport & repair (GAR) | 10 | 0 | 0 | 10 |
 | 15 | AI behavior & difficulty (AI) | 9 | 4 | 3 | 2 |
 | 16 | Victory, scoring & game modes (VIC) | 12 | 0 | 1 | 11 |
-| 17 | Multiplayer determinism (NET) | 11 | 2 | 1 | 8 |
+| 17 | Multiplayer determinism (NET) | 11 | 4 | 5 | 2 |
 | 18 | Information rules (INF) | 11 | 2 | 4 | 5 |
-| | **Total** | **213** | **91** | **40** | **82** |
+| | **Total** | **213** | **93** | **44** | **76** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer
@@ -2318,7 +2341,8 @@ combat stack (§8–§10) landed with M3, the age/technology layer
 elevation, fog) with M7, so the remaining greenfield is concentrated
 in the systems whose content has not been built yet — monks (§12),
 trade (§13), garrison (§14), the water domain (ships, docks,
-fishing), cliffs, and multiplayer (§17).
+fishing), and cliffs. Multiplayer's transport (§17) landed with M8;
+its remaining gaps are snapshots (NET-09) and diplomacy (NET-11).
 
 ---
 
@@ -2399,6 +2423,9 @@ the larger map sizes; VIS-08 waits on teams (M8).)*
 N+2 scheduling, hash comparison, replay/save formats, diplomacy),
 VIC-06…10, VIC-12 (mode deltas), SIM-11 (speed settings), AI-09 +
 VIC-08 (KotH), SEL-15/INF-06 completed forms for team play.
+*Status: shipped 2026-10-18 for the lockstep core (NET-01…08 and
+NET-10 re-audited above); the VIC/SIM-11/AI-09 items and NET-09/11
+remain future work.*
 
 Cross-cutting at every milestone: NET-05/06 discipline (no local factor
 in the sim; RNG only in fixed iteration) and VIS-09 (fog hides

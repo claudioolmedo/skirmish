@@ -143,18 +143,27 @@ From the [Gap Analysis](GAP-ANALYSIS.md): the items that most make Skirmish II
   `sim/tests/pace.rs` as the regression pin, plus the steering
   separation cap the slower scale required. See ARCHITECTURE.md,
   "Pace correction".
-- **M8 — Lockstep multiplayer.** Commands-only networking on the
-  deterministic sim (per-tick hash is the desync detector), send-a-link
-  lobby, replay viewer. **Multi-region from day one**: one relay per
-  match, placed near its players on edge hosting — ping is the
-  product. The region list is fixed and the same for everyone, and
-  while the player base is small the PLAYER picks the server:
-  the lobby shows the live ping for every region (nearest one
-  pre-highlighted), so friends choose the same location and
-  everyone knows their ping before they play. Capacity grows by
-  adding regions, not bigger machines. Anonymous match
-  telemetry and replay submission land with it, feeding the
-  fidelity-and-quality loop (SUSTAINABILITY.md §5).
+- **M8 — Lockstep multiplayer (shipped 2026-10-18).** Commands-only
+  networking on the deterministic sim — the per-turn state hash is
+  the desync detector — with a send-a-link lobby and a replay
+  viewer. **Multi-region from day one**: one relay room per match,
+  its Durable Object placed in the region the players picked —
+  ping is the product. The region list is fixed and the same for
+  everyone, and while the player base is small the PLAYER picks
+  the server: the lobby shows the live ping for every region
+  (measured as an echo round trip to an object placed in that
+  region; the nearest one is pre-highlighted), so friends choose
+  the same location and everyone knows their ping before they
+  play. Capacity grows by adding regions, not bigger machines.
+  Lockstep shape: 3-tick turns, commands stamped 4 turns (200 ms)
+  ahead, adapting up when the link lags; a dropped player gets a
+  90-second rejoin window (the match is rebuilt from its recorded
+  command stream). Anonymous match telemetry (counters only) and
+  downloadable replays landed with it, feeding the
+  fidelity-and-quality loop (SUSTAINABILITY.md §5). The sim itself
+  gained only additive pieces — a two-player mode, one per-seat
+  command form, per-seat ABI wrappers; no behavior changed. See
+  ARCHITECTURE.md, "M8 — lockstep multiplayer".
 
 ## Good first contributions
 

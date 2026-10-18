@@ -66,7 +66,8 @@ impl WasmSim {
     }
 
     /// Create a match against the scripted AI opponent (M5):
-    /// `mode_tag` 1 = AI Easy, 2 = AI Normal (the `MatchMode` tags;
+    /// `mode_tag` 1 = AI Easy, 2 = AI Normal, 3 = Two-player (M8)
+    /// (the `MatchMode` tags;
     /// 0 or anything unknown falls back to the plain sandbox
     /// constructor's game). The opponent spawns mirrored across the
     /// map and plays through the ordinary command queue from the
@@ -810,5 +811,125 @@ impl WasmSim {
     /// enemy buildings as last-known where it reads 1.
     pub fn fog(&self) -> Vec<u8> {
         self.inner.visibility(crate::entity::OWNER_PLAYER).to_vec()
+    }
+
+    // --- M8: per-seat forms for lockstep multiplayer ----------------
+    // A networked client plays either seat, so the Town Center
+    // orders and the per-player queries it needs must name the seat
+    // explicitly. Every function below is a thin additive wrapper
+    // over an existing sim operation; the seat-0 forms above are
+    // unchanged, and nothing here alters any existing behavior.
+
+    /// Enqueue a villager at a SPECIFIC Town Center (any seat):
+    /// `push_train_villager` for an explicit Town Center.
+    pub fn push_train_villager_at(&mut self, tc: u32) -> bool {
+        let ok = self.inner.can_train_villager_at(tc);
+        if ok {
+            self.inner.push_command(Command::TrainVillagerAt { tc });
+        }
+        ok
+    }
+
+    /// Enqueue a Town Center technology (Loom 0, Feudal Age 1) at a
+    /// SPECIFIC Town Center: `push_research_tc` for an explicit
+    /// Town Center.
+    pub fn push_research_tc_at(&mut self, tc: u32, tech_tag: u32) -> bool {
+        let tech = match TechId::from_tag(tech_tag as u8) {
+            Some(t) => t,
+            None => return false,
+        };
+        let ok = self.inner.research_block_at_tc(tc, tech).tag() == 0;
+        if ok {
+            self.inner.push_command(Command::ResearchTcAt { tc, tech });
+        }
+        ok
+    }
+
+    /// Set a SPECIFIC Town Center's rally point (any seat):
+    /// `push_set_rally_tc` for an explicit Town Center.
+    pub fn push_set_rally_tc_of(&mut self, tc: u32, x: f64, y: f64) -> bool {
+        let ok = self.inner.can_set_rally_tc(tc);
+        if ok {
+            self.inner.push_command(Command::SetRallyTc {
+                tc,
+                x: I16F16::from_num(x),
+                y: I16F16::from_num(y),
+            });
+        }
+        ok
+    }
+
+    /// `train_block_reason` for a specific Town Center (same tags).
+    pub fn train_block_reason_at(&self, tc: u32) -> u32 {
+        self.inner.train_block_at(tc).tag() as u32
+    }
+
+    /// `research_block_tc` for a specific Town Center (same tags).
+    pub fn research_block_tc_at(&self, tc: u32, tech_tag: u32) -> u32 {
+        match TechId::from_tag(tech_tag as u8) {
+            Some(tech) => self.inner.research_block_at_tc(tc, tech).tag() as u32,
+            None => 2,
+        }
+    }
+
+    /// A specific Town Center's queue as flat entry codes — see
+    /// `tc_queue`.
+    pub fn tc_queue_for(&self, tc: u32) -> Vec<u32> {
+        self.inner.tc_queue_of(tc).iter().map(|e| e.code()).collect()
+    }
+
+    /// Progress on a specific Town Center queue's head entry, 0..1.
+    pub fn tc_progress_for(&self, tc: u32) -> f64 {
+        I16F16::from_bits(self.inner.tc_progress_bits_of(tc)).to_num::<f64>()
+    }
+
+    /// A specific Town Center's rally point as `[x, y, node, has]` —
+    /// the single-entry form of one `rally_points` entry.
+    pub fn tc_rally_of(&self, tc: u32) -> Vec<f64> {
+        match self.inner.tc_rally_of(tc) {
+            Some((x, y, node)) => vec![
+                x.to_num::<f64>(),
+                y.to_num::<f64>(),
+                node.map(|n| n as f64).unwrap_or(-1.0),
+                1.0,
+            ],
+            None => vec![0.0, 0.0, -1.0, 0.0],
+        }
+    }
+
+    /// Population (units + queued) of a specific player.
+    pub fn population_for(&self, owner: u32) -> u32 {
+        self.inner.population_of(owner as u8)
+    }
+
+    /// Population cap of a specific player.
+    pub fn population_cap_for(&self, owner: u32) -> u32 {
+        self.inner.population_cap_of(owner as u8)
+    }
+
+    /// Current age tag of a specific player (0 Dark, 1 Feudal).
+    pub fn age_for(&self, owner: u32) -> u32 {
+        self.inner.age_of(owner as u8).tag() as u32
+    }
+
+    /// Researched-technology bitmask of a specific player.
+    pub fn tech_mask_for(&self, owner: u32) -> u32 {
+        self.inner.tech_mask_of(owner as u8) as u32
+    }
+
+    /// The fog-of-war grid of a specific player — `fog` for an
+    /// explicit seat.
+    pub fn fog_for(&self, owner: u32) -> Vec<u8> {
+        self.inner.visibility(owner as u8).to_vec()
+    }
+
+    /// Ids of a specific player's idle villagers.
+    pub fn idle_villagers_for(&self, owner: u32) -> Vec<u32> {
+        self.inner.idle_villagers_of(owner as u8)
+    }
+
+    /// Ids of a specific player's idle military.
+    pub fn idle_military_for(&self, owner: u32) -> Vec<u32> {
+        self.inner.idle_military_of(owner as u8)
     }
 }

@@ -89,15 +89,17 @@ Survival is much easier when staying alive is cheap. The numbers today:
 |-------|-----------|-----|
 | Game hosting | **$0** | Static files on free-tier static hosting; the game is small (the WASM sim + sprites are measured in hundreds of KB) |
 | Single-player | **$0** | No server at all (section 2) |
-| Future multiplayer relay | **~$2/month, designed** | See below |
+| Multiplayer relay (shipped, M8) | **$0 today** — free tier; ~$2/month class if it outgrows it | See below |
 
 The multiplayer design is where the architecture pays for itself.
 Multiplayer is **deterministic lockstep**: the simulation runs identically
 on every player's machine, so a relay server only has to *forward
 commands* — a few bytes per tick — and never compute, store, or even
 understand game state. That is the cheapest possible thing a server can
-do, which is why a single small relay (on the order of a $2/month instance)
-can carry matches, and why the per-tick state hash doubles as a free
+do, which is why a single small relay can carry matches — ours (M8,
+shipped 2026-10-18) runs on a free tier today and the design's
+ceiling is a ~$2/month-class instance, not a fleet — and why the
+per-turn state hash doubles as a free
 desync detector instead of a server-side anti-cheat system.
 
 Costs that scale with *players* are the classic way game servers die.

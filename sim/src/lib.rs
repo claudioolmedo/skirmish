@@ -243,6 +243,18 @@ pub enum Command {
         x: I16F16,
         y: I16F16,
     },
+    /// Set a specific Town Center's rally point (M8): the
+    /// per-Town-Center form of `SetRally { building: None, .. }`,
+    /// which names the human Town Center implicitly. Lockstep
+    /// application uses this form for both seats, so a rally order
+    /// from either player means the same thing on every client.
+    /// The rules are identical to the implicit form (the point is
+    /// clamped; a nearby live node is recorded as the snap target).
+    SetRallyTc {
+        tc: u32,
+        x: I16F16,
+        y: I16F16,
+    },
     /// Enqueue a technology at the human player's Town Center (M6):
     /// Loom or the Feudal Age advancement — the only technologies
     /// the Town Center hosts. The cost is charged on enqueue and the
@@ -325,16 +337,24 @@ pub enum MatchMode {
     AiEasy,
     /// Scripted opponent, full profile.
     AiNormal,
+    /// Two human players (M8, lockstep multiplayer): the mirrored
+    /// opponent start spawns exactly as in the AI modes and Conquest
+    /// applies, but no script drives the second seat — every command
+    /// for both players arrives from outside, through the ordinary
+    /// command queue. The mode exists so a networked match is still
+    /// just (seed, mode, command stream), like every other mode.
+    TwoPlayer,
 }
 
 impl MatchMode {
     /// Stable tag for the state hash and the WASM ABI:
-    /// 0 sandbox, 1 AI Easy, 2 AI Normal.
+    /// 0 sandbox, 1 AI Easy, 2 AI Normal, 3 two-player (M8).
     pub fn tag(self) -> u8 {
         match self {
             MatchMode::Sandbox => 0,
             MatchMode::AiEasy => 1,
             MatchMode::AiNormal => 2,
+            MatchMode::TwoPlayer => 3,
         }
     }
 
@@ -344,6 +364,7 @@ impl MatchMode {
             0 => Some(MatchMode::Sandbox),
             1 => Some(MatchMode::AiEasy),
             2 => Some(MatchMode::AiNormal),
+            3 => Some(MatchMode::TwoPlayer),
             _ => None,
         }
     }
@@ -1138,7 +1159,14 @@ impl Sim {
     /// The human Town Center's queue entries in order (M6) — for the
     /// client's queue display (head first).
     pub fn tc_queue(&self) -> &[ProdEntry] {
-        match self.tc_state(TOWN_CENTER_ID) {
+        self.tc_queue_of(TOWN_CENTER_ID)
+    }
+
+    /// A specific Town Center's production queue (M8): the
+    /// per-Town-Center form of `tc_queue`, so a networked client can
+    /// show its own Town Center's queue whichever seat it plays.
+    pub fn tc_queue_of(&self, tc: u32) -> &[ProdEntry] {
+        match self.tc_state(tc) {
             Some(s) => &s.queue,
             None => &[],
         }
@@ -1157,7 +1185,13 @@ impl Sim {
     /// fraction in raw bits (0 … 65536) — the `train_frac_bits`
     /// counterpart for the Town Center (M6).
     pub fn tc_progress_bits(&self) -> i32 {
-        let s = match self.tc_state(TOWN_CENTER_ID) {
+        self.tc_progress_bits_of(TOWN_CENTER_ID)
+    }
+
+    /// A specific Town Center's head-of-queue progress (M8): the
+    /// per-Town-Center form of `tc_progress_bits`.
+    pub fn tc_progress_bits_of(&self, tc: u32) -> i32 {
+        let s = match self.tc_state(tc) {
             Some(s) => s,
             None => return 0,
         };
@@ -1257,7 +1291,10 @@ impl Sim {
     /// against that Town Center's owner's population and stockpile.
     /// A missing or dead Town Center reports as `QueueFull` (the
     /// generic refusal).
-    fn train_block_at(&self, tc: u32) -> TrainBlock {
+    /// Why training a villager at THIS Town Center is blocked right
+    /// now (M8: the per-Town-Center form, public for the WASM ABI;
+    /// `train_block` is this for the human Town Center).
+    pub fn train_block_at(&self, tc: u32) -> TrainBlock {
         let (owner, queue) = match (self.entity_index(tc), self.tc_state(tc)) {
             (Some(i), Some(s)) if !self.entities[i].dead => {
                 (self.entities[i].owner, s.queue.len() as u32)
@@ -1404,7 +1441,7 @@ impl Sim {
     /// Would a villager enqueue be accepted at Town Center `tc`
     /// (M5)? The per-Town-Center form of `can_train_villager`,
     /// charged to that Town Center's owner.
-    fn can_train_villager_at(&self, tc: u32) -> bool {
+    pub fn can_train_villager_at(&self, tc: u32) -> bool {
         let (owner, queue) = match (self.entity_index(tc), self.tc_state(tc)) {
             (Some(i), Some(s)) if !self.entities[i].dead => {
                 (self.entities[i].owner, s.queue.len() as u32)
@@ -1501,7 +1538,9 @@ impl Sim {
     /// (M6): the per-Town-Center form of `research_block_tc`.
     /// Technologies foreign to the Town Center report as
     /// `QueueFull` (the generic refusal).
-    fn research_block_at_tc(&self, tc: u32, tech: TechId) -> ResearchBlock {
+    /// The per-Town-Center research block (M8: public for the WASM
+    /// ABI; `research_block_tc` is this for the human Town Center).
+    pub fn research_block_at_tc(&self, tc: u32, tech: TechId) -> ResearchBlock {
         if tech.host() != TechHost::TownCenter {
             return ResearchBlock::QueueFull;
         }
@@ -1751,7 +1790,13 @@ impl Sim {
     /// The human Town Center's rally point as `(x, y, snapped_node)`,
     /// or `None` when unset (M4, SEL-13). For the client's flag render.
     pub fn tc_rally(&self) -> Option<(I16F16, I16F16, Option<u32>)> {
-        let s = self.tc_state(TOWN_CENTER_ID)?;
+        self.tc_rally_of(TOWN_CENTER_ID)
+    }
+
+    /// A specific Town Center's rally point (M8): the
+    /// per-Town-Center form of `tc_rally`, same shape.
+    pub fn tc_rally_of(&self, tc: u32) -> Option<(I16F16, I16F16, Option<u32>)> {
+        let s = self.tc_state(tc)?;
         s.rally.map(|(x, y)| (x, y, s.rally_node))
     }
 
@@ -1770,11 +1815,17 @@ impl Sim {
     /// indicator (INF-03). Human-only: the AI reads its own idle
     /// state directly, and the client's indicators are the human's.
     pub fn idle_villagers(&self) -> Vec<u32> {
+        self.idle_villagers_of(entity::OWNER_PLAYER)
+    }
+
+    /// Idle villagers of a specific player (M8): the per-player form
+    /// of `idle_villagers`, same definition, any seat.
+    pub fn idle_villagers_of(&self, owner: u8) -> Vec<u32> {
         self.entities
             .iter()
             .filter(|e| {
                 e.kind == EntityKind::Villager
-                    && e.owner == entity::OWNER_PLAYER
+                    && e.owner == owner
                     && !e.dead
                     && e.task == Task::Idle
                     && e.order.is_none()
@@ -1789,11 +1840,17 @@ impl Sim {
     /// (Scout, Militia, Archer) with no move order and no attack
     /// target. Id order. The mirror of `idle_villagers`.
     pub fn idle_military(&self) -> Vec<u32> {
+        self.idle_military_of(entity::OWNER_PLAYER)
+    }
+
+    /// Idle military of a specific player (M8): the per-player form
+    /// of `idle_military`, same definition, any seat.
+    pub fn idle_military_of(&self, owner: u8) -> Vec<u32> {
         self.entities
             .iter()
             .filter(|e| {
                 e.kind.is_military()
-                    && e.owner == entity::OWNER_PLAYER
+                    && e.owner == owner
                     && !e.dead
                     && e.order.is_none()
                     && e.attack_target.is_none()
@@ -1831,6 +1888,7 @@ impl Sim {
                 Command::TrainAt { building, kind } => self.issue_train_at(building, kind),
                 Command::Queue { entity, order } => self.issue_queue(entity, order),
                 Command::SetRally { building, x, y } => self.issue_set_rally(building, x, y),
+                Command::SetRallyTc { tc, x, y } => self.issue_set_rally_tc(tc, x, y),
                 Command::ResearchTc { tech } => self.issue_research_tc(tech),
                 Command::ResearchTcAt { tc, tech } => self.issue_research_tc_at(tc, tech),
                 Command::ResearchAt { building, tech } => self.issue_research_at(building, tech),
@@ -1974,7 +2032,9 @@ impl Sim {
         //    next tick's step 1 like any command. No state is touched
         //    directly, so a match is still just (seed, mode, the
         //    human's commands) and replays bit-identically.
-        if self.mode.is_match() && self.tick % ai::config(self.mode).cadence == 0 {
+        if matches!(self.mode, MatchMode::AiEasy | MatchMode::AiNormal)
+            && self.tick % ai::config(self.mode).cadence == 0
+        {
             ai::decide(self);
         }
 
@@ -2466,6 +2526,35 @@ impl Sim {
                 self.buildings[bi].rally = Some((x, y));
                 self.buildings[bi].rally_node = node;
             }
+        }
+    }
+
+    /// Apply a `SetRallyTc` command (M8): the `None` case of
+    /// `issue_set_rally` for an arbitrary Town Center — the rally
+    /// lands on that Town Center's own state, whichever seat owns
+    /// it. A missing or dead Town Center rejects silently.
+    fn issue_set_rally_tc(&mut self, tc: u32, x: I16F16, y: I16F16) {
+        if !self.can_set_rally_tc(tc) {
+            return;
+        }
+        let (x, y) = (clamp_pos(x), clamp_pos(y));
+        let node = self.rally_snap_node(x, y);
+        if let Some(s) = self.tc_states.iter_mut().find(|s| s.tc_id == tc) {
+            s.rally = Some((x, y));
+            s.rally_node = node;
+        }
+    }
+
+    /// Would a `SetRallyTc` command be accepted right now? A Town
+    /// Center always holds a rally point (the `can_set_rally(None)`
+    /// rule), so this only asks that the Town Center exists and
+    /// lives.
+    pub fn can_set_rally_tc(&self, tc: u32) -> bool {
+        match self.entity_index(tc) {
+            Some(i) => {
+                self.entities[i].kind == EntityKind::TownCenter && !self.entities[i].dead
+            }
+            None => false,
         }
     }
 
