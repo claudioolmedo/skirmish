@@ -89,7 +89,7 @@ Survival is much easier when staying alive is cheap. The numbers today:
 |-------|-----------|-----|
 | Game hosting | **$0** | Static files on free-tier static hosting; the game is small (the WASM sim + sprites are measured in hundreds of KB) |
 | Single-player | **$0** | No server at all (section 2) |
-| Multiplayer relay (shipped, M8) | **$0 today** — free tier; ~$2/month class if it outgrows it | See below |
+| Multiplayer relay (shipped, M8; open-games directory M9) | **$0 today** — free tier; ~$2/month class if it outgrows it | See below |
 
 The multiplayer design is where the architecture pays for itself.
 Multiplayer is **deterministic lockstep**: the simulation runs identically
@@ -101,6 +101,10 @@ shipped 2026-10-18) runs on a free tier today and the design's
 ceiling is a ~$2/month-class instance, not a fleet — and why the
 per-turn state hash doubles as a free
 desync detector instead of a server-side anti-cheat system.
+The open-games directory (M9) follows the same discipline: rooms
+report only their socket count, so the lobby list is a handful of
+counters next to the pipe — it stores no players and no game state,
+and it costs nothing beyond the relay itself.
 
 Costs that scale with *players* are the classic way game servers die.
 Lockstep makes our server cost scale with almost nothing.

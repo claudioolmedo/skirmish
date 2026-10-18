@@ -19,33 +19,45 @@ on the page itself.
 
 ## Where the slots are
 
-| Slot element id | Position | Size |
-| --- | --- | --- |
-| `ad-slot-leaderboard` | Under the hero, above the Play section | 728×90, collapsing to 320×50 on small screens |
-| `ad-slot-play` | Beside the game frame in the Play section (stacks underneath on narrow screens) | 300×250 |
+| Slot element id | Page | Position | Size |
+| --- | --- | --- | --- |
+| `ad-slot-leaderboard` | Landing (`index.html`) | Under the hero, above the Play section | 728×90, collapsing to 320×50 on small screens |
+| `ad-slot-play` | Landing (`index.html`) | Beside the game frame in the Play section (stacks underneath on narrow screens) | 300×250 |
+| `ad-slot-lobby` | Play (`play/index.html`) | Right sidebar of the Lobby Browser — beside the open-games table on desktop, stacked below it on narrow screens | 300×250 |
 
-Both slots are declared in `index.html`; styling lives in `site.css`;
-behavior and configuration live in **`ads.js` — the only file that needs
-editing to activate real ads.**
+The two-slots-per-page rule holds on every page: the landing carries
+two, the play page carries one. The lobby slot exists **only in the
+lobby/waiting view** — the overlay closes when a match starts, so the
+ad is never on screen during play and never over the game canvas.
+
+The landing slots are declared in `index.html`, the lobby slot in
+`play/index.html`; styling lives in `site.css`; behavior and
+configuration live in **`ads.js` — the only file that needs editing
+to activate real ads.**
 
 ## How it works today
 
 `ads.js` ships with `enabled: false` and placeholder ids, so every slot
 renders a **house placeholder**: a friendly message ("Your friendly ad will
 live here soon — for now, thanks for playing!") with a link to the GitHub
-repo. The layout, labels and reserved sizes are already final, so swapping
-in real ads causes no layout shift and no page redesign.
+repo. The lobby slot renders a designed **promo for the game itself**
+(emblem, headline, button) that fills its 300×250 box like a real unit,
+so the placement can be judged realistically — it never pretends to be a
+third-party sponsor. The layout, labels and reserved sizes are already
+final, so swapping in real ads causes no layout shift and no redesign.
 
 ## Activating AdSense (once approved)
 
 1. In the AdSense dashboard, confirm the site `skirmish.online` is approved.
-2. Create two ad units (Display ads):
+2. Create three ad units (Display ads):
    - one responsive/leaderboard unit for the under-hero slot,
-   - one 300×250 (medium rectangle) unit for the beside-the-game slot.
+   - one 300×250 (medium rectangle) unit for the beside-the-game slot,
+   - one 300×250 (medium rectangle) unit for the lobby sidebar slot.
 3. Open `web-preview/ads.js` and edit the `CONFIG` block at the top:
    - `clientId`: your publisher id (`ca-pub-…`),
    - `slots["ad-slot-leaderboard"]`: the leaderboard unit's slot id,
    - `slots["ad-slot-play"]`: the rectangle unit's slot id,
+   - `slots["ad-slot-lobby"]`: the lobby unit's slot id,
    - `enabled`: set to `true`.
 4. Commit and publish as usual (`web-preview/` → `gh-pages`).
 

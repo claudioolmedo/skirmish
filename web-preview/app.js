@@ -55,6 +55,10 @@ import {
   createRelayClient, probeRegionPing, makeRoomId, buildPlayUrl,
   parsePlayParams, pickFastestRegion, REGIONS as NET_REGIONS,
 } from './play/netplay.js';
+import {
+  LOBBIES_REFRESH_MS, parseLobbies, lobbyRowModel, sortLobbyRows,
+  joinTarget,
+} from './play/lobby.js';
 
 const assetUrl = (rel) => new URL(rel, import.meta.url).href;
 
@@ -1178,6 +1182,15 @@ function fitCanvas() {
 let netUi = null; // DOM refs, filled by wireNetUi() in main()
 let regionList = NET_REGIONS; // replaced by the relay's /regions when fetched
 
+// --- M9: open-games browser state -----------------------------------
+// The directory (relay GET /lobbies) is polled while the Lobby
+// Browser is open; the shaping/sorting lives in play/lobby.js.
+let lobbyPings = {}; // region id -> measured ms (shares loadRegionsAndPings' probes)
+let lobbyGames = { open: [], inProgress: 0 };
+let lobbyTimer = null;
+let lobbySelectedRoom = null;
+let lobbySort = { key: 'created', dir: 1 };
+
 const regionName = (id) => (regionList.find((r) => r.id === id) || {}).name || id;
 
 function lobbyStatus(text) {
@@ -1320,6 +1333,7 @@ function onDesync(e) {
 /// Tear the whole netplay state down (the caller resets the local
 /// game afterwards when appropriate).
 function teardownNet() {
+  stopLobbyBrowser();
   if (net && net.client) net.client.close();
   net = null;
   if (netUi) {
@@ -1419,6 +1433,7 @@ function beginOnlineMatch() {
   });
   net.session = makeNetSession();
   net.phase = 'playing';
+  stopLobbyBrowser();
   showOverlay(netUi.onlineOverlay, false);
   setPaused(false);
   playing = true;
@@ -1628,9 +1643,10 @@ function connectToRoom() {
   net.client.connect(wsUrl);
 }
 
-/// Open the lobby overlay. With `join` ({room, region}) the client
-/// enters as the guest and connects at once; otherwise it is the
-/// create view (region pick + Create game).
+/// Open the lobby overlay — since M9 this is the Lobby Browser:
+/// the open-games table over the create view. With `join`
+/// ({room, region}) the client skips the browser entirely, enters
+/// as the guest and connects at once (the link flow).
 function openLobby(join) {
   if (net) teardownNet();
   net = {
@@ -1647,9 +1663,18 @@ function openLobby(join) {
   if (netUi.startBtn) netUi.startBtn.disabled = true;
   if (netUi.roomLinkRow) netUi.roomLinkRow.hidden = !join;
   if (netUi.createBtn) netUi.createBtn.disabled = !!join;
+  // Browsing shows the games table + create view; joining by link
+  // shows only the status line (and the waiting-view ad sidebar).
+  if (netUi.gamesSection) netUi.gamesSection.hidden = !!join;
+  if (netUi.createSection) netUi.createSection.hidden = !!join;
   lobbyStatus(join ? 'Joining the room…' : 'Pick a server, then create the game.');
   loadRegionsAndPings();
-  if (join) connectToRoom();
+  if (join) {
+    stopLobbyBrowser();
+    connectToRoom();
+  } else {
+    startLobbyBrowser();
+  }
   updateNetStatus();
 }
 
@@ -1666,13 +1691,16 @@ async function loadRegionsAndPings() {
   } catch { /* keep the built-in mirror */ }
   if (!net || net !== mine) return;
   renderRegionList({});
+  renderLobbyGames();
   const pings = {};
   for (const r of regionList) {
     const res = await probeRegionPing({ relayHttp: RELAY_HTTP, region: r.id })
       .catch(() => null);
     if (!net || net !== mine) return;
     pings[r.id] = res ? res.ms : null;
+    lobbyPings[r.id] = pings[r.id];
     renderRegionList(pings);
+    renderLobbyGames();
   }
   // Pre-highlight the nearest server; the choice stays the player's.
   if (net && net === mine && !net.selectedRegion) {
@@ -1726,6 +1754,133 @@ function createGame() {
   if (netUi.createBtn) netUi.createBtn.disabled = true;
   renderRegionList({});
   connectToRoom();
+}
+
+// --- M9: the open-games browser ---------------------------------------
+
+function startLobbyBrowser() {
+  stopLobbyBrowser();
+  refreshLobbyGames();
+  lobbyTimer = setInterval(refreshLobbyGames, LOBBIES_REFRESH_MS);
+}
+
+function stopLobbyBrowser() {
+  if (lobbyTimer) {
+    clearInterval(lobbyTimer);
+    lobbyTimer = null;
+  }
+}
+
+async function refreshLobbyGames() {
+  try {
+    const res = await fetch(RELAY_HTTP + '/lobbies');
+    if (!res.ok) return;
+    const parsed = parseLobbies(await res.json());
+    if (!parsed) return;
+    lobbyGames = parsed;
+    // A selection that filled up or vanished is dropped.
+    if (lobbySelectedRoom
+      && !parsed.open.some((g) => g.room === lobbySelectedRoom)) {
+      lobbySelectedRoom = null;
+    }
+    renderLobbyGames();
+  } catch { /* directory unreachable — the last list stands */ }
+}
+
+function renderLobbyGames() {
+  if (!netUi || !netUi.gamesList) return;
+  const models = lobbyGames.open.map((e) => lobbyRowModel(e, {
+    regionName: regionName(e.region),
+    pingMs: lobbyPings[e.region],
+  }));
+  const rows = sortLobbyRows(models, lobbySort.key, lobbySort.dir);
+  const list = netUi.gamesList;
+  list.innerHTML = '';
+  const head = document.createElement('div');
+  head.className = 'game-row game-head';
+  const locArrow = lobbySort.key === 'location'
+    ? (lobbySort.dir === 1 ? ' ▴' : ' ▾') : '';
+  const pingArrow = lobbySort.key === 'ping'
+    ? (lobbySort.dir === 1 ? ' ▴' : ' ▾') : '';
+  head.innerHTML = '<span class="g-title">Game</span>'
+    + `<button type="button" class="g-sort" data-sort="location">Location${locArrow}</button>`
+    + '<span class="g-players">Players</span>'
+    + `<button type="button" class="g-sort" data-sort="ping">Ping${pingArrow}</button>`
+    + '<span class="g-join"></span>';
+  for (const btn of head.querySelectorAll('[data-sort]')) {
+    btn.addEventListener('click', () => {
+      const key = btn.dataset.sort;
+      if (lobbySort.key === key) lobbySort.dir = lobbySort.dir === 1 ? -1 : 1;
+      else lobbySort = { key, dir: 1 };
+      renderLobbyGames();
+    });
+  }
+  list.append(head);
+  if (!rows.length) {
+    const empty = document.createElement('p');
+    empty.className = 'games-empty';
+    empty.textContent = 'No open games right now — create one below.';
+    list.append(empty);
+  }
+  for (const m of rows) {
+    const row = document.createElement('div');
+    row.className = 'game-row' + (m.room === lobbySelectedRoom ? ' selected' : '');
+    row.dataset.room = m.room;
+    row.innerHTML = `<span class="g-title">${m.title}</span>`
+      + `<span class="g-loc">${m.server}</span>`
+      + `<span class="g-players">${m.playersText}</span>`
+      + `<span class="g-ping">${m.pingText}</span>`;
+    const joinBtn = document.createElement('button');
+    joinBtn.type = 'button';
+    joinBtn.className = 'btn btn-ghost btn-sm g-join-btn';
+    joinBtn.textContent = 'Join';
+    joinBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      joinListedGame(m.room);
+    });
+    row.append(joinBtn);
+    row.addEventListener('click', () => {
+      lobbySelectedRoom = m.room;
+      renderLobbyGames();
+    });
+    row.addEventListener('dblclick', () => joinListedGame(m.room));
+    list.append(row);
+  }
+  if (netUi.joinLobbyBtn) {
+    netUi.joinLobbyBtn.disabled = !lobbySelectedRoom;
+  }
+  if (netUi.gamesNote) {
+    const n = lobbyGames.inProgress;
+    netUi.gamesNote.hidden = !(n > 0);
+    netUi.gamesNote.textContent = n > 0
+      ? `${n} match${n === 1 ? '' : 'es'} in progress`
+      : '';
+  }
+}
+
+function joinListedGame(room) {
+  const entry = lobbyGames.open.find((g) => g.room === room);
+  const target = joinTarget(entry);
+  if (!target) return;
+  lobbySelectedRoom = null;
+  openLobby(target);
+}
+
+/// The quiet way out of the browser: back to the local game. From
+/// the page-load browser this starts the solo match that has been
+/// waiting behind the panel; from an online match it leaves first.
+function playSoloFromLobby() {
+  stopLobbyBrowser();
+  if (net && (net.phase === 'playing' || net.phase === 'peer-left')) {
+    leaveNetMatch('abandoned');
+    setPaused(false);
+    playing = true;
+    return;
+  }
+  if (net) teardownNet();
+  showOverlay(netUi.onlineOverlay, false);
+  setPaused(false);
+  playing = true;
 }
 
 // --- replay playback -----------------------------------------------------------
@@ -1934,6 +2089,13 @@ async function main() {
   netUi = {
     onlineOverlay: document.getElementById('online-overlay'),
     onlineClose: document.getElementById('online-close'),
+    gamesSection: document.getElementById('games-section'),
+    createSection: document.getElementById('create-section'),
+    gamesList: document.getElementById('games-list'),
+    gamesNote: document.getElementById('games-in-progress'),
+    refreshGamesBtn: document.getElementById('btn-refresh-games'),
+    joinLobbyBtn: document.getElementById('btn-join-lobby'),
+    soloBtn: document.getElementById('btn-solo'),
     regionList: document.getElementById('region-list'),
     createBtn: document.getElementById('btn-create-game'),
     roomLinkRow: document.getElementById('room-link-row'),
@@ -1963,8 +2125,20 @@ async function main() {
   if (onlineBtn) onlineBtn.addEventListener('click', () => openLobby(null));
   if (netUi.onlineClose) {
     netUi.onlineClose.addEventListener('click', () => {
+      stopLobbyBrowser();
       showOverlay(netUi.onlineOverlay, false);
     });
+  }
+  if (netUi.refreshGamesBtn) {
+    netUi.refreshGamesBtn.addEventListener('click', () => refreshLobbyGames());
+  }
+  if (netUi.joinLobbyBtn) {
+    netUi.joinLobbyBtn.addEventListener('click', () => {
+      if (lobbySelectedRoom) joinListedGame(lobbySelectedRoom);
+    });
+  }
+  if (netUi.soloBtn) {
+    netUi.soloBtn.addEventListener('click', playSoloFromLobby);
   }
   if (netUi.createBtn) netUi.createBtn.addEventListener('click', createGame);
   if (netUi.startBtn) netUi.startBtn.addEventListener('click', hostStartMatch);
@@ -2042,16 +2216,16 @@ async function main() {
   }
   if (netUi.pbExit) netUi.pbExit.addEventListener('click', exitPlayback);
 
-  // Arriving by link (or ?online=1): the local match still starts
-  // instantly behind the lobby, exactly as always — the lobby is
-  // an overlay, never a start screen.
+  // M9: the play page OPENS on the Lobby Browser (online-first) —
+  // the local match waits behind the panel and "Play solo instead"
+  // starts it in one tap. Arriving by link skips the browser and
+  // joins that room directly; ?online=1 lands on the browser too.
   {
     const pp = parsePlayParams(location.search);
+    setPaused(true);
     if (pp.room) {
-      setPaused(true);
       openLobby({ room: pp.room, region: pp.region });
-    } else if (pp.online) {
-      setPaused(true);
+    } else {
       openLobby(null);
     }
   }

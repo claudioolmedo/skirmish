@@ -2311,7 +2311,9 @@ side sampling of public data). · *Status:* **MISSING**.
 ## A. Rule counts
 
 213 rules total. Counts verified mechanically against the status tags in
-this document (2026-10-18, M8 audit).
+this document (2026-10-18, M8 audit; re-verified for M9 the same day —
+the open-games lobby changed no status, see the M9 note in section B,
+so the totals below stand).
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
@@ -2426,6 +2428,16 @@ VIC-08 (KotH), SEL-15/INF-06 completed forms for team play.
 *Status: shipped 2026-10-18 for the lockstep core (NET-01…08 and
 NET-10 re-audited above); the VIC/SIM-11/AI-09 items and NET-09/11
 remain future work.*
+
+**M9 — Open-games lobby.** A public directory of waiting games on
+the relay (rooms report their own socket counts; `GET /lobbies`
+lists them) and the Lobby Browser the play page opens on.
+*Status: shipped 2026-10-18. Re-audit: no NET or INF status
+changes — no rule in §17 or §18 describes a lobby browser, and the
+directory is pre-match transport metadata (room id, region, socket
+count) that never enters hashed state, so NET-01's letter is
+untouched and INF-07's in-match information split is unaffected.
+The counts in section A are unchanged.*
 
 Cross-cutting at every milestone: NET-05/06 discipline (no local factor
 in the sim; RNG only in fixed iteration) and VIS-09 (fog hides

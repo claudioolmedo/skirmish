@@ -164,6 +164,23 @@ From the [Gap Analysis](GAP-ANALYSIS.md): the items that most make Skirmish II
   gained only additive pieces — a two-player mode, one per-seat
   command form, per-seat ABI wrappers; no behavior changed. See
   ARCHITECTURE.md, "M8 — lockstep multiplayer".
+- **M9 — Open-games lobby (shipped 2026-10-18).** Online is the
+  front door: the play page opens on a Lobby Browser in the
+  traditional shape — a compact table of open games (auto-generated
+  title, server/region, players as 1/2, your measured ping to that
+  region), sortable by location, refreshed automatically every
+  ~5 s with a manual Refresh beside it. Double-click a row (or
+  select it and press Join Lobby) to join; Create Lobby hosts with
+  the M8 region pick and link; solo play is one quiet tap under
+  the table. The one server addition is a directory: each room
+  reports its own socket count to a singleton Lobby object on the
+  relay (`GET /lobbies`); it stores only the room's public id, its
+  region and the count, pruned after 120 s without an update — no
+  players, no state, no identifiers. The lobby carries the play
+  page's single ad slot in a right sidebar (house promo today),
+  visible only while waiting — never over the game. Zero sim
+  changes. See ARCHITECTURE.md, "M8 — lockstep multiplayer"
+  (directory bullet).
 
 ## Good first contributions
 

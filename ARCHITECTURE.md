@@ -753,6 +753,23 @@ dumb relay.
   the same location. The match room itself is created under the
   chosen region's hint, so match traffic lands in the picked
   region too.
+- **Open-games directory (M9).** The play page opens on a Lobby
+  Browser — the list of games waiting for a second player — so the
+  relay gained exactly one directory: a singleton `Lobby` Durable
+  Object. Each match room reports its own socket count to it on
+  every open/close (`{room, region, players, ts}`; the region is
+  the location hint the room was created under, persisted in the
+  room's storage on its first request). `GET /lobbies` serves
+  `{open: [{room, region, players: 1, createdAt}], inProgress}`
+  and prunes entries with no report for 120 s. Probe rooms never
+  register. The directory stores nothing else — room ids are the
+  random ids hosts already share publicly by link; there are no
+  accounts, names, IPs or per-player records, and nothing about a
+  match that has started beyond its count in `inProgress`. The
+  client polls it every ~5 s while the browser is open and renders
+  the traditional table (auto title "1v1 Arabia — <region>",
+  players 1/2, the player's measured ping to the region); joining
+  a row is the same guest flow as opening its link.
 - **Disconnect & rejoin.** A dropped socket pauses the remaining
   side ("Opponent disconnected") with a 90-second grace window.
   Rejoin is by the same link: the remaining peer transfers the
@@ -775,11 +792,13 @@ dumb relay.
   identifier exists. It feeds fidelity and quality work
   (SUSTAINABILITY.md §5), never mechanics changes.
 - **The relay deliberately does NOT** run game logic, see game
-  state (it forwards opaque bytes), track presence, store anything
-  per-match, or authenticate anyone — the link is the capability.
-  Its only extras over the dumb pipe are the probe echo and the
-  telemetry counters. Relay source lives outside this repository
-  while the server-license decision is open.
+  state (it forwards opaque bytes), track people (the M9 directory
+  counts sockets per room — it knows rooms, never who is in them),
+  store anything per-match, or authenticate anyone — the link is
+  the capability. Its only extras over the dumb pipe are the probe
+  echo, the telemetry counters and the room directory. Relay
+  source lives outside this repository while the server-license
+  decision is open.
 - **Sim/ABI additions (purely additive).** `MatchMode::TwoPlayer`
   (tag 3; the AI step's gate now names the AI modes explicitly so
   the script can never drive a networked seat);
