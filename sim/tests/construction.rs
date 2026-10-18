@@ -16,6 +16,34 @@ fn villager(sim: &Sim, id: u32) -> &skirmish_sim::Entity {
     sim.entities().iter().find(|e| e.id == id).unwrap()
 }
 
+/// The first anchor cell near the Town Center where `kind` may be
+/// built by `entity` — M7: placement scenarios derive their ground
+/// from the generated map (the arena's fixed open cells are gone),
+/// scanning rings around the Town Center like the AI's own search.
+fn open_anchor_near_tc(sim: &Sim, entity: u32, kind: BuildingKind) -> (u32, u32) {
+    let tc = sim.town_center();
+    let (tcx, tcy) = sim.grid().world_to_cell(tc.pos_x, tc.pos_y);
+    for r in 2..=12i32 {
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if dx.abs() != r && dy.abs() != r {
+                    continue;
+                }
+                let (ax, ay) = (tcx as i32 + dx, tcy as i32 + dy);
+                if ax < 0 || ay < 0 {
+                    continue;
+                }
+                let (ax, ay) = (ax as u32, ay as u32);
+                let (x, y) = anchor_point(sim, ax, ay);
+                if sim.can_build(entity, kind, x, y) {
+                    return (ax, ay);
+                }
+            }
+        }
+    }
+    panic!("no buildable ground near the Town Center");
+}
+
 /// A world point inside anchor cell `(cx, cy)` (its center), the way a
 /// client would report a placement click.
 fn anchor_point(sim: &Sim, cx: u32, cy: u32) -> (I16F16, I16F16) {
@@ -239,9 +267,30 @@ fn invalid_placements_are_rejected_whole() {
     let mut sim = Sim::new(43);
     let start_wood = sim.stockpile().amount(ResourceKind::Wood);
 
-    // (a) on a wall cell, (b) on a berry node, (c) on the Town Center,
-    // (d) hanging off the map edge.
-    for (cx, cy) in [(25, 10), (21, 24), (23, 23), (49, 49)] {
+    // (a) on a blocked cell (a standing tree — the arena's wall
+    // cell's M7 analog), (b) on a berry node, (c) on the Town
+    // Center, (d) hanging off the map edge. M7: the cells are
+    // derived from seed 43's generated map, not fixed coordinates.
+    let cell_of = |x: I16F16, y: I16F16| sim.grid().world_to_cell(x, y);
+    let tree = sim
+        .nodes()
+        .iter()
+        .find(|n| n.kind == NodeKind::Tree)
+        .unwrap();
+    let berry = sim
+        .nodes()
+        .iter()
+        .find(|n| n.kind == NodeKind::BerryBush)
+        .unwrap();
+    let tc = sim.town_center();
+    let dim = sim.grid().width();
+    let blocked_cells = [
+        cell_of(tree.pos_x, tree.pos_y),
+        cell_of(berry.pos_x, berry.pos_y),
+        cell_of(tc.pos_x, tc.pos_y),
+        (dim - 1, dim - 1),
+    ];
+    for (cx, cy) in blocked_cells {
         build(&mut sim, 1, BuildingKind::House, cx, cy);
         sim.tick();
         assert_eq!(
@@ -257,10 +306,11 @@ fn invalid_placements_are_rejected_whole() {
     );
 
     // (e) overlapping a standing building.
-    build(&mut sim, 1, BuildingKind::House, 18, 27);
+    let (hx, hy) = open_anchor_near_tc(&sim, 1, BuildingKind::House);
+    build(&mut sim, 1, BuildingKind::House, hx, hy);
     sim.tick();
     assert_eq!(sim.buildings().len(), 1);
-    build(&mut sim, 2, BuildingKind::House, 19, 28);
+    build(&mut sim, 2, BuildingKind::House, hx + 1, hy + 1);
     sim.tick();
     assert_eq!(
         sim.buildings().len(),
@@ -485,9 +535,14 @@ fn solo_house_takes_exactly_1500_ticks_of_work() {
 #[test]
 fn two_builders_finish_a_house_in_about_1125_ticks() {
     let mut sim = Sim::new(67);
-    build(&mut sim, 1, BuildingKind::House, 18, 27);
+    // M7: the plot is the first buildable ground near the Town
+    // Center on seed 67's generated map (the arena's fixed cell
+    // (18, 27) is now wherever the generator put the forest), so
+    // the ≈1125 + short-travel budget measures the same thing.
+    let (hx, hy) = open_anchor_near_tc(&sim, 1, BuildingKind::House);
+    build(&mut sim, 1, BuildingKind::House, hx, hy);
     sim.tick();
-    build(&mut sim, 2, BuildingKind::House, 18, 27); // resume: second builder
+    build(&mut sim, 2, BuildingKind::House, hx, hy); // resume: second builder
     sim.tick();
     assert_eq!(sim.buildings().len(), 1);
 

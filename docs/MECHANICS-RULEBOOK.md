@@ -139,53 +139,61 @@ construction; a headless replay example exists (`sim/examples/replay.rs`).
 
 **MAP-01 — The world is a tile grid; distances are in tiles.** All ranges,
 speeds, and line-of-sight values in the data tables are expressed in tiles.
-*Source:* MECHANICS-STUDY §4.2. · *Impl:* our coarse cell (4 world units) is
-the tile analog; every range constant must be authored in tiles and
-converted once (e.g. GATHER_RANGE 2.5 world units = 0.625 cells today —
-when combat lands, re-express ranges in the tile convention and record the
-conversion in the data table). · *Status:* **DIFFERS** (fixed 50×50-cell
-world of world-unit ranges; no tile-convention table yet).
+*Source:* MECHANICS-STUDY §4.2. · *Impl:* shipped (M7) — 1 cell = 1 tile
+= 4 world units, on a 120×120-tile map (MAP-02); table values are
+authored in tiles and converted once in the data tables (unit LoS, for
+instance, is stored in world units as tiles × 4 — `units.rs`). ·
+*Status:* **MATCHES**.
 
 **MAP-02 — Map sizes.** Square maps from Tiny (120×120 tiles) to Ludicrous
 (480×480); object counts and victory timers scale with size (VIC-02).
 *Source:* GAP 7.2; Relic wiki (victory duration table by size). · *Impl:*
-world size becomes a match setting parameterizing `Grid`, node/animal
-placement, and camera/minimap geometry end-to-end. · *Status:* **MISSING**
-(hardcoded 200×200 world units / 50×50 cells).
+shipped in part (M7) — the 2-player size, Tiny 120×120 tiles, is the
+world (world units [-240, 240), 1 tile = 1 cell = 4 units); the client
+reads every dimension from the ABI, so sizes parameterize end-to-end
+when more land. · *Status:* **DIFFERS** (Tiny only; the larger sizes
+and their object/timer scaling are not implemented).
 
 **MAP-03 — Terrain types gate movement and placement.** Terrains include
 grass, dirt, sand, snow, ice, beach, shallows, and deep water. Each terrain
 declares which movement domains may enter it and whether buildings may be
 placed on it.
-*Source:* GAP 7.3, 7.5. · *Impl:* a terrain layer in `Grid` beside the
-blocked layers; passability is *derived* (terrain × domain) rather than
-stored per unit. · *Status:* **MISSING** (one flat ground type; walls are
-compile-time constants in `grid.rs`).
+*Source:* GAP 7.3, 7.5. · *Impl:* shipped in part (M7) — a terrain
+layer in `Grid` beside the blocked layers (land / water); passability
+for the one domain that exists (land) is derived: water blocks
+movement and placement, land admits both. The compile-time wall layout
+is gone. · *Status:* **DIFFERS** (only land and water exist as types —
+dirt/sand/snow/ice/beach/shallows are not distinct terrains yet;
+shorelines render as sand on the client only).
 
 **MAP-04 — Forests are resource and obstacle at once.** A forest tile holds
 one tree node (100 wood). A tree blocks pathing while it stands; when
 chopped out, the tile frees immediately (the stump is visual only). Onager-
 line attacks can fell trees (CMB-16).
-*Source:* MECHANICS-STUDY §6.3; GAP 3.3, 6.9. · *Impl:* today trees are
-point nodes on a separate static wall layout — the M7 terrain work merges
-node and obstacle: a tree node *is* the cell's block until depleted. ·
-*Status:* **DIFFERS** (nodes exist with correct amounts; they don't block,
-and walls are unrelated constants).
+*Source:* MECHANICS-STUDY §6.3; GAP 3.3, 6.9. · *Impl:* shipped (M7) —
+node and obstacle are merged: a tree node *is* its cell's block (the
+grid's node-block layer, set at generation) until the tick it depletes,
+when the cell opens; gather orders path to a standing cell beside the
+tree. · *Status:* **MATCHES** (the blocking rule; Onager-line felling
+is CMB-16, still missing with the siege line).
 
 **MAP-05 — Elevation is per-tile data.** The map carries a discrete height
 level per tile (the reference data model uses 7 levels), independent of
 terrain type. Rendering lifts tiles by their height; gameplay reads height
 *differences* only.
-*Source:* OPENAGE-RESEARCH §2.3; GAP 7.4. · *Impl:* a height byte per cell
-in `Grid`, hashed; consumed by CMB-05 and the renderer's iso lift. ·
-*Status:* **MISSING** (flat world).
+*Source:* OPENAGE-RESEARCH §2.3; GAP 7.4. · *Impl:* shipped (M7) — a
+height byte per cell in `Grid`, hashed per tick, consumed by CMB-01's
+elevation factor and the renderer's iso lift. We carry 5 levels
+(0–4), not the reference's 7 — the combat rule reads differences only
+(MAP-06 is binary), so the count is presentational. · *Status:*
+**DIFFERS** (5 levels, not 7).
 
 **MAP-06 — Hill bonus is binary.** Any height advantage — one level is
 enough — gives the full damage multiplier (CMB-05). It never scales with
 the size of the height difference.
 *Source:* MECHANICS-STUDY §1.4, confirmed by AoK Heaven elevation tests. ·
-*Impl:* sign comparison at damage time; no float. · *Status:* **MISSING**
-(no elevation, no damage yet).
+*Impl:* shipped (M7) — sign comparison at damage time inside CMB-01's
+formula (`compute_damage_elev`); no float. · *Status:* **MATCHES**.
 
 **MAP-07 — Cliffs are impassable elevation breaks.** A cliff is a border
 between tiles where height changes discontinuously; land units can never
@@ -193,17 +201,24 @@ cross it, whatever the heights. (Whether the uphill damage penalty applies
 across cliffs is AMBIGUOUS in the sources — MECHANICS-STUDY §1.4; the
 working default is that the downhill bonus applies, the uphill penalty
 does not.)
-*Source:* OPENAGE-RESEARCH §2.3; MECHANICS-STUDY §1.4. · *Impl:* cliff
-borders as cost-∞ edges in the pathing grid, derived from the height
-layer. · *Status:* **MISSING**.
+*Source:* OPENAGE-RESEARCH §2.3; MECHANICS-STUDY §1.4. · *Impl:* not
+built (M7) — the generator caps adjacent-cell height deltas at 2 and
+flattens starts, so no cliff-like breaks exist to cross; until cliffs
+are authored, the damage default from the study applies everywhere
+(both the downhill bonus and the uphill penalty, via CMB-01). ·
+*Status:* **MISSING**.
 
 **MAP-08 — Water belongs to ships.** Deep water admits only ships;
 shallows admit ships (and, in the reference, nothing else — there is no
 wading). Land units path only on land. The shoreline is where the domains
 meet; Docks are placed straddling it (BLD-14).
-*Source:* GAP 7.5. · *Impl:* one passability grid per movement domain
-(land/water), as in OPENAGE-RESEARCH §2.1; a unit's data names its domain.
-· *Status:* **MISSING** (no water at all).
+*Source:* GAP 7.5. · *Impl:* shipped in part (M7) — water is a terrain
+type: land units path only on land (A* and placement both refuse it),
+and generated ponds are validated (clear of starts, never severing the
+landmass). The water domain itself — ships, shallows, Docks (BLD-14),
+fishing (ECO-15) — is not built: Arabia v1 carries water as terrain
+only, sparingly (0–2 small ponds, some seeds have none). · *Status:*
+**DIFFERS**.
 
 **MAP-09 — Generated maps guarantee fair starts.** A random-map script
 places, per player: a Town Center start, a nearby woodline, a berry patch,
@@ -211,18 +226,26 @@ main and secondary gold and stone, herdables and huntables in standard
 counts/distances, straggler trees, and relics distributed across the map —
 roughly symmetric between players. The exact start package is specified in
 [`OPENING-SPEC.md`](OPENING-SPEC.md).
-*Source:* GAP 7.1; wiki map pages. · *Impl:* the generator runs *inside*
-match creation from the match seed (deterministic; its output is ordinary
-state, hashed like everything else). · *Status:* **MISSING** (one fixed
-hand-authored layout, identical for every seed).
+*Source:* GAP 7.1; wiki map pages. · *Impl:* shipped (M7) — the Arabia
+generator runs *inside* match creation from the match seed
+(deterministic sub-seed stream; its output is ordinary state, hashed
+like everything else). Start B's package is start A's mirrored through
+the map center, so counts and distances are exactly equal. Generation
+validates (resources reachable, a land path between the starts, no
+start enclosed, shoreline clearance) and regenerates with the next
+sub-seed on failure — bounded at 64 attempts, then a fixed fallback
+template that validates by construction. Relics are not distributed
+yet (they land with §12). · *Status:* **MATCHES** (the start package
+and fairness guarantee; relics pending §12).
 
 **MAP-10 — Straggler trees are ordinary trees.** The single trees scattered
 near starts follow MAP-04 exactly; their only special property is
 positional (players save them for future farmers — a strategy fact, not a
 rule).
 *Source:* community build-order literature (see OPENING-SPEC). · *Impl:*
-nothing special; node kind Tree. · *Status:* **MATCHES** in kind (trees
-exist); placement is part of MAP-09.
+nothing special; node kind Tree — and since M7 their placement is the
+generator's (MAP-09): 3 stragglers per start in the §2.3 band. ·
+*Status:* **MATCHES**.
 
 **MAP-11 — The world edge is a wall.** Out-of-bounds is impassable for
 every domain.
@@ -234,9 +257,10 @@ to player 0 (Gaia) until a rule transfers them (herdable capture AI-06,
 relic pickup MNK-09). Gaia never acts except through the animal rules
 (§15).
 *Source:* wiki (Gaia/Mother Nature); Conversion wiki (Gaia objects). ·
-*Impl:* an `owner` field per entity with 0 = Gaia once players exist (M3+
-entity model); today there is exactly one player and no ownership field. ·
-*Status:* **MISSING** (single-player world, no owner concept).
+*Impl:* shipped — an `owner` field per entity (and per building):
+Gaia owns every node and wild animal until capture/harvest rules
+transfer them; the two player seats own the rest (M3/M5 entity model).
+· *Status:* **MATCHES**.
 
 ---
 
@@ -245,52 +269,74 @@ entity model); today there is exactly one player and no ownership field. ·
 **VIS-01 — Three visibility states.** Every tile has, per player, one of
 three states: *unexplored* (black), *explored* (terrain shown dimmed,
 frozen at last sight), *visible* (live).
-*Source:* OPENAGE-RESEARCH §2.5; GAP 7.6. · *Impl:* a per-player byte grid
-on the **client** (derived data, recomputed from sim LoS — never hashed;
-see VIS-09). · *Status:* **MISSING** (everything always visible).
+*Source:* OPENAGE-RESEARCH §2.5; GAP 7.6. · *Impl:* shipped (M7) — a
+per-player byte grid (0 unexplored / 1 explored / 2 visible) for each
+player, recomputed in the sim every 15 ticks and at match creation.
+**Deviation, recorded deliberately:** the grid lives *inside* `Sim`
+and is hash-covered, not client-side as first sketched — VIS-09's own
+note sanctions computing visibility deterministically in the sim, and
+M7's AI must decide *from* its grid (VIS-09 below), which only replays
+bit-identically if the grid is state. The client receives the local
+player's grid through the ABI and renders strictly from it. ·
+*Status:* **MATCHES**.
 
 **VIS-02 — Visibility is the union of sight circles.** A tile is visible
 while it lies within the line-of-sight radius of any of the player's units
 or buildings (or a vision-sharing ally's, VIS-08).
-*Source:* OPENAGE-RESEARCH §2.5. · *Impl:* recompute on the ticks where
-positions change materially (every tick is fine at our scale); radii come
-from the unit/building data tables. · *Status:* **MISSING** (no LoS field
-exists in any stat table yet).
+*Source:* OPENAGE-RESEARCH §2.5. · *Impl:* shipped (M7) — visibility is
+the union of integer sight discs stamped from every living unit and
+standing building of the player, rebuilt on a fixed 15-tick interval
+(cost: sources × disc area, independent of map area — no per-tick
+full-map scans). · *Status:* **MATCHES**.
 
 **VIS-03 — Line of sight is a unit stat.** Every unit and building has a
 LoS radius in the data tables (MECHANICS-STUDY §3 lists them per unit; for
 ranged units it is typically range + 2). Technologies can raise building
 LoS (Town Watch +4, Town Patrol +4).
-*Source:* MECHANICS-STUDY §3, §8; Technology wiki. · *Impl:* `los` column in
-the unit/building tables; tech patches modify it like any other stat
-(TEC-06). · *Status:* **MISSING**.
+*Source:* MECHANICS-STUDY §3, §8; Technology wiki. · *Impl:* shipped in
+part (M7) — the unit tables carry a `los` column (world units, tiles ×
+4) and fog reads the owner's *effective* row, so the Scout's Feudal
+LoS rise applies (TEC-06). Building LoS is two **adopted constants —
+Town Center 6 tiles, other buildings 4 — flagged UNVERIFIED**: the
+project docs do not pin building LoS values. Town Watch / Town Patrol
+(+4) are not implemented, and no other tech patches LoS yet. ·
+*Status:* **DIFFERS**.
 
 **VIS-04 — LoS is capped at 20 tiles.** No unit or building sees farther
 than 20 tiles, whatever its stats or technologies say.
 *Source:* wiki, Line of Sight (via OPENAGE-RESEARCH §2.5, §4 item 3). ·
-*Impl:* clamp at visibility-computation time. · *Status:* **MISSING**.
+*Impl:* shipped (M7) — clamped at stamp time in the visibility
+recompute; a test pins that no visible cell ever sits beyond 20 tiles
+of a sight source. · *Status:* **MATCHES**.
 
 **VIS-05 — Sight is not occluded.** Line of sight is a pure radius: hills,
 forests, and buildings do not block or shadow vision. There are no vision
 cones.
 *Source:* OPENAGE-RESEARCH §2.5 (explicit: "radius-based, not
-raycast-occluded, in classic AoE2"). · *Impl:* circle test only — do not
-build raycasting. · *Status:* **MISSING** (rule recorded for M7).
+raycast-occluded, in classic AoE2"). · *Impl:* shipped (M7) — integer
+disc test only; no raycasting exists anywhere in the visibility path.
+· *Status:* **MATCHES**.
 
 **VIS-06 — Explored areas remember buildings, not units.** In explored
 (not currently visible) tiles, terrain and buildings are shown at their
 last-seen state — including buildings destroyed since, which keep showing
 until the tile is seen again. Units are never shown from memory.
-*Source:* OPENAGE-RESEARCH §2.5; GAP 7.6. · *Impl:* the client keeps a
-last-seen building snapshot per tile, updated only while visible. ·
-*Status:* **MISSING**.
+*Source:* OPENAGE-RESEARCH §2.5; GAP 7.6. · *Impl:* shipped (M7) — the
+client keeps a last-seen snapshot per enemy building, refreshed only
+while its ground is visible and dropped when re-seeing finds the
+building gone; the main view and minimap both draw from it, dimmed.
+The enemy Town Center (an entity in our model) follows the same rule;
+units and projectiles render only in currently-visible cells. ·
+*Status:* **MATCHES**.
 
 **VIS-07 — The match starts nearly blind.** At tick 0 a player sees only
 the surroundings of their starting units and Town Center; everything else
 is unexplored. Scouting is the act of converting unexplored → explored.
-*Source:* GAP 7.9. · *Impl:* initial visibility from the starting set's
-LoS (MAP-09 start package includes a scout — see OPENING-SPEC). ·
-*Status:* **MISSING** (full map visible from tick 0).
+*Source:* GAP 7.9. · *Impl:* shipped (M7) — the grids are computed at
+match creation from the starting set alone (Town Center, villagers,
+Scout), so a match opens with only the start's surroundings known;
+tests pin that the enemy start reads unexplored for both players. ·
+*Status:* **MATCHES**.
 
 **VIS-08 — Allies share vision.** In DE, teammates' line of sight is
 shared automatically (the old Cartography technology that once gated this
@@ -298,7 +344,7 @@ was removed from DE). Team visibility is the union over the team.
 *Source:* Technology wiki (Cartography listed among removed/cut generic
 technologies); GAP 8.7 (older gated model, superseded). · *Impl:* merge
 per-team on the client; the sim still tracks per-player truth. ·
-*Status:* **MISSING** (no teams).
+*Status:* **MISSING** (no teams exist yet — 1v1 and Sandbox only).
 
 **VIS-09 — Fog hides information, not truth.** In the lockstep model every
 client simulates the whole world; fog is a presentation filter. Gameplay
@@ -306,18 +352,24 @@ systems (auto-targeting, AI) use simulation truth under their own rules —
 fog never feeds back into the sim. (The accepted trade-off, documented
 since 2001: a tampered client can reveal the map; checksums cannot catch
 that.)
-*Source:* OPENAGE-RESEARCH §2.5, §2.6. · *Impl:* architectural law —
-visibility grids live outside `Sim`; if AI ever needs "what would a player
-see", compute it deterministically inside the sim as a query, never from
-client state. · *Status:* **MATCHES** as a design rule (nothing violates
-it; there is no fog yet to violate it with).
+*Source:* OPENAGE-RESEARCH §2.5, §2.6. · *Impl:* architectural law,
+kept with one recorded refinement (M7): the visibility grids are sim
+state (see VIS-01) — fog still never feeds back into *truth*:
+movement, combat resolution and the economy read the world itself,
+and auto-acquisition's radius is the unit's own LoS, so nothing can
+engage what it could not see. What fog gates is *knowledge*: the
+client's rendering (via the ABI grid) and the scripted AI's
+targeting decisions. No client state ever flows into the sim. ·
+*Status:* **MATCHES** as a design rule.
 
 **VIS-10 — The minimap obeys the same fog.** The minimap renders the
 player's three visibility states (black / dim / live colors); enemy dots
 appear only on visible tiles (INF-04).
-*Source:* GAP 11.1. · *Impl:* `play/minimap.js` already renders live state;
-fog shading joins when VIS-01 lands. · *Status:* **DIFFERS** (minimap
-exists and is live; no fog states yet).
+*Source:* GAP 11.1. · *Impl:* shipped (M7) — the minimap's ground is a
+per-cell terrain base in the player's three fog states (black /
+pre-dimmed / live), and its node, building and entity layers are
+filtered by the same grid the main view uses. · *Status:*
+**MATCHES**.
 
 ---
 
@@ -950,9 +1002,12 @@ Only classes the attacker actually has an attack value in participate
 just more terms in the sum.
 *Source:* MECHANICS-STUDY §1.1, §1.2 (formula pinned, with worked
 examples). · *Impl:* shipped (M3) — `compute_damage` in `combat.rs` over
-(class → value) slices from the unit tables, exactly this shape;
-the elevation factor is 1 everywhere (no elevation exists yet — §2).
-· *Status:* **MATCHES**.
+(class → value) slices from the unit tables, exactly this shape; the
+elevation factor landed with M7 (`compute_damage_elev`): k = 1.25 /
+0.75 / 1 by the sign of the height difference, applied to the
+armor-subtracted sum before the minimum-1 clamp; a projectile carries
+its shooter's elevation from release (PRJ-10). · *Status:*
+**MATCHES**.
 
 **CMB-02 — HP is fractional; death at HP < 1.** Entities carry fractional
 hit points (fixed-point). A unit dies the tick its HP drops below 1 — not
@@ -2156,8 +2211,9 @@ attack alerts (INF-01), and displays ally flares: a flare is a visible
 X marker + sound placed for allies only (Signal Allies).
 *Source:* wiki, Mini map / Signal Allies; GAP 11.1. · *Impl:* minimap
 rendering shipped (terrain, nodes, buildings, entities, viewport rect);
-fog shading waits on VIS-01; flares are a client command + net message
-(NET-10). · *Status:* **DIFFERS** (map yes; fog/flares/alert flashes no).
+fog shading shipped with M7 (VIS-10); flares are a client command + net
+message (NET-10). · *Status:* **DIFFERS** (map and fog yes;
+flares/alert flashes no).
 
 **INF-05 — Selection panel shows identity and health.** A single selected
 unit/building shows its portrait, HP bar, attack/armor stats, and (for
@@ -2232,13 +2288,13 @@ side sampling of public data). · *Status:* **MISSING**.
 ## A. Rule counts
 
 213 rules total. Counts verified mechanically against the status tags in
-this document (2026-10-16).
+this document (2026-10-17, M7 audit).
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
 | 1 | Simulation & time (SIM) | 12 | 10 | 1 | 1 |
-| 2 | Map, terrain & elevation (MAP) | 12 | 2 | 2 | 8 |
-| 3 | Visibility & exploration (VIS) | 10 | 1 | 1 | 8 |
+| 2 | Map, terrain & elevation (MAP) | 12 | 7 | 4 | 1 |
+| 3 | Visibility & exploration (VIS) | 10 | 8 | 1 | 1 |
 | 4 | Selection & orders (SEL) | 16 | 12 | 3 | 1 |
 | 5 | Movement, pathfinding & collision (MOV) | 12 | 3 | 4 | 5 |
 | 6 | Economy & drop-off (ECO) | 17 | 13 | 2 | 2 |
@@ -2254,14 +2310,15 @@ this document (2026-10-16).
 | 16 | Victory, scoring & game modes (VIC) | 12 | 0 | 1 | 11 |
 | 17 | Multiplayer determinism (NET) | 11 | 2 | 1 | 8 |
 | 18 | Information rules (INF) | 11 | 2 | 4 | 5 |
-| | **Total** | **213** | **79** | **38** | **96** |
+| | **Total** | **213** | **91** | **40** | **82** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
-combat stack (§8–§10) landed with M3 and the age/technology layer
-(§11) with M6, so the remaining greenfield is concentrated in the
-systems whose content has not been built yet — monks (§12), trade
-(§13), garrison (§14), the world itself (§2/§3: terrain, fog, water)
-and multiplayer (§17).
+combat stack (§8–§10) landed with M3, the age/technology layer
+(§11) with M6, and the world itself (§2/§3: generated maps, terrain,
+elevation, fog) with M7, so the remaining greenfield is concentrated
+in the systems whose content has not been built yet — monks (§12),
+trade (§13), garrison (§14), the water domain (ships, docks,
+fishing), cliffs, and multiplayer (§17).
 
 ---
 
@@ -2327,10 +2384,16 @@ MNK-01…13 monks, TRD-01…08 market/trade, VIC-02…05, and queue
 cancel/refund (TEC-05). §8–§10 were also re-audited against the
 shipped M3 code in this pass — their MISSING tags were stale.)*
 
-**M7 — World: maps, terrain, fog, water.** MAP-02…09 (sizes, terrain,
-elevation, random maps), MAP-04 completed (trees as blocking nodes),
-MAP-07 (cliffs), MAP-08 + BLD-14 + ECO-15 (water, docks, fishing),
-MOV-11 (domains), VIS-01…08, VIS-10, INF-04 completed (fog minimap).
+**M7 — World: maps, terrain, fog, water.** *(Shipped 2026-10-17:
+the seeded Arabia generator (MAP-09) at Tiny size (MAP-02 in part)
+with mirrored fair starts; terrain + water layers (MAP-03/08 in
+part — water as terrain only); a 5-level height field (MAP-05) and
+the binary hill bonus through CMB-01 (MAP-06); MAP-04 completed
+(trees as blocking nodes); fog of war end-to-end (VIS-01…07,
+VIS-10, INF-04's fog half) with the AI's targeting bound by its own
+grid. Trimmed, deliberately: MAP-07 cliffs, the water domain —
+BLD-14 docks, ECO-15 fishing, ships, MOV-11's water domain — and
+the larger map sizes; VIS-08 waits on teams (M8).)*
 
 **M8 — Multiplayer & match framework.** NET-01…11 (lockstep transport,
 N+2 scheduling, hash comparison, replay/save formats, diplomacy),
@@ -2338,8 +2401,9 @@ VIC-06…10, VIC-12 (mode deltas), SIM-11 (speed settings), AI-09 +
 VIC-08 (KotH), SEL-15/INF-06 completed forms for team play.
 
 Cross-cutting at every milestone: NET-05/06 discipline (no local factor
-in the sim; RNG only in fixed iteration) and VIS-09 (fog never feeds the
-sim) are invariants, not milestones.
+in the sim; RNG only in fixed iteration) and VIS-09 (fog hides
+information, never truth — it gates knowledge consumers only) are
+invariants, not milestones.
 
 ---
 

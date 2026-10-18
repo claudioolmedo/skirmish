@@ -5,14 +5,20 @@
 //! Center, population and buildings, and everything it does goes
 //! through the same `Command` queue the human's client uses —
 //! `TrainVillagerAt`, `Gather`, `Build`, `TrainAt`, `SetRally`,
-//! `Attack`, `AttackBuilding`. It reads only sim state (never the
-//! human's hidden anything — there is no fog yet, VIS rules are a
-//! later milestone, and the script uses nothing a player at the
-//! same screen could not see: positions, counts, stockpiles of its
-//! own seat) and it never draws from the RNG — its decisions are
-//! pure functions of state, in fixed iteration order (ascending
-//! entity/building/node id), so a match replays bit-identically
-//! from (seed, mode, human commands) alone.
+//! `Attack`, `AttackBuilding`. It reads only sim state a player at
+//! its seat could know — and since M7 that includes the fog rules
+//! (VIS-01): its *combat* targeting aims only at units it can
+//! currently see and buildings it has explored, its Scout is sent
+//! to reveal the enemy start before the first wave can aim at it,
+//! and the one positional fact it uses about the enemy base is
+//! Arabia's rotational symmetry (the mirror of its own Town
+//! Center — what any player knows about a mirrored map). Its
+//! economy assigns nodes by Town-Center proximity (its own start's
+//! package — its explored home ground). It never draws from the
+//! RNG — its decisions are pure functions of state, in fixed
+//! iteration order (ascending entity/building/node id), so a match
+//! replays bit-identically from (seed, mode, human commands)
+//! alone.
 //!
 //! The script (AI-04's build order, at v1 depth):
 //!
@@ -59,7 +65,7 @@ use fixed::types::I16F16;
 
 use crate::build::BuildingKind;
 use crate::econ::ResourceKind;
-use crate::entity::{EntityKind, Task, OWNER_OPPONENT, OWNER_PLAYER};
+use crate::entity::{EntityKind, Task, OWNER_GAIA, OWNER_OPPONENT, OWNER_PLAYER};
 use crate::{steer, Command, MatchMode, Sim};
 
 /// The AI's behavior profile (AI-03: behavior parameters only).
@@ -123,18 +129,19 @@ pub(crate) struct AiState {
 }
 
 /// How close (world units) a human unit must come to the AI's Town
-/// Center before idle soldiers engage it in defense. Sized to the
-/// arena: the two Town Centers stand ~17 units apart and each
-/// side's *starting Scout* stands ~10 from the other's Town
-/// Center, so the radius must stay under that — 8 covers the Town
-/// Center and the inner resource lines while keeping defenders on
-/// their own half of the map. (An early larger value had the AI's
-/// Scout raiding the human's base from the first minute, which is
-/// an attack, not a defense.)
-const DEFENSE_RADIUS: I16F16 = I16F16::from_bits(8 * 65536);
+/// Center before idle soldiers engage it in defense: 10 tiles —
+/// the Town Center and its inner resource lines. (M5's arena value
+/// was 8 *units*, sized to a 50×50 map whose Town Centers stood
+/// ~135 units apart; at M7's 120-tile map scale the same idea is a
+/// tile radius. Starting Scouts stand beside their *own* Town
+/// Centers, ~450 units from the enemy's, so no cross-triggering.)
+const DEFENSE_RADIUS: I16F16 = I16F16::from_bits(40 * 65536);
 /// How far from its Town Center the AI looks for a food source
-/// before it starts hunting its own sheep instead.
-const FOOD_SEARCH_RADIUS: I16F16 = I16F16::from_bits(20 * 65536);
+/// before it starts hunting its own sheep instead: 11 tiles — the
+/// berry patch sits 5–8 tiles out (20–32 units) and near-sheep
+/// carcasses land beside the Town Center, so this covers the
+/// start's own food with margin (M7 rescale of the arena's 20).
+const FOOD_SEARCH_RADIUS: I16F16 = I16F16::from_bits(44 * 65536);
 
 /// One decision pass. Called from `Sim::tick` on the cadence;
 /// enqueues commands only (see the module docs). Every loop runs in
@@ -174,9 +181,14 @@ pub(crate) fn decide(sim: &mut Sim) {
     plan_research(sim, &cfg);
 
     // 3. Production-building rally: once each, toward a staging
-    //    point short of the human's Town Center, so fresh troops
-    //    walk toward the front.
+    //    point short of the enemy start, so fresh troops walk
+    //    toward the front.
     plan_rally(sim);
+
+    // 3.5 Scouting (M7): until the enemy start's ground is on the
+    //     AI's map, its idle Scout rides there — the wave step can
+    //     only aim at what the AI has seen.
+    plan_scout(sim, &mut acted);
 
     // 4. Military production: keep the producing building's queue
     //    busy (one enqueue per decision) toward the army target,
@@ -387,16 +399,62 @@ fn find_anchor(
     None
 }
 
+/// The expected enemy start (M7): the rotational mirror of the
+/// AI's own Town Center cell — the one fact Arabia's symmetry
+/// hands every player about the enemy base. Used for the rally
+/// staging point, the Scout's first ride, and a wave that has not
+/// seen anything yet. Deliberately computed from the AI's *own*
+/// state, never from the human's records.
+fn expected_enemy_start(sim: &Sim) -> Option<(I16F16, I16F16)> {
+    let tc = sim.tc_entity_of(OWNER_OPPONENT)?;
+    let (cx, cy) = sim.grid().world_to_cell(tc.pos_x, tc.pos_y);
+    let (mx, my) = (crate::GRID_DIM - 1 - cx, crate::GRID_DIM - 1 - cy);
+    Some(sim.grid().cell_center(mx, my))
+}
+
+/// Scouting (M7): while the enemy start's ground is still
+/// unexplored on the AI's map, an idle Scout is sent there — the
+/// fog rules mean the wave step cannot aim at a base it has never
+/// seen. Once the ground is explored the Scout is left to the
+/// ordinary steps (it defends like any soldier when home).
+fn plan_scout(sim: &mut Sim, acted: &mut Vec<u32>) {
+    let me = OWNER_OPPONENT;
+    let Some((ex, ey)) = expected_enemy_start(sim) else {
+        return;
+    };
+    let (cx, cy) = sim.grid().world_to_cell(ex, ey);
+    if sim.cell_explored_by(me, cx, cy) {
+        return;
+    }
+    let scout = sim
+        .entities()
+        .iter()
+        .find(|e| {
+            e.owner == me
+                && e.kind == EntityKind::ScoutCavalry
+                && is_idle(sim, e.id)
+                && !acted.contains(&e.id)
+        })
+        .map(|e| e.id);
+    if let Some(sid) = scout {
+        sim.push_command(Command::Move {
+            entity: sid,
+            x: ex,
+            y: ey,
+        });
+        acted.push(sid);
+    }
+}
+
 /// Production rally: set once per production building (Barracks,
 /// Archery Range), when it stands complete and has no rally yet —
-/// toward the human's Town Center, stopping short of it (the
+/// toward the expected enemy start, stopping short of it (the
 /// staging point fresh troops gather at).
 fn plan_rally(sim: &mut Sim) {
     let me = OWNER_OPPONENT;
-    let Some(human_tc) = sim.tc_entity_of(OWNER_PLAYER) else {
+    let Some((hx, hy)) = expected_enemy_start(sim) else {
         return;
     };
-    let (hx, hy) = (human_tc.pos_x, human_tc.pos_y);
     let Some(building) = sim.buildings().iter().find(|b| {
         b.owner == me && b.kind.is_production() && b.complete && b.rally.is_none()
     }) else {
@@ -650,6 +708,26 @@ fn assign_idle_villagers(sim: &mut Sim, cfg: &AiConfig, acted: &mut Vec<u32>) {
                         counts[0] += 1;
                         continue;
                     }
+                    // No sheep of its own yet (M7): go and get one.
+                    // The start's herds stand on the generated map
+                    // wherever the generator put them — a villager
+                    // walking to a Gaia sheep captures it by
+                    // proximity on the approach (the kill then
+                    // proceeds on an owned sheep, as above). Without
+                    // this step the whole food economy rides on the
+                    // luck of a work route crossing a sheep: when
+                    // the berries ran out first, the AI starved at
+                    // the Feudal gate with full wood and gold (the
+                    // M7 long-match tests caught it on seed 9).
+                    if let Some(sheep) = nearest_gaia_sheep(sim, hx, hy) {
+                        sim.push_command(Command::Attack {
+                            entity: vid,
+                            target: sheep,
+                        });
+                        acted.push(vid);
+                        counts[0] += 1;
+                        continue;
+                    }
                 }
             }
         }
@@ -684,17 +762,6 @@ fn resource_slot(resource: ResourceKind) -> usize {
     }
 }
 
-/// The nearest live node of `resource` to a point (ties: lowest
-/// id, by scan order) — restricted to the AI's own resource set.
-/// On this arena the two layouts interleave geometrically (each
-/// side's far gold mine sits a hair nearer the *enemy* Town
-/// Center than its own), so "my side" cannot be derived from
-/// distances: it is the mirrored block of the layout — the second
-/// `NODE_SPECS` block of node ids is the opponent's set by
-/// construction (see `Sim::spawn_opponent_start`). Dynamic nodes
-/// (id past the layout: carcasses, farms) belong to whichever
-/// Town Center is nearer — a carcass falls where the kill
-/// happened.
 /// Position of the nearest live node of a kind to a point — the
 /// camp anchor centers for `plan_build` (M6): a Mill goes by the
 /// berries, a Lumber Camp by the woodline.
@@ -712,31 +779,41 @@ fn nearest_node_pos(
         let d = steer::vec_len(n.pos_x - x, n.pos_y - y);
         let db = d.to_bits() as i64;
         let key = (db * db, n.id);
-        if best.map(|b| (b.0, b.1) < key).unwrap_or(true) {
+        // Keep the SMALLEST key (nearest). (An inverted comparison
+        // here once made camps anchor at the *farthest* node of the
+        // kind — at M7's map scale that is the enemy's resource
+        // patch, and a builder walks the whole map to raise a Mill
+        // beside it. The M7 long-match tests caught what the arena
+        // era's could not.)
+        if best.map(|b| key < (b.0, b.1)).unwrap_or(true) {
             best = Some((key.0, key.1, n.pos_x, n.pos_y));
         }
     }
     best.map(|(_, _, px, py)| (px, py))
 }
 
+/// The nearest live node of `resource` to a point (ties: lowest
+/// id, by scan order) — restricted to the AI's own resource set by
+/// *owner proximity* (M7): a node is the AI's when it is nearer
+/// the AI's Town Center (the query point, always its own TC) than
+/// the human's. The generated packages sit around their own
+/// starts, so proximity assigns each side its own set with no
+/// layout or node-id knowledge at all; neutral and dynamic nodes
+/// (mid-map forests, carcasses, farms) fall to whichever Town
+/// Center is nearer — where the work actually happened.
 fn nearest_node(sim: &Sim, resource: ResourceKind, x: I16F16, y: I16F16) -> Option<u32> {
-    let shared = crate::econ::NODE_SPECS.len() as u32;
     let foe_tc = sim.tc_entity_of(OWNER_PLAYER);
     let mut best: Option<(i64, u32)> = None;
     for n in sim.nodes() {
         if n.is_depleted() || n.resource() != resource {
             continue;
         }
-        let mine = if n.id < shared * 2 {
-            n.id >= shared
-        } else {
-            match foe_tc {
-                Some(ftc) => {
-                    steer::vec_len(n.pos_x - x, n.pos_y - y)
-                        <= steer::vec_len(n.pos_x - ftc.pos_x, n.pos_y - ftc.pos_y)
-                }
-                None => true,
+        let mine = match foe_tc {
+            Some(ftc) => {
+                steer::vec_len(n.pos_x - x, n.pos_y - y)
+                    <= steer::vec_len(n.pos_x - ftc.pos_x, n.pos_y - ftc.pos_y)
             }
+            None => true,
         };
         if !mine {
             continue;
@@ -755,6 +832,34 @@ fn nearest_node(sim: &Sim, resource: ResourceKind, x: I16F16, y: I16F16) -> Opti
 /// The nearest sheep owned by `owner` *that can be reached* from
 /// (x, y) — an entombed sheep (standing in a blocked cell) is
 /// skipped rather than absorbing every hunter forever (M6 fix).
+/// The nearest living Gaia sheep within hunting range of
+/// `(x, y)` that a hunter standing there can actually path to —
+/// the capture run (M7). The range is generous (the start's far
+/// sheep stand up to ~16 tiles from the Town Center) but bounded,
+/// so the hunter never crosses the map for lunch: every sheep on
+/// an Arabia layout belongs to one of the two starts.
+fn nearest_gaia_sheep(sim: &Sim, x: I16F16, y: I16F16) -> Option<u32> {
+    // The range cap, in the candidates' squared-bits units:
+    // (88 world units × 65536 bits/unit)² — fits i64 comfortably.
+    const HUNT_RANGE_SQ_BITS: i64 = (88 * 65536) * (88 * 65536);
+    let mut candidates: Vec<(i64, u32, I16F16, I16F16)> = sim
+        .entities()
+        .iter()
+        .filter(|e| e.kind == EntityKind::Sheep && e.owner == OWNER_GAIA && !e.dead)
+        .map(|e| {
+            let d = steer::vec_len(e.pos_x - x, e.pos_y - y);
+            let db = d.to_bits() as i64;
+            (db * db, e.id, e.pos_x, e.pos_y)
+        })
+        .filter(|c| c.0 <= HUNT_RANGE_SQ_BITS)
+        .collect();
+    candidates.sort();
+    candidates
+        .iter()
+        .find(|c| sim.grid().find_path((x, y), (c.2, c.3)).is_some())
+        .map(|c| c.1)
+}
+
 fn nearest_owned_sheep(sim: &Sim, owner: u8, x: I16F16, y: I16F16) -> Option<u32> {
     let mut candidates: Vec<(i64, u32, I16F16, I16F16)> = sim
         .entities()
@@ -797,6 +902,12 @@ fn plan_defense(sim: &mut Sim, acted: &mut Vec<u32>) {
         else {
             continue;
         };
+        // A defender is a soldier *at home*: one standing twice
+        // the defense radius away (the Scout on its scouting ride,
+        // M7) is not recalled across the map for a home raid.
+        if steer::vec_len(sx - tc_x, sy - tc_y) > DEFENSE_RADIUS * I16F16::from_num(2) {
+            continue;
+        }
         let mut best: Option<(i64, u32)> = None;
         for e in sim.entities() {
             if e.owner != OWNER_PLAYER || e.dead || !e.kind.counts_population() {
@@ -804,6 +915,14 @@ fn plan_defense(sim: &mut Sim, acted: &mut Vec<u32>) {
             }
             let d = steer::vec_len(e.pos_x - tc_x, e.pos_y - tc_y);
             if d > DEFENSE_RADIUS {
+                continue;
+            }
+            // Fog (M7, VIS-01): the AI defends against what it can
+            // currently see — a raider outside its sight is not a
+            // target it may pick, however close to the Town Center
+            // it stands in truth.
+            let (ecx, ecy) = sim.grid().world_to_cell(e.pos_x, e.pos_y);
+            if !sim.cell_visible_to(me, ecx, ecy) {
                 continue;
             }
             // Only engage targets the defender can actually reach
@@ -832,13 +951,22 @@ fn plan_defense(sim: &mut Sim, acted: &mut Vec<u32>) {
 
 /// The wave step: when the cooldown has passed and at least
 /// `wave_size` trained soldiers (Militia/Archers) stand idle at
-/// home, they all attack at once. Each picks the same kind of
-/// target the script always picks: the nearest *reachable* human
-/// population unit to itself; if none can be reached, the human
-/// Town Center; if that is gone too, the nearest human building
-/// (via `AttackBuilding`). The cooldown restarts on launch — win or
-/// lose, the survivors' state (dead, fighting, walking home via
-/// rally-less idleness) is simply re-read next decision.
+/// home, they all attack at once. Targeting obeys the AI's own
+/// fog of war (M7, VIS-01/06): a human *unit* is a target only
+/// while the AI can currently see it; the human Town Center and
+/// buildings are targets once *explored* — remembered knowledge,
+/// like a player's (a building razed unseen stays on the AI's map
+/// until someone looks again). When the AI knows nothing yet —
+/// its Scout has not reached the enemy start — the wave instead
+/// marches on the expected enemy start (the mirrored Town Center
+/// cell): an attack-move in spirit, executed as an ordinary Move;
+/// auto-acquisition and later decisions take over on contact.
+/// Among known targets each soldier picks as the script always
+/// has: the nearest *reachable* visible unit; else the Town
+/// Center; else the nearest explored building. The cooldown
+/// restarts on launch — win or lose, the survivors' state (dead,
+/// fighting, walking home via rally-less idleness) is simply
+/// re-read next decision.
 fn plan_wave(sim: &mut Sim, cfg: &AiConfig, acted: &mut Vec<u32>) {
     let me = OWNER_OPPONENT;
     if sim.tick_count() < sim.ai.next_wave_tick {
@@ -863,6 +991,12 @@ fn plan_wave(sim: &mut Sim, cfg: &AiConfig, acted: &mut Vec<u32>) {
         .tc_entity_of(OWNER_PLAYER)
         .filter(|tc| !tc.dead)
         .map(|tc| (tc.id, tc.pos_x, tc.pos_y));
+    let tc_known = human_tc
+        .map(|(_, tx, ty)| {
+            let (cx, cy) = sim.grid().world_to_cell(tx, ty);
+            sim.cell_explored_by(me, cx, cy)
+        })
+        .unwrap_or(false);
     for mid in &wave {
         let (mx, my) = sim
             .entities()
@@ -870,19 +1004,22 @@ fn plan_wave(sim: &mut Sim, cfg: &AiConfig, acted: &mut Vec<u32>) {
             .find(|e| e.id == *mid)
             .map(|e| (e.pos_x, e.pos_y))
             .unwrap_or((I16F16::ZERO, I16F16::ZERO));
-        // Nearest human population unit *that can actually be
-        // reached*. A target standing inside a building footprint
-        // (or behind a plugged chokepoint) has no path; ordering the
-        // wave onto it fizzles every soldier at once (M6 fix — the
-        // AI's own base can plug the map's wall gap, and the two
-        // forward human units stand in it). Candidates are walked
-        // nearest-first; the reachability probe is one A* per
-        // candidate per soldier, once per wave — affordable, and
-        // deterministic like every other path query.
+        // Nearest human population unit the AI can currently see
+        // *and* actually reach. A target standing inside a building
+        // footprint (or behind a plugged chokepoint) has no path;
+        // ordering the wave onto it fizzles every soldier at once
+        // (M6 fix). Candidates are walked nearest-first; the
+        // reachability probe is one A* per candidate per soldier,
+        // once per wave — affordable, and deterministic like every
+        // other path query.
         let mut candidates: Vec<(i64, u32, I16F16, I16F16)> = sim
             .entities()
             .iter()
             .filter(|e| e.owner == OWNER_PLAYER && !e.dead && e.kind.counts_population())
+            .filter(|e| {
+                let (cx, cy) = sim.grid().world_to_cell(e.pos_x, e.pos_y);
+                sim.cell_visible_to(me, cx, cy)
+            })
             .map(|e| {
                 let d = steer::vec_len(e.pos_x - mx, e.pos_y - my);
                 let db = d.to_bits() as i64;
@@ -905,20 +1042,27 @@ fn plan_wave(sim: &mut Sim, cfg: &AiConfig, acted: &mut Vec<u32>) {
             acted.push(*mid);
             continue;
         }
-        // No reachable human units: the Town Center, then buildings.
-        if let Some((tc_id, tx, ty)) = human_tc {
-            if reachable(sim, tx, ty) {
-                sim.push_command(Command::Attack {
-                    entity: *mid,
-                    target: tc_id,
-                });
-                acted.push(*mid);
-                continue;
+        // No visible units: the Town Center, once explored.
+        if tc_known {
+            if let Some((tc_id, tx, ty)) = human_tc {
+                if reachable(sim, tx, ty) {
+                    sim.push_command(Command::Attack {
+                        entity: *mid,
+                        target: tc_id,
+                    });
+                    acted.push(*mid);
+                    continue;
+                }
             }
         }
+        // Then the nearest human building the AI has explored.
         let mut best_b: Option<(i64, u32)> = None;
         for b in sim.buildings() {
             if b.owner != OWNER_PLAYER {
+                continue;
+            }
+            let (cx, cy) = sim.grid().world_to_cell(b.pos_x, b.pos_y);
+            if !sim.cell_explored_by(me, cx, cy) {
                 continue;
             }
             let d = steer::vec_len(b.pos_x - mx, b.pos_y - my);
@@ -932,6 +1076,18 @@ fn plan_wave(sim: &mut Sim, cfg: &AiConfig, acted: &mut Vec<u32>) {
             sim.push_command(Command::AttackBuilding {
                 entity: *mid,
                 building: bid,
+            });
+            acted.push(*mid);
+            continue;
+        }
+        // Nothing is known yet: march on the expected enemy start.
+        // The soldiers' own eyes (auto-acquisition within their
+        // LoS) and the next decisions do the rest.
+        if let Some((ex, ey)) = expected_enemy_start(sim) {
+            sim.push_command(Command::Move {
+                entity: *mid,
+                x: ex,
+                y: ey,
             });
             acted.push(*mid);
         }

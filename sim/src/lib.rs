@@ -37,6 +37,15 @@
 //! the Mill gate on Farms, and the Feudal buildings (Archery Range,
 //! Stable, Blacksmith) with the Militia line's Man-at-Arms upgrade
 //! (CLS-03/04).
+//! M7 scope: the world itself — a deterministic seeded Arabia
+//! generator (`mapgen`) replaces the fixed arena: the rulebook's
+//! 120×120-tile 2-player map (MAP-02), per-start resource packages
+//! (OPENING-SPEC §2.3) mirrored for exact fairness, generated
+//! terrain with water (MAP-03/08) and a height field (MAP-05) that
+//! feeds the elevation combat factor (MAP-06/CMB-01), trees as
+//! blocking nodes (MAP-04), and per-player fog of war with
+//! exploration memory (VIS-01…08), hash-covered and recomputed on
+//! a bounded interval (see `recompute_visibility`).
 
 mod ai;
 mod build;
@@ -46,6 +55,7 @@ mod econ;
 mod entity;
 mod grid;
 mod hash;
+mod mapgen;
 mod rng;
 mod steer;
 mod tech;
@@ -61,7 +71,7 @@ pub use build::{
     FOOTPRINT_CELLS, HOUSE_BUILD_TICKS, HOUSE_POP_SUPPORT, HOUSE_WOOD_COST, STABLE_BUILD_TICKS,
     STABLE_WOOD_COST, TOWN_CENTER_POP_SUPPORT,
 };
-pub use combat::{compute_damage, Projectile, MELEE_REACH};
+pub use combat::{compute_damage, compute_damage_elev, elevation_factor, Projectile, MELEE_REACH};
 pub use econ::{
     NodeKind, ResourceKind, ResourceNode, Stockpile, CARRY_CAPACITY, DEPOSIT_RANGE, GATHER_RANGE,
     HUNT_CARRY_CAPACITY, RALLY_NODE_SNAP_RADIUS, RETARGET_RADIUS, TRAIN_QUEUE_CAP,
@@ -71,7 +81,8 @@ pub use entity::{
     is_player_owner, Dropoff, Entity, EntityKind, MoveOrder, QueuedOrder, Task, OWNER_GAIA,
     OWNER_OPPONENT, OWNER_PLAYER,
 };
-pub use grid::{Grid, CELL_SIZE, GRID_DIM, WORLD_HALF};
+pub use grid::{Grid, CELL_SIZE, GRID_DIM, TERRAIN_LAND, TERRAIN_WATER, WORLD_HALF};
+pub use mapgen::GeneratedMap;
 pub use hash::Fnv1a64;
 pub use rng::Pcg32;
 pub use steer::{MAX_SPEED, SEPARATION_RADIUS, SLOW_RADIUS, WAYPOINT_REACH};
@@ -84,10 +95,9 @@ use fixed::types::I16F16;
 /// clock the sim knows.
 pub const TICKS_PER_SECOND: u64 = 60;
 
-/// Town Center cell. Cell (23, 23) — world (-6, -6) — sits just west of
-/// the vertical wall's gap, on open ground.
-const TC_CELL: (u32, u32) = (23, 23);
-/// The Town Center is always entity 0.
+/// The Town Center is always entity 0. Its cell is no longer a
+/// constant: the M7 generator places it (see `mapgen`), mirrored
+/// for the opponent, different on every seed.
 pub const TOWN_CENTER_ID: u32 = 0;
 /// Starting villagers: 3, placed at fixed offsets from the Town Center.
 pub const START_VILLAGER_COUNT: u32 = 3;
@@ -111,40 +121,30 @@ const TRAIN_SPAWN_OFFSETS: [(i32, i32); 8] = [
 /// §2.1). Diagonal, so it never shares a villager's spawn point.
 const START_SCOUT_OFFSET: (i32, i32) = (5, 5);
 
-/// Starting Gaia layout (M3): (kind, cell_x, cell_y), ids assigned in
-/// table order after the player units. Distances are in cells (= the
-/// spec's tiles) from the Town Center cell (23, 23), following
-/// OPENING-SPEC §2.2's bands, adapted to the fixed arena (existing
-/// nodes and walls kept):
-///
-/// - Sheep near group (spec: 4 sheep at ≈4–8): (19,21) 4.5, (20,27)
-///   5.0, (18,23) 5.0, (21,18) 5.4.
-/// - Sheep far pairs (spec: 2+2 at ≈10–16): (13,18)+(14,17) ≈11,
-///   (15,34)+(16,33) ≈13 — the second pair beyond the south wall.
-/// - Boars (spec: 2 per player at ≈15–30, split directions): (8,10)
-///   ≈19.8 north-west, (38,28) ≈15.8 east past the wall gap.
-/// - Deer near herd (spec: 2–4 at ≈12–20): (12,28), (13,29),
-///   (11,27) ≈12 west-south-west.
-pub const ANIMAL_SPECS: &[(EntityKind, u32, u32)] = &[
-    (EntityKind::Sheep, 19, 21),
-    (EntityKind::Sheep, 20, 27),
-    (EntityKind::Sheep, 18, 23),
-    (EntityKind::Sheep, 21, 18),
-    (EntityKind::Sheep, 13, 18),
-    (EntityKind::Sheep, 14, 17),
-    (EntityKind::Sheep, 15, 34),
-    (EntityKind::Sheep, 16, 33),
-    (EntityKind::Boar, 8, 10),
-    (EntityKind::Boar, 38, 28),
-    (EntityKind::Deer, 12, 28),
-    (EntityKind::Deer, 13, 29),
-    (EntityKind::Deer, 11, 27),
-];
+/// Fog of war recomputation interval, in ticks (M7, VIS-01): the
+/// per-player visibility grids are rebuilt from scratch this often
+/// (and once at match creation) — never per tick — so the cost is
+/// bounded by (sources × sight-disc area) per interval regardless
+/// of map size or unit count growth. Between recomputations the
+/// grids stand as last computed; 15 ticks is a quarter second, far
+/// below the time anything needs to cross a sight radius.
+pub const FOG_RECOMPUTE_INTERVAL: u64 = 15;
+/// The Town Center's sight radius in tiles (M7, VIS-02/03): the
+/// unit table's Town Center row carries no LoS (it never acquires
+/// targets), so the fog model needs its own value. ADOPTED —
+/// building LoS values are not pinned by the project docs
+/// (UNVERIFIED); Town Watch / Town Patrol (+4) are not implemented.
+pub const TC_SIGHT_TILES: u32 = 6;
+/// A placed building's sight radius in tiles (M7, VIS-02/03).
+/// ADOPTED for every kind — see `TC_SIGHT_TILES` (UNVERIFIED).
+pub const BUILDING_SIGHT_TILES: u32 = 4;
+/// The hard cap on any sight radius, in tiles (VIS-04).
+pub const MAX_SIGHT_TILES: u32 = 20;
 
-/// World position clamp: entities never leave [-99, 99].
-/// (const via raw bits: 99 × 2^16 = 6488064.)
-const MIN_POS: I16F16 = I16F16::from_bits(-6_488_064);
-const MAX_POS: I16F16 = I16F16::from_bits(6_488_064);
+/// World position clamp: entities never leave [-239, 239].
+/// (const via raw bits: 239 × 2^16 = 15663104.)
+const MIN_POS: I16F16 = I16F16::from_bits(-15_663_104);
+const MAX_POS: I16F16 = I16F16::from_bits(15_663_104);
 
 /// Maximum queued orders held behind an entity's current order
 /// (M4, SEL-12). A queue-deeper-than-playable bound: shift-click
@@ -473,39 +473,58 @@ pub struct Sim {
     /// only; every *decision* reads live sim state, so nothing else
     /// needs storing. Inert in Sandbox.
     ai: ai::AiState,
+    /// Fog of war (M7, VIS-01): per-player-slot visibility grids,
+    /// row-major over the map, one byte per cell — 0 unexplored,
+    /// 1 explored (remembered), 2 currently visible. Rebuilt on
+    /// `FOG_RECOMPUTE_INTERVAL` by `recompute_visibility`; part of
+    /// the hashed state, so a replay must reproduce every player's
+    /// knowledge exactly (and the AI's fog-bound decisions replay
+    /// with it).
+    fog: [Vec<u8>; 2],
+    /// The cell indices currently at visibility 2, per slot — the
+    /// demotion list for the next recompute (explored memory is
+    /// what remains when a cell leaves this list). Bookkeeping for
+    /// `fog`; derivable from it, so not hashed separately.
+    fog_visible: [Vec<u32>; 2],
 }
 
 impl Sim {
     /// Create a new sandbox simulation from a seed — the pre-M5
-    /// game: one player, no opponent, no win/lose. The starting
-    /// layout is fixed (Town Center, 3 villagers, the starting
-    /// Scout, the Gaia herds, node layout, stockpile), so the seed
-    /// feeds only the in-state RNG — its words are hashed every
-    /// tick, keeping seeds divergent from tick one. Combat is the
-    /// first system that draws from it (archer accuracy, PRJ-03).
+    /// game: one player, no opponent, no win/lose. Since M7 the
+    /// starting layout is *generated* from the seed (the Arabia
+    /// generator — see `with_mode`); the seed also feeds the
+    /// in-state RNG, whose words are hashed every tick, keeping
+    /// seeds divergent from tick one. Combat is the first system
+    /// that draws from it (archer accuracy, PRJ-03).
     pub fn new(seed: u64) -> Self {
         Self::with_mode(seed, MatchMode::Sandbox)
     }
 
     /// Create a match against the scripted AI opponent (M5):
-    /// `MatchMode::AiEasy` or `MatchMode::AiNormal`. The human start
-    /// is the sandbox layout; the opponent gets a mirrored start
-    /// across the map center (see `spawn_opponent_start`).
+    /// `MatchMode::AiEasy` or `MatchMode::AiNormal`. Both starts
+    /// come from the seeded generator; the opponent's is the
+    /// human's rotational mirror (see `spawn_opponent_start`).
     pub fn new_match(seed: u64, mode: MatchMode) -> Self {
         debug_assert!(mode.is_match());
         Self::with_mode(seed, mode)
     }
 
-    /// The shared constructor: the standard (human) start, plus —
-    /// in a match — the mirrored opponent start.
+    /// The shared constructor (M7): the map comes from the seeded
+    /// Arabia generator (`mapgen::generate` — terrain, heights and
+    /// both starts' packages), the human start spawns from package
+    /// 0, and in a match the opponent spawns from package 1 (the
+    /// generated mirror). The in-state RNG is seeded exactly as
+    /// before and feeds only gameplay draws — generation runs on
+    /// its own derived stream, so combat's draw sequence is
+    /// untouched by however many candidates generation tried.
     pub fn with_mode(seed: u64, mode: MatchMode) -> Self {
         let rng = Pcg32::new(seed);
-        let grid = Grid::new();
-        let (tc_x, tc_y) = grid.cell_center(TC_CELL.0, TC_CELL.1);
+        let map = mapgen::generate(seed);
+        let grid = map.grid.clone();
+        let pkg = &map.starts[0];
+        let (tc_x, tc_y) = grid.cell_center(pkg.tc_cell.0, pkg.tc_cell.1);
 
-        let mut entities = Vec::with_capacity(
-            1 + START_VILLAGER_COUNT as usize + 1 + ANIMAL_SPECS.len(),
-        );
+        let mut entities = Vec::with_capacity(64);
         entities.push(Entity::town_center(TOWN_CENTER_ID, tc_x, tc_y));
         for (i, &(ox, oy)) in START_VILLAGER_OFFSETS.iter().enumerate() {
             entities.push(Entity::villager(
@@ -524,8 +543,10 @@ impl Sim {
             tc_y + I16F16::from_num(START_SCOUT_OFFSET.1),
         ));
         next_id += 1;
-        // Gaia animals at their spec cells (ANIMAL_SPECS).
-        for &(kind, cx, cy) in ANIMAL_SPECS {
+        // Gaia animals at their generated cells, in the package's
+        // fixed order (sheep, boars, deer) — the historical id
+        // layout: 5–12 sheep, 13–14 boars, 15–20 deer.
+        for &(kind, cx, cy) in &pkg.animals {
             let (pos_x, pos_y) = grid.cell_center(cx, cy);
             entities.push(Entity::spawned(
                 next_id,
@@ -537,15 +558,21 @@ impl Sim {
             next_id += 1;
         }
 
-        let nodes = econ::NODE_SPECS
-            .iter()
-            .enumerate()
-            .map(|(i, &(kind, cx, cy))| {
-                let (pos_x, pos_y) = grid.cell_center(cx, cy);
-                ResourceNode::placed(i as u32, kind, pos_x, pos_y)
-            })
-            .collect();
+        // Nodes: the human's package, then (matches) the opponent's,
+        // then the neutral dressing — ids in that fixed order.
+        let mut nodes: Vec<ResourceNode> = Vec::new();
+        let mut node_specs: Vec<(NodeKind, u32, u32)> = Vec::new();
+        node_specs.extend_from_slice(&pkg.nodes);
+        if mode.is_match() {
+            node_specs.extend_from_slice(&map.starts[1].nodes);
+        }
+        node_specs.extend_from_slice(&map.neutral_nodes);
+        for (i, &(kind, cx, cy)) in node_specs.iter().enumerate() {
+            let (pos_x, pos_y) = grid.cell_center(cx, cy);
+            nodes.push(ResourceNode::placed(i as u32, kind, pos_x, pos_y));
+        }
 
+        let cell_total = (GRID_DIM * GRID_DIM) as usize;
         let mut sim = Sim {
             tick: 0,
             rng,
@@ -567,28 +594,26 @@ impl Sim {
             next_building_id: 0,
             projectiles: Vec::new(),
             ai: ai::AiState::default(),
+            fog: [vec![0; cell_total], vec![0; cell_total]],
+            fog_visible: [Vec::new(), Vec::new()],
         };
         if mode.is_match() {
-            sim.spawn_opponent_start();
+            sim.spawn_opponent_start(&map.starts[1]);
         }
+        // VIS-07: a match starts nearly blind — only each start's
+        // surroundings are known, from this first computation.
+        sim.recompute_visibility();
         sim
     }
 
-    /// The opponent's start (M5): the human start mirrored through
-    /// the map center — cell (cx, cy) → (GRID_DIM−1−cx, GRID_DIM−1−cy),
-    /// world offsets negated. Its own Town Center at the mirrored TC
-    /// cell, 3 villagers and a Scout at the mirrored offsets, its own
-    /// copies of the resource layout at the mirrored node cells, and
-    /// its own sheep at the mirrored herdable cells (boars and deer
-    /// stay shared Gaia, as placed). Mirroring is exact where the
-    /// arena allows it; a mirrored spawn point that lands inside a
-    /// wall (the arena's walls are not rotationally symmetric)
-    /// walks outward ring by ring to the first open cell — the same
-    /// deterministic search wherever it is needed.
-    fn spawn_opponent_start(&mut self) {
-        let mirror_cell = |cx: u32, cy: u32| (GRID_DIM - 1 - cx, GRID_DIM - 1 - cy);
-        let (etc_x, etc_y) = mirror_cell(TC_CELL.0, TC_CELL.1);
-        let (tc_x, tc_y) = self.grid.cell_center(etc_x, etc_y);
+    /// The opponent's start (M5, generated in M7): package 1 of the
+    /// generated map — its own Town Center, 3 villagers and a Scout
+    /// at the mirrored offsets, and its own full animal set (sheep,
+    /// boars, deer — all Gaia-owned, as placed). The package is the
+    /// human's mirrored through the map center by the generator, so
+    /// the start is exactly as strong as the human's.
+    fn spawn_opponent_start(&mut self, pkg: &mapgen::StartPackage) {
+        let (tc_x, tc_y) = self.grid.cell_center(pkg.tc_cell.0, pkg.tc_cell.1);
         let mut next_id = self.entities.len() as u32;
 
         // Town Center (an entity, like the human's).
@@ -608,153 +633,157 @@ impl Sim {
             rally: None,
             rally_node: None,
         });
-        // Villagers and Scout at the mirrored start offsets.
+        // Villagers and Scout at the mirrored start offsets (the
+        // generator keeps the Town Center's 3×3 clear for them).
         for &(ox, oy) in START_VILLAGER_OFFSETS.iter() {
-            let (px, py) = self.free_spawn_pos(
-                tc_x - I16F16::from_num(ox),
-                tc_y - I16F16::from_num(oy),
-            );
             self.entities.push(Entity::spawned(
                 next_id,
                 EntityKind::Villager,
                 entity::OWNER_OPPONENT,
-                px,
-                py,
+                tc_x - I16F16::from_num(ox),
+                tc_y - I16F16::from_num(oy),
             ));
             next_id += 1;
         }
-        let (px, py) = self.free_spawn_pos(
-            tc_x - I16F16::from_num(START_SCOUT_OFFSET.0),
-            tc_y - I16F16::from_num(START_SCOUT_OFFSET.1),
-        );
         self.entities.push(Entity::spawned(
             next_id,
             EntityKind::ScoutCavalry,
             entity::OWNER_OPPONENT,
-            px,
-            py,
+            tc_x - I16F16::from_num(START_SCOUT_OFFSET.0),
+            tc_y - I16F16::from_num(START_SCOUT_OFFSET.1),
         ));
         next_id += 1;
-        // The opponent's own sheep at the mirrored herdable cells.
-        for &(kind, cx, cy) in ANIMAL_SPECS {
-            if kind != EntityKind::Sheep {
-                continue;
-            }
-            let (mcx, mcy) = mirror_cell(cx, cy);
-            let (pos_x, pos_y) = self.free_cell_pos(mcx, mcy);
+        // The opponent's own animals at their generated cells.
+        for &(kind, cx, cy) in &pkg.animals {
+            let (pos_x, pos_y) = self.grid.cell_center(cx, cy);
             self.entities.push(Entity::spawned(
                 next_id,
-                EntityKind::Sheep,
+                kind,
                 entity::OWNER_GAIA,
                 pos_x,
                 pos_y,
             ));
             next_id += 1;
         }
-        // The opponent's own resource set: the full node layout at
-        // the mirrored cells, appended after the shared layout.
-        let node_specs: Vec<(NodeKind, u32, u32)> = econ::NODE_SPECS
-            .iter()
-            .map(|&(kind, cx, cy)| {
-                let (mcx, mcy) = mirror_cell(cx, cy);
-                (kind, mcx, mcy)
-            })
-            .collect();
-        for (kind, cx, cy) in node_specs {
-            let (pos_x, pos_y) = self.free_node_pos(cx, cy);
-            let nid = self.nodes.len() as u32;
-            self.nodes
-                .push(ResourceNode::placed(nid, kind, pos_x, pos_y));
+    }
+
+    /// Rebuild both players' visibility grids (M7, VIS-01/02):
+    /// every cell currently seen drops to *explored* (memory
+    /// persists), then every living unit and standing building of
+    /// each player stamps its sight disc as *visible*. Sight is a
+    /// pure radius (VIS-05: no occlusion, no raycasting), from the
+    /// unit table's LoS via the owner's effective row (a Feudal
+    /// Scout sees 6 tiles, VIS-03), capped at 20 tiles (VIS-04);
+    /// buildings use the adopted sight constants. Runs at match
+    /// creation and every `FOG_RECOMPUTE_INTERVAL` ticks — bounded
+    /// work: sources × disc area, independent of map area.
+    fn recompute_visibility(&mut self) {
+        for slot in 0..2usize {
+            let owner = if slot == 0 {
+                entity::OWNER_PLAYER
+            } else {
+                entity::OWNER_OPPONENT
+            };
+            for i in std::mem::take(&mut self.fog_visible[slot]) {
+                self.fog[slot][i as usize] = 1; // visible → explored
+            }
+            for idx in 0..self.entities.len() {
+                let e = &self.entities[idx];
+                if e.dead || e.owner != owner {
+                    continue;
+                }
+                let r = if e.kind == EntityKind::TownCenter {
+                    TC_SIGHT_TILES
+                } else {
+                    let los = self.unit_stats(idx).los;
+                    (los / CELL_SIZE).to_num::<i32>().clamp(0, MAX_SIGHT_TILES as i32) as u32
+                };
+                if r == 0 {
+                    continue;
+                }
+                let (cx, cy) = self.grid.world_to_cell(e.pos_x, e.pos_y);
+                self.stamp_sight(slot, cx, cy, r);
+            }
+            for bi in 0..self.buildings.len() {
+                let b = &self.buildings[bi];
+                if b.owner != owner {
+                    continue;
+                }
+                let (cx, cy) = self.grid.world_to_cell(b.pos_x, b.pos_y);
+                self.stamp_sight(slot, cx, cy, BUILDING_SIGHT_TILES);
+            }
         }
     }
 
-    /// A spawn position at or near a world point: the point itself
-    /// when its cell is open and holds no Town Center, else the
-    /// center of the first open, Town-Center-free cell found by an
-    /// expanding ring search (fixed order: ring radius, then rows,
-    /// then columns). Deterministic by construction.
-    fn free_spawn_pos(&self, x: I16F16, y: I16F16) -> (I16F16, I16F16) {
+    /// Stamp one sight disc (radius `r` tiles, integer disc) as
+    /// visible for a player slot.
+    fn stamp_sight(&mut self, slot: usize, cx: u32, cy: u32, r: u32) {
+        let r = r as i32;
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if dx * dx + dy * dy > r * r {
+                    continue;
+                }
+                let (x, y) = (cx as i32 + dx, cy as i32 + dy);
+                if x < 0 || y < 0 || x >= GRID_DIM as i32 || y >= GRID_DIM as i32 {
+                    continue;
+                }
+                let i = ((y as u32) * GRID_DIM + (x as u32)) as usize;
+                if self.fog[slot][i] != 2 {
+                    self.fog[slot][i] = 2;
+                    self.fog_visible[slot].push(i as u32);
+                }
+            }
+        }
+    }
+
+    /// A player's fog-of-war grid (M7, VIS-01): row-major bytes over
+    /// the whole map — 0 unexplored, 1 explored, 2 currently
+    /// visible. Gaia (and unknown tags) have no grid: an empty
+    /// slice. This is the ABI's fog source and the AI's only
+    /// window on the enemy.
+    pub fn visibility(&self, owner: u8) -> &[u8] {
+        match player_slot(owner) {
+            Some(slot) => &self.fog[slot],
+            None => &[],
+        }
+    }
+
+    /// One cell's visibility state for a player (0/1/2 as in
+    /// `visibility`); out-of-grid cells and non-players read 0.
+    pub fn cell_visibility(&self, owner: u8, cx: u32, cy: u32) -> u8 {
+        if cx >= GRID_DIM || cy >= GRID_DIM {
+            return 0;
+        }
+        match player_slot(owner) {
+            Some(slot) => self.fog[slot][(cy * GRID_DIM + cx) as usize],
+            None => 0,
+        }
+    }
+
+    /// Whether a cell is *currently visible* to a player.
+    pub fn cell_visible_to(&self, owner: u8, cx: u32, cy: u32) -> bool {
+        self.cell_visibility(owner, cx, cy) == 2
+    }
+
+    /// Whether a cell has ever been seen by a player (explored or
+    /// currently visible — VIS-06's remembered knowledge).
+    pub fn cell_explored_by(&self, owner: u8, cx: u32, cy: u32) -> bool {
+        self.cell_visibility(owner, cx, cy) >= 1
+    }
+
+    /// The elevation level (0..=4) of the cell containing a world
+    /// point — MAP-05 data for the combat factor and the renderer.
+    pub fn height_at_world(&self, x: I16F16, y: I16F16) -> u8 {
         let (cx, cy) = self.grid.world_to_cell(x, y);
-        if self.spawn_cell_free(cx, cy) {
-            return (x, y);
-        }
-        self.free_cell_pos(cx, cy)
+        self.grid.height_at(cx, cy)
     }
 
-    /// The center of cell `(cx, cy)` if it can hold a spawn, else the
-    /// center of the nearest cell that can (same ring search as
-    /// `free_spawn_pos`).
-    fn free_cell_pos(&self, cx: u32, cy: u32) -> (I16F16, I16F16) {
-        if self.spawn_cell_free(cx, cy) {
-            return self.grid.cell_center(cx, cy);
-        }
-        for r in 1..GRID_DIM as i32 {
-            for dy in -r..=r {
-                for dx in -r..=r {
-                    if dx.abs() != r && dy.abs() != r {
-                        continue; // ring cells only
-                    }
-                    let (nx, ny) = (cx as i32 + dx, cy as i32 + dy);
-                    if nx < 0 || ny < 0 || nx >= GRID_DIM as i32 || ny >= GRID_DIM as i32 {
-                        continue;
-                    }
-                    let (nx, ny) = (nx as u32, ny as u32);
-                    if self.spawn_cell_free(nx, ny) {
-                        return self.grid.cell_center(nx, ny);
-                    }
-                }
-            }
-        }
-        self.grid.cell_center(cx, cy) // unreachable on an open map
+    /// The elevation level of the cell an entity stands on.
+    pub(crate) fn entity_height(&self, idx: usize) -> u8 {
+        let e = &self.entities[idx];
+        self.height_at_world(e.pos_x, e.pos_y)
     }
-
-    /// A cell a fresh unit or animal may appear on: inside the grid,
-    /// not blocked, and not a Town Center's cell (a spawn must never
-    /// land inside a Town Center).
-    fn spawn_cell_free(&self, cx: u32, cy: u32) -> bool {
-        if cx >= GRID_DIM || cy >= GRID_DIM || self.grid.is_blocked(cx, cy) {
-            return false;
-        }
-        !self.entities.iter().any(|e| {
-            e.kind == EntityKind::TownCenter
-                && self.grid.world_to_cell(e.pos_x, e.pos_y) == (cx, cy)
-        })
-    }
-
-    /// A position for a mirrored resource node: its own cell when it
-    /// is open and no live node already sits on it, else the nearest
-    /// cell that qualifies (same ring search).
-    fn free_node_pos(&self, cx: u32, cy: u32) -> (I16F16, I16F16) {
-        let node_cell_free = |x: u32, y: u32| {
-            !self.grid.is_blocked(x, y)
-                && !self
-                    .nodes
-                    .iter()
-                    .any(|n| self.grid.world_to_cell(n.pos_x, n.pos_y) == (x, y))
-        };
-        if node_cell_free(cx, cy) {
-            return self.grid.cell_center(cx, cy);
-        }
-        for r in 1..GRID_DIM as i32 {
-            for dy in -r..=r {
-                for dx in -r..=r {
-                    if dx.abs() != r && dy.abs() != r {
-                        continue;
-                    }
-                    let (nx, ny) = (cx as i32 + dx, cy as i32 + dy);
-                    if nx < 0 || ny < 0 || nx >= GRID_DIM as i32 || ny >= GRID_DIM as i32 {
-                        continue;
-                    }
-                    let (nx, ny) = (nx as u32, ny as u32);
-                    if node_cell_free(nx, ny) {
-                        return self.grid.cell_center(nx, ny);
-                    }
-                }
-            }
-        }
-        self.grid.cell_center(cx, cy) // unreachable on an open map
-    }
-
     /// Queue a command to be applied at the start of the next tick.
     pub fn push_command(&mut self, command: Command) {
         self.commands.push(command);
@@ -1646,9 +1675,6 @@ impl Sim {
         let Some(target) = self.deposit_target(owner, kind, px, py) else {
             return;
         };
-        let Some((tx, ty)) = self.dropoff_steer_point(owner, target, px, py) else {
-            return;
-        };
         {
             let e = &mut self.entities[idx];
             e.order_queue.clear();
@@ -1656,7 +1682,9 @@ impl Sim {
             e.task = Task::Returning;
             e.task_dropoff = Some(target);
         }
-        self.set_move_order(idx, tx, ty);
+        // If the drop-off cannot be steered to at all, the
+        // Returning step resolves the stop itself next tick.
+        self.steer_to_dropoff(idx, owner, target);
     }
 
     /// Would an `AttackBuilding` command be accepted right now?
@@ -1861,6 +1889,7 @@ impl Sim {
                 _ => (I16F16::ZERO, I16F16::ZERO, 0, false),
             });
         }
+        let grid = &self.grid;
         for (e, (vx, vy, idx, arrived)) in self.entities.iter_mut().zip(plans) {
             if arrived {
                 e.order = None;
@@ -1872,8 +1901,37 @@ impl Sim {
                 }
                 e.vel_x = vx;
                 e.vel_y = vy;
-                e.pos_x = clamp_pos(e.pos_x + vx);
-                e.pos_y = clamp_pos(e.pos_y + vy);
+                // M7: axis-separated slide against TREE cells. The
+                // A* corner rule lets a diagonal leg pass between
+                // two trunks (the only way into a felled tree's
+                // freed cell, MAP-04), but a continuous unit
+                // steering between waypoints cuts the corner by a
+                // hair and its center clips the flanking tree
+                // cell — the integrity pass then teleported it
+                // back, the task layer re-issued the same order,
+                // and the woodcutter looped forever at the mouth
+                // of the gap (the seed-109 stall). Sliding along
+                // the blocked axis instead — the standard grid
+                // mover — rounds the corner into the standing
+                // cell. Only the tree layer slides: buildings and
+                // water keep the M6 integrity teleport below.
+                let (ox, oy) = (e.pos_x, e.pos_y);
+                let (nx, ny) = (clamp_pos(ox + vx), clamp_pos(oy + vy));
+                let in_tree = |x: I16F16, y: I16F16| {
+                    let (cx, cy) = grid.world_to_cell(x, y);
+                    grid.is_node_blocked(cx, cy)
+                };
+                let (fx, fy) = if !in_tree(nx, ny) {
+                    (nx, ny)
+                } else if !in_tree(nx, oy) {
+                    (nx, oy)
+                } else if !in_tree(ox, ny) {
+                    (ox, ny)
+                } else {
+                    (ox, oy)
+                };
+                e.pos_x = fx;
+                e.pos_y = fy;
             }
         }
 
@@ -1918,6 +1976,15 @@ impl Sim {
         //    human's commands) and replays bit-identically.
         if self.mode.is_match() && self.tick % ai::config(self.mode).cadence == 0 {
             ai::decide(self);
+        }
+
+        // 7. Fog of war (M7): the visibility grids recompute on
+        //    their fixed interval, after every system that moves
+        //    things — the AI above decided on the previous
+        //    interval's knowledge, like a player reacting to what
+        //    they saw a moment ago.
+        if self.tick % FOG_RECOMPUTE_INTERVAL == 0 {
+            self.recompute_visibility();
         }
 
         self.tick += 1;
@@ -2078,11 +2145,8 @@ impl Sim {
     /// Shared by the `Gather` command and by farm completion, where the
     /// builder starts working the field it just raised.
     fn begin_gather(&mut self, idx: usize, node: u32) {
-        let (nx, ny, resource) = match self.node_index(node) {
-            Some(ni) => {
-                let n = &self.nodes[ni];
-                (n.pos_x, n.pos_y, n.resource())
-            }
+        let resource = match self.node_index(node) {
+            Some(ni) => self.nodes[ni].resource(),
             None => return,
         };
         self.entities[idx].task_node = Some(node);
@@ -2101,22 +2165,95 @@ impl Sim {
                 };
                 match self.deposit_target(owner, k, px, py) {
                     Some(target) => {
-                        let (tx, ty) = self
-                            .dropoff_steer_point(owner, target, px, py)
-                            .expect("target resolved");
                         self.entities[idx].task = Task::Returning;
                         self.entities[idx].task_dropoff = Some(target);
-                        self.set_move_order(idx, tx, ty);
+                        if !self.steer_to_dropoff(idx, owner, target) {
+                            // No reachable drop-off: head for the
+                            // node and keep the carry (documented
+                            // above).
+                            self.entities[idx].task = Task::ToNode;
+                            self.entities[idx].task_dropoff = None;
+                            self.move_order_to_node(idx, node);
+                        }
                     }
                     None => {
                         self.entities[idx].task = Task::ToNode;
-                        self.set_move_order(idx, nx, ny);
+                        self.move_order_to_node(idx, node);
                     }
                 }
             }
             _ => {
                 self.entities[idx].task = Task::ToNode;
-                self.set_move_order(idx, nx, ny);
+                self.move_order_to_node(idx, node);
+            }
+        }
+    }
+
+    /// Install a move order taking entity `idx` to work node
+    /// `node_id` (M7). Ordinary nodes are pathed to directly, as
+    /// always. A TREE node's own cell is blocked by the tree
+    /// (MAP-04), so the order targets the best standing cell beside
+    /// it instead: the reachable ring cell with the shortest path
+    /// (ties break in fixed ring order — the search is bounded at
+    /// the tree's 8 neighbors, once per order, never per tick).
+    /// Returns whether an order was installed; on failure the
+    /// entity's order is cleared, exactly like `set_move_order`.
+    fn move_order_to_node(&mut self, idx: usize, node_id: u32) -> bool {
+        let (nx, ny, kind) = match self.node_index(node_id) {
+            Some(ni) => {
+                let n = &self.nodes[ni];
+                (n.pos_x, n.pos_y, n.kind)
+            }
+            None => return false,
+        };
+        if kind != NodeKind::Tree {
+            return self.set_move_order(idx, nx, ny);
+        }
+        let (tx, ty) = self.grid.world_to_cell(nx, ny);
+        let from = (self.entities[idx].pos_x, self.entities[idx].pos_y);
+        let mut best: Option<(usize, (I16F16, I16F16), Vec<(I16F16, I16F16)>)> = None;
+        for dy in -1i32..=1 {
+            for dx in -1i32..=1 {
+                if dx == 0 && dy == 0 {
+                    continue;
+                }
+                let (cx, cy) = (tx as i32 + dx, ty as i32 + dy);
+                if cx < 0 || cy < 0 || cx >= GRID_DIM as i32 || cy >= GRID_DIM as i32 {
+                    continue;
+                }
+                let (cx, cy) = (cx as u32, cy as u32);
+                if self.grid.is_blocked(cx, cy) {
+                    continue;
+                }
+                let center = self.grid.cell_center(cx, cy);
+                if let Some(wps) = self.grid.find_path(from, center) {
+                    let better = match &best {
+                        None => true,
+                        Some((len, _, _)) => wps.len() < *len,
+                    };
+                    if better {
+                        best = Some((wps.len(), center, wps));
+                    }
+                }
+            }
+        }
+        match best {
+            Some((_, target, wps)) => {
+                let e = &mut self.entities[idx];
+                e.order = Some(MoveOrder {
+                    target_x: target.0,
+                    target_y: target.1,
+                    waypoints: wps,
+                    wp_index: 0,
+                });
+                true
+            }
+            None => {
+                let e = &mut self.entities[idx];
+                e.order = None;
+                e.vel_x = I16F16::ZERO;
+                e.vel_y = I16F16::ZERO;
+                false
             }
         }
     }
@@ -2826,14 +2963,32 @@ impl Sim {
                     }
                 };
                 let d = self.distance_to(idx, nx, ny);
-                if d <= GATHER_RANGE {
+                // M7 (MAP-04): a tree's own cell is blocked by the
+                // tree, so a woodcutter "arrives" by standing on any
+                // cell beside it — the gather range alone (2.5
+                // units) can never be met from a neighboring cell
+                // center 4 units away.
+                let beside_tree = {
+                    let ni = self.node_index(node_id).expect("live node checked");
+                    if self.nodes[ni].kind == NodeKind::Tree {
+                        let (vx, vy) = self.grid.world_to_cell(
+                            self.entities[idx].pos_x,
+                            self.entities[idx].pos_y,
+                        );
+                        let (tx, ty) = self.grid.world_to_cell(nx, ny);
+                        vx.abs_diff(tx) <= 1 && vy.abs_diff(ty) <= 1
+                    } else {
+                        false
+                    }
+                };
+                if d <= GATHER_RANGE || beside_tree {
                     let e = &mut self.entities[idx];
                     e.task = Task::Gathering;
                     e.order = None;
                     e.vel_x = I16F16::ZERO;
                     e.vel_y = I16F16::ZERO;
                 } else if self.entities[idx].order.is_none()
-                    && !self.set_move_order(idx, nx, ny)
+                    && !self.move_order_to_node(idx, node_id)
                 {
                     // The node cannot be reached from here (a
                     // building completed around it, or around the
@@ -2880,6 +3035,18 @@ impl Sim {
                 let take = rate.min(room).min(self.nodes[ni].amount_left);
                 if take > I16F16::ZERO {
                     self.nodes[ni].amount_left -= take;
+                    // MAP-04 (M7): a tree is its cell's block *until
+                    // depleted* — the tick it runs dry, its cell
+                    // opens (the stump does not block; the forest
+                    // can be chopped through).
+                    if self.nodes[ni].kind == NodeKind::Tree
+                        && self.nodes[ni].amount_left <= I16F16::ZERO
+                    {
+                        let (cx, cy) = self
+                            .grid
+                            .world_to_cell(self.nodes[ni].pos_x, self.nodes[ni].pos_y);
+                        self.grid.set_node_block(cx, cy, false);
+                    }
                     let resource = self.nodes[ni].resource();
                     let e = &mut self.entities[idx];
                     e.carry += take;
@@ -2924,10 +3091,7 @@ impl Sim {
                             || self.entities[idx].order.is_none()
                         {
                             self.entities[idx].task_dropoff = Some(t);
-                            let (tx, ty) = self
-                                .dropoff_steer_point(owner, t, px, py)
-                                .expect("target resolved");
-                            if !self.set_move_order(idx, tx, ty) {
+                            if !self.steer_to_dropoff(idx, owner, t) {
                                 // The drop-off cannot be reached
                                 // from here: stop with the load kept
                                 // (re-taskable) instead of re-pathing
@@ -3216,9 +3380,9 @@ impl Sim {
         }
         match self.entities[idx].task_node {
             Some(node_id) => match self.live_node_pos(node_id) {
-                Some((nx, ny)) => {
+                Some(_) => {
                     self.entities[idx].task = Task::ToNode;
-                    self.set_move_order(idx, nx, ny);
+                    self.move_order_to_node(idx, node_id);
                 }
                 // The assignment died while the villager hauled its
                 // last load home: ECO-09's "or after depositing"
@@ -3292,6 +3456,36 @@ impl Sim {
         }
     }
 
+    /// Steer a hauler toward its deposit target. The geometric
+    /// steer point goes first; for a building, if that point cannot
+    /// be pathed to — a camp hugging its woodline (M7's generated
+    /// forests) can have the push-out point land inside the trees —
+    /// fall back to the building's proven standing point
+    /// (`approach_point`: a free ring cell with a real path), the
+    /// same ground placement validation used. `false` only when
+    /// the target is genuinely unreachable from here.
+    fn steer_to_dropoff(&mut self, idx: usize, owner: u8, target: Dropoff) -> bool {
+        let (px, py) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
+        let Some((tx, ty)) = self.dropoff_steer_point(owner, target, px, py) else {
+            return false;
+        };
+        if self.set_move_order(idx, tx, ty) {
+            return true;
+        }
+        if let Dropoff::Building(bid) = target {
+            if let Some(bi) = self.building_index(bid) {
+                let (ax, ay, size) = {
+                    let b = &self.buildings[bi];
+                    (b.cell_x, b.cell_y, b.kind.footprint_size())
+                };
+                if let Some((axp, ayp)) = self.approach_point(idx, ax, ay, size) {
+                    return self.set_move_order(idx, axp, ayp);
+                }
+            }
+        }
+        false
+    }
+
     /// Send the villager home to deposit, keeping its gather
     /// assignment. "Home" is the nearest valid drop-off for the
     /// load (M6, ECO-06; before M6, always the owner's Town
@@ -3308,12 +3502,14 @@ impl Sim {
         };
         match target {
             Some(t) => {
-                let (tx, ty) = self
-                    .dropoff_steer_point(owner, t, px, py)
-                    .expect("target resolved");
                 self.entities[idx].task = Task::Returning;
                 self.entities[idx].task_dropoff = Some(t);
-                self.set_move_order(idx, tx, ty);
+                if !self.steer_to_dropoff(idx, owner, t) {
+                    // Unreachable from here: stop, load kept (the
+                    // M6 terminal-transition rule — never re-path a
+                    // failing route every tick).
+                    self.stop_task(idx);
+                }
             }
             None => self.stop_task(idx),
         }
@@ -3437,17 +3633,18 @@ impl Sim {
         let (rng_state, rng_inc) = self.rng.state_words();
         h.write_u64(rng_state);
         h.write_u64(rng_inc);
-        // Grid layout is constant, but hashing it pins the layout to the
-        // golden-hash tripwire: any accidental layout change is caught.
+        // The grid layers, chunk-fed (M7): terrain and heights from
+        // the generator, the tree-block layer (MAP-04 — a falling
+        // tree changes the hash), and the dynamic layer of placed
+        // buildings (M2.5). Hashing them pins the generated layout
+        // to the golden-hash tripwire: any accidental layout change
+        // is caught.
         h.write_u32(self.grid.width());
         h.write_u32(self.grid.height());
-        for b in self.grid.blocked_bytes() {
-            h.write_u8(b);
-        }
-        // M2.5: the dynamic layer — cells blocked by placed buildings.
-        for b in self.grid.dynamic_bytes() {
-            h.write_u8(b);
-        }
+        h.write_bytes_chunked(self.grid.terrain_bytes());
+        h.write_bytes_chunked(self.grid.height_bytes());
+        h.write_bytes_chunked(self.grid.node_block_bytes());
+        h.write_bytes_chunked(self.grid.dynamic_bytes());
         // M5: the match mode — a sandbox and a match with identical
         // openings must never share a hash stream.
         h.write_u8(self.mode.tag());
@@ -3706,6 +3903,9 @@ impl Sim {
             }
             h.write_u32(p.attacker);
             h.write_u8(p.owner);
+            // M7: the attacker's release-time elevation (PRJ-10) —
+            // a shot's hill factor is fixed at release.
+            h.write_u8(p.attacker_elev);
             h.write_u32(p.attacks.len() as u32);
             for &(class, value) in &p.attacks {
                 h.write_u8(class);
@@ -3715,6 +3915,12 @@ impl Sim {
         // M5: the AI opponent's scheduling state (its decisions read
         // live state, but the wave clock is state of its own).
         h.write_u64(self.ai.next_wave_tick);
+        // M7: both players' fog-of-war grids (VIS-01) — what each
+        // player knows is state: the AI's decisions are functions
+        // of its grid, so a replay must reproduce it exactly.
+        for slot in &self.fog {
+            h.write_bytes_chunked(slot);
+        }
         h.finish()
     }
 
@@ -3759,22 +3965,34 @@ mod tests {
 
     #[test]
     fn starting_layout_is_on_open_ground() {
+        // M7: on a generated map — every entity stands on open
+        // ground, and every node stands on open ground too, with
+        // exactly one exception: a tree node stands ON its own
+        // blocking cell (MAP-04) — blocked *by itself*, by design.
         let sim = Sim::new(5);
         for e in sim.entities() {
             let (cx, cy) = sim.grid.world_to_cell(e.pos_x, e.pos_y);
             assert!(
                 !sim.grid.is_blocked(cx, cy),
-                "entity {} starts inside a wall",
+                "entity {} starts inside a blocked cell",
                 e.id
             );
         }
         for n in sim.nodes() {
             let (cx, cy) = sim.grid.world_to_cell(n.pos_x, n.pos_y);
-            assert!(
-                !sim.grid.is_blocked(cx, cy),
-                "node {} sits inside a wall",
-                n.id
-            );
+            if n.kind == NodeKind::Tree {
+                assert!(
+                    sim.grid.is_node_blocked(cx, cy),
+                    "tree node {} does not block its cell (MAP-04)",
+                    n.id
+                );
+            } else {
+                assert!(
+                    !sim.grid.is_blocked(cx, cy),
+                    "node {} sits inside a blocked cell",
+                    n.id
+                );
+            }
         }
     }
 
@@ -3815,11 +4033,18 @@ mod tests {
         let mut sim = Sim::new(11);
         let before: Vec<(I16F16, I16F16)> =
             sim.entities().iter().map(|e| (e.pos_x, e.pos_y)).collect();
-        // (2, -46): cell (25, 13) — inside the vertical wall.
+        // M7: the arena walls are gone — the blocked target is now
+        // a standing tree's cell (MAP-04: a tree blocks its cell).
+        let tree = sim
+            .nodes()
+            .iter()
+            .find(|n| n.kind == NodeKind::Tree)
+            .expect("a tree");
+        let (tx, ty) = (tree.pos_x, tree.pos_y);
         sim.push_command(Command::Move {
             entity: 1,
-            x: I16F16::from_num(2),
-            y: I16F16::from_num(-46),
+            x: tx,
+            y: ty,
         });
         for _ in 0..120 {
             sim.tick();
@@ -3958,7 +4183,10 @@ mod tests {
                 2
             );
             assert_eq!(sim.stockpile_of(entity::OWNER_OPPONENT), sim.stockpile());
-            assert!(sim.nodes().len() > econ::NODE_SPECS.len());
+            // M7: the generated layout carries two starts' packages
+            // plus neutral dressing — strictly more nodes than one
+            // start's package (a Sandbox sim with the same seed).
+            assert!(sim.nodes().len() > Sim::new(11).nodes().len());
             assert_eq!(sim.population_of(entity::OWNER_OPPONENT), 4);
             assert_eq!(sim.population_cap_of(entity::OWNER_OPPONENT), 5);
         }

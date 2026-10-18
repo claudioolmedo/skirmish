@@ -138,3 +138,42 @@ test('renderMinimap: obstacles, live nodes only, entities, viewport', () => {
   // M3: two carcass node kinds (hunt + herd) extend the palette 5 -> 7.
   assert.equal(NODE_COLORS.length, 7);
 });
+
+// --- M7: fog/terrain base -------------------------------------------
+// With fog + terrain layers present, the ground is drawn per cell
+// (an affine-transformed fillRect per cell): unexplored cells in
+// the shroud color, water and land shaded by fog state. The legacy
+// state (no layers) must keep the old ground + obstacle rendering
+// exactly — the tests above pin it; this one pins the new branch.
+test('fog base: per-cell terrain under fog states (M7)', () => {
+  const fills = [];
+  const ctx = {
+    fillStyle: '', strokeStyle: '', lineWidth: 1,
+    beginPath() {}, moveTo() {}, lineTo() {}, closePath() {},
+    fill() {}, stroke() {}, clip() {}, save() {}, restore() {},
+    arc() {}, strokeRect() {},
+    setTransform() {},
+    fillRect(x, y, w, h) { fills.push({ x, y, fill: this.fillStyle }); },
+  };
+  const g = createMinimap({ worldHalf: 240, width: 220, height: 124, pad: 2 });
+  const GW = 120, GH = 120;
+  const terrain = new Uint8Array(GW * GH);
+  const heights = new Uint8Array(GW * GH);
+  const fog = new Uint8Array(GW * GH); // all unexplored
+  terrain[5 * GW + 5] = 1; // a water cell...
+  fog[5 * GW + 5] = 2;     // ...currently visible
+  fog[6 * GW + 6] = 1;     // an explored land cell
+  heights[6 * GW + 6] = 3;
+  renderMinimap(ctx, g, {
+    gridW: GW, gridH: GH, cellSize: 4,
+    obstacles: new Uint8Array(GW * GH),
+    terrain, heights, fog,
+    nodes: [], buildings: [], entities: [], cam: null,
+  });
+  // One base rect per cell, in row-major cell order.
+  assert.equal(fills.length, GW * GH);
+  assert.equal(fills[0].fill, '#05070a', 'unexplored = shroud');
+  assert.equal(fills[5 * GW + 5].fill, '#2e6da8', 'visible water');
+  assert.equal(fills[6 * GW + 6].fill, '#2f4a26', 'explored land at height 3 (dim)');
+  assert.deepEqual([fills[6 * GW + 6].x, fills[6 * GW + 6].y], [6, 6]);
+});

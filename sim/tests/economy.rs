@@ -31,11 +31,45 @@ fn node_amount(sim: &Sim, id: u32) -> I16F16 {
 fn nodes_are_reachable_from_town_center() {
     let sim = Sim::new(3);
     let tc = sim.town_center();
+    // M7 (MAP-04): a tree's own cell is blocked by the tree, and a
+    // forest's interior trees have no reachable standing cell at
+    // all — they are workable the AoE2 way, by chopping in from the
+    // edge. So trees are judged by the generator's own criterion:
+    // the cell stands on the shared landmass (a flood fill over
+    // terrain from the Town Center, where trees do not block).
+    // Everything else must path directly to its cell.
+    let (tcx, tcy) = sim.grid().world_to_cell(tc.pos_x, tc.pos_y);
+    let dim = sim.grid().width();
+    let mut flood = vec![false; (dim * dim) as usize];
+    {
+        let mut stack = vec![(tcx, tcy)];
+        flood[(tcy * dim + tcx) as usize] = true;
+        while let Some((cx, cy)) = stack.pop() {
+            for (dx, dy) in [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)] {
+                let (nx, ny) = (cx as i32 + dx, cy as i32 + dy);
+                if nx < 0 || ny < 0 || nx >= dim as i32 || ny >= dim as i32 {
+                    continue;
+                }
+                let (nx, ny) = (nx as u32, ny as u32);
+                let i = (ny * dim + nx) as usize;
+                if !flood[i] && !sim.grid().is_water(nx, ny) {
+                    flood[i] = true;
+                    stack.push((nx, ny));
+                }
+            }
+        }
+    }
     for n in sim.nodes() {
-        assert!(
+        let (cx, cy) = sim.grid().world_to_cell(n.pos_x, n.pos_y);
+        let reachable = if n.kind == NodeKind::Tree {
+            flood[(cy * dim + cx) as usize]
+        } else {
             sim.grid()
                 .find_path((tc.pos_x, tc.pos_y), (n.pos_x, n.pos_y))
-                .is_some(),
+                .is_some()
+        };
+        assert!(
+            reachable,
             "node {} ({:?}) is unreachable from the Town Center",
             n.id,
             n.kind
@@ -107,10 +141,15 @@ fn node_depletion_is_bit_exact_and_node_goes_inert() {
     //
     // M4 deliberate update (ECO-09): "moved on" is no longer "idle"
     // — the villager retargets to the tree's same-resource neighbor
-    // (id 1, the tree 4 units east; the tie with the tree 4 units
-    // south breaks to the lower id). The conservation assertion is
+    // when one stands within reach. The conservation assertion is
     // unchanged: it is taken at the deposit tick, before any wood
     // from the *next* tree can land.
+    //
+    // M7 note: the first tree is now a generated straggler (the
+    // arena's fixed west forest is gone); whether a same-resource
+    // neighbor stands within the retarget radius depends on the
+    // generated woodline, so the continuation assertion below
+    // accepts either a tree retarget or honest idleness.
     let mut finished = false;
     for _ in 0..60_000 {
         sim.tick();
@@ -130,10 +169,20 @@ fn node_depletion_is_bit_exact_and_node_goes_inert() {
         start_wood + I16F16::from_num(100),
         "total gathered must equal the node's full amount exactly"
     );
-    // ECO-09: the villager continued at the neighboring tree instead
-    // of going idle (the west forest chains; see tests/input.rs for
-    // the dedicated retarget scenarios).
-    assert_eq!(villager(&sim, 1).task_node, Some(1));
+    // ECO-09: the assignment moved on from the dead tree — to a
+    // neighboring tree when one is within reach (the generated
+    // woodline permitting), else to honest idleness (see
+    // tests/input.rs for the dedicated retarget scenarios).
+    let moved = villager(&sim, 1).task_node;
+    assert_ne!(moved, Some(tree));
+    if let Some(next) = moved {
+        let kind = sim
+            .nodes()
+            .iter()
+            .find(|n| n.id == next)
+            .map(|n| n.kind);
+        assert_eq!(kind, Some(NodeKind::Tree), "retarget must stay on wood");
+    }
 
     // A depleted node rejects new gather orders: the villager stays idle.
     sim.push_command(Command::Gather {

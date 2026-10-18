@@ -42,8 +42,10 @@ fn stockpile_total(sim: &Sim, owner: u8) -> f64 {
 #[test]
 fn opponent_start_is_mirrored_and_complete() {
     let sim = Sim::new_match(3, MatchMode::AiNormal);
-    // Two Town Centers: the human's at the standard cell, the
-    // opponent's mirrored through the map center.
+    // Two Town Centers. M7: the cells come from the seeded
+    // generator — the fairness law is rotational symmetry: the
+    // opponent's start is the human's rotated 180° through the
+    // map center (the arena's fixed (-6,-6)/(6,6) cells are gone).
     let tcs: Vec<_> = sim
         .entities()
         .iter()
@@ -52,8 +54,14 @@ fn opponent_start_is_mirrored_and_complete() {
     assert_eq!(tcs.len(), 2);
     let human_tc = tcs.iter().find(|e| e.owner == OWNER_PLAYER).unwrap();
     let enemy_tc = tcs.iter().find(|e| e.owner == OWNER_OPPONENT).unwrap();
-    assert_eq!((f(human_tc.pos_x), f(human_tc.pos_y)), (-6.0, -6.0));
-    assert_eq!((f(enemy_tc.pos_x), f(enemy_tc.pos_y)), (6.0, 6.0));
+    let dim = sim.grid().width();
+    let (hx, hy) = sim.grid().world_to_cell(human_tc.pos_x, human_tc.pos_y);
+    let (ex, ey) = sim.grid().world_to_cell(enemy_tc.pos_x, enemy_tc.pos_y);
+    assert_eq!(
+        (ex, ey),
+        (dim - 1 - hx, dim - 1 - hy),
+        "the opponent's start is not the human's rotated 180°"
+    );
     // Mirrored start package: 3 villagers + 1 Scout, own stockpile,
     // own population room.
     assert_eq!(living(&sim, OWNER_OPPONENT, EntityKind::Villager), 3);
@@ -61,17 +69,36 @@ fn opponent_start_is_mirrored_and_complete() {
     assert_eq!(sim.population_of(OWNER_OPPONENT), 4);
     assert_eq!(sim.population_cap_of(OWNER_OPPONENT), 5);
     assert_eq!(stockpile_total(&sim, OWNER_OPPONENT), 700.0);
-    // The resource layout is doubled (20 shared + 20 mirrored).
-    assert_eq!(sim.nodes().len(), 40);
+    // The resource layout is doubled: per kind, each side's
+    // package (nearer its own Town Center) holds equal counts.
+    assert!(sim.nodes().len() >= 150, "nodes: {}", sim.nodes().len());
+    for kind in [
+        skirmish_sim::NodeKind::BerryBush,
+        skirmish_sim::NodeKind::Tree,
+        skirmish_sim::NodeKind::GoldMine,
+        skirmish_sim::NodeKind::StoneMine,
+    ] {
+        let (mut a, mut b) = (0usize, 0usize);
+        for n in sim.nodes().iter().filter(|n| n.kind == kind) {
+            let dh = dist(n.pos_x - human_tc.pos_x, n.pos_y - human_tc.pos_y);
+            let de = dist(n.pos_x - enemy_tc.pos_x, n.pos_y - enemy_tc.pos_y);
+            if dh < de {
+                a += 1;
+            } else if de < dh {
+                b += 1;
+            }
+        }
+        assert_eq!(a, b, "unfair {kind:?} split: {a} vs {b}");
+    }
     // The opponent has its own sheep: the Gaia herd doubles too.
     assert_eq!(living(&sim, 1, EntityKind::Sheep), 16);
-    // Nobody starts inside a wall (the mirrored villager whose
-    // exact mirror cell is wall must have been re-seated nearby).
+    // Nobody starts inside a blocked cell (the generator seats
+    // every unit of the package on open ground).
     for e in sim.entities() {
         let (cx, cy) = sim.grid().world_to_cell(e.pos_x, e.pos_y);
         assert!(
             !sim.grid().is_blocked(cx, cy),
-            "entity {} starts inside a wall",
+            "entity {} starts inside a blocked cell",
             e.id
         );
     }
@@ -286,8 +313,28 @@ impl HumanScript {
         // Military production at the M6 homes: Militia from the
         // Barracks, Archers from the Archery Range — a mixed army
         // toward 16, kept up during the push (reinforcements).
+        //
+        // M7 adaptation — the age-up saving discipline the AI
+        // script itself plays by (its plan_train_military pause):
+        // while Dark, Loomed and nearly grown, hold production
+        // until the Feudal 500 is in hand. On the arena's short
+        // trips the script out-earned its own army sink and the
+        // 550-food moment arrived anyway; at generated-map scale
+        // the sink wins the race and the script sits Dark forever,
+        // trading its army into a Feudal defense (seed 21 caught
+        // it: food pinned at ~50 for 100,000 ticks).
+        let saving_for_feudal = sim.age_of(me) == Age::Dark
+            && sim.has_tech(me, TechId::Loom)
+            && sim
+                .buildings()
+                .iter()
+                .filter(|b| b.owner == me && b.complete && b.kind.counts_toward_feudal())
+                .count()
+                >= 2
+            && villagers >= 10
+            && food < 550.0;
         let army = living(sim, me, EntityKind::Militia) + living(sim, me, EntityKind::Archer);
-        if army < 16 {
+        if army < 16 && !saving_for_feudal {
             let producers: Vec<(u32, EntityKind)> = sim
                 .buildings()
                 .iter()
@@ -530,9 +577,12 @@ impl HumanScript {
             })
             .map(|e| e.id)
             .collect();
+        // M7: "near" is 11 tiles (44 units) — the generated
+        // start's berries stand 5–8 tiles out; the arena's 20-unit
+        // yardstick predates real map scale.
         let food_near = nearest_node(sim, ResourceKind::Food, tc_x, tc_y)
             .and_then(|nid| sim.nodes().iter().find(|n| n.id == nid))
-            .map(|n| dist(n.pos_x - tc_x, n.pos_y - tc_y) <= 20.0)
+            .map(|n| dist(n.pos_x - tc_x, n.pos_y - tc_y) <= 44.0)
             .unwrap_or(false);
         for vid in idle {
             let mut slot = 0usize;
@@ -583,13 +633,11 @@ fn dist(dx: I16F16, dy: I16F16) -> f64 {
 }
 
 fn nearest_node(sim: &Sim, resource: ResourceKind, x: I16F16, y: I16F16) -> Option<u32> {
-    // Own side of the map only — the same rule the AI plays by:
-    // the layout's first block of nodes is the human's set, the
-    // mirrored block is the opponent's, and dynamic nodes
-    // (carcasses) belong to the nearer Town Center. (Plain
-    // distance would send miners to the enemy's far gold mine,
-    // which sits a hair nearer this Town Center than its own.)
-    let shared = 20u32; // NODE_SPECS length; the layout is 2 blocks
+    // Own side of the map only — the same rule the AI plays by
+    // (M7): a node belongs to the Town Center it stands nearer
+    // (ties to the asker — here the human, whose (x, y) this is).
+    // (Plain distance alone would send miners to the enemy's
+    // gold when the map's rotation puts it a hair nearer.)
     let foe_tc = sim
         .entities()
         .iter()
@@ -599,16 +647,12 @@ fn nearest_node(sim: &Sim, resource: ResourceKind, x: I16F16, y: I16F16) -> Opti
         if n.is_depleted() || n.resource() != resource {
             continue;
         }
-        let mine = if n.id < shared * 2 {
-            n.id < shared
-        } else {
-            match foe_tc {
-                Some(ftc) => {
-                    dist(n.pos_x - x, n.pos_y - y)
-                        <= dist(n.pos_x - ftc.pos_x, n.pos_y - ftc.pos_y)
-                }
-                None => true,
+        let mine = match foe_tc {
+            Some(ftc) => {
+                dist(n.pos_x - x, n.pos_y - y)
+                    <= dist(n.pos_x - ftc.pos_x, n.pos_y - ftc.pos_y)
             }
+            None => true,
         };
         if !mine {
             continue;

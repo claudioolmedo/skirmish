@@ -121,7 +121,8 @@ The movement model, and the decisions that keep it deterministic:
   3-cell gap + one horizontal wall) — identical for every seed, and hashed
   so the golden tripwire pins the layout.
 - **A*.** Integer costs (10 orthogonal / 14 diagonal), octile heuristic,
-  fixed neighbor order (E, W, N, S, NE, SE, NW, SW), no corner cutting, and
+  fixed neighbor order (E, W, N, S, NE, SE, NW, SW), no corner cutting
+  (M7 relaxes this past tree cells only — see the M7 section), and
   a `BinaryHeap` with a *total* deterministic ordering `(f, h, cell)`.
   Waypoints are cell centers ending exactly on the commanded target point.
 - **Steering.** Per tick, per ordered entity: advance past reached
@@ -540,6 +541,96 @@ bitset** (`players: [PlayerState; 2]`), both hashed.
   with age yet (BLD-11); "nearest drop-off" is straight-line
   distance, not path distance; under-construction buildings carry
   full HP (BLD-05, from M5).
+
+## M7 — the world: random maps, terrain, fog (shipped 2026-10-17)
+
+- **One scale, faithfully translated.** The rulebook's 2-player map
+  (Tiny, 120×120 tiles) is the world: 1 sim cell = 1 tile = 4 world
+  units, so the world spans [-240, 240) and `GRID_DIM` is 120. Every
+  client dimension comes from the ABI (`world_half`, `grid_width`,
+  `cell_size`), so nothing downstream hardcodes the size.
+- **The generator (`sim/src/mapgen.rs`).** A deterministic Arabia
+  generator runs inside match creation from the match seed, on its
+  own derived sub-seed stream (the in-state RNG's draw sequence is
+  untouched by however many candidates generation tried). Start B's
+  package is start A's rotated 180° through the map center — equal
+  counts *and* mirrored distances, exact fairness by construction.
+  Heights are blurred integer noise, symmetrized; ponds are mirrored
+  pairs, clear of starts; starts and package nodes are flattened to
+  the start's level so openings play identically. Generation
+  **validates** (land flood-fill: starts connected, every package
+  cell on the shared landmass, no water near a start, no cliff-like
+  height breaks) and regenerates with the next sub-seed on failure —
+  bounded at 64 attempts, then a fixed template that validates by
+  construction. Never a hang; same seed ⇒ byte-identical map.
+- **Terrain & elevation are grid layers.** `Grid` carries `terrain`
+  (land/water), `height` (0–4), `node_block` (standing trees,
+  MAP-04) and `dynamic` (buildings) as byte layers; `is_blocked` is
+  their union for the land domain. The old compile-time wall layout
+  is deleted. Water is *terrain support only*: impassable to land
+  units in pathing and placement, rendered, shoreline-validated —
+  ships/docks/fishing are trimmed (rulebook MAP-08 stays DIFFERS).
+  Elevation feeds exactly one gameplay rule: CMB-01's binary factor
+  (×1.25 / ×0.75 / ×1 on the armor-subtracted sum, clamped after), with a
+  projectile carrying its shooter's elevation from release (PRJ-10).
+  No movement effect — AoE2 elevation does not slow movement.
+- **Fog of war is sim state (VIS-01, with the deviation recorded in
+  the rulebook).** Per player slot, a byte grid (0 unexplored /
+  1 explored / 2 visible), hash-covered, rebuilt from scratch every
+  15 ticks and at creation: demote visible→explored, then stamp
+  integer sight discs (pure radius — VIS-05, no occlusion) from
+  every living unit (effective-table LoS, capped at 20 tiles,
+  VIS-04) and standing building. Cost is bounded by sources × disc
+  area per interval, independent of map area — no per-tick scans.
+  The ABI serves the local player's grid; the client renders
+  strictly from it (shroud black, explored dimmed with last-known
+  enemy buildings, units/projectiles only where visible — minimap
+  included, VIS-10). Fog never feeds back into truth (VIS-09): it
+  gates knowledge consumers only.
+- **The AI plays under its own fog.** Its combat targeting picks
+  only currently-visible units and explored buildings; its Scout
+  rides to the expected enemy start (the mirror of its own TC —
+  the one fact Arabia's symmetry gives every player) before the
+  first wave can aim; its economy assigns nodes by Town-Center
+  proximity instead of node-id blocks, so it works any generated
+  map. Explicit Attack orders persist through fog for both players
+  equally — the same privilege as a human's click. One behavior
+  the generated maps forced into the open: the AI must *capture*
+  sheep, not just hunt owned ones — on the arena its work routes
+  crossed the herds by luck, but on a real map the berries can run
+  out first, and an AI with full wood and gold starved at the
+  Feudal gate. Its food fallback now sends a hunter to the
+  nearest reachable Gaia sheep (the approach captures it), the
+  one click a player makes without thinking.
+- **UNVERIFIED values adopted this milestone** (flagged in code and
+  rulebook VIS-03): building sight radii — Town Center 6 tiles,
+  other buildings 4. The unit LoS column is the study's; Town
+  Watch/Patrol are not implemented.
+- **Hash changes (deliberate).** The four grid layers and both fog
+  grids are hashed (chunk-fed — the FNV writer takes 8 bytes per
+  multiply so the 120×120 layers cost like the old 50×50 byte
+  loop); projectiles hash their release elevation. The golden hash
+  moved with M7 (see `tests/determinism.rs` for the trail).
+- **Scale traps the long matches caught (recorded so they stay
+  caught).** All sim distance comparisons go through
+  `steer::vec_len` (i64 bit math): a squared fixed-point distance
+  overflows I16F16 beyond ~181 units, which at arena scale never
+  happened and at map scale silently corrupts "nearest" queries.
+  Deposit steering falls back to the building's proven approach
+  point when the geometric steer point cannot be pathed to — a
+  camp hugging its woodline (the normal M7 placement) can have
+  the push-out point land inside the trees, and a hauler that
+  simply stops with a full load is the failure mode. A third trap
+  is path *traversal*, not path *finding*: a felled tree's freed
+  cell is ringed by trunks, so A* admits a diagonal step past
+  trees (water and buildings stay hard corners) — but a unit
+  steering continuously between waypoints cuts that corner by a
+  hair, clips the flanking trunk, and the integrity teleport
+  plus task re-issue looped forever at the gap's mouth.
+  Movement therefore slides axis-separated against tree cells
+  (the standard grid mover); the M6 teleport still guards every
+  other blocked layer. All three were found by the M7
+  long-match tests, not by inspection.
 
 ## The sim may
 

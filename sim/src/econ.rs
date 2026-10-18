@@ -282,40 +282,6 @@ pub const RETARGET_RADIUS: I16F16 = I16F16::from_bits(786_432); // 12.0
 /// right-click node pick radius (4 world units).
 pub const RALLY_NODE_SNAP_RADIUS: I16F16 = I16F16::from_bits(262_144); // 4.0
 
-/// Static node layout: (kind, cell_x, cell_y), ids assigned in table
-/// order. All cells are free (not walls) and every node is reachable from
-/// the Town Center cell — pinned by a test in `tests/economy.rs`.
-///
-/// Two tree clusters west/east, berries close to the Town Center (the
-/// classic start), gold to the north-east, stone to the south-west.
-pub const NODE_SPECS: &[(NodeKind, u32, u32)] = &[
-    // Trees — west forest.
-    (NodeKind::Tree, 8, 19),
-    (NodeKind::Tree, 9, 19),
-    (NodeKind::Tree, 8, 20),
-    (NodeKind::Tree, 9, 20),
-    (NodeKind::Tree, 10, 20),
-    (NodeKind::Tree, 8, 21),
-    (NodeKind::Tree, 9, 21),
-    (NodeKind::Tree, 10, 21),
-    // Trees — east copse.
-    (NodeKind::Tree, 40, 40),
-    (NodeKind::Tree, 41, 40),
-    (NodeKind::Tree, 40, 41),
-    // Berry bushes — just west of the Town Center.
-    (NodeKind::BerryBush, 21, 24),
-    (NodeKind::BerryBush, 22, 24),
-    (NodeKind::BerryBush, 21, 25),
-    (NodeKind::BerryBush, 22, 25),
-    // Gold mines — east, through the wall gap.
-    (NodeKind::GoldMine, 35, 15),
-    (NodeKind::GoldMine, 36, 15),
-    (NodeKind::GoldMine, 35, 16),
-    // Stone mines — south-west, around the horizontal wall.
-    (NodeKind::StoneMine, 15, 40),
-    (NodeKind::StoneMine, 16, 40),
-];
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -375,16 +341,7 @@ mod tests {
         assert_eq!(ResourceKind::from_tag(0), None);
     }
 
-    #[test]
-    fn node_specs_are_unique_cells() {
-        for (i, a) in NODE_SPECS.iter().enumerate() {
-            for b in NODE_SPECS.iter().skip(i + 1) {
-                assert_ne!(
-                    (a.1, a.2),
-                    (b.1, b.2),
-                    "two nodes share a cell"
-                );
-            }
-        }
-    }
+    // M7: the fixed NODE_SPECS layout table is gone — node placement
+    // is the map generator's job now (`mapgen`), and its tests pin
+    // the generated packages' uniqueness and fairness.
 }

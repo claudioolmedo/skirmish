@@ -46,6 +46,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full technical contract.
 | M3 | Combat: attack-move, targeting, HP/death, projectiles; first original empire |
 | M4 | Renderer (Canvas 2D) + input shell + adaptive-quality governor |
 | M5 | Feel tuning + scripted opponent AI; playtest loop |
+| **M7** ✅ | The world: seeded Arabia random maps (Tiny 120×120) with mirrored fair starts, terrain + water, elevation with the hill bonus, trees as blocking nodes, and per-player fog of war (the AI plays under the same fog) |
 
 Multiplayer, lobby, and ads are explicitly out of the prototype — they come
 after the game feels right.

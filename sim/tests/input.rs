@@ -5,9 +5,10 @@
 //!
 //! Entity ids in the standard start: 0 Town Center, 1–3 villagers,
 //! 4 Scout Cavalry, 5–8 near sheep, 9–12 far sheep, 13–14 boars,
-//! 15–17 deer (see `ANIMAL_SPECS` in lib.rs). Node ids follow
-//! `NODE_SPECS` in econ.rs: 0–7 west-forest trees, 8–10 east-copse
-//! trees, 11–14 berries, 15–17 gold, 18–19 stone.
+//! 15–20 deer. Node ids since M7 follow the generator's package
+//! order (mapgen.rs): berries first, then straggler trees, the two
+//! forests, gold, stone — tests look nodes up by kind, not by the
+//! arena's old fixed ids.
 
 use fixed::types::I16F16;
 use skirmish_sim::{
@@ -31,6 +32,14 @@ fn dist_to(sim: &Sim, id: u32, x: f64, y: f64) -> f64 {
     let dx = f(e.pos_x) - x;
     let dy = f(e.pos_y) - y;
     (dx * dx + dy * dy).sqrt()
+}
+
+fn first_node(sim: &Sim, kind: skirmish_sim::NodeKind) -> u32 {
+    sim.nodes()
+        .iter()
+        .find(|n| n.kind == kind)
+        .unwrap()
+        .id
 }
 
 fn node_amount(sim: &Sim, node: u32) -> I16F16 {
@@ -163,15 +172,25 @@ fn plain_command_replaces_the_whole_queue() {
 #[test]
 fn queued_gather_runs_after_the_current_move() {
     let mut sim = Sim::new(7);
-    let near = cell_point(&sim, 18, 23); // (-26, -6), open ground
+    // M7: the waypoints are map-derived — walk to the berry patch
+    // (open node ground beside the Town Center), then the queued
+    // gather takes over at the first tree.
+    let berry = first_node(&sim, skirmish_sim::NodeKind::BerryBush);
+    let berry_pos = sim
+        .nodes()
+        .iter()
+        .find(|n| n.id == berry)
+        .map(|n| (n.pos_x, n.pos_y))
+        .unwrap();
+    let tree = first_node(&sim, skirmish_sim::NodeKind::Tree);
     sim.push_command(Command::Move {
         entity: 2,
-        x: near.0,
-        y: near.1,
+        x: berry_pos.0,
+        y: berry_pos.1,
     });
     sim.push_command(Command::Queue {
         entity: 2,
-        order: QueuedOrder::Gather { node: 0 }, // west-forest tree
+        order: QueuedOrder::Gather { node: tree },
     });
     // The gather must not start until the move lands: mid-walk the
     // villager has no task assignment yet.
@@ -180,7 +199,7 @@ fn queued_gather_runs_after_the_current_move() {
     }
     assert_eq!(ent(&sim, 2).task_node, None);
 
-    let started = run_until(&mut sim, 20_000, |s| ent(s, 2).task_node == Some(0));
+    let started = run_until(&mut sim, 20_000, |s| ent(s, 2).task_node == Some(tree));
     assert!(started, "queued gather never started after the move");
     // …and it produces: the first deposit raises the wood stockpile.
     let start_wood = sim.stockpile().amount(ResourceKind::Wood);
@@ -197,7 +216,7 @@ fn queued_order_for_an_idle_unit_starts_immediately() {
     assert!(sim.can_queue(3, QueuedOrder::Gather { node: 11 }));
     sim.push_command(Command::Queue {
         entity: 3,
-        order: QueuedOrder::Gather { node: 11 }, // berry bush
+        order: QueuedOrder::Gather { node: 11 }, // a forest tree (M7 ids)
     });
     sim.tick();
     let v = ent(&sim, 3);
@@ -398,7 +417,11 @@ fn queued_script_replays_bit_identically() {
 #[test]
 fn tc_rally_point_walks_the_new_villager_there() {
     let mut sim = Sim::new(7);
-    let point = cell_point(&sim, 18, 23); // (-26, -6), open ground
+    // M7: the rally ground is 8 units east of the Town Center —
+    // inside the flattened, node-free start clearing by
+    // construction (the arena's fixed open cell is gone).
+    let tc = sim.town_center();
+    let point = (tc.pos_x + I16F16::from_num(8), tc.pos_y);
     sim.push_command(Command::SetRally {
         building: None,
         x: point.0,
@@ -410,17 +433,36 @@ fn tc_rally_point_walks_the_new_villager_there() {
     assert_eq!(node, None, "open ground must not snap to a node");
 
     sim.push_command(Command::TrainVillager);
+    let new_villager = |s: &Sim| {
+        s.entities()
+            .iter()
+            .filter(|e| e.kind == EntityKind::Villager)
+            .map(|e| e.id)
+            .max()
+            .unwrap()
+    };
     let arrived = run_until(&mut sim, 10_000, |s| {
-        s.villager_count() == 4 && dist_to(s, 18, f(point.0), f(point.1)) < 1.5
+        s.villager_count() == 4 && dist_to(s, new_villager(s), f(point.0), f(point.1)) < 1.5
     });
     assert!(arrived, "new villager never walked to the rally point");
-    assert_eq!(ent(&sim, 18).task, Task::Idle, "a point rally is a walk, not a task");
+    assert_eq!(
+        ent(&sim, new_villager(&sim)).task,
+        Task::Idle,
+        "a point rally is a walk, not a task"
+    );
 }
 
 #[test]
 fn tc_rally_on_a_node_sends_the_new_villager_to_work() {
     let mut sim = Sim::new(7);
-    let berry = cell_point(&sim, 21, 24); // node 11's center
+    // M7: rally onto the first berry bush of the generated start.
+    let berry_id = first_node(&sim, skirmish_sim::NodeKind::BerryBush);
+    let berry = sim
+        .nodes()
+        .iter()
+        .find(|n| n.id == berry_id)
+        .map(|n| (n.pos_x, n.pos_y))
+        .unwrap();
     sim.push_command(Command::SetRally {
         building: None,
         x: berry.0,
@@ -428,11 +470,15 @@ fn tc_rally_on_a_node_sends_the_new_villager_to_work() {
     });
     sim.tick();
     let (_, _, node) = sim.tc_rally().expect("rally not stored");
-    assert_eq!(node, Some(11), "rally on the bush must snap to it");
+    assert_eq!(node, Some(berry_id), "rally on the bush must snap to it");
 
     sim.push_command(Command::TrainVillager);
     let working = run_until(&mut sim, 10_000, |s| {
-        s.villager_count() == 4 && ent(s, 18).task_node == Some(11)
+        s.villager_count() == 4
+            && s.entities()
+                .iter()
+                .filter(|e| e.kind == EntityKind::Villager)
+                .any(|v| v.task_node == Some(berry_id) && v.id > 4)
     });
     assert!(working, "new villager never went to work on the rallied node");
     // And it produces: berries land in the food stockpile.
@@ -480,21 +526,79 @@ fn barracks_rally_walks_the_new_unit_there() {
 #[test]
 fn retarget_continues_at_the_same_resource_neighbor() {
     let mut sim = Sim::new(9);
-    // All three villagers on the first west-forest tree (node 0).
+    // M7: all three villagers on one FOREST tree of the generated
+    // woodline (the arena's node 0 is a berry bush now), chosen
+    // with live trees inside the retarget radius; the expected
+    // continuation is the nearest other tree to it (ties break to
+    // the lower id — the sim's stated rule).
+    let trees: Vec<(u32, f64, f64)> = sim
+        .nodes()
+        .iter()
+        .filter(|n| n.kind == skirmish_sim::NodeKind::Tree)
+        .map(|n| (n.id, f(n.pos_x), f(n.pos_y)))
+        .collect();
+    let near_count = |t: &(u32, f64, f64)| {
+        trees
+            .iter()
+            .filter(|o| {
+                let dx = o.1 - t.1;
+                let dy = o.2 - t.2;
+                dx * dx + dy * dy <= 144.0
+            })
+            .count()
+    };
+    // ...and a standing cell the pathfinder can actually reach
+    // from the Town Center (an interior tree ringed by trunks
+    // cannot be worked first — same rule the combat build-up
+    // learned).
+    let tc = sim.town_center();
+    let workable = |t: &(u32, f64, f64)| {
+        let (cx, cy) = sim.grid().world_to_cell(
+            I16F16::from_num(t.1),
+            I16F16::from_num(t.2),
+        );
+        (-1i32..=1).any(|dy| {
+            (-1i32..=1).any(|dx| {
+                let (nx, ny) = (cx as i32 + dx, cy as i32 + dy);
+                if nx < 0 || ny < 0 || sim.grid().is_blocked(nx as u32, ny as u32) {
+                    return false;
+                }
+                let center = sim.grid().cell_center(nx as u32, ny as u32);
+                sim.grid().find_path((tc.pos_x, tc.pos_y), center).is_some()
+            })
+        })
+    };
+    let &(tree, tx, ty) = trees
+        .iter()
+        .filter(|t| near_count(t) >= 3 && workable(t))
+        .max_by_key(|t| near_count(t))
+        .expect("no workable forest tree with neighbors in reach");
+    let expected = trees
+        .iter()
+        .filter(|o| o.0 != tree)
+        .min_by(|a, b| {
+            let da = (a.1 - tx).powi(2) + (a.2 - ty).powi(2);
+            let db = (b.1 - tx).powi(2) + (b.2 - ty).powi(2);
+            da.partial_cmp(&db)
+                .unwrap()
+                .then(a.0.cmp(&b.0))
+        })
+        .unwrap()
+        .0;
     for v in 1..=3 {
         sim.push_command(Command::Gather {
             entity: v,
-            node: 0,
+            node: tree,
         });
     }
-    let dried = run_until(&mut sim, 90_000, |s| node_amount(s, 0) == I16F16::ZERO);
+    let dried = run_until(&mut sim, 90_000, |s| node_amount(s, tree) == I16F16::ZERO);
     assert!(dried, "the shared tree never depleted");
     // Nobody goes idle while the woodline stands: within a few
     // thousand ticks (deposit trips included) every villager's
-    // assignment is the neighboring tree — node 1, the nearest
-    // same-resource node to node 0 (ties at 4 units break low).
+    // assignment is the neighboring tree — the nearest
+    // same-resource node to the dead one.
     let moved_on = run_until(&mut sim, 6_000, |s| {
-        (1..=3).all(|v| ent(s, v).task_node == Some(1))
+        (1..=3).all(|v| ent(s, v).task_node == Some(expected))
     });
     assert!(moved_on, "villagers went idle instead of retargeting to the next tree");
     // And the work is real: the stockpile keeps growing past the

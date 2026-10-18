@@ -123,9 +123,19 @@ From the [Gap Analysis](GAP-ANALYSIS.md): the items that most make Skirmish II
   scripted AI taught the same layer. Carried to later milestones: the
   Castle/Imperial rungs, Market/Monastery/University, garrison + Town
   Bell, monks and relics, market and trade, repair, and queue cancel.
-- **M7 — Terrain, fog & random maps.** Map sizes and terrain, elevation,
-  Arabia-style random map generation, fog of war + black map, water and
-  fishing.
+- **M7 — Terrain, fog & random maps.** ✅ Shipped 2026-10-17. A
+  deterministic seeded Arabia generator in the sim replaces the fixed
+  arena: Tiny 120×120 tiles, per-start resource packages (OPENING-SPEC
+  §2.3) mirrored for exact fairness, validated connectivity (bounded
+  regeneration, fixed fallback — never a hang). Terrain layers (land /
+  water), a 5-level height field feeding the binary hill bonus
+  (CMB-01), trees as blocking nodes, and per-player fog of war —
+  hash-covered, recomputed on a bounded interval — with the scripted
+  AI's targeting bound by its own fog and its economy assigned by
+  Town-Center proximity. Trimmed, deliberately: cliffs, the water
+  domain (ships, docks, fishing), and the larger map sizes — the
+  generator's vocabulary and validation already cover water as
+  terrain; the rest lands with the naval content.
 - **M8 — Lockstep multiplayer.** Commands-only networking on the
   deterministic sim (per-tick hash is the desync detector), send-a-link
   lobby, replay viewer. **Multi-region from day one**: one relay per

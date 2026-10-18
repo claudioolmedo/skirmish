@@ -53,6 +53,51 @@ fn first_node(sim: &Sim, kind: NodeKind) -> u32 {
     sim.nodes().iter().find(|n| n.kind == kind).unwrap().id
 }
 
+/// A woodline tree for sustained chopping (M7): a forest EDGE
+/// tree — a standing cell beside it that the pathfinder reaches
+/// from the Town Center, and several tree neighbors within the
+/// retarget radius, so a depleted trunk chains to the next.
+/// (The first tree in id order is a lone straggler now: 100 wood
+/// and no neighbor in reach, so any `wait_wood` past 100 starved
+/// forever — the trap the combat build-up hit first.)
+fn woodline_tree(sim: &Sim) -> u32 {
+    let tc = sim.town_center();
+    let trees: Vec<_> = sim
+        .nodes()
+        .iter()
+        .filter(|n| n.kind == NodeKind::Tree && !n.is_depleted())
+        .collect();
+    let neighbors = |t: &skirmish_sim::ResourceNode| {
+        trees
+            .iter()
+            .filter(|o| {
+                let dx = o.pos_x.to_num::<f64>() - t.pos_x.to_num::<f64>();
+                let dy = o.pos_y.to_num::<f64>() - t.pos_y.to_num::<f64>();
+                dx * dx + dy * dy <= 144.0
+            })
+            .count()
+    };
+    let workable = |t: &skirmish_sim::ResourceNode| {
+        let (cx, cy) = sim.grid().world_to_cell(t.pos_x, t.pos_y);
+        (-1i32..=1).any(|dy| {
+            (-1i32..=1).any(|dx| {
+                let (nx, ny) = (cx as i32 + dx, cy as i32 + dy);
+                if nx < 0 || ny < 0 || sim.grid().is_blocked(nx as u32, ny as u32) {
+                    return false;
+                }
+                let center = sim.grid().cell_center(nx as u32, ny as u32);
+                sim.grid().find_path((tc.pos_x, tc.pos_y), center).is_some()
+            })
+        })
+    };
+    trees
+        .iter()
+        .filter(|t| workable(t) && neighbors(t) >= 3)
+        .max_by_key(|t| neighbors(t))
+        .expect("no workable woodline tree")
+        .id
+}
+
 /// First node of `kind` that still holds resources. (A gather
 /// order onto a depleted node is rejected by the sim — the
 /// villager stays idle — so long tests must pick live nodes.)
@@ -126,7 +171,7 @@ fn wait_wood(sim: &mut Sim, want: i32) {
 
 /// Put every villager on the woodline.
 fn all_chop(sim: &mut Sim) {
-    let tree = first_node(sim, NodeKind::Tree);
+    let tree = woodline_tree(sim);
     for id in 1..=3 {
         sim.push_command(Command::Gather {
             entity: id,
@@ -525,7 +570,7 @@ fn blacksmith_technologies_patch_the_combat_rows() {
     reach_feudal(&mut sim);
     // Wood for the Blacksmith: villager 1 chops (the camps ate the
     // starting stockpile); 2 and 3 stay on food duty below.
-    let tree = first_node(&sim, NodeKind::Tree);
+    let tree = woodline_tree(&sim);
     sim.push_command(Command::Gather {
         entity: 1,
         node: tree,
@@ -542,7 +587,7 @@ fn blacksmith_technologies_patch_the_combat_rows() {
     // villager 1 goes back to the woodline to refill it. The tree
     // is re-resolved live: the first chop depleted the original
     // node, and a gather order onto a depleted node is refused.)
-    let tree = first_live_node(&sim, NodeKind::Tree);
+    let tree = woodline_tree(&sim);
     sim.push_command(Command::Gather {
         entity: 1,
         node: tree,
@@ -609,7 +654,7 @@ fn man_at_arms_upgrades_existing_and_future_militia() {
     reach_feudal(&mut sim);
     // Wood for the Barracks: villager 3 chops; 1 and 2 stay on the
     // berries for the Militia and upgrade food costs.
-    let tree = first_node(&sim, NodeKind::Tree);
+    let tree = woodline_tree(&sim);
     sim.push_command(Command::Gather {
         entity: 3,
         node: tree,
@@ -678,7 +723,7 @@ fn man_at_arms_upgrades_existing_and_future_militia() {
     // while it builds, and the tree it used before is depleted
     // (a gather order onto a dead node is rejected), so pick a
     // live one.
-    let live_tree = first_live_node(&sim, NodeKind::Tree);
+    let live_tree = woodline_tree(&sim);
     sim.push_command(Command::Gather {
         entity: 3,
         node: live_tree,

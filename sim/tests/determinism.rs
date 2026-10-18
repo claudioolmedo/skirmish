@@ -150,11 +150,23 @@ fn golden_hash_regression() {
     // wider coverage alone. New value verified stable across
     // independent runs (replay example, seed 42, 360 ticks, run
     // twice).
+    //
+    // M7 deliberate update: the world itself changed — the fixed
+    // arena is replaced by the seeded Arabia generator (seed 42's
+    // generated layout: Town Center, package and heights all differ
+    // from the old hand-authored cells), the grid is 120×120 with
+    // terrain/height/tree-block layers, and the hash now also
+    // covers those layers (chunk-fed), both players' fog-of-war
+    // grids, and each projectile's release elevation. No commands
+    // are issued in this scenario — the stream changes through the
+    // new world and the wider coverage alone. New value verified
+    // stable across independent runs (replay example, seed 42, 360
+    // ticks, run twice).
     let mut sim = Sim::new(42);
     let mut hash = 0;
     for _ in 0..360 {
         hash = sim.tick();
     }
     assert_eq!(sim.tick_count(), 360);
-    assert_eq!(format!("{:016x}", hash), "09e22978bb8876db");
+    assert_eq!(format!("{:016x}", hash), "be584974ce98139d");
 }

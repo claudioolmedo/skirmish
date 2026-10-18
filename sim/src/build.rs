@@ -667,15 +667,16 @@ mod tests {
 
     #[test]
     fn footprint_center_is_the_shared_corner() {
-        // Cell (0,0) spans [-100,-96); the 2x2 footprint there spans
-        // [-100,-92) on both axes, so its center is (-96, -96).
+        // M7 geometry (120×120 cells, world [-240, 240)): cell (0,0)
+        // spans [-240,-236); the 2x2 footprint there spans
+        // [-240,-232) on both axes, so its center is (-236, -236).
         let (x, y) = footprint_center(0, 0, 2);
-        assert_eq!((x, y), (I16F16::from_num(-96), I16F16::from_num(-96)));
-        // World center-ish: footprint (24,24) spans [-4, 4) → center 0.
-        let (x, y) = footprint_center(24, 24, 2);
+        assert_eq!((x, y), (I16F16::from_num(-236), I16F16::from_num(-236)));
+        // World center: footprint (59,59) spans [-4, 4) → center 0.
+        let (x, y) = footprint_center(59, 59, 2);
         assert_eq!((x, y), (I16F16::from_num(0), I16F16::from_num(0)));
-        // A 3×3 footprint at (20,20) spans [-20,-8) → center -14.
+        // A 3×3 footprint at (20,20) spans [-160,-148) → center -154.
         let (x, y) = footprint_center(20, 20, 3);
-        assert_eq!((x, y), (I16F16::from_num(-14), I16F16::from_num(-14)));
+        assert_eq!((x, y), (I16F16::from_num(-154), I16F16::from_num(-154)));
     }
 }

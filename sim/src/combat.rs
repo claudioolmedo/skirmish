@@ -5,10 +5,11 @@
 //!
 //! - Damage is table-driven (CMB-01): for each (class, value) pair in
 //!   the attacker's row, if the target belongs to that class the pair
-//!   contributes max(0, value − armor); the total is at least 1.
-//!   Melee/pierce pairs always participate, mitigated by the matching
-//!   armor (which may be negative later — the formula already adds).
-//!   Elevation is ×1: the map is flat.
+//!   contributes max(0, value − armor); the sum is scaled by the
+//!   elevation factor (×1.25 attacker higher, ×0.75 attacker lower,
+//!   ×1 level — MAP-06, binary: any height difference of ≥ 1 level
+//!   gives the full factor) and the total is at least 1. Before M7
+//!   the map was flat, so the factor was ×1 everywhere.
 //! - The attack cycle (CMB-04/05/06): the first strike of an
 //!   engagement lands after the unit's attack delay; later strikes
 //!   land every reload ticks, counted from the previous landing.
@@ -93,16 +94,21 @@ pub struct Projectile {
     pub attacker: u32,
     /// Attacker owner (friendly-fire exclusion).
     pub owner: u8,
+    /// The attacker's elevation level at release (M7, PRJ-10):
+    /// height enters a shot's damage only through the elevation
+    /// factor, comparing this against the target's level at impact.
+    pub attacker_elev: u8,
     /// Snapshot of the attacker's (class, value) attack table.
     pub attacks: Vec<(u8, i32)>,
 }
 
-/// CMB-01 damage of one landed attack against a target, as a whole
-/// number (all table values are integers). Pure — unit-tested
-/// directly. Returns 0 only when no attack pair participates (an
-/// attacker with no applicable class at all); any participating
-/// attack deals at least 1.
-pub fn compute_damage(attacks: &[(u8, i32)], target: &UnitSpec) -> i32 {
+/// The pre-elevation damage sum of CMB-01: Σ over participating
+/// (class, value) pairs of max(0, value − armor), and whether any
+/// pair participated at all. The minimum-1 clamp is NOT applied
+/// here — CMB-01 applies the elevation factor to this sum first
+/// and clamps after (`compute_damage_elev`); on flat ground the
+/// factor is 1 and the two readings coincide.
+fn damage_sum(attacks: &[(u8, i32)], target: &UnitSpec) -> (i32, bool) {
     let mut total: i32 = 0;
     let mut participated = false;
     for &(class, value) in attacks {
@@ -125,10 +131,54 @@ pub fn compute_damage(attacks: &[(u8, i32)], target: &UnitSpec) -> i32 {
         };
         total += (value - armor).max(0);
     }
+    (total, participated)
+}
+
+/// CMB-01 damage of one landed attack against a target on LEVEL
+/// ground, as a whole number (all table values are integers).
+/// Pure — unit-tested directly. Returns 0 only when no attack pair
+/// participates (an attacker with no applicable class at all);
+/// any participating attack deals at least 1.
+pub fn compute_damage(attacks: &[(u8, i32)], target: &UnitSpec) -> i32 {
+    let (total, participated) = damage_sum(attacks, target);
     if participated {
         total.max(1)
     } else {
         0
+    }
+}
+
+/// The elevation factor of MAP-06 / CMB-01: ×1.25 when the attacker
+/// stands on higher ground than the target, ×0.75 when lower, ×1
+/// when level — binary, so a difference of one level already gives
+/// the full factor. Both values are exact in I16F16.
+pub fn elevation_factor(attacker_elev: u8, target_elev: u8) -> I16F16 {
+    match attacker_elev.cmp(&target_elev) {
+        std::cmp::Ordering::Greater => I16F16::from_bits(81_920), // 1.25
+        std::cmp::Ordering::Less => I16F16::from_bits(49_152),    // 0.75
+        std::cmp::Ordering::Equal => I16F16::from_num(1),
+    }
+}
+
+/// CMB-01 damage with the elevation factor (M7): max(1, k_elev × Σ)
+/// over the armor-subtracted sum, as fixed-point (a ×1.25 of an odd
+/// sum is fractional — HP is fractional state, so nothing rounds).
+/// Returns 0 only when no attack pair participates.
+pub fn compute_damage_elev(
+    attacks: &[(u8, i32)],
+    target: &UnitSpec,
+    attacker_elev: u8,
+    target_elev: u8,
+) -> I16F16 {
+    let (total, participated) = damage_sum(attacks, target);
+    if !participated {
+        return I16F16::ZERO;
+    }
+    let dmg = I16F16::from_num(total) * elevation_factor(attacker_elev, target_elev);
+    if dmg < I16F16::from_num(1) {
+        I16F16::from_num(1)
+    } else {
+        dmg
     }
 }
 
@@ -517,6 +567,9 @@ impl Sim {
                 intended_building: None,
                 attacker: attacker_id,
                 owner,
+                // PRJ-10 (M7): the shooter's elevation is captured
+                // at release, like its attack table.
+                attacker_elev: self.entity_height(idx),
                 attacks: spec.attacks.to_vec(),
             });
         } else {
@@ -524,7 +577,8 @@ impl Sim {
             // the landing tick (CMB-06); otherwise it whiffs.
             let dist = steer::vec_len(tx - ax, ty - ay);
             if dist <= MELEE_REACH {
-                self.apply_hit(attacker_id, (ax, ay), spec.attacks, ti, false);
+                let atk_elev = self.entity_height(idx);
+                self.apply_hit(attacker_id, (ax, ay), spec.attacks, ti, false, atk_elev);
             }
         }
         let e = &mut self.entities[idx];
@@ -545,17 +599,22 @@ impl Sim {
         attacks: &[(u8, i32)],
         ti: usize,
         mishit: bool,
+        atk_elev: u8,
     ) {
         // M6: damage reads the target's *effective* armor — Loom's
         // +1/+2 and the Blacksmith armor lines land here (CMB-01
-        // against the patched row, TEC-06).
+        // against the patched row, TEC-06). M7: the elevation
+        // factor compares the attacker's level (`atk_elev` — the
+        // shooter's at release for a projectile, PRJ-10) against
+        // the target's level where it stands now.
         let tspec = self.unit_stats(ti);
-        let full = compute_damage(attacks, &tspec);
+        let tgt_elev = self.entity_height(ti);
+        let full = compute_damage_elev(attacks, &tspec, atk_elev, tgt_elev);
         let dmg = if mishit {
             // CMB-13: a mishit deals 50% (fixed-point halving is exact).
-            I16F16::from_num(full) / I16F16::from_num(2)
+            full / I16F16::from_num(2)
         } else {
-            I16F16::from_num(full)
+            full
         };
         {
             let t = &mut self.entities[ti];
@@ -771,6 +830,7 @@ impl Sim {
                 intended_building: Some(bid),
                 attacker: attacker_id,
                 owner,
+                attacker_elev: self.entity_height(idx),
                 attacks: spec.attacks.to_vec(),
             });
         } else {
@@ -778,7 +838,8 @@ impl Sim {
             let qx = (ax - bx).clamp(-half, half) + bx;
             let qy = (ay - by).clamp(-half, half) + by;
             if steer::vec_len(ax - qx, ay - qy) <= MELEE_REACH {
-                self.damage_building(bid, spec.attacks);
+                let atk_elev = self.entity_height(idx);
+                self.damage_building(bid, spec.attacks, atk_elev);
             }
         }
         let e = &mut self.entities[idx];
@@ -794,14 +855,18 @@ impl Sim {
     /// armor and the All Buildings + Standard Buildings classes —
     /// so class bonuses (e.g. a future anti-building row) work
     /// against buildings with no special cases (CMB-01/03).
-    pub(crate) fn damage_building(&mut self, bid: u32, attacks: &[(u8, i32)]) {
+    pub(crate) fn damage_building(&mut self, bid: u32, attacks: &[(u8, i32)], atk_elev: u8) {
         let bi = match self.building_index(bid) {
             Some(bi) => bi,
             None => return,
         };
         let spec = building_spec(self.buildings[bi].kind);
-        let dmg = compute_damage(attacks, &spec);
-        self.buildings[bi].hp -= I16F16::from_num(dmg);
+        // M7: the elevation factor reads the building's own ground
+        // (its footprint-center cell) against the attacker's level.
+        let b = &self.buildings[bi];
+        let tgt_elev = self.height_at_world(b.pos_x, b.pos_y);
+        let dmg = compute_damage_elev(attacks, &spec, atk_elev, tgt_elev);
+        self.buildings[bi].hp -= dmg;
         if self.buildings[bi].hp < I16F16::from_num(1) {
             self.destroy_building(bid);
         }
@@ -875,7 +940,7 @@ impl Sim {
                 if (p.impact_x - b.pos_x).abs() <= half
                     && (p.impact_y - b.pos_y).abs() <= half
                 {
-                    self.damage_building(bid, &p.attacks);
+                    self.damage_building(bid, &p.attacks, p.attacker_elev);
                 }
             }
             return;
@@ -889,7 +954,7 @@ impl Sim {
                         self.entities[ti].pos_y - p.impact_y,
                     );
                     if d <= tspec.radius + HIT_SLACK {
-                        self.apply_hit(p.attacker, (p.spawn_x, p.spawn_y), &p.attacks, ti, false);
+                        self.apply_hit(p.attacker, (p.spawn_x, p.spawn_y), &p.attacks, ti, false, p.attacker_elev);
                         return;
                     }
                 }
@@ -904,7 +969,7 @@ impl Sim {
             let tspec = units::spec(e.kind);
             let d = steer::vec_len(e.pos_x - p.impact_x, e.pos_y - p.impact_y);
             if d <= tspec.radius + HIT_SLACK {
-                self.apply_hit(p.attacker, (p.spawn_x, p.spawn_y), &p.attacks, ti, true);
+                self.apply_hit(p.attacker, (p.spawn_x, p.spawn_y), &p.attacks, ti, true, p.attacker_elev);
                 return;
             }
         }
@@ -993,6 +1058,59 @@ mod tests {
         let mut armored = *villager;
         armored.armor_melee = 10;
         assert_eq!(compute_damage(villager.attacks, &armored), 1);
+    }
+
+    #[test]
+    fn elevation_factor_matches_cmb_01() {
+        // The factor itself: binary (MAP-06) — any difference of
+        // ≥ 1 level gives the full ×1.25 / ×0.75.
+        assert_eq!(elevation_factor(2, 2), I16F16::from_num(1));
+        assert_eq!(elevation_factor(3, 2), I16F16::from_bits(81_920));
+        assert_eq!(elevation_factor(4, 0), I16F16::from_bits(81_920));
+        assert_eq!(elevation_factor(1, 2), I16F16::from_bits(49_152));
+        assert_eq!(elevation_factor(0, 4), I16F16::from_bits(49_152));
+        // Militia (4 melee) vs Villager (0 armor): Σ = 4.
+        let militia = spec(EntityKind::Militia);
+        let villager = spec(EntityKind::Villager);
+        assert_eq!(
+            compute_damage_elev(militia.attacks, villager, 2, 2),
+            I16F16::from_num(4)
+        );
+        assert_eq!(
+            compute_damage_elev(militia.attacks, villager, 3, 2),
+            I16F16::from_num(5) // 4 × 1.25
+        );
+        assert_eq!(
+            compute_damage_elev(militia.attacks, villager, 1, 2),
+            I16F16::from_num(3) // 4 × 0.75
+        );
+        // Fractional results survive (HP is fractional): Archer
+        // Σ = 4 − 1 = 3 vs Militia, uphill → 3.75.
+        let archer = spec(EntityKind::Archer);
+        assert_eq!(
+            compute_damage_elev(archer.attacks, militia, 2, 1),
+            I16F16::from_bits(245_760) // 3.75
+        );
+        // The minimum-1 clamp applies AFTER the factor (CMB-01):
+        // villager 3 vs 2 armor → Σ = 1; downhill 0.75 → 1, uphill
+        // 1.25 → 1.25 (not the pre-clamped 1 × 1.25 confusion — the
+        // sum is what scales).
+        let mut armored = *villager;
+        armored.armor_melee = 2;
+        assert_eq!(
+            compute_damage_elev(villager.attacks, &armored, 0, 3),
+            I16F16::from_num(1)
+        );
+        assert_eq!(
+            compute_damage_elev(villager.attacks, &armored, 3, 0),
+            I16F16::from_bits(81_920)
+        );
+        // No participating pair stays 0 at any elevation.
+        let sheep = spec(EntityKind::Sheep);
+        assert_eq!(
+            compute_damage_elev(sheep.attacks, villager, 4, 0),
+            I16F16::ZERO
+        );
     }
 
     #[test]

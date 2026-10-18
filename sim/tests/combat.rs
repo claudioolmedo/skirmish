@@ -5,7 +5,9 @@
 //!
 //! Entity ids in the standard start: 0 Town Center, 1–3 villagers,
 //! 4 Scout Cavalry, 5–8 near sheep, 9–12 far sheep, 13–14 boars,
-//! 15–17 deer (see `ANIMAL_SPECS` in lib.rs).
+//! 15–20 deer (two herds of 3). Since M7 the *cells* come from the
+//! seeded generator (the package layout is OPENING-SPEC §2's); the
+//! id order is the generator's fixed package order.
 
 use fixed::types::I16F16;
 use skirmish_sim::{
@@ -44,12 +46,14 @@ fn run_until(sim: &mut Sim, cap: u64, mut done: impl FnMut(&Sim) -> bool) -> boo
 #[test]
 fn standard_start_has_scout_and_gaia_herds() {
     let sim = Sim::new(7);
-    assert_eq!(sim.entities().len(), 18);
+    // M7 package: TC + 3 villagers + Scout + 8 sheep + 2 boars +
+    // 6 deer (near herd 3 + far herd 3, OPENING-SPEC §2.2).
+    assert_eq!(sim.entities().len(), 21);
     let scout = ent(&sim, 4);
     assert_eq!(scout.kind, EntityKind::ScoutCavalry);
     assert_eq!(scout.owner, OWNER_PLAYER);
     assert_eq!(scout.hp, I16F16::from_num(45));
-    // Beside the Town Center: TC at (-6,-6), scout offset (+5,+5).
+    // Beside the Town Center: the scout's fixed (+5,+5) offset.
     let tc = sim.town_center();
     assert!(dist(scout, tc) < 8.0, "scout is not beside the TC");
     // The Scout occupies a population slot: 3 villagers + scout = 4.
@@ -60,7 +64,7 @@ fn standard_start_has_scout_and_gaia_herds() {
     };
     assert_eq!(count(EntityKind::Sheep), 8);
     assert_eq!(count(EntityKind::Boar), 2);
-    assert_eq!(count(EntityKind::Deer), 3);
+    assert_eq!(count(EntityKind::Deer), 6);
     assert!(
         sim.entities()
             .iter()
@@ -84,21 +88,24 @@ fn standard_start_has_scout_and_gaia_herds() {
 #[test]
 fn sheep_captured_by_proximity_then_taskable() {
     let mut sim = Sim::new(11);
-    // Far sheep 9 at cell (13,18). Walk villager 1 up to it.
-    let (sx, sy) = cell_point(&sim, 13, 18);
+    // Far sheep 9 — at its generated cell since M7 (the arena's
+    // fixed (13, 18) is gone). Walk villager 1 up to it.
+    let (sx, sy) = (ent(&sim, 9).pos_x, ent(&sim, 9).pos_y);
     sim.push_command(Command::Move {
         entity: 1,
         x: sx,
         y: sy,
     });
-    let captured = run_until(&mut sim, 3000, |s| ent(s, 9).owner == OWNER_PLAYER);
+    let captured = run_until(&mut sim, 6000, |s| ent(s, 9).owner == OWNER_PLAYER);
     assert!(captured, "sheep was never captured by proximity");
-    // A captured sheep takes move orders like a unit.
+    // A captured sheep takes move orders like a unit: send it to
+    // the Town Center (open ground by construction).
     let (ox, oy) = (f(ent(&sim, 9).pos_x), f(ent(&sim, 9).pos_y));
+    let tc = sim.town_center();
     sim.push_command(Command::Move {
         entity: 9,
-        x: I16F16::from_num(-30),
-        y: I16F16::from_num(-26),
+        x: tc.pos_x,
+        y: tc.pos_y,
     });
     for _ in 0..600 {
         sim.tick();
@@ -212,7 +219,7 @@ fn villager_dies_to_boar_population_drops_tombstone_stays() {
     assert_eq!(sim.population(), 3, "death must free the pop slot the same tick");
     // Tombstone: the entity is still in the list (ids stay stable),
     // out of play — and the boar, its victim gone, walks home.
-    assert_eq!(sim.entities().len(), 18);
+    assert_eq!(sim.entities().len(), 21); // M7 package size
     let recovered = run_until(&mut sim, 8000, |s| {
         let b = ent(s, 13);
         b.aggro_target.is_none() && b.hp == I16F16::from_num(75)
@@ -282,6 +289,37 @@ fn melee_fight_replays_bit_identically() {
     assert_eq!(run(), run(), "identical fight scripts diverged");
 }
 
+/// The first anchor cell for `kind` that `entity` may build, in
+/// expanding rings around a center cell — M7: the build-up's plots
+/// are derived from the generated map (the arena's fixed cells are
+/// gone), the way a player picks ground near the thing the building
+/// serves.
+fn anchor_near(sim: &Sim, entity: u32, kind: BuildingKind, center: (u32, u32)) -> (u32, u32) {
+    for r in 1..=14i32 {
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if dx.abs() != r && dy.abs() != r {
+                    continue;
+                }
+                let (ax, ay) = (center.0 as i32 + dx, center.1 as i32 + dy);
+                if ax < 0 || ay < 0 {
+                    continue;
+                }
+                let (ax, ay) = (ax as u32, ay as u32);
+                let (x, y) = cell_point(sim, ax, ay);
+                if sim.can_build(entity, kind, x, y) {
+                    return (ax, ay);
+                }
+            }
+        }
+    }
+    panic!("no buildable anchor near {center:?} for {kind:?}");
+}
+
+fn cell_of(sim: &Sim, x: I16F16, y: I16F16) -> (u32, u32) {
+    sim.grid().world_to_cell(x, y)
+}
+
 /// Scripted build-up shared by the archer test: walk the real
 /// production path to an Archer. Returns nothing; asserts as it
 /// goes.
@@ -310,14 +348,70 @@ fn build_barracks_and_archer(sim: &mut Sim) {
             .unwrap()
             .id
     };
-    // The Feudal pair first: Mill north-west of the Town Center,
-    // Lumber Camp west of it; villager 3 chops from the start.
-    // (Anchors are footprint top-left cells; column 25 is the wall.
-    // The Lumber Camp sits at (16, 20): a sheep stands on (18, 21)
-    // and placement refuses to cover a standing unit.)
-    build_at(sim, 1, BuildingKind::Mill, 21, 20);
-    build_at(sim, 2, BuildingKind::LumberCamp, 16, 20);
-    let tree = first_node(sim, NodeKind::Tree);
+    // The Feudal pair first: a Mill by the berry patch and a
+    // Lumber Camp by the woodline (M7: anchors derived from the
+    // generated map — the first buildable ground in rings around
+    // the resource each camp serves); villager 3 chops from the
+    // start.
+    let berry0 = sim
+        .nodes()
+        .iter()
+        .find(|n| n.kind == NodeKind::BerryBush)
+        .unwrap();
+    let berry_cell = cell_of(sim, berry0.pos_x, berry0.pos_y);
+    // The woodline tree: a forest EDGE tree — at least one free
+    // standing cell beside it, and several tree neighbors within
+    // the retarget radius, so a depleted trunk chains to the next
+    // (M7: the first node in id order is a lone straggler now;
+    // working it dry strands the chopper with no neighbor in
+    // reach, and a deep-interior tree has no standing cell at
+    // all — both are correct sim behavior and the wrong script).
+    let (tree0_id, tree_cell) = {
+        let trees: Vec<_> = sim
+            .nodes()
+            .iter()
+            .filter(|n| n.kind == NodeKind::Tree)
+            .collect();
+        let neighbors = |t: &skirmish_sim::ResourceNode| {
+            trees
+                .iter()
+                .filter(|o| {
+                    let dx = f(o.pos_x) - f(t.pos_x);
+                    let dy = f(o.pos_y) - f(t.pos_y);
+                    dx * dx + dy * dy <= 144.0
+                })
+                .count()
+        };
+        // A standing cell counts only if the pathfinder can
+        // actually reach it from the Town Center — a one-cell
+        // clearing ringed by trunks is free but unreachable.
+        let tc = sim.town_center();
+        let (tc_x, tc_y) = (tc.pos_x, tc.pos_y);
+        let has_free_side = |t: &skirmish_sim::ResourceNode| {
+            let (cx, cy) = cell_of(sim, t.pos_x, t.pos_y);
+            (-1i32..=1).any(|dy| {
+                (-1i32..=1).any(|dx| {
+                    let (nx, ny) = (cx as i32 + dx, cy as i32 + dy);
+                    if nx < 0 || ny < 0 || sim.grid().is_blocked(nx as u32, ny as u32) {
+                        return false;
+                    }
+                    let center = sim.grid().cell_center(nx as u32, ny as u32);
+                    sim.grid().find_path((tc_x, tc_y), center).is_some()
+                })
+            })
+        };
+        let best = trees
+            .iter()
+            .filter(|t| has_free_side(t) && neighbors(t) >= 3)
+            .max_by_key(|t| neighbors(t))
+            .expect("no forest edge tree");
+        (best.id, cell_of(sim, best.pos_x, best.pos_y))
+    };
+    let (mx, my) = anchor_near(sim, 1, BuildingKind::Mill, berry_cell);
+    build_at(sim, 1, BuildingKind::Mill, mx, my);
+    let (lx, ly) = anchor_near(sim, 2, BuildingKind::LumberCamp, tree_cell);
+    build_at(sim, 2, BuildingKind::LumberCamp, lx, ly);
+    let tree = tree0_id;
     sim.push_command(Command::Gather {
         entity: 3,
         node: tree,
@@ -341,7 +435,10 @@ fn build_barracks_and_archer(sim: &mut Sim) {
         s.stockpile().amount(ResourceKind::Wood) >= I16F16::from_num(175)
     });
     assert!(wood_ready, "never gathered the barracks wood");
-    build_at(sim, 1, BuildingKind::Barracks, 27, 20);
+    let tc = sim.town_center();
+    let tc_cell = cell_of(sim, tc.pos_x, tc.pos_y);
+    let (bx, by) = anchor_near(sim, 1, BuildingKind::Barracks, tc_cell);
+    build_at(sim, 1, BuildingKind::Barracks, bx, by);
     let barracks_up = run_until(sim, 30000, |s| {
         s.buildings()
             .iter()
@@ -368,7 +465,8 @@ fn build_barracks_and_archer(sim: &mut Sim) {
         s.stockpile().amount(ResourceKind::Wood) >= I16F16::from_num(175)
     });
     assert!(wood_ready, "never gathered the range wood");
-    build_at(sim, 2, BuildingKind::ArcheryRange, 27, 24);
+    let (rx, ry) = anchor_near(sim, 2, BuildingKind::ArcheryRange, (bx, by));
+    build_at(sim, 2, BuildingKind::ArcheryRange, rx, ry);
     let range_up = run_until(sim, 30000, |s| {
         s.buildings()
             .iter()
@@ -434,8 +532,17 @@ fn archer_kills_at_range_and_the_rng_replay_is_bit_identical() {
 fn barracks_placement_rules_3x3() {
     let mut sim = Sim::new(37);
     let start_wood = sim.stockpile().amount(skirmish_sim::ResourceKind::Wood);
-    // Anchor (24,20): the 3×3 footprint covers wall column x=25.
-    let (x, y) = cell_point(&sim, 24, 20);
+    // M7: the scenario cells are derived from seed 37's generated
+    // map (the wall column and the 50-cell edge are gone).
+    // An anchor whose 3×3 footprint covers a standing tree's cell
+    // (MAP-04: trees block) is refused whole.
+    let tree = sim
+        .nodes()
+        .iter()
+        .find(|n| n.kind == NodeKind::Tree)
+        .unwrap();
+    let (tx, ty) = cell_of(&sim, tree.pos_x, tree.pos_y);
+    let (x, y) = cell_point(&sim, tx - 1, ty - 1);
     assert!(!sim.can_build(1, BuildingKind::Barracks, x, y));
     sim.push_command(Command::Build {
         entity: 1,
@@ -445,11 +552,16 @@ fn barracks_placement_rules_3x3() {
     });
     sim.tick();
     assert_eq!(sim.buildings().len(), 0);
-    // Anchor (48,48): cells 48..50 hang off the 50-cell grid.
-    let (x, y) = cell_point(&sim, 48, 48);
+    // An anchor at the map's corner: the footprint hangs off the
+    // 120-cell grid.
+    let dim = sim.grid().width();
+    let (x, y) = cell_point(&sim, dim - 2, dim - 2);
     assert!(!sim.can_build(1, BuildingKind::Barracks, x, y));
     // A legal plot deducts 175 and blocks all 9 cells.
-    let (x, y) = cell_point(&sim, 27, 20);
+    let tc = sim.town_center();
+    let tc_cell = cell_of(&sim, tc.pos_x, tc.pos_y);
+    let (ax, ay) = anchor_near(&sim, 1, BuildingKind::Barracks, tc_cell);
+    let (x, y) = cell_point(&sim, ax, ay);
     assert!(sim.can_build(1, BuildingKind::Barracks, x, y));
     sim.push_command(Command::Build {
         entity: 1,
@@ -463,8 +575,8 @@ fn barracks_placement_rules_3x3() {
         sim.stockpile().amount(skirmish_sim::ResourceKind::Wood),
         start_wood - I16F16::from_num(175)
     );
-    for cx in 27..=29 {
-        for cy in 20..=22 {
+    for cx in ax..ax + 3 {
+        for cy in ay..ay + 3 {
             assert!(sim.grid().is_dynamic(cx, cy), "barracks cell ({cx},{cy}) not blocked");
         }
     }

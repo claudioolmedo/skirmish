@@ -30,6 +30,13 @@
 //! typed queue arrays (units and research share the queues), the
 //! Town Center's head-progress getter, and force drop-off. Entity
 //! HP maximums are now the owner's *effective* maxima (Loom).
+//! M7: the world channels — `terrain()` and `heights()` flatten
+//! the generated map's layers (row-major, one byte per cell,
+//! matching `obstacles()`' indexing), and `fog()` serves the LOCAL
+//! player's visibility grid (0 unexplored / 1 explored / 2 visible)
+//! — the only knowledge the client may render from. `obstacles()`
+//! now means water ∪ standing trees ∪ placed buildings
+//! (MAP-03/04), so its existing consumers follow the world.
 
 use wasm_bindgen::prelude::*;
 
@@ -775,8 +782,33 @@ impl WasmSim {
         grid::WORLD_HALF.to_num::<f64>()
     }
 
-    /// Obstacle cells as row-major bytes (0 = open, 1 = blocked).
+    /// Obstacle cells as row-major bytes (0 = open, 1 = blocked:
+    /// water and standing-tree cells — terrain ∪ node block — plus
+    /// placed-building cells). (Before M7 this was the arena's
+    /// fixed wall layout; the meaning for consumers — "a land unit
+    /// cannot stand here" — is unchanged.)
     pub fn obstacles(&self) -> Vec<u8> {
         self.inner.grid().blocked_bytes()
+    }
+
+    /// The generated map's terrain layer (M7, MAP-03): flat
+    /// row-major bytes, one per cell — 0 land, 1 water.
+    pub fn terrain(&self) -> Vec<u8> {
+        self.inner.grid().terrain_bytes().to_vec()
+    }
+
+    /// The generated map's height layer (M7, MAP-05): flat
+    /// row-major bytes, one elevation level per cell (0..=4).
+    pub fn heights(&self) -> Vec<u8> {
+        self.inner.grid().height_bytes().to_vec()
+    }
+
+    /// The LOCAL player's fog-of-war grid (M7, VIS-01): flat
+    /// row-major bytes, one per cell — 0 unexplored, 1 explored,
+    /// 2 currently visible. The client renders strictly from this:
+    /// enemy/Gaia units and projectiles only where it reads 2,
+    /// enemy buildings as last-known where it reads 1.
+    pub fn fog(&self) -> Vec<u8> {
+        self.inner.visibility(crate::entity::OWNER_PLAYER).to_vec()
     }
 }

@@ -1,9 +1,19 @@
-//! Deterministic coarse grid + A* pathfinding (M1).
+//! Deterministic coarse grid + A* pathfinding (M1, reshaped by M7).
 //!
 //! The world is a fixed square spanning `[-WORLD_HALF, WORLD_HALF)` on each
 //! axis, divided into a coarse grid of square cells. A* runs on cell indices
 //! with integer costs and fully deterministic tie-breaking, so the same
 //! query always returns the same path on every platform, including WASM.
+//!
+//! M7 reshape: the fixed 50×50 test arena (compile-time wall layout) is
+//! gone. The grid is now the rulebook's 2-player map size — Tiny,
+//! 120×120 tiles (MAP-02) — at the sim's long-standing scale of one
+//! cell = one tile = 4 world units, and its contents are *generated*
+//! per match by `mapgen`: a terrain layer (land/water, MAP-03/08), a
+//! per-cell height layer (MAP-05), and a node-block layer for live
+//! trees (MAP-04: a tree is its cell's block until depleted). The
+//! dynamic building layer from M2.5 stays as it was. A bare `Grid::new`
+//! is flat, empty land — the generator fills it.
 //!
 //! Determinism notes: the open list is a `BinaryHeap` with a *total*
 //! deterministic ordering `(f, h, cell)` — never a `HashMap`. Neighbor
@@ -12,63 +22,65 @@
 use fixed::types::I16F16;
 use std::collections::BinaryHeap;
 
-/// World half-extent in world units: the world spans [-100, 100).
-/// (const via raw bits: 100 × 2^16 = 6553600.)
-pub const WORLD_HALF: I16F16 = I16F16::from_bits(6_553_600);
+/// World half-extent in world units: the world spans [-240, 240).
+/// (const via raw bits: 240 × 2^16 = 15728640.)
+pub const WORLD_HALF: I16F16 = I16F16::from_bits(15_728_640);
 /// Cell edge length in world units (coarse grid): 4 × 2^16 = 262144.
+/// One cell is one rulebook tile (MAP-01's convention, M3).
 pub const CELL_SIZE: I16F16 = I16F16::from_bits(262_144);
-/// Grid dimension, in cells per axis: (2 * 100) / 4.
-pub const GRID_DIM: u32 = 50;
+/// Grid dimension, in cells per axis: (2 * 240) / 4 = 120 — the
+/// rulebook's Tiny map, the 2-player size (MAP-02).
+pub const GRID_DIM: u32 = 120;
+
+/// Terrain tag: ordinary land — every land unit may stand here.
+pub const TERRAIN_LAND: u8 = 0;
+/// Terrain tag: water — impassable to land units (MAP-08: no wading;
+/// ships do not exist yet, so water is a pure obstacle in M7).
+pub const TERRAIN_WATER: u8 = 1;
+/// Highest elevation level the generator produces (MAP-05: the
+/// reference's per-tile height byte has 7 levels; Skirmish's Arabia
+/// hills use 0..=4 — see `mapgen`).
+pub const MAX_HEIGHT: u8 = 4;
 
 /// A* step costs: orthogonal = 10, diagonal = 14 (≈ 10·√2, integer).
 const COST_ORTHO: i64 = 10;
 const COST_DIAG: i64 = 14;
 
-/// Static obstacle layout. Walls are compile-time constants, so the layout
-/// is identical for every seed — deterministic by construction:
-///
-/// - vertical wall at column x = 25, rows 8..=38, with a 3-cell gap at
-///   rows 22..=24 (the only crossing);
-/// - horizontal wall at row y = 32, columns 6..=20.
-///
-/// The map stays fully connected: everything is reachable through the gap
-/// or around the wall ends.
-fn is_wall_cell(x: u32, y: u32) -> bool {
-    if x == 25 && (8..=38).contains(&y) && !(22..=24).contains(&y) {
-        return true;
-    }
-    if y == 32 && (6..=20).contains(&x) {
-        return true;
-    }
-    false
+fn cell_count() -> usize {
+    (GRID_DIM * GRID_DIM) as usize
 }
 
-/// The coarse navigation grid. Static obstacles (walls) are compile-time
-/// constants; M2.5 adds a second, dynamic layer for cells blocked by
-/// placed buildings (houses). The struct exists so both layers are
-/// explicit state (and part of the state hash).
+/// The coarse navigation grid. All layers are explicit state and part
+/// of the state hash: terrain and heights from the map generator,
+/// the node-block layer tracking live trees, and the dynamic layer
+/// of cells blocked by placed buildings (M2.5).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Grid {
-    blocked: Vec<bool>, // row-major, GRID_DIM * GRID_DIM — static walls
-    /// Cells blocked at runtime by buildings (M2.5). Kept separate from
-    /// the static layer: `blocked_bytes` (state hash, debug preview)
-    /// stays wall-only, and the sim hashes this layer on its own.
-    dynamic: Vec<bool>, // row-major, GRID_DIM * GRID_DIM
+    /// Per-cell terrain tag (`TERRAIN_LAND` / `TERRAIN_WATER`),
+    /// row-major. Set once by the generator; never changes in play.
+    terrain: Vec<u8>,
+    /// Per-cell elevation level, 0..=`MAX_HEIGHT`, row-major.
+    /// Data only (MAP-06's combat factor reads it); it never gates
+    /// movement — AoE elevation does not slow or block land units.
+    height: Vec<u8>,
+    /// Cells blocked by a live tree node (MAP-04), row-major 0/1.
+    /// Set at generation / farm growth, cleared the moment the tree
+    /// depletes: a harvested tree stops blocking its cell.
+    node_block: Vec<u8>,
+    /// Cells blocked at runtime by buildings (M2.5), row-major 0/1.
+    dynamic: Vec<u8>,
 }
 
 impl Grid {
+    /// An empty map: flat land everywhere, no water, no trees, no
+    /// buildings. The match generator starts from this and carves
+    /// the match's Arabia into it.
     pub fn new() -> Self {
-        let mut blocked = vec![false; (GRID_DIM * GRID_DIM) as usize];
-        for y in 0..GRID_DIM {
-            for x in 0..GRID_DIM {
-                if is_wall_cell(x, y) {
-                    blocked[(y * GRID_DIM + x) as usize] = true;
-                }
-            }
-        }
         Grid {
-            blocked,
-            dynamic: vec![false; (GRID_DIM * GRID_DIM) as usize],
+            terrain: vec![TERRAIN_LAND; cell_count()],
+            height: vec![0; cell_count()],
+            node_block: vec![0; cell_count()],
+            dynamic: vec![0; cell_count()],
         }
     }
 
@@ -80,23 +92,92 @@ impl Grid {
         GRID_DIM
     }
 
-    /// Out-of-bounds counts as blocked: the world edge is a wall. A cell
-    /// is blocked when a static wall *or* a placed building occupies it.
+    fn idx(x: u32, y: u32) -> usize {
+        (y * GRID_DIM + x) as usize
+    }
+
+    /// Out-of-bounds counts as blocked: the world edge is a wall
+    /// (MAP-11). A cell is blocked when it is water, holds a live
+    /// tree, or a placed building occupies it.
     pub fn is_blocked(&self, x: u32, y: u32) -> bool {
         if x >= GRID_DIM || y >= GRID_DIM {
             return true;
         }
-        let i = (y * GRID_DIM + x) as usize;
-        self.blocked[i] || self.dynamic[i]
+        let i = Self::idx(x, y);
+        self.terrain[i] == TERRAIN_WATER || self.node_block[i] != 0 || self.dynamic[i] != 0
     }
 
-    /// Whether a building (dynamic layer) blocks this cell. Static
-    /// walls alone do not count.
+    /// Whether the terrain itself blocks this cell (water). Out of
+    /// bounds counts as terrain-blocked (the edge is a wall).
+    pub fn is_water(&self, x: u32, y: u32) -> bool {
+        if x >= GRID_DIM || y >= GRID_DIM {
+            return true;
+        }
+        self.terrain[Self::idx(x, y)] == TERRAIN_WATER
+    }
+
+    /// The terrain tag of a cell (out of bounds reads as water —
+    /// the wall at the world's edge).
+    pub fn terrain_at(&self, x: u32, y: u32) -> u8 {
+        if x >= GRID_DIM || y >= GRID_DIM {
+            return TERRAIN_WATER;
+        }
+        self.terrain[Self::idx(x, y)]
+    }
+
+    /// Set a cell's terrain tag (generator use).
+    pub fn set_terrain(&mut self, x: u32, y: u32, tag: u8) {
+        if x >= GRID_DIM || y >= GRID_DIM {
+            return;
+        }
+        let i = Self::idx(x, y);
+        self.terrain[i] = tag;
+    }
+
+    /// The elevation level of a cell, 0..=`MAX_HEIGHT` (out of
+    /// bounds reads as 0).
+    pub fn height_at(&self, x: u32, y: u32) -> u8 {
+        if x >= GRID_DIM || y >= GRID_DIM {
+            return 0;
+        }
+        self.height[Self::idx(x, y)]
+    }
+
+    /// Set a cell's elevation level (generator use).
+    pub fn set_height(&mut self, x: u32, y: u32, level: u8) {
+        if x >= GRID_DIM || y >= GRID_DIM {
+            return;
+        }
+        let i = Self::idx(x, y);
+        self.height[i] = level;
+    }
+
+    /// Whether a live tree blocks this cell (the node-block layer
+    /// alone — water and buildings do not count).
+    pub fn is_node_blocked(&self, x: u32, y: u32) -> bool {
+        if x >= GRID_DIM || y >= GRID_DIM {
+            return false;
+        }
+        self.node_block[Self::idx(x, y)] != 0
+    }
+
+    /// Set or clear the tree block on one cell (generation, and the
+    /// economy phase the tick a tree depletes — MAP-04).
+    pub fn set_node_block(&mut self, x: u32, y: u32, value: bool) {
+        if x >= GRID_DIM || y >= GRID_DIM {
+            return;
+        }
+        let i = Self::idx(x, y);
+        self.node_block[i] = u8::from(value);
+    }
+
+    /// Whether a building (dynamic layer) blocks this cell. Terrain
+    /// and trees alone do not count.
     pub fn is_dynamic(&self, x: u32, y: u32) -> bool {
         if x >= GRID_DIM || y >= GRID_DIM {
             return false;
         }
-        self.dynamic[(y * GRID_DIM + x) as usize]
+        self.dynamic[Self::idx(x, y)] != 0
     }
 
     /// Set or clear the dynamic (building) block on one cell.
@@ -104,8 +185,8 @@ impl Grid {
         if x >= GRID_DIM || y >= GRID_DIM {
             return;
         }
-        let i = (y * GRID_DIM + x) as usize;
-        self.dynamic[i] = value;
+        let i = Self::idx(x, y);
+        self.dynamic[i] = u8::from(value);
     }
 
     /// World coordinates → cell indices, clamped into the grid.
@@ -130,18 +211,40 @@ impl Grid {
         (wx, wy)
     }
 
-    /// Static wall cells as row-major bytes (0/1) — for the state hash
-    /// and the debug preview. The dynamic building layer is *not*
-    /// included (the preview draws buildings themselves); see
-    /// `dynamic_bytes`.
-    pub fn blocked_bytes(&self) -> Vec<u8> {
-        self.blocked.iter().map(|&b| u8::from(b)).collect()
+    /// Terrain tags as row-major bytes — for the state hash and the
+    /// WASM terrain array the renderer paints from.
+    pub fn terrain_bytes(&self) -> &[u8] {
+        &self.terrain
     }
 
-    /// Dynamic (building-blocked) cells as row-major bytes (0/1) — for
-    /// the state hash, so building placement is replay-visible.
-    pub fn dynamic_bytes(&self) -> Vec<u8> {
-        self.dynamic.iter().map(|&b| u8::from(b)).collect()
+    /// Elevation levels as row-major bytes — for the state hash and
+    /// the WASM heights array (rendering lift/shading).
+    pub fn height_bytes(&self) -> &[u8] {
+        &self.height
+    }
+
+    /// Tree-blocked cells as row-major bytes (0/1) — for the state
+    /// hash, so a falling tree is replay-visible.
+    pub fn node_block_bytes(&self) -> &[u8] {
+        &self.node_block
+    }
+
+    /// Dynamic (building-blocked) cells as row-major bytes (0/1) —
+    /// for the state hash, so building placement is replay-visible.
+    pub fn dynamic_bytes(&self) -> &[u8] {
+        &self.dynamic
+    }
+
+    /// Statically impassable cells as row-major bytes (0/1): water
+    /// or a live tree. This is the WASM `obstacles()` view the client
+    /// mirrors for its placement ghost — terrain truth, without the
+    /// building layer (the client reads buildings separately).
+    pub fn blocked_bytes(&self) -> Vec<u8> {
+        (0..cell_count())
+            .map(|i| {
+                u8::from(self.terrain[i] == TERRAIN_WATER || self.node_block[i] != 0)
+            })
+            .collect()
     }
 
     /// A* from one world point to another.
@@ -266,14 +369,21 @@ impl Grid {
                 if self.is_blocked(nx, ny) {
                     continue;
                 }
-                // No corner cutting: a diagonal step requires both
-                // orthogonal neighbors to be free.
-                if dx != 0
-                    && dy != 0
-                    && (self.is_blocked((cx as i32 + dx) as u32, cy)
-                        || self.is_blocked(cx, (cy as i32 + dy) as u32))
-                {
-                    continue;
+                // Corner cutting: a diagonal step is barred by a
+                // HARD corner — water or a building on either
+                // orthogonal neighbor. A tree is not a wall, it is
+                // a trunk standing in its cell: diagonal passage
+                // past a tree corner is legal (M7, MAP-04). The
+                // strict both-free rule made a felled tree's freed
+                // cell a pocket no woodcutter could step into —
+                // ringed orthogonally by standing trunks — and the
+                // whole forest block behind it unworkable; the
+                // long tech tests caught what the arena never had.
+                if dx != 0 && dy != 0 {
+                    let hard = |x: u32, y: u32| self.is_water(x, y) || self.is_dynamic(x, y);
+                    if hard((cx as i32 + dx) as u32, cy) || hard(cx, (cy as i32 + dy) as u32) {
+                        continue;
+                    }
                 }
                 let ni = cell_index(nx, ny);
                 let tentative = g_score[ci] + cost;
@@ -307,67 +417,87 @@ mod tests {
     fn world_to_cell_mapping() {
         let g = Grid::new();
         assert_eq!(
-            g.world_to_cell(I16F16::from_num(-100), I16F16::from_num(-100)),
+            g.world_to_cell(I16F16::from_num(-240), I16F16::from_num(-240)),
             (0, 0)
         );
         assert_eq!(
-            g.world_to_cell(I16F16::from_num(99), I16F16::from_num(99)),
-            (49, 49)
+            g.world_to_cell(I16F16::from_num(239), I16F16::from_num(239)),
+            (119, 119)
         );
-        // Cell (0,0) spans [-100, -96); its center is (-98, -98).
+        // Cell (0,0) spans [-240, -236); its center is (-238, -238).
         let (wx, wy) = g.cell_center(0, 0);
-        assert_eq!((wx, wy), (I16F16::from_num(-98), I16F16::from_num(-98)));
+        assert_eq!(
+            (wx, wy),
+            (I16F16::from_num(-238), I16F16::from_num(-238))
+        );
+        // The grid is the rulebook's 2-player size: Tiny, 120×120.
+        assert_eq!((g.width(), g.height()), (120, 120));
     }
 
     #[test]
-    fn wall_layout_as_designed() {
-        let g = Grid::new();
-        // Vertical wall body is blocked…
-        assert!(g.is_blocked(25, 10));
-        assert!(g.is_blocked(25, 38));
-        // …but the gap rows are open.
-        assert!(!g.is_blocked(25, 22));
-        assert!(!g.is_blocked(25, 23));
-        assert!(!g.is_blocked(25, 24));
-        // Horizontal wall body is blocked.
-        assert!(g.is_blocked(10, 32));
-        // Open field stays open.
-        assert!(!g.is_blocked(0, 0));
-        assert!(!g.is_blocked(49, 49));
+    fn terrain_layers_block_as_designed() {
+        let mut g = Grid::new();
+        // Open flat land blocks nothing.
+        assert!(!g.is_blocked(60, 60));
+        assert_eq!(g.height_at(60, 60), 0);
+        // Water blocks (MAP-08) and reads back as water.
+        g.set_terrain(60, 60, TERRAIN_WATER);
+        assert!(g.is_blocked(60, 60));
+        assert!(g.is_water(60, 60));
+        // A tree blocks until it is cleared (MAP-04).
+        g.set_node_block(61, 60, true);
+        assert!(g.is_blocked(61, 60));
+        assert!(g.is_node_blocked(61, 60));
+        g.set_node_block(61, 60, false);
+        assert!(!g.is_blocked(61, 60));
+        // Buildings block through their own layer.
+        g.set_dynamic(62, 60, true);
+        assert!(g.is_blocked(62, 60));
+        assert!(g.is_dynamic(62, 60));
+        // Height is data, never a block.
+        g.set_height(63, 60, 4);
+        assert_eq!(g.height_at(63, 60), 4);
+        assert!(!g.is_blocked(63, 60));
+        // Out of bounds is a wall (MAP-11).
+        assert!(g.is_blocked(120, 0));
+        assert!(g.is_blocked(0, 120));
     }
 
     #[test]
-    fn astar_routes_around_wall() {
-        let g = Grid::new();
-        // Straight line at row 10 crosses the vertical wall (x = 25, rows
-        // 8..=38, gap only at 22..=24): the path must detour.
-        let from = g.cell_center(10, 10);
-        let to = g.cell_center(40, 10);
-        let path = g.find_path(from, to).expect("a path must exist");
-        // No waypoint (except the exact final target) may sit in a wall.
+    fn astar_routes_around_water() {
+        let mut g = Grid::new();
+        // A water column at x = 60, rows 20..=99, with a 3-cell gap
+        // at rows 58..=60 — the only crossing.
+        for y in 20..=99u32 {
+            if !(58..=60).contains(&y) {
+                g.set_terrain(60, y, TERRAIN_WATER);
+            }
+        }
+        let from = g.cell_center(30, 40);
+        let to = g.cell_center(90, 40);
+        let path = g.find_path(from, to).expect("a path must exist through the gap");
         for &(wx, wy) in &path[..path.len() - 1] {
             let (cx, cy) = g.world_to_cell(wx, wy);
-            assert!(!g.is_blocked(cx, cy), "waypoint inside a wall");
+            assert!(!g.is_blocked(cx, cy), "waypoint inside water");
         }
-        // Detour is real: the cell trail is longer than the straight
-        // Manhattan distance (30 cells).
-        assert!(path.len() > 30, "path did not detour: {}", path.len());
-        // And it ends exactly on the target.
+        // Detour is real: longer than the straight 60-cell run.
+        assert!(path.len() > 60, "path did not detour: {}", path.len());
         assert_eq!(*path.last().unwrap(), to);
     }
 
     #[test]
     fn astar_rejects_blocked_target() {
-        let g = Grid::new();
-        let to = g.cell_center(25, 10); // inside the vertical wall
+        let mut g = Grid::new();
+        g.set_terrain(60, 40, TERRAIN_WATER);
+        let to = g.cell_center(60, 40); // inside the pond
         assert!(g.find_path(g.cell_center(0, 0), to).is_none());
     }
 
     #[test]
     fn astar_is_deterministic() {
         let g = Grid::new();
-        let from = g.cell_center(5, 45);
-        let to = g.cell_center(45, 5);
+        let from = g.cell_center(5, 110);
+        let to = g.cell_center(115, 10);
         let a = g.find_path(from, to);
         let b = g.find_path(from, to);
         assert_eq!(a, b);

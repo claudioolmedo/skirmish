@@ -41,6 +41,30 @@ impl Fnv1a64 {
         self.write_u32(value as u32);
     }
 
+    /// Feed a whole byte slice (M7): the slice length as a u64, then
+    /// the bytes in 8-byte little-endian groups (the final group
+    /// zero-padded), one multiply per group. The grid and fog layers
+    /// are 14,400 bytes each at the 120×120 map size — feeding them
+    /// byte-at-a-time would make the per-tick hash ~8× more expensive
+    /// for no determinism gain: the packing is explicit little-endian
+    /// assembly, identical on every platform, and the length prefix
+    /// keeps padded tails unambiguous.
+    pub fn write_bytes_chunked(&mut self, bytes: &[u8]) {
+        self.write_u64(bytes.len() as u64);
+        let mut chunks = bytes.chunks_exact(8);
+        for c in &mut chunks {
+            self.0 ^= u64::from_le_bytes(c.try_into().expect("8-byte chunk"));
+            self.0 = self.0.wrapping_mul(Self::PRIME);
+        }
+        let rem = chunks.remainder();
+        if !rem.is_empty() {
+            let mut buf = [0u8; 8];
+            buf[..rem.len()].copy_from_slice(rem);
+            self.0 ^= u64::from_le_bytes(buf);
+            self.0 = self.0.wrapping_mul(Self::PRIME);
+        }
+    }
+
     pub fn finish(&self) -> u64 {
         self.0
     }
