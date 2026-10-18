@@ -74,6 +74,14 @@ export class WasmSim {
      */
     entity_path(entity: number): Float64Array;
     /**
+     * The LOCAL player's fog-of-war grid (M7, VIS-01): flat
+     * row-major bytes, one per cell — 0 unexplored, 1 explored,
+     * 2 currently visible. The client renders strictly from this:
+     * enemy/Gaia units and projectiles only where it reads 2,
+     * enemy buildings as last-known where it reads 1.
+     */
+    fog(): Uint8Array;
+    /**
      * One stockpile resource by name: convenience getters for the HUD.
      */
     food(): number;
@@ -83,6 +91,11 @@ export class WasmSim {
      * Navigation grid dimensions, in cells.
      */
     grid_width(): number;
+    /**
+     * The generated map's height layer (M7, MAP-05): flat
+     * row-major bytes, one elevation level per cell (0..=4).
+     */
+    heights(): Uint8Array;
     /**
      * Ids of the idle military units (Scout, Militia, Archer), in
      * id order. The mirror of `idle_villagers`.
@@ -129,7 +142,11 @@ export class WasmSim {
      */
     nodes(): Float64Array;
     /**
-     * Obstacle cells as row-major bytes (0 = open, 1 = blocked).
+     * Obstacle cells as row-major bytes (0 = open, 1 = blocked:
+     * water and standing-tree cells — terrain ∪ node block — plus
+     * placed-building cells). (Before M7 this was the arena's
+     * fixed wall layout; the meaning for consumers — "a land unit
+     * cannot stand here" — is unchanged.)
      */
     obstacles(): Uint8Array;
     /**
@@ -396,6 +413,11 @@ export class WasmSim {
      */
     tech_mask(): number;
     /**
+     * The generated map's terrain layer (M7, MAP-03): flat
+     * row-major bytes, one per cell — 0 land, 1 water.
+     */
+    terrain(): Uint8Array;
+    /**
      * Ticks elapsed. Returned as u32 (wraps after ~2.26 years at 60 Hz —
      * fine for the prototype; widen if a match ever needs more).
      */
@@ -441,10 +463,12 @@ export interface InitOutput {
     readonly wasmsim_entity_kinds: (a: number) => [number, number];
     readonly wasmsim_entity_owners: (a: number) => [number, number];
     readonly wasmsim_entity_path: (a: number, b: number) => [number, number];
+    readonly wasmsim_fog: (a: number) => [number, number];
     readonly wasmsim_food: (a: number) => number;
     readonly wasmsim_gold: (a: number) => number;
     readonly wasmsim_grid_height: (a: number) => number;
     readonly wasmsim_grid_width: (a: number) => number;
+    readonly wasmsim_heights: (a: number) => [number, number];
     readonly wasmsim_idle_military: (a: number) => [number, number];
     readonly wasmsim_idle_villagers: (a: number) => [number, number];
     readonly wasmsim_match_state: (a: number) => number;
@@ -503,6 +527,7 @@ export interface InitOutput {
     readonly wasmsim_tc_progress: (a: number) => number;
     readonly wasmsim_tc_queue: (a: number) => [number, number];
     readonly wasmsim_tech_mask: (a: number) => number;
+    readonly wasmsim_terrain: (a: number) => [number, number];
     readonly wasmsim_tick: (a: number) => [number, number];
     readonly wasmsim_tick_count: (a: number) => number;
     readonly wasmsim_train_block_reason: (a: number) => number;

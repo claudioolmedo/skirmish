@@ -143,6 +143,20 @@ export class WasmSim {
         return v1;
     }
     /**
+     * The LOCAL player's fog-of-war grid (M7, VIS-01): flat
+     * row-major bytes, one per cell — 0 unexplored, 1 explored,
+     * 2 currently visible. The client renders strictly from this:
+     * enemy/Gaia units and projectiles only where it reads 2,
+     * enemy buildings as last-known where it reads 1.
+     * @returns {Uint8Array}
+     */
+    fog() {
+        const ret = wasm.wasmsim_fog(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
      * One stockpile resource by name: convenience getters for the HUD.
      * @returns {number}
      */
@@ -171,6 +185,17 @@ export class WasmSim {
     grid_width() {
         const ret = wasm.wasmsim_grid_width(this.__wbg_ptr);
         return ret >>> 0;
+    }
+    /**
+     * The generated map's height layer (M7, MAP-05): flat
+     * row-major bytes, one elevation level per cell (0..=4).
+     * @returns {Uint8Array}
+     */
+    heights() {
+        const ret = wasm.wasmsim_heights(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
     }
     /**
      * Ids of the idle military units (Scout, Militia, Archer), in
@@ -256,7 +281,11 @@ export class WasmSim {
         return v1;
     }
     /**
-     * Obstacle cells as row-major bytes (0 = open, 1 = blocked).
+     * Obstacle cells as row-major bytes (0 = open, 1 = blocked:
+     * water and standing-tree cells — terrain ∪ node block — plus
+     * placed-building cells). (Before M7 this was the arena's
+     * fixed wall layout; the meaning for consumers — "a land unit
+     * cannot stand here" — is unchanged.)
      * @returns {Uint8Array}
      */
     obstacles() {
@@ -828,6 +857,17 @@ export class WasmSim {
     tech_mask() {
         const ret = wasm.wasmsim_tech_mask(this.__wbg_ptr);
         return ret >>> 0;
+    }
+    /**
+     * The generated map's terrain layer (M7, MAP-03): flat
+     * row-major bytes, one per cell — 0 land, 1 water.
+     * @returns {Uint8Array}
+     */
+    terrain() {
+        const ret = wasm.wasmsim_terrain(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
     }
     /**
      * Ticks elapsed. Returned as u32 (wraps after ~2.26 years at 60 Hz —

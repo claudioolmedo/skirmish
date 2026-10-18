@@ -102,6 +102,14 @@ export function diamondPath(ctx, g) {
 export const NODE_COLORS = ['#2e7d32', '#e0497e', '#ffd23e', '#a8adb5', '#86c860', '#b5542c', '#c97b4a'];
 export const GROUND_COLOR = '#44512f'; // muted moss — the unexplored-later base
 export const OBSTACLE_COLOR = '#232a20'; // wall cells read as dark blocks
+// M7 fog/terrain palette (VIS-10): unexplored is the black shroud;
+// land shades climb with elevation; explored-but-not-visible cells
+// draw in pre-dimmed variants (the minimap has no post-dim pass).
+export const SHROUD_COLOR = '#05070a';
+export const MM_LAND = ['#3d6030', '#466b34', '#527a3c', '#5f8a46', '#6d9a52'];
+export const MM_LAND_DIM = ['#1e3019', '#22361c', '#284020', '#2f4a26', '#37542c'];
+export const MM_WATER = '#2e6da8';
+export const MM_WATER_DIM = '#1d3a56';
 export const BUILDING_COLOR = '#e8e3d5'; // own buildings when no color is given
 export const VIEWPORT_COLOR = 'rgba(255, 255, 255, 0.9)';
 export const SELECTED_COLOR = '#ffcf4d'; // matches the main view's selection gold
@@ -129,6 +137,10 @@ function drawDiamond(ctx, g, cxWorld, cyWorld, halfWorld, fill) {
  * state = {
  *   gridW, gridH, cellSize,
  *   obstacles: flat row-major array (truthy = blocked cell),
+ *   terrain:   flat row-major bytes (0 land / 1 water)   — M7,
+ *   heights:   flat row-major bytes (elevation levels)  — M7,
+ *   fog:       flat row-major bytes (0 unexplored / 1 explored /
+ *              2 visible) for the local player           — M7,
  *   nodes:     [{ x, y, kind, amount }],          // amount <= 0 skipped
  *   buildings: [{ x, y, kind, complete, color?, size? }], // size = footprint
  *                        // edge in cells (2 or 3); default 2 (M3)
@@ -140,6 +152,14 @@ function drawDiamond(ctx, g, cxWorld, cyWorld, halfWorld, fill) {
  * Draw order: ground diamond, obstacle cells, nodes, buildings,
  * entities, viewport rect — everything after the ground is clipped to
  * the diamond, then the diamond border is stroked on top.
+ *
+ * M7: when `fog` and `terrain` are both present, the ground IS the
+ * world as the local player knows it — a per-cell terrain base
+ * (shroud black / dimmed explored / full visible, water and
+ * elevation shaded) replaces the flat ground + obstacle diamonds.
+ * The caller pre-filters nodes/buildings/entities by the same fog;
+ * the base is the only part drawn here. Absent layers keep the
+ * pre-M7 rendering exactly (the headless tests rely on it).
  */
 export function renderMinimap(ctx, g, state) {
   const H = g.worldHalf;
@@ -154,8 +174,35 @@ export function renderMinimap(ctx, g, state) {
   diamondPath(ctx, g);
   ctx.clip();
 
-  // Obstacle cells as dark diamonds.
-  if (obstacles) {
+  // M7 world base: per-cell terrain under fog, drawn with an
+  // affine transform that maps the unit square of cell (gx, gy)
+  // exactly onto its minimap diamond — 14k flat rects, no paths.
+  if (state.fog && state.terrain) {
+    const csPx = cellSize * g.scale;
+    ctx.save();
+    if (ctx.setTransform) {
+      ctx.setTransform(
+        csPx, csPx / 2, -csPx, csPx / 2,
+        g.cx, g.cy - H * g.scale,
+      );
+      for (let gy = 0; gy < gridH; gy++) {
+        for (let gx = 0; gx < gridW; gx++) {
+          const i = gy * gridW + gx;
+          const f = state.fog[i];
+          if (f === 0) ctx.fillStyle = SHROUD_COLOR;
+          else if (state.terrain[i] === 1) ctx.fillStyle = f === 2 ? MM_WATER : MM_WATER_DIM;
+          else {
+            const h = Math.min(4, (state.heights && state.heights[i]) || 0);
+            ctx.fillStyle = f === 2 ? MM_LAND[h] : MM_LAND_DIM[h];
+          }
+          ctx.fillRect(gx, gy, 1, 1);
+        }
+      }
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+    }
+    ctx.restore();
+  } else if (obstacles) {
+    // Obstacle cells as dark diamonds (pre-M7 path).
     ctx.fillStyle = OBSTACLE_COLOR;
     for (let gy = 0; gy < gridH; gy++) {
       for (let gx = 0; gx < gridW; gx++) {

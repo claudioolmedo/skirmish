@@ -586,9 +586,83 @@ function s2w(sx, sy, s, ox, oy) {
 function centerCamera(wx, wy, s, w, h) {
   return [w / 2 - (wx - wy) * s, h / 2 - ((wx + wy) / 2) * s];
 }
-const worldToScreen = (wx, wy) => w2s(wx, wy, camS, camOx, camOy);
+// M7: the projection lifts elevated ground — screen y drops by
+// (height level × ELEV_LIFT) per world unit of zoom, so units,
+// buildings and overlays standing on a hill render on the hill.
+// One projection point keeps every sprite consistent.
+const ELEV_LIFT = 1.1;
+const worldToScreen = (wx, wy) => {
+  const [sx, sy] = w2s(wx, wy, camS, camOx, camOy);
+  return [sx, sy - heightAtWorld(wx, wy) * ELEV_LIFT * camS];
+};
 
 let sim, HALF, GW, GH, CS, OBST;
+// M7 world layers (flat row-major, one byte per cell, indexed
+// gy * GW + gx): terrain (0 land / 1 water), heights (0..=4), and
+// the LOCAL player's fog grid (0 unexplored / 1 explored /
+// 2 visible) — the only knowledge this client renders from.
+let TERRAIN = null, HEIGHTS = null, FOG = null;
+// Land cells touching water — sand-colored shorelines (computed
+// when a match's layers load; terrain never changes mid-match).
+let SHORE = new Set();
+// Last-known enemy buildings (VIS-06): id -> snapshot of the
+// building record as last seen visible. Drawn dimmed while their
+// ground is explored-but-not-visible; dropped on re-look if gone.
+const seenBuildings = new Map();
+
+function heightAtCell(gx, gy) {
+  if (!HEIGHTS || gx < 0 || gy < 0 || gx >= GW || gy >= GH) return 0;
+  return HEIGHTS[gy * GW + gx];
+}
+function heightAtWorld(wx, wy) {
+  if (!HEIGHTS) return 0;
+  const [gx, gy] = worldToCell(wx, wy);
+  return HEIGHTS[gy * GW + gx];
+}
+function fogAtWorld(wx, wy) {
+  if (!FOG) return 2;
+  const [gx, gy] = worldToCell(wx, wy);
+  return FOG[gy * GW + gx];
+}
+const cellVisibleW = (wx, wy) => fogAtWorld(wx, wy) === 2;
+const cellExploredW = (wx, wy) => fogAtWorld(wx, wy) >= 1;
+
+// Mix a #rrggbb color toward a pale tint by t (0..1) — the hill
+// lightening for terrain rendering.
+function shade(hex, t) {
+  const n = parseInt(hex.slice(1), 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  const mix = (c) => Math.round(c + (224 - c) * t);
+  return `rgb(${mix(r)},${mix(g)},${mix(b)})`;
+}
+
+// Pull the static world layers for the current sim and compute the
+// shoreline set. Terrain/heights are fixed per match; fog and
+// obstacles refresh per frame in draw().
+function refreshWorldLayers() {
+  GW = sim.grid_width();
+  GH = sim.grid_height();
+  CS = sim.cell_size();
+  HALF = sim.world_half();
+  TERRAIN = sim.terrain();
+  HEIGHTS = sim.heights();
+  OBST = sim.obstacles();
+  FOG = sim.fog();
+  SHORE = new Set();
+  for (let gy = 0; gy < GH; gy++) {
+    for (let gx = 0; gx < GW; gx++) {
+      const i = gy * GW + gx;
+      if (TERRAIN[i] === 1) continue;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = gx + dx, ny = gy + dy;
+        if (nx >= 0 && ny >= 0 && nx < GW && ny < GH && TERRAIN[ny * GW + nx] === 1) {
+          SHORE.add(i);
+          break;
+        }
+      }
+    }
+  }
+}
 
 // Node data is a flat array: [id, x, y, kind, amount_left] per node.
 function nodeList() {
@@ -926,6 +1000,8 @@ function resetSim(mode = matchMode) {
   sim = mode === 'sandbox'
     ? new WasmSim(seed)
     : WasmSim.new_match(seed, MODE_TAG[mode]);
+  seenBuildings.clear(); // M7: last-known enemy buildings are per-match
+  refreshWorldLayers();
   vilAnim.clear();
   prevPos.clear();
   lastNodeKind.clear();
@@ -1154,7 +1230,17 @@ async function main() {
     const r = canvas.getBoundingClientRect();
     const sx = (ev.clientX - r.left) * (canvas.width / r.width);
     const sy = (ev.clientY - r.top) * (canvas.height / r.height);
-    return s2w(sx, sy, camS, camOx, camOy);
+    let [wx, wy] = s2w(sx, sy, camS, camOx, camOy);
+    // M7: the projection lifts elevated ground (see worldToScreen);
+    // picking must undo the lift — solve with the height at the
+    // flat estimate, then once more with the refined one.
+    const h = heightAtWorld(wx, wy);
+    if (h > 0) {
+      [wx, wy] = s2w(sx, sy + h * ELEV_LIFT * camS, camS, camOx, camOy);
+      const h2 = heightAtWorld(wx, wy);
+      if (h2 !== h) [wx, wy] = s2w(sx, sy + h2 * ELEV_LIFT * camS, camS, camOx, camOy);
+    }
+    return [wx, wy];
   }
 
   function eventScreen(ev) {
@@ -1320,7 +1406,10 @@ async function main() {
     // fight. Our own TC is never a target: clicks on it fall
     // through to the ordinary logic below.
     const tcT = tcAt(wx, wy);
-    if (tcT != null && st.owners[tcT] === 2) {
+    // M7: an order can only name what the player knows — the
+    // enemy Town Center once its ground is explored (VIS-06).
+    if (tcT != null && st.owners[tcT] === 2
+        && cellExploredW(st.pos[tcT * 2], st.pos[tcT * 2 + 1])) {
       let any = false;
       for (const id of targets) {
         if (st.kinds[id] === KIND_SHEEP) continue;
@@ -1328,7 +1417,12 @@ async function main() {
       }
       if (any) return;
     }
-    const t = entityAt(wx, wy);
+    let t = entityAt(wx, wy);
+    // M7: a non-own unit is a target only while currently visible
+    // — in explored memory or the black it cannot be clicked
+    // (the click falls through to a ground move, as a miss does).
+    if (t != null && st.owners[t] !== 0
+        && !cellVisibleW(st.pos[t * 2], st.pos[t * 2 + 1])) t = null;
     if (t != null && (st.owners[t] === 1 || st.owners[t] === 2 || st.kinds[t] === KIND_SHEEP)) {
       let any = false;
       for (const id of targets) {
@@ -1343,7 +1437,7 @@ async function main() {
     // (No queued form in M5 — the order replaces, like a fresh
     // right-click should.)
     const bT = buildingAt(wx, wy);
-    if (bT && bT.owner === 2) {
+    if (bT && bT.owner === 2 && cellExploredW(bT.x, bT.y)) {
       let any = false;
       for (const id of targets) {
         if (st.kinds[id] === KIND_SHEEP) continue;
@@ -1365,7 +1459,10 @@ async function main() {
       }
       if (any) return;
     }
-    const n = nodeAt(wx, wy);
+    let n = nodeAt(wx, wy);
+    // M7: a node on unexplored ground cannot be ordered — the
+    // click is a ground move instead.
+    if (n && !cellExploredW(n.x, n.y)) n = null;
     for (const id of targets) {
       if (n && st.kinds[id] === 0) {
         if (queued) sim.push_gather_queued(id, n.id);
@@ -1489,13 +1586,18 @@ async function main() {
       // buildings select too — for information only (their owner
       // rides along in the descriptor; the panels gate on it).
       const tc = tcAt(wx, wy);
-      if (tc != null) {
-        const st = entityState();
+      const st = entityState();
+      // M7: information selection obeys fog too — an enemy Town
+      // Center or building selects only once its ground is
+      // explored; in the black the click is plain empty ground.
+      if (tc != null && (st.owners[tc] === 0
+          || cellExploredW(st.pos[tc * 2], st.pos[tc * 2 + 1]))) {
         selectBuilding({ type: 'tc', id: tc, owner: st.owners[tc] });
       } else {
         const b = buildingAt(wx, wy);
-        if (b) selectBuilding({ type: 'building', id: b.id, kind: b.kind, owner: b.owner });
-        else selectUnits(new Set());
+        if (b && (b.owner !== 2 || cellExploredW(b.x, b.y))) {
+          selectBuilding({ type: 'building', id: b.id, kind: b.kind, owner: b.owner });
+        } else selectUnits(new Set());
       }
     }
   });
@@ -1666,19 +1768,9 @@ function shadow(sx, sy, rx) {
 
 const up = (p, h) => [p[0], p[1] - h];
 
-// Raised stone block on a blocked cell (AoE-style wall sprite: one flat
-// shape — light top, medium left face, dark right face).
-const BLOCK_H = 2; // screen px of height per unit of camS
-function drawBlock(wx0, wy0) {
-  const t = worldToScreen(wx0, wy0);
-  const r = worldToScreen(wx0 + CS, wy0);
-  const b = worldToScreen(wx0 + CS, wy0 + CS);
-  const l = worldToScreen(wx0, wy0 + CS);
-  const h = BLOCK_H * camS;
-  poly([l, b, up(b, h), up(l, h)], '#7d838d'); // left face
-  poly([b, r, up(r, h), up(b, h)], '#5b6067'); // right face
-  poly([up(t, h), up(r, h), up(b, h), up(l, h)], '#b9bdc4'); // top
-}
+// (M7: the arena's drawBlock wall sprite is retired — there are no
+// wall cells anymore; blocked ground is water or trees, rendered
+// as terrain and nodes.)
 
 // --- Resource node sprites ----------------------------------------------
 function amountBar(sx, sy, frac) {
@@ -2787,23 +2879,55 @@ function draw() {
   ctx.fillStyle = '#0b0f14';
   ctx.fillRect(0, 0, W, H);
 
-  // Ground: the whole grid as diamond tiles, two alternating greens.
+  // M7: fog and obstacles change as the match runs (sight moves,
+  // trees fall) — refresh both flat layers every frame, like every
+  // other sim read here. Terrain and heights are static per match
+  // (refreshWorldLayers).
+  FOG = sim.fog();
+  OBST = sim.obstacles();
+
+  // Ground (M7): the generated terrain as diamond tiles — land in
+  // the two alternating greens, lightened per elevation level,
+  // with a darker step skirt under each raised cell; water in two
+  // blues; sand on shorelines. Unexplored cells are the black
+  // shroud (VIS-01) — nothing about them is drawn at all.
   const hw = CS * camS;
   const hh = hw / 2;
   for (let gy = 0; gy < GH; gy++) {
     for (let gx = 0; gx < GW; gx++) {
-      const [cx, cy] = worldToScreen(-HALF + (gx + 0.5) * CS, -HALF + (gy + 0.5) * CS);
+      const fi = gy * GW + gx;
+      const wx = -HALF + (gx + 0.5) * CS;
+      const wy = -HALF + (gy + 0.5) * CS;
+      const [cx, cy] = worldToScreen(wx, wy);
       if (cx < -hw || cx > W + hw || cy < -hh || cy > H + hh) continue;
-      diamond(cx, cy, hw, hh, (gx + gy) % 2 ? '#3f7a37' : '#457f3b');
+      if (FOG[fi] === 0) {
+        diamond(cx, cy, hw, hh, '#05070a');
+        continue;
+      }
+      const hgt = HEIGHTS[fi];
+      let base;
+      if (TERRAIN[fi] === 1) base = (gx + gy) % 2 ? '#2a639c' : '#2e6da8';
+      else if (SHORE.has(fi)) base = '#b8a06a';
+      else base = (gx + gy) % 2 ? '#3f7a37' : '#457f3b';
+      if (hgt > 0) {
+        // The step: the level below shows as a darker tread.
+        diamond(cx, cy + ELEV_LIFT * camS, hw, hh, shade(base, -0.25));
+        diamond(cx, cy, hw, hh, shade(base, hgt * 0.09));
+      } else {
+        diamond(cx, cy, hw, hh, base);
+      }
     }
   }
   // Ground grid strokes: a second full-grid stroke pass — pure
-  // cosmetics, the first thing LOW drops after shadows.
+  // cosmetics, the first thing LOW drops after shadows. Only
+  // currently-visible ground is stroked (fog is information; the
+  // stroke grid is not).
   if (Q.groundStrokes) {
     ctx.strokeStyle = 'rgba(0,0,0,0.10)';
     ctx.lineWidth = 1;
     for (let gy = 0; gy < GH; gy++) {
       for (let gx = 0; gx < GW; gx++) {
+        if (FOG[gy * GW + gx] !== 2) continue;
         const [cx, cy] = worldToScreen(-HALF + (gx + 0.5) * CS, -HALF + (gy + 0.5) * CS);
         if (cx < -hw || cx > W + hw || cy < -hh || cy > H + hh) continue;
         ctx.beginPath();
@@ -2819,6 +2943,32 @@ function draw() {
 
   const nodes = nodeList();
   const buildings = buildingList();
+  // M7 (VIS-06): the buildings this frame may DRAW — ours always;
+  // the enemy's live record while visible (refreshing the
+  // last-known snapshot), the snapshot while merely explored, and
+  // nothing while unexplored. A snapshot whose ground is visible
+  // again with no building standing is dropped — re-seeing updates
+  // memory, including to "razed".
+  const renderBuildings = [];
+  for (const b of buildings) {
+    if (b.owner !== 2) {
+      renderBuildings.push(b);
+      continue;
+    }
+    const f = fogAtWorld(b.x, b.y);
+    if (f === 2) {
+      seenBuildings.set(b.id, { ...b });
+      renderBuildings.push(b);
+    } else if (f === 1) {
+      const snap = seenBuildings.get(b.id);
+      if (snap) renderBuildings.push(snap);
+    }
+  }
+  for (const [id, snap] of seenBuildings) {
+    if (fogAtWorld(snap.x, snap.y) === 2 && !buildings.some((b) => b.id === id)) {
+      seenBuildings.delete(id);
+    }
+  }
   const st = entityState();
   const kinds = st.kinds;
   const pos = st.pos;
@@ -2861,26 +3011,28 @@ function draw() {
   // Painter's algorithm: every sprite-like drawable sorted by wx + wy,
   // drawn back-to-front so nearer things overlap farther ones.
   const draws = [];
-  for (let gy = 0; gy < GH; gy++) {
-    for (let gx = 0; gx < GW; gx++) {
-      if (!OBST[gy * GW + gx]) continue;
-      const wx0 = -HALF + gx * CS;
-      const wy0 = -HALF + gy * CS;
-      draws.push({ key: wx0 + wy0 + CS, fn: () => drawBlock(wx0, wy0) });
-    }
-  }
+  // (M7: the old arena's stone blocks are gone — obstacles are now
+  // terrain: water renders in the ground pass, trees as nodes.)
   for (const n of nodes) {
-    if (n.amount <= 0) continue; // depleted nodes vanish
+    // Fog (VIS-01/06): a node draws only on explored ground. A
+    // depleted node still draws while its ground is not currently
+    // visible (memory says it stands); once re-seen empty it
+    // vanishes for good. Amount bars are live information — only
+    // in visible cells.
+    const f = fogAtWorld(n.x, n.y);
+    if (f === 0) continue;
+    if (n.amount <= 0 && f === 2) continue;
+    const known = n.amount > 0 ? n.amount / NODE_MAX[n.kind] : 1;
     draws.push({
       key: n.x + n.y,
       fn: () => {
         const [sx, sy] = worldToScreen(n.x, n.y);
-        NODE_DRAW[n.kind](sx, sy, n.amount / NODE_MAX[n.kind], n.x, n.y);
-        amountBar(sx, sy, n.amount / NODE_MAX[n.kind]);
+        NODE_DRAW[n.kind](sx, sy, known, n.x, n.y);
+        if (f === 2) amountBar(sx, sy, n.amount / NODE_MAX[n.kind]);
       },
     });
   }
-  for (const b of buildings) {
+  for (const b of renderBuildings) {
     if (b.kind === 1 && b.complete) continue; // drawn as a farm node
     draws.push({ key: b.x + b.y + CS, fn: () => drawBuilding(b) });
   }
@@ -2895,6 +3047,11 @@ function draw() {
     if (kinds[i] === KIND_TC) {
       // Sort by the TC's base/front edge so units in front overlap it.
       const owner = st.owners[i];
+      // M7 (VIS-06): the enemy Town Center is a building for
+      // knowledge — drawn once its ground is explored, but its HP
+      // is live information, shown only while visible.
+      const f = owner === 0 ? 2 : fogAtWorld(wx, wy);
+      if (f === 0) continue;
       const hp = st.hp[i * 2];
       const maxHp = st.hp[i * 2 + 1];
       draws.push({
@@ -2903,13 +3060,17 @@ function draw() {
           drawTC(wx, wy, owner);
           // M5: a Town Center under attack shows its HP like any
           // unit — razing it is how matches end.
-          if (hp < maxHp) {
+          if (f === 2 && hp < maxHp) {
             const [sx, sy] = worldToScreen(wx, wy);
             hpBar(sx, sy - 5.4 * camS, hp / maxHp);
           }
         },
       });
     } else if (st.hp[i * 2] >= 1) {
+      // M7 (VIS-01): enemy and Gaia UNITS draw only in currently
+      // visible cells — explored memory remembers buildings, never
+      // units (VIS-06).
+      if (st.owners[i] !== 0 && !cellVisibleW(wx, wy)) continue;
       const drawFn = UNIT_DRAW[kinds[i]] || drawVillager;
       const hp = st.hp[i * 2];
       const maxHp = st.hp[i * 2 + 1];
@@ -2945,6 +3106,9 @@ function draw() {
       const t = Math.max(0, Math.min(1, (now - proj[p + 4]) / span));
       const wx = proj[p] + (proj[p + 2] - proj[p]) * t;
       const wy = proj[p + 1] + (proj[p + 3] - proj[p + 1]) * t;
+      // M7 (VIS-01): an arrow is a unit for knowledge — drawn only
+      // while its cell is currently visible.
+      if (!cellVisibleW(wx, wy)) continue;
       const [sx, sy] = worldToScreen(wx, wy);
       if (!Q.projTrail) {
         ctx.beginPath();
@@ -2964,6 +3128,20 @@ function draw() {
     }
   }
 
+  // Fog dim (M7, VIS-01): explored-but-not-visible ground draws
+  // under a dim veil — terrain, nodes and last-known buildings
+  // were all painted at full brightness above, and this pass is
+  // what makes memory read as memory. (Unexplored cells were never
+  // painted — the ground pass left them black.)
+  for (let gy = 0; gy < GH; gy++) {
+    for (let gx = 0; gx < GW; gx++) {
+      if (FOG[gy * GW + gx] !== 1) continue;
+      const [cx, cy] = worldToScreen(-HALF + (gx + 0.5) * CS, -HALF + (gy + 0.5) * CS);
+      if (cx < -hw || cx > W + hw || cy < -hh || cy > H + hh) continue;
+      diamond(cx, cy, hw, hh, 'rgba(6, 8, 12, 0.48)');
+    }
+  }
+
   // Building selection: a gold outline around the footprint — the
   // building counterpart of the unit selection ring.
   {
@@ -2972,7 +3150,7 @@ function draw() {
       const id = selectedBuilding.id;
       outline = [pos[id * 2], pos[id * 2 + 1], TC_HALF];
     } else if (selectedBuilding && selectedBuilding.type === 'building') {
-      const b = buildings.find((bb) => bb.id === selectedBuilding.id);
+      const b = renderBuildings.find((bb) => bb.id === selectedBuilding.id);
       if (b) outline = [b.x, b.y, (b.size * CS) / 2];
     }
     if (outline) {
@@ -3102,8 +3280,16 @@ function draw() {
     const mmEntities = [];
     for (let i = 0; i < count; i++) {
       if (kinds[i] !== KIND_TC && st.hp[i * 2] < 1) continue;
+      // M7 (VIS-10): the minimap obeys the same fog as the main
+      // view — our units always; the enemy Town Center once
+      // explored; every other non-own unit only while visible.
+      const ex = pos[i * 2], ey = pos[i * 2 + 1];
+      if (st.owners[i] !== 0) {
+        const f = fogAtWorld(ex, ey);
+        if (kinds[i] === KIND_TC ? f < 1 : f !== 2) continue;
+      }
       mmEntities.push({
-        x: pos[i * 2], y: pos[i * 2 + 1], kind: kinds[i],
+        x: ex, y: ey, kind: kinds[i],
         // M5: three minimap families — Gaia's own colors, our blue,
         // the enemy's red.
         color: st.owners[i] === 1
@@ -3114,11 +3300,17 @@ function draw() {
     }
     renderMinimap(mmCtx, mmGeom, {
       gridW: GW, gridH: GH, cellSize: CS, obstacles: OBST,
-      nodes,
+      // M7: terrain + heights + fog — the minimap's ground IS the
+      // world as the local player knows it (VIS-10).
+      terrain: TERRAIN, heights: HEIGHTS, fog: FOG,
+      // M7: nodes plot only on explored ground.
+      nodes: nodes.filter((n) => cellExploredW(n.x, n.y)),
       // M5: enemy buildings plot in enemy red. M6: our buildings
       // plot in their per-kind colors (camps/range/stable/smith);
-      // House/Farm/Barracks keep the parchment default.
-      buildings: buildings.map((b) => (b.owner === 2
+      // House/Farm/Barracks keep the parchment default. M7: the
+      // enemy's entries are the fog-filtered render list
+      // (last-known snapshots included).
+      buildings: renderBuildings.map((b) => (b.owner === 2
         ? { ...b, color: ENEMY_COLOR }
         : { ...b, color: BUILDING_MINIMAP_COLOR[b.kind] })),
       entities: mmEntities,
