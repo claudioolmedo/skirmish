@@ -285,7 +285,11 @@ spec; anything the sources don't pin down is marked UNVERIFIED in
   (the old uniform speed is gone). Scale: study tiles/s × 1.25
   units/tick, anchored so the villager keeps its shipped 1.0
   units/tick pace — every unit-to-unit ratio is the study's.
-  Ranges/LoS are tiles × 4 (one cell = one tile).
+  Ranges/LoS are tiles × 4 (one cell = one tile). *(Scale corrected
+  in 2026-10: the × 1.25 prototype scale was ratio-only and made
+  travel ≈12× too fast once M7 fixed the tile at 4 world units —
+  see "Pace correction" after the M7 section. Speeds are now the
+  absolute study values: tiles/s × 4 ÷ 60.)*
 - **MOV-04.** A melee unit in range of its target with an attack
   engaged is exempt from separation steering, both as the pushed
   and the pusher's problem: it holds its ground mid-swing.
@@ -631,6 +635,57 @@ bitset** (`players: [PlayerState; 2]`), both hashed.
   (the standard grid mover); the M6 teleport still guards every
   other blocked layer. All three were found by the M7
   long-match tests, not by inspection.
+
+## Pace correction (2026-10-18, post-M7 fix)
+
+- **Root cause.** The unit table kept the M1/M2 prototype pace:
+  speeds were the study's tiles/second values scaled ×1.25 off a
+  villager anchored at 1.0 world-units/tick, preserving only the
+  unit-to-unit RATIOS; the units.rs header said the absolute
+  tile-scale pass was "a later tuning pass". It never happened,
+  and M7 then fixed 1 tile = 4 world units — so travel ran at
+  prototype speed on a real-scale map. Measured just before the
+  fix (seed 42, villager ordered 10 tiles): arrival in 61 ticks
+  ≈ 1.02 s (≈9.8 tiles/s effective; cruise step exactly 1.0
+  units/tick = 15 tiles/s) against the reference 0.8 tiles/s —
+  travel ≈12× too fast. The game clock, train times, gather
+  rates and rates of fire were always correct game-time values;
+  only the movement scale was wrong.
+- **The fix.** Every movement speed is now the absolute study
+  value converted at the tile scale: `units/tick = tiles/s × 4
+  world-units-per-tile ÷ 60 ticks/s` (I16F16 bits =
+  round(tiles/s × 65536 / 15); per-row rounding ≤ 0.011%). Rows:
+  Villager 0.8, Scout 1.20 (Feudal 1.55 via `stats_for`), Militia
+  0.90, Archer 0.96, Man-at-Arms 0.96, Sheep 0.7, Boar 0.8 roaming
+  / 1.0 chasing, Deer 1.0 (still UNVERIFIED — kept at its
+  documented ratio to the anchor). Loom's +0.1 tiles/s (TEC-06)
+  converts in the same formula (0.8 → 0.90 exactly in bits).
+  Projectile speed (0.5 units/tick) is an independent visual
+  constant and deliberately unchanged. Regression-pinned by
+  `sim/tests/pace.rs`: sustained cruise within 1.5% of the table
+  value for Villager/Scout/Militia, and a 10-tile villager leg in
+  ≈12.5 s of game time (measured 760 ticks ≈ 12.7 s).
+- **Consequence the correction exposed (fixed with it).**
+  Separation is a per-tick *displacement* calibrated when a
+  villager's whole speed was 1.0 units/tick; at 0.053 units/tick
+  two neighbors flanking a unit's heading sum to a push that can
+  cancel its order exactly — a stable fixed point (three
+  villagers wedged in a seed-9 forest pocket froze bit-identical
+  for 300k+ ticks; the scripted-siege match stalled the same
+  way). Steering now caps the separation term at half the unit's
+  own speed, so an order always keeps at least half its
+  authority; the orderless shove is uncapped (a standing unit
+  must stay displaceable at up to its full speed — the M2
+  anti-wall rule). Also exposed, in tests only: long build-ups
+  that re-issued a Gather order against a by-then-depleted node
+  (silently ignored by design) had to re-bind a live node — at
+  the prototype pace the re-gather always came while the first
+  node still stood.
+- **Hashes.** The golden hash (`tests/determinism.rs`) does NOT
+  move: its scenario issues no commands and nothing moves in 360
+  ticks, so speeds never enter it. Every live-match replay hash
+  changes, as expected — movement feeds everything — and those
+  are pinned by their own bit-identity tests.
 
 ## The sim may
 

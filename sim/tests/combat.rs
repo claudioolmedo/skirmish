@@ -348,6 +348,16 @@ fn build_barracks_and_archer(sim: &mut Sim) {
             .unwrap()
             .id
     };
+    // First node of the kind with anything left in it — a Gather
+    // order naming a depleted node is ignored by the sim, so a
+    // re-assignment late in a long build-up must pick a live one.
+    let first_live_node = |sim: &Sim, kind: NodeKind| {
+        sim.nodes()
+            .iter()
+            .find(|n| n.kind == kind && n.amount_left > I16F16::from_num(0))
+            .unwrap()
+            .id
+    };
     // The Feudal pair first: a Mill by the berry patch and a
     // Lumber Camp by the woodline (M7: anchors derived from the
     // generated map — the first buildable ground in rings around
@@ -446,11 +456,20 @@ fn build_barracks_and_archer(sim: &mut Sim) {
     });
     assert!(barracks_up, "barracks never completed");
     // Villager 1 back on food; click Feudal when the 500 is in hand.
+    // (Budget raised by the 2026-10 pace correction: at the corrected
+    // 0.8 tiles/s the berry trips between patch and Mill take their
+    // real game time, so the gatherer needs well over the old 90k
+    // ticks for 500 food. The amount asserted is unchanged. The bush
+    // is also re-bound LIVE: the phase-1 bush is depleted by now —
+    // villager 1 ate its whole 125 — and the sim ignores a Gather
+    // order naming a dead node, which at the prototype pace never
+    // bit because the re-gather came after a handful of trips.)
+    let berry = first_live_node(sim, NodeKind::BerryBush);
     sim.push_command(Command::Gather {
         entity: 1,
         node: berry,
     });
-    let food_ready = run_until(sim, 90000, |s| {
+    let food_ready = run_until(sim, 240_000, |s| {
         s.stockpile().amount(ResourceKind::Food) >= I16F16::from_num(500)
     });
     assert!(food_ready, "never gathered the feudal food");

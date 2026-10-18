@@ -876,7 +876,7 @@ impl Sim {
         // attack 3 → 5, speed 1.20 → 1.55 tiles/s, LoS 4 → 6.
         if kind == EntityKind::ScoutCavalry && p.age >= Age::Feudal {
             s.attacks = units::SCOUT_FEUDAL_ATTACKS;
-            s.speed = I16F16::from_bits(126_976); // 1.9375 (1.55 × 1.25)
+            s.speed = I16F16::from_bits(6_772); // 1.55 tiles/s (absolute tile scale)
             s.los = I16F16::from_bits(1_572_864); // 24 (6 tiles)
         }
         // TEC-04 (Loom): villagers +15 HP, +1 melee / +2 pierce
@@ -886,7 +886,7 @@ impl Sim {
             s.max_hp += 15;
             s.armor_melee += 1;
             s.armor_pierce += 2;
-            s.speed += I16F16::from_bits(8_192); // +0.125 (0.1 × 1.25)
+            s.speed += I16F16::from_bits(437); // +0.1 tiles/s (absolute tile scale)
         }
         // Fletching (study §8): archers +1 attack, +1 tile of range.
         if kind == EntityKind::Archer && p.techs & TechId::Fletching.bit() != 0 {

@@ -162,6 +162,18 @@ fn golden_hash_regression() {
     // new world and the wider coverage alone. New value verified
     // stable across independent runs (replay example, seed 42, 360
     // ticks, run twice).
+    //
+    // Pace correction (2026-10): every unit speed moved to the
+    // absolute reference tile scale (≈18.75× slower than the M1/M2
+    // prototype pace the table had kept), and steering caps the
+    // separation term at half a unit's speed so it can no longer
+    // cancel an order outright. The golden value deliberately does
+    // NOT move: this scenario issues no commands and nothing moves
+    // or fights in 360 ticks — speeds and separation never enter
+    // it — so an unchanged hash here is itself part of the
+    // correction's evidence. (Live-match hash streams, which do
+    // move units, all change; they are pinned by their own replay
+    // tests, not by this tripwire.)
     let mut sim = Sim::new(42);
     let mut hash = 0;
     for _ in 0..360 {

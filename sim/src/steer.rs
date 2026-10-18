@@ -7,10 +7,12 @@
 
 use fixed::types::I16F16;
 
-/// The M1/M2 uniform speed in world units per tick — now only the
-/// villager's row of the M3 unit table (`units::spec`); steering takes
-/// each entity's own speed as a parameter. Kept as the snapshot
-/// default and for the steering unit tests.
+/// The M1/M2 uniform speed in world units per tick. Steering takes
+/// each entity's own speed as a parameter, and every production call
+/// passes the entity's table speed (`Sim::current_speed`) — no
+/// movement path clamps to this constant, and since the pace
+/// correction the table rows are all far below it (fastest ≈ 0.103).
+/// Kept as the snapshot default and for the steering unit tests.
 /// Constants via raw bits (value × 2^16): from_num is not const in fixed 1.x.
 pub const MAX_SPEED: I16F16 = I16F16::from_bits(65_536); // 1.0
 /// Inside this radius of the final waypoint, speed scales down linearly
@@ -167,7 +169,31 @@ pub fn steer(
     // Separation from neighbors, on top of the desired velocity —
     // except while a melee attack is engaged (MOV-04).
     if apply_separation {
-        let (sx, sy) = separation(positions, me);
+        let (mut sx, mut sy) = separation(positions, me);
+        // Pace correction (2026-10): separation is a per-tick
+        // DISPLACEMENT calibrated at the M1/M2 prototype pace, when a
+        // unit's speed was 1.0 world units/tick and a pair's push
+        // (≤ ~0.05 for a slight overlap) was a few percent of it. At
+        // the corrected tile scale a villager's whole speed is 0.053
+        // units/tick, so two neighbors flanking the desired direction
+        // can sum to a push that cancels the order exactly — a stable
+        // fixed point (three villagers wedged in a forest pocket on
+        // seed 9 froze bit-identically for 300k+ ticks: each pair at
+        // d≈1.95, the y-pushes summing to −3068 bits against a +3072
+        // desired, the residual axis-aligned step vetoed by the tree
+        // slide). Cap the separation term at half the unit's own
+        // speed: an order always keeps at least half its authority,
+        // exact cancellation becomes impossible, and crowds still
+        // spread (the term is unchanged below the cap). The orderless
+        // `shove` path is NOT capped this way — a standing unit must
+        // remain displaceable at up to its full speed, or it becomes
+        // the immovable wall M2 designed the shove against.
+        let slen = vec_len(sx, sy);
+        let cap = max_speed / 2;
+        if slen > cap {
+            sx = sx / slen * cap;
+            sy = sy / slen * cap;
+        }
         vx += sx;
         vy += sy;
     }
@@ -270,6 +296,32 @@ mod tests {
         let wps = [(I16F16::from_num(100), I16F16::ZERO)];
         let (vx, vy, _, _) = steer(&p, 0, &wps, 0, MAX_SPEED, false);
         assert_eq!((vx, vy), (MAX_SPEED, I16F16::ZERO));
+    }
+
+    #[test]
+    fn separation_cannot_cancel_an_order() {
+        // Pace-correction regression: two neighbors flanking the
+        // desired direction at d≈1.95 (the seed-9 forest-pocket
+        // geometry) sum to a −y push of ≈3068 bits — enough to cancel
+        // a villager's +3072 desired y EXACTLY at the corrected speed
+        // (3495 bits), freezing the unit forever. With the separation
+        // term capped at half the unit's speed, the order keeps at
+        // least half its authority: vy must stay ≥ ~half speed.
+        let r = I16F16::from_num(1);
+        let positions = [
+            (I16F16::ZERO, I16F16::ZERO, r),
+            (I16F16::from_num(-0.972), I16F16::from_num(1.686), r),
+            (I16F16::from_num(0.966), I16F16::from_num(1.688), r),
+        ];
+        let wps = [(I16F16::ZERO, I16F16::from_num(100))];
+        let villager_speed = I16F16::from_bits(3_495); // 0.8 tiles/s
+        let (_, vy, _, arrived) = steer(&positions, 0, &wps, 0, villager_speed, true);
+        assert!(!arrived);
+        assert!(
+            vy >= villager_speed / 2 - I16F16::from_bits(64),
+            "separation cancelled the order: vy bits = {}",
+            vy.to_bits()
+        );
     }
 
     #[test]

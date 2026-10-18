@@ -307,7 +307,11 @@ fn loom_charges_gold_and_patches_villager_stats() {
     assert_eq!(loomed.max_hp, 40);
     assert_eq!(loomed.armor_melee, 1);
     assert_eq!(loomed.armor_pierce, 2);
-    assert_eq!(loomed.speed.to_bits(), 73_728);
+    // 0.90 tiles/s in I16F16 bits at the corrected tile scale
+    // (2026-10 pace correction: 0.9 × 65536 / 15 = 3932; the old
+    // 73_728 was the prototype-pace basis, 1.0 + 0.125 prototype
+    // units/tick).
+    assert_eq!(loomed.speed.to_bits(), 3_932);
     for id in 1..=3 {
         assert_eq!(
             villager(&sim, id).hp,
@@ -554,6 +558,24 @@ fn archer_production_moves_to_the_range_and_scout_to_the_stable() {
     wait_wood(&mut sim, 175);
     raise(&mut sim, 1, BuildingKind::Stable, 27, 30);
     let stable = building_id(&sim, BuildingKind::Stable);
+    // The Scout's 80 food must actually be in hand before judging
+    // trainability: since the 2026-10 pace correction, the Feudal
+    // research window no longer refills the stockpile past 80 on
+    // berry trips alone (at the prototype pace it silently did), so
+    // put a villager on food and wait for the real amount. The bush
+    // must be a LIVE one (first_live_node): the patch's first bush
+    // is long depleted by now, and the sim ignores a Gather order
+    // that names a dead node. The trainability assertion itself is
+    // unchanged.
+    let berry = first_live_node(&sim, NodeKind::BerryBush);
+    sim.push_command(Command::Gather {
+        entity: 2,
+        node: berry,
+    });
+    let fed = run_until(&mut sim, 180_000, |s| {
+        s.stockpile().amount(ResourceKind::Food) >= I16F16::from_num(80)
+    });
+    assert!(fed, "never banked the Scout's 80 food");
     assert!(sim.can_train_at(stable, EntityKind::ScoutCavalry));
     // And the Feudal buildings were age-gated: a Dark-Age sim
     // cannot even place them.
@@ -755,7 +777,13 @@ fn man_at_arms_upgrades_existing_and_future_militia() {
 fn ai_match_replays_bit_identically_and_ages_up() {
     fn run(seed: u64) -> (Vec<u64>, Sim) {
         let mut sim = Sim::new_match(seed, MatchMode::AiNormal);
-        let hashes = (0..60_000).map(|_| sim.tick()).collect();
+        // 120k ticks (pace correction, 2026-10): at the corrected
+        // tile scale the AI's economy matures in real game time —
+        // measured on this seed: Feudal at ≈79.8k ticks, the Archery
+        // Range complete at ≈83.9k. The old 60k window encoded the
+        // prototype pace and ended while the AI was still Dark. The
+        // assertions below (Loom, Feudal, Range, Mill) are unchanged.
+        let hashes = (0..120_000).map(|_| sim.tick()).collect();
         (hashes, sim)
     }
     let (a, sim_a) = run(1234);

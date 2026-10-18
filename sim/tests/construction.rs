@@ -578,7 +578,17 @@ fn two_builders_finish_a_house_in_about_1125_ticks() {
 #[test]
 fn a_builder_joining_mid_build_changes_the_pace() {
     let mut sim = Sim::new(61);
-    build(&mut sim, 1, BuildingKind::House, 18, 27);
+    // Pace correction (2026-10): the plot moves to the near-TC anchor
+    // (the sibling test's helper). The old fixed cell (18, 27) sits
+    // ~85 units from this seed's Town Center; at the corrected
+    // 0.8 tiles/s the joining builder's walk (~1,500 ticks) outlasts
+    // the entire second half of the build (750 ticks), so the house
+    // always finished before the join — the scenario measured the
+    // walk, not the join. Near the TC the walk is a few hundred ticks
+    // again and the mid-build join below is what is measured. Every
+    // assertion is unchanged.
+    let (hx, hy) = open_anchor_near_tc(&sim, 1, BuildingKind::House);
+    build(&mut sim, 1, BuildingKind::House, hx, hy);
     sim.tick();
     let started = run_until(&mut sim, 20_000, |s| villager(s, 1).task == Task::Building);
     assert!(started, "the builder never started building");
@@ -599,7 +609,7 @@ fn a_builder_joining_mid_build_changes_the_pace() {
     assert!(!sim.buildings()[0].complete);
 
     // The second builder joins the standing foundation mid-build.
-    build(&mut sim, 2, BuildingKind::House, 18, 27);
+    build(&mut sim, 2, BuildingKind::House, hx, hy);
     let joined = run_until(&mut sim, 20_000, |s| villager(s, 2).task == Task::Building);
     assert!(joined, "the second builder never joined the build");
     assert!(!sim.buildings()[0].complete);

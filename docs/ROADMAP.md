@@ -136,6 +136,13 @@ From the [Gap Analysis](GAP-ANALYSIS.md): the items that most make Skirmish II
   domain (ships, docks, fishing), and the larger map sizes — the
   generator's vocabulary and validation already cover water as
   terrain; the rest lands with the naval content.
+  **Fix (2026-10-18) — pace correction.** Unit speeds had kept the
+  M1/M2 prototype scale (ratios only), which on M7's real tile
+  scale made travel ≈12× faster than the reference; all speeds are
+  now the absolute study values at tiles/s × 4 ÷ 60, with
+  `sim/tests/pace.rs` as the regression pin, plus the steering
+  separation cap the slower scale required. See ARCHITECTURE.md,
+  "Pace correction".
 - **M8 — Lockstep multiplayer.** Commands-only networking on the
   deterministic sim (per-tick hash is the desync detector), send-a-link
   lobby, replay viewer. **Multi-region from day one**: one relay per

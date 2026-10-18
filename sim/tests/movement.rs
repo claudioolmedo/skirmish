@@ -44,7 +44,12 @@ fn move_order_arrives_at_target() {
     assert!(order.waypoints.len() >= 2, "expected a real path");
 
     let mut arrived_at = None;
-    for tick in 0..2400 {
+    // Pace correction (2026-10): the ~254-unit cross-map leg at the
+    // corrected 0.8 tiles/s takes ≈4,800 cruise ticks (plus forest
+    // detours and the arrival slowdown) — the old 2,400-tick budget
+    // encoded the prototype pace. The arrival assertion below is
+    // unchanged.
+    for tick in 0..12_000 {
         sim.tick();
         if by_id(&sim, 1).order.is_none() {
             arrived_at = Some(tick);

@@ -8,12 +8,19 @@
 //! silently invented.
 //!
 //! Conventions:
-//! - Speeds are the study's tiles/second values scaled by 1.25, so the
-//!   villager keeps the 1.0 world-units/tick pace M1/M2 shipped with.
-//!   Ratios between units are therefore exactly the study's (Scout is
-//!   1.5× a villager, Militia 1.125×, and so on). The sim's tile analog
-//!   is one grid cell (4 world units); absolute tile-scale travel time
-//!   is a later tuning pass, not a data change.
+//! - Speeds are the study's tiles/second values at the sim's
+//!   ABSOLUTE tile scale (the pace correction, post-M7): M7 fixed
+//!   1 tile = 1 grid cell = 4 world units, so every row follows
+//!   `speed(units/tick) = tiles/s × 4 / 60`. Before this pass the
+//!   table preserved only the study's ratios (× 1.25 off a
+//!   1.0 units/tick villager inherited from M1/M2), which made
+//!   absolute travel ~12× too fast — a villager crossed a tile in
+//!   ~0.07 s instead of 1.25 s. I16F16 rounding moves individual
+//!   rows by < 0.02% (0.8 tiles/s is 3495 bits vs the exact
+//!   3495.25); determinism is unaffected — the rounded value IS
+//!   the state, identical on every machine. (Loom's +0.1 tiles/s
+//!   increment rounds to 437 bits, which lands the loomed villager
+//!   exactly on the 0.90 tiles/s row.)
 //! - Ranges and line-of-sight are tiles × 4 world units (one cell is
 //!   one tile), so an Archer's range 4 is 16 world units and a Scout's
 //!   Dark Age LoS 4 is 16 world units.
@@ -128,7 +135,7 @@ static VILLAGER: UnitSpec = UnitSpec {
     accuracy: 100,
     projectile_speed: I16F16::ZERO,
     scatter: I16F16::ZERO,
-    speed: I16F16::from_bits(65_536), // 1.0 (0.8 tiles/s × 1.25)
+    speed: I16F16::from_bits(3_495), // 0.8 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(1_048_576), // 16 (4 tiles)
     radius: I16F16::from_bits(65_536), // 1.0
     carcass_food: 0,
@@ -182,7 +189,7 @@ static SCOUT_CAVALRY: UnitSpec = UnitSpec {
     accuracy: 100,
     projectile_speed: I16F16::ZERO,
     scatter: I16F16::ZERO,
-    speed: I16F16::from_bits(98_304), // 1.5 (1.20 tiles/s × 1.25)
+    speed: I16F16::from_bits(5_243), // 1.20 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(1_048_576), // 16 (4 tiles, Dark Age)
     radius: I16F16::from_bits(65_536),
     carcass_food: 0,
@@ -211,7 +218,7 @@ static MILITIA: UnitSpec = UnitSpec {
     accuracy: 100,
     projectile_speed: I16F16::ZERO,
     scatter: I16F16::ZERO,
-    speed: I16F16::from_bits(73_728), // 1.125 (0.90 tiles/s × 1.25)
+    speed: I16F16::from_bits(3_932), // 0.90 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(1_048_576), // 16 (4 tiles)
     radius: I16F16::from_bits(65_536),
     carcass_food: 0,
@@ -239,7 +246,7 @@ static ARCHER: UnitSpec = UnitSpec {
     accuracy: 80,
     projectile_speed: I16F16::from_bits(32_768), // 0.5 — design constant (see field doc)
     scatter: I16F16::from_bits(131_072),          // 2.0 — design constant (see field doc)
-    speed: I16F16::from_bits(78_643),            // 1.2 (0.96 tiles/s × 1.25)
+    speed: I16F16::from_bits(4_194),            // 0.96 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(1_572_864),            // 24 (6 tiles)
     radius: I16F16::from_bits(65_536),
     carcass_food: 0,
@@ -276,7 +283,7 @@ static MAN_AT_ARMS: UnitSpec = UnitSpec {
     accuracy: 100,
     projectile_speed: I16F16::ZERO,
     scatter: I16F16::ZERO,
-    speed: I16F16::from_bits(78_643), // 1.2 (0.96 tiles/s × 1.25)
+    speed: I16F16::from_bits(4_194), // 0.96 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(1_048_576), // 16 (4 tiles)
     radius: I16F16::from_bits(65_536),
     carcass_food: 0,
@@ -304,7 +311,7 @@ static SHEEP: UnitSpec = UnitSpec {
     accuracy: 100,
     projectile_speed: I16F16::ZERO,
     scatter: I16F16::ZERO,
-    speed: I16F16::from_bits(57_344), // 0.875 (0.7 tiles/s × 1.25)
+    speed: I16F16::from_bits(3_058), // 0.7 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(786_432),  // 12 (~3 tiles)
     radius: I16F16::from_bits(65_536),
     carcass_food: 100,
@@ -337,7 +344,7 @@ static BOAR: UnitSpec = UnitSpec {
     accuracy: 100,
     projectile_speed: I16F16::ZERO,
     scatter: I16F16::ZERO,
-    speed: I16F16::from_bits(65_536), // 1.0 roaming/return (0.8 × 1.25); chase uses BOAR_CHASE_SPEED
+    speed: I16F16::from_bits(3_495), // 0.8 tiles/s roaming/return (absolute scale); chase uses BOAR_CHASE_SPEED
     los: I16F16::from_bits(1_310_720), // 20 (5 tiles)
     radius: I16F16::from_bits(78_643), // 1.2 — the boar is bulky
     carcass_food: 340,
@@ -348,9 +355,10 @@ static BOAR: UnitSpec = UnitSpec {
     train_ticks: 0,
 };
 
-/// The boar's chase speed while it has an aggro target: 1.25
-/// units/tick (its 1.0 tiles/s attacking speed × 1.25, see header).
-pub const BOAR_CHASE_SPEED: I16F16 = I16F16::from_bits(81_920);
+/// The boar's chase speed while it has an aggro target: its
+/// 1.0 tiles/s attacking speed at the absolute tile scale (see
+/// the module header for the conversion).
+pub const BOAR_CHASE_SPEED: I16F16 = I16F16::from_bits(4_369);
 
 /// Deer (OPENING-SPEC §2.2): 140 food, passive, flees when attacked,
 /// decays at the herdable 0.25/s. HP UNVERIFIED — the spec only
@@ -370,7 +378,7 @@ static DEER: UnitSpec = UnitSpec {
     accuracy: 100,
     projectile_speed: I16F16::ZERO,
     scatter: I16F16::ZERO,
-    speed: I16F16::from_bits(81_920), // 1.25 (1.0 tiles/s × 1.25) — UNVERIFIED
+    speed: I16F16::from_bits(4_369), // 1.0 tiles/s (absolute scale) — UNVERIFIED
     los: I16F16::from_bits(1_048_576),
     radius: I16F16::from_bits(65_536),
     carcass_food: 140,

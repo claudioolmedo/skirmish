@@ -105,7 +105,11 @@ fn queued_moves_execute_in_fifo_order() {
     });
 
     let (mut ta, mut tb, mut tc) = (None, None, None);
-    for tick in 0..6000u64 {
+    // Pace correction (2026-10): the three legs total several hundred
+    // world units; at the corrected 0.8 tiles/s the chain needs
+    // ~10k ticks, not the prototype-pace 6,000. The FIFO order
+    // assertions below are unchanged.
+    for tick in 0..40_000u64 {
         sim.tick();
         if ta.is_none() && dist_to(&sim, 1, f(a.0), f(a.1)) < 1.5 {
             ta = Some(tick);
