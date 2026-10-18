@@ -140,8 +140,12 @@ From the [Gap Analysis](GAP-ANALYSIS.md): the items that most make Skirmish II
   deterministic sim (per-tick hash is the desync detector), send-a-link
   lobby, replay viewer. **Multi-region from day one**: one relay per
   match, placed near its players on edge hosting — ping is the
-  product, players are matched to their nearest region, and capacity
-  grows by adding regions, not bigger machines. Anonymous match
+  product. The region list is fixed and the same for everyone, and
+  while the player base is small the PLAYER picks the server:
+  the lobby shows the live ping for every region (nearest one
+  pre-highlighted), so friends choose the same location and
+  everyone knows their ping before they play. Capacity grows by
+  adding regions, not bigger machines. Anonymous match
   telemetry and replay submission land with it, feeding the
   fidelity-and-quality loop (SUSTAINABILITY.md §5).
 
