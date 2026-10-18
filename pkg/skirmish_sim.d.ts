@@ -12,6 +12,10 @@ export class WasmSim {
      */
     age(): number;
     /**
+     * Current age tag of a specific player (0 Dark, 1 Feudal).
+     */
+    age_for(owner: number): number;
+    /**
      * A placed building's queue as flat entry codes (M6) — see
      * `tc_queue`.
      */
@@ -82,6 +86,11 @@ export class WasmSim {
      */
     fog(): Uint8Array;
     /**
+     * The fog-of-war grid of a specific player — `fog` for an
+     * explicit seat.
+     */
+    fog_for(owner: number): Uint8Array;
+    /**
      * One stockpile resource by name: convenience getters for the HUD.
      */
     food(): number;
@@ -102,11 +111,19 @@ export class WasmSim {
      */
     idle_military(): Uint32Array;
     /**
+     * Ids of a specific player's idle military.
+     */
+    idle_military_for(owner: number): Uint32Array;
+    /**
      * Ids of the idle villagers (no work task, no move order, no
      * attack target), in id order. Behind the client's idle-villager
      * key and the top-bar idle indicator.
      */
     idle_villagers(): Uint32Array;
+    /**
+     * Ids of a specific player's idle villagers.
+     */
+    idle_villagers_for(owner: number): Uint32Array;
     /**
      * The match outcome (M5, Conquest): 0 ongoing, 1 victory,
      * 2 defeat — from the human player's seat. Always 0 in
@@ -125,7 +142,8 @@ export class WasmSim {
     constructor(seed: number);
     /**
      * Create a match against the scripted AI opponent (M5):
-     * `mode_tag` 1 = AI Easy, 2 = AI Normal (the `MatchMode` tags;
+     * `mode_tag` 1 = AI Easy, 2 = AI Normal, 3 = Two-player (M8)
+     * (the `MatchMode` tags;
      * 0 or anything unknown falls back to the plain sandbox
      * constructor's game). The opponent spawns mirrored across the
      * map and plays through the ordinary command queue from the
@@ -154,9 +172,17 @@ export class WasmSim {
      */
     population_cap(): number;
     /**
+     * Population cap of a specific player.
+     */
+    population_cap_for(owner: number): number;
+    /**
      * Current population: living villagers plus the training queue.
      */
     population(): number;
+    /**
+     * Population (units + queued) of a specific player.
+     */
+    population_for(owner: number): number;
     /**
      * Flat `[x0, y0, x1, y1, …]` entity positions as f64. Rendering only —
      * the sim itself never sees these floats.
@@ -325,6 +351,12 @@ export class WasmSim {
      */
     push_research_loom(): boolean;
     /**
+     * Enqueue a Town Center technology (Loom 0, Feudal Age 1) at a
+     * SPECIFIC Town Center: `push_research_tc` for an explicit
+     * Town Center.
+     */
+    push_research_tc_at(tc: number, tech_tag: number): boolean;
+    /**
      * Set a production building's rally point (M4: the Barracks).
      * Returns whether the building accepts a rally point.
      */
@@ -336,6 +368,11 @@ export class WasmSim {
      * would be accepted (the Town Center always accepts).
      */
     push_set_rally_tc(x: number, y: number): boolean;
+    /**
+     * Set a SPECIFIC Town Center's rally point (any seat):
+     * `push_set_rally_tc` for an explicit Town Center.
+     */
+    push_set_rally_tc_of(tc: number, x: number, y: number): boolean;
     /**
      * Enqueue an Archer at a completed Archery Range (M6 — the
      * Range is the Archer's home since M6; in M3 the Barracks
@@ -353,6 +390,11 @@ export class WasmSim {
      * `push_train_militia`.
      */
     push_train_scout(building: number): boolean;
+    /**
+     * Enqueue a villager at a SPECIFIC Town Center (any seat):
+     * `push_train_villager` for an explicit Town Center.
+     */
+    push_train_villager_at(tc: number): boolean;
     /**
      * Enqueue a villager at the Town Center (50 food, deducted when the
      * command is applied next tick). Returns whether the order *would*
@@ -373,6 +415,10 @@ export class WasmSim {
      * proceed: same tags as `research_block_tc`. UI affordance.
      */
     research_block_at(building: number, tech_tag: number): number;
+    /**
+     * `research_block_tc` for a specific Town Center (same tags).
+     */
+    research_block_tc_at(tc: number, tech_tag: number): number;
     /**
      * Why research `tech_tag` at the Town Center cannot currently
      * proceed: 0 ok, 1 cannot afford, 2 queue full / not a Town
@@ -401,17 +447,35 @@ export class WasmSim {
      */
     tc_progress(): number;
     /**
+     * Progress on a specific Town Center queue's head entry, 0..1.
+     */
+    tc_progress_for(tc: number): number;
+    /**
      * The Town Center's queue as flat entry codes, head first
      * (M6): unit kinds keep their entity tag; technologies are
      * `100 + tech tag`. Behind the panel's queue display.
      */
     tc_queue(): Uint32Array;
     /**
+     * A specific Town Center's queue as flat entry codes — see
+     * `tc_queue`.
+     */
+    tc_queue_for(tc: number): Uint32Array;
+    /**
+     * A specific Town Center's rally point as `[x, y, node, has]` —
+     * the single-entry form of one `rally_points` entry.
+     */
+    tc_rally_of(tc: number): Float64Array;
+    /**
      * The human player's researched-technology bitmask (M6): bit
      * per tech tag (`TechId::tag`); the Feudal bit reads set while
      * the player stands in the Feudal Age.
      */
     tech_mask(): number;
+    /**
+     * Researched-technology bitmask of a specific player.
+     */
+    tech_mask_for(owner: number): number;
     /**
      * The generated map's terrain layer (M7, MAP-03): flat
      * row-major bytes, one per cell — 0 land, 1 water.
@@ -427,6 +491,10 @@ export class WasmSim {
      * as a 16-character hex string.
      */
     tick(): string;
+    /**
+     * `train_block_reason` for a specific Town Center (same tags).
+     */
+    train_block_reason_at(tc: number): number;
     /**
      * Why Town Center training cannot currently proceed:
      * 0 ok, 1 no food, 2 queue full, 3 housed (at population cap).
@@ -454,6 +522,7 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_wasmsim_free: (a: number, b: number) => void;
     readonly wasmsim_age: (a: number) => number;
+    readonly wasmsim_age_for: (a: number, b: number) => number;
     readonly wasmsim_building_queue: (a: number, b: number) => [number, number];
     readonly wasmsim_building_train_block: (a: number, b: number, c: number) => number;
     readonly wasmsim_buildings: (a: number) => [number, number];
@@ -464,13 +533,16 @@ export interface InitOutput {
     readonly wasmsim_entity_owners: (a: number) => [number, number];
     readonly wasmsim_entity_path: (a: number, b: number) => [number, number];
     readonly wasmsim_fog: (a: number) => [number, number];
+    readonly wasmsim_fog_for: (a: number, b: number) => [number, number];
     readonly wasmsim_food: (a: number) => number;
     readonly wasmsim_gold: (a: number) => number;
     readonly wasmsim_grid_height: (a: number) => number;
     readonly wasmsim_grid_width: (a: number) => number;
     readonly wasmsim_heights: (a: number) => [number, number];
     readonly wasmsim_idle_military: (a: number) => [number, number];
+    readonly wasmsim_idle_military_for: (a: number, b: number) => [number, number];
     readonly wasmsim_idle_villagers: (a: number) => [number, number];
+    readonly wasmsim_idle_villagers_for: (a: number, b: number) => [number, number];
     readonly wasmsim_match_state: (a: number) => number;
     readonly wasmsim_mode: (a: number) => number;
     readonly wasmsim_new: (a: number) => number;
@@ -479,6 +551,8 @@ export interface InitOutput {
     readonly wasmsim_obstacles: (a: number) => [number, number];
     readonly wasmsim_population: (a: number) => number;
     readonly wasmsim_population_cap: (a: number) => number;
+    readonly wasmsim_population_cap_for: (a: number, b: number) => number;
+    readonly wasmsim_population_for: (a: number, b: number) => number;
     readonly wasmsim_positions: (a: number) => [number, number];
     readonly wasmsim_projectiles: (a: number) => [number, number];
     readonly wasmsim_push_attack: (a: number, b: number, c: number) => number;
@@ -511,26 +585,35 @@ export interface InitOutput {
     readonly wasmsim_push_research_at: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_research_feudal: (a: number) => number;
     readonly wasmsim_push_research_loom: (a: number) => number;
+    readonly wasmsim_push_research_tc_at: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_set_rally_building: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_set_rally_tc: (a: number, b: number, c: number) => number;
+    readonly wasmsim_push_set_rally_tc_of: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_train_archer: (a: number, b: number) => number;
     readonly wasmsim_push_train_militia: (a: number, b: number) => number;
     readonly wasmsim_push_train_scout: (a: number, b: number) => number;
     readonly wasmsim_push_train_villager: (a: number) => number;
+    readonly wasmsim_push_train_villager_at: (a: number, b: number) => number;
     readonly wasmsim_rally_points: (a: number) => [number, number];
     readonly wasmsim_research_block_at: (a: number, b: number, c: number) => number;
     readonly wasmsim_research_block_tc: (a: number, b: number) => number;
+    readonly wasmsim_research_block_tc_at: (a: number, b: number, c: number) => number;
     readonly wasmsim_state_hash: (a: number) => [number, number];
     readonly wasmsim_stockpile: (a: number) => [number, number];
     readonly wasmsim_stockpile_for: (a: number, b: number) => [number, number];
     readonly wasmsim_stone: (a: number) => number;
     readonly wasmsim_tc_progress: (a: number) => number;
+    readonly wasmsim_tc_progress_for: (a: number, b: number) => number;
     readonly wasmsim_tc_queue: (a: number) => [number, number];
+    readonly wasmsim_tc_queue_for: (a: number, b: number) => [number, number];
+    readonly wasmsim_tc_rally_of: (a: number, b: number) => [number, number];
     readonly wasmsim_tech_mask: (a: number) => number;
+    readonly wasmsim_tech_mask_for: (a: number, b: number) => number;
     readonly wasmsim_terrain: (a: number) => [number, number];
     readonly wasmsim_tick: (a: number) => [number, number];
     readonly wasmsim_tick_count: (a: number) => number;
     readonly wasmsim_train_block_reason: (a: number) => number;
+    readonly wasmsim_train_block_reason_at: (a: number, b: number) => number;
     readonly wasmsim_train_queue_len: (a: number) => number;
     readonly wasmsim_villager_count: (a: number) => number;
     readonly wasmsim_wood: (a: number) => number;

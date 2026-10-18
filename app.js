@@ -48,6 +48,13 @@ import {
 import {
   createControlGroups, createTapTracker, nextInCycle,
 } from './play/groups.js';
+import {
+  TURN_TICKS as NET_TURN_TICKS, REJOIN_GRACE_MS,
+  applyCommand as netApplyCommand, tcIdOf as netTcIdOf,
+  createSession, createRecorder, replayEvents, isReplay,
+  createRelayClient, probeRegionPing, makeRoomId, buildPlayUrl,
+  parsePlayParams, pickFastestRegion, REGIONS as NET_REGIONS,
+} from './play/netplay.js';
 
 const assetUrl = (rel) => new URL(rel, import.meta.url).href;
 
@@ -234,12 +241,29 @@ let drawOwner = 0;
 // start overlay, default AI Normal; ?mode= works like ?seed= and
 // ?quality= (a support tool, never stored). MODE_TAG is the sim's
 // MatchMode tag for WasmSim.new_match.
-const MODE_TAG = { sandbox: 0, easy: 1, normal: 2 };
+const MODE_TAG = { sandbox: 0, easy: 1, normal: 2, online: 3 };
 let matchMode = ['sandbox', 'easy', 'normal'].includes(params.get('mode'))
   ? params.get('mode')
   : 'normal';
 let builtMode = null; // the mode the current sim instance was built with
 let matchEnded = false; // the victory/defeat overlay is up; the sim holds
+
+// --- M8: lockstep multiplayer -------------------------------------------
+// Send-a-link 1v1 over the dumb relay (play/netplay.js holds the
+// whole protocol; this file integrates it). `net` is null in every
+// local mode — the single-player path below is byte-for-byte the
+// pre-M8 game; netplay activates only from the lobby or a room link.
+// The seat this client plays: 0 = the first player (host), 2 = the
+// second (guest). All "own/foe" checks and per-seat HUD reads go
+// through localOwner/foeOwner() so the guest sees its own village.
+const RELAY_HTTP = 'https://skirmish-relay.hoardserdure7.workers.dev';
+const BUILD_VERSION = 'm8';
+let localOwner = 0;
+let myTcId = 0; // entity id of the LOCAL player's Town Center
+const foeOwner = () => (localOwner === 0 ? 2 : 0);
+let net = null; // netplay controller (see openLobby / startNetMatch)
+let localRecorder = null; // replay recorder for LOCAL matches (M8)
+let playback = null; // replay playback state while a replay runs
 
 /// Show the victory/defeat overlay (M5). Called by the frame loop
 /// the first tick the sim reports a decided match; the sim itself
@@ -405,7 +429,7 @@ function drawOriginalVillager(anim, sx, sy) {
   // M5: the opponent's villagers draw from the red variant of the
   // same sheets (generated at load in loadTierSprites) — one sprite
   // pipeline, two player colors.
-  const red = drawOwner === 2 ? VIL_ORIGINAL.imgRed[anim.state] : null;
+  const red = drawOwner === foeOwner() ? VIL_ORIGINAL.imgRed[anim.state] : null;
   const im = red || VIL_ORIGINAL.img[anim.state];
   if (!im || !(im.naturalWidth > 0 || im.width > 0)) return false;
   const C = VIL_ORIGINAL.cell;
@@ -647,7 +671,7 @@ function refreshWorldLayers() {
   TERRAIN = sim.terrain();
   HEIGHTS = sim.heights();
   OBST = sim.obstacles();
-  FOG = sim.fog();
+  FOG = myFog();
   SHORE = new Set();
   for (let gy = 0; gy < GH; gy++) {
     for (let gx = 0; gx < GW; gx++) {
@@ -712,7 +736,7 @@ function entityState() {
 // A living unit of ours: player-owned, not the Town Center, hp >= 1
 // (the sim's death rule is hp < 1).
 const isOwnUnit = (st, i) =>
-  st.owners[i] === 0 && st.kinds[i] !== KIND_TC && st.hp[i * 2] >= 1;
+  st.owners[i] === localOwner && st.kinds[i] !== KIND_TC && st.hp[i * 2] >= 1;
 
 // Every selectable unit of ours (for box select / double-click).
 function ownUnitIds() {
@@ -751,16 +775,16 @@ function mirrorValid(kind, cx, cy) {
   // Resuming an incomplete building of the same kind at this anchor
   // (M5: only our OWN — the sim refuses to resume the enemy's).
   for (const b of buildings) {
-    if (!b.complete && b.owner === 0 && b.kind === kind && b.cellX === cx && b.cellY === cy) {
+    if (!b.complete && b.owner === localOwner && b.kind === kind && b.cellX === cx && b.cellY === cy) {
       return true;
     }
   }
   // M6 gates (mirrors of the sim's validate_build): Farms need a
   // completed Mill of ours; the Feudal buildings need the Feudal
   // Age; the Range and the Stable need a completed Barracks.
-  const ownDone = buildings.filter((b) => b.owner === 0 && b.complete);
+  const ownDone = buildings.filter((b) => b.owner === localOwner && b.complete);
   if (kind === 1 && !ownDone.some((b) => b.kind === 4)) return false;
-  if (kind >= 6 && sim.age() < 1) return false;
+  if (kind >= 6 && myAge() < 1) return false;
   if ((kind === 6 || kind === 7) && !ownDone.some((b) => b.kind === 2)) return false;
   // Any standing building's footprint (square range overlap).
   for (const b of buildings) {
@@ -793,7 +817,7 @@ function mirrorValid(kind, cx, cy) {
       if (nc[0] === x && nc[1] === y) return false;
     }
   }
-  if (sim.wood() < BUILD_COST[kind]) return false;
+  if (myStock()[1] < BUILD_COST[kind]) return false;
   return true;
 }
 
@@ -894,7 +918,7 @@ function liveGroupMembers(n) {
 /// select every idle one instead (the Shift variant). Shared by the
 /// '.' / ',' keys and the top-bar idle indicators.
 function cycleIdle(kind, selectAll) {
-  const ids = kind === 'villager' ? [...sim.idle_villagers()] : [...sim.idle_military()];
+  const ids = kind === 'villager' ? [...myIdleVillagers()] : [...myIdleMilitary()];
   if (!ids.length) {
     flash(kind === 'villager' ? 'No idle villagers.' : 'No idle military units.');
     return;
@@ -960,9 +984,9 @@ function handleGameKey(e) {
       if (e.ctrlKey || e.metaKey || e.altKey) return false;
       e.preventDefault();
       if (e.repeat) return true;
-      const tc = sim.entity_kinds().indexOf(KIND_TC);
+      const tc = ownTcIndex();
       if (tc >= 0) {
-        selectBuilding({ type: 'tc', id: tc });
+        selectBuilding({ type: 'tc', id: tc, owner: localOwner });
         const pos = sim.positions();
         centerOn(pos[tc * 2], pos[tc * 2 + 1]);
       }
@@ -985,10 +1009,96 @@ function setPaused(v) {
   if (!playing) return;
   paused = v;
   pauseMenu.style.display = paused ? 'flex' : 'none';
+  // M8: connection details live in the pause menu (the top bar
+  // stays clean) — refresh them whenever the menu opens online.
+  if (v && net) {
+    updateNetStatus();
+    refreshNetPing();
+  }
 }
 
-// (Re)create the simulation and all client-side mirrors. Restart is a
-// fresh WasmSim with the same seed: bit-identical starting state.
+// --- M8: per-seat reads ---------------------------------------------------
+// In local play localOwner is 0 and every helper below takes the
+// original seat-0 ABI call — the pre-M8 behavior, unchanged. In an
+// online match (or a replay viewed from the second seat) they take
+// the per-seat forms, so the guest's HUD, panels and fog are its own.
+const seatAware = () => !!net || localOwner !== 0;
+const myStock = () => (seatAware() ? sim.stockpile_for(localOwner) : sim.stockpile());
+const myAge = () => (seatAware() ? sim.age_for(localOwner) : sim.age());
+const myTechMask = () => (seatAware() ? sim.tech_mask_for(localOwner) : sim.tech_mask());
+const myPop = () => (seatAware() ? sim.population_for(localOwner) : sim.population());
+const myPopCap = () => (seatAware() ? sim.population_cap_for(localOwner) : sim.population_cap());
+const myTrainBlock = () => (seatAware() ? sim.train_block_reason_at(myTcId) : sim.train_block_reason());
+const myResearchBlockTc = (t) => (seatAware() ? sim.research_block_tc_at(myTcId, t) : sim.research_block_tc(t));
+const myTcQueue = () => (seatAware() ? sim.tc_queue_for(myTcId) : sim.tc_queue());
+const myTcProgress = () => (seatAware() ? sim.tc_progress_for(myTcId) : sim.tc_progress());
+const myTrainQueueLen = () => myTcQueue().length;
+const myIdleVillagers = () => (seatAware() ? sim.idle_villagers_for(localOwner) : sim.idle_villagers());
+const myIdleMilitary = () => (seatAware() ? sim.idle_military_for(localOwner) : sim.idle_military());
+const myFog = () => (seatAware() ? sim.fog_for(localOwner) : sim.fog());
+
+/// The entity index of the LOCAL player's Town Center.
+function ownTcIndex() {
+  const kinds = sim.entity_kinds();
+  const owners = sim.entity_owners();
+  for (let i = 0; i < kinds.length; i++) {
+    if (kinds[i] === KIND_TC && owners[i] === localOwner) return i;
+  }
+  return -1;
+}
+
+// --- M8: the order choke point --------------------------------------------
+// Every order the local player gives funnels through issue(). Local
+// play applies it to the sim immediately, exactly as the pre-M8 call
+// sites did (applyLocalOrder is those very calls), and records it
+// for the replay. Netplay stamps it into the lockstep session
+// instead — the sim receives it later, at its execution turn, on
+// both clients identically (netplay.js's applyCommand is the mirror
+// of applyLocalOrder with the per-seat Town Center forms).
+
+function applyLocalOrder(cmd) {
+  switch (cmd.t) {
+    case 'move': return cmd.q
+      ? sim.push_move_queued(cmd.e, cmd.x, cmd.y)
+      : sim.push_move(cmd.e, cmd.x, cmd.y);
+    case 'gather': return cmd.q
+      ? sim.push_gather_queued(cmd.e, cmd.n)
+      : sim.push_gather(cmd.e, cmd.n);
+    case 'attack': return cmd.q
+      ? sim.push_attack_queued(cmd.e, cmd.tg)
+      : sim.push_attack(cmd.e, cmd.tg);
+    case 'attackb': return sim.push_attack_building(cmd.e, cmd.b);
+    case 'build': return cmd.q
+      ? sim[PUSH_BUILD_QUEUED[cmd.k]](cmd.e, cmd.x, cmd.y)
+      : sim[PUSH_BUILD[cmd.k]](cmd.e, cmd.x, cmd.y);
+    case 'train_at':
+      return cmd.k === 2 ? sim.push_train_scout(cmd.b)
+        : cmd.k === 3 ? sim.push_train_militia(cmd.b)
+        : sim.push_train_archer(cmd.b);
+    case 'train_vil': return sim.push_train_villager();
+    case 'research_tc': return cmd.tech === 0
+      ? sim.push_research_loom()
+      : sim.push_research_feudal();
+    case 'research_at': return sim.push_research_at(cmd.b, cmd.tech);
+    case 'rally_tc': return sim.push_set_rally_tc(cmd.x, cmd.y);
+    case 'rally_b': return sim.push_set_rally_building(cmd.b, cmd.x, cmd.y);
+    case 'force_dep': return sim.push_force_deposit(cmd.e);
+    default: return false;
+  }
+}
+
+function issue(cmd) {
+  if (playback) return false;
+  if (net) {
+    if (!net.session || net.phase !== 'playing') return false;
+    return net.session.localCommand(cmd) >= 0;
+  }
+  const ok = applyLocalOrder(cmd);
+  if (ok && playing && localRecorder) {
+    localRecorder.addLocal(sim.tick_count(), cmd);
+  }
+  return ok;
+}
 // M5: the mode decides the construction — Sandbox is the plain
 // constructor (no opponent at all); the AI modes go through
 // WasmSim.new_match and spawn the mirrored opponent + its script.
@@ -997,9 +1107,19 @@ function resetSim(mode = matchMode) {
   builtMode = mode;
   matchEnded = false;
   endOverlay.style.display = 'none';
+  localOwner = 0; // local modes always play the first seat (M8)
+  playback = null;
+  if (typeof netUi !== 'undefined' && netUi && netUi.playbackBar) {
+    netUi.playbackBar.hidden = true;
+  }
   sim = mode === 'sandbox'
     ? new WasmSim(seed)
     : WasmSim.new_match(seed, MODE_TAG[mode]);
+  // M8: every local match records its command stream — the end
+  // overlay (and the pause menu) can download it as a replay.
+  localRecorder = createRecorder({
+    seed, modeTag: MODE_TAG[mode], seats: [0], view: 0,
+  });
   seenBuildings.clear(); // M7: last-known enemy buildings are per-match
   refreshWorldLayers();
   vilAnim.clear();
@@ -1020,6 +1140,7 @@ function resetSim(mode = matchMode) {
   const kinds = sim.entity_kinds();
   const pos = sim.positions();
   const tc = kinds.indexOf(KIND_TC);
+  myTcId = tc;
   camS = INITIAL_S;
   const [ox, oy] = centerCamera(
     pos[tc * 2], pos[tc * 2 + 1], camS, canvas.width, canvas.height);
@@ -1046,6 +1167,675 @@ function fitCanvas() {
   camOy += (h - canvas.height) / 2;
   canvas.width = w;
   canvas.height = h;
+}
+
+// --- M8: netplay controller ----------------------------------------------
+// The lobby, the room handshake, rejoin, telemetry, and replay
+// playback. Protocol + session live in play/netplay.js; the relay
+// is a dumb pipe, so presence (hello messages), roles (how you
+// entered), and the handshake all happen here, client-side.
+
+let netUi = null; // DOM refs, filled by wireNetUi() in main()
+let regionList = NET_REGIONS; // replaced by the relay's /regions when fetched
+
+const regionName = (id) => (regionList.find((r) => r.id === id) || {}).name || id;
+
+function lobbyStatus(text) {
+  if (netUi) netUi.lobbyStatus.textContent = text;
+}
+
+function showOverlay(el, show) {
+  if (el) el.style.display = show ? 'flex' : 'none';
+}
+
+/// Adopt a freshly built sim as THE match (start of an online game,
+/// or the rejoiner's rebuilt one): the same per-match client resets
+/// resetSim performs, for an explicit seat.
+function adoptSim(newSim, owner) {
+  sim = newSim;
+  localOwner = owner;
+  builtMode = 'online';
+  matchEnded = false;
+  endOverlay.style.display = 'none';
+  seenBuildings.clear();
+  refreshWorldLayers();
+  vilAnim.clear();
+  prevPos.clear();
+  lastNodeKind.clear();
+  carryKind.clear();
+  atNodeNow.clear();
+  selectUnits(new Set());
+  placement = null;
+  controlGroups.clear();
+  groupTaps.reset();
+  idleCycleVil = -1;
+  idleCycleMil = -1;
+  localRecorder = null;
+  myTcId = ownTcIndex();
+  const pos = sim.positions();
+  camS = INITIAL_S;
+  const [ox, oy] = centerCamera(
+    pos[myTcId * 2], pos[myTcId * 2 + 1], camS, canvas.width, canvas.height);
+  camOx = ox;
+  camOy = oy;
+}
+
+function makeNetSession() {
+  return createSession({
+    localSlot: net.role === 'host' ? 0 : 1,
+    send: (m) => net.client.send(m),
+    applyBundle: (slot, cmds) => {
+      const o = slot === 0 ? 0 : 2;
+      for (const c of cmds) netApplyCommand(sim, c, o, (oo) => netTcIdOf(sim, oo));
+    },
+    tickOnce: () => {
+      sim.tick();
+      return sim.state_hash();
+    },
+    onEvent: (e) => {
+      if (!net) return;
+      if (e.type === 'desync') onDesync(e);
+      if (e.type === 'waiting') onNetWaiting(e.waiting);
+    },
+    onTurn: (turn, c0, c1) => {
+      if (!net) return;
+      net.recorder.addTurn(turn, c0, c1);
+      const ms = sim.match_state();
+      if (ms !== 0 && net.phase === 'playing') {
+        // match_state() speaks for seat 0; invert for the guest.
+        netMatchEnd(localOwner === 0 ? ms : (ms === 1 ? 2 : 1), {});
+      }
+    },
+  });
+}
+
+let netWaitTimer = null;
+function onNetWaiting(waiting) {
+  // Show the stall pill only for stalls that outlast a blink.
+  if (!netUi) return;
+  if (waiting) {
+    if (!netWaitTimer) {
+      netWaitTimer = setTimeout(() => {
+        if (netUi) netUi.netWait.hidden = false;
+      }, 500);
+    }
+  } else {
+    clearTimeout(netWaitTimer);
+    netWaitTimer = null;
+    netUi.netWait.hidden = true;
+  }
+}
+
+function postTelemetry(result) {
+  if (!net || net.telemetryPosted) return;
+  net.telemetryPosted = true;
+  try {
+    fetch(RELAY_HTTP + '/telemetry', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        region: net.region,
+        durationTicks: sim ? sim.tick_count() : 0,
+        result,
+        desyncCount: net.desyncs || 0,
+        buildVersion: BUILD_VERSION,
+      }),
+    }).catch(() => {});
+  } catch { /* telemetry never breaks the game */ }
+}
+
+function netMatchEnd(localMs, opts) {
+  if (!net || net.phase === 'ended') return;
+  net.phase = 'ended';
+  if (net.session) net.session.stop();
+  if (netUi) netUi.netWait.hidden = true;
+  showOverlay(netUi && netUi.peerOverlay, false);
+  const result = opts.desync ? 'desync'
+    : opts.selfResign ? 'resigned'
+    : opts.resignedByPeer ? 'victory'
+    : localMs === 1 ? 'victory' : 'defeat';
+  net.finalReplay = net.recorder
+    ? net.recorder.finish({ result, ticks: sim.tick_count() })
+    : null;
+  postTelemetry(result);
+  updateNetStatus();
+  if (opts.desync) {
+    if (netUi) {
+      netUi.desyncDetail.textContent =
+        `The two clients' simulations diverged at turn ${opts.desyncTurn}. ` +
+        'The match cannot continue — download the replay to help diagnose it.';
+    }
+    showOverlay(netUi && netUi.desyncOverlay, true);
+    return;
+  }
+  showMatchEnd(localMs);
+}
+
+function onDesync(e) {
+  if (!net) return;
+  net.desyncs = (net.desyncs || 0) + 1;
+  netMatchEnd(2, { desync: true, desyncTurn: e.turn });
+}
+
+/// Tear the whole netplay state down (the caller resets the local
+/// game afterwards when appropriate).
+function teardownNet() {
+  if (net && net.client) net.client.close();
+  net = null;
+  if (netUi) {
+    showOverlay(netUi.onlineOverlay, false);
+    showOverlay(netUi.desyncOverlay, false);
+    showOverlay(netUi.peerOverlay, false);
+    netUi.netWait.hidden = true;
+    netUi.netStatus.hidden = true;
+    if (netUi.resignBtn) netUi.resignBtn.hidden = true;
+  }
+}
+
+/// Leave an online match back to local play (pause-menu Restart,
+/// Leave match, desync close): telemetry when a match was live,
+/// then a fresh local game with the pause menu over it.
+function leaveNetMatch(result) {
+  if (net && (net.phase === 'playing' || net.phase === 'peer-left')) {
+    postTelemetry(result || 'abandoned');
+  }
+  teardownNet();
+  resetSim(matchMode);
+  playing = true;
+  setPaused(true);
+}
+
+function updateNetStatus() {
+  if (!netUi) return;
+  if (!net || !net.room) {
+    netUi.netStatus.hidden = true;
+    if (netUi && netUi.resignBtn) netUi.resignBtn.hidden = true;
+    return;
+  }
+  const stateTxt = {
+    lobby: 'in the lobby',
+    starting: 'starting…',
+    playing: 'match in progress',
+    'peer-left': 'opponent disconnected',
+    rebuilding: 'rebuilding the match…',
+    ended: 'match over',
+    desync: 'desynchronized',
+  }[net.phase] || net.phase;
+  netUi.netStatus.hidden = false;
+  netUi.netStatusText.textContent =
+    `Online · ${regionName(net.region)} · you are the ${net.role === 'host' ? 'host (blue)' : 'guest (red)'} · ${stateTxt}` +
+    (net.pingMs != null ? ` · ping ${net.pingMs} ms` : '');
+  if (netUi.resignBtn) {
+    netUi.resignBtn.hidden = !(net.phase === 'playing' || net.phase === 'peer-left');
+  }
+}
+
+function refreshNetPing() {
+  if (!net || !net.region) return;
+  probeRegionPing({ relayHttp: RELAY_HTTP, region: net.region }).then((r) => {
+    if (r && net) {
+      net.pingMs = r.ms;
+      updateNetStatus();
+    }
+  }).catch(() => {});
+}
+
+// --- the handshake ---------------------------------------------------------
+
+function hostStartMatch() {
+  if (!net || net.role !== 'host' || !net.peerPresent) return;
+  net.seed = (Math.random() * 0x7fffffff) >>> 0;
+  net.pendingSim = WasmSim.new_match(net.seed, MODE_TAG.online);
+  net.client.send({
+    type: 'start', seed: net.seed, hash0: net.pendingSim.state_hash(),
+  });
+  net.phase = 'starting';
+  lobbyStatus('Starting the match…');
+  updateNetStatus();
+}
+
+function guestHandleStart(msg) {
+  const candidate = WasmSim.new_match(msg.seed, MODE_TAG.online);
+  if (candidate.state_hash() !== msg.hash0) {
+    // Same seed, different construction hash: the two builds
+    // disagree — lockstep would desync on turn 0. Refuse cleanly.
+    net.client.send({ type: 'start-abort', reason: 'build-mismatch' });
+    lobbyStatus('Version mismatch — this client cannot play that match. Reload the page to update.');
+    return;
+  }
+  net.seed = msg.seed;
+  net.pendingSim = candidate;
+  net.client.send({ type: 'start-ack' });
+  lobbyStatus('Starting the match…');
+}
+
+function beginOnlineMatch() {
+  const owner = net.role === 'host' ? 0 : 2;
+  adoptSim(net.pendingSim, owner);
+  net.pendingSim = null;
+  net.recorder = createRecorder({
+    seed: net.seed, modeTag: MODE_TAG.online, region: net.region,
+    seats: [0, 2], view: owner,
+  });
+  net.session = makeNetSession();
+  net.phase = 'playing';
+  showOverlay(netUi.onlineOverlay, false);
+  setPaused(false);
+  playing = true;
+  updateNetStatus();
+  refreshNetPing();
+  return net.session;
+}
+
+// --- rejoin ------------------------------------------------------------------
+
+async function rejoinFromResync(msg) {
+  // The remaining peer transferred the full recorded stream: this
+  // client rebuilds the sim from the seed and fast-forwards it,
+  // chunked so the page stays alive, then both sides resume from
+  // the frontier via startAt/rebase.
+  net.phase = 'rebuilding';
+  net.seed = msg.seed;
+  const slot = typeof msg.yourSlot === 'number' ? msg.yourSlot : 1;
+  net.role = slot === 0 ? 'host' : 'guest';
+  const owner = slot === 0 ? 0 : 2;
+  lobbyStatus('Rebuilding the match from the recorded game…');
+  showOverlay(netUi.onlineOverlay, true);
+  const fresh = WasmSim.new_match(msg.seed, MODE_TAG.online);
+  adoptSim(fresh, owner);
+  const byTick = new Map();
+  for (const e of msg.events || []) byTick.set(e.tick, e);
+  const total = msg.ticks || 0;
+  for (let t = 0; t < total; t++) {
+    const e = byTick.get(t);
+    if (e) {
+      for (const c of e.s0) netApplyCommand(sim, c, 0, (o) => netTcIdOf(sim, o));
+      if (e.s1) for (const c of e.s1) netApplyCommand(sim, c, 2, (o) => netTcIdOf(sim, o));
+    }
+    sim.tick();
+    if (t % 600 === 599) await new Promise((r) => setTimeout(r, 0));
+  }
+  net.recorder = createRecorder({
+    seed: net.seed, modeTag: MODE_TAG.online, region: net.region,
+    seats: [0, 2], view: owner,
+  });
+  net.recorder.seed(msg.events || []);
+  net.session = makeNetSession();
+  net.resyncDelay = msg.delay || 4;
+  net.client.send({ type: 'resync-done' });
+  lobbyStatus('Rebuilt — resuming…');
+}
+
+function sendResync() {
+  if (!net || !net.session || !net.recorder) return;
+  const snapshot = net.recorder.finish({ result: 'ongoing', ticks: sim.tick_count() });
+  net.client.send({
+    type: 'resync',
+    seed: net.seed,
+    ticks: sim.tick_count(),
+    delay: net.session.state().delay,
+    yourSlot: net.role === 'host' ? 1 : 0,
+    events: snapshot.events,
+  });
+}
+
+function onPeerGone() {
+  if (!net) return;
+  if (net.phase === 'playing') {
+    net.phase = 'peer-left';
+    net.peerLeftAt = Date.now();
+    updateNetStatus();
+    showOverlay(netUi.peerOverlay, true);
+    if (netUi.claimBtn) netUi.claimBtn.disabled = true;
+    clearInterval(net.graceTimer);
+    net.graceTimer = setInterval(() => {
+      if (!net || net.phase !== 'peer-left') {
+        clearInterval(net.graceTimer);
+        return;
+      }
+      const left = Math.max(0, Math.ceil(
+        (REJOIN_GRACE_MS - (Date.now() - net.peerLeftAt)) / 1000));
+      if (netUi.peerDetail) {
+        netUi.peerDetail.textContent = left > 0
+          ? `Your opponent's connection dropped. If they reopen the same link within ${left} s, the match resumes where it stopped.`
+          : 'The rejoin window has closed. You may claim the victory, or leave the match.';
+      }
+      if (left <= 0 && netUi.claimBtn) netUi.claimBtn.disabled = false;
+    }, 250);
+  } else if (net.phase === 'lobby' || net.phase === 'starting') {
+    net.peerPresent = false;
+    lobbyStatus('Your opponent left the room.');
+    if (netUi.startBtn) netUi.startBtn.disabled = true;
+    updateNetStatus();
+  }
+}
+
+function onNetMessage(msg) {
+  if (!net) return;
+  if (net.session && net.session.receive(msg)) return;
+  switch (msg.type) {
+    case 'hello': {
+      if (!net.helloReplied) {
+        net.helloReplied = true;
+        net.client.send({ type: 'hello', v: 1, role: net.role });
+      }
+      const wasGone = net.peerGone;
+      net.hellosSeen = (net.hellosSeen || 0) + 1;
+      net.peerPresent = true;
+      net.peerGone = false;
+      if (net.phase === 'lobby' || net.phase === 'starting') {
+        if (net.role === 'host') {
+          lobbyStatus('Your opponent is here. Start when ready.');
+          if (netUi.startBtn) netUi.startBtn.disabled = false;
+        } else {
+          lobbyStatus('Connected. Waiting for the host to start the match…');
+        }
+      } else if (net.phase === 'peer-left' || (net.phase === 'playing' && wasGone)) {
+        // The opponent rejoined on the same link: transfer the
+        // recorded match so they can rebuild it.
+        showOverlay(netUi.peerOverlay, false);
+        net.phase = 'playing';
+        sendResync();
+      } else if (net.phase === 'playing' && !wasGone && net.hellosSeen > 2) {
+        // The real peer accounts for at most two hellos (its own
+        // plus its reply to mine); a third hello is a third client
+        // opening the link mid-match.
+        net.client.send({ type: 'room-full' });
+      }
+      updateNetStatus();
+      break;
+    }
+    case 'room-full':
+      lobbyStatus('This room already has two players.');
+      break;
+    case 'start':
+      if (net.role === 'guest' && net.phase === 'lobby') guestHandleStart(msg);
+      break;
+    case 'start-ack':
+      if (net.role === 'host' && net.phase === 'starting' && net.pendingSim) {
+        const t0 = performance.now() + 600;
+        net.client.send({ type: 'go', inMs: 600 });
+        beginOnlineMatch().start(t0);
+      }
+      break;
+    case 'start-abort':
+      lobbyStatus('The other client runs a different build — the match was refused.');
+      net.phase = 'lobby';
+      break;
+    case 'go':
+      if (net.role === 'guest' && net.pendingSim) {
+        beginOnlineMatch().start(performance.now() + (msg.inMs || 600));
+      }
+      break;
+    case 'resign':
+      if (net.phase === 'playing' || net.phase === 'peer-left') {
+        showOverlay(netUi.peerOverlay, false);
+        netMatchEnd(1, { resignedByPeer: true });
+      }
+      break;
+    case 'resync':
+      if (net.phase === 'lobby' || net.phase === 'peer-left') {
+        showOverlay(netUi.peerOverlay, false);
+        rejoinFromResync(msg);
+      }
+      break;
+    case 'resync-done':
+      if (net.session && (net.phase === 'playing')) {
+        const st = net.session.state();
+        const atTurn = st.turn + st.delay + 2;
+        net.client.send({ type: 'resume', atTurn });
+        net.session.rebase(atTurn, performance.now() + 700);
+        flash('Opponent reconnected — match resumed.');
+      }
+      break;
+    case 'resume':
+      if (net.session && net.phase === 'rebuilding') {
+        net.session.startAt(msg.atTurn, performance.now() + 700,
+          net.resyncDelay || undefined);
+        net.phase = 'playing';
+        showOverlay(netUi.onlineOverlay, false);
+        setPaused(false);
+        playing = true;
+        updateNetStatus();
+        flash('Reconnected — match resumed.');
+      }
+      break;
+    default:
+      break;
+  }
+}
+
+function connectToRoom() {
+  const wsUrl = RELAY_HTTP.replace(/^http/, 'ws')
+    + `/room/${encodeURIComponent(net.room)}?region=${encodeURIComponent(net.region)}`;
+  net.client = createRelayClient({
+    onOpen: () => {
+      net.client.send({ type: 'hello', v: 1, role: net.role });
+      if (net.role === 'host') {
+        lobbyStatus('Room created. Share the link; your opponent appears here when they open it.');
+      } else {
+        lobbyStatus('Joining the room…');
+      }
+    },
+    onMessage: (m) => onNetMessage(m),
+    onClose: () => {
+      if (net && net.client) {
+        net.peerGone = true;
+        onPeerGone();
+      }
+    },
+  });
+  net.client.connect(wsUrl);
+}
+
+/// Open the lobby overlay. With `join` ({room, region}) the client
+/// enters as the guest and connects at once; otherwise it is the
+/// create view (region pick + Create game).
+function openLobby(join) {
+  if (net) teardownNet();
+  net = {
+    role: join ? 'guest' : 'host',
+    room: join ? join.room : null,
+    region: join ? (join.region || 'wnam') : null,
+    client: null, session: null, phase: 'lobby',
+    peerPresent: false, peerGone: false, helloReplied: false,
+    seed: null, pendingSim: null, recorder: null,
+    desyncs: 0, telemetryPosted: false, pingMs: null,
+    selectedRegion: null,
+  };
+  showOverlay(netUi.onlineOverlay, true);
+  if (netUi.startBtn) netUi.startBtn.disabled = true;
+  if (netUi.roomLinkRow) netUi.roomLinkRow.hidden = !join;
+  if (netUi.createBtn) netUi.createBtn.disabled = !!join;
+  lobbyStatus(join ? 'Joining the room…' : 'Pick a server, then create the game.');
+  loadRegionsAndPings();
+  if (join) connectToRoom();
+  updateNetStatus();
+}
+
+async function loadRegionsAndPings() {
+  const mine = net;
+  try {
+    const res = await fetch(RELAY_HTTP + '/regions');
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.regions) && data.regions.length) {
+        regionList = data.regions.map((r) => ({ id: r.id, name: r.label || r.name || r.id }));
+      }
+    }
+  } catch { /* keep the built-in mirror */ }
+  if (!net || net !== mine) return;
+  renderRegionList({});
+  const pings = {};
+  for (const r of regionList) {
+    const res = await probeRegionPing({ relayHttp: RELAY_HTTP, region: r.id })
+      .catch(() => null);
+    if (!net || net !== mine) return;
+    pings[r.id] = res ? res.ms : null;
+    renderRegionList(pings);
+  }
+  // Pre-highlight the nearest server; the choice stays the player's.
+  if (net && net === mine && !net.selectedRegion) {
+    const fastest = pickFastestRegion(pings);
+    if (fastest) selectRegion(fastest);
+  }
+}
+
+function selectRegion(id) {
+  if (!net) return;
+  net.selectedRegion = id;
+  if (net.role === 'host' && net.phase === 'lobby' && !net.room) {
+    net.region = id;
+  }
+  if (netUi) {
+    for (const row of netUi.regionList.querySelectorAll('.region-row')) {
+      row.classList.toggle('selected', row.dataset.region === id);
+    }
+  }
+}
+
+function renderRegionList(pings) {
+  if (!netUi) return;
+  netUi.regionList.innerHTML = '';
+  for (const r of regionList) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'region-row'
+      + (net && net.selectedRegion === r.id ? ' selected' : '')
+      + (net && net.region === r.id && net.room ? ' locked' : '');
+    row.dataset.region = r.id;
+    const ms = pings[r.id];
+    row.innerHTML = `<span class="region-name">${r.name}</span>`
+      + `<span class="region-ms">${typeof ms === 'number' ? ms + ' ms' : '…'}</span>`;
+    row.addEventListener('click', () => {
+      if (net && net.room) return; // region is fixed once the room exists
+      selectRegion(r.id);
+    });
+    netUi.regionList.append(row);
+  }
+}
+
+function createGame() {
+  if (!net || net.room) return;
+  net.region = net.selectedRegion || net.region || regionList[0].id;
+  net.room = makeRoomId();
+  const link = buildPlayUrl(
+    location.origin + location.pathname, net.room, net.region);
+  if (netUi.roomLink) netUi.roomLink.value = link;
+  if (netUi.roomLinkRow) netUi.roomLinkRow.hidden = false;
+  if (netUi.createBtn) netUi.createBtn.disabled = true;
+  renderRegionList({});
+  connectToRoom();
+}
+
+// --- replay playback -----------------------------------------------------------
+
+function startPlayback(rec) {
+  if (net) teardownNet();
+  const events = replayEvents(rec);
+  if (!events) {
+    flash('That file is not a Skirmish II replay.');
+    return;
+  }
+  const owners = Array.isArray(rec.seats) && rec.seats.length >= 2
+    ? rec.seats : [0, 2];
+  sim = rec.modeTag === 0
+    ? new WasmSim(rec.seed)
+    : WasmSim.new_match(rec.seed, rec.modeTag);
+  playback = {
+    rec, events, idx: 0, owners,
+    view: typeof rec.view === 'number' ? rec.view : owners[0],
+    speed: 1, playing: true, acc: 0, last: 0, done: false,
+    totalTicks: rec.ticks || 0,
+  };
+  adoptSim(sim, playback.view);
+  // adoptSim replaced `sim` with itself and cleared playback? No —
+  // adoptSim does not touch playback; but it DOES reset local state.
+  playback.last = performance.now();
+  if (netUi && netUi.playbackBar) {
+    netUi.playbackBar.hidden = false;
+    netUi.pbLabel.textContent = 'Replay — ' + (rec.region ? regionName(rec.region) + ' · ' : '')
+      + `seed ${rec.seed}`;
+    netUi.pbToggle.textContent = 'Pause';
+    netUi.pbSpeed.textContent = '1×';
+  }
+  playing = true;
+  setPaused(false);
+  flash('Playing the replay. Orders are disabled; camera is free.');
+}
+
+function exitPlayback() {
+  playback = null;
+  if (netUi && netUi.playbackBar) netUi.playbackBar.hidden = true;
+  resetSim(matchMode);
+  playing = true;
+  setPaused(false);
+}
+
+function stepReplayTick() {
+  const t = sim.tick_count();
+  while (playback.idx < playback.events.length
+      && playback.events[playback.idx].tick <= t) {
+    const e = playback.events[playback.idx++];
+    for (const c of e.s0) netApplyCommand(sim, c, playback.owners[0], (o) => netTcIdOf(sim, o));
+    if (e.s1) {
+      for (const c of e.s1) netApplyCommand(sim, c, playback.owners[1], (o) => netTcIdOf(sim, o));
+    }
+  }
+  sim.tick();
+  if (playback.totalTicks && sim.tick_count() >= playback.totalTicks) {
+    playback.done = true;
+    playback.playing = false;
+    if (netUi) netUi.pbToggle.textContent = 'Play';
+    flash('Replay ended.');
+  }
+}
+
+function drivePlayback(now) {
+  if (!playback.playing) {
+    playback.last = now;
+    return;
+  }
+  if (!playback.last) playback.last = now;
+  playback.acc += Math.min(now - playback.last, 250) * playback.speed;
+  playback.last = now;
+  const STEP = 1000 / 60;
+  let n = 0;
+  while (playback.acc >= STEP && n < 24 && !playback.done) {
+    stepReplayTick();
+    playback.acc -= STEP;
+    n++;
+  }
+  if (n === 24) playback.acc = 0;
+}
+
+/// Download a replay object as a .json file.
+function downloadReplay(replayObj) {
+  if (!replayObj) {
+    flash('No replay recorded yet.');
+    return;
+  }
+  const blob = new Blob([JSON.stringify(replayObj)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `skirmish2-replay-seed${replayObj.seed}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+function currentReplay() {
+  if (playback) return playback.rec;
+  if (net && net.recorder) {
+    return net.finalReplay || net.recorder.finish({
+      result: 'ongoing', ticks: sim.tick_count(),
+    });
+  }
+  if (localRecorder) {
+    return localRecorder.finish({
+      result: matchEnded ? 'finished' : 'ongoing', ticks: sim.tick_count(),
+    });
+  }
+  return null;
 }
 
 async function main() {
@@ -1104,6 +1894,12 @@ async function main() {
   });
   restartBtn.addEventListener('click', () => {
     // Restart begins a fresh match in the mode checked in the menu.
+    // In an online match, Restart leaves the match (it cannot be
+    // restarted locally — the opponent is a person, not a script).
+    if (net) {
+      leaveNetMatch('abandoned');
+      return;
+    }
     resetSim(chosenMode());
     setPaused(false);
     playing = true;
@@ -1112,15 +1908,153 @@ async function main() {
   // the same seed; Back to menu resets a fresh match and opens the
   // pause menu over it (there is no start screen anymore).
   endRestartBtn.addEventListener('click', () => {
+    if (net) {
+      // The finished online match cannot restart; leave it and
+      // begin a fresh local match in the mode checked in the menu.
+      leaveNetMatch('abandoned');
+      resetSim(chosenMode());
+      setPaused(false);
+      return;
+    }
     resetSim(chosenMode());
     playing = true;
     paused = false;
   });
   endMenuBtn.addEventListener('click', () => {
+    if (net) {
+      leaveNetMatch('abandoned');
+      return;
+    }
     resetSim(builtMode || matchMode);
     playing = true;
     setPaused(true);
   });
+
+  // --- M8 wiring: lobby, online menu entries, replay ----------------
+  netUi = {
+    onlineOverlay: document.getElementById('online-overlay'),
+    onlineClose: document.getElementById('online-close'),
+    regionList: document.getElementById('region-list'),
+    createBtn: document.getElementById('btn-create-game'),
+    roomLinkRow: document.getElementById('room-link-row'),
+    roomLink: document.getElementById('room-link'),
+    copyLinkBtn: document.getElementById('btn-copy-link'),
+    lobbyStatus: document.getElementById('lobby-status'),
+    startBtn: document.getElementById('btn-start-game'),
+    netStatus: document.getElementById('net-status'),
+    netStatusText: document.getElementById('net-status-text'),
+    resignBtn: document.getElementById('btn-resign'),
+    netWait: document.getElementById('net-wait'),
+    desyncOverlay: document.getElementById('desync-overlay'),
+    desyncDetail: document.getElementById('desync-detail'),
+    desyncReplayBtn: document.getElementById('btn-desync-replay'),
+    desyncCloseBtn: document.getElementById('btn-desync-close'),
+    peerOverlay: document.getElementById('peer-overlay'),
+    peerDetail: document.getElementById('peer-detail'),
+    claimBtn: document.getElementById('btn-claim-victory'),
+    leaveBtn: document.getElementById('btn-leave-match'),
+    playbackBar: document.getElementById('playback-bar'),
+    pbLabel: document.getElementById('pb-label'),
+    pbToggle: document.getElementById('pb-toggle'),
+    pbSpeed: document.getElementById('pb-speed'),
+    pbExit: document.getElementById('pb-exit'),
+  };
+  const onlineBtn = document.getElementById('btn-online');
+  if (onlineBtn) onlineBtn.addEventListener('click', () => openLobby(null));
+  if (netUi.onlineClose) {
+    netUi.onlineClose.addEventListener('click', () => {
+      showOverlay(netUi.onlineOverlay, false);
+    });
+  }
+  if (netUi.createBtn) netUi.createBtn.addEventListener('click', createGame);
+  if (netUi.startBtn) netUi.startBtn.addEventListener('click', hostStartMatch);
+  if (netUi.copyLinkBtn) {
+    netUi.copyLinkBtn.addEventListener('click', () => {
+      netUi.roomLink.select();
+      if (navigator.clipboard) navigator.clipboard.writeText(netUi.roomLink.value);
+      flash('Link copied — send it to your opponent.');
+    });
+  }
+  if (netUi.resignBtn) {
+    netUi.resignBtn.addEventListener('click', () => {
+      if (!net) return;
+      net.client.send({ type: 'resign' });
+      showOverlay(netUi.peerOverlay, false);
+      netMatchEnd(2, { selfResign: true });
+      setPaused(false);
+    });
+  }
+  if (netUi.claimBtn) {
+    netUi.claimBtn.addEventListener('click', () => {
+      if (!net) return;
+      showOverlay(netUi.peerOverlay, false);
+      netMatchEnd(1, {});
+    });
+  }
+  if (netUi.leaveBtn) {
+    netUi.leaveBtn.addEventListener('click', () => leaveNetMatch('abandoned'));
+  }
+  if (netUi.desyncReplayBtn) {
+    netUi.desyncReplayBtn.addEventListener('click', () => downloadReplay(currentReplay()));
+  }
+  if (netUi.desyncCloseBtn) {
+    netUi.desyncCloseBtn.addEventListener('click', () => leaveNetMatch('desync'));
+  }
+  const endReplayBtn = document.getElementById('end-replay-btn');
+  if (endReplayBtn) {
+    endReplayBtn.addEventListener('click', () => downloadReplay(currentReplay()));
+  }
+  const dlReplayBtn = document.getElementById('btn-download-replay');
+  if (dlReplayBtn) {
+    dlReplayBtn.addEventListener('click', () => downloadReplay(currentReplay()));
+  }
+  const replayFile = document.getElementById('replay-file');
+  if (replayFile) {
+    replayFile.addEventListener('change', async () => {
+      const f = replayFile.files && replayFile.files[0];
+      replayFile.value = '';
+      if (!f) return;
+      try {
+        const rec = JSON.parse(await f.text());
+        if (!isReplay(rec)) throw new Error('not a replay');
+        setPaused(false);
+        startPlayback(rec);
+      } catch {
+        flash('That file is not a Skirmish II replay.');
+      }
+    });
+  }
+  if (netUi.pbToggle) {
+    netUi.pbToggle.addEventListener('click', () => {
+      if (!playback || playback.done) return;
+      playback.playing = !playback.playing;
+      netUi.pbToggle.textContent = playback.playing ? 'Pause' : 'Play';
+    });
+  }
+  if (netUi.pbSpeed) {
+    netUi.pbSpeed.addEventListener('click', () => {
+      if (!playback) return;
+      const speeds = [0.5, 1, 2, 4];
+      const next = speeds[(speeds.indexOf(playback.speed) + 1) % speeds.length];
+      playback.speed = next;
+      netUi.pbSpeed.textContent = next + '×';
+    });
+  }
+  if (netUi.pbExit) netUi.pbExit.addEventListener('click', exitPlayback);
+
+  // Arriving by link (or ?online=1): the local match still starts
+  // instantly behind the lobby, exactly as always — the lobby is
+  // an overlay, never a start screen.
+  {
+    const pp = parsePlayParams(location.search);
+    if (pp.room) {
+      setPaused(true);
+      openLobby({ room: pp.room, region: pp.region });
+    } else if (pp.online) {
+      setPaused(true);
+      openLobby(null);
+    }
+  }
   // Quality override (pause menu): Auto / High / Medium / Low.
   for (const [mode, btn] of Object.entries(qualityModeBtns)) {
     if (btn) btn.addEventListener('click', () => setQualityMode(mode));
@@ -1134,8 +2068,8 @@ async function main() {
     const btn = ev.target.closest('button');
     if (!btn || btn.disabled) return;
     if (btn.id === 'train') {
-      if (!sim.push_train_villager()) {
-        const reason = sim.train_block_reason();
+      if (!issue({ t: 'train_vil' })) {
+        const reason = myTrainBlock();
         flash(['', 'Not enough food for a villager.',
           'The training queue is full.', 'Housed — build a House first.'][reason] || 'Cannot train right now.');
       }
@@ -1145,9 +2079,9 @@ async function main() {
     } else if (btn.id === 'research-loom' || btn.id === 'research-feudal') {
       // M6: Town Center research (shared queue with training).
       const tag = btn.id === 'research-loom' ? 0 : 1;
-      const ok = tag === 0 ? sim.push_research_loom() : sim.push_research_feudal();
+      const ok = issue({ t: 'research_tc', tech: tag });
       if (!ok) {
-        const rb = sim.research_block_tc(tag);
+        const rb = myResearchBlockTc(tag);
         flash(tag === 1 && rb === 4
           ? 'Feudal Age needs 2 completed Dark-Age buildings first (Houses and Farms do not count).'
           : RESEARCH_BLOCK_TITLES[rb] || 'Cannot research right now.');
@@ -1159,14 +2093,14 @@ async function main() {
         'research-padded': 4, 'research-maa': 5,
       }[btn.id];
       if (tag != null && selectedBuilding && selectedBuilding.type === 'building') {
-        if (!sim.push_research_at(selectedBuilding.id, tag)) {
+        if (!issue({ t: 'research_at', b: selectedBuilding.id, tech: tag })) {
           flash(RESEARCH_BLOCK_TITLES[sim.research_block_at(selectedBuilding.id, tag)]
             || 'Cannot research right now.');
         }
       }
     } else if (btn.id === 'train-scout') {
       const ok = selectedBuilding && selectedBuilding.type === 'building'
-        ? sim.push_train_scout(selectedBuilding.id)
+        ? issue({ t: 'train_at', b: selectedBuilding.id, k: 2 })
         : false;
       if (!ok && selectedBuilding) {
         const reason = sim.building_train_block(selectedBuilding.id, 2);
@@ -1176,9 +2110,7 @@ async function main() {
     } else if (btn.id === 'train-militia' || btn.id === 'train-archer') {
       const kindTag = btn.id === 'train-militia' ? 3 : 4;
       const ok = selectedBuilding && selectedBuilding.type === 'building'
-        ? (kindTag === 3
-          ? sim.push_train_militia(selectedBuilding.id)
-          : sim.push_train_archer(selectedBuilding.id))
+        ? issue({ t: 'train_at', b: selectedBuilding.id, k: kindTag })
         : false;
       if (!ok && selectedBuilding) {
         const reason = sim.building_train_block(selectedBuilding.id, kindTag);
@@ -1336,13 +2268,13 @@ async function main() {
       // building selected for information takes no orders at all;
       // the click falls through to the unit-order path (whose
       // selection is empty, so it just flashes the hint).
-      const foe = selectedBuilding.owner === 2;
+      const foe = selectedBuilding.owner === foeOwner();
       if (!foe && selectedBuilding.type === 'tc') {
-        sim.push_set_rally_tc(wx, wy);
+        issue({ t: 'rally_tc', x: wx, y: wy });
         return;
       }
       if (!foe && selectedBuilding.type === 'building' && [2, 6, 7].includes(selectedBuilding.kind)) {
-        sim.push_set_rally_building(selectedBuilding.id, wx, wy);
+        issue({ t: 'rally_b', b: selectedBuilding.id, x: wx, y: wy });
         return;
       }
     }
@@ -1358,7 +2290,7 @@ async function main() {
     const targets = selectedUnits();
     if (targets.length === 0) {
       flash(selectedBuilding != null
-        ? (selectedBuilding.owner === 2
+        ? (selectedBuilding.owner === foeOwner()
           ? 'That is the enemy’s — look, but the orders are not yours.'
           : selectedBuilding.type === 'tc'
             ? 'The Town Center trains villagers from the Commands panel.'
@@ -1398,8 +2330,7 @@ async function main() {
     }
     const sendMove = (id) => {
       const [mx, my] = moveDest ? moveDest(id) : [wx, wy];
-      if (queued) sim.push_move_queued(id, mx, my);
-      else sim.push_move(id, mx, my);
+      issue({ t: 'move', e: id, x: mx, y: my, q: queued || undefined });
     };
     // The enemy Town Center (M5): entityAt skips Town Centers, so
     // it gets its own pick — an attack order for everyone who can
@@ -1408,12 +2339,12 @@ async function main() {
     const tcT = tcAt(wx, wy);
     // M7: an order can only name what the player knows — the
     // enemy Town Center once its ground is explored (VIS-06).
-    if (tcT != null && st.owners[tcT] === 2
+    if (tcT != null && st.owners[tcT] === foeOwner()
         && cellExploredW(st.pos[tcT * 2], st.pos[tcT * 2 + 1])) {
       let any = false;
       for (const id of targets) {
         if (st.kinds[id] === KIND_SHEEP) continue;
-        if (queued ? sim.push_attack_queued(id, tcT) : sim.push_attack(id, tcT)) any = true;
+        if (issue({ t: 'attack', e: id, tg: tcT, q: queued || undefined })) any = true;
       }
       if (any) return;
     }
@@ -1421,13 +2352,13 @@ async function main() {
     // M7: a non-own unit is a target only while currently visible
     // — in explored memory or the black it cannot be clicked
     // (the click falls through to a ground move, as a miss does).
-    if (t != null && st.owners[t] !== 0
+    if (t != null && st.owners[t] !== localOwner
         && !cellVisibleW(st.pos[t * 2], st.pos[t * 2 + 1])) t = null;
-    if (t != null && (st.owners[t] === 1 || st.owners[t] === 2 || st.kinds[t] === KIND_SHEEP)) {
+    if (t != null && (st.owners[t] === 1 || st.owners[t] === foeOwner() || st.kinds[t] === KIND_SHEEP)) {
       let any = false;
       for (const id of targets) {
         if (st.kinds[id] === KIND_SHEEP) continue; // sheep don't fight
-        if (queued ? sim.push_attack_queued(id, t) : sim.push_attack(id, t)) any = true;
+        if (issue({ t: 'attack', e: id, tg: t, q: queued || undefined })) any = true;
       }
       if (any) return;
       // Nobody could attack (e.g. only sheep selected): fall through
@@ -1437,11 +2368,11 @@ async function main() {
     // (No queued form in M5 — the order replaces, like a fresh
     // right-click should.)
     const bT = buildingAt(wx, wy);
-    if (bT && bT.owner === 2 && cellExploredW(bT.x, bT.y)) {
+    if (bT && bT.owner === foeOwner() && cellExploredW(bT.x, bT.y)) {
       let any = false;
       for (const id of targets) {
         if (st.kinds[id] === KIND_SHEEP) continue;
-        if (sim.push_attack_building(id, bT.id)) any = true;
+        if (issue({ t: 'attackb', e: id, b: bT.id })) any = true;
       }
       if (any) return;
     }
@@ -1450,12 +2381,12 @@ async function main() {
     // carry heuristic sees loaded hauls its load in now, then
     // returns to its work on its own. The heuristic is the client's
     // carry view; the sim re-validates each order itself.
-    const ownDrop = (tcT != null && st.owners[tcT] === 0)
-      || (bT && bT.owner === 0 && bT.kind >= 3 && bT.kind <= 5);
+    const ownDrop = (tcT != null && st.owners[tcT] === localOwner)
+      || (bT && bT.owner === localOwner && bT.kind >= 3 && bT.kind <= 5);
     if (ownDrop) {
       let any = false;
       for (const id of targets) {
-        if (st.kinds[id] === 0 && carryKind.has(id) && sim.push_force_deposit(id)) any = true;
+        if (st.kinds[id] === 0 && carryKind.has(id) && issue({ t: 'force_dep', e: id })) any = true;
       }
       if (any) return;
     }
@@ -1465,8 +2396,7 @@ async function main() {
     if (n && !cellExploredW(n.x, n.y)) n = null;
     for (const id of targets) {
       if (n && st.kinds[id] === 0) {
-        if (queued) sim.push_gather_queued(id, n.id);
-        else sim.push_gather(id, n.id);
+        issue({ t: 'gather', e: id, n: n.id, q: queued || undefined });
       } else {
         sendMove(id);
       }
@@ -1505,9 +2435,10 @@ async function main() {
     // row of buildings can be queued with repeated Shift+clicks.
     // (The queued form validates at execution — see Sim::can_queue —
     // so its acceptance here only proves the builder can build.)
-    const ok = queued
-      ? sim[PUSH_BUILD_QUEUED[placement.kind]](builder, px, py)
-      : sim[PUSH_BUILD[placement.kind]](builder, px, py);
+    const ok = issue({
+      t: 'build', e: builder, k: placement.kind, x: px, y: py,
+      q: queued || undefined,
+    });
     if (ok) {
       if (!queued) placement = null;
     } else {
@@ -1590,12 +2521,12 @@ async function main() {
       // M7: information selection obeys fog too — an enemy Town
       // Center or building selects only once its ground is
       // explored; in the black the click is plain empty ground.
-      if (tc != null && (st.owners[tc] === 0
+      if (tc != null && (st.owners[tc] === localOwner
           || cellExploredW(st.pos[tc * 2], st.pos[tc * 2 + 1]))) {
         selectBuilding({ type: 'tc', id: tc, owner: st.owners[tc] });
       } else {
         const b = buildingAt(wx, wy);
-        if (b && (b.owner !== 2 || cellExploredW(b.x, b.y))) {
+        if (b && (b.owner !== foeOwner() || cellExploredW(b.x, b.y))) {
           selectBuilding({ type: 'building', id: b.id, kind: b.kind, owner: b.owner });
         } else selectUnits(new Set());
       }
@@ -1712,6 +2643,36 @@ async function main() {
   let prevFrameAt = null;
   const STEP = 1000 / 60;
   function frame(now) {
+    // M8: in an online match the lockstep session owns the tick
+    // loop — it applies both players' bundles at their execution
+    // turns and ticks there; the free-running accumulator below is
+    // bypassed (never both). The pause menu does NOT hold an online
+    // match: the opponent plays on, so the session pumps regardless
+    // of `paused`. In replay playback the replay driver ticks.
+    if (net && net.session) {
+      if (net.phase === 'playing' || net.phase === 'peer-left') {
+        net.session.pump(now);
+      }
+      if (prevFrameAt != null) {
+        const step = governor.sample(now - prevFrameAt, now);
+        if (step.changed) applyQuality(step.level, { announce: true });
+      }
+      prevFrameAt = now;
+      last = now;
+      applyKeys();
+      draw();
+      requestAnimationFrame(frame);
+      return;
+    }
+    if (playback) {
+      drivePlayback(now);
+      prevFrameAt = now;
+      last = now;
+      applyKeys();
+      draw();
+      requestAnimationFrame(frame);
+      return;
+    }
     if (playing && !paused && !matchEnded) {
       acc += Math.min(now - last, 250);
       let n = 0;
@@ -1957,7 +2918,7 @@ function drawTC(wx, wy, owner = 0) {
   // M5: the owner's pennant — a small player-color triangle above
   // the roof cap, so the two Town Centers read apart at a glance
   // (blue ours, red the enemy's).
-  ctx.fillStyle = owner === 2 ? ENEMY_COLOR : OWN_COLOR;
+  ctx.fillStyle = owner === foeOwner() ? ENEMY_COLOR : OWN_COLOR;
   ctx.beginPath();
   ctx.moveTo(cx, cy - 1.15 * camS);
   ctx.lineTo(cx + 1.05 * camS, cy - 0.82 * camS);
@@ -2118,7 +3079,7 @@ function drawNewBuilding(b) {
   if (b.complete) {
     poly([up(t, hgt), up(r, hgt), up(bt, hgt), up(l, hgt)], st.roof);
     drawBuildingFeature(b.kind, sx, sy, hgt);
-    if (b.owner === 2) {
+    if (b.owner === foeOwner()) {
       // The enemy's pennant above the roof (M5's owner treatment).
       poly([[sx, sy - hgt - 1.9 * camS], [sx + 1.15 * camS, sy - hgt - 1.55 * camS],
         [sx, sy - hgt - 1.2 * camS]], ENEMY_COLOR);
@@ -2224,7 +3185,7 @@ function drawVillager(i, wx, wy) {
   const spr = orig || drawSpriteH(SPRITES.villager, sx, sy, 2.4);
   const by = sy - 1.15 * u; // fallback body center / label anchor
   if (!spr) {
-    ctx.fillStyle = drawOwner === 2 ? ENEMY_COLOR : COLORS[i % COLORS.length];
+    ctx.fillStyle = drawOwner === foeOwner() ? ENEMY_COLOR : COLORS[i % COLORS.length];
     ctx.beginPath();
     ctx.arc(sx, by, 0.85 * u, 0, Math.PI * 2);
     ctx.fill();
@@ -2291,7 +3252,7 @@ function drawScout(i, wx, wy) {
   ctx.beginPath();
   ctx.ellipse(sx + 1.45 * u, sy - 1.8 * u, 0.38 * u, 0.22 * u, 0.5, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = drawOwner === 2 ? ENEMY_CLOTH : '#31579e'; // rider torso (player color)
+  ctx.fillStyle = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e'; // rider torso (player color)
   ctx.beginPath();
   ctx.ellipse(sx - 0.05 * u, sy - 1.85 * u, 0.42 * u, 0.55 * u, 0, 0, Math.PI * 2);
   ctx.fill();
@@ -2312,7 +3273,7 @@ function drawMilitia(i, wx, wy) {
   const u = camS;
   shadow(sx, sy, 0.95 * u);
   if (selection.has(i)) drawSelRing(sx, sy, 1.25);
-  ctx.fillStyle = drawOwner === 2 ? ENEMY_CLOTH : '#31579e'; // tunic (player color)
+  ctx.fillStyle = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e'; // tunic (player color)
   ctx.beginPath();
   ctx.ellipse(sx, sy - 0.85 * u, 0.62 * u, 0.8 * u, 0, 0, Math.PI * 2);
   ctx.fill();
@@ -2337,7 +3298,7 @@ function drawArcher(i, wx, wy) {
   const u = camS;
   shadow(sx, sy, 0.95 * u);
   if (selection.has(i)) drawSelRing(sx, sy, 1.25);
-  ctx.fillStyle = drawOwner === 2 ? ENEMY_ARCHER_CLOTH : '#4a6e46'; // tunic (archer green / enemy red)
+  ctx.fillStyle = drawOwner === foeOwner() ? ENEMY_ARCHER_CLOTH : '#4a6e46'; // tunic (archer green / enemy red)
   ctx.beginPath();
   ctx.ellipse(sx, sy - 0.85 * u, 0.58 * u, 0.8 * u, 0, 0, Math.PI * 2);
   ctx.fill();
@@ -2376,7 +3337,7 @@ function drawSheep(i, wx, wy) {
   ctx.fill();
   // M5: a captured sheep wears its owner's mark — a red brand dot
   // for the enemy's herd (our own sheep stay unmarked, as before).
-  if (drawOwner === 2) {
+  if (drawOwner === foeOwner()) {
     ctx.fillStyle = ENEMY_COLOR;
     ctx.beginPath();
     ctx.arc(sx + 0.05 * u, sy - 1.35 * u, 0.26 * u, 0, Math.PI * 2);
@@ -2455,31 +3416,31 @@ let lastIdleMil = -1;
 let lastAge = -1; // M6: the last age tag shown in the top bar
 
 function updateTopBar() {
-  const [food, wood, gold, stone] = sim.stockpile();
+  const [food, wood, gold, stone] = myStock();
   resFood.textContent = Math.floor(food);
   resWood.textContent = Math.floor(wood);
   resGold.textContent = Math.floor(gold);
   resStone.textContent = Math.floor(stone);
   // M6: the age chip — the player's current age, always visible.
-  const age = sim.age();
+  const age = myAge();
   if (age !== lastAge) {
     lastAge = age;
     resAge.textContent = AGE_NAMES[age] || 'Dark Age';
   }
-  const pop = sim.population();
-  const cap = sim.population_cap();
+  const pop = myPop();
+  const cap = myPopCap();
   resPop.textContent = `${pop} / ${cap}`;
   // Warn tint when housed (reason 3) or simply at the cap.
-  resPop.classList.toggle('warn', sim.train_block_reason() === 3 || pop >= cap);
+  resPop.classList.toggle('warn', myTrainBlock() === 3 || pop >= cap);
   // Idle indicators (INF-03): live counts from the sim's idle
   // queries; the buttons light up while anyone is standing free.
-  const nVil = sim.idle_villagers().length;
+  const nVil = myIdleVillagers().length;
   if (nVil !== lastIdleVil) {
     lastIdleVil = nVil;
     idleVilCount.textContent = String(nVil);
     idleVilBtn.classList.toggle('has-idle', nVil > 0);
   }
-  const nMil = sim.idle_military().length;
+  const nMil = myIdleMilitary().length;
   if (nMil !== lastIdleMil) {
     lastIdleMil = nMil;
     idleMilCount.textContent = String(nMil);
@@ -2524,15 +3485,15 @@ function renderCommands() {
   const selUnits = selectedUnits();
   const st = entityState();
   const hasVillager = selUnits.some((id) => st.kinds[id] === 0);
-  const wood = sim.wood();
-  const reason = sim.train_block_reason();
-  const queue = sim.train_queue_len();
+  const wood = myStock()[1];
+  const reason = myTrainBlock();
+  const queue = myTrainQueueLen();
   const bk = selectedBuilding && selectedBuilding.type === 'building'
     ? buildingList().find((b) => b.id === selectedBuilding.id) || null
     : null;
   // M5: an enemy building/TC selection is information-only — its
   // context renders a hint, never command buttons.
-  const foeSel = !!selectedBuilding && selectedBuilding.owner === 2;
+  const foeSel = !!selectedBuilding && selectedBuilding.owner === foeOwner();
   // M6: each production/research building gets its own context.
   const BUILDING_CONTEXT = { 2: 'barracks', 6: 'range', 7: 'stable', 8: 'blacksmith' };
   const context = selUnits.length > 0
@@ -2542,20 +3503,20 @@ function renderCommands() {
         : selectedBuilding.type === 'tc' ? 'tc'
         : (bk && BUILDING_CONTEXT[bk.kind]) || 'none')
       : 'none';
-  const age = sim.age();
-  const techMask = sim.tech_mask();
+  const age = myAge();
+  const techMask = myTechMask();
   const blockM = bk && context === 'barracks' ? sim.building_train_block(bk.id, 3) : -1;
   const blockA = bk && context === 'range' ? sim.building_train_block(bk.id, 4) : -1;
   const blockS = bk && context === 'stable' ? sim.building_train_block(bk.id, 2) : -1;
   // Research blocks: the TC pair (Loom 0, Feudal 1) and the
   // building techs (Fletching 2, Scale Mail 3, Padded 4, MAA 5).
   const rbTc = context === 'tc'
-    ? [sim.research_block_tc(0), sim.research_block_tc(1)] : [-1, -1];
+    ? [myResearchBlockTc(0), myResearchBlockTc(1)] : [-1, -1];
   const rbBk = bk && (context === 'blacksmith' || context === 'barracks')
     ? [2, 3, 4, 5].map((t) => sim.research_block_at(bk.id, t)) : [];
-  const tcQueueCodes = context === 'tc' ? sim.tc_queue().join('.') : '';
+  const tcQueueCodes = context === 'tc' ? myTcQueue().join('.') : '';
   const bkQueueCodes = bk ? sim.building_queue(bk.id).join('.') : '';
-  const sig = [context, Math.floor(wood), Math.floor(sim.food()), Math.floor(sim.gold()),
+  const sig = [context, Math.floor(wood), Math.floor(myStock()[0]), Math.floor(myStock()[2]),
     reason, queue, bk ? bk.id : -1, bk ? bk.queue : -1, bk && bk.complete ? 1 : 0,
     blockM, blockA, blockS, age, techMask, rbTc.join('.'), rbBk.join('.'),
     tcQueueCodes, bkQueueCodes,
@@ -2569,8 +3530,8 @@ function renderCommands() {
     // (with their requirement in the title) until the age advances;
     // the Range and the Stable also need a completed Barracks.
     const all = buildingList();
-    const hasMill = all.some((b) => b.owner === 0 && b.kind === 4 && b.complete);
-    const hasBarracks = all.some((b) => b.owner === 0 && b.kind === 2 && b.complete);
+    const hasMill = all.some((b) => b.owner === localOwner && b.kind === 4 && b.complete);
+    const hasBarracks = all.some((b) => b.owner === localOwner && b.kind === 2 && b.complete);
     const buttons = [];
     for (let kind = 0; kind <= 8; kind++) {
       let gate = null;
@@ -2722,13 +3683,13 @@ let selSig = ''; // signature of the last-rendered selection panel
 function updateSelPanel() {
   const selUnits = selectedUnits();
   const st = entityState();
-  const queue = sim.train_queue_len();
-  const reason = sim.train_block_reason();
+  const queue = myTrainQueueLen();
+  const reason = myTrainBlock();
   const bk = selectedBuilding && selectedBuilding.type === 'building'
     ? buildingList().find((b) => b.id === selectedBuilding.id) || null
     : null;
   // M5: enemy selections get their own info-only contexts.
-  const foeSel = !!selectedBuilding && selectedBuilding.owner === 2;
+  const foeSel = !!selectedBuilding && selectedBuilding.owner === foeOwner();
   // M6: the production/research buildings share one info shape.
   const PROD_KINDS = [2, 6, 7, 8];
   const context = selUnits.length > 0 ? 'units'
@@ -2742,8 +3703,8 @@ function updateSelPanel() {
   const TRAINS_TAG = { 2: 3, 6: 4, 7: 2 };
   const bkBlock = bk && TRAINS_TAG[bk.kind] != null
     ? sim.building_train_block(bk.id, TRAINS_TAG[bk.kind]) : -1;
-  const tcQueueCodes = sim.tc_queue().join('.');
-  const tcProgBucket = Math.floor(sim.tc_progress() * 20);
+  const tcQueueCodes = myTcQueue().join('.');
+  const tcProgBucket = Math.floor(myTcProgress() * 20);
   const bkQueueCodes = bk ? sim.building_queue(bk.id).join('.') : '';
   // The selected TC's HP joins the signature (M5): the enemy TC
   // panel must tick down live while it is being razed. Same for a
@@ -2753,7 +3714,7 @@ function updateSelPanel() {
   const sig = [context, selUnits.join(','), JSON.stringify(selectedBuilding),
     queue, reason, singleHp, bk ? bk.queue : -1, bkBlock,
     bk && bk.complete ? 1 : 0, selTcHp, tcQueueCodes, bkQueueCodes, tcProgBucket,
-    sim.age(), sim.tech_mask(),
+    myAge(), myTechMask(),
     bk ? Math.round(bk.hpFrac * 40) : -1].join('|');
   if (sig === selSig) return;
   selSig = sig;
@@ -2799,14 +3760,14 @@ function updateSelPanel() {
     selPortrait.classList.remove('empty');
     selPortrait.innerHTML = '<svg class="ui-icon"><use href="#i-tc"/></svg>';
     selName.textContent = 'Town Center';
-    const codes = sim.tc_queue();
+    const codes = myTcQueue();
     if (reason === 3) {
       selInfo.textContent = 'Housed — training stalls until a House stands.';
       selInfo.classList.add('warn');
     } else if (codes.length > 0) {
       const head = codes[0];
       selInfo.textContent = head >= 100
-        ? `Researching ${queueEntryName(head)}… ${Math.round(sim.tc_progress() * 100)}% · Queue ${codes.length}`
+        ? `Researching ${queueEntryName(head)}… ${Math.round(myTcProgress() * 100)}% · Queue ${codes.length}`
         : `Training a villager… · Queue ${codes.length}`;
     } else {
       selInfo.textContent = 'Train villagers and research from the Commands panel. Right-click the map to set a rally point.';
@@ -2873,6 +3834,43 @@ function updateToast() {
 }
 
 // --- Frame ------------------------------------------------------------------
+/// The rally flag (SEL-13): a dashed gold line from the building
+/// to its rally point, a small flag planted there, and a gold ring
+/// when the point snapped to a resource node. Extracted (M8) so
+/// the per-seat Town Center rally draws the identical flag.
+function drawRallyFlag(from, rx, ry, nodeId) {
+  const [fx, fy] = worldToScreen(from[0], from[1]);
+  const [tx, ty] = worldToScreen(rx, ry);
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255, 207, 77, 0.75)';
+  ctx.fillStyle = '#ffcf4d';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([5, 4]);
+  ctx.beginPath();
+  ctx.moveTo(fx, fy);
+  ctx.lineTo(tx, ty);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  // The flag: a pole and a triangular pennant at the point.
+  const pole = 2.4 * camS;
+  ctx.beginPath();
+  ctx.moveTo(tx, ty);
+  ctx.lineTo(tx, ty - pole);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(tx, ty - pole);
+  ctx.lineTo(tx + 1.1 * camS, ty - pole + 0.38 * camS);
+  ctx.lineTo(tx, ty - pole + 0.76 * camS);
+  ctx.closePath();
+  ctx.fill();
+  if (nodeId >= 0) {
+    ctx.beginPath();
+    ctx.arc(tx, ty, 0.9 * camS, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function draw() {
   const W = canvas.width;
   const H = canvas.height;
@@ -2883,7 +3881,7 @@ function draw() {
   // trees fall) — refresh both flat layers every frame, like every
   // other sim read here. Terrain and heights are static per match
   // (refreshWorldLayers).
-  FOG = sim.fog();
+  FOG = myFog();
   OBST = sim.obstacles();
 
   // Ground (M7): the generated terrain as diamond tiles — land in
@@ -2951,7 +3949,7 @@ function draw() {
   // memory, including to "razed".
   const renderBuildings = [];
   for (const b of buildings) {
-    if (b.owner !== 2) {
+    if (b.owner !== foeOwner()) {
       renderBuildings.push(b);
       continue;
     }
@@ -2979,7 +3977,7 @@ function draw() {
   // enemy's, or our haulers would "deposit" by walking past it).
   let tcPos = null;
   for (let i = 0; i < count; i++) {
-    if (kinds[i] === KIND_TC && st.owners[i] === 0) {
+    if (kinds[i] === KIND_TC && st.owners[i] === localOwner) {
       tcPos = [pos[i * 2], pos[i * 2 + 1]];
       break;
     }
@@ -3050,7 +4048,7 @@ function draw() {
       // M7 (VIS-06): the enemy Town Center is a building for
       // knowledge — drawn once its ground is explored, but its HP
       // is live information, shown only while visible.
-      const f = owner === 0 ? 2 : fogAtWorld(wx, wy);
+      const f = owner === localOwner ? 2 : fogAtWorld(wx, wy);
       if (f === 0) continue;
       const hp = st.hp[i * 2];
       const maxHp = st.hp[i * 2 + 1];
@@ -3070,7 +4068,7 @@ function draw() {
       // M7 (VIS-01): enemy and Gaia UNITS draw only in currently
       // visible cells — explored memory remembers buildings, never
       // units (VIS-06).
-      if (st.owners[i] !== 0 && !cellVisibleW(wx, wy)) continue;
+      if (st.owners[i] !== localOwner && !cellVisibleW(wx, wy)) continue;
       const drawFn = UNIT_DRAW[kinds[i]] || drawVillager;
       const hp = st.hp[i * 2];
       const maxHp = st.hp[i * 2 + 1];
@@ -3179,11 +4177,19 @@ function draw() {
   // node as well. Only the selected building's flag shows. M5:
   // never for an enemy selection — the opponent's rally is its own
   // business, and entry 0 is always OUR Town Center's rally.
-  if (selectedBuilding && selectedBuilding.owner !== 2) {
+  if (selectedBuilding && selectedBuilding.owner !== foeOwner()) {
     const rallies = sim.rally_points();
     let entry = -1;
     let from = null;
-    if (selectedBuilding.type === 'tc') {
+    if (selectedBuilding.type === 'tc' && seatAware()) {
+      // M8: the per-seat TC rally, shaped like one rally_points entry.
+      const r = sim.tc_rally_of(selectedBuilding.id);
+      entry = -2;
+      from = [pos[selectedBuilding.id * 2], pos[selectedBuilding.id * 2 + 1]];
+      if (r[3] > 0.5) {
+        drawRallyFlag(from, r[0], r[1], r[2]);
+      }
+    } else if (selectedBuilding.type === 'tc') {
       entry = 0;
       from = [pos[selectedBuilding.id * 2], pos[selectedBuilding.id * 2 + 1]];
     } else if (selectedBuilding.type === 'building') {
@@ -3194,39 +4200,7 @@ function draw() {
       }
     }
     if (entry >= 0 && rallies[entry * 4 + 3] > 0.5) {
-      const rx = rallies[entry * 4];
-      const ry = rallies[entry * 4 + 1];
-      const nodeId = rallies[entry * 4 + 2];
-      const [fx, fy] = worldToScreen(from[0], from[1]);
-      const [tx, ty] = worldToScreen(rx, ry);
-      ctx.save();
-      ctx.strokeStyle = 'rgba(255, 207, 77, 0.75)';
-      ctx.fillStyle = '#ffcf4d';
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([5, 4]);
-      ctx.beginPath();
-      ctx.moveTo(fx, fy);
-      ctx.lineTo(tx, ty);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      // The flag: a pole and a triangular pennant at the point.
-      const pole = 2.4 * camS;
-      ctx.beginPath();
-      ctx.moveTo(tx, ty);
-      ctx.lineTo(tx, ty - pole);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(tx, ty - pole);
-      ctx.lineTo(tx + 1.1 * camS, ty - pole + 0.38 * camS);
-      ctx.lineTo(tx, ty - pole + 0.76 * camS);
-      ctx.closePath();
-      ctx.fill();
-      if (nodeId >= 0) {
-        ctx.beginPath();
-        ctx.arc(tx, ty, 0.9 * camS, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-      ctx.restore();
+      drawRallyFlag(from, rallies[entry * 4], rallies[entry * 4 + 1], rallies[entry * 4 + 2]);
     }
   }
 
@@ -3284,7 +4258,7 @@ function draw() {
       // view — our units always; the enemy Town Center once
       // explored; every other non-own unit only while visible.
       const ex = pos[i * 2], ey = pos[i * 2 + 1];
-      if (st.owners[i] !== 0) {
+      if (st.owners[i] !== localOwner) {
         const f = fogAtWorld(ex, ey);
         if (kinds[i] === KIND_TC ? f < 1 : f !== 2) continue;
       }
@@ -3294,7 +4268,7 @@ function draw() {
         // the enemy's red.
         color: st.owners[i] === 1
           ? (GAIA_COLORS[kinds[i]] || '#9a9a9a')
-          : st.owners[i] === 2 ? ENEMY_COLOR : OWN_COLOR,
+          : st.owners[i] === foeOwner() ? ENEMY_COLOR : OWN_COLOR,
         selected: selection.has(i),
       });
     }
@@ -3310,7 +4284,7 @@ function draw() {
       // House/Farm/Barracks keep the parchment default. M7: the
       // enemy's entries are the fog-filtered render list
       // (last-known snapshots included).
-      buildings: renderBuildings.map((b) => (b.owner === 2
+      buildings: renderBuildings.map((b) => (b.owner === foeOwner()
         ? { ...b, color: ENEMY_COLOR }
         : { ...b, color: BUILDING_MINIMAP_COLOR[b.kind] })),
       entities: mmEntities,

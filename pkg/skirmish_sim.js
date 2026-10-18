@@ -29,6 +29,15 @@ export class WasmSim {
         return ret >>> 0;
     }
     /**
+     * Current age tag of a specific player (0 Dark, 1 Feudal).
+     * @param {number} owner
+     * @returns {number}
+     */
+    age_for(owner) {
+        const ret = wasm.wasmsim_age_for(this.__wbg_ptr, owner);
+        return ret >>> 0;
+    }
+    /**
      * A placed building's queue as flat entry codes (M6) — see
      * `tc_queue`.
      * @param {number} building
@@ -157,6 +166,18 @@ export class WasmSim {
         return v1;
     }
     /**
+     * The fog-of-war grid of a specific player — `fog` for an
+     * explicit seat.
+     * @param {number} owner
+     * @returns {Uint8Array}
+     */
+    fog_for(owner) {
+        const ret = wasm.wasmsim_fog_for(this.__wbg_ptr, owner);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
      * One stockpile resource by name: convenience getters for the HUD.
      * @returns {number}
      */
@@ -209,6 +230,17 @@ export class WasmSim {
         return v1;
     }
     /**
+     * Ids of a specific player's idle military.
+     * @param {number} owner
+     * @returns {Uint32Array}
+     */
+    idle_military_for(owner) {
+        const ret = wasm.wasmsim_idle_military_for(this.__wbg_ptr, owner);
+        var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
      * Ids of the idle villagers (no work task, no move order, no
      * attack target), in id order. Behind the client's idle-villager
      * key and the top-bar idle indicator.
@@ -216,6 +248,17 @@ export class WasmSim {
      */
     idle_villagers() {
         const ret = wasm.wasmsim_idle_villagers(this.__wbg_ptr);
+        var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * Ids of a specific player's idle villagers.
+     * @param {number} owner
+     * @returns {Uint32Array}
+     */
+    idle_villagers_for(owner) {
+        const ret = wasm.wasmsim_idle_villagers_for(this.__wbg_ptr, owner);
         var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
         return v1;
@@ -252,7 +295,8 @@ export class WasmSim {
     }
     /**
      * Create a match against the scripted AI opponent (M5):
-     * `mode_tag` 1 = AI Easy, 2 = AI Normal (the `MatchMode` tags;
+     * `mode_tag` 1 = AI Easy, 2 = AI Normal, 3 = Two-player (M8)
+     * (the `MatchMode` tags;
      * 0 or anything unknown falls back to the plain sandbox
      * constructor's game). The opponent spawns mirrored across the
      * map and plays through the ordinary command queue from the
@@ -303,11 +347,29 @@ export class WasmSim {
         return ret >>> 0;
     }
     /**
+     * Population cap of a specific player.
+     * @param {number} owner
+     * @returns {number}
+     */
+    population_cap_for(owner) {
+        const ret = wasm.wasmsim_population_cap_for(this.__wbg_ptr, owner);
+        return ret >>> 0;
+    }
+    /**
      * Current population: living villagers plus the training queue.
      * @returns {number}
      */
     population() {
         const ret = wasm.wasmsim_population(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Population (units + queued) of a specific player.
+     * @param {number} owner
+     * @returns {number}
+     */
+    population_for(owner) {
+        const ret = wasm.wasmsim_population_for(this.__wbg_ptr, owner);
         return ret >>> 0;
     }
     /**
@@ -677,6 +739,18 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Enqueue a Town Center technology (Loom 0, Feudal Age 1) at a
+     * SPECIFIC Town Center: `push_research_tc` for an explicit
+     * Town Center.
+     * @param {number} tc
+     * @param {number} tech_tag
+     * @returns {boolean}
+     */
+    push_research_tc_at(tc, tech_tag) {
+        const ret = wasm.wasmsim_push_research_tc_at(this.__wbg_ptr, tc, tech_tag);
+        return ret !== 0;
+    }
+    /**
      * Set a production building's rally point (M4: the Barracks).
      * Returns whether the building accepts a rally point.
      * @param {number} building
@@ -699,6 +773,18 @@ export class WasmSim {
      */
     push_set_rally_tc(x, y) {
         const ret = wasm.wasmsim_push_set_rally_tc(this.__wbg_ptr, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Set a SPECIFIC Town Center's rally point (any seat):
+     * `push_set_rally_tc` for an explicit Town Center.
+     * @param {number} tc
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_set_rally_tc_of(tc, x, y) {
+        const ret = wasm.wasmsim_push_set_rally_tc_of(this.__wbg_ptr, tc, x, y);
         return ret !== 0;
     }
     /**
@@ -731,6 +817,16 @@ export class WasmSim {
      */
     push_train_scout(building) {
         const ret = wasm.wasmsim_push_train_scout(this.__wbg_ptr, building);
+        return ret !== 0;
+    }
+    /**
+     * Enqueue a villager at a SPECIFIC Town Center (any seat):
+     * `push_train_villager` for an explicit Town Center.
+     * @param {number} tc
+     * @returns {boolean}
+     */
+    push_train_villager_at(tc) {
+        const ret = wasm.wasmsim_push_train_villager_at(this.__wbg_ptr, tc);
         return ret !== 0;
     }
     /**
@@ -767,6 +863,16 @@ export class WasmSim {
      */
     research_block_at(building, tech_tag) {
         const ret = wasm.wasmsim_research_block_at(this.__wbg_ptr, building, tech_tag);
+        return ret >>> 0;
+    }
+    /**
+     * `research_block_tc` for a specific Town Center (same tags).
+     * @param {number} tc
+     * @param {number} tech_tag
+     * @returns {number}
+     */
+    research_block_tc_at(tc, tech_tag) {
+        const ret = wasm.wasmsim_research_block_tc_at(this.__wbg_ptr, tc, tech_tag);
         return ret >>> 0;
     }
     /**
@@ -837,6 +943,15 @@ export class WasmSim {
         return ret;
     }
     /**
+     * Progress on a specific Town Center queue's head entry, 0..1.
+     * @param {number} tc
+     * @returns {number}
+     */
+    tc_progress_for(tc) {
+        const ret = wasm.wasmsim_tc_progress_for(this.__wbg_ptr, tc);
+        return ret;
+    }
+    /**
      * The Town Center's queue as flat entry codes, head first
      * (M6): unit kinds keep their entity tag; technologies are
      * `100 + tech tag`. Behind the panel's queue display.
@@ -849,6 +964,30 @@ export class WasmSim {
         return v1;
     }
     /**
+     * A specific Town Center's queue as flat entry codes — see
+     * `tc_queue`.
+     * @param {number} tc
+     * @returns {Uint32Array}
+     */
+    tc_queue_for(tc) {
+        const ret = wasm.wasmsim_tc_queue_for(this.__wbg_ptr, tc);
+        var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * A specific Town Center's rally point as `[x, y, node, has]` —
+     * the single-entry form of one `rally_points` entry.
+     * @param {number} tc
+     * @returns {Float64Array}
+     */
+    tc_rally_of(tc) {
+        const ret = wasm.wasmsim_tc_rally_of(this.__wbg_ptr, tc);
+        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v1;
+    }
+    /**
      * The human player's researched-technology bitmask (M6): bit
      * per tech tag (`TechId::tag`); the Feudal bit reads set while
      * the player stands in the Feudal Age.
@@ -856,6 +995,15 @@ export class WasmSim {
      */
     tech_mask() {
         const ret = wasm.wasmsim_tech_mask(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Researched-technology bitmask of a specific player.
+     * @param {number} owner
+     * @returns {number}
+     */
+    tech_mask_for(owner) {
+        const ret = wasm.wasmsim_tech_mask_for(this.__wbg_ptr, owner);
         return ret >>> 0;
     }
     /**
@@ -894,6 +1042,15 @@ export class WasmSim {
         } finally {
             wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
         }
+    }
+    /**
+     * `train_block_reason` for a specific Town Center (same tags).
+     * @param {number} tc
+     * @returns {number}
+     */
+    train_block_reason_at(tc) {
+        const ret = wasm.wasmsim_train_block_reason_at(this.__wbg_ptr, tc);
+        return ret >>> 0;
     }
     /**
      * Why Town Center training cannot currently proceed:
