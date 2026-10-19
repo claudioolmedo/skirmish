@@ -288,6 +288,30 @@ html, body {
   justify-content: space-between;
   margin: 2px 0 8px;
 }
+/* M11: the one controls row over the table — Search, Refresh,
+   the Password toggle, the Server filter. All real, all wired
+   to the same directory data the table renders. */
+.games-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 2px 0 8px;
+  font-size: 13.5px;
+  color: #4a3820;
+}
+.games-search { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.games-search input, .games-region select {
+  padding: 6px 8px;
+  border: 1px solid #c9b48a;
+  border-radius: 8px;
+  background: #fffdf6;
+  color: #4a3820;
+  font-size: 13.5px;
+}
+.games-search input { width: 150px; }
+.games-pw { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+.games-region { display: flex; align-items: center; gap: 6px; font-weight: 600; }
 .games-list {
   border: 1px solid #c9b48a;
   border-radius: 8px;
@@ -296,9 +320,10 @@ html, body {
   overflow-y: auto;
   margin: 0 0 6px;
 }
+/* Game Name · Players · Map · Location · Server */
 .game-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 128px 52px 62px 60px;
+  grid-template-columns: minmax(0, 1fr) 52px 58px 128px 88px;
   gap: 8px;
   align-items: center;
   padding: 7px 10px;
@@ -320,21 +345,22 @@ html, body {
   background: rgba(61, 42, 18, 0.06);
 }
 .game-head:hover { background: rgba(61, 42, 18, 0.06); }
-.game-head .g-sort {
-  background: none;
-  border: none;
-  padding: 0;
-  font: inherit;
-  color: inherit;
-  text-transform: inherit;
-  letter-spacing: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.game-head .g-sort:hover { color: #8a5a10; }
 .g-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.g-players, .g-ping { font-variant-numeric: tabular-nums; }
-.g-join-btn { justify-self: end; }
+.g-players, .g-server, .cq-ms { font-variant-numeric: tabular-nums; }
+.g-server { display: flex; align-items: center; gap: 6px; }
+/* The ping quality square: green < 120 ms, yellow < 220 ms,
+   red above (play/lobby.js pingQuality); hollow until measured. */
+.q-square {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  border: 1px solid rgba(74, 56, 32, 0.45);
+  background: transparent;
+}
+.q-good { background: #4d9e4d; }
+.q-ok { background: #d9a92b; }
+.q-bad { background: #c0392b; }
 .games-empty {
   margin: 0;
   padding: 14px 12px;
@@ -343,6 +369,27 @@ html, body {
   font-size: 13.5px;
 }
 .games-actions { display: flex; gap: 12px; align-items: center; margin: 8px 0 16px; }
+.games-actions-spacer { flex: 1 1 auto; }
+/* M11: Connection Quality — under the ad in the sidebar: every
+   server, your live ping, its quality square. */
+.conn-quality { margin-top: 18px; text-align: left; }
+.conn-quality .lobby-h { margin-bottom: 8px; text-align: center; }
+.conn-quality-list {
+  border: 1px solid #c9b48a;
+  border-radius: 8px;
+  background: rgba(255, 252, 244, 0.5);
+  padding: 6px 10px;
+}
+.cq-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 13px;
+  color: #4a3820;
+}
+.cq-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cq-ms { min-width: 30px; text-align: right; }
 .btn-quiet {
   background: none;
   border: none;
@@ -359,10 +406,11 @@ html, body {
   .lobby-main { width: 100%; }
   .lobby-side { flex: none; width: 300px; max-width: 100%; margin: 0 auto; padding-top: 4px; }
   .game-row {
-    grid-template-columns: minmax(0, 1fr) 96px 44px 54px 56px;
+    grid-template-columns: minmax(0, 1fr) 40px 50px 84px 74px;
     font-size: 12.5px;
     padding: 7px 8px;
   }
+  .games-search input { width: 110px; }
 }
 
 /* --- M10: privacy choice, room screen, loading screen ----------- */

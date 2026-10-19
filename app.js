@@ -62,7 +62,7 @@ import {
 } from './play/netplay.js';
 import {
   LOBBIES_REFRESH_MS, parseLobbies, lobbyRowModel, sortLobbyRows,
-  joinTarget,
+  joinTarget, filterLobbyRows, selectionSurvives, pingQuality,
 } from './play/lobby.js';
 import {
   checkPassword, peerAdmitted, guestAdmitted, canToggleReady,
@@ -1203,11 +1203,13 @@ let regionList = NET_REGIONS; // replaced by the relay's /regions when fetched
 // --- M9: open-games browser state -----------------------------------
 // The directory (relay GET /lobbies) is polled while the Lobby
 // Browser is open; the shaping/sorting lives in play/lobby.js.
+// M11: the controls row's state — search text, the Password toggle
+// and the Server filter — decided purely by lobby.js.
 let lobbyPings = {}; // region id -> measured ms (shares loadRegionsAndPings' probes)
 let lobbyGames = { open: [], inProgress: 0 };
 let lobbyTimer = null;
 let lobbySelectedRoom = null;
-let lobbySort = { key: 'created', dir: 1 };
+let lobbyFilters = { search: '', showPassword: true, region: '' };
 
 const regionName = (id) => (regionList.find((r) => r.id === id) || {}).name || id;
 
@@ -2121,10 +2123,11 @@ function openLobby(join) {
   showOverlay(netUi.onlineOverlay, true);
   hideLoading();
   if (netUi.createBtn) netUi.createBtn.disabled = !!join;
-  // Browsing shows the games table + create view; joining enters
-  // the room screen directly (and the waiting-view ad sidebar).
+  // Browsing shows the games browser; the create view is a panel
+  // the action bar's Create Lobby opens (M11). Joining enters the
+  // room screen directly (and the waiting-view ad sidebar).
   if (netUi.gamesSection) netUi.gamesSection.hidden = !!join;
-  if (netUi.createSection) netUi.createSection.hidden = !!join;
+  if (netUi.createSection) netUi.createSection.hidden = true;
   lobbyStatus(join ? 'Joining the room…' : 'Pick a server, then create the game.');
   loadRegionsAndPings();
   if (join) {
@@ -2150,7 +2153,9 @@ async function loadRegionsAndPings() {
   } catch { /* keep the built-in mirror */ }
   if (!net || net !== mine) return;
   renderRegionList({});
+  renderRegionFilter();
   renderLobbyGames();
+  renderConnQuality();
   const pings = {};
   for (const r of regionList) {
     const res = await probeRegionPing({ relayHttp: RELAY_HTTP, region: r.id })
@@ -2160,6 +2165,7 @@ async function loadRegionsAndPings() {
     lobbyPings[r.id] = pings[r.id];
     renderRegionList(pings);
     renderLobbyGames();
+    renderConnQuality();
   }
   // Pre-highlight the nearest server; the choice stays the player's.
   if (net && net === mine && !net.selectedRegion) {
@@ -2258,13 +2264,20 @@ async function refreshLobbyGames() {
     const parsed = parseLobbies(await res.json());
     if (!parsed) return;
     lobbyGames = parsed;
-    // A selection that filled up or vanished is dropped.
-    if (lobbySelectedRoom
-      && !parsed.open.some((g) => g.room === lobbySelectedRoom)) {
+    // A selection that filled up or vanished is dropped; one
+    // that still exists survives the refresh untouched (M11).
+    if (!selectionSurvives(lobbySelectedRoom, parsed.open)) {
       lobbySelectedRoom = null;
     }
     renderLobbyGames();
   } catch { /* directory unreachable — the last list stands */ }
+}
+
+// The colored square beside a ping: green under 120 ms, yellow
+// under 220 ms, red above (pingQuality in play/lobby.js); hollow
+// while the region is still unmeasured.
+function qualitySquare(quality) {
+  return `<span class="q-square q-${quality || 'none'}" aria-hidden="true"></span>`;
 }
 
 function renderLobbyGames() {
@@ -2273,33 +2286,25 @@ function renderLobbyGames() {
     regionName: regionName(e.region),
     pingMs: lobbyPings[e.region],
   }));
-  const rows = sortLobbyRows(models, lobbySort.key, lobbySort.dir);
+  // Lobby order (oldest game first), then the controls row's
+  // filters decide what is visible (M11).
+  const rows = filterLobbyRows(sortLobbyRows(models, 'created', 1), lobbyFilters);
   const list = netUi.gamesList;
   list.innerHTML = '';
   const head = document.createElement('div');
   head.className = 'game-row game-head';
-  const locArrow = lobbySort.key === 'location'
-    ? (lobbySort.dir === 1 ? ' ▴' : ' ▾') : '';
-  const pingArrow = lobbySort.key === 'ping'
-    ? (lobbySort.dir === 1 ? ' ▴' : ' ▾') : '';
-  head.innerHTML = '<span class="g-title">Game</span>'
-    + `<button type="button" class="g-sort" data-sort="location">Location${locArrow}</button>`
+  head.innerHTML = '<span class="g-title">Game Name</span>'
     + '<span class="g-players">Players</span>'
-    + `<button type="button" class="g-sort" data-sort="ping">Ping${pingArrow}</button>`
-    + '<span class="g-join"></span>';
-  for (const btn of head.querySelectorAll('[data-sort]')) {
-    btn.addEventListener('click', () => {
-      const key = btn.dataset.sort;
-      if (lobbySort.key === key) lobbySort.dir = lobbySort.dir === 1 ? -1 : 1;
-      else lobbySort = { key, dir: 1 };
-      renderLobbyGames();
-    });
-  }
+    + '<span class="g-map">Map</span>'
+    + '<span class="g-loc">Location</span>'
+    + '<span class="g-server">Server</span>';
   list.append(head);
   if (!rows.length) {
     const empty = document.createElement('p');
     empty.className = 'games-empty';
-    empty.textContent = 'No open games right now — create one below.';
+    empty.textContent = lobbyGames.open.length
+      ? 'No games match — clear the search or filters.'
+      : 'No open games right now — create one with Create Lobby.';
     list.append(empty);
   }
   for (const m of rows) {
@@ -2307,18 +2312,10 @@ function renderLobbyGames() {
     row.className = 'game-row' + (m.room === lobbySelectedRoom ? ' selected' : '');
     row.dataset.room = m.room;
     row.innerHTML = `<span class="g-title">${m.locked ? '<span class="g-lock" title="Private — password required">🔒</span> ' : ''}${m.title}</span>`
-      + `<span class="g-loc">${m.server}</span>`
       + `<span class="g-players">${m.playersText}</span>`
-      + `<span class="g-ping">${m.pingText}</span>`;
-    const joinBtn = document.createElement('button');
-    joinBtn.type = 'button';
-    joinBtn.className = 'btn btn-ghost btn-sm g-join-btn';
-    joinBtn.textContent = 'Join';
-    joinBtn.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      joinListedGame(m.room);
-    });
-    row.append(joinBtn);
+      + `<span class="g-map">${m.mapText}</span>`
+      + `<span class="g-loc">${m.server}</span>`
+      + `<span class="g-server">${qualitySquare(m.quality)}${m.pingText}</span>`;
     row.addEventListener('click', () => {
       lobbySelectedRoom = m.room;
       renderLobbyGames();
@@ -2327,7 +2324,9 @@ function renderLobbyGames() {
     list.append(row);
   }
   if (netUi.joinLobbyBtn) {
-    netUi.joinLobbyBtn.disabled = !lobbySelectedRoom;
+    // Join needs a selection that is actually on screen: one the
+    // filters hide cannot be joined from here.
+    netUi.joinLobbyBtn.disabled = !selectionSurvives(lobbySelectedRoom, rows);
   }
   if (netUi.gamesNote) {
     const n = lobbyGames.inProgress;
@@ -2335,6 +2334,44 @@ function renderLobbyGames() {
     netUi.gamesNote.textContent = n > 0
       ? `${n} match${n === 1 ? '' : 'es'} in progress`
       : '';
+  }
+}
+
+/// The controls row's Server dropdown: Any + every region. The
+/// options follow regionList (the relay's /regions replaces the
+/// built-in mirror); the current filter value is preserved.
+function renderRegionFilter() {
+  const sel = netUi && netUi.gamesRegionFilter;
+  if (!sel) return;
+  sel.innerHTML = '';
+  const any = document.createElement('option');
+  any.value = '';
+  any.textContent = 'Any';
+  sel.append(any);
+  for (const r of regionList) {
+    const opt = document.createElement('option');
+    opt.value = r.id;
+    opt.textContent = r.name;
+    sel.append(opt);
+  }
+  sel.value = lobbyFilters.region;
+}
+
+/// The sidebar's Connection Quality panel (M11): every region
+/// with the player's live ping from the probe cycle and its
+/// quality square — the reference browser's panel, our regions.
+function renderConnQuality() {
+  if (!netUi || !netUi.connQualityList) return;
+  const list = netUi.connQualityList;
+  list.innerHTML = '';
+  for (const r of regionList) {
+    const ms = lobbyPings[r.id];
+    const row = document.createElement('div');
+    row.className = 'cq-row';
+    row.innerHTML = `<span class="cq-name">${r.name}</span>`
+      + `<span class="cq-ms">${typeof ms === 'number' ? Math.round(ms) : '…'}</span>`
+      + qualitySquare(pingQuality(typeof ms === 'number' ? ms : null));
+    list.append(row);
   }
 }
 
@@ -2584,8 +2621,14 @@ async function main() {
     createSection: document.getElementById('create-section'),
     gamesList: document.getElementById('games-list'),
     gamesNote: document.getElementById('games-in-progress'),
+    gamesSearch: document.getElementById('games-search'),
+    gamesShowLocked: document.getElementById('games-show-locked'),
+    gamesRegionFilter: document.getElementById('games-region-filter'),
     refreshGamesBtn: document.getElementById('btn-refresh-games'),
     joinLobbyBtn: document.getElementById('btn-join-lobby'),
+    createOpenBtn: document.getElementById('btn-create-open'),
+    createBackBtn: document.getElementById('btn-create-back'),
+    connQualityList: document.getElementById('conn-quality-list'),
     soloBtn: document.getElementById('btn-solo'),
     regionList: document.getElementById('region-list'),
     createBtn: document.getElementById('btn-create-game'),
@@ -2636,9 +2679,44 @@ async function main() {
   if (netUi.refreshGamesBtn) {
     netUi.refreshGamesBtn.addEventListener('click', () => refreshLobbyGames());
   }
+  // M11 controls row: search / Password toggle / Server filter —
+  // each keystroke or change re-renders through lobby.js' pure
+  // filter; the directory poll keeps running underneath.
+  if (netUi.gamesSearch) {
+    netUi.gamesSearch.addEventListener('input', () => {
+      lobbyFilters.search = netUi.gamesSearch.value;
+      renderLobbyGames();
+    });
+  }
+  if (netUi.gamesShowLocked) {
+    netUi.gamesShowLocked.addEventListener('change', () => {
+      lobbyFilters.showPassword = !!netUi.gamesShowLocked.checked;
+      renderLobbyGames();
+    });
+  }
+  if (netUi.gamesRegionFilter) {
+    netUi.gamesRegionFilter.addEventListener('change', () => {
+      lobbyFilters.region = netUi.gamesRegionFilter.value;
+      renderLobbyGames();
+    });
+  }
   if (netUi.joinLobbyBtn) {
     netUi.joinLobbyBtn.addEventListener('click', () => {
       if (lobbySelectedRoom) joinListedGame(lobbySelectedRoom);
+    });
+  }
+  // M11 action bar: Create Lobby opens the create panel; the
+  // panel's quiet back line returns to the browser.
+  if (netUi.createOpenBtn) {
+    netUi.createOpenBtn.addEventListener('click', () => {
+      if (netUi.gamesSection) netUi.gamesSection.hidden = true;
+      if (netUi.createSection) netUi.createSection.hidden = false;
+    });
+  }
+  if (netUi.createBackBtn) {
+    netUi.createBackBtn.addEventListener('click', () => {
+      if (netUi.createSection) netUi.createSection.hidden = true;
+      if (netUi.gamesSection) netUi.gamesSection.hidden = false;
     });
   }
   if (netUi.soloBtn) {
