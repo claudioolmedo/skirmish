@@ -58,7 +58,7 @@ import {
   applyCommand as netApplyCommand, tcIdOf as netTcIdOf,
   createSession, createRecorder, replayEvents, isReplay,
   createRelayClient, probeRegionPing, makeRoomId, buildPlayUrl,
-  parsePlayParams, pickFastestRegion, REGIONS as NET_REGIONS,
+  linkJoinRoom, pickFastestRegion, REGIONS as NET_REGIONS,
 } from './play/netplay.js';
 import {
   LOBBIES_REFRESH_MS, parseLobbies, lobbyRowModel, sortLobbyRows,
@@ -1530,6 +1530,40 @@ function cancelLoading(notify) {
   lobbyStatus(MATCH_CANCELLED_MSG);
 }
 
+// --- room-link consume-once --------------------------------------------------
+// A room link is consumed exactly once per tab session: the boot
+// that follows it joins the room; a RELOAD of the same tab must
+// land on the Lobby Browser (the front door) — the game loads
+// only when a match is actually entered. sessionStorage is the
+// mark store: it survives reloads in the same tab and dies with
+// the tab, which is exactly the wanted semantics.
+const ROOM_LINK_MARK_KEY = 'skirmish2.roomLinkConsumed';
+
+function readRoomLinkMark() {
+  try { return sessionStorage.getItem(ROOM_LINK_MARK_KEY); } catch { return null; }
+}
+
+function writeRoomLinkMark(room) {
+  try { sessionStorage.setItem(ROOM_LINK_MARK_KEY, room); } catch { /* storage off — the link just stays re-joinable */ }
+}
+
+/// Drop the room params (room/region/private) from the address bar
+/// without navigating. From the moment a room exists it lives in
+/// memory (net.room); the invite link is built on demand by the
+/// room screen's copy action, never read back from the URL — so
+/// the address bar can never re-trigger a join on reload.
+function cleanPlayUrl() {
+  try {
+    const p = new URLSearchParams(location.search);
+    if (!p.has('room') && !p.has('region') && !p.has('private')) return;
+    p.delete('room');
+    p.delete('region');
+    p.delete('private');
+    const qs = p.toString();
+    history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
+  } catch { /* non-http(s) context — nothing to clean */ }
+}
+
 // --- the handshake ---------------------------------------------------------
 
 async function hostStartMatch() {
@@ -2185,6 +2219,10 @@ function createGame() {
   }
   net.region = net.selectedRegion || net.region || regionList[0].id;
   net.room = makeRoomId();
+  // The room lives in memory from here — the address bar stays
+  // room-free (a reload must land on the Lobby Browser), and the
+  // invite link is built on demand by the copy action.
+  cleanPlayUrl();
   net.roomLinkValue = buildPlayUrl(
     location.origin + location.pathname, net.room, net.region,
     { private: net.privacy === 'private' });
@@ -2626,8 +2664,16 @@ async function main() {
   }
   if (netUi.copyLinkBtn) {
     netUi.copyLinkBtn.addEventListener('click', () => {
-      if (net && net.roomLinkValue && navigator.clipboard) {
-        navigator.clipboard.writeText(net.roomLinkValue);
+      // The invite link is built on demand from in-memory room
+      // state — never read from the address bar, which is kept
+      // room-free so a reload lands on the Lobby Browser.
+      if (net && net.room) {
+        net.roomLinkValue = buildPlayUrl(
+          location.origin + location.pathname, net.room, net.region,
+          { private: net.privacy === 'private' });
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(net.roomLinkValue);
+        }
       }
       flash('Link copied — send it to your opponent.');
     });
@@ -2703,12 +2749,18 @@ async function main() {
   // the local match waits behind the panel and "Play solo instead"
   // starts it in one tap. Arriving by link skips the browser and
   // joins that room directly; ?online=1 lands on the browser too.
+  // Reload rule: the link is consumed ONCE per tab — the mark is
+  // written and the address bar cleaned BEFORE joining, so any
+  // later reload of this tab lands on the Lobby Browser.
   {
-    const pp = parsePlayParams(location.search);
+    const join = linkJoinRoom(location.search, readRoomLinkMark());
     setPaused(true);
-    if (pp.room) {
-      openLobby({ room: pp.room, region: pp.region, private: pp.private });
+    if (join) {
+      writeRoomLinkMark(join.room);
+      cleanPlayUrl();
+      openLobby({ room: join.room, region: join.region, private: join.private });
     } else {
+      cleanPlayUrl(); // a consumed link's params leave the bar too
       openLobby(null);
     }
   }

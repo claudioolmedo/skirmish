@@ -13,7 +13,8 @@ import {
   encodeMessage, decodeMessage,
   createSession, createRecorder, isReplay, replayEvents,
   createRelayClient, probeRegionPing,
-  makeRoomId, buildPlayUrl, parsePlayParams, pickFastestRegion, REGIONS,
+  makeRoomId, buildPlayUrl, parsePlayParams, linkJoinRoom,
+  pickFastestRegion, REGIONS,
 } from './netplay.js';
 
 // ---------------------------------------------------------------- codec
@@ -94,6 +95,23 @@ test('M10 link params: the private flag round-trips', () => {
 
 test('the load timeout is the documented 90 s', () => {
   assert.equal(LOAD_TIMEOUT_MS, 90_000);
+});
+
+test('linkJoinRoom: a room link joins once per tab session', () => {
+  const link = '?room=abc123def4&region=wnam';
+  // Fresh tab (no mark): the boot joins the link's room.
+  assert.deepEqual(linkJoinRoom(link, null),
+    { room: 'abc123def4', region: 'wnam', online: false, private: false });
+  // Reload in the same tab (mark matches): front door, no join.
+  assert.equal(linkJoinRoom(link, 'abc123def4'), null);
+  // Same tab, a DIFFERENT room's link: joins the new room.
+  assert.equal(linkJoinRoom('?room=xyz987abcd&region=weur', 'abc123def4').room,
+    'xyz987abcd');
+  // No room in the URL: never a join, whatever the mark.
+  assert.equal(linkJoinRoom('', null), null);
+  assert.equal(linkJoinRoom('?online=1', 'abc123def4'), null);
+  // The private flag rides along on the fresh join.
+  assert.equal(linkJoinRoom('?room=abc123def4&private=1', null).private, true);
 });
 
 // ---------------------------------------------------------------- applier
