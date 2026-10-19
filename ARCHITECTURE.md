@@ -832,6 +832,17 @@ dumb relay.
   Style / Game Speed / Treaty / Victory filters and its Restore
   button are intentionally absent — no backing features exist;
   they arrive with their features (see ROADMAP, M11).
+- **Pre-match state (M11 addendum).** Before a match is entered
+  there is no game on screen at all: unless `body` carries
+  `.in-match`, play.css hides the canvas and every HUD element
+  (top bar, command/selection/minimap bar, net-wait banner,
+  playback bar), so the lobby, room and loading overlays sit on
+  the plain page background — no game shell peeking around
+  them. One toggle (`setInMatch` in app.js) flips it at the
+  exact points a match starts — solo start, online 'go',
+  rejoin resume, replay playback entry (and the Restart paths
+  that begin a fresh live local match) — and back off at every
+  return: `openLobby`, leaving a match, Back to menu.
 - **Loading phase & load order (M10).** The heavy game loads
   AFTER commitment, never before: `/play` opens as a light lobby
   (browser, region pings — WebSocket probes only — room

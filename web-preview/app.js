@@ -1221,6 +1221,18 @@ function showOverlay(el, show) {
   if (el) el.style.display = show ? 'flex' : 'none';
 }
 
+/// THE pre-match state (M11 addendum, Claudio's rule): before a
+/// match is entered there is no game on screen at all — play.css
+/// hides the canvas and every HUD element unless body carries
+/// .in-match, and the lobby sits on the plain page background.
+/// This one toggle is flipped at the exact entry points where a
+/// match starts (solo start, online 'go', rejoin resume, replay
+/// playback) and at every return (openLobby, leaving a match,
+/// back-to-menu) — nowhere else.
+function setInMatch(on) {
+  if (document.body) document.body.classList.toggle('in-match', !!on);
+}
+
 /// Adopt a freshly built sim as THE match (start of an online game,
 /// or the rejoiner's rebuilt one): the same per-match client resets
 /// resetSim performs, for an explicit seat.
@@ -1376,6 +1388,7 @@ function leaveNetMatch(result) {
     postTelemetry(result || 'abandoned');
   }
   teardownNet();
+  setInMatch(false); // back to the menu side: chrome hides again
   resetSim(matchMode);
   playing = true;
   setPaused(true);
@@ -1635,6 +1648,7 @@ function beginOnlineMatch() {
   // phase ends here, for both roles.
   clearTimeout(net.loadTimer);
   hideLoading();
+  setInMatch(true); // 'go': the game appears
   const owner = net.role === 'host' ? 0 : 2;
   adoptSim(net.pendingSim, owner);
   net.pendingSim = null;
@@ -2048,6 +2062,7 @@ function onNetMessage(msg) {
           net.resyncDelay || undefined);
         net.phase = 'playing';
         showOverlay(netUi.onlineOverlay, false);
+        setInMatch(true); // the resumed match is on screen again
         setPaused(false);
         playing = true;
         updateNetStatus();
@@ -2098,6 +2113,7 @@ function connectToRoom() {
 /// ({room, region}) the client skips the browser entirely, enters
 /// as the guest and connects at once (the link flow).
 function openLobby(join) {
+  setInMatch(false); // the lobby is up: no game on screen
   if (net) teardownNet();
   net = {
     role: join ? 'guest' : 'host',
@@ -2417,6 +2433,7 @@ async function playSoloFromLobby() {
   }
   resetSim(matchMode);
   hideLoading();
+  setInMatch(true); // solo start: the game appears
   setPaused(false);
   playing = true;
 }
@@ -2450,6 +2467,7 @@ async function startPlayback(rec) {
     totalTicks: rec.ticks || 0,
   };
   adoptSim(sim, playback.view);
+  setInMatch(true); // playback entry: the game appears
   // adoptSim replaced `sim` with itself and cleared playback? No —
   // adoptSim does not touch playback; but it DOES reset local state.
   playback.last = performance.now();
@@ -2584,6 +2602,7 @@ async function main() {
       return;
     }
     resetSim(chosenMode());
+    setInMatch(true); // a fresh live match is on screen
     setPaused(false);
     playing = true;
   });
@@ -2596,10 +2615,12 @@ async function main() {
       // begin a fresh local match in the mode checked in the menu.
       leaveNetMatch('abandoned');
       resetSim(chosenMode());
+      setInMatch(true);
       setPaused(false);
       return;
     }
     resetSim(chosenMode());
+    setInMatch(true);
     playing = true;
     paused = false;
   });
@@ -2608,6 +2629,7 @@ async function main() {
       leaveNetMatch('abandoned');
       return;
     }
+    setInMatch(false); // back to the menu: chrome hides again
     resetSim(builtMode || matchMode);
     playing = true;
     setPaused(true);

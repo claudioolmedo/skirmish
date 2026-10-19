@@ -225,7 +225,12 @@ From the [Gap Analysis](GAP-ANALYSIS.md): the items that most make Skirmish II
   **Create Lobby** (opens the M10 create panel) — replaces the
   per-row Join buttons and sortable headers, and an auto-
   refresh preserves the selection while its game still exists.
-  Deliberately NOT built, because nothing backs them yet —
+  And the pre-match state is absolute (Claudio, live phone
+  test): until a match actually begins there is no game on
+  screen at all — the canvas and every HUD panel stay hidden
+  behind a single body-class toggle, and the lobby sits on the
+  plain page background. Deliberately NOT built, because
+  nothing backs them yet —
   they arrive with their features, not as dead UI: the Ranked /
   Spectate Games / Clans / Leaderboard tabs, the Game Mode /
   Map Style / Game Speed / Treaty / Victory filters, and a
