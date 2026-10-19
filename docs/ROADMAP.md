@@ -274,6 +274,31 @@ From the [Gap Analysis](GAP-ANALYSIS.md): the items that most make Skirmish II
   speed and population settings. Zero sim changes. See
   ARCHITECTURE.md, "M8 — lockstep multiplayer" (guest slot
   bullet).
+- **M12.1 — Mobile pass: the pre-match screens on phones
+  (shipped 2026-10-18).** The lobby experience was shaped on
+  the reference game's wide browser; Claudio tests on his
+  iPhone ("Para o celular"). One ≤700 px media query in
+  play.css (the breakpoint the HUD already uses) reflows the
+  four pre-match screens — Lobby Browser, Create panel, Room
+  screen, Loading screen — and nothing else: the games table
+  condenses to two lines per row (title + players, then
+  map · region · ping with its quality square) by rearranging
+  the same rendered spans with grid areas, so selection and
+  double-tap join are untouched; Search takes a full-width
+  line with Refresh / Password / Server beneath it; every
+  control is a ≥40 px touch target (44 px for region rows,
+  slot selectors, password fields and primary buttons); the
+  action bar sticks to the bottom of the scrolling lobby
+  card; room seats and the guest-slot selector go full-width
+  with a full-row Start; the 300×250 ad keeps its desktop
+  contract (ADS.md) and scales down inside its slot at the
+  same aspect on narrower phones instead of overflowing.
+  Desktop rendering is byte-identical CSS above the query.
+  Zero sim changes. Verified by construction — this
+  environment has no layout engine, so the lobby smoke
+  asserts the shipped phone rules exist and the desktop
+  rules survive; Claudio's phone is the visual check, as
+  with every UI pass.
 
 ## Good first contributions
 
