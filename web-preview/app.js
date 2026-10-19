@@ -4149,6 +4149,14 @@ const NODE_DRAW = [drawTree, drawBerry, drawGold, drawStone, drawFarm, drawCarca
 
 // --- Building sprites -----------------------------------------------------
 const TC_HALF = 3.6; // world units: TC footprint half-extent
+// The Town Center's footprint is 4x4 cells (the DE study; the
+// prompt standard composes the TC art for exactly that). The art is
+// drawn footprint-based like the other Base44 buildings
+// (drawNewBuilding): width = footprint x 1.12, base planted
+// half-footprint x 0.45 toward the front corner — NOT the old
+// 9.5 / +1.6 placeholder contract, which left the compound small
+// inside its 4x4 footprint diamond with empty space at the sides.
+const TC_ART_CELLS = 4; // TC footprint edge, in cells
 function drawTC(wx, wy, owner = 0) {
   const a = TC_HALF;
   const t = worldToScreen(wx - a, wy - a);
@@ -4157,11 +4165,17 @@ function drawTC(wx, wy, owner = 0) {
   const l = worldToScreen(wx - a, wy + a);
   const [sx, sy] = worldToScreen(wx, wy);
   shadow(sx, sy, (r[0] - l[0]) / 2);
-  // Building sprite, base planted toward the footprint's front edge
-  // (dy +1.6 world units from the center point). First choice is the
-  // Base44 test art; the CC0 placeholder is the fallback.
-  if (drawSpriteW(BUILDING_ART.img.tc, sx, sy, 9.5, 1.6)) return;
-  if (drawSpriteW(SPRITES.tc, sx, sy, 9.5, 1.6)) return;
+  // Building sprite, footprint-based like drawNewBuilding: width =
+  // 4 cells x CS x 1.12 (= 17.92 world units at CS = 4), base planted
+  // half-footprint x 0.45 (= 3.6) toward the front corner, so the
+  // art's ground-contact diamond coincides with the 4x4 footprint
+  // diamond. First choice is the Base44 test art; the CC0 placeholder
+  // is the fallback (same draw contract).
+  const tcArtHalf = (TC_ART_CELLS * CS) / 2;
+  if (drawSpriteW(BUILDING_ART.img.tc, sx, sy,
+    TC_ART_CELLS * CS * 1.12, tcArtHalf * 0.45)) return;
+  if (drawSpriteW(SPRITES.tc, sx, sy,
+    TC_ART_CELLS * CS * 1.12, tcArtHalf * 0.45)) return;
   const h = 2.2 * camS; // wall height
   poly([l, b, up(b, h), up(l, h)], '#b09468'); // front-left wall
   poly([b, r, up(r, h), up(b, h)], '#8a6f45'); // front-right wall
