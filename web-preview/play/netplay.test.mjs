@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  TURN_TICKS, INITIAL_DELAY_TURNS,
+  TURN_TICKS, INITIAL_DELAY_TURNS, LOAD_TIMEOUT_MS,
   validateCommand, applyCommand, tcIdOf,
   encodeMessage, decodeMessage,
   createSession, createRecorder, isReplay, replayEvents,
@@ -58,6 +58,42 @@ test('message codec round-trips bundles and rejects malformed traffic', () => {
   assert.equal(decodeMessage('{"type":"bundle","turn":-1,"cmds":[]}').ok, false);
   assert.equal(decodeMessage('{"type":"bundle","turn":1,"cmds":[{"t":"move"}]}').ok, false);
   assert.equal(decodeMessage('{"type":"hash","turn":1}').ok, false);
+});
+
+test('M10 lobby messages decode: ready, the password handshake, cancel', () => {
+  for (const m of [
+    { type: 'ready', ready: true },
+    { type: 'ready', ready: false },
+    { type: 'pw', pw: 'swordfish' },
+    { type: 'pw-req' },
+    { type: 'pw-ok' },
+    { type: 'pw-no' },
+    { type: 'cancel' },
+  ]) {
+    const dec = decodeMessage(encodeMessage(m));
+    assert.equal(dec.ok, true, JSON.stringify(m));
+    assert.deepEqual(dec.msg, m);
+  }
+  // Malformed lobby traffic is rejected whole.
+  assert.equal(decodeMessage('{"type":"ready"}').ok, false);
+  assert.equal(decodeMessage('{"type":"ready","ready":"yes"}').ok, false);
+  assert.equal(decodeMessage('{"type":"pw"}').ok, false);
+  assert.equal(decodeMessage('{"type":"pw","pw":42}').ok, false);
+  assert.equal(decodeMessage(`{"type":"pw","pw":"${'x'.repeat(129)}"}`).ok, false);
+});
+
+test('M10 link params: the private flag round-trips', () => {
+  const priv = buildPlayUrl('https://skirmish.online/play/', 'abc123def4', 'wnam', { private: true });
+  assert.equal(priv, 'https://skirmish.online/play/?room=abc123def4&region=wnam&private=1');
+  assert.deepEqual(parsePlayParams('?room=abc123def4&region=wnam&private=1'),
+    { room: 'abc123def4', region: 'wnam', online: false, private: true });
+  const pub = buildPlayUrl('https://skirmish.online/play/', 'abc123def4', 'wnam');
+  assert.equal(pub, 'https://skirmish.online/play/?room=abc123def4&region=wnam');
+  assert.equal(parsePlayParams('?room=abc123def4&region=wnam').private, false);
+});
+
+test('the load timeout is the documented 90 s', () => {
+  assert.equal(LOAD_TIMEOUT_MS, 90_000);
 });
 
 // ---------------------------------------------------------------- applier
@@ -424,7 +460,7 @@ test('lobby helpers: room ids, links, fastest region', () => {
   const url = buildPlayUrl('https://skirmish.online/play/', 'abc123xyz9', 'wnam');
   assert.equal(url, 'https://skirmish.online/play/?room=abc123xyz9&region=wnam');
   const parsed = parsePlayParams('?room=abc123xyz9&region=wnam');
-  assert.deepEqual(parsed, { room: 'abc123xyz9', region: 'wnam', online: false });
+  assert.deepEqual(parsed, { room: 'abc123xyz9', region: 'wnam', online: false, private: false });
   assert.equal(parsePlayParams('?online=1').online, true);
   assert.equal(pickFastestRegion({ wnam: 80, weur: 25, sam: null }), 'weur');
   assert.equal(pickFastestRegion({}), null);

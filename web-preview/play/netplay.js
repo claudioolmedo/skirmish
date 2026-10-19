@@ -35,6 +35,14 @@ export const INITIAL_DELAY_TURNS = 4;
 export const MAX_DELAY_TURNS = 10;
 export const BUNDLE_CAP = 256; // NET-07: per-turn command volume bound
 export const REJOIN_GRACE_MS = 90_000;
+// M10 loading phase: how long a client waits on the loading
+// screen for the peer's loaded signal (the guest's start-ack /
+// the host's go) before the match is cancelled and everyone
+// returns to the Lobby Browser. 90 s is generous on purpose —
+// the heavy load (WASM fetch + init, artwork, world build)
+// happens in this window, and a slow phone on a weak network
+// deserves the same patience the rejoin window gives a drop.
+export const LOAD_TIMEOUT_MS = 90_000;
 
 // The fixed region list (Claudio's decision, 2026-10-18): the same
 // locations for everyone; the player picks. The relay's /regions is
@@ -149,6 +157,15 @@ const MESSAGE_TYPES = new Set([
   'hello', 'start', 'start-ack', 'start-abort', 'go',
   'bundle', 'hash', 'delay', 'resign', 'resync', 'resync-done',
   'resume', 'claim', 'room-full',
+  // M10 room model: ready flags and the private-room password
+  // handshake. All lobby traffic — none of it ever reaches the sim
+  // or the hashed state (NET-10 discipline).
+  'ready', 'pw', 'pw-req', 'pw-ok', 'pw-no',
+  // M10 loading phase: sent by a client that cancels a match
+  // during loading (it is leaving, or its own load failed), so the
+  // peer returns to the lobby too instead of waiting out the
+  // timeout. A disconnect needs no message — it cancels by itself.
+  'cancel',
 ]);
 
 export function encodeMessage(msg) {
@@ -178,6 +195,13 @@ export function decodeMessage(text) {
   }
   if (msg.type === 'delay' && (!isInt(msg.turns) || !isInt(msg.atTurn))) {
     return { ok: false, error: 'bad delay' };
+  }
+  if (msg.type === 'ready' && typeof msg.ready !== 'boolean') {
+    return { ok: false, error: 'bad ready' };
+  }
+  // A password is a short human string; anything else is junk.
+  if (msg.type === 'pw' && (typeof msg.pw !== 'string' || msg.pw.length > 128)) {
+    return { ok: false, error: 'bad pw' };
   }
   return { ok: true, msg };
 }
@@ -647,9 +671,14 @@ export function makeRoomId(rand = Math.random) {
   return id;
 }
 
-export function buildPlayUrl(base, room, region) {
+export function buildPlayUrl(base, room, region, opts = {}) {
   const sep = base.includes('?') ? '&' : '?';
-  return `${base}${sep}room=${encodeURIComponent(room)}&region=${encodeURIComponent(region)}`;
+  let url = `${base}${sep}room=${encodeURIComponent(room)}&region=${encodeURIComponent(region)}`;
+  // M10: a private room's link says so, so the guest client can ask
+  // for the password up front. The flag is not a secret — the room
+  // is listed as locked in the directory anyway.
+  if (opts && opts.private) url += '&private=1';
+  return url;
 }
 
 export function parsePlayParams(search) {
@@ -658,6 +687,7 @@ export function parsePlayParams(search) {
     room: p.get('room') || null,
     region: p.get('region') || null,
     online: p.get('online') === '1',
+    private: p.get('private') === '1',
   };
 }
 

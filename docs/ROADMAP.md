@@ -181,6 +181,30 @@ From the [Gap Analysis](GAP-ANALYSIS.md): the items that most make Skirmish II
   visible only while waiting — never over the game. Zero sim
   changes. See ARCHITECTURE.md, "M8 — lockstep multiplayer"
   (directory bullet).
+- **M10 — Room model refinement (shipped 2026-10-18).** Rooms
+  work the way the reference game's lobbies do. Create **Public**
+  (listed, anyone can join) or **Private** — listed WITH a lock
+  (🔒), like DE's passworded games, never hidden; joining one, by
+  list or link, runs a password check against the host's client
+  over the room pipe (a courtesy lock: the password lives only
+  in the host's browser memory, the relay stores nothing but the
+  locked flag). The room screen is calm: the two seats with
+  presence and ready states, one Start button per player — and
+  the match begins by itself when BOTH players are ready (the
+  big link field is demoted to one quiet "Invite link — copy"
+  line). Starting passes through a **loading screen** where the
+  heavy load actually happens — the lobby itself is light now:
+  the .wasm and the artwork load only once a match begins (both
+  players ready, or Play solo) — with each player's loaded state
+  shown; the host sends 'go' only when both are loaded, and a
+  player who leaves or fails to load (90 s) cancels the match
+  for everyone, back to the Lobby Browser. One live-found bug
+  fixed on the way: a waiting host's room no longer ages out of
+  the directory (rooms heartbeat to it every ~45 s). The lobby
+  and loading waiting slots rotate fresh house creatives every
+  60 s while players wait. Zero sim changes. See
+  ARCHITECTURE.md, "M8 — lockstep multiplayer" (room model,
+  loading phase, directory bullets).
 
 ## Good first contributions
 

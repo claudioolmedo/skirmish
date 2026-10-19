@@ -753,23 +753,88 @@ dumb relay.
   the same location. The match room itself is created under the
   chosen region's hint, so match traffic lands in the picked
   region too.
-- **Open-games directory (M9).** The play page opens on a Lobby
-  Browser — the list of games waiting for a second player — so the
-  relay gained exactly one directory: a singleton `Lobby` Durable
-  Object. Each match room reports its own socket count to it on
-  every open/close (`{room, region, players, ts}`; the region is
-  the location hint the room was created under, persisted in the
-  room's storage on its first request). `GET /lobbies` serves
-  `{open: [{room, region, players: 1, createdAt}], inProgress}`
-  and prunes entries with no report for 120 s. Probe rooms never
-  register. The directory stores nothing else — room ids are the
-  random ids hosts already share publicly by link; there are no
-  accounts, names, IPs or per-player records, and nothing about a
-  match that has started beyond its count in `inProgress`. The
-  client polls it every ~5 s while the browser is open and renders
-  the traditional table (auto title "1v1 Arabia — <region>",
-  players 1/2, the player's measured ping to the region); joining
-  a row is the same guest flow as opening its link.
+- **Open-games directory (M9, heartbeat + locks in M10).** The play
+  page opens on a Lobby Browser — the list of games waiting for a
+  second player — so the relay gained exactly one directory: a
+  singleton `Lobby` Durable Object. Each match room reports its
+  own socket count to it on every open/close (`{room, region,
+  players, locked, ts}`; the region is the location hint the room
+  was created under, persisted in the room's storage on its first
+  request). `GET /lobbies` serves
+  `{open: [{room, region, players: 1, createdAt, locked}],
+  inProgress}` and prunes entries with no report for 120 s. Probe
+  rooms never register. The directory stores nothing else — room
+  ids are the random ids hosts already share publicly by link;
+  there are no accounts, names, IPs or per-player records, and
+  nothing about a match that has started beyond its count in
+  `inProgress`. The client polls it every ~5 s while the browser
+  is open and renders the traditional table (auto title "1v1
+  Arabia — <region>", players 1/2, the player's measured ping to
+  the region); joining a row is the same guest flow as opening
+  its link. M10 fixed the directory's one live-found flaw: a room
+  only reported on open/close, so a host simply WAITING aged out
+  of the list after 120 s. A waiting room now re-reports itself
+  on a Durable Object alarm every ~45 s for as long as it holds
+  at least one socket — comfortably inside the prune window —
+  and the chain stops when the room empties.
+- **Room model (M10).** Rooms are created **Public** (listed,
+  anyone may join) or **Private**, following the reference game's
+  browser: a private room is NOT hidden — it lists with
+  `locked: true` and a 🔒 in the table — but joining one, from
+  the list or by its invite link, requires the password the host
+  set at create time. The host's create connection carries
+  `?private=1`; the room persists only that flag (first sight
+  wins) and reports it with its count. **The password itself
+  never reaches the relay as data**: it lives only in the host
+  client's memory for the session, and the check runs over the
+  room pipe — the guest sends `{type:'pw'}`, the host's client
+  compares and answers `pw-ok` / `pw-no` (asking first with
+  `pw-req` when a guest arrives). Until `pw-ok`, the guest does
+  not count as present on either client: no slot presence, no
+  ready, no start. This is honestly a **courtesy lock** — it
+  keeps honest players honest and mirrors the reference UX; it
+  is not account-grade security (there are no accounts), and a
+  modified client could bypass the gate-keeping on its own side
+  — it cannot mint a match the host's client refuses to start.
+  The room screen itself is the calm DE shape: the two seats
+  (Host — Blue / Guest — Red) with presence and ready states,
+  ONE prominent **Start** button per player that toggles their
+  ready flag (`{type:'ready'}` over the pipe), and the invite
+  link demoted to one quiet line under the seats. **Start rule:**
+  the host's client initiates the M8 start handshake by itself
+  the moment BOTH players are ready; un-readying before that
+  keeps the gate closed, and a guest leaving resets both flags.
+  Ready/password traffic is lobby traffic — it never enters the
+  sim or the hashed state (NET-10).
+- **Loading phase & load order (M10).** The heavy game loads
+  AFTER commitment, never before: `/play` opens as a light lobby
+  (browser, region pings — WebSocket probes only — room
+  creation/joining all work with the .wasm never requested and
+  no sprite tier fetched; the sim module is a dynamic `import()`
+  behind `ensureGameLoaded()`). When the start rule fires
+  (online) or the player taps Play solo, both clients enter a
+  dedicated **loading screen** where the real load happens —
+  WASM fetch + init, artwork, world construction from the seed,
+  construction-hash verification — with each seat's state shown
+  ("Blue — loaded ✓ / Red — loading…"). The loaded signal IS the
+  M8 handshake, extended not replaced: the guest's `start-ack`
+  now means "built and verified", the host marks itself loaded
+  when its own build verifies, and the host sends `go` only
+  after BOTH loaded signals are in. **Cancellation:** a
+  disconnect during loading, an explicit `{type:'cancel'}` from
+  a client whose own load failed, or the loaded signal not
+  arriving within **90 s** (`LOAD_TIMEOUT_MS` — the same
+  patience as the rejoin window, for slow mobile networks)
+  cancels the match for everyone: every remaining client shows
+  "Match cancelled — a player left or failed to load." and
+  returns cleanly to the Lobby Browser — no dead screen, no
+  desync overlay, no half-started sim (the pending sim is simply
+  dropped). Solo passes through the same screen for exactly the
+  real local load — no artificial delay. The loading screen
+  carries the play page's second waiting-view ad slot (lobby
+  sidebar is the first; see `web-preview/ADS.md`); both rotate
+  fresh house creatives every 60 s while the player waits,
+  pausing on a hidden tab and stopping the moment play begins.
 - **Disconnect & rejoin.** A dropped socket pauses the remaining
   side ("Opponent disconnected") with a 90-second grace window.
   Rejoin is by the same link: the remaining peer transfers the

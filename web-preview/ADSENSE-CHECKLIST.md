@@ -25,13 +25,18 @@ Only the site owner can do these; they need his own accounts and documents.
   - `slots["ad-slot-leaderboard"]` → the leaderboard unit's slot ID,
   - `slots["ad-slot-play"]` → the beside-the-game unit's slot ID,
   - `slots["ad-slot-lobby"]` → the lobby unit's slot ID,
+  - `slots["ad-slot-loading"]` → the loading-screen unit's slot ID,
   - `enabled` → `true`.
+  - Leave `rotateRealAds` at `false` — real-ad rotation is an
+    auto-refresh with policy constraints; confirm the current
+    AdSense policy before enabling it (see `ADS.md`, "Rotation
+    during waits").
 
-    (Create the three Display ad units in the AdSense console first if
-    their slot IDs are not known yet: one responsive/leaderboard, two
-    300×250 — see `ADS.md`. With `clientId` set and `enabled: true`,
-    `ads.js` loads Google's library, which also serves as the site's
-    verification code.)
+    (Create the four Display ad units in the AdSense console first if
+    their slot IDs are not known yet: one responsive/leaderboard,
+    three 300×250 — see `ADS.md`. With `clientId` set and
+    `enabled: true`, `ads.js` loads Google's library, which also
+    serves as the site's verification code.)
 - [ ] Create `web-preview/ads.txt` (publishes as `https://skirmish.online/ads.txt`)
       with exactly one line, using the real publisher ID from Step 1:
 
@@ -48,7 +53,7 @@ Only the site owner can do these; they need his own accounts and documents.
       the published file).
 - [ ] After approval: load <https://skirmish.online/> and
       <https://skirmish.online/play/> and verify real ads render in all
-      three slots, the "Advertisement" labels remain, and no slot covers
+      four slots, the "Advertisement" labels remain, and no slot covers
       the game. Verify `https://skirmish.online/ads.txt` returns the line.
 
 To pause ads at any time: set `enabled` back to `false` in `ads.js` and
