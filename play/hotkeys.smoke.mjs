@@ -7,11 +7,15 @@
 // frame callback and the global listeners so keys and frames flow
 // exactly as in the browser).
 //
-// Proves: '.' selects an idle villager → Q arms the economic page
-// (panel shows that page's buildings, House badged E) → E enters
-// House placement exactly like the button click; Q,W enters Mill
-// placement; W arms the military page and Esc backs out without
-// pausing; H selects the Town Center → Q queues a villager; A with
+// Proves: '.' selects an idle villager → the panel root shows
+// ONLY the two build-page openers (badged Q / W) → Q arms the
+// economic page (its five buildings + Back, House badged E) → E
+// enters House placement and the panel STAYS on the page; Esc
+// cancels the placement back onto the page, a second Esc returns
+// to the root; Q,W enters Mill placement; W arms the military
+// page and Esc backs out without pausing; clicking an opener or
+// Back runs the very same page state; H selects the Town
+// Center → Q queues a villager; A with
 // an unloaded villager runs the drop-off path (its feedback
 // shows); Ctrl+Z with no Lumber Camp flashes its feedback, and
 // after one is really built and finished, Ctrl+Z selects it.
@@ -351,34 +355,46 @@ function key(code, mods = {}) {
 const cmdButtons = () => tab.el('cmd-grid').children.filter((c) => c.tagName === 'BUTTON');
 const cmdIds = () => cmdButtons().map((b) => b.id);
 const cmdBtn = (id) => cmdButtons().find((b) => b.id === id);
+// The DE page model (UI FIX 4 addendum): root = the two openers;
+// a page = its buildings + Back in the last slot.
+const ROOT_IDS = ['page-eco', 'page-mil'];
+const ECO_IDS = ['build-0', 'build-1', 'build-3', 'build-4', 'build-5', 'page-back'];
+const MIL_IDS = ['build-2', 'build-6', 'build-7', 'build-8', 'page-back'];
 
 pump(3);
 
 // ------------------------------------------------------------- (1)
-// '.' picks an idle villager; Q arms the economic page; E places
-// a House (Claudio's sequence); Esc cancels the placement.
+// '.' picks an idle villager: the root shows only the two page
+// openers. Q arms the economic page; E places a House (Claudio's
+// sequence) and the panel stays on the page; Esc cancels the
+// placement back onto the page, a second Esc returns to root.
 key('Period');
 pump(2);
-assert.deepEqual(cmdIds(), ['build-0', 'build-1', 'build-2', 'build-3', 'build-4',
-  'build-5', 'build-6', 'build-7', 'build-8'], 'villager selected: the full build panel');
+assert.deepEqual(cmdIds(), ROOT_IDS, 'villager selected: the root page — two openers only');
+assert.ok(cmdBtn('page-eco').innerHTML.includes('<span class="cmd-key">Q</span>'),
+  'the Economic opener is badged Q');
+assert.ok(cmdBtn('page-mil').innerHTML.includes('<span class="cmd-key">W</span>'),
+  'the Military opener is badged W');
 
 key('KeyQ');
-assert.deepEqual(cmdIds(), ['build-0', 'build-1', 'build-3', 'build-4', 'build-5'],
-  'Q arms the economic page — its five buildings only');
+assert.deepEqual(cmdIds(), ECO_IDS, 'Q arms the economic page — its five buildings + Back');
 assert.ok(cmdBtn('build-0').innerHTML.includes('<span class="cmd-key">E</span>'),
   'the House button is badged E');
 assert.ok(cmdBtn('build-4').innerHTML.includes('<span class="cmd-key">W</span>'),
   'the Mill button is badged W');
 
 key('KeyE');
-assert.deepEqual(cmdIds(), ['build-0', 'build-1', 'build-2', 'build-3', 'build-4',
-  'build-5', 'build-6', 'build-7', 'build-8'], 'placing closes the page — full panel back');
+assert.deepEqual(cmdIds(), ECO_IDS, 'placing keeps the page — the panel stays on economic');
 assert.ok(cmdBtn('build-0').className.includes('active'), 'E entered House placement');
 
 key('Escape');
 pump(2);
 assert.ok(!cmdBtn('build-0').className.includes('active'), 'Esc cancels the placement');
-console.log('PASS (1) Q arms economic, E enters House placement, Esc cancels');
+assert.deepEqual(cmdIds(), ECO_IDS, '…and lands back on the page the House came from');
+key('Escape');
+pump(2);
+assert.deepEqual(cmdIds(), ROOT_IDS, 'a second Esc returns to the root page');
+console.log('PASS (1) root openers; Q arms economic; E places; Esc steps back page by page');
 
 // ------------------------------------------------------------- (2)
 // Q then W (the Mill's key on the economic page) places a Mill;
@@ -386,18 +402,19 @@ console.log('PASS (1) Q arms economic, E enters House placement, Esc cancels');
 key('KeyQ');
 key('KeyW');
 assert.ok(cmdBtn('build-4').className.includes('active'), 'Q,W entered Mill placement');
+assert.deepEqual(cmdIds(), ECO_IDS, '…with the panel still on the economic page');
+key('Escape');
 key('Escape');
 pump(2);
+assert.deepEqual(cmdIds(), ROOT_IDS, 'two Esc steps land back on the root page');
 
 key('KeyW');
-assert.deepEqual(cmdIds(), ['build-2', 'build-6', 'build-7', 'build-8'],
-  'W arms the military page — its four buildings only');
+assert.deepEqual(cmdIds(), MIL_IDS, 'W arms the military page — its four buildings + Back');
 assert.ok(cmdBtn('build-2').innerHTML.includes('<span class="cmd-key">Q</span>'),
   'the Barracks button is badged Q');
 key('Escape');
 pump(2);
-assert.deepEqual(cmdIds(), ['build-0', 'build-1', 'build-2', 'build-3', 'build-4',
-  'build-5', 'build-6', 'build-7', 'build-8'], 'Esc backed out of the page');
+assert.deepEqual(cmdIds(), ROOT_IDS, 'Esc backed out of the page to the root');
 assert.notEqual(tab.el('pause-menu').style.display, 'flex', '…and did not open the pause menu');
 console.log('PASS (2) Q,W enters Mill placement; W arms military; Esc backs out cleanly');
 
@@ -423,7 +440,7 @@ key('KeyA');
 pump(2);
 assert.equal(tab.el('toast').textContent, 'No loaded villagers selected — nothing to drop off.',
   'A ran the drop-off path and reported');
-assert.ok(!cmdBtn('build-1').className.includes('active'), 'A did not arm Farm placement');
+assert.deepEqual(cmdIds(), ROOT_IDS, 'A opened no page and armed no Farm placement');
 console.log('PASS (4) villager + A issues the force drop-off path');
 
 // ------------------------------------------------------------- (5)
@@ -542,6 +559,35 @@ for (const fn of docListeners.fullscreenchange || []) fn({});
 assert.equal(fsBtn.textContent, '⛶', 'leaving fullscreen restores the enter glyph');
 assert.equal(fsMenuBtn.textContent, 'Fullscreen', '…and the menu entry label');
 console.log('PASS (7) fullscreen toggle: both controls drive the API, glyph/label sync on fullscreenchange');
+
+// ------------------------------------------------------------- (8)
+// The mouse runs the SAME page state (UI FIX 4 addendum):
+// clicking an opener opens its page; clicking Back returns to
+// the root. The panel's listener is delegated on #cmd-grid and
+// reads ev.target.closest('button') — the stub's closest() is a
+// null stub, so each button gets a faithful one for the click.
+key('Period');
+pump(2);
+assert.deepEqual(cmdIds(), ROOT_IDS, 'villager selected again: the root page');
+const grid = tab.el('cmd-grid');
+const clickBtn = (id) => {
+  const b = cmdBtn(id);
+  assert.ok(b, `${id} is rendered`);
+  b.closest = () => b;
+  grid.dispatch('click', { target: b });
+  pump(2);
+};
+clickBtn('page-mil');
+assert.deepEqual(cmdIds(), MIL_IDS, 'clicking the Military opener opens the military page');
+clickBtn('page-back');
+assert.deepEqual(cmdIds(), ROOT_IDS, 'clicking Back returns to the root');
+clickBtn('page-eco');
+assert.deepEqual(cmdIds(), ECO_IDS, 'clicking the Economic opener opens the economic page');
+assert.ok(cmdBtn('page-back').innerHTML.includes('#i-back'),
+  'Back carries the return-arrow glyph');
+clickBtn('page-back');
+assert.deepEqual(cmdIds(), ROOT_IDS, 'Back from economic returns to the root too');
+console.log('PASS (8) mouse and keyboard share one page state: opener clicks, Back clicks');
 
 console.log('HOTKEYS SMOKE: all cases passed');
 process.exit(0);
