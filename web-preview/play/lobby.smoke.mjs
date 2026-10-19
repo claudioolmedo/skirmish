@@ -406,40 +406,45 @@ await boot(tab);
   const phoneAt = css.lastIndexOf('@media (max-width: 700px)');
   assert.ok(phoneAt > 0 && css.slice(phoneAt).includes('.ui-bottombar { height: clamp(134px, 27vh, 30vh)'),
     'on phones the strip takes a larger share but stays under ~30vh');
-  // Icon-dominant pass (UI FIX 3, Claudio, 2026-10-19: the
-  // stacked cell let the icon shrink to a speck atop a wide
-  // pill — the reference button is led by a LARGE icon): the
-  // icon area flexes to fill the cell over one slim caption
-  // line, the cost rides on the icon as a corner chip, and a
-  // disabled state never dims the text.
-  assert.ok(css.includes('flex: 0 0 348px'),
-    'the command panel is widened to ~348px so full names fit their cells');
-  const labelAt = css.indexOf('.cmd-btn .cmd-label');
-  const labelRule = css.slice(labelAt, css.indexOf('}', labelAt));
-  assert.ok(!labelRule.includes('ellipsis') && labelRule.includes('white-space: nowrap'),
-    'button names never truncate with an ellipsis — one full caption line');
-  assert.ok(labelRule.includes('color: #f0e5c8'),
-    'names render in bright parchment #f0e5c8');
-  assert.ok(css.includes('.cmd-btn.long-name .cmd-label'),
-    'names too long for the standard caption get the smaller long-name line');
+  // DE final form (UI FIX 4, Claudio, 2026-10-19: too much
+  // data on the button — in DE the command button is JUST a
+  // square with the icon; name and cost live in the hover
+  // tooltip; the only on-face marks are the hotkey letter and
+  // the queue badge). The villager panel follows the DE page
+  // model too: a root of two openers, pages behind them.
+  assert.ok(css.includes('flex: 0 0 228px'),
+    'the command panel is only as wide as three square cells need (~228px)');
+  const btnAt = css.indexOf('.cmd-btn {');
+  const btnRule = css.slice(btnAt, css.indexOf('}', btnAt));
+  assert.ok(btnRule.includes('aspect-ratio: 1 / 1') && btnRule.includes('height: 100%')
+    && btnRule.includes('justify-self: center'),
+    'cells are square: height from the grid row, width from the 1:1 ratio, centered');
   const wrapAt = css.indexOf('.cmd-icon-wrap {');
   const wrapRule = css.slice(wrapAt, css.indexOf('}', wrapAt));
-  assert.ok(wrapRule.includes('flex: 1 1 auto') && wrapRule.includes('min-height: 26px'),
-    'the icon area is flex:1-driven with a 26px floor — it cannot shrink to a speck');
-  assert.ok(!css.includes('height: clamp(18px, 3.6vh, 32px)') && !css.includes('height: clamp(16px, 3vh, 24px)'),
-    'no fixed height cap throttles the icon anymore');
-  const costAt = css.indexOf('.cmd-btn .cmd-cost {');
-  const costRule = css.slice(costAt, css.indexOf('}', costAt));
-  assert.ok(costRule.includes('position: absolute') && costRule.includes('rgba(0, 0, 0, 0.62)')
-    && costRule.includes('color: #e8c766'),
-    'the cost is a semi-transparent dark chip on the icon, its number in gold #e8c766');
+  assert.ok(wrapRule.includes('position: absolute') && wrapRule.includes('inset: 0'),
+    'the icon wrap fills the whole square cell — the icon IS the button face');
+  assert.ok(!css.includes('cmd-label') && !css.includes('cmd-cost'),
+    'no name line and no cost chip are styled onto the button face');
+  assert.ok(css.includes('.cmd-btn .cmd-key'),
+    'the hotkey letter badge stays on the face (top-left), as in DE');
   assert.ok(!css.includes('.cmd-btn:disabled { opacity')
-    && css.includes('.cmd-btn:disabled .cmd-label'),
-    'a disabled button darkens its cell and icon only — name and cost stay legible');
+    && css.includes('.cmd-btn:disabled .cmd-icon'),
+    'a disabled button greys its icon only');
   const appJs = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
-  assert.ok(appJs.includes('cmd-cost-row') && appJs.includes("'long-name'"),
-    'app.js builds the two-row cost chip and flags long names');
-  console.log('PASS (9) compact bottom strip + icon-dominant command cells ship in ui.css (by construction; no layout engine here)');
+  assert.ok(!appJs.includes('cmd-label') && !appJs.includes('cmd-cost') && !appJs.includes('long-name'),
+    'app.js renders no name line, no cost chip, no long-name class onto a button');
+  assert.ok(appJs.includes('cmd-key') && appJs.includes('cmd-badge'),
+    'app.js keeps the letter badge and the queue badge on the face');
+  assert.ok(appJs.includes('Train Militia — 60 food · 20 gold')
+    && appJs.includes('Train Archer — 25 wood · 45 gold'),
+    'the hover tooltip carries name + FULL cost, both resources included');
+  assert.ok(appJs.includes("'page-eco'") && appJs.includes("'page-mil'") && appJs.includes("'page-back'"),
+    'app.js builds the DE page model: two openers + Back on each page');
+  const playHtml = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+  assert.ok(!playHtml.includes('cmd-label') && !playHtml.includes('cmd-cost')
+    && playHtml.includes('id="page-eco"') && playHtml.includes('id="i-back"'),
+    'the static first paint matches: openers only, no face text, a return-arrow symbol');
+  console.log('PASS (9) compact bottom strip + square icon-only command cells (DE page model) ship in ui.css (by construction; no layout engine here)');
 }
 
 // (10) The PNG command-icon set (2026-10-19): all twenty original

@@ -5117,10 +5117,22 @@ function runCommandButton(id) {
       flash(['', 'Not enough food for a villager.',
         'The training queue is full.', 'Housed — build a House first.'][reason] || 'Cannot train right now.');
     }
+  } else if (id === 'page-eco' || id === 'page-mil') {
+    // UI FIX 4 addendum: the root openers arm the very page the
+    // Q / W hotkeys arm — one shared buildPage state drives the
+    // rendered grid for mouse and keyboard alike.
+    buildPage = id === 'page-eco' ? 'eco' : 'mil';
+  } else if (id === 'page-back') {
+    placement = null;
+    buildPage = null; // back to the root page
   } else if (id.startsWith('build-')) {
     const kind = Number(id.slice(6));
     placement = placement && placement.kind === kind ? null : { kind };
-    buildPage = null; // M13: entering placement closes the page
+    // The page STAYS armed while placement runs (UI FIX 4
+    // addendum cancel rule): cancelling placement — Esc, a
+    // right-click, re-clicking the building — lands back on the
+    // page the building came from; only a further Esc, a
+    // right-click on the open page, or Back returns to the root.
   } else if (id === 'research-loom' || id === 'research-feudal') {
     // M6: Town Center research (shared queue with training).
     const tag = id === 'research-loom' ? 0 : 1;
@@ -5170,32 +5182,24 @@ function cmdButton({ id, icon, img, label, costIcon, cost, cost2Icon, cost2, tit
   btn.type = 'button';
   btn.id = id;
   btn.className = 'cmd-btn' + (active ? ' active' : '');
-  // UI FIX 3 (Claudio, 2026-10-19): the DE command button is led
-  // by its icon — names that overflow one caption line at the
-  // standard size get the 'long-name' class, whose caption runs
-  // a step smaller so the full name still fits on the one line.
-  if (label && label.length > 15) btn.classList.add('long-name');
   btn.disabled = !!disabled;
+  // UI FIX 4 (Claudio, 2026-10-19): the DE command button is
+  // JUST a square with its icon — no name and no price printed
+  // on the face. Name and full cost (both resources, where two
+  // apply) live in the hover tooltip: every call site's title
+  // states them (e.g. 'Train Militia — 60 food · 20 gold').
+  // The label/cost arguments stay in the signature because the
+  // call sites pass them alongside the title; the face renders
+  // only the glyph, the hotkey letter at its top-left corner
+  // and the production queue badge at the button's top-right.
   btn.title = title;
-  // The glyph: the original PNG set where one maps (img), else
-  // the SVG symbol. Glyph, hotkey letter and cost chip all live
-  // in .cmd-icon-wrap: the letter overlays the glyph's top-left
-  // corner, the chip its bottom-right.
   const glyph = img
     ? pngIcon(img, 'cmd-icon')
     : `<svg class="cmd-icon"><use href="#${icon}"/></svg>`;
-  // The cost chip carries one row per resource — a second
-  // resource (cost2/cost2Icon, e.g. the Militia's 20 gold beside
-  // its 60 food) stacks under the first inside the same chip.
-  const costRow = (ci, c) =>
-    `<span class="cmd-cost-row"><svg class="ui-icon"><use href="#${ci}"/></svg>${c}</span>`;
-  let chip = costRow(costIcon, cost);
-  if (cost2 != null) chip += costRow(cost2Icon, cost2);
   let html =
     `<span class="cmd-icon-wrap">${glyph}` +
     (key ? `<span class="cmd-key">${key}</span>` : '') +
-    `<span class="cmd-cost">${chip}</span></span>` +
-    `<span class="cmd-label">${label}</span>`;
+    `</span>`;
   if (badge) html += `<span class="cmd-badge" id="train-badge">${badge}</span>`;
   btn.innerHTML = html;
   return btn;
@@ -5294,13 +5298,32 @@ function renderCommands() {
     hint.className = 'ui-cmd-hint';
     if (buildPage) {
       cmdGrid.append(...PAGE_KINDS[buildPage].map(buildBtn));
+      // The page's last slot is Back (root) — a plain return
+      // glyph, no PNG; its click runs the same state change an
+      // Esc on the open page runs.
+      cmdGrid.append(cmdButton({
+        id: 'page-back', icon: 'i-back', label: 'Back',
+        title: 'Back to the build menu (Esc).',
+      }));
       hint.textContent = buildPage === 'eco'
         ? 'Economic buildings — the letter on a button places it. Esc goes back.'
         : 'Military buildings — the letter on a button places it. Esc goes back.';
     } else {
-      const buttons = [];
-      for (let kind = 0; kind <= 8; kind++) buttons.push(buildBtn(kind));
-      cmdGrid.append(...buttons);
+      // DE page model (UI FIX 4 addendum): the root shows ONLY
+      // the two category openers, badged with the very letters
+      // (Q / W) that arm the same pages from the keyboard; the
+      // remaining grid slots stay empty panel, exactly like the
+      // reference game's villager panel.
+      cmdGrid.append(
+        cmdButton({
+          id: 'page-eco', img: 'house.png', label: 'Economic Buildings',
+          key: 'Q', title: 'Economic Buildings (Q)',
+        }),
+        cmdButton({
+          id: 'page-mil', img: 'barracks.png', label: 'Military Buildings',
+          key: 'W', title: 'Military Buildings (W)',
+        }),
+      );
       hint.textContent =
         'Q economic · W military · A drop off resources.';
     }

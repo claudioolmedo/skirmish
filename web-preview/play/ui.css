@@ -157,10 +157,11 @@
 /* command panel (bottom-left) */
 
 .ui-cmd-panel {
-  /* widened (Claudio, 2026-10-19): the selection panel had
-     slack to give, and full building names need the width —
-     at ~348px every name fits its cell without truncation */
-  flex: 0 0 348px;
+  /* UI FIX 4 (Claudio, 2026-10-19): the panel is only as wide
+     as three square cells need — the grid rows are ~54-60px in
+     the capped strip, so a ~228px panel gives the columns room
+     for squares; the freed width goes to the selection panel */
+  flex: 0 0 228px;
   display: flex;
   flex-direction: column;
   padding: 5px 8px;
@@ -187,30 +188,23 @@
 
 .cmd-btn {
   position: relative;
-  /* ICON-DOMINANT cell (UI FIX 3, Claudio, 2026-10-19: the
-     stacked cell still let the icon lose the flex fight and
-     render as a speck atop a wide pill — the reference game's
-     command button is LED BY A LARGE ICON, its name living in
-     the tooltip). Now the icon area takes everything the row
-     leaves after ONE slim caption line: the wrap flexes
-     (flex: 1 1 auto) and the square art fills it via
-     object-fit: cover. The caption stays visible but
-     subordinate — one line, no ellipsis — and the cost rides
-     ON the icon as a dark chip at its bottom-right corner,
-     the hotkey letter at its top-left, the queue badge at the
-     button's top-right. When space gets tight the caption is
-     what gives (the media queries step its size down), never
-     the icon: the wrap carries a 26px min-height floor. */
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: center;
-  gap: 2px;
+  /* SQUARE, ICON-ONLY cell (UI FIX 4, Claudio, 2026-10-19:
+     exactly the reference game's command button — a square
+     whose whole face is the icon; name and cost print nowhere
+     on it, they live in the hover tooltip). The cell takes its
+     height from the grid row and its width from the 1:1 ratio,
+     centered in its column; the max-width guard keeps it inside
+     a too-narrow column instead of overflowing. The only marks
+     on the face are the hotkey letter (top-left) and the
+     production queue badge (top-right), as in DE. */
+  aspect-ratio: 1 / 1;
+  height: 100%;
+  justify-self: center;
+  max-width: 100%;
   min-height: 0;
   min-width: 0;
   overflow: hidden;
-  padding: 2px 4px;
-  text-align: center;
+  padding: 0;
   background:
     linear-gradient(rgba(26, 13, 4, 0.52), rgba(26, 13, 4, 0.52)),
     var(--ui-wood) url("ui-art/tex-wood.webp") center / cover no-repeat;
@@ -237,9 +231,8 @@
     inset 0 -1px 0 rgba(255, 220, 150, 0.15),
     0 1px 2px rgba(0, 0, 0, 0.4);
 }
-/* disabled/unaffordable: the CELL darkens and the icon greys,
-   but the name and cost stay at full legibility — the old
-   whole-button opacity: .42 made grey text of everything */
+/* disabled/unaffordable: the CELL darkens and the icon greys
+   (the old whole-button opacity: .42 greyed everything) */
 .cmd-btn:disabled {
   cursor: not-allowed;
   background:
@@ -252,83 +245,28 @@
     0 2px 5px rgba(0, 0, 0, 0.45);
 }
 .cmd-btn:disabled .cmd-icon { opacity: 0.45; filter: saturate(0.45); }
-.cmd-btn:disabled .cmd-label { color: rgba(240, 229, 200, 0.9); }
-.cmd-btn:disabled .cmd-cost { color: rgba(232, 199, 102, 0.88); }
 .cmd-btn.active { /* placement armed */
   outline: 2px solid var(--gold-bright, #ffcf4d);
   outline-offset: 1px;
 }
-/* The icon area: every button carries one (app.js always wraps
-   the glyph now), it flexes to fill the cell above the caption,
-   and it hosts the overlays — .cmd-key top-left, .cmd-cost
-   bottom-right, both absolutely positioned against it. */
+/* The icon area: the wrap fills the whole square cell and
+   hosts the one overlay, the hotkey letter at its top-left.
+   The glyph fills the wrap completely. PNG set
+   (ui-art/icons/): full-bleed squares carrying their own
+   walnut background and gold frame, made to fill a square
+   exactly — cell and art are both square, so nothing crops. */
 .cmd-icon-wrap {
-  position: relative;
-  flex: 1 1 auto;
-  min-height: 26px;
-  width: 100%;
+  position: absolute;
+  inset: 0;
   line-height: 0;
 }
-/* The glyph fills its wrap completely — no height cap: the
-   flex of the wrap IS the size. PNG set (ui-art/icons/):
-   full-bleed squares carrying their own walnut background and
-   gold frame, made to fill; object-fit: cover crops the square
-   to the wrap's wide band around its center. */
 .cmd-btn .cmd-icon {
   display: block;
   width: 100%;
   height: 100%;
   min-height: 0;
 }
-.cmd-btn img.cmd-icon { border-radius: 3px; object-fit: cover; }
-.cmd-btn .cmd-label {
-  flex: none;
-  width: 100%;
-  min-width: 0;
-  /* ONE slim caption line under the icon: the full name,
-     centered, never cut off with truncation dots (an unset
-     text-overflow clips only in the pathological case). At
-     ~110px cells the standard size fits names to ~15 chars;
-     longer names run under .long-name a step smaller and
-     still fit the line. */
-  white-space: nowrap;
-  overflow: hidden;
-  font-size: clamp(9.5px, 1.4vh, 11.5px);
-  font-weight: 600;
-  line-height: 1.15;
-  color: #f0e5c8;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
-}
-.cmd-btn.long-name .cmd-label {
-  font-size: 9.5px;
-  letter-spacing: -0.02em;
-}
-/* The cost: a semi-transparent dark chip ON the icon's
-   bottom-right corner — resource icon + gold number per row;
-   a second resource stacks as a second row inside the chip. */
-.cmd-btn .cmd-cost {
-  position: absolute;
-  right: 3px;
-  bottom: 3px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 1px;
-  padding: 2px 4px;
-  background: rgba(0, 0, 0, 0.62);
-  border-radius: 2px;
-  font-size: 10px;
-  color: #e8c766; /* gold, like the reference panel — not grey */
-  line-height: 1.25;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
-}
-.cmd-btn .cmd-cost-row {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  white-space: nowrap;
-}
-.cmd-btn .cmd-cost .ui-icon { width: 10px; height: 10px; }
+.cmd-btn img.cmd-icon { object-fit: cover; }
 .cmd-btn .cmd-badge { /* e.g. training queue length */
   position: absolute;
   top: 3px;
@@ -470,31 +408,19 @@
 /* ---------- narrow screens ---------- */
 
 @media (max-width: 980px) {
-  .ui-cmd-panel { flex-basis: 248px; }
-  .cmd-btn { min-height: 0; }
-  .cmd-icon-wrap { min-height: 22px; }
-  /* narrower cells: the caption steps down a size so the one
-     line still holds the full name; the icon stays dominant */
-  .cmd-btn .cmd-label { font-size: 9.5px; }
-  .cmd-btn.long-name .cmd-label { font-size: 8.5px; }
   .sel-portrait { width: 58px; height: 58px; }
   .sel-portrait .ui-icon { width: 34px; height: 34px; }
   #minimap { width: 176px; height: 99px; } /* geometry math uses the
      canvas attribute size; click handlers convert via bounding rect */
 }
 
-/* short viewports (small laptop windows): the strip sits at its
-   150px floor — slim the panel chrome (padding, title margin,
-   hint) and let the CAPTION give (9px), so the icon keeps its
-   size instead of shrinking back into a speck */
+/* short viewports (small laptop windows): the strip sits at
+   its 150px floor — slim the panel chrome (padding, title
+   margin, hint, gaps) so the square cells keep their size */
 @media (max-height: 780px) {
   .ui-cmd-panel { padding-top: 3px; padding-bottom: 3px; }
   .ui-cmd-panel .ui-panel-title { margin-bottom: 1px; }
   .cmd-grid { gap: 3px; }
-  .cmd-btn { padding: 1px 3px; }
-  .cmd-icon-wrap { min-height: 24px; }
-  .cmd-btn .cmd-label { font-size: 9px; }
-  .cmd-btn.long-name .cmd-label { font-size: 8.5px; }
   .ui-cmd-hint { padding-top: 0; padding-bottom: 0; }
 }
 
@@ -508,24 +434,11 @@
      shrink all three panels instead of letting the selection
      panel and minimap slide off-screen */
   .ui-bottombar { height: clamp(134px, 27vh, 30vh); }
-  .ui-cmd-panel { flex-basis: 150px; padding: 5px 6px; }
+  /* a slightly wider panel than the old pill layout: the three
+     columns (~52px) let the cells stay square at ~44px+ on a
+     typical phone, sized by their row height as on desktop */
+  .ui-cmd-panel { flex-basis: 176px; padding: 5px 6px; }
   .cmd-grid { gap: 3px; }
-  /* the icon stays dominant on phones too: it flexes over a
-     caption that may wrap to two lines at 8.5px (the ~44px
-     cells cannot hold a name on one line), and the cost chip
-     shrinks to the number alone — the resource is in the
-     tooltip, as before */
-  .cmd-btn { min-height: 0; padding: 1px 2px; }
-  .cmd-icon-wrap { min-height: 20px; }
-  .cmd-btn .cmd-label {
-    font-size: 8.5px;
-    white-space: normal;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-  }
-  .cmd-btn .cmd-cost { font-size: 9px; padding: 1px 3px; }
-  .cmd-btn .cmd-cost .ui-icon { display: none; }
   .cmd-btn .cmd-key { font-size: 8px; min-width: 11px; padding: 0 2px; }
   .ui-cmd-hint { font-size: 9.5px; }
   .ui-sel-panel { padding: 6px 8px; gap: 8px; }
