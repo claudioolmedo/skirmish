@@ -87,6 +87,29 @@
     text-align: center; color: rgba(240, 229, 200, .75); font-size: 12px;
     pointer-events: none; text-shadow: 0 1px 2px #000;
   }
+
+  /* ---------- orientação: consola (paisagem) vs retrato ----------
+     A classe .landscape/.portrait no <body> é posta por JS via
+     matchMedia('(orientation: landscape)') — muda ao virar o
+     telefone, sem recarregar. Paisagem é a postura de consola:
+     mover à esquerda, botões à direita. */
+  #rotate-hint {
+    display: none;
+    color: rgba(240, 229, 200, .85); font-size: 11px; letter-spacing: .02em;
+    background: rgba(20, 14, 6, .45); border: 1px solid rgba(201, 162, 39, .3);
+    border-radius: 999px; padding: 4px 10px;
+  }
+  body.portrait #rotate-hint { display: block; }
+  body.portrait #pad {
+    right: 10px; bottom: 56px;
+    transform: scale(.86); transform-origin: bottom right;
+  }
+  body.landscape #pad {
+    right: calc(12px + env(safe-area-inset-right, 0px));
+    bottom: auto; top: 50%; transform: translateY(-50%);
+  }
+  body.landscape #hud-top { padding-top: calc(10px + env(safe-area-inset-top, 0px)); }
+  body.landscape #status, body.landscape #hint { max-width: 58vw; }
 </style>
 </head>
 <body>
@@ -96,6 +119,7 @@
 <div id="hud-top">
   <div id="hint">Experimento — stick move a câmara · o ponto é a mira · A age no ponto</div>
   <div id="status">A carregar…</div>
+  <div id="rotate-hint">Vira o telefone para jogar como consola</div>
 </div>
 
 <div id="dot-ring"></div>
@@ -267,10 +291,12 @@ cv.addEventListener('pointerdown', function (e) {
   if (e.clientX >= window.innerWidth / 2) return;   // metade direita é dos botões
   if (stick.id !== null) return;
   stick.id = e.pointerId; stick.ax = e.clientX; stick.ay = e.clientY; stick.dx = 0; stick.dy = 0;
+  stick.px = e.clientX; stick.py = e.clientY;
   stickShow(e.clientX, e.clientY);
 });
 window.addEventListener('pointermove', function (e) {
   if (e.pointerId !== stick.id) return;
+  stick.px = e.clientX; stick.py = e.clientY;
   var dx = e.clientX - stick.ax, dy = e.clientY - stick.ay;
   var d = Math.hypot(dx, dy);
   if (d > STICK_R) { dx = dx / d * STICK_R; dy = dy / d * STICK_R; }
@@ -284,6 +310,53 @@ function stickEnd(e) {
 window.addEventListener('pointerup', stickEnd);
 window.addEventListener('pointercancel', stickEnd);
 document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+/* ---------------- orientação: detetar e adaptar ----------------
+   matchMedia é o sinal fiável no Safari iOS; screen.orientation é
+   só recurso. A classe no <body> muda o layout (CSS) ao vivo, sem
+   recarregar: paisagem = consola (stick à esquerda, botões à
+   direita centrados); retrato = compacto, com o aviso para virar. */
+function isLandscape() {
+  if (window.matchMedia) return window.matchMedia('(orientation: landscape)').matches;
+  if (window.screen && screen.orientation && screen.orientation.type) {
+    return screen.orientation.type.indexOf('landscape') === 0;
+  }
+  return window.innerWidth >= window.innerHeight;
+}
+
+function stickReanchor() {
+  if (stick.id === null) return;
+  // Mantém o deslocamento atual: a âncora passa a ficar atrás do
+  // último ponto conhecido do dedo, já nas coordenadas novas, e
+  // presa à metade esquerda do ecrã rodado — a câmara continua a
+  // andar e o stick não fica "colado" nem fora do ecrã.
+  var px = (stick.px !== undefined) ? stick.px : stick.ax + stick.dx * STICK_R;
+  var py = (stick.py !== undefined) ? stick.py : stick.ay + stick.dy * STICK_R;
+  stick.ax = px - stick.dx * STICK_R;
+  stick.ay = py - stick.dy * STICK_R;
+  stick.ax = Math.max(30, Math.min(window.innerWidth / 2 - 10, stick.ax));
+  stick.ay = Math.max(30, Math.min(window.innerHeight - 30, stick.ay));
+  baseEl.style.display = knobEl.style.display = 'block';
+  baseEl.style.left = (stick.ax - 58) + 'px'; baseEl.style.top = (stick.ay - 58) + 'px';
+  stickKnob(stick.ax + stick.dx * STICK_R, stick.ay + stick.dy * STICK_R);
+}
+
+function applyOrientation() {
+  var land = isLandscape();
+  document.body.classList.toggle('landscape', land);
+  document.body.classList.toggle('portrait', !land);
+  resize();
+  clampCam();
+  stickReanchor();
+}
+var orientMql = window.matchMedia ? window.matchMedia('(orientation: landscape)') : null;
+if (orientMql) {
+  if (orientMql.addEventListener) orientMql.addEventListener('change', applyOrientation);
+  else if (orientMql.addListener) orientMql.addListener(applyOrientation);
+}
+window.addEventListener('orientationchange', applyOrientation);
+window.addEventListener('resize', applyOrientation);
+applyOrientation();
 
 /* ---------------- simulação simples ---------------- */
 var SPEED = 150;
