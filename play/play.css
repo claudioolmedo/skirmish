@@ -264,6 +264,22 @@ html, body {
   display: none !important;
 }
 
+/* --- Pre-match state (M11 addendum) ------------------------------ */
+/* Claudio's rule: before a match is entered there is NO game on
+   screen — the canvas and every HUD element (top resource bar,
+   bottom command/selection/minimap bar, net-wait banner,
+   playback bar) stay hidden, and the lobby, room and loading
+   overlays sit on the plain page background. app.js' setInMatch
+   toggles body.in-match at the exact moments a match starts
+   (solo, 'go', rejoin resume, playback) and ends back at a menu. */
+body:not(.in-match) #view,
+body:not(.in-match) .ui-topbar,
+body:not(.in-match) .ui-bottombar,
+body:not(.in-match) .net-wait,
+body:not(.in-match) .playback-bar {
+  display: none !important;
+}
+
 /* --- M9: Lobby Browser — open-games table + ad sidebar ------------ */
 /* The lobby card is wider than the menu cards: a compact DE-style
    table on the left, the page's one ad slot in a 300px sidebar on
