@@ -193,10 +193,37 @@ function makeTab(href) {
 }
 
 class FakeImage {
-  constructor() { this.onload = null; this.onerror = null; }
-  addEventListener() {}
-  removeEventListener() {}
-  set src(v) { this._src = v; }
+  // Per-case loading plan, read when src is set:
+  //   { mode: 'load', delayMs } — settles as loaded after delayMs
+  //   { mode: 'hang' }          — never settles (a stalled fetch)
+  // The default models a fast successful load, which is what the
+  // older cases assumed without modelling image loading at all.
+  static plan = { mode: 'load', delayMs: 0 };
+  constructor() {
+    this.onload = null; this.onerror = null;
+    this._listeners = {};
+    this.complete = false;
+    this.naturalWidth = 0;
+    this.naturalHeight = 0;
+  }
+  addEventListener(ev, fn) { (this._listeners[ev] ||= []).push(fn); }
+  removeEventListener(ev, fn) {
+    const l = this._listeners[ev] || [];
+    const i = l.indexOf(fn);
+    if (i >= 0) l.splice(i, 1);
+  }
+  set src(v) {
+    this._src = v;
+    const plan = FakeImage.plan;
+    if (plan.mode === 'hang') return; // never completes
+    setTimeout(() => {
+      this.complete = true;
+      this.naturalWidth = 64;
+      this.naturalHeight = 64;
+      for (const fn of this._listeners.load || []) fn({});
+      if (this.onload) this.onload({});
+    }, plan.delayMs || 0);
+  }
   get src() { return this._src; }
 }
 
@@ -290,6 +317,47 @@ const roomSocket = () =>
   assert.ok(tab.el('lobby-status').textContent.includes('Match cancelled'),
     'the cancellation message shows');
   console.log('PASS (3) loading cancelled: lobby returns, chrome stays hidden');
+}
+
+// (4) The loaded gate includes the building art (Claudio's bug:
+//     the TC drew the old placeholder first, then popped to the
+//     new art). With slow art the solo start WAITS on the loading
+//     screen — the match must not begin before the art settles.
+{
+  FakeImage.plan = { mode: 'load', delayMs: 700 };
+  const tab = makeTab('https://skirmish.online/play/');
+  await boot(tab);
+  tab.el('btn-solo').click();
+  await sleep(300);
+  assert.equal(inMatch(tab), false, 'match has NOT begun while the building art is still loading');
+  assert.equal(tab.el('loading-overlay').style.display, 'flex', 'still on the loading screen');
+  let began = false;
+  for (let i = 0; i < 20 && !began; i += 1) {
+    await sleep(250);
+    began = inMatch(tab);
+  }
+  assert.ok(began, 'match begins once the building art has settled');
+  console.log('PASS (4) slow building art: the start waits for the art to settle');
+  FakeImage.plan = { mode: 'load', delayMs: 0 };
+}
+
+// (5) A hung image can never block a match: with art that never
+//     settles, the settle cap (8s) still lets the solo start land.
+{
+  FakeImage.plan = { mode: 'hang' };
+  const tab = makeTab('https://skirmish.online/play/');
+  await boot(tab);
+  tab.el('btn-solo').click();
+  await sleep(1000);
+  assert.equal(inMatch(tab), false, 'still loading while the art hangs (inside the cap)');
+  let began = false;
+  for (let i = 0; i < 40 && !began; i += 1) {
+    await sleep(300);
+    began = inMatch(tab);
+  }
+  assert.ok(began, 'match begins after the settle cap despite the hung art');
+  console.log('PASS (5) hung building art: the settle cap lets the match start');
+  FakeImage.plan = { mode: 'load', delayMs: 0 };
 }
 
 console.log('PREMATCH SMOKE: all cases passed');
