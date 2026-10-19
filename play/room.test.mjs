@@ -12,6 +12,14 @@ import {
   guestAdmitted,
   canToggleReady,
   startGate,
+  GUEST_SLOTS,
+  isGuestSlot,
+  guestSlotOf,
+  slotIsAi,
+  slotSealed,
+  slotAiMode,
+  slotLabel,
+  roomConfigText,
 } from './room.js';
 
 test('checkPassword accepts only the exact password', () => {
@@ -73,4 +81,90 @@ test('startGate: the host starts automatically when BOTH are ready', () => {
   assert.equal(startGate({ ...base, admitted: false }), false);
   assert.equal(startGate({ ...base, peerPresent: false }), false);
   assert.equal(startGate({ ...base, phase: 'starting' }), false);
+});
+
+// --- M12: the guest slot ------------------------------------------
+
+test('guest slots: the four values, junk falls back to open', () => {
+  assert.deepEqual(GUEST_SLOTS, ['open', 'ai-easy', 'ai-normal', 'closed']);
+  for (const s of GUEST_SLOTS) assert.equal(isGuestSlot(s), true, s);
+  assert.equal(isGuestSlot('ai-hard'), false);
+  assert.equal(isGuestSlot(''), false);
+  assert.equal(isGuestSlot(null), false);
+  assert.equal(guestSlotOf('ai-easy'), 'ai-easy');
+  assert.equal(guestSlotOf('closed'), 'closed');
+  assert.equal(guestSlotOf('nonsense'), 'open');
+  assert.equal(guestSlotOf(undefined), 'open');
+});
+
+test('slot predicates: AI seals the seat, closed seals it too', () => {
+  assert.equal(slotIsAi('ai-easy'), true);
+  assert.equal(slotIsAi('ai-normal'), true);
+  assert.equal(slotIsAi('open'), false);
+  assert.equal(slotIsAi('closed'), false);
+  assert.equal(slotSealed('ai-easy'), true);
+  assert.equal(slotSealed('ai-normal'), true);
+  assert.equal(slotSealed('closed'), true);
+  assert.equal(slotSealed('open'), false);
+  assert.equal(slotAiMode('ai-easy'), 'easy');
+  assert.equal(slotAiMode('ai-normal'), 'normal');
+  assert.equal(slotAiMode('open'), null);
+  assert.equal(slotAiMode('closed'), null);
+  assert.equal(slotLabel('open'), 'Open');
+  assert.equal(slotLabel('ai-easy'), 'AI · Easy');
+  assert.equal(slotLabel('ai-normal'), 'AI · Normal');
+  assert.equal(slotLabel('closed'), 'Closed');
+});
+
+test('canToggleReady: AI slot readies alone, closed never readies', () => {
+  // No peer exists with an AI slot — the host may still ready.
+  assert.equal(canToggleReady({
+    phase: 'lobby', peerPresent: false, admitted: true, guestSlot: 'ai-normal',
+  }), true);
+  assert.equal(canToggleReady({
+    phase: 'lobby', peerPresent: false, admitted: true, guestSlot: 'ai-easy',
+  }), true);
+  // A closed seat means no match at all.
+  assert.equal(canToggleReady({
+    phase: 'lobby', peerPresent: false, admitted: true, guestSlot: 'closed',
+  }), false);
+  // The phase gate still applies to AI slots.
+  assert.equal(canToggleReady({
+    phase: 'starting', peerPresent: false, admitted: true, guestSlot: 'ai-normal',
+  }), false);
+  // Open slot: unchanged (a peer is still required).
+  assert.equal(canToggleReady({
+    phase: 'lobby', peerPresent: false, admitted: true, guestSlot: 'open',
+  }), false);
+});
+
+test('startGate: AI slot starts on the host ready alone', () => {
+  const ai = {
+    role: 'host',
+    phase: 'lobby',
+    peerPresent: false,
+    admitted: true,
+    selfReady: true,
+    peerReady: false,
+    guestSlot: 'ai-normal',
+  };
+  assert.equal(startGate(ai), true);
+  assert.equal(startGate({ ...ai, selfReady: false }), false);
+  assert.equal(startGate({ ...ai, phase: 'starting' }), false);
+  assert.equal(startGate({ ...ai, role: 'guest' }), false);
+  // Closed never starts, whatever the flags say.
+  assert.equal(startGate({ ...ai, guestSlot: 'closed', peerReady: true }), false);
+});
+
+test('roomConfigText: the configuration summary line', () => {
+  assert.equal(roomConfigText({ guestSlot: 'open' }),
+    '1v1 · Arabia · Conquest · Guest: Open');
+  assert.equal(roomConfigText({ guestSlot: 'ai-normal' }),
+    '1v1 · Arabia · Conquest · Guest: AI · Normal');
+  assert.equal(roomConfigText({ guestSlot: 'closed' }),
+    '1v1 · Arabia · Conquest · Guest: Closed');
+  // From the guest's own seat the last part reads "You".
+  assert.equal(roomConfigText({ guestSlot: 'open', selfIsGuest: true }),
+    '1v1 · Arabia · Conquest · Guest: You');
+  assert.equal(roomConfigText({}), '1v1 · Arabia · Conquest · Guest: Open');
 });

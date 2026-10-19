@@ -165,7 +165,7 @@
       </div>
     </div>
     <p class="overlay-note">Quality changes only the picture — sprites, sharpness, shadows. The game is identical on every device, from an old Chromebook to a gaming PC.</p>
-    <p class="overlay-note">Test build · M11 — the Lobby Browser in the classic shape: search and filter the open games, watch every server's connection quality, then join or create. Rooms work the way the classic lobbies do: create a Public room (listed, anyone can join) or a Private one (🔒 listed, password to enter), and the match starts when both players press Start. The game itself loads only once a match begins — the lobby stays light. Matches run in lockstep: both browsers simulate the same game from the same seed and exchange only orders. On top of the M7 generated Arabia with fog of war, the M6 ages and technologies and the M5 match (scripted AI opponent or Sandbox, Conquest victory and defeat). Placeholder art is being replaced piece by piece with our own.</p>
+    <p class="overlay-note">Test build · M12 — the Lobby Browser in the classic shape: search and filter the open games, watch every server's connection quality, then join or create. Rooms work the way the classic lobbies do: create a Public room (listed, anyone can join) or a Private one (🔒 listed, password to enter), configure the guest seat — a human, an AI at Easy or Normal, or closed — and the match starts when both players press Start (an AI seat is always ready, so the full room → loading → match flow works solo for testing). The game itself loads only once a match begins — the lobby stays light. Two-human matches run in lockstep: both browsers simulate the same game from the same seed and exchange only orders. On top of the M7 generated Arabia with fog of war, the M6 ages and technologies and the M5 match (scripted AI opponent or Sandbox, Conquest victory and defeat). Placeholder art is being replaced piece by piece with our own.</p>
     <p class="overlay-note"><a href="../">← Back to the Skirmish II site</a></p>
   </div>
 </div>
@@ -263,6 +263,27 @@
           <div id="pw-set-row" class="pw-set-row" hidden>
             <input id="room-password" type="password" placeholder="Room password" autocomplete="off" maxlength="128">
           </div>
+          <!-- M12: the match settings, shown the way the
+               reference game's create lobby shows them. Map,
+               Victory and Players are the game's fixed facts
+               today — stated, not dressed up as choices. The
+               guest seat IS a choice (the same control the room
+               screen carries): a human, an AI at a difficulty,
+               or nobody. -->
+          <div class="settings-box">
+            <h4 class="settings-h">Match settings</h4>
+            <div class="setting-row"><span class="setting-name">Map</span><span class="setting-value">Arabia</span></div>
+            <div class="setting-row"><span class="setting-name">Victory</span><span class="setting-value">Conquest</span></div>
+            <div class="setting-row"><span class="setting-name">Players</span><span class="setting-value">2</span></div>
+            <div class="setting-row"><span class="setting-name">Guest slot</span>
+              <select id="create-guest-slot" class="slot-select">
+                <option value="open" selected>Open — anyone may join</option>
+                <option value="ai-easy">AI · Easy</option>
+                <option value="ai-normal">AI · Normal</option>
+                <option value="closed">Closed — no guest</option>
+              </select>
+            </div>
+          </div>
           <div class="pause-actions">
             <button id="btn-create-game" class="btn btn-gold" type="button">Create Lobby</button>
           </div>
@@ -273,9 +294,23 @@
              is one quiet line under the seats. -->
         <div id="room-section" hidden>
           <h3 class="lobby-h">Your room</h3>
+          <p id="room-config-line" class="overlay-note room-config"></p>
           <div class="slot-list">
             <div class="slot-row" id="slot-host"></div>
             <div class="slot-row" id="slot-guest"></div>
+          </div>
+          <!-- M12: the guest-seat selector — the host's alone,
+               and locked while a human guest is present. The same
+               control the create panel carries. -->
+          <div id="slot-control-row" class="slot-control-row" hidden>
+            <label class="slot-control-label">Guest slot
+              <select id="guest-slot-select" class="slot-select">
+                <option value="open">Open — anyone may join</option>
+                <option value="ai-easy">AI · Easy</option>
+                <option value="ai-normal">AI · Normal</option>
+                <option value="closed">Closed — no guest</option>
+              </select>
+            </label>
           </div>
           <p id="room-listed-line" class="overlay-note">Listed in the Lobby Browser — anyone can join.</p>
           <p id="room-private-line" class="overlay-note" hidden>🔒 Private room — guests need the invite link and the password.</p>

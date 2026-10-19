@@ -66,7 +66,8 @@ import {
 } from './play/lobby.js';
 import {
   checkPassword, peerAdmitted, guestAdmitted, canToggleReady,
-  startGate,
+  startGate, guestSlotOf, slotIsAi, slotSealed, slotAiMode,
+  slotLabel, roomConfigText,
 } from './play/room.js';
 
 const assetUrl = (rel) => new URL(rel, import.meta.url).href;
@@ -275,6 +276,11 @@ let localOwner = 0;
 let myTcId = 0; // entity id of the LOCAL player's Town Center
 const foeOwner = () => (localOwner === 0 ? 2 : 0);
 let net = null; // netplay controller (see openLobby / startNetMatch)
+let aiRoom = null; // M12: { mode, seed } while an AI-room match is the
+// live game. The room dissolves the moment such a match begins (the
+// match is local — see beginAiMatch), so this small marker is what
+// lets Restart replay the same configuration and Back to menu find
+// the Lobby Browser again, exactly like a local match's mode does.
 let localRecorder = null; // replay recorder for LOCAL matches (M8)
 let playback = null; // replay playback state while a replay runs
 
@@ -1491,7 +1497,12 @@ function renderLoading() {
     `<span class="slot-name">${label}</span>` +
     `<span class="slot-state">${loaded ? 'loaded ✓' : 'loading…'}</span>`;
   netUi.loadSlotHost.innerHTML = row('Blue — Host', m.blueLoaded);
-  netUi.loadSlotGuest.innerHTML = row('Red — Guest', m.redLoaded);
+  // M12: with an AI guest slot the red seat names the AI (it is
+  // this same client's sim — it shows loaded the moment the
+  // host's build verifies).
+  const guestLabel = slotIsAi(net.guestSlot)
+    ? `Red — ${slotLabel(net.guestSlot)}` : 'Red — Guest';
+  netUi.loadSlotGuest.innerHTML = row(guestLabel, m.redLoaded);
 }
 
 function setLoadingStatus(text) {
@@ -1643,6 +1654,82 @@ async function guestHandleStart(msg) {
   setLoadingStatus('Loaded — waiting for the host…');
 }
 
+// --- M12: the AI guest slot --------------------------------------
+//
+// With the guest seat filled by an AI, no second client exists —
+// so there is no handshake and no lockstep session. The room
+// screen and the loading screen are genuinely the online ones
+// (that is the point: the host runs the full flow alone), and
+// the match itself is a LOCAL match against the in-sim scripted
+// AI at the chosen difficulty, recorded like a local match.
+
+async function hostStartAiMatch() {
+  // Fired by the host-only ready gate when the slot is an AI.
+  if (!net || net.role !== 'host' || net.phase !== 'lobby') return;
+  const mode = slotAiMode(net.guestSlot);
+  if (!mode) return;
+  enterLoading();
+  const mine = net;
+  try {
+    await ensureGameLoaded((t) => { if (net === mine) setLoadingStatus(t); });
+  } catch {
+    if (net === mine) cancelLoading(true);
+    return;
+  }
+  if (net !== mine || net.phase !== 'starting') return; // cancelled mid-load
+  net.seed = (Math.random() * 0x7fffffff) >>> 0;
+  net.pendingSim = WasmSim.new_match(net.seed, MODE_TAG[mode]);
+  // The host's own build is its verification — and the AI seat
+  // counts as loaded the moment that build verifies: there is
+  // no second load to wait for.
+  markSelfLoaded();
+  net.peerLoaded = true;
+  renderLoading();
+  setLoadingStatus('Starting the match…');
+  beginAiMatch(mode);
+}
+
+/// The loading phase ends: the room dissolves (its socket
+/// closes, the directory entry goes with it) and the verified
+/// sim becomes a local match under the aiRoom marker.
+function beginAiMatch(mode) {
+  const seed = net.seed;
+  const candidate = net.pendingSim;
+  net.pendingSim = null;
+  // The room's life is over: mark it ended BEFORE teardown
+  // closes its socket, so the close event can never be read as
+  // a peer dropping out of the loading phase.
+  net.phase = 'ended';
+  teardownNet(); // clears the load timer, closes the room socket
+  aiRoom = { mode, seed };
+  adoptAiMatch(candidate, mode, seed);
+}
+
+/// Put an AI-room match on screen: the same per-match resets an
+/// online match gets (adoptSim), then the local corrections —
+/// the frame loop must run the AI modes' Conquest check (not
+/// the online path), and the replay records like a local match
+/// (one seat, the AI difficulty's mode tag).
+function adoptAiMatch(candidate, mode, seed) {
+  adoptSim(candidate, 0);
+  builtMode = mode;
+  localRecorder = createRecorder({
+    seed, modeTag: MODE_TAG[mode], seats: [0], view: 0,
+  });
+  setInMatch(true); // the match begins: the game appears
+  setPaused(false);
+  playing = true;
+}
+
+/// Pause-menu / end-overlay Restart for an AI-room match: the
+/// same configuration again — same seed, same AI difficulty —
+/// exactly what Restart means for a local match.
+function restartAiMatch() {
+  if (!aiRoom) return;
+  const { mode, seed } = aiRoom;
+  adoptAiMatch(WasmSim.new_match(seed, MODE_TAG[mode]), mode, seed);
+}
+
 function beginOnlineMatch() {
   // Both loaded signals are in and 'go' has flown: the loading
   // phase ends here, for both roles.
@@ -1689,14 +1776,21 @@ function renderRoom() {
   if (!inRoom) return;
   const isHost = net.role === 'host';
   const priv = net.privacy === 'private';
+  const slot = net.guestSlot || 'open';
+  const aiSlot = isHost && slotIsAi(slot);
   const hostReady = isHost ? net.selfReady : net.peerReady;
-  const guestReady = isHost ? net.peerReady : net.selfReady;
+  // M12: the AI seat always counts as ready.
+  const guestReady = aiSlot ? true : (isHost ? net.peerReady : net.selfReady);
   let hostState;
   let guestState;
   if (isHost) hostState = 'You';
   else hostState = (net.peerPresent || net.hostSeen) ? 'Here' : 'Waiting…';
   if (!isHost) {
     guestState = priv && net.pwState !== 'ok' ? 'You — password required' : 'You';
+  } else if (aiSlot) {
+    guestState = slotLabel(slot);
+  } else if (slot === 'closed') {
+    guestState = 'Closed — no guest will join';
   } else if (net.peerPwOk || net.peerPresent) {
     guestState = 'Here';
   } else if (net.doorGuest) {
@@ -1713,8 +1807,28 @@ function renderRoom() {
     '<span class="slot-dot dot-red"></span>' +
     '<span class="slot-name">Guest — Red</span>' +
     `<span class="slot-state">${guestState}${badge(guestReady)}</span>`;
-  netUi.roomListedLine.hidden = priv;
-  netUi.roomPrivateLine.hidden = !priv;
+  // M12: the configuration summary — the game's fixed facts
+  // plus the guest seat, from the viewer's own side of it.
+  if (netUi.roomConfigLine) {
+    netUi.roomConfigLine.textContent = roomConfigText({
+      guestSlot: slot, selfIsGuest: !isHost,
+    });
+  }
+  // M12: the guest-seat selector is the host's alone, and it
+  // locks while a human guest is present (or at the door): the
+  // seat cannot be reconfigured out from under a person.
+  if (netUi.slotControlRow) {
+    netUi.slotControlRow.hidden = !isHost;
+    if (netUi.roomGuestSlot) {
+      netUi.roomGuestSlot.value = slot;
+      netUi.roomGuestSlot.disabled = net.phase !== 'lobby'
+        || !!net.peerPresent || !!net.doorGuest;
+    }
+  }
+  // The listed lines describe an OPEN seat; a sealed seat is
+  // explained by the configuration line instead.
+  netUi.roomListedLine.hidden = priv || slotSealed(slot);
+  netUi.roomPrivateLine.hidden = !priv || slotSealed(slot);
   // The password prompt belongs to a guest of a private room who
   // is not in yet.
   const showPw = !isHost && priv && net.pwState !== 'ok';
@@ -1723,9 +1837,11 @@ function renderRoom() {
   netUi.pwNote.hidden = !showPwNote;
   if (showPwNote) netUi.pwNote.textContent = 'Incorrect password — try again.';
   // The Start toggle: live only for an admitted player with an
-  // admitted, present peer, in the lobby phase.
+  // admitted, present peer — or, with an AI seat, for the host
+  // alone (the AI always counts as ready).
   const can = canToggleReady({
     phase: net.phase, peerPresent: net.peerPresent, admitted: myAdmitted(),
+    guestSlot: slot,
   });
   netUi.readyBtn.disabled = !can;
   netUi.readyBtn.textContent = net.selfReady ? '✓ Ready — tap to cancel' : 'Start';
@@ -1735,7 +1851,9 @@ function renderRoom() {
 /// The both-ready rule (host side only — startGate enforces it):
 /// when both flags are up, the host's client initiates the start
 /// handshake by itself. Un-readying before that simply keeps the
-/// gate closed.
+/// gate closed. M12: with an AI guest slot the gate is the host's
+/// ready alone, and firing it starts the AI match instead — no
+/// handshake exists to send.
 function maybeStartMatch() {
   if (!net) return;
   if (startGate({
@@ -1745,8 +1863,10 @@ function maybeStartMatch() {
     admitted: myAdmitted(),
     selfReady: net.selfReady,
     peerReady: net.peerReady,
+    guestSlot: net.guestSlot,
   })) {
-    hostStartMatch();
+    if (slotIsAi(net.guestSlot)) hostStartAiMatch();
+    else hostStartMatch();
   }
 }
 
@@ -1754,6 +1874,7 @@ function toggleReady() {
   if (!net || net.phase !== 'lobby') return;
   if (!canToggleReady({
     phase: net.phase, peerPresent: net.peerPresent, admitted: myAdmitted(),
+    guestSlot: net.guestSlot,
   })) return;
   net.selfReady = !net.selfReady;
   net.client.send({ type: 'ready', ready: net.selfReady });
@@ -1876,6 +1997,14 @@ function onNetMessage(msg) {
   if (net.session && net.session.receive(msg)) return;
   switch (msg.type) {
     case 'hello': {
+      // M12: a sealed guest seat (AI / Closed) admits no human —
+      // a late hello on a stale link is told the room is full,
+      // exactly like a third opener of a two-human room.
+      if (net.role === 'host' && net.phase === 'lobby'
+        && slotSealed(net.guestSlot)) {
+        net.client.send({ type: 'room-full' });
+        break;
+      }
       if (!net.helloReplied) {
         net.helloReplied = true;
         net.client.send({ type: 'hello', v: 1, role: net.role });
@@ -2074,6 +2203,31 @@ function onNetMessage(msg) {
   }
 }
 
+/// M12: tell the room object whether this room belongs in the
+/// open-games directory right now. The seat is the host's to
+/// configure, so only the host's client sends it — a control
+/// frame the room object honors from the host's connection only
+/// and never forwards (see the relay's slot control). Sealed
+/// (AI / Closed) delists; Open relists.
+function sendSlotListed(listed) {
+  if (!net || net.role !== 'host' || !net.client) return;
+  try { net.client.send({ type: 'slot', listed: !!listed }); } catch { /* socket gone */ }
+}
+
+/// Host: set the guest seat (room screen selector). The selector
+/// is disabled while a human guest is present — this is only
+/// ever called from an enabled control — and the directory
+/// follows the seat: sealed seats leave the open list, Open
+/// returns to it (under the M10 public/private rules).
+function setGuestSlot(value) {
+  if (!net || net.role !== 'host') return;
+  const slot = guestSlotOf(value);
+  if (slot === net.guestSlot) { renderRoom(); return; }
+  net.guestSlot = slot;
+  sendSlotListed(!slotSealed(slot));
+  renderRoom();
+}
+
 function connectToRoom() {
   // M10: the HOST's create connection carries the private flag —
   // the room registers in the directory as locked (listed, like
@@ -2081,15 +2235,30 @@ function connectToRoom() {
   // never the password).
   const privFlag = net.role === 'host' && net.privacy === 'private'
     ? '&private=1' : '';
+  // M12: the host's connection also presents host=1 (only it may
+  // steer the listing later, via the slot control) and, when the
+  // seat was already filled in the create panel, listed=0 — the
+  // room then never enters the open list at all.
+  const hostFlag = net.role === 'host' ? '&host=1' : '';
+  const listedFlag = net.role === 'host' && slotSealed(net.guestSlot)
+    ? '&listed=0' : '';
   const wsUrl = RELAY_HTTP.replace(/^http/, 'ws')
-    + `/room/${encodeURIComponent(net.room)}?region=${encodeURIComponent(net.region)}${privFlag}`;
+    + `/room/${encodeURIComponent(net.room)}?region=${encodeURIComponent(net.region)}${privFlag}${hostFlag}${listedFlag}`;
   net.client = createRelayClient({
     onOpen: () => {
       net.client.send({ type: 'hello', v: 1, role: net.role });
       if (net.role === 'host') {
-        lobbyStatus(net.privacy === 'private'
-          ? 'Private room created. Share the invite link — guests also need the password.'
-          : 'Room created — it is listed in the Lobby Browser for anyone to join.');
+        // M12: a sealed seat changes what "created" means — the
+        // room is not in the public list and needs no guest.
+        if (slotIsAi(net.guestSlot)) {
+          lobbyStatus(`Room created — the guest seat is ${slotLabel(net.guestSlot)}. Press Start when you are ready.`);
+        } else if (net.guestSlot === 'closed') {
+          lobbyStatus('Room created — the guest seat is closed. Reopen it to let a player join.');
+        } else if (net.privacy === 'private') {
+          lobbyStatus('Private room created. Share the invite link — guests also need the password.');
+        } else {
+          lobbyStatus('Room created — it is listed in the Lobby Browser for anyone to join.');
+        }
       } else if (net.privacy === 'private') {
         lobbyStatus('This room is private — enter the password to join.');
       } else {
@@ -2114,6 +2283,7 @@ function connectToRoom() {
 /// as the guest and connects at once (the link flow).
 function openLobby(join) {
   setInMatch(false); // the lobby is up: no game on screen
+  aiRoom = null; // entering the lobby dissolves any AI-room match
   if (net) teardownNet();
   net = {
     role: join ? 'guest' : 'host',
@@ -2124,6 +2294,7 @@ function openLobby(join) {
     seed: null, pendingSim: null, recorder: null,
     desyncs: 0, telemetryPosted: false, pingMs: null,
     selectedRegion: null,
+    guestSlot: 'open', // M12: the second seat — Open / AI / Closed
     // M10 room model. The password lives ONLY in the host
     // client's memory (net.password), set at create time; it is
     // never persisted and never sent anywhere — guests send
@@ -2239,6 +2410,11 @@ function createGame() {
     net.password = pw; // host memory only — never persisted
     if (netUi.roomPassword) netUi.roomPassword.value = '';
   }
+  // M12: the guest seat may be configured right here, in the
+  // create panel (the same control the room screen carries). A
+  // seat filled here rides the create connection as listed=0.
+  net.guestSlot = guestSlotOf(netUi.createGuestSlot
+    ? netUi.createGuestSlot.value : 'open');
   net.region = net.selectedRegion || net.region || regionList[0].id;
   net.room = makeRoomId();
   // The room lives in memory from here — the address bar stays
@@ -2601,6 +2777,12 @@ async function main() {
       leaveNetMatch('abandoned');
       return;
     }
+    // M12: an AI-room match restarts like a local match — the
+    // same configuration (same seed, same AI difficulty).
+    if (aiRoom) {
+      restartAiMatch();
+      return;
+    }
     resetSim(chosenMode());
     setInMatch(true); // a fresh live match is on screen
     setPaused(false);
@@ -2619,6 +2801,11 @@ async function main() {
       setPaused(false);
       return;
     }
+    // M12: an AI-room match restarts with its own configuration.
+    if (aiRoom) {
+      restartAiMatch();
+      return;
+    }
     resetSim(chosenMode());
     setInMatch(true);
     playing = true;
@@ -2627,6 +2814,13 @@ async function main() {
   endMenuBtn.addEventListener('click', () => {
     if (net) {
       leaveNetMatch('abandoned');
+      return;
+    }
+    // M12: from an AI-room match, Back to menu means the Lobby
+    // Browser (the room was the way in).
+    if (aiRoom) {
+      endOverlay.style.display = 'none';
+      openLobby(null);
       return;
     }
     setInMatch(false); // back to the menu: chrome hides again
@@ -2656,9 +2850,13 @@ async function main() {
     createBtn: document.getElementById('btn-create-game'),
     roomPassword: document.getElementById('room-password'),
     pwSetRow: document.getElementById('pw-set-row'),
+    createGuestSlot: document.getElementById('create-guest-slot'),
     roomSection: document.getElementById('room-section'),
     slotHost: document.getElementById('slot-host'),
     slotGuest: document.getElementById('slot-guest'),
+    roomConfigLine: document.getElementById('room-config-line'),
+    slotControlRow: document.getElementById('slot-control-row'),
+    roomGuestSlot: document.getElementById('guest-slot-select'),
     roomListedLine: document.getElementById('room-listed-line'),
     roomPrivateLine: document.getElementById('room-private-line'),
     pwRow: document.getElementById('pw-row'),
@@ -2745,6 +2943,13 @@ async function main() {
     netUi.soloBtn.addEventListener('click', playSoloFromLobby);
   }
   if (netUi.createBtn) netUi.createBtn.addEventListener('click', createGame);
+  // M12: the room screen's guest-seat selector (host only; the
+  // create panel's twin is read by createGame itself).
+  if (netUi.roomGuestSlot) {
+    netUi.roomGuestSlot.addEventListener('change', () => {
+      setGuestSlot(netUi.roomGuestSlot.value);
+    });
+  }
   // M10: the room screen's one button toggles ready; the host's
   // client starts the match itself when both players are ready.
   if (netUi.readyBtn) netUi.readyBtn.addEventListener('click', toggleReady);

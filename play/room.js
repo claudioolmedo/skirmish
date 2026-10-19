@@ -45,15 +45,20 @@ export function guestAdmitted({ isPrivate, pwState }) {
 /// May this player flip their ready flag right now? Only in the
 /// lobby phase, with an admitted, present peer on both sides of
 /// the gate (a lone player readying up starts nothing and means
-/// nothing).
-export function canToggleReady({ phase, peerPresent, admitted }) {
+/// nothing) — EXCEPT the M12 guest-slot cases below.
+export function canToggleReady({ phase, peerPresent, admitted, guestSlot = 'open' }) {
+  if (guestSlot === 'closed') return false; // no opponent, ever
+  if (slotIsAi(guestSlot)) return phase === 'lobby'; // the host readies alone
   return phase === 'lobby' && !!peerPresent && !!admitted;
 }
 
 /// The start rule: the HOST's client — and only the host's —
 /// initiates the start handshake, automatically, the moment both
 /// joined players are ready (and the peer is admitted + present,
-/// in the lobby phase).
+/// in the lobby phase). With an AI guest slot there is no second
+/// player to wait for: the host's own ready IS the whole gate
+/// (the AI seat always counts as ready). A closed slot can never
+/// start.
 export function startGate({
   role,
   phase,
@@ -61,11 +66,73 @@ export function startGate({
   admitted,
   selfReady,
   peerReady,
+  guestSlot = 'open',
 }) {
+  if (role !== 'host' || !selfReady) return false;
+  if (slotIsAi(guestSlot)) return phase === 'lobby';
   return (
-    role === 'host' &&
-    canToggleReady({ phase, peerPresent, admitted }) &&
-    !!selfReady &&
+    canToggleReady({ phase, peerPresent, admitted, guestSlot }) &&
     !!peerReady
   );
+}
+
+// --- M12: the guest slot -------------------------------------------
+//
+// The host configures the room's second seat, the way the
+// reference game's lobby does: Open (a human may take it), an AI
+// at a difficulty (the in-sim scripted opponent fills it), or
+// Closed (nobody). With an AI slot the host can run the whole
+// online flow alone — room, ready, loading — and then play a
+// LOCAL match against the scripted AI: no second client exists,
+// so there is no lockstep session (ARCHITECTURE.md says so
+// plainly). A seat filled by AI or Closed is not an open game:
+// the room leaves the public directory while the slot is sealed.
+
+export const GUEST_SLOTS = ['open', 'ai-easy', 'ai-normal', 'closed'];
+
+export function isGuestSlot(v) {
+  return GUEST_SLOTS.includes(v);
+}
+
+/// The slot value, or 'open' for anything unrecognized — a junk
+/// value must never seal a seat by accident.
+export function guestSlotOf(v) {
+  return isGuestSlot(v) ? v : 'open';
+}
+
+export function slotIsAi(slot) {
+  return slot === 'ai-easy' || slot === 'ai-normal';
+}
+
+/// The seat is filled without a human: no human may join, and the
+/// room does not belong in the open-games directory.
+export function slotSealed(slot) {
+  return slotIsAi(slot) || slot === 'closed';
+}
+
+/// The local match mode an AI slot plays ('easy' | 'normal',
+/// the sim's MatchMode names), or null for a non-AI slot.
+export function slotAiMode(slot) {
+  if (slot === 'ai-easy') return 'easy';
+  if (slot === 'ai-normal') return 'normal';
+  return null;
+}
+
+export function slotLabel(slot) {
+  switch (slot) {
+    case 'ai-easy': return 'AI · Easy';
+    case 'ai-normal': return 'AI · Normal';
+    case 'closed': return 'Closed';
+    default: return 'Open';
+  }
+}
+
+/// The room screen's configuration summary line, e.g.
+/// "1v1 · Arabia · Conquest · Guest: AI · Normal". The settings
+/// shown are the game's fixed facts today (map, victory,
+/// players) plus the guest slot — from the guest's own seat the
+/// last part simply reads "You".
+export function roomConfigText({ guestSlot = 'open', selfIsGuest = false } = {}) {
+  const guest = selfIsGuest ? 'You' : slotLabel(guestSlot);
+  return `1v1 · Arabia · Conquest · Guest: ${guest}`;
 }
