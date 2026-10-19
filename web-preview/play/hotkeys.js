@@ -22,12 +22,14 @@
 //    too — and the Mining Camp, whose grid letter E is thereby
 //    taken, answers to G (its go-to letter). Recorded in
 //    ARCHITECTURE.md (M13).
-// 2. Panel position keys. With a building selected, Q / W / E
-//    run the panel's buttons left to right — the grid principle
-//    applied to our own panel (Town Center: Villager, Loom,
-//    Feudal Age; Barracks: Militia, Man-at-Arms; Blacksmith:
-//    Fletching, Scale Mail, Padded Archer Armor; Range/Stable:
-//    their single train button on Q).
+// 2. Panel keys. With a building selected, Q / W / E run the
+//    panel's buttons left to right — the grid principle applied
+//    to our own panel (Barracks: Militia, Man-at-Arms;
+//    Blacksmith: Fletching, Scale Mail, Padded Archer Armor;
+//    Range/Stable: their single train button on Q). ONE
+//    exception, the Town Center (2026-10-19 study fix): DE's own
+//    TC panel arrangement gives Villager Q, Loom A, Feudal Age
+//    W — see PANEL_KEYS below for the evidence.
 //
 // Go-to (jump to a building type) is Ctrl+letter with the
 // reference's letters: Lumber Camp Z, Mill I, Mining Camp G,
@@ -90,6 +92,27 @@ export const PANEL_BUTTONS = {
   stable: ['train-scout'],
   blacksmith: ['research-fletching', 'research-scalemail', 'research-padded'],
 };
+
+// Per-context letter overrides where DE does NOT run the plain
+// position keys. The Town Center is the documented case: in DE
+// the grid letter IS the button's panel position, and the TC
+// panel's own arrangement is not our button order — Create
+// Villager sits top-left (Q), Loom sits below it (A — the study
+// video's in-game tooltip reads "Loom … (Hotkey: A)"), and the
+// Feudal Age advancement takes the top row's second slot (W).
+// Sources: Age of Empires wiki, "Hotkey" (DE grid layout: the
+// key is the button's panel position) + the 2026-10-19 player
+// study (frame f_025, Loom tooltip). Villager-context letters
+// are unaffected: 'build' is not in this table, so a villager's
+// A still means force drop-off, resolved by context exactly as
+// DE resolves it. Maps button id -> [KeyboardEvent.code, letter].
+export const PANEL_KEYS = {
+  tc: {
+    train: ['KeyQ', 'Q'],
+    'research-loom': ['KeyA', 'A'],
+    'research-feudal': ['KeyW', 'W'],
+  },
+};
 export const POSITION_CODES = ['KeyQ', 'KeyW', 'KeyE'];
 export const POSITION_LETTERS = ['Q', 'W', 'E'];
 
@@ -139,6 +162,16 @@ export function resolveHotkey({ context, page, code, ctrl = false, shift = false
   }
   const buttons = PANEL_BUTTONS[context];
   if (buttons) {
+    // A context with documented DE letters (PANEL_KEYS) resolves
+    // by letter, not by our button order; every other panel runs
+    // its buttons left to right on the position keys.
+    const byLetter = PANEL_KEYS[context];
+    if (byLetter) {
+      for (const [id, [keyCode]] of Object.entries(byLetter)) {
+        if (keyCode === code) return { type: 'button', id };
+      }
+      return null;
+    }
     const idx = POSITION_CODES.indexOf(code);
     if (idx >= 0 && idx < buttons.length) return { type: 'button', id: buttons[idx] };
   }
@@ -156,6 +189,8 @@ export function badgeForButton({ context, page, id, index }) {
   if (context === 'build' && page && id.startsWith('build-')) {
     return PAGE_BADGE[page][Number(id.slice(6))] || null;
   }
+  const byLetter = PANEL_KEYS[context];
+  if (byLetter && byLetter[id]) return byLetter[id][1];
   if (PANEL_BUTTONS[context] && index >= 0 && index < POSITION_LETTERS.length) {
     return POSITION_LETTERS[index];
   }

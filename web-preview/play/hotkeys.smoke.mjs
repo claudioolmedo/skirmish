@@ -419,16 +419,38 @@ assert.notEqual(tab.el('pause-menu').style.display, 'flex', '…and did not open
 console.log('PASS (2) Q,W enters Mill placement; W arms military; Esc backs out cleanly');
 
 // ------------------------------------------------------------- (3)
-// H selects the Town Center; Q (its first button) queues a villager.
+// H selects the Town Center. Its letters are DE's own (study
+// fix, gap 1): Q trains a villager, A researches Loom, W is the
+// Feudal Age advancement — badged on the buttons, resolving
+// only in this context. And no .cmd-badge exists anywhere on
+// the grid (2026-10-19 addendum): the queue count lives in the
+// selection panel's info line, where DE puts it.
 key('KeyH');
 pump(2);
 assert.ok(cmdBtn('train'), 'Town Center selected: the train panel is up');
 assert.ok(cmdBtn('train').innerHTML.includes('<span class="cmd-key">Q</span>'),
   'the Villager button is badged Q');
+assert.ok(cmdBtn('research-loom').innerHTML.includes('<span class="cmd-key">A</span>'),
+  'the Loom button is badged A (DE)');
+assert.ok(cmdBtn('research-feudal').innerHTML.includes('<span class="cmd-key">W</span>'),
+  'the Feudal button is badged W (DE)');
 key('KeyQ');
 pump(6);
-assert.ok(cmdBtn('train').innerHTML.includes('cmd-badge'), 'Q queued a villager (queue badge shows)');
-console.log('PASS (3) TC selected + Q queues a villager');
+assert.ok(tab.el('sel-info').textContent.includes('Queue 1'),
+  'Q queued one villager — the info line carries the queue count');
+assert.ok(!cmdButtons().some((b) => b.innerHTML.includes('cmd-badge')),
+  'no queue badge on any button face (addendum)');
+key('KeyA');
+pump(6);
+assert.ok(tab.el('sel-info').textContent.includes('Queue 2'),
+  'A queued Loom at the TC (context decides: not the villager drop-off)');
+key('KeyW');
+pump(6);
+assert.ok(tab.el('toast').textContent.includes('Feudal Age needs 2 completed'),
+  'W ran the Feudal advancement (gated: its refusal explains itself)');
+assert.ok(tab.el('sel-info').textContent.includes('Queue 2'),
+  '…and queued nothing — W is not Loom any more');
+console.log('PASS (3) TC letters are DE’s: Q villager, A Loom, W Feudal; queue lives in the info line');
 
 // ------------------------------------------------------------- (4)
 // A with villagers selected and no page armed: force drop-off.
@@ -475,7 +497,7 @@ for (const [cx, cy] of [[150, 75], [151.5, 75.8], [148.5, 74.2], [153, 76.5],
 }
 assert.ok(placed, 'the canvas click laid the Lumber Camp foundation');
 // Construction takes 35 game-seconds; pump in 250 ms steps (the
-// frame loop caps at 5 ticks per frame) until it must be done.
+// frame loop caps at 9 ticks per frame) until it must be done.
 pump(500, 250);
 key('KeyZ', { ctrl: true });
 pump(2);
@@ -588,6 +610,39 @@ assert.ok(cmdBtn('page-back').innerHTML.includes('#i-back'),
 clickBtn('page-back');
 assert.deepEqual(cmdIds(), ROOT_IDS, 'Back from economic returns to the root too');
 console.log('PASS (8) mouse and keyboard share one page state: opener clicks, Back clicks');
+
+// ------------------------------------------------------------- (9)
+// Shift+train x5 (study fix, gap 4): Shift held on a train
+// button — click or hotkey — repeats the train order up to
+// five times, stopping at the first refusal; a plain press is
+// exactly one (case 3's Q -> Queue 1). Food is the binding
+// constraint here: 150 of the starting 200 remains (case 3
+// queued one villager), so the shift run lands exactly three
+// more villagers and stops at the refusal — the repeat count
+// itself (5) is pinned at source level in the lobby smoke.
+key('KeyH');
+pump(2);
+const queueLen = () => {
+  const m = /Queue (\d+)/.exec(tab.el('sel-info').textContent);
+  return m ? Number(m[1]) : 0;
+};
+const qBefore = queueLen();
+const trainBtn = cmdBtn('train');
+trainBtn.closest = () => trainBtn;
+grid.dispatch('click', { target: trainBtn, shiftKey: true });
+pump(4);
+assert.equal(queueLen(), qBefore + 3,
+  'Shift+click queued three villagers (150 food), then stopped at the refusal');
+grid.dispatch('click', { target: trainBtn });
+pump(4);
+assert.equal(queueLen(), qBefore + 3, 'a plain click with no food queues nothing');
+assert.equal(tab.el('toast').textContent, 'Housed — build a House first.',
+  '…and flashes the single-attempt refusal (the sim checks housing first here)');
+key('KeyQ', { shift: true });
+pump(4);
+assert.equal(queueLen(), qBefore + 3,
+  'Shift+Q on the hotkey path also stops at the first refusal');
+console.log('PASS (9) Shift+train repeats to five attempts, stops at first refusal; plain press is one');
 
 console.log('HOTKEYS SMOKE: all cases passed');
 process.exit(0);

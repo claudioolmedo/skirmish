@@ -702,7 +702,10 @@ dumb relay.
   (tag 3): the mirrored start spawns and Conquest applies, but no
   script drives the second seat; every command for both players
   arrives from outside. (Seed, mode, command stream) is the match.
-- **Turn structure.** 1 turn = 3 ticks (50 ms), 20 turns/s. Each
+- **Turn structure.** 1 turn = 3 ticks. A tick is 1/60 s of game
+  time and the game runs at GAME_SPEED = 1.7× wall clock (DE's
+  Normal speed; 2026-10-19 study fix), so a turn spans ≈29.4 ms
+  of real time, 34 turns/s. Each
   client assembles one bundle per turn; a turn executes only when
   BOTH bundles for it have arrived (an empty bundle is a
   heartbeat), then both bundles apply in slot order (slot 0 first,
@@ -710,7 +713,8 @@ dumb relay.
   late, execution waits — the slowest machine sets the pace
   (NET-03); sim time is never dropped.
 - **Input delay.** Commands are stamped for the turn `delay` turns
-  in the future — 4 turns (200 ms, the reference turnaround) at
+  in the future — 4 turns (≈118 ms wall at GAME_SPEED 1.7×, the
+  reference turnaround in turn units) at
   match start; the first `delay` turns are empty by construction on
   both sides. The delay adapts UP only: when more than ~35% of the
   last ~200 turns executed late, the host proposes +1 (cap 10) and
@@ -994,12 +998,19 @@ also answers as an alias):
 
 **Train / research (building selected).** Q / W / E run the
 panel's buttons left to right — the grid principle applied to
-our own panel: TC — Villager, Loom, Feudal Age; Barracks —
+our own panel: Barracks —
 Militia, Man-at-Arms; Archery Range — Archer; Stable — Scout
 Cavalry; Blacksmith — Fletching, Scale Mail, Padded Archer
-Armor. Every command-panel button carries its letter as a
-small badge (top-left; the queue badge keeps the top-right) so
-the grid is learnable by looking. Availability gating is the
+Armor. ONE exception (2026-10-19 study fix): the Town Center
+takes DE's own letters — Villager **Q**, Loom **A**, Feudal Age
+**W** (the wiki's grid rule: the letter is the button's panel
+position, and DE's TC panel is arranged that way; the study
+video's Loom tooltip reads "(Hotkey: A)"). Every command-panel button carries its letter as a
+small badge (top-left) so
+the grid is learnable by looking — and NOTHING else on the
+face: the production queue count is not badged (Claudio,
+2026-10-19); it lives in the selection panel's info line,
+queue length + progress %, as in DE. Availability gating is the
 button's own: a key for a disabled button is consumed (it must
 not leak into camera panning) and does nothing.
 

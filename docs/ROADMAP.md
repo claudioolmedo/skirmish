@@ -155,7 +155,7 @@ From the [Gap Analysis](GAP-ANALYSIS.md): the items that most make Skirmish II
   region; the nearest one is pre-highlighted), so friends choose
   the same location and everyone knows their ping before they
   play. Capacity grows by adding regions, not bigger machines.
-  Lockstep shape: 3-tick turns, commands stamped 4 turns (200 ms)
+  Lockstep shape: 3-tick turns, commands stamped 4 turns (≈118 ms wall at 1.7×)
   ahead, adapting up when the link lags; a dropped player gets a
   90-second rejoin window (the match is rebuilt from its recorded
   command stream). Anonymous match telemetry (counters only) and
@@ -309,9 +309,10 @@ From the [Gap Analysis](GAP-ANALYSIS.md): the items that most make Skirmish II
   (**Q, E raises a House** — Claudio's call; the House keeps
   its grid Q too, and the Mining Camp, whose grid E that
   takes, answers to G). With a building selected, **Q / W /
-  E** run its panel buttons left to right (Town Center:
-  Villager, Loom, Feudal Age; Blacksmith: Fletching, Scale
-  Mail, Padded Archer Armor). **A** drops off a villager's
+  E** run its panel buttons left to right (Blacksmith: Fletching, Scale
+  Mail, Padded Archer Armor) — except the Town Center, which
+  takes DE's own letters (**Q** Villager, **A** Loom, **W**
+  Feudal Age; 2026-10-19 study fix). **A** drops off a villager's
   load; **Ctrl+Z / I / G / S / B / A** cycle to a Lumber
   Camp, Mill, Mining Camp, Blacksmith, Barracks or Archery
   Range (Ctrl+Shift selects all of the kind; Ctrl+L for the

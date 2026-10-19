@@ -437,8 +437,12 @@ await boot(tab);
     'app.js renders no name line, no cost chip, no long-name class onto a button');
   assert.ok(!appJs.includes('ui-cmd-hint') && !appJs.includes('drop off resources'),
     'app.js renders no hint line under the command grid in any state');
-  assert.ok(appJs.includes('cmd-key') && appJs.includes('cmd-badge'),
-    'app.js keeps the letter badge and the queue badge on the face');
+  assert.ok(appJs.includes('cmd-key') && !appJs.includes('cmd-badge'),
+    'app.js keeps ONLY the letter badge on the face — no queue badge (2026-10-19 addendum)');
+  assert.ok(!css.includes('cmd-badge'),
+    'ui.css styles no queue badge either — the count lives in the selection info line');
+  assert.ok(appJs.includes('SHIFT_TRAIN_COUNT = 5'),
+    'the Shift+train repeat count is five (gap 4), pinned at the source');
   assert.ok(appJs.includes('Train Militia — 60 food · 20 gold')
     && appJs.includes('Train Archer — 25 wood · 45 gold'),
     'the hover tooltip carries name + FULL cost, both resources included');

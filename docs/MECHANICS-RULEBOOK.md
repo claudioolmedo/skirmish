@@ -2109,8 +2109,8 @@ design), giving every packet a full turn to arrive. The delay is fixed
 per match settings, never adaptive mid-match.
 *Source:* Bettner & Terrano (the N+2 rule). · *Impl:* the transport
 stamps each bundle for an execution TURN `delay` turns ahead (turns of
-3 ticks / 50 ms, not the reference's ≈200 ms turns) and holds it until
-that turn; the delay starts at 4 turns (200 ms) and adapts UP when the
+3 ticks / ≈29.4 ms wall at 1.7× game speed, not the reference's ≈200 ms turns) and holds it until
+that turn; the delay starts at 4 turns (≈118 ms) and adapts UP when the
 link lags, never fixed per match settings; local single-player input
 does not take the bundle path (it applies immediately, delay 0).
 · *Status:* **DIFFERS** (scheduling-ahead matches; turn size,
@@ -2280,8 +2280,9 @@ special commands like Town Bell / Set Rally), greyed with reasons when
 unavailable (prerequisites TEC-07, housed BLD-10, unaffordable ECO-01).
 A full-screen tech-tree view shows the whole graph.
 *Source:* GAP 11.4. · *Impl:* the command panel ships in basic form
-(villager → House/Farm with placement flow; TC → Train with queue badge
-and housed explanations) — buttons are data-driven from the same
+(villager → House/Farm with placement flow; TC → Train with the
+queue count + progress in the selection info line, no badge on the
+button face (2026-10-19), and housed explanations) — buttons are data-driven from the same
 availability functions the sim validates with (BLD-15), so panel and sim
 can never disagree. · *Status:* **DIFFERS**.
 

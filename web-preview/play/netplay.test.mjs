@@ -8,7 +8,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  TURN_TICKS, INITIAL_DELAY_TURNS, LOAD_TIMEOUT_MS,
+  TURN_TICKS, GAME_SPEED, TICK_MS, TURN_MS, advanceTicks,
+  INITIAL_DELAY_TURNS, LOAD_TIMEOUT_MS,
   validateCommand, applyCommand, tcIdOf,
   encodeMessage, decodeMessage,
   createSession, createRecorder, isReplay, replayEvents,
@@ -510,4 +511,51 @@ test('startAt: a session opens at the frontier with an empty delay buffer', () =
   // localCommand stamps for the open turn, delay turns ahead.
   const stamped = s.localCommand({ t: 'train_vil' });
   assert.ok(stamped >= 100 + INITIAL_DELAY_TURNS);
+});
+
+// ------------------------------------------------------- game speed
+// Gap 2 (2026-10-19 study fix): one constant, GAME_SPEED = 1.7
+// (DE Normal), drives BOTH places real time becomes ticks —
+// the local frame loop's accumulator (advanceTicks) and the
+// netplay turn pacing (TURN_MS). The sim never sees it.
+
+test('game speed: 1.7x drives the turn interval math', () => {
+  assert.equal(GAME_SPEED, 1.7, 'DE Normal speed');
+  assert.equal(TICK_MS, 1000 / 60, 'a tick is 1/60 s of game time');
+  // A turn is TURN_TICKS ticks of game time, compressed by the
+  // speed into wall time: 3 ticks x 16.67 ms / 1.7 ≈ 29.41 ms.
+  assert.ok(Math.abs(TURN_MS - (TURN_TICKS * TICK_MS) / GAME_SPEED) < 1e-9);
+  assert.ok(Math.abs(TURN_MS - 29.4118) < 0.001, `TURN_MS=${TURN_MS}`);
+  // 34 turns per real second; one game second per ~588 wall ms.
+  assert.ok(Math.abs(1000 / TURN_MS - 34) < 0.01);
+});
+
+test('game speed: advanceTicks converts wall time to ticks at 1.7x', () => {
+  // One real second runs 102 ticks (1.7 game seconds at 60 tps).
+  // Float note: TICK_MS is a hair over 50/3, so a single 1000 ms
+  // step can floor to 101 with a near-full-tick remainder — the
+  // remainder carries, so the long-run rate is exact (below).
+  const s1 = advanceTicks(0, 1000);
+  assert.ok(Math.abs(s1.ticks - 102) <= 1, `ticks ${s1.ticks}`);
+  assert.ok(s1.accMs >= 0 && s1.accMs < TICK_MS, `remainder ${s1.accMs}`);
+  // A 50 ms frame step runs 5 ticks and keeps the 0.1-tick rest.
+  const s2 = advanceTicks(0, 50);
+  assert.equal(s2.ticks, 5);
+  assert.ok(Math.abs(s2.accMs - (85 - 5 * TICK_MS)) < 1e-9);
+  // The remainder carries: two half-steps equal one whole step.
+  const a = advanceTicks(0, 25);
+  const b = advanceTicks(a.accMs, 25);
+  assert.equal(a.ticks + b.ticks, s2.ticks);
+  // A render frame at 60 Hz advances 1.7 ticks on average:
+  // over 60 frames that is 102 ticks (±1 for float accumulation
+  // in the remainder, the same property the pre-1.7x accumulator
+  // had).
+  let acc = 0;
+  let total = 0;
+  for (let i = 0; i < 60; i++) {
+    const r = advanceTicks(acc, 1000 / 60);
+    acc = r.accMs;
+    total += r.ticks;
+  }
+  assert.ok(Math.abs(total - 102) <= 1, `ticks over 60 frames: ${total}`);
 });
