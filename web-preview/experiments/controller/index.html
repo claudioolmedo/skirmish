@@ -60,27 +60,35 @@
     background: rgba(240, 229, 200, .35); border: 2px solid rgba(240, 229, 200, .7);
   }
 
-  /* ---------- Xbox diamond (right thumb) ---------- */
-  #pad {
-    position: fixed; right: 14px; bottom: 64px; z-index: 7;
-    width: 196px; height: 196px; touch-action: none;
+  /* ---------- rodas laterais (os dois polegares) ----------
+     O MESMO sistema dos dois lados: um disco onde o polegar
+     descansa. Arrastar à volta do centro da roda gira o destaque
+     no menu radial do centro do ecrã; soltar seleciona. O núcleo
+     da roda é a zona morta = cancelar. Sem botões Xbox. */
+  .sidewheel {
+    position: fixed; z-index: 7; width: 132px; height: 132px;
+    border-radius: 50%; touch-action: none; cursor: pointer;
+    border: 2px solid rgba(240, 229, 200, .55);
+    box-shadow: 0 3px 10px rgba(0,0,0,.5), inset 0 0 0 1px rgba(0,0,0,.3);
+    background: conic-gradient(from -30deg,
+      rgba(232,217,168,.34) 0deg 60deg, rgba(20,14,6,.42) 60deg 120deg,
+      rgba(232,217,168,.34) 120deg 180deg, rgba(20,14,6,.42) 180deg 240deg,
+      rgba(232,217,168,.34) 240deg 300deg, rgba(20,14,6,.42) 300deg 360deg);
   }
-  .pbtn {
-    position: absolute; width: 58px; height: 58px; border-radius: 50%;
+  .sidewheel.active { border-color: #ffd75e; box-shadow: 0 0 18px rgba(255,215,94,.6); }
+  .sw-rotor { position: absolute; inset: 0; pointer-events: none; }
+  .sw-marker {
+    position: absolute; left: 50%; top: 6px; width: 14px; height: 14px;
+    margin-left: -7px; border-radius: 50%; background: #ffd75e;
+    border: 2px solid rgba(0,0,0,.5); box-shadow: 0 0 8px rgba(255,215,94,.85);
+  }
+  .sw-core {
+    position: absolute; left: 50%; top: 50%; width: 54px; height: 54px;
+    margin: -27px 0 0 -27px; border-radius: 50%;
+    background: rgba(20, 14, 6, .6); border: 2px solid rgba(240, 229, 200, .4);
+    color: rgba(240, 229, 200, .75); font-size: 15px;
     display: flex; align-items: center; justify-content: center;
-    font-family: Arial, sans-serif; font-weight: bold; font-size: 22px; color: #fff;
-    border: 2px solid rgba(0,0,0,.45); box-shadow: 0 3px 8px rgba(0,0,0,.5);
-    touch-action: none; cursor: pointer;
-  }
-  .pbtn:active { transform: scale(.92); filter: brightness(1.25); }
-  #btn-y { left: 69px; top: 0;    background: #d9a92c; color: #241a02; }
-  #btn-x { left: 0;    top: 69px; background: #2b6fd3; }
-  #btn-b { right: 0;   top: 69px; background: #cf3527; }
-  #btn-a { left: 69px; bottom: 0; background: #3fae4a; }
-  .pbtn small {
-    position: absolute; bottom: -17px; left: 0; right: 0; text-align: center;
-    font-size: 10px; font-weight: normal; color: #f0e5c8; letter-spacing: .03em;
-    text-shadow: 0 1px 2px #000; pointer-events: none;
+    pointer-events: none;
   }
 
   #foot {
@@ -93,7 +101,7 @@
      A classe .landscape/.portrait no <body> é posta por JS via
      matchMedia('(orientation: landscape)') — muda ao virar o
      telefone, sem recarregar. Paisagem é a postura de consola:
-     mover à esquerda, botões à direita. */
+     rodas nos dois lados, centradas nas margens. */
   #rotate-hint {
     display: none;
     color: rgba(240, 229, 200, .85); font-size: 11px; letter-spacing: .02em;
@@ -101,13 +109,17 @@
     border-radius: 999px; padding: 4px 10px;
   }
   body.portrait #rotate-hint { display: block; }
-  body.portrait #pad {
-    right: 10px; bottom: 56px;
-    transform: scale(.86); transform-origin: bottom right;
+  body.portrait .sidewheel { width: 118px; height: 118px; }
+  body.portrait .sw-core { width: 48px; height: 48px; margin: -24px 0 0 -24px; }
+  body.portrait #wheel-left  { left: 10px;  bottom: calc(58px + env(safe-area-inset-bottom, 0px)); }
+  body.portrait #wheel-right { right: 10px; bottom: calc(58px + env(safe-area-inset-bottom, 0px)); }
+  body.landscape #wheel-left {
+    left: calc(12px + env(safe-area-inset-left, 0px));
+    top: 50%; transform: translateY(-50%);
   }
-  body.landscape #pad {
+  body.landscape #wheel-right {
     right: calc(12px + env(safe-area-inset-right, 0px));
-    bottom: auto; top: 50%; transform: translateY(-50%);
+    top: 50%; transform: translateY(-50%);
   }
   body.landscape #hud-top { padding-top: calc(10px + env(safe-area-inset-top, 0px)); }
   body.landscape #status, body.landscape #hint { max-width: 58vw; }
@@ -118,7 +130,7 @@
 <canvas id="world"></canvas>
 
 <div id="hud-top">
-  <div id="hint">Experimento — stick move a câmara · o ponto é a mira · A age no ponto · segura no ponto: menu radial</div>
+  <div id="hint">Toca no ponto para selecionar · Rodas laterais: gira e solta para dar a ordem</div>
   <div id="status">A carregar…</div>
   <div id="rotate-hint">Vira o telefone para jogar como consola</div>
 </div>
@@ -129,11 +141,13 @@
 <div id="stick-base"></div>
 <div id="stick-knob"></div>
 
-<div id="pad">
-  <div class="pbtn" id="btn-y">Y<small>base</small></div>
-  <div class="pbtn" id="btn-x">X<small>ordem</small></div>
-  <div class="pbtn" id="btn-b">B<small>cancelar</small></div>
-  <div class="pbtn" id="btn-a">A<small>agir</small></div>
+<div class="sidewheel" id="wheel-left">
+  <div class="sw-rotor"><div class="sw-marker"></div></div>
+  <div class="sw-core">✕</div>
+</div>
+<div class="sidewheel" id="wheel-right">
+  <div class="sw-rotor"><div class="sw-marker"></div></div>
+  <div class="sw-core">✕</div>
 </div>
 
 <div id="foot">Experimento de controle — não faz parte do jogo (ainda).</div>
@@ -142,10 +156,14 @@
 'use strict';
 /* =====================================================================
    EXPERIMENTO DE CONTROLE — página isolada, não faz parte do jogo.
-   Esquema tipo consola (PS5/Xbox) para RTS no telemóvel:
-   - polegar esquerdo: joystick flutuante move a câmara;
-   - ponto fixo no centro do ecrã é a mira/ponteiro;
-   - botões A/B/X/Y à direita agem sobre o que a mira aponta.
+   Esquema de RODAS LATERAIS para RTS no telemóvel (v4):
+   - DUAS rodas, uma para cada polegar — o mesmo sistema dos dois
+     lados: arrastar à volta da roda gira o destaque no menu radial
+     que aparece à volta do ponto central; soltar seleciona;
+   - ponto fixo no centro do ecrã é a mira/ponteiro: um toque nele
+     faz a ação inteligente (selecionar / ordenar);
+   - arrastar na metade esquerda, fora da roda, move a câmara
+     (joystick flutuante). Sem botões Xbox.
    ===================================================================== */
 
 var WORLD_W = 2400, WORLD_H = 1600;
@@ -198,7 +216,7 @@ var selected = null;      // a minha unidade selecionada
 var constructions = [];   // casas/fazendas do menu radial (demo)
 var cam = { x: base.x - viewW / 2, y: base.y - viewH / 2 };
 
-/* -------- menu radial: segurar no ponto, girar, soltar -------- */
+/* -------- menu radial: rodas laterais giram, soltar seleciona -------- */
 var WHEEL_ITEMS = [
   { id: 'move',   label: 'Mover' },
   { id: 'gather', label: 'Recolher' },
@@ -207,8 +225,9 @@ var WHEEL_ITEMS = [
   { id: 'farm',   label: 'Fazenda' },
   { id: 'stop',   label: 'Parar' }
 ];
-var WHEEL_HOLD_MS = 180, WHEEL_ZONE = 70, WHEEL_IN = 52;
-var wheel = null;         // { id, open, x, y, target, slice, timer }
+var WHEEL_IN = 52;
+var DOT_TAP_ZONE = 70, DOT_TAP_MS = 350, DOT_TAP_SLOP = 14;
+var wheelGesture = null;  // { id, side, el, rotor, cx, cy, innerR, slice, hadSlice, target }
 var statusOverride = '', statusOverrideUntil = 0;
 function note(text, ms) {
   statusOverride = text;
@@ -250,16 +269,16 @@ var ringEl = document.getElementById('dot-ring');
 
 function statusText(t) {
   if (t.what === 'unit') {
-    if (t.u.side === 'me') return 'Aldeão (teu) — A: selecionar';
-    if (t.u.side === 'enemy') return selected ? 'Inimigo — A: atacar' : 'Inimigo — seleciona um aldeão primeiro';
-    return selected ? 'Unidade neutra — A: atacar' : 'Unidade neutra — seleciona um aldeão primeiro';
+    if (t.u.side === 'me') return 'Aldeão (teu) — toca no ponto para selecionar';
+    if (t.u.side === 'enemy') return selected ? 'Inimigo — toca no ponto para atacar · ou gira uma roda' : 'Inimigo — seleciona um aldeão primeiro';
+    return selected ? 'Unidade neutra — toca no ponto para atacar · ou gira uma roda' : 'Unidade neutra — seleciona um aldeão primeiro';
   }
   if (t.what === 'node') {
     var name = t.n.kind === 'tree' ? 'Árvore' : 'Bagas';
-    return selected ? name + ' — A: recolher' : name + ' — seleciona um aldeão primeiro';
+    return selected ? name + ' — toca no ponto para recolher · ou gira uma roda' : name + ' — seleciona um aldeão primeiro';
   }
-  if (t.what === 'base') return selected ? 'Centro da Vila — A: mover para aqui' : 'Centro da Vila — a tua base (Y volta aqui)';
-  return selected ? 'Chão — A: mover selecionado para aqui' : 'Chão — mira um aldeão teu e prime A';
+  if (t.what === 'base') return selected ? 'Centro da Vila — toca no ponto para mover para aqui' : 'Centro da Vila — a tua base';
+  return selected ? 'Chão — toca no ponto para mover o selecionado · ou gira uma roda' : 'Chão — toca no ponto sobre um aldeão teu para o selecionar';
 }
 
 /* ---------------- ordens ---------------- */
@@ -267,28 +286,22 @@ function orderMove(u, x, y) { u.order = { type: 'move', x: x, y: y }; }
 function orderToEntity(u, ent, type) { u.order = { type: type, ent: ent }; }
 
 /* ---------------- menu radial ---------------- */
-function wheelSliceAt(px, py) {
-  var dx = px - viewW / 2, dy = py - viewH / 2;
-  var d = Math.hypot(dx, dy);
-  if (d < WHEEL_IN || d > wheelOuter()) return -1;      // zona morta / fora = cancelar
+/* Ângulo do dedo à volta de um centro → fatia do menu.
+   Convenção única: 0° = cima, cresce no sentido dos ponteiros do
+   relógio, 6 fatias de 60°. Serve para a roda lateral (onde o dedo
+   gira) E para o menu do centro (onde o destaque roda): a rotação
+   é 1:1, no mesmo sentido, dos dois lados. */
+function sectorAt(dx, dy) {
   var deg = (Math.atan2(dy, dx) * 180 / Math.PI + 90 + 360) % 360;  // 0° = cima
-  return Math.floor(deg / 60) % WHEEL_ITEMS.length;
+  return { deg: deg, slice: Math.floor(deg / 60) % WHEEL_ITEMS.length };
 }
-function startWheel(e) {
-  var pid = e.pointerId;
-  wheel = { id: pid, open: false, x: e.clientX, y: e.clientY, target: null, slice: -1, timer: null };
-  wheel.timer = setTimeout(function () {
-    if (!wheel || wheel.id !== pid) return;
-    wheel.open = true;
-    wheel.target = dotWorld();                 // o ponto do mundo fica capturado
-    wheel.slice = wheelSliceAt(wheel.x, wheel.y);
-  }, WHEEL_HOLD_MS);
-}
-function cancelWheel(silent) {
-  if (!wheel) return;
-  if (wheel.timer) clearTimeout(wheel.timer);
-  wheel = null;
-  if (!silent) note('Menu cancelado');
+function cancelSideWheel() {
+  if (!wheelGesture) return;
+  var g = wheelGesture;
+  wheelGesture = null;
+  g.el.classList.remove('active');
+  if (g.rotor) g.rotor.style.transform = '';
+  if (g.hadSlice) note('Menu cancelado');
 }
 function nearestNode(p, maxD) {
   var best = null, bestD = maxD;
@@ -336,43 +349,63 @@ function executeWheel(idx, target) {
     note('Ordem: Parar');
   }
 }
-function wheelEnd(e, cancelled) {
-  if (!wheel || e.pointerId !== wheel.id) return;
-  var w = wheel;
-  wheel = null;
-  if (w.timer) clearTimeout(w.timer);
-  if (!w.open || cancelled) return;
-  if (w.slice >= 0) executeWheel(w.slice, w.target);
+function sideWheelEnd(e, cancelled) {
+  if (!wheelGesture || e.pointerId !== wheelGesture.id) return;
+  var g = wheelGesture;
+  wheelGesture = null;
+  g.el.classList.remove('active');
+  if (g.rotor) g.rotor.style.transform = '';
+  if (cancelled) { if (g.hadSlice) note('Menu cancelado'); return; }
+  if (!selected) return;   // sem seleção o menu aparece desativado — nada executa
+  if (g.slice >= 0) executeWheel(g.slice, g.target);
+  else if (g.hadSlice) note('Menu cancelado');
 }
+/* As duas rodas: gesto idêntico dos dois lados. A primeira roda
+   tocada é a dona do destaque; a segunda é ignorada até a
+   primeira soltar — sem estados presos. */
+function bindSideWheel(el, side) {
+  el.addEventListener('pointerdown', function (e) {
+    e.preventDefault(); e.stopPropagation();
+    if (wheelGesture) return;
+    var r = el.getBoundingClientRect();
+    wheelGesture = {
+      id: e.pointerId, side: side, el: el,
+      rotor: el.querySelector('.sw-rotor'),
+      cx: r.left + r.width / 2, cy: r.top + r.height / 2,
+      innerR: r.width / 2 * 0.42,
+      slice: -1, hadSlice: false,
+      target: dotWorld()           // o ponto do mundo fica capturado ao tocar
+    };
+    el.classList.add('active');
+    sideWheelMove(e);              // destaca já a fatia sob o dedo
+  });
+  el.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+}
+function sideWheelMove(e) {
+  var g = wheelGesture;
+  if (!g || e.pointerId !== g.id) return;
+  var dx = e.clientX - g.cx, dy = e.clientY - g.cy;
+  if (Math.hypot(dx, dy) < g.innerR) { g.slice = -1; return; }   // núcleo da roda = cancelar
+  var s = sectorAt(dx, dy);
+  g.slice = s.slice; g.hadSlice = true;
+  if (g.rotor) g.rotor.style.transform = 'rotate(' + s.deg + 'deg)';
+}
+bindSideWheel(document.getElementById('wheel-left'), 'left');
+bindSideWheel(document.getElementById('wheel-right'), 'right');
 
-function pressA() {
+/* Toque no ponto central = ação inteligente (a antiga ação "A"):
+   sem seleção, seleciona a minha unidade sob a mira; com seleção,
+   dá a ordem óbvia no ponto (recolher / atacar / mover). */
+function tapDot() {
   var t = targetAtDot();
   if (t.what === 'unit' && t.u.side === 'me') { selected = t.u; return; }
-  if (!selected) return;
+  if (!selected) { note('Primeiro seleciona um aldeão teu'); return; }
   if (t.what === 'ground') orderMove(selected, t.x, t.y);
   else if (t.what === 'base') orderMove(selected, base.x, base.y + base.size / 2 + 30);
   else if (t.what === 'node') orderToEntity(selected, t.n, 'gather');
   else if (t.what === 'unit') orderToEntity(selected, t.u, 'attack');
 }
-function pressX() { pressA(); }        // X = ordem inteligente no ponto (igual a A aqui)
-function pressB() {
-  if (selected) { selected.order = null; selected = null; }
-}
-function pressY() { cam.x = base.x - viewW / 2; cam.y = base.y - viewH / 2; clampCam(); }
-
-function bindBtn(id, fn) {
-  var el = document.getElementById(id);
-  el.addEventListener('pointerdown', function (e) {
-    e.preventDefault(); e.stopPropagation();
-    if (wheel && wheel.open) return;   // com o menu aberto, os botões não roubam o gesto
-    fn();
-  });
-  el.addEventListener('contextmenu', function (e) { e.preventDefault(); });
-}
-bindBtn('btn-a', pressA);
-bindBtn('btn-b', pressB);
-bindBtn('btn-x', pressX);
-bindBtn('btn-y', pressY);
+var tapCand = null;   // { id, x, y, t } — toque no ponto à espera de soltar
 
 /* ---------------- joystick flutuante (metade esquerda) ---------------- */
 var stick = { id: null, ax: 0, ay: 0, dx: 0, dy: 0 };
@@ -391,25 +424,23 @@ function stickKnob(x, y) {
 function stickHide() { baseEl.style.display = knobEl.style.display = 'none'; }
 
 cv.addEventListener('pointerdown', function (e) {
-  // Zona do ponto central (~70 px): segurar abre o menu radial.
+  if (wheelGesture) return;   // com uma roda ativa, outros toques não dão ordens
+  // Zona do ponto central (~70 px): um TOQUE faz a ação inteligente.
   var dc = Math.hypot(e.clientX - window.innerWidth / 2, e.clientY - window.innerHeight / 2);
-  if (dc <= WHEEL_ZONE) {
-    if (wheel) return;
-    if (!selected) { note('Seleciona um aldeão com o botão A'); return; }
-    startWheel(e);
+  if (dc <= DOT_TAP_ZONE) {
+    tapCand = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now() };
     return;
   }
-  if (wheel) return;   // com o menu a caminho/aberto, não nasce outro stick
-  if (e.clientX >= window.innerWidth / 2) return;   // metade direita é dos botões
+  if (e.clientX >= window.innerWidth / 2) return;   // metade direita: só a roda comanda
   if (stick.id !== null) return;
   stick.id = e.pointerId; stick.ax = e.clientX; stick.ay = e.clientY; stick.dx = 0; stick.dy = 0;
   stick.px = e.clientX; stick.py = e.clientY;
   stickShow(e.clientX, e.clientY);
 });
 window.addEventListener('pointermove', function (e) {
-  if (wheel && e.pointerId === wheel.id) {
-    wheel.x = e.clientX; wheel.y = e.clientY;
-    if (wheel.open) wheel.slice = wheelSliceAt(e.clientX, e.clientY);
+  if (wheelGesture && e.pointerId === wheelGesture.id) { sideWheelMove(e); return; }
+  if (tapCand && e.pointerId === tapCand.id) {
+    if (Math.hypot(e.clientX - tapCand.x, e.clientY - tapCand.y) > DOT_TAP_SLOP) tapCand = null;
     return;
   }
   if (e.pointerId !== stick.id) return;
@@ -426,15 +457,26 @@ function stickEnd(e) {
 }
 window.addEventListener('pointerup', stickEnd);
 window.addEventListener('pointercancel', stickEnd);
-window.addEventListener('pointerup', function (e) { wheelEnd(e, false); });
-window.addEventListener('pointercancel', function (e) { wheelEnd(e, true); });
+window.addEventListener('pointerup', function (e) {
+  if (tapCand && e.pointerId === tapCand.id) {
+    var c = tapCand; tapCand = null;
+    if (!wheelGesture && performance.now() - c.t < DOT_TAP_MS &&
+        Math.hypot(e.clientX - c.x, e.clientY - c.y) <= DOT_TAP_SLOP) tapDot();
+  }
+  sideWheelEnd(e, false);
+});
+window.addEventListener('pointercancel', function (e) {
+  if (tapCand && e.pointerId === tapCand.id) tapCand = null;
+  sideWheelEnd(e, true);
+});
 document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 
 /* ---------------- orientação: detetar e adaptar ----------------
    matchMedia é o sinal fiável no Safari iOS; screen.orientation é
    só recurso. A classe no <body> muda o layout (CSS) ao vivo, sem
-   recarregar: paisagem = consola (stick à esquerda, botões à
-   direita centrados); retrato = compacto, com o aviso para virar. */
+   recarregar: paisagem = consola (rodas nos dois lados,
+   centradas); retrato = rodas nos cantos inferiores, com o
+   aviso para virar. */
 function isLandscape() {
   if (window.matchMedia) return window.matchMedia('(orientation: landscape)').matches;
   if (window.screen && screen.orientation && screen.orientation.type) {
@@ -461,7 +503,7 @@ function stickReanchor() {
 }
 
 function applyOrientation() {
-  if (wheel) cancelWheel(false);   // rodar a meio do menu cancela limpo
+  if (wheelGesture) cancelSideWheel();   // rodar a meio do gesto cancela limpo
   var land = isLandscape();
   document.body.classList.toggle('landscape', land);
   document.body.classList.toggle('portrait', !land);
@@ -594,13 +636,14 @@ function draw() {
     ctx.fillText(b.kind === 'house' ? 'Casa' : 'Fazenda', b.x, b.y + h + 24);
   });
 
-  // alvo capturado pelo menu radial
-  if (wheel && wheel.open && wheel.target) {
+  // alvo capturado ao tocar numa roda lateral
+  if (wheelGesture && selected && wheelGesture.target) {
+    var wt = wheelGesture.target;
     ctx.strokeStyle = '#ffd75e'; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.arc(wheel.target.x, wheel.target.y, 16, 0, 7); ctx.stroke();
+    ctx.beginPath(); ctx.arc(wt.x, wt.y, 16, 0, 7); ctx.stroke();
     ctx.beginPath();
-    ctx.moveTo(wheel.target.x - 22, wheel.target.y); ctx.lineTo(wheel.target.x + 22, wheel.target.y);
-    ctx.moveTo(wheel.target.x, wheel.target.y - 22); ctx.lineTo(wheel.target.x, wheel.target.y + 22);
+    ctx.moveTo(wt.x - 22, wt.y); ctx.lineTo(wt.x + 22, wt.y);
+    ctx.moveTo(wt.x, wt.y - 22); ctx.lineTo(wt.x, wt.y + 22);
     ctx.stroke();
   }
 
@@ -635,7 +678,7 @@ function draw() {
   });
 
   ctx.restore();
-  if (wheel && wheel.open) drawWheel();
+  if (wheelGesture) drawWheel();
   return t;
 }
 
@@ -680,38 +723,40 @@ function drawWheelIcon(kind, x, y, s, color) {
 function drawWheel() {
   var cx = viewW / 2, cy = viewH / 2;
   var rOut = wheelOuter(), rIn = WHEEL_IN;
+  var disabled = !selected;   // sem seleção: menu visível mas desativado
   ctx.beginPath(); ctx.arc(cx, cy, rOut + 12, 0, 7);
   ctx.fillStyle = 'rgba(20, 14, 6, .5)'; ctx.fill();
   for (var i = 0; i < WHEEL_ITEMS.length; i++) {
     var a0 = (i * 60 - 90) * Math.PI / 180, a1 = a0 + Math.PI / 3, am = (a0 + a1) / 2;
-    var hot = wheel.slice === i;
+    var hot = !disabled && wheelGesture.slice === i;
     var ro = hot ? rOut + 12 : rOut;
     ctx.beginPath();
     ctx.arc(cx, cy, ro, a0, a1);
     ctx.arc(cx, cy, rIn, a1, a0, true);
     ctx.closePath();
-    ctx.fillStyle = hot ? 'rgba(201, 162, 39, .95)' : 'rgba(232, 217, 168, .88)';
+    ctx.fillStyle = hot ? 'rgba(201, 162, 39, .95)'
+      : disabled ? 'rgba(150, 150, 150, .5)' : 'rgba(232, 217, 168, .88)';
     ctx.fill();
     ctx.strokeStyle = 'rgba(28, 20, 6, .8)'; ctx.lineWidth = 2; ctx.stroke();
-    var color = hot ? '#241a02' : '#4a3a16';
+    var color = hot ? '#241a02' : disabled ? 'rgba(30, 30, 30, .55)' : '#4a3a16';
     var ir = rIn + (ro - rIn) * 0.34, lr = rIn + (ro - rIn) * 0.72;
     drawWheelIcon(WHEEL_ITEMS[i].id, cx + Math.cos(am) * ir, cy + Math.sin(am) * ir, hot ? 12 : 10, color);
     ctx.fillStyle = color; ctx.textAlign = 'center';
     ctx.font = 'bold ' + (hot ? 17 : 13.5) + 'px Georgia';
     ctx.fillText(WHEEL_ITEMS[i].label, cx + Math.cos(am) * lr, cy + Math.sin(am) * lr + 5);
   }
-  // centro: ponto de cancelamento (zona morta)
+  // centro: a mira — o alvo das ordens (cancelar é no núcleo da roda)
   ctx.beginPath(); ctx.arc(cx, cy, rIn - 6, 0, 7);
   ctx.fillStyle = 'rgba(20, 14, 6, .55)'; ctx.fill();
-  ctx.fillStyle = '#f0e5c8'; ctx.font = 'bold 11px Georgia'; ctx.textAlign = 'center';
-  ctx.fillText('✕', cx, cy + 4);
+  ctx.beginPath(); ctx.arc(cx, cy, 5, 0, 7);
+  ctx.fillStyle = disabled ? 'rgba(200, 200, 200, .6)' : '#ffd75e'; ctx.fill();
 }
 
 /* ---------------- ciclo principal ---------------- */
 var last = performance.now();
 function frame(now) {
   var dt = Math.min(0.05, (now - last) / 1000); last = now;
-  if (stick.id !== null && !(wheel && wheel.open)) {   // menu aberto: câmara congela
+  if (stick.id !== null && !wheelGesture) {   // roda ativa: câmara congela
     cam.x += stick.dx * 950 * dt;
     cam.y += stick.dy * 950 * dt;
     clampCam();
@@ -719,10 +764,10 @@ function frame(now) {
   stepUnits(dt);
   var t = draw();
   var s;
-  if (wheel && wheel.open) {
-    s = wheel.slice >= 0
-      ? 'Menu: ' + WHEEL_ITEMS[wheel.slice].label + ' — solta para confirmar'
-      : 'Menu radial — gira à volta do centro e solta numa fatia (centro/fora cancela)';
+  if (wheelGesture) {
+    if (!selected) s = 'Menu radial — seleciona um aldeão primeiro (toca no ponto sobre ele)';
+    else if (wheelGesture.slice >= 0) s = 'Menu: ' + WHEEL_ITEMS[wheelGesture.slice].label + ' — solta para confirmar';
+    else s = 'Menu radial — gira a roda lateral e solta numa fatia (núcleo da roda cancela)';
   } else if (statusOverride && now < statusOverrideUntil) {
     s = statusOverride;
   } else {
@@ -730,7 +775,7 @@ function frame(now) {
   }
   if (statusEl.textContent !== s) statusEl.textContent = s;
   ringEl.classList.toggle('hot', t.what !== 'ground');
-  ringEl.classList.toggle('wheel', !!(wheel && wheel.open));
+  ringEl.classList.toggle('wheel', !!wheelGesture);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
