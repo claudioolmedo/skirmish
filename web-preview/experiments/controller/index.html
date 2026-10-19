@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Experimento de Controle — Skirmish II</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    height: 100%; overflow: hidden; background: #1c1710;
+    font-family: Georgia, 'Times New Roman', serif;
+    touch-action: none; overscroll-behavior: none;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #world { position: fixed; inset: 0; display: block; touch-action: none; }
+
+  /* ---------- header: instruction + status ---------- */
+  #hud-top {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 5;
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    padding: 10px 12px 0; pointer-events: none; text-align: center;
+  }
+  #hint {
+    color: #f0e5c8; font-size: 13px; letter-spacing: .02em;
+    background: rgba(20, 14, 6, .72); border: 1px solid rgba(201, 162, 39, .55);
+    border-radius: 999px; padding: 6px 14px;
+  }
+  #status {
+    color: #1c1710; font-weight: bold; font-size: 14px;
+    background: #e8d9a8; border: 1px solid #c9a227; border-radius: 8px;
+    padding: 6px 14px; min-height: 32px; max-width: 92vw;
+  }
+
+  /* ---------- center dot: the pointer ---------- */
+  #dot-ring {
+    position: fixed; left: 50%; top: 50%; z-index: 4;
+    width: 54px; height: 54px; margin: -27px 0 0 -27px;
+    border: 2px solid rgba(240, 229, 200, .9); border-radius: 50%;
+    box-shadow: 0 0 0 1px rgba(0,0,0,.35), inset 0 0 0 1px rgba(0,0,0,.25);
+    pointer-events: none;
+  }
+  #dot {
+    position: fixed; left: 50%; top: 50%; z-index: 4;
+    width: 8px; height: 8px; margin: -4px 0 0 -4px;
+    background: #ffd75e; border: 1px solid rgba(0,0,0,.5); border-radius: 50%;
+    pointer-events: none;
+  }
+  #dot-ring.hot { border-color: #ffd75e; box-shadow: 0 0 12px rgba(255, 215, 94, .8); }
+
+  /* ---------- floating joystick (left thumb) ---------- */
+  #stick-base, #stick-knob { position: fixed; z-index: 6; border-radius: 50%; pointer-events: none; display: none; }
+  #stick-base {
+    width: 116px; height: 116px;
+    background: rgba(240, 229, 200, .10); border: 2px solid rgba(240, 229, 200, .45);
+  }
+  #stick-knob {
+    width: 52px; height: 52px;
+    background: rgba(240, 229, 200, .35); border: 2px solid rgba(240, 229, 200, .7);
+  }
+
+  /* ---------- Xbox diamond (right thumb) ---------- */
+  #pad {
+    position: fixed; right: 14px; bottom: 64px; z-index: 7;
+    width: 196px; height: 196px; touch-action: none;
+  }
+  .pbtn {
+    position: absolute; width: 58px; height: 58px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-family: Arial, sans-serif; font-weight: bold; font-size: 22px; color: #fff;
+    border: 2px solid rgba(0,0,0,.45); box-shadow: 0 3px 8px rgba(0,0,0,.5);
+    touch-action: none; cursor: pointer;
+  }
+  .pbtn:active { transform: scale(.92); filter: brightness(1.25); }
+  #btn-y { left: 69px; top: 0;    background: #d9a92c; color: #241a02; }
+  #btn-x { left: 0;    top: 69px; background: #2b6fd3; }
+  #btn-b { right: 0;   top: 69px; background: #cf3527; }
+  #btn-a { left: 69px; bottom: 0; background: #3fae4a; }
+  .pbtn small {
+    position: absolute; bottom: -17px; left: 0; right: 0; text-align: center;
+    font-size: 10px; font-weight: normal; color: #f0e5c8; letter-spacing: .03em;
+    text-shadow: 0 1px 2px #000; pointer-events: none;
+  }
+
+  #foot {
+    position: fixed; left: 0; right: 0; bottom: 8px; z-index: 5;
+    text-align: center; color: rgba(240, 229, 200, .75); font-size: 12px;
+    pointer-events: none; text-shadow: 0 1px 2px #000;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="world"></canvas>
+
+<div id="hud-top">
+  <div id="hint">Experimento — stick move a câmara · o ponto é a mira · A age no ponto</div>
+  <div id="status">A carregar…</div>
+</div>
+
+<div id="dot-ring"></div>
+<div id="dot"></div>
+
+<div id="stick-base"></div>
+<div id="stick-knob"></div>
+
+<div id="pad">
+  <div class="pbtn" id="btn-y">Y<small>base</small></div>
+  <div class="pbtn" id="btn-x">X<small>ordem</small></div>
+  <div class="pbtn" id="btn-b">B<small>cancelar</small></div>
+  <div class="pbtn" id="btn-a">A<small>agir</small></div>
+</div>
+
+<div id="foot">Experimento de controle — não faz parte do jogo (ainda).</div>
+
+<script>
+'use strict';
+/* =====================================================================
+   EXPERIMENTO DE CONTROLE — página isolada, não faz parte do jogo.
+   Esquema tipo consola (PS5/Xbox) para RTS no telemóvel:
+   - polegar esquerdo: joystick flutuante move a câmara;
+   - ponto fixo no centro do ecrã é a mira/ponteiro;
+   - botões A/B/X/Y à direita agem sobre o que a mira aponta.
+   ===================================================================== */
+
+var WORLD_W = 2400, WORLD_H = 1600;
+var cv = document.getElementById('world');
+var ctx = cv.getContext('2d');
+var viewW = 0, viewH = 0, dpr = 1;
+
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  viewW = window.innerWidth; viewH = window.innerHeight;
+  cv.width = Math.round(viewW * dpr); cv.height = Math.round(viewH * dpr);
+  cv.style.width = viewW + 'px'; cv.style.height = viewH + 'px';
+}
+window.addEventListener('resize', resize);
+resize();
+
+/* ---------------- mundo ---------------- */
+var patches = [];
+(function makeTerrain() {
+  var cols = ['#5d7a35', '#64853a', '#556f31', '#6b8a40'];
+  var seed = 7;
+  function rnd() { seed = (seed * 16807) % 2147483647; return seed / 2147483647; }
+  for (var gy = 0; gy < 8; gy++) for (var gx = 0; gx < 12; gx++) {
+    patches.push({ x: gx * 200, y: gy * 200, w: 200, h: 200, c: cols[Math.floor(rnd() * cols.length)] });
+  }
+  patches.push({ x: 240, y: 1020, w: 560, h: 480, c: '#8a734a' });   // terra junto à base
+  patches.push({ x: 1650, y: 150, w: 620, h: 420, c: '#a08b57' });   // clareira arenosa
+  patches.push({ x: 1000, y: 900, w: 480, h: 380, c: '#4e6b2d' });   // relva densa
+})();
+
+var base = { x: 430, y: 1240, size: 128, kind: 'base' };
+
+var nodes = [];
+(function makeNodes() {
+  var trees = [[700, 350], [860, 300], [1010, 380], [790, 520], [1500, 1050], [1620, 980], [2050, 1250], [2180, 1120]];
+  var berries = [[1120, 700], [1260, 760], [1900, 480]];
+  trees.forEach(function (p) { nodes.push({ x: p[0], y: p[1], r: 22, kind: 'tree', amount: 100 }); });
+  berries.forEach(function (p) { nodes.push({ x: p[0], y: p[1], r: 20, kind: 'berry', amount: 100 }); });
+})();
+
+var units = [];
+function addUnit(x, y, side) {
+  units.push({ x: x, y: y, r: 12, side: side, hp: 100, order: null, flash: 0 });
+}
+addUnit(600, 1180, 'me'); addUnit(620, 1300, 'me'); addUnit(540, 1360, 'me');
+addUnit(1250, 900, 'neutral'); addUnit(1330, 960, 'neutral');
+addUnit(2000, 700, 'enemy'); addUnit(2080, 780, 'enemy');
+
+var selected = null;      // a minha unidade selecionada
+var cam = { x: base.x - viewW / 2, y: base.y - viewH / 2 };
+
+function clampCam() {
+  cam.x = Math.max(0, Math.min(WORLD_W - viewW, cam.x));
+  cam.y = Math.max(0, Math.min(WORLD_H - viewH, cam.y));
+}
+clampCam();
+
+/* ---------------- mira (ponto central) ---------------- */
+function dotWorld() { return { x: cam.x + viewW / 2, y: cam.y + viewH / 2 }; }
+
+function targetAtDot() {
+  var p = dotWorld();
+  var best = null, bestD = 1e9;
+  units.forEach(function (u) {
+    var d = Math.hypot(u.x - p.x, u.y - p.y);
+    if (d < u.r + 22 && d < bestD) { best = u; bestD = d; }
+  });
+  if (best) return { what: 'unit', u: best };
+  nodes.forEach(function (n) {
+    if (n.amount <= 0) return;
+    var d = Math.hypot(n.x - p.x, n.y - p.y);
+    if (d < n.r + 22 && d < bestD) { best = n; bestD = d; }
+  });
+  if (best) return { what: 'node', n: best };
+  if (Math.abs(p.x - base.x) < base.size / 2 + 14 && Math.abs(p.y - base.y) < base.size / 2 + 14) {
+    return { what: 'base' };
+  }
+  return { what: 'ground', x: p.x, y: p.y };
+}
+
+var statusEl = document.getElementById('status');
+var ringEl = document.getElementById('dot-ring');
+
+function statusText(t) {
+  if (t.what === 'unit') {
+    if (t.u.side === 'me') return 'Aldeão (teu) — A: selecionar';
+    if (t.u.side === 'enemy') return selected ? 'Inimigo — A: atacar' : 'Inimigo — seleciona um aldeão primeiro';
+    return selected ? 'Unidade neutra — A: atacar' : 'Unidade neutra — seleciona um aldeão primeiro';
+  }
+  if (t.what === 'node') {
+    var name = t.n.kind === 'tree' ? 'Árvore' : 'Bagas';
+    return selected ? name + ' — A: recolher' : name + ' — seleciona um aldeão primeiro';
+  }
+  if (t.what === 'base') return selected ? 'Centro da Vila — A: mover para aqui' : 'Centro da Vila — a tua base (Y volta aqui)';
+  return selected ? 'Chão — A: mover selecionado para aqui' : 'Chão — mira um aldeão teu e prime A';
+}
+
+/* ---------------- ordens ---------------- */
+function orderMove(u, x, y) { u.order = { type: 'move', x: x, y: y }; }
+function orderToEntity(u, ent, type) { u.order = { type: type, ent: ent }; }
+
+function pressA() {
+  var t = targetAtDot();
+  if (t.what === 'unit' && t.u.side === 'me') { selected = t.u; return; }
+  if (!selected) return;
+  if (t.what === 'ground') orderMove(selected, t.x, t.y);
+  else if (t.what === 'base') orderMove(selected, base.x, base.y + base.size / 2 + 30);
+  else if (t.what === 'node') orderToEntity(selected, t.n, 'gather');
+  else if (t.what === 'unit') orderToEntity(selected, t.u, 'attack');
+}
+function pressX() { pressA(); }        // X = ordem inteligente no ponto (igual a A aqui)
+function pressB() {
+  if (selected) { selected.order = null; selected = null; }
+}
+function pressY() { cam.x = base.x - viewW / 2; cam.y = base.y - viewH / 2; clampCam(); }
+
+function bindBtn(id, fn) {
+  var el = document.getElementById(id);
+  el.addEventListener('pointerdown', function (e) { e.preventDefault(); e.stopPropagation(); fn(); });
+  el.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+}
+bindBtn('btn-a', pressA);
+bindBtn('btn-b', pressB);
+bindBtn('btn-x', pressX);
+bindBtn('btn-y', pressY);
+
+/* ---------------- joystick flutuante (metade esquerda) ---------------- */
+var stick = { id: null, ax: 0, ay: 0, dx: 0, dy: 0 };
+var baseEl = document.getElementById('stick-base');
+var knobEl = document.getElementById('stick-knob');
+var STICK_R = 46;
+
+function stickShow(x, y) {
+  baseEl.style.display = knobEl.style.display = 'block';
+  baseEl.style.left = (x - 58) + 'px'; baseEl.style.top = (y - 58) + 'px';
+  stickKnob(x, y);
+}
+function stickKnob(x, y) {
+  knobEl.style.left = (x - 26) + 'px'; knobEl.style.top = (y - 26) + 'px';
+}
+function stickHide() { baseEl.style.display = knobEl.style.display = 'none'; }
+
+cv.addEventListener('pointerdown', function (e) {
+  if (e.clientX >= window.innerWidth / 2) return;   // metade direita é dos botões
+  if (stick.id !== null) return;
+  stick.id = e.pointerId; stick.ax = e.clientX; stick.ay = e.clientY; stick.dx = 0; stick.dy = 0;
+  stickShow(e.clientX, e.clientY);
+});
+window.addEventListener('pointermove', function (e) {
+  if (e.pointerId !== stick.id) return;
+  var dx = e.clientX - stick.ax, dy = e.clientY - stick.ay;
+  var d = Math.hypot(dx, dy);
+  if (d > STICK_R) { dx = dx / d * STICK_R; dy = dy / d * STICK_R; }
+  stick.dx = dx / STICK_R; stick.dy = dy / STICK_R;
+  stickKnob(stick.ax + dx, stick.ay + dy);
+});
+function stickEnd(e) {
+  if (e.pointerId !== stick.id) return;
+  stick.id = null; stick.dx = 0; stick.dy = 0; stickHide();
+}
+window.addEventListener('pointerup', stickEnd);
+window.addEventListener('pointercancel', stickEnd);
+document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+/* ---------------- simulação simples ---------------- */
+var SPEED = 150;
+function stepUnits(dt) {
+  units.forEach(function (u) {
+    if (u.flash > 0) u.flash -= dt;
+    if (!u.order) return;
+    var o = u.order, tx, ty, stopD;
+    if (o.type === 'move') { tx = o.x; ty = o.y; stopD = 4; }
+    else {
+      if (o.ent.hp !== undefined && o.ent.hp <= 0) { u.order = null; return; }
+      if (o.ent.amount !== undefined && o.ent.amount <= 0) { u.order = null; return; }
+      tx = o.ent.x; ty = o.ent.y; stopD = (o.ent.r || 20) + u.r + 8;
+    }
+    var dx = tx - u.x, dy = ty - u.y, d = Math.hypot(dx, dy);
+    if (d > stopD) {
+      u.x += dx / d * SPEED * dt; u.y += dy / d * SPEED * dt;
+    } else if (o.type === 'move') {
+      u.order = null;
+    } else if (o.type === 'gather') {
+      o.ent.amount = Math.max(0, o.ent.amount - 22 * dt);
+      if (o.ent.amount <= 0) u.order = null;
+    } else if (o.type === 'attack') {
+      o.ent.hp -= 40 * dt; o.ent.flash = 0.12;
+      if (o.ent.hp <= 0) u.order = null;
+    }
+  });
+  units = units.filter(function (u) { return u.hp > 0; });
+  if (selected && selected.hp <= 0) selected = null;
+}
+
+/* ---------------- desenho ---------------- */
+function draw() {
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, viewW, viewH);
+  ctx.save();
+  ctx.translate(-cam.x, -cam.y);
+
+  patches.forEach(function (p) { ctx.fillStyle = p.c; ctx.fillRect(p.x, p.y, p.w, p.h); });
+
+  // base: quadrado tipo Centro da Vila
+  ctx.fillStyle = '#7d7468'; ctx.fillRect(base.x - base.size / 2, base.y - base.size / 2, base.size, base.size);
+  ctx.fillStyle = '#9c2b16'; ctx.fillRect(base.x - base.size / 2 + 14, base.y - base.size / 2 + 14, base.size - 28, base.size - 28);
+  ctx.fillStyle = '#c9a227'; ctx.fillRect(base.x - 5, base.y - base.size / 2 - 16, 10, 18);
+  ctx.fillStyle = '#f0e5c8'; ctx.font = 'bold 15px Georgia'; ctx.textAlign = 'center';
+  ctx.fillText('Centro da Vila', base.x, base.y + base.size / 2 + 22);
+
+  var t = targetAtDot();
+
+  // recursos
+  nodes.forEach(function (n) {
+    if (n.kind === 'tree') {
+      if (n.amount > 0) {
+        ctx.fillStyle = '#5d4630'; ctx.fillRect(n.x - 4, n.y + 4, 8, 16);
+        ctx.fillStyle = '#2e5d27'; ctx.beginPath(); ctx.arc(n.x, n.y - 6, 20, 0, 7); ctx.fill();
+        ctx.fillStyle = '#3a7031'; ctx.beginPath(); ctx.arc(n.x - 7, n.y - 12, 12, 0, 7); ctx.fill();
+      } else {
+        ctx.fillStyle = '#6e5840'; ctx.fillRect(n.x - 6, n.y + 6, 12, 9);
+      }
+    } else {
+      ctx.fillStyle = n.amount > 0 ? '#46682e' : '#7a7a52';
+      ctx.beginPath(); ctx.arc(n.x, n.y, 18, 0, 7); ctx.fill();
+      if (n.amount > 0) {
+        ctx.fillStyle = '#b03a6e';
+        [[-8, -4], [6, -8], [0, 6], [10, 4], [-11, 7]].forEach(function (o) {
+          ctx.beginPath(); ctx.arc(n.x + o[0], n.y + o[1], 3.4, 0, 7); ctx.fill();
+        });
+      }
+    }
+    if (t.what === 'node' && t.n === n) {
+      ctx.strokeStyle = '#ffd75e'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(n.x, n.y, n.r + 9, 0, 7); ctx.stroke();
+    }
+  });
+
+  // unidades
+  units.forEach(function (u) {
+    if (u.order && u.order.type === 'move' && u === selected) {
+      ctx.strokeStyle = 'rgba(240,229,200,.5)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(u.x, u.y); ctx.lineTo(u.order.x, u.order.y); ctx.stroke();
+    }
+    ctx.fillStyle = u.side === 'me' ? '#2b6fd3' : (u.side === 'enemy' ? '#cf3527' : '#9a958c');
+    if (u.flash > 0) ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.arc(u.x, u.y, u.r, 0, 7); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,.55)'; ctx.lineWidth = 2; ctx.stroke();
+    if (u === selected) {
+      ctx.strokeStyle = '#7ee787'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(u.x, u.y, u.r + 6, 0, 7); ctx.stroke();
+    }
+    if (t.what === 'unit' && t.u === u) {
+      ctx.strokeStyle = '#ffd75e'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(u.x, u.y, u.r + 10, 0, 7); ctx.stroke();
+    }
+    if (u.hp < 100) {
+      ctx.fillStyle = '#000'; ctx.fillRect(u.x - 14, u.y - u.r - 12, 28, 5);
+      ctx.fillStyle = '#7ee787'; ctx.fillRect(u.x - 13, u.y - u.r - 11, 26 * Math.max(0, u.hp) / 100, 3);
+    }
+  });
+
+  ctx.restore();
+  return t;
+}
+
+/* ---------------- ciclo principal ---------------- */
+var last = performance.now();
+function frame(now) {
+  var dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (stick.id !== null) {
+    cam.x += stick.dx * 950 * dt;
+    cam.y += stick.dy * 950 * dt;
+    clampCam();
+  }
+  stepUnits(dt);
+  var t = draw();
+  var s = statusText(t);
+  if (statusEl.textContent !== s) statusEl.textContent = s;
+  ringEl.classList.toggle('hot', t.what !== 'ground');
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
