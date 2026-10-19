@@ -406,9 +406,13 @@ function drawSpriteW(im, sx, sy, wWorld, dyWorld = 0) {
 // building later. Fallback chain per building: this
 // art -> whatever the renderer used before (original stage art / CC0
 // placeholder / vector). One image serves both players for the test
-// (no per-owner tint yet). Loading is fire-and-forget alongside the
-// placeholder sprites, inside the M10 loading phase.
-const BUILDING_ART = { img: {}, loaded: false };
+// (no per-owner tint yet). Loading starts inside the M10 loading
+// phase, and ensureGameLoaded() AWAITS the whole set settling
+// (loaded or errored, capped — see whenBuildingArtSettled) before
+// any match may start: a match that opened on unsettled art drew
+// the CC0 placeholder first and popped to the real art when it
+// landed (Claudio's bug report, 2026-10-18).
+const BUILDING_ART = { img: {}, settled: {}, loaded: false };
 const BUILDING_ART_FILES = {
   tc: 'town-center.png',
   house: 'house.png',
@@ -430,14 +434,44 @@ const BUILDING_ART_KEY = {
   0: 'house', 2: 'barracks', 3: 'lumber', 4: 'mill', 5: 'mining',
   6: 'range', 7: 'stable', 8: 'blacksmith',
 };
+// The settle cap: the loading gate waits for the art, but a hung
+// image (stalled connection) must never block a match longer
+// than this. Whatever is still in flight past the cap keeps the
+// in-draw fallback chain (with the pending guard in drawTC /
+// drawBarracks covering the pop until it lands).
+const BUILDING_ART_SETTLE_TIMEOUT_MS = 8000;
+let buildingArtSettledPromise = null;
 function loadBuildingArt() {
   if (BUILDING_ART.loaded) return;
   BUILDING_ART.loaded = true;
+  const pending = [];
   for (const [key, file] of Object.entries(BUILDING_ART_FILES)) {
     const im = new Image();
-    im.src = assetUrl('assets-original/buildings/' + file);
     BUILDING_ART.img[key] = im;
+    BUILDING_ART.settled[key] = false;
+    pending.push(new Promise((resolve) => {
+      const done = () => { BUILDING_ART.settled[key] = true; resolve(); };
+      im.addEventListener('load', done);
+      im.addEventListener('error', done);
+      im.src = assetUrl('assets-original/buildings/' + file);
+      // A cached image may already be complete (loaded or broken)
+      // the moment src is set — that counts as settled too.
+      if (im.complete) done();
+    }));
   }
+  const cap = new Promise((r) => { setTimeout(r, BUILDING_ART_SETTLE_TIMEOUT_MS); });
+  buildingArtSettledPromise = Promise.race([Promise.all(pending), cap]);
+}
+// Resolves once every building-art image has settled (loaded or
+// errored), or after BUILDING_ART_SETTLE_TIMEOUT_MS — whichever
+// comes first. Resolves immediately if art was never kicked off.
+function whenBuildingArtSettled() {
+  return buildingArtSettledPromise || Promise.resolve();
+}
+// True while a building-art image is still in flight (not loaded,
+// not errored). False for keys that never started loading.
+function buildingArtPending(key) {
+  return BUILDING_ART.settled[key] === false;
 }
 // Draw building art bottom-anchored like the placeholder sprites:
 // full image when frac >= 1, otherwise clip-revealed to the bottom
@@ -1698,6 +1732,17 @@ function ensureGameLoaded(onStep) {
       loadPlaceholderSprites();
       loadBuildingArt();
       loadTierSprites(Q);
+      // The local "loaded" readiness includes the building-art
+      // set: this promise must not resolve while a building PNG
+      // is still in flight, or the match's first frames draw the
+      // CC0 placeholder and pop to the real art when it lands.
+      // Settled means loaded OR errored (a failed image keeps the
+      // fallback chain), capped at BUILDING_ART_SETTLE_TIMEOUT_MS
+      // so a hung image can never block a match. Every entry
+      // funnels through here — solo start, the host's start, the
+      // guest's start-ack (the M10 loaded signal), AI rooms,
+      // rejoin and replay — so gating here gates them all.
+      await whenBuildingArtSettled();
       // The world constants are the same for every match (fixed
       // world size); read them off a throwaway probe sim so no
       // match code ever runs before they exist.
@@ -2145,6 +2190,16 @@ async function rejoinFromResync(msg) {
   // client rebuilds the sim from the seed and fast-forwards it,
   // chunked so the page stays alive, then both sides resume from
   // the frontier via startAt/rebase.
+  // A rejoin can land on a client whose game never loaded in this
+  // page (fresh tab on the same link): go through the same load
+  // gate as every other entry — WasmSim and the building art
+  // (settled, capped) — before rebuilding.
+  try {
+    await ensureGameLoaded();
+  } catch {
+    lobbyStatus('The game failed to load — check your connection and try rejoining again.');
+    return;
+  }
   net.phase = 'rebuilding';
   net.seed = msg.seed;
   const slot = typeof msg.yourSlot === 'number' ? msg.yourSlot : 1;
@@ -4184,8 +4239,15 @@ function drawTC(wx, wy, owner = 0) {
   const tcArtHalf = (TC_ART_CELLS * CS) / 2;
   if (drawSpriteW(BUILDING_ART.img.tc, sx, sy,
     TC_ART_CELLS * CS * 1.12, tcArtHalf * 0.55)) return;
-  if (drawSpriteW(SPRITES.tc, sx, sy,
-    TC_ART_CELLS * CS * 1.12, tcArtHalf * 0.55)) return;
+  // While the real art is still in flight — reachable only when
+  // the loading gate's settle cap let the match start first —
+  // fall through to the vector Town Center below instead of the
+  // CC0 placeholder photo, so the eventual pop is from our own
+  // shapes, not a photo swap. Once the art has settled the normal
+  // chain resumes: an errored image keeps the placeholder.
+  if (!buildingArtPending('tc') &&
+    drawSpriteW(SPRITES.tc, sx, sy,
+      TC_ART_CELLS * CS * 1.12, tcArtHalf * 0.55)) return;
   const h = 2.2 * camS; // wall height
   poly([l, b, up(b, h), up(l, h)], '#b09468'); // front-left wall
   poly([b, r, up(r, h), up(b, h)], '#8a6f45'); // front-right wall
@@ -4306,7 +4368,10 @@ function drawBarracks(b) {
   if (drawArtImage(BUILDING_ART.img.barracks, sx, sy, 13.5, 2.6,
     b.complete ? 1 : b.progress)) {
     // Base44 test art drawn (full, or clip-revealed by progress).
-  } else if (spriteReady(im)) {
+  } else if (spriteReady(im) && !buildingArtPending('barracks')) {
+    // Same pending guard as drawTC: while the real art is still
+    // in flight, grow the vector block below rather than the CC0
+    // placeholder photo; a settled (errored) image restores it.
     const w = 13.5 * camS;
     const h = w * (im.naturalHeight / im.naturalWidth);
     const base = sy + 2.6 * camS;

@@ -31,6 +31,11 @@ function makeCtx() {
       get: (t, k) => {
         if (k === 'canvas') return { width: 0, height: 0 };
         if (k === 'measureText') return () => ({ width: 10 });
+        if (k === 'getImageData') {
+          // makeRedSheet (enemy palette swap) reads real pixels
+          // once sheet images report loaded.
+          return (x, y, w, h) => ({ data: new Uint8ClampedArray(Math.max(4, w * h * 4)) });
+        }
         if (k === 'createLinearGradient' || k === 'createRadialGradient') {
           return () => ({ addColorStop() {} });
         }
@@ -206,10 +211,33 @@ function makeTab(href) {
 
 const IMG_LOADS = [];
 class FakeImage {
-  constructor() { this.onload = null; this.onerror = null; }
-  addEventListener() {}
-  removeEventListener() {}
-  set src(v) { this._src = v; IMG_LOADS.push(v); }
+  // Models a fast successful load ('load' fires on a later tick):
+  // the match-start gate awaits the building art settling, and a
+  // never-settling stub would hold every start for the 8s cap.
+  constructor() {
+    this.onload = null; this.onerror = null;
+    this._listeners = {};
+    this.complete = false;
+    this.naturalWidth = 0;
+    this.naturalHeight = 0;
+  }
+  addEventListener(ev, fn) { (this._listeners[ev] ||= []).push(fn); }
+  removeEventListener(ev, fn) {
+    const l = this._listeners[ev] || [];
+    const i = l.indexOf(fn);
+    if (i >= 0) l.splice(i, 1);
+  }
+  set src(v) {
+    this._src = v;
+    IMG_LOADS.push(v);
+    setTimeout(() => {
+      this.complete = true;
+      this.naturalWidth = 64;
+      this.naturalHeight = 64;
+      for (const fn of this._listeners.load || []) fn({});
+      if (this.onload) this.onload({});
+    }, 0);
+  }
   get src() { return this._src; }
 }
 
