@@ -24,7 +24,10 @@ staging area (`~/workspace/skirmish-art/processed/`).
 | File | Building |
 |---|---|
 | `town-center.png` | Town Center |
-| `house.png` | House |
+| `house.png` | House (finished) |
+| `house-stage1.png` | House under construction — stage 1: foundation + posts |
+| `house-stage2.png` | House under construction — stage 2: stone walls + frame + scaffolding |
+| `house-stage3.png` | House under construction — stage 3: walls complete, roof beams, scaffolding |
 | `barracks.png` | Barracks |
 | `lumber-camp.png` | Lumber Camp |
 | `mill.png` | Mill |
@@ -37,3 +40,18 @@ staging area (`~/workspace/skirmish-art/processed/`).
 Status: **test set** — wired into the renderer (M13 + art test) so the
 look can be judged in a real match before more batches are generated.
 The same image serves both players for now (no per-owner tint yet).
+
+## House construction stages
+
+`house-stage1..3.png` and the finished `house.png` are **one strip
+generation**: a single four-frame construction sequence generated on
+Claudio's Base44 account on 2026-10-18 (same app, same prompt
+standard) and sliced into frames that share one 237×273 canvas with
+bottom-aligned ground lines. The finished House art therefore now
+comes from the same strip (it replaced the batch-1 `house.png`), so
+a House under construction grows stage by stage — foundation +
+posts → stone walls + frame + scaffolding → walls complete, roof
+beams, scaffolding → finished house — with no design jump at
+completion. The renderer picks the frame by build progress
+(thirds); if a stage frame fails to load it falls back to
+clip-revealing the finished art over the foundation diamond.
