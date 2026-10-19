@@ -61,6 +61,7 @@ import {
 } from './play/groups.js';
 import {
   TURN_TICKS as NET_TURN_TICKS, REJOIN_GRACE_MS, LOAD_TIMEOUT_MS,
+  GAME_SPEED, TICK_MS, advanceTicks,
   applyCommand as netApplyCommand, tcIdOf as netTcIdOf,
   createSession, createRecorder, replayEvents, isReplay,
   createRelayClient, probeRegionPing, makeRoomId, buildPlayUrl,
@@ -78,6 +79,7 @@ import {
 import {
   PAGE_KINDS, resolveHotkey, badgeForButton, edgePan,
 } from './play/hotkeys.js';
+import { diffFeedEvents } from './play/feed.js';
 
 const assetUrl = (rel) => new URL(rel, import.meta.url).href;
 
@@ -113,6 +115,7 @@ const selPortrait = document.getElementById('sel-portrait');
 const selName = document.getElementById('sel-name');
 const selInfo = document.getElementById('sel-info');
 const selGrid = document.getElementById('sel-grid');
+const feedEl = document.getElementById('event-feed');
 const minimapCanvas = document.getElementById('minimap');
 const mmCtx = minimapCanvas.getContext('2d');
 const toast = document.getElementById('toast');
@@ -365,6 +368,87 @@ let flashUntil = 0;
 function flash(msg) {
   flashText = msg;
   flashUntil = performance.now() + 2600;
+}
+
+// --- Event notification feed (2026-10-19 study fix, gap 3) --------
+// DE's top-left event log ("House Built", "Villager Created",
+// "Sheep Found", "Loom Research Complete"...): how a player
+// tracks the game while looking somewhere else. Own-player
+// events only, detected by diffing snapshots of the state the
+// client already reads every frame for its own seat (completed
+// buildings, living units by kind, researched techs, age, owned
+// sheep) — nothing here observes the opponent, so the feed is
+// fog-fair by construction. The diff -> message mapping is the
+// pure play/feed.js; this layer owns the snapshot and the DOM.
+// No audio (that is a separate, later gap).
+
+const FEED_MAX_LINES = 5;
+let feedPrev = null; // previous snapshot; null until a match seeds it
+
+function ownFeedSnapshot() {
+  const built = {};
+  for (const b of buildingList()) {
+    if (b.owner === localOwner && b.complete) built[b.id] = b.kind;
+  }
+  const st = entityState();
+  const units = {};
+  let sheep = 0;
+  for (let i = 0; i < st.count; i++) {
+    if (st.owners[i] !== localOwner || st.hp[i * 2] < 1) continue;
+    const k = st.kinds[i];
+    if (k === KIND_SHEEP) sheep++;
+    else if (k !== KIND_TC) units[k] = (units[k] || 0) + 1;
+  }
+  const mask = myTechMask();
+  return {
+    built, units, sheep,
+    age: myAge(),
+    techs: {
+      loom: (mask & 1) !== 0,
+      fletching: (mask & 4) !== 0,
+      scalemail: (mask & 8) !== 0,
+      padded: (mask & 16) !== 0,
+      maa: (mask & 32) !== 0,
+    },
+  };
+}
+
+function pushFeedLine(text) {
+  if (!feedEl) return;
+  const line = document.createElement('div');
+  line.className = 'feed-line';
+  line.textContent = text;
+  feedEl.prepend(line); // newest on top
+  while (feedEl.children.length > FEED_MAX_LINES) {
+    feedEl.removeChild(feedEl.children[feedEl.children.length - 1]);
+  }
+  const fade = setTimeout(() => line.classList.add('fade'), 4000);
+  const drop = setTimeout(() => line.remove(), 5000);
+  if (fade.unref) fade.unref();
+  if (drop.unref) drop.unref();
+}
+
+/// Diff the current own-player state against the last frame's
+/// and post any events. Called once per frame from the live
+/// branches of the frame loop (never during replay playback:
+/// the feed reports the match being played, not watched).
+function updateEventFeed() {
+  if (!sim || playback) return;
+  const snap = ownFeedSnapshot();
+  if (!feedPrev) { feedPrev = snap; return; }
+  const lines = diffFeedEvents(feedPrev, snap, {
+    buildingName: (k) => BUILD_NAME[k],
+    unitName: (k) => KIND_NAME[k],
+  });
+  feedPrev = snap;
+  for (const text of lines) pushFeedLine(text);
+}
+
+/// Per-match reset (resetSim / adoptSim): the next snapshot
+/// seeds silently, and stale lines from the last match go.
+function resetEventFeed() {
+  feedPrev = null;
+  if (feedEl) feedEl.innerHTML = '';
 }
 
 // --- Placeholder sprites (CC0 test art) --------------------------------
@@ -1375,7 +1459,10 @@ function handleHotkey(e) {
       // the key is still consumed (it must not leak into camera
       // panning) but does nothing, like the button itself.
       if (btn && !btn.disabled) {
-        runCommandButton(act.id);
+        // Gap 4: Shift held on a train hotkey queues five, like
+        // a Shift+click (resolveHotkey already consumed the key;
+        // the modifier only scales the train repeat).
+        runCommandButton(act.id, e.shiftKey ? SHIFT_TRAIN_COUNT : 1);
         renderCommands();
       }
       return true;
@@ -1592,6 +1679,7 @@ function resetSim(mode = matchMode) {
     seed, modeTag: MODE_TAG[mode], seats: [0], view: 0,
   });
   seenBuildings.clear(); // M7: last-known enemy buildings are per-match
+  resetEventFeed();
   refreshWorldLayers();
   vilAnim.clear();
   prevPos.clear();
@@ -1692,6 +1780,7 @@ function adoptSim(newSim, owner) {
   matchEnded = false;
   endOverlay.style.display = 'none';
   seenBuildings.clear();
+  resetEventFeed();
   refreshWorldLayers();
   vilAnim.clear();
   prevPos.clear();
@@ -3162,16 +3251,19 @@ function drivePlayback(now) {
     return;
   }
   if (!playback.last) playback.last = now;
-  playback.acc += Math.min(now - playback.last, 250) * playback.speed;
+  // Replay playback follows the same pacing as live play — the
+  // advanceTicks conversion at GAME_SPEED — times the viewer's
+  // own speed setting. (playback.acc is a game-ms remainder.)
+  const adv = advanceTicks(
+    playback.acc, Math.min(now - playback.last, 250) * playback.speed);
   playback.last = now;
-  const STEP = 1000 / 60;
+  playback.acc = adv.accMs;
   let n = 0;
-  while (playback.acc >= STEP && n < 24 && !playback.done) {
+  while (n < adv.ticks && n < 24 && !playback.done) {
     stepReplayTick();
-    playback.acc -= STEP;
     n++;
   }
-  if (n === 24) playback.acc = 0;
+  if (adv.ticks > n) playback.acc = 0; // shed the backlog, as the old cap did
 }
 
 /// Download a replay object as a .json file.
@@ -3557,7 +3649,8 @@ async function main() {
   cmdGrid.addEventListener('click', (ev) => {
     const btn = ev.target.closest('button');
     if (!btn || btn.disabled) return;
-    runCommandButton(btn.id);
+    // Gap 4: Shift+click on a train button queues five.
+    runCommandButton(btn.id, ev.shiftKey ? SHIFT_TRAIN_COUNT : 1);
   });
 
   // Minimap camera control: click or drag to jump the main camera.
@@ -4097,10 +4190,14 @@ async function main() {
   // steps the visual level down/up; it cannot touch the tick logic
   // above: worst case on weak hardware stays "fewer, cheaper frames
   // of the identical simulation".
-  let acc = 0;
+  let acc = 0; // game-ms remainder (advanceTicks, play/netplay.js)
   let last = performance.now();
   let prevFrameAt = null;
-  const STEP = 1000 / 60;
+  // Per-frame tick cap: a long hitch sheds its backlog instead of
+  // spiralling (the pre-speed-fix loop capped at 5 ticks of 1.0x
+  // time; 9 ticks is the same catch-up window in game time at
+  // GAME_SPEED = 1.7).
+  const MAX_TICKS_PER_FRAME = 9;
   function frame(now) {
     // M10 load order: before any match is entered there is no
     // sim at all — the lobby sits over an empty canvas. Paint the
@@ -4123,6 +4220,7 @@ async function main() {
       if (net.phase === 'playing' || net.phase === 'peer-left') {
         net.session.pump(now);
       }
+      updateEventFeed();
       if (prevFrameAt != null) {
         const step = governor.sample(now - prevFrameAt, now);
         if (step.changed) applyQuality(step.level, { announce: true });
@@ -4144,20 +4242,22 @@ async function main() {
       return;
     }
     if (playing && !paused && !matchEnded) {
-      acc += Math.min(now - last, 250);
-      let n = 0;
-      while (acc >= STEP && n < 5) {
-        sim.tick();
-        acc -= STEP;
-        n++;
-      }
-      if (n === 5) acc = 0;
+      // Game speed (gap 2): the accumulator converts wall time
+      // to ticks at GAME_SPEED (DE Normal, 1.7x) — advanceTicks
+      // is the one place that conversion lives, shared with the
+      // netplay pacing and replay playback.
+      const adv = advanceTicks(acc, Math.min(now - last, 250));
+      acc = adv.accMs;
+      const n = Math.min(adv.ticks, MAX_TICKS_PER_FRAME);
+      if (adv.ticks > n) acc = 0; // shed the backlog, as the old cap did
+      for (let i = 0; i < n; i++) sim.tick();
       // M5: Conquest check — the first decided tick raises the
       // end overlay and holds the sim (see showMatchEnd).
       if (builtMode !== 'sandbox') {
         const ms = sim.match_state();
         if (ms !== 0) showMatchEnd(ms);
       }
+      updateEventFeed();
       if (prevFrameAt != null) {
         const step = governor.sample(now - prevFrameAt, now);
         if (step.changed) applyQuality(step.level, { announce: true });
@@ -5105,19 +5205,60 @@ function updateTopBar() {
   }
 }
 
+/// One training attempt for a train button; true when the sim
+/// (or the lockstep session) accepted the order. Extracted from
+/// runCommandButton so the Shift repeat below runs the identical
+/// order a plain click runs — never a parallel path.
+function attemptTrain(id) {
+  if (id === 'train') return issue({ t: 'train_vil' });
+  const kindTag = { 'train-scout': 2, 'train-militia': 3, 'train-archer': 4 }[id];
+  if (kindTag == null) return false;
+  return selectedBuilding && selectedBuilding.type === 'building'
+    ? issue({ t: 'train_at', b: selectedBuilding.id, k: kindTag })
+    : false;
+}
+
+/// The refusal flash a single train click produces (the wording
+/// is unchanged); shown when a train run queued nothing at all.
+function flashTrainRefusal(id) {
+  if (id === 'train') {
+    const reason = myTrainBlock();
+    flash(['', 'Not enough food for a villager.',
+      'The training queue is full.', 'Housed — build a House first.'][reason] || 'Cannot train right now.');
+    return;
+  }
+  if (selectedBuilding) {
+    const kindTag = { 'train-scout': 2, 'train-militia': 3, 'train-archer': 4 }[id];
+    const reason = sim.building_train_block(selectedBuilding.id, kindTag);
+    flash(['', 'Not enough resources for that unit.',
+      'The training queue is full.', 'Housed — build a House first.'][reason] || 'Cannot train right now.');
+  }
+}
+
+// Shift+train x5 (2026-10-19 study fix, gap 4): DE queues five
+// of a unit when Shift is held on its train button or hotkey.
+// The repeat is deliberately dumb — the same issue() a plain
+// click makes, up to five times, stopping at the first refusal;
+// food, queue and housing rules stay the sim's. Research
+// buttons are not train buttons and never repeat.
+const SHIFT_TRAIN_COUNT = 5;
+
 /// Run one command-panel button by id — the single implementation
 /// behind the panel's delegated click listener AND the M13
 /// hotkeys, so a key press and a click can never drift apart.
 /// Callers gate on the button not being disabled (the listener
-/// checks the element; the hotkey path checks it too).
-function runCommandButton(id) {
-  if (id === 'train') {
-    if (!issue({ t: 'train_vil' })) {
-      const reason = myTrainBlock();
-      flash(['', 'Not enough food for a villager.',
-        'The training queue is full.', 'Housed — build a House first.'][reason] || 'Cannot train right now.');
-    }
-  } else if (id === 'page-eco' || id === 'page-mil') {
+/// checks the element; the hotkey path checks it too). `times`
+/// is the Shift+train repeat count (SHIFT_TRAIN_COUNT with Shift
+/// held, 1 otherwise); only train buttons honor it.
+function runCommandButton(id, times = 1) {
+  if (id === 'train' || id === 'train-scout'
+    || id === 'train-militia' || id === 'train-archer') {
+    let done = 0;
+    while (done < times && attemptTrain(id)) done++;
+    if (done === 0) flashTrainRefusal(id);
+    return;
+  }
+  if (id === 'page-eco' || id === 'page-mil') {
     // UI FIX 4 addendum: the root openers arm the very page the
     // Q / W hotkeys arm — one shared buildPage state drives the
     // rendered grid for mouse and keyboard alike.
@@ -5155,29 +5296,10 @@ function runCommandButton(id) {
           || 'Cannot research right now.');
       }
     }
-  } else if (id === 'train-scout') {
-    const ok = selectedBuilding && selectedBuilding.type === 'building'
-      ? issue({ t: 'train_at', b: selectedBuilding.id, k: 2 })
-      : false;
-    if (!ok && selectedBuilding) {
-      const reason = sim.building_train_block(selectedBuilding.id, 2);
-      flash(['', 'Not enough resources for that unit.',
-        'The training queue is full.', 'Housed — build a House first.'][reason] || 'Cannot train right now.');
-    }
-  } else if (id === 'train-militia' || id === 'train-archer') {
-    const kindTag = id === 'train-militia' ? 3 : 4;
-    const ok = selectedBuilding && selectedBuilding.type === 'building'
-      ? issue({ t: 'train_at', b: selectedBuilding.id, k: kindTag })
-      : false;
-    if (!ok && selectedBuilding) {
-      const reason = sim.building_train_block(selectedBuilding.id, kindTag);
-      flash(['', 'Not enough resources for that unit.',
-        'The training queue is full.', 'Housed — build a House first.'][reason] || 'Cannot train right now.');
-    }
   }
 }
 
-function cmdButton({ id, icon, img, label, costIcon, cost, cost2Icon, cost2, title, disabled, active, badge, key }) {
+function cmdButton({ id, icon, img, label, costIcon, cost, cost2Icon, cost2, title, disabled, active, key }) {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.id = id;
@@ -5190,18 +5312,19 @@ function cmdButton({ id, icon, img, label, costIcon, cost, cost2Icon, cost2, tit
   // states them (e.g. 'Train Militia — 60 food · 20 gold').
   // The label/cost arguments stay in the signature because the
   // call sites pass them alongside the title; the face renders
-  // only the glyph, the hotkey letter at its top-left corner
-  // and the production queue badge at the button's top-right.
+  // only the glyph and the hotkey letter at its top-left corner.
+  // NO indicators on the face (Claudio, 2026-10-19 addendum):
+  // the production queue count is NOT a badge here — it lives
+  // where DE puts it, in the selection panel's info line
+  // (queue length + progress %), which updateSelPanel renders.
   btn.title = title;
   const glyph = img
     ? pngIcon(img, 'cmd-icon')
     : `<svg class="cmd-icon"><use href="#${icon}"/></svg>`;
-  let html =
+  btn.innerHTML =
     `<span class="cmd-icon-wrap">${glyph}` +
     (key ? `<span class="cmd-key">${key}</span>` : '') +
     `</span>`;
-  if (badge) html += `<span class="cmd-badge" id="train-badge">${badge}</span>`;
-  btn.innerHTML = html;
   return btn;
 }
 
@@ -5331,11 +5454,10 @@ function renderCommands() {
         id: 'train', icon: 'i-train', img: 'villager.png', label: 'Villager',
         costIcon: 'i-food', cost: 50,
         disabled: reason === 2, // queue full; other blocks flash on click
-        badge: queue > 0 ? `+${queue}` : null,
         key: badgeForButton({ context, id: 'train', index: 0 }),
         title: TRAIN_BLOCK_TITLES[reason]
           ? `Train Villager — ${TRAIN_BLOCK_TITLES[reason]}`
-          : 'Train a villager at the Town Center (50 food).',
+          : 'Train a villager at the Town Center (50 food). Hotkey: Q · Shift queues five.',
       }),
       cmdButton({
         id: 'research-loom', icon: 'i-loom', img: 'loom.png', label: 'Loom',
@@ -5344,7 +5466,7 @@ function renderCommands() {
         key: badgeForButton({ context, id: 'research-loom', index: 1 }),
         title: loomDone
           ? 'Loom — researched. Villagers: +15 HP, +1 melee / +2 pierce armor.'
-          : `Research Loom — 50 gold · 25 s. Villagers gain +15 HP and armor.${RESEARCH_BLOCK_TITLES[rbTc[0]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[0]] : ''}`,
+          : `Research Loom — 50 gold · 25 s. Villagers gain +15 HP and armor. Hotkey: A.${RESEARCH_BLOCK_TITLES[rbTc[0]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[0]] : ''}`,
       }),
       cmdButton({
         id: 'research-feudal', icon: 'i-feudal', img: 'feudal.png', label: 'Feudal Age',
@@ -5354,8 +5476,8 @@ function renderCommands() {
         title: feudalDone
           ? 'Feudal Age — you stand in the Feudal Age.'
           : rbTc[1] === 4
-            ? 'Advance to the Feudal Age — needs 2 completed Dark-Age buildings first (Houses and Farms do not count).'
-            : `Advance to the Feudal Age — 500 food · 130 s. Unlocks the Archery Range, Stable and Blacksmith.${RESEARCH_BLOCK_TITLES[rbTc[1]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[1]] : ''}`,
+            ? 'Advance to the Feudal Age — needs 2 completed Dark-Age buildings first (Houses and Farms do not count). Hotkey: W.'
+            : `Advance to the Feudal Age — 500 food · 130 s. Unlocks the Archery Range, Stable and Blacksmith. Hotkey: W.${RESEARCH_BLOCK_TITLES[rbTc[1]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[1]] : ''}`,
       }),
     );
   } else if (context === 'barracks') {
@@ -5366,11 +5488,10 @@ function renderCommands() {
         id: 'train-militia', icon: 'i-militia', img: 'militia.png', label: 'Militia',
         costIcon: 'i-food', cost: 60, cost2Icon: 'i-gold', cost2: 20,
         disabled: underConstruction || blockM === 2,
-        badge: bk.queue > 0 ? `+${bk.queue}` : null,
         key: badgeForButton({ context, id: 'train-militia', index: 0 }),
         title: underConstruction
           ? 'Militia — the Barracks is under construction.'
-          : `Train Militia — 60 food · 20 gold.${TRAIN_BLOCK_TITLES[blockM] ? ' ' + TRAIN_BLOCK_TITLES[blockM] : ''}`,
+          : `Train Militia — 60 food · 20 gold · Shift queues five.${TRAIN_BLOCK_TITLES[blockM] ? ' ' + TRAIN_BLOCK_TITLES[blockM] : ''}`,
       }),
       cmdButton({
         id: 'research-maa', icon: 'i-maa', img: 'man-at-arms.png', label: 'Man-at-Arms',
@@ -5390,11 +5511,10 @@ function renderCommands() {
       id: 'train-archer', icon: 'i-archer', img: 'archer.png', label: 'Archer',
       costIcon: 'i-wood', cost: 25, cost2Icon: 'i-gold', cost2: 45,
       disabled: underConstruction || blockA === 2,
-      badge: bk.queue > 0 ? `+${bk.queue}` : null,
       key: badgeForButton({ context, id: 'train-archer', index: 0 }),
       title: underConstruction
         ? 'Archer — the Archery Range is under construction.'
-        : `Train Archer — 25 wood · 45 gold.${TRAIN_BLOCK_TITLES[blockA] ? ' ' + TRAIN_BLOCK_TITLES[blockA] : ''}`,
+        : `Train Archer — 25 wood · 45 gold · Shift queues five.${TRAIN_BLOCK_TITLES[blockA] ? ' ' + TRAIN_BLOCK_TITLES[blockA] : ''}`,
     }));
   } else if (context === 'stable') {
     const underConstruction = !bk.complete;
@@ -5402,11 +5522,10 @@ function renderCommands() {
       id: 'train-scout', icon: 'i-villager', img: 'scout.png', label: 'Scout Cavalry',
       costIcon: 'i-food', cost: 80,
       disabled: underConstruction || blockS === 2,
-      badge: bk.queue > 0 ? `+${bk.queue}` : null,
       key: badgeForButton({ context, id: 'train-scout', index: 0 }),
       title: underConstruction
         ? 'Scout Cavalry — the Stable is under construction.'
-        : `Train Scout Cavalry — 80 food · 30 s.${TRAIN_BLOCK_TITLES[blockS] ? ' ' + TRAIN_BLOCK_TITLES[blockS] : ''}`,
+        : `Train Scout Cavalry — 80 food · 30 s · Shift queues five.${TRAIN_BLOCK_TITLES[blockS] ? ' ' + TRAIN_BLOCK_TITLES[blockS] : ''}`,
     }));
   } else if (context === 'blacksmith') {
     // M6: the Blacksmith's three Feudal researches.
@@ -5530,14 +5649,20 @@ function updateSelPanel() {
     selPortrait.innerHTML = pngIcon('town-center.png', 'ui-icon');
     selName.textContent = 'Town Center';
     const codes = myTcQueue();
-    if (reason === 3) {
+    if (codes.length > 0) {
+      // The queue line comes first (addendum, 2026-10-19): with
+      // the button badge gone, this line is where the queue
+      // count + progress live — including while housed, where
+      // the stall note rides along instead of replacing it.
+      const head = codes[0];
+      selInfo.textContent = (head >= 100
+        ? `Researching ${queueEntryName(head)}… ${Math.round(myTcProgress() * 100)}% · Queue ${codes.length}`
+        : `Training a villager… ${Math.round(myTcProgress() * 100)}% · Queue ${codes.length}`)
+        + (reason === 3 ? ' · Housed — training stalls until a House stands.' : '');
+      if (reason === 3) selInfo.classList.add('warn');
+    } else if (reason === 3) {
       selInfo.textContent = 'Housed — training stalls until a House stands.';
       selInfo.classList.add('warn');
-    } else if (codes.length > 0) {
-      const head = codes[0];
-      selInfo.textContent = head >= 100
-        ? `Researching ${queueEntryName(head)}… ${Math.round(myTcProgress() * 100)}% · Queue ${codes.length}`
-        : `Training a villager… · Queue ${codes.length}`;
     } else {
       selInfo.textContent = 'Train villagers and research from the Commands panel. Right-click the map to set a rally point.';
     }
@@ -5552,14 +5677,16 @@ function updateSelPanel() {
     const codes = sim.building_queue(bk.id);
     if (!bk.complete) {
       selInfo.textContent = 'Under construction…';
+    } else if (codes.length > 0) {
+      const head = codes[0];
+      selInfo.textContent = (head >= 100
+        ? `Researching ${queueEntryName(head)}… · Queue ${codes.length}`
+        : `Training ${queueEntryName(head)}… · Queue ${codes.length}`)
+        + (bkBlock === 3 ? ' · Housed — training stalls until a House stands.' : '');
+      if (bkBlock === 3) selInfo.classList.add('warn');
     } else if (bkBlock === 3) {
       selInfo.textContent = 'Housed — training stalls until a House stands.';
       selInfo.classList.add('warn');
-    } else if (codes.length > 0) {
-      const head = codes[0];
-      selInfo.textContent = head >= 100
-        ? `Researching ${queueEntryName(head)}… · Queue ${codes.length}`
-        : `Training ${queueEntryName(head)}… · Queue ${codes.length}`;
     } else {
       selInfo.textContent = bk.kind === 8
         ? 'Research technologies from the Commands panel.'

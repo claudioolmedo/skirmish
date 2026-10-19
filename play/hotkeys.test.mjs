@@ -57,9 +57,6 @@ test('A with villagers and no page armed is the DE drop-off', () => {
 
 test('panel position keys run a selected building\u2019s buttons in order', () => {
   const at = (context, code) => resolveHotkey({ context, page: null, code });
-  assert.equal(at('tc', 'KeyQ').id, 'train');
-  assert.equal(at('tc', 'KeyW').id, 'research-loom');
-  assert.equal(at('tc', 'KeyE').id, 'research-feudal');
   assert.equal(at('barracks', 'KeyQ').id, 'train-militia');
   assert.equal(at('barracks', 'KeyW').id, 'research-maa');
   assert.equal(at('barracks', 'KeyE'), null, 'no third button');
@@ -68,6 +65,27 @@ test('panel position keys run a selected building\u2019s buttons in order', () =
   assert.equal(at('blacksmith', 'KeyQ').id, 'research-fletching');
   assert.equal(at('blacksmith', 'KeyW').id, 'research-scalemail');
   assert.equal(at('blacksmith', 'KeyE').id, 'research-padded');
+});
+
+test('Town Center letters are DE’s own: Villager Q, Loom A, Feudal W', () => {
+  // DE's grid letter is the button's panel position, and the TC
+  // panel's arrangement is not our button order (Age of Empires
+  // wiki, "Hotkey"; the study video's Loom tooltip reads
+  // "(Hotkey: A)"). Scoped to the TC context only: E runs
+  // nothing here, and the villager context keeps its own A.
+  const at = (code) => resolveHotkey({ context: 'tc', page: null, code });
+  assert.equal(at('KeyQ').id, 'train', 'Create Villager — top-left of the TC panel');
+  assert.equal(at('KeyA').id, 'research-loom', 'Loom — below Villager (study frame f_025)');
+  assert.equal(at('KeyW').id, 'research-feudal', 'Feudal Age — top row, second slot');
+  assert.equal(at('KeyE'), null, 'E is not a TC letter in DE');
+  assert.equal(at('KeyS'), null);
+  assert.equal(at('KeyD'), null);
+  // The badges painted on the buttons carry the same letters.
+  assert.equal(badgeForButton({ context: 'tc', id: 'train', index: 0 }), 'Q');
+  assert.equal(badgeForButton({ context: 'tc', id: 'research-loom', index: 1 }), 'A');
+  assert.equal(badgeForButton({ context: 'tc', id: 'research-feudal', index: 2 }), 'W');
+  // Other panels keep their position badges.
+  assert.equal(badgeForButton({ context: 'barracks', id: 'research-maa', index: 1 }), 'W');
 });
 
 test('no hotkeys in unit / empty / enemy contexts — WASD keeps panning', () => {
@@ -112,11 +130,16 @@ test('every building sits on exactly one page, with a working badge', () => {
 
 test('badges in train/research contexts are the position letters', () => {
   for (const [context, ids] of Object.entries(PANEL_BUTTONS)) {
+    if (context === 'tc') continue; // DE's own TC letters — the test below
     ids.forEach((id, i) => {
       assert.equal(badgeForButton({ context, id, index: i }), 'QWE'[i], `${context}/${id}`);
       assert.equal(POSITION_CODES[i], `Key${'QWE'[i]}`);
     });
   }
+  // The Town Center exception: DE letters, not positions.
+  assert.equal(badgeForButton({ context: 'tc', id: 'train', index: 0 }), 'Q');
+  assert.equal(badgeForButton({ context: 'tc', id: 'research-loom', index: 1 }), 'A');
+  assert.equal(badgeForButton({ context: 'tc', id: 'research-feudal', index: 2 }), 'W');
   assert.equal(badgeForButton({ context: 'units', id: 'x', index: 0 }), null);
 });
 

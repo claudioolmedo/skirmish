@@ -58,6 +58,41 @@
   font: 600 13.5px/1 system-ui, sans-serif;
 }
 
+/* ---------- event notification feed (gap 3) ---------- */
+/* DE's event log: top-left, directly under the resource bar.
+   Own-player events only (app.js diffs its own seat's state).
+   Text-only lines, parchment on a soft dark shade, newest on
+   top; each fades out after ~5 s (app.js adds .fade at 4 s and
+   removes the node at 5 s). Never interactive, never over the
+   lobby: it exists only while a match is on screen. */
+#event-feed {
+  position: fixed;
+  top: 50px; /* the 42px topbar + a breath */
+  left: 10px;
+  z-index: 19; /* under the topbar (20), over the canvas */
+  display: none;
+  flex-direction: column;
+  gap: 2px;
+  pointer-events: none;
+  max-width: min(46vw, 340px);
+}
+body.in-match #event-feed { display: flex; }
+#event-feed .feed-line {
+  color: var(--ui-text);
+  font: 600 12.5px/1.35 system-ui, sans-serif;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95);
+  background: linear-gradient(rgba(11, 7, 2, 0.55), rgba(11, 7, 2, 0.55));
+  border-left: 2px solid rgba(201, 162, 39, 0.65);
+  border-radius: 0 3px 3px 0;
+  padding: 2px 8px 2px 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 1;
+  transition: opacity 0.9s ease;
+}
+#event-feed .feed-line.fade { opacity: 0; }
+
 .ui-res-group {
   display: flex;
   align-items: center;
@@ -251,14 +286,6 @@
   min-height: 0;
 }
 .cmd-btn img.cmd-icon { object-fit: cover; }
-.cmd-btn .cmd-badge { /* e.g. training queue length */
-  position: absolute;
-  top: 3px;
-  right: 5px;
-  font: 700 10px/1.4 ui-monospace, Menlo, monospace;
-  color: var(--gold-bright, #ffcf4d);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
-}
 .cmd-btn .cmd-key { /* M13: the grid hotkey letter for this button */
   position: absolute;
   top: 2px;
@@ -398,6 +425,7 @@
 @media (max-width: 700px) {
   /* no floating site link anymore: the topbar reclaims its row */
   .ui-topbar { padding: 6px 12px; height: auto; min-height: 42px; flex-wrap: wrap; gap: 6px 14px; }
+  #event-feed { top: 92px; } /* below the wrapped two-row topbar */
   .sel-line { display: none; }
   .sel-grid { display: none; }
   /* bottom strip must FIT a phone: it may take a larger share

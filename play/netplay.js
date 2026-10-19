@@ -8,9 +8,12 @@
 // are compared — a mismatch is a desync and the match stops.
 //
 // Layout of a match:
-//   * 1 turn = 3 ticks (50 ms). 20 turns per second.
+//   * 1 turn = 3 ticks. A tick is 1/60 s of GAME time; the game
+//     runs at GAME_SPEED x wall clock (DE's Normal speed), so a
+//     turn spans 3 x (1000/60) / 1.7 ≈ 29.4 ms of real time and
+//     there are 34 turns per real second.
 //   * Input delay: commands are stamped for the turn that is
-//     `delay` turns in the future (starts at 4 turns = 200 ms, the
+//     `delay` turns in the future (starts at 4 turns, the
 //     reference design's turnaround). A turn executes only when BOTH
 //     bundles for it have arrived; an empty bundle is a heartbeat.
 //     If a side's bundle is late, execution waits — the slowest
@@ -30,7 +33,33 @@
 
 export const PROTOCOL_VERSION = 1;
 export const TURN_TICKS = 3;
-export const TURN_MS = 1000 / 20; // one turn = 50 ms
+// Game speed (2026-10-19 study fix, gap 2): DE's Normal speed
+// runs game time at 1.7x the wall clock — until now the client
+// ran 1.0x, so every build, train and research took 1.7x longer
+// in real time than a DE player expects. This ONE constant is
+// where real time becomes ticks, everywhere: the local frame
+// loop's accumulator (via advanceTicks), the netplay turn
+// pacing below, and replay playback. The sim itself is
+// untouched — its ticks, rules and hashes do not know the
+// wall clock exists, and both lockstep clients run this same
+// build, so they pace identically. Input delay is counted in
+// TURNS and is unchanged (4 turns ≈ 118 ms at this speed).
+export const GAME_SPEED = 1.7;
+export const TICK_MS = 1000 / 60; // one sim tick at 1.0x (game ms)
+export const TURN_MS = (TURN_TICKS * TICK_MS) / GAME_SPEED; // ≈29.41 ms of wall time per turn
+
+/**
+ * Advance a tick accumulator by `dtMs` of wall time at
+ * GAME_SPEED. The accumulator is kept in GAME milliseconds:
+ * pass the previous remainder back in as `accGameMs`. Returns
+ * how many whole ticks to run now and the new remainder. Pure —
+ * the frame loop, the replay driver and the tests share it.
+ */
+export function advanceTicks(accGameMs, dtMs) {
+  const total = accGameMs + dtMs * GAME_SPEED;
+  const ticks = Math.floor(total / TICK_MS);
+  return { ticks, accMs: total - ticks * TICK_MS };
+}
 export const INITIAL_DELAY_TURNS = 4;
 export const MAX_DELAY_TURNS = 10;
 export const BUNDLE_CAP = 256; // NET-07: per-turn command volume bound
