@@ -37,7 +37,12 @@
 // so the page works from /play/, from the site root, and from the
 // github.io project path alike.
 
-import init, { WasmSim } from './pkg/skirmish_sim.js';
+// M10 load order (Claudio's direction): the WASM sim is NOT
+// imported statically. The lobby — browser, region pings, rooms —
+// must work without ever fetching the .wasm; the heavy module is
+// pulled in by ensureGameLoaded() inside the loading phase, when
+// a match actually starts. `WasmSim` below is assigned there.
+let WasmSim = null;
 import {
   createMinimap, renderMinimap, minimapToWorld, cameraCenteredOn,
 } from './play/minimap.js';
@@ -49,7 +54,7 @@ import {
   createControlGroups, createTapTracker, nextInCycle,
 } from './play/groups.js';
 import {
-  TURN_TICKS as NET_TURN_TICKS, REJOIN_GRACE_MS,
+  TURN_TICKS as NET_TURN_TICKS, REJOIN_GRACE_MS, LOAD_TIMEOUT_MS,
   applyCommand as netApplyCommand, tcIdOf as netTcIdOf,
   createSession, createRecorder, replayEvents, isReplay,
   createRelayClient, probeRegionPing, makeRoomId, buildPlayUrl,
@@ -59,6 +64,10 @@ import {
   LOBBIES_REFRESH_MS, parseLobbies, lobbyRowModel, sortLobbyRows,
   joinTarget,
 } from './play/lobby.js';
+import {
+  checkPassword, peerAdmitted, guestAdmitted, canToggleReady,
+  startGate,
+} from './play/room.js';
 
 const assetUrl = (rel) => new URL(rel, import.meta.url).href;
 
@@ -303,19 +312,26 @@ function flash(msg) {
 // image is ready (or if it fails), the draw functions fall back to the
 // original vector shapes below.
 const SPRITES = {};
-for (const [key, file] of Object.entries({
-  villager: 'villager.png',
-  tree: 'tree.png',
-  berry: 'berry-bush.png',
-  gold: 'gold.png',
-  stone: 'stone.png',
-  tc: 'town-center.png',
-  house: 'house.png',
-  barracks: 'barracks.png',
-})) {
-  const im = new Image();
-  im.src = assetUrl('assets-placeholder/' + file);
-  SPRITES[key] = im;
+let placeholderSpritesLoaded = false;
+function loadPlaceholderSprites() {
+  // M10 load order: artwork loads with the game (loading phase),
+  // never at page open — the lobby must stay light.
+  if (placeholderSpritesLoaded) return;
+  placeholderSpritesLoaded = true;
+  for (const [key, file] of Object.entries({
+    villager: 'villager.png',
+    tree: 'tree.png',
+    berry: 'berry-bush.png',
+    gold: 'gold.png',
+    stone: 'stone.png',
+    tc: 'town-center.png',
+    house: 'house.png',
+    barracks: 'barracks.png',
+  })) {
+    const im = new Image();
+    im.src = assetUrl('assets-placeholder/' + file);
+    SPRITES[key] = im;
+  }
 }
 function spriteReady(im) {
   return !!im && im.complete && im.naturalWidth > 0;
@@ -583,11 +599,13 @@ function setQualityMode(mode) {
   }
 }
 
-// Boot: fetch the initial tier's sheets and set the DPR scale now;
-// main()'s first fitCanvas() call picks dprScale up (the full
-// applyQuality path is for post-boot changes — it also resizes the
-// canvas, which must wait until the camera state exists).
-loadTierSprites(Q);
+// Boot: set the DPR scale now; main()'s first fitCanvas() call
+// picks dprScale up. The initial tier's sheets are NOT fetched
+// here anymore (M10 load order): ensureGameLoaded() loads them
+// inside the loading phase, when a match actually starts.
+// (applyQuality's loadTierSprites call is the post-boot path —
+// it also resizes the canvas, which must wait until the camera
+// state exists.)
 dprScale = Math.min(window.devicePixelRatio || 1, Q.dprCap);
 updateQualityUi();
 
@@ -1334,10 +1352,12 @@ function onDesync(e) {
 /// game afterwards when appropriate).
 function teardownNet() {
   stopLobbyBrowser();
+  if (net && net.loadTimer) clearTimeout(net.loadTimer);
   if (net && net.client) net.client.close();
   net = null;
   if (netUi) {
     showOverlay(netUi.onlineOverlay, false);
+    showOverlay(netUi.loadingOverlay, false);
     showOverlay(netUi.desyncOverlay, false);
     showOverlay(netUi.peerOverlay, false);
     netUi.netWait.hidden = true;
@@ -1368,7 +1388,7 @@ function updateNetStatus() {
   }
   const stateTxt = {
     lobby: 'in the lobby',
-    starting: 'starting…',
+    starting: 'loading…',
     playing: 'match in progress',
     'peer-left': 'opponent disconnected',
     rebuilding: 'rebuilding the match…',
@@ -1394,36 +1414,191 @@ function refreshNetPing() {
   }).catch(() => {});
 }
 
+// --- M10: lazy game load + the loading phase -----------------------
+//
+// The heavy game — the WASM binary, the sprite tiers, the world
+// constants — loads ONLY here, once a match is actually starting
+// (both players ready online, or Play solo). Until then /play is
+// a light lobby: no .wasm request, no artwork fetch. The load
+// reports its step to the loading screen, so what the player
+// watches is the real load, not a spinner over nothing.
+
+let gameLoadPromise = null;
+
+function ensureGameLoaded(onStep) {
+  if (!gameLoadPromise) {
+    gameLoadPromise = (async () => {
+      if (onStep) onStep('Downloading the game…');
+      const mod = await import('./pkg/skirmish_sim.js');
+      await mod.default(); // fetch + instantiate the .wasm
+      WasmSim = mod.WasmSim;
+      if (onStep) onStep('Loading the artwork…');
+      loadPlaceholderSprites();
+      loadTierSprites(Q);
+      // The world constants are the same for every match (fixed
+      // world size); read them off a throwaway probe sim so no
+      // match code ever runs before they exist.
+      const probe = new WasmSim(1);
+      HALF = probe.world_half();
+      GW = probe.grid_width();
+      GH = probe.grid_height();
+      CS = probe.cell_size();
+      OBST = probe.obstacles();
+      mmGeom = createMinimap({
+        worldHalf: HALF, width: minimapCanvas.width, height: minimapCanvas.height,
+      });
+      if (onStep) onStep('Building the world…');
+    })();
+    // A failed load (offline, blocked fetch) may be retried by
+    // the next attempt to play — don't cache the rejection.
+    gameLoadPromise.catch(() => { gameLoadPromise = null; });
+  }
+  return gameLoadPromise;
+}
+
+/// Whose seat is loaded in the loading model: seats are fixed —
+/// host is Blue (slot 0), guest is Red (slot 1).
+function loadingModel() {
+  if (!net) return null;
+  const selfLoaded = !!net.selfLoaded;
+  const peerLoaded = !!net.peerLoaded;
+  return net.role === 'host'
+    ? { blueLoaded: selfLoaded, redLoaded: peerLoaded }
+    : { blueLoaded: peerLoaded, redLoaded: selfLoaded };
+}
+
+function renderLoading() {
+  if (!netUi || !netUi.loadingOverlay) return;
+  const m = loadingModel();
+  if (!m) return;
+  netUi.loadSlotGuest.style.display = '';
+  const row = (label, loaded) =>
+    `<span class="slot-name">${label}</span>` +
+    `<span class="slot-state">${loaded ? 'loaded ✓' : 'loading…'}</span>`;
+  netUi.loadSlotHost.innerHTML = row('Blue — Host', m.blueLoaded);
+  netUi.loadSlotGuest.innerHTML = row('Red — Guest', m.redLoaded);
+}
+
+function setLoadingStatus(text) {
+  if (netUi && netUi.loadingStatus) netUi.loadingStatus.textContent = text;
+}
+
+/// Enter the loading phase (online): the room screen gives way to
+/// the loading screen, both loaded flags start down, and the
+/// cancellation timer starts ticking.
+function enterLoading() {
+  net.phase = 'starting';
+  net.selfLoaded = false;
+  net.peerLoaded = false;
+  showOverlay(netUi.onlineOverlay, false);
+  showOverlay(netUi.loadingOverlay, true);
+  renderLoading();
+  setLoadingStatus('Loading…');
+  clearTimeout(net.loadTimer);
+  net.loadTimer = setTimeout(() => cancelLoading('timeout'), LOAD_TIMEOUT_MS);
+  updateNetStatus();
+}
+
+function hideLoading() {
+  if (netUi) showOverlay(netUi.loadingOverlay, false);
+}
+
+/// This client finished loading (sim built, construction hash
+/// verified): raise my flag on the loading screen.
+function markSelfLoaded() {
+  if (!net) return;
+  net.selfLoaded = true;
+  renderLoading();
+}
+
+/// The one cancellation message (addendum rule): a player left or
+/// failed to load — the match is cancelled for everyone.
+const MATCH_CANCELLED_MSG = 'Match cancelled — a player left or failed to load.';
+
+/// Cancel a match that is still loading and return to the Lobby
+/// Browser. `notify` tells the peer (its own cancel — or its
+/// disconnect — needs no echo). Never a desync overlay, never a
+/// half-started sim: the pending sim is simply dropped.
+function cancelLoading(notify) {
+  if (!net || net.phase !== 'starting') return;
+  clearTimeout(net.loadTimer);
+  if (notify && net.client) {
+    try { net.client.send({ type: 'cancel' }); } catch { /* socket already gone */ }
+  }
+  hideLoading();
+  openLobby(null);
+  lobbyStatus(MATCH_CANCELLED_MSG);
+}
+
 // --- the handshake ---------------------------------------------------------
 
-function hostStartMatch() {
+async function hostStartMatch() {
+  // Fired by the both-ready gate (M10), never by a button: the
+  // host's client starts the handshake the moment both players
+  // are ready. The heavy load happens first, on the loading
+  // screen; only a loaded host sends 'start'.
   if (!net || net.role !== 'host' || !net.peerPresent) return;
+  if (net.phase !== 'lobby') return;
+  enterLoading();
+  const mine = net;
+  try {
+    await ensureGameLoaded((t) => { if (net === mine) setLoadingStatus(t); });
+  } catch {
+    if (net === mine) cancelLoading(true);
+    return;
+  }
+  if (net !== mine || net.phase !== 'starting') return; // cancelled mid-load
   net.seed = (Math.random() * 0x7fffffff) >>> 0;
   net.pendingSim = WasmSim.new_match(net.seed, MODE_TAG.online);
   net.client.send({
     type: 'start', seed: net.seed, hash0: net.pendingSim.state_hash(),
   });
-  net.phase = 'starting';
-  lobbyStatus('Starting the match…');
+  // The host's own build IS its verification — it is loaded.
+  markSelfLoaded();
+  setLoadingStatus('Waiting for your opponent to load…');
   updateNetStatus();
 }
 
-function guestHandleStart(msg) {
+async function guestHandleStart(msg) {
+  // The host started: enter the loading phase and do the real
+  // load here (WASM + artwork + world), then build the sim and
+  // verify its construction hash against the host's.
+  enterLoading();
+  const mine = net;
+  try {
+    await ensureGameLoaded((t) => { if (net === mine) setLoadingStatus(t); });
+  } catch {
+    if (net === mine) {
+      net.client.send({ type: 'start-abort', reason: 'load-failed' });
+      cancelLoading(false);
+    }
+    return;
+  }
+  if (net !== mine || net.phase !== 'starting') return; // cancelled mid-load
   const candidate = WasmSim.new_match(msg.seed, MODE_TAG.online);
   if (candidate.state_hash() !== msg.hash0) {
     // Same seed, different construction hash: the two builds
-    // disagree — lockstep would desync on turn 0. Refuse cleanly.
+    // disagree — lockstep would desync on turn 0. That is a
+    // failed load: refuse and cancel cleanly for everyone.
     net.client.send({ type: 'start-abort', reason: 'build-mismatch' });
-    lobbyStatus('Version mismatch — this client cannot play that match. Reload the page to update.');
+    cancelLoading(false);
     return;
   }
   net.seed = msg.seed;
   net.pendingSim = candidate;
+  markSelfLoaded();
+  // start-ack IS the loaded signal (M10): the sim is built and
+  // the construction hash verified. The host sends 'go' only
+  // once both loaded signals are in.
   net.client.send({ type: 'start-ack' });
-  lobbyStatus('Starting the match…');
+  setLoadingStatus('Loaded — waiting for the host…');
 }
 
 function beginOnlineMatch() {
+  // Both loaded signals are in and 'go' has flown: the loading
+  // phase ends here, for both roles.
+  clearTimeout(net.loadTimer);
+  hideLoading();
   const owner = net.role === 'host' ? 0 : 2;
   adoptSim(net.pendingSim, owner);
   net.pendingSim = null;
@@ -1440,6 +1615,114 @@ function beginOnlineMatch() {
   updateNetStatus();
   refreshNetPing();
   return net.session;
+}
+
+// --- M10: the room screen --------------------------------------------
+//
+// Two seats, their ready states, one Start button per player
+// (toggle ready). The pure gates live in play/room.js; this is
+// the DOM + state half.
+
+/// Admission from THIS client's seat (host: the peer's; guest:
+/// my own) — the value the ready gate consumes.
+function myAdmitted() {
+  if (!net) return false;
+  return net.role === 'host'
+    ? peerAdmitted({ privacy: net.privacy, peerPwOk: net.peerPwOk })
+    : guestAdmitted({ isPrivate: net.privacy === 'private', pwState: net.pwState });
+}
+
+function renderRoom() {
+  if (!netUi || !netUi.roomSection) return;
+  const inRoom = !!(net && net.room);
+  netUi.roomSection.hidden = !inRoom;
+  if (!inRoom) return;
+  const isHost = net.role === 'host';
+  const priv = net.privacy === 'private';
+  const hostReady = isHost ? net.selfReady : net.peerReady;
+  const guestReady = isHost ? net.peerReady : net.selfReady;
+  let hostState;
+  let guestState;
+  if (isHost) hostState = 'You';
+  else hostState = (net.peerPresent || net.hostSeen) ? 'Here' : 'Waiting…';
+  if (!isHost) {
+    guestState = priv && net.pwState !== 'ok' ? 'You — password required' : 'You';
+  } else if (net.peerPwOk || net.peerPresent) {
+    guestState = 'Here';
+  } else if (net.doorGuest) {
+    guestState = 'At the door — password';
+  } else {
+    guestState = 'Waiting for a guest…';
+  }
+  const badge = (r) => (r ? ' · <span class="slot-ready">Ready ✓</span>' : '');
+  netUi.slotHost.innerHTML =
+    '<span class="slot-dot dot-blue"></span>' +
+    '<span class="slot-name">Host — Blue</span>' +
+    `<span class="slot-state">${hostState}${badge(hostReady)}</span>`;
+  netUi.slotGuest.innerHTML =
+    '<span class="slot-dot dot-red"></span>' +
+    '<span class="slot-name">Guest — Red</span>' +
+    `<span class="slot-state">${guestState}${badge(guestReady)}</span>`;
+  netUi.roomListedLine.hidden = priv;
+  netUi.roomPrivateLine.hidden = !priv;
+  // The password prompt belongs to a guest of a private room who
+  // is not in yet.
+  const showPw = !isHost && priv && net.pwState !== 'ok';
+  netUi.pwRow.hidden = !showPw;
+  const showPwNote = showPw && net.pwState === 'wrong';
+  netUi.pwNote.hidden = !showPwNote;
+  if (showPwNote) netUi.pwNote.textContent = 'Incorrect password — try again.';
+  // The Start toggle: live only for an admitted player with an
+  // admitted, present peer, in the lobby phase.
+  const can = canToggleReady({
+    phase: net.phase, peerPresent: net.peerPresent, admitted: myAdmitted(),
+  });
+  netUi.readyBtn.disabled = !can;
+  netUi.readyBtn.textContent = net.selfReady ? '✓ Ready — tap to cancel' : 'Start';
+  netUi.readyBtn.classList.toggle('active', !!net.selfReady);
+}
+
+/// The both-ready rule (host side only — startGate enforces it):
+/// when both flags are up, the host's client initiates the start
+/// handshake by itself. Un-readying before that simply keeps the
+/// gate closed.
+function maybeStartMatch() {
+  if (!net) return;
+  if (startGate({
+    role: net.role,
+    phase: net.phase,
+    peerPresent: net.peerPresent,
+    admitted: myAdmitted(),
+    selfReady: net.selfReady,
+    peerReady: net.peerReady,
+  })) {
+    hostStartMatch();
+  }
+}
+
+function toggleReady() {
+  if (!net || net.phase !== 'lobby') return;
+  if (!canToggleReady({
+    phase: net.phase, peerPresent: net.peerPresent, admitted: myAdmitted(),
+  })) return;
+  net.selfReady = !net.selfReady;
+  net.client.send({ type: 'ready', ready: net.selfReady });
+  renderRoom();
+  maybeStartMatch();
+}
+
+/// Guest: send the typed password to the host for checking. The
+/// verdict comes back as pw-ok / pw-no; until pw-ok this client
+/// is not present, cannot ready, and the host cannot start.
+function submitPassword() {
+  if (!net || !netUi.pwInput) return;
+  const pw = netUi.pwInput.value;
+  if (!pw) return;
+  netUi.pwInput.value = '';
+  net.pwState = 'sent';
+  net.client.send({ type: 'pw', pw });
+  lobbyStatus('Checking the password…');
+  renderRoom();
 }
 
 // --- rejoin ------------------------------------------------------------------
@@ -1517,10 +1800,23 @@ function onPeerGone() {
       }
       if (left <= 0 && netUi.claimBtn) netUi.claimBtn.disabled = false;
     }, 250);
-  } else if (net.phase === 'lobby' || net.phase === 'starting') {
+  } else if (net.phase === 'starting') {
+    // M10: a disconnect during LOADING cancels the match for
+    // everyone — no dead screen, no half-started sim; the
+    // remaining player lands back in the Lobby Browser with the
+    // cancellation message.
+    cancelLoading(false);
+  } else if (net.phase === 'lobby') {
     net.peerPresent = false;
+    net.peerGone = false;
+    // M10: a guest who leaves takes both ready flags down — the
+    // host must press Start again for the next guest.
+    net.peerReady = false;
+    net.selfReady = false;
+    net.peerPwOk = false;
+    net.doorGuest = false;
     lobbyStatus('Your opponent left the room.');
-    if (netUi.startBtn) netUi.startBtn.disabled = true;
+    renderRoom();
     updateNetStatus();
   }
 }
@@ -1534,17 +1830,45 @@ function onNetMessage(msg) {
         net.helloReplied = true;
         net.client.send({ type: 'hello', v: 1, role: net.role });
       }
+      // M10 private rooms: a guest at the door of a private room
+      // does not count as present until the password check passes
+      // (host side). The host asks for the password instead; the
+      // door state shows in the guest slot, nothing more.
+      if (net.role === 'host' && net.phase === 'lobby'
+        && net.privacy === 'private' && !net.peerPwOk) {
+        net.doorGuest = true;
+        net.client.send({ type: 'pw-req' });
+        lobbyStatus('A guest is at the door — waiting for the password.');
+        renderRoom();
+        updateNetStatus();
+        break;
+      }
+      // Guest side of the same door: the host exists, but in a
+      // private room this client is not IN yet — presence waits
+      // for 'pw-ok'.
+      const guestAtDoor = net.role === 'guest' && net.phase === 'lobby'
+        && net.privacy === 'private' && net.pwState !== 'ok';
       const wasGone = net.peerGone;
       net.hellosSeen = (net.hellosSeen || 0) + 1;
+      if (guestAtDoor) {
+        net.hostSeen = true;
+        lobbyStatus('This room is private — enter the password to join.');
+        renderRoom();
+        updateNetStatus();
+        break;
+      }
+      const isNewPresence = !net.peerPresent;
       net.peerPresent = true;
       net.peerGone = false;
+      // A fresh arrival starts unready on both sides of the gate.
+      if (isNewPresence && net.phase === 'lobby') net.peerReady = false;
       if (net.phase === 'lobby' || net.phase === 'starting') {
         if (net.role === 'host') {
-          lobbyStatus('Your opponent is here. Start when ready.');
-          if (netUi.startBtn) netUi.startBtn.disabled = false;
+          lobbyStatus('Your opponent is here. Press Start when you are both ready.');
         } else {
-          lobbyStatus('Connected. Waiting for the host to start the match…');
+          lobbyStatus('Connected. Press Start when you are ready — the match begins when both players are ready.');
         }
+        renderRoom();
       } else if (net.phase === 'peer-left' || (net.phase === 'playing' && wasGone)) {
         // The opponent rejoined on the same link: transfer the
         // recorded match so they can rebuild it.
@@ -1567,19 +1891,98 @@ function onNetMessage(msg) {
       if (net.role === 'guest' && net.phase === 'lobby') guestHandleStart(msg);
       break;
     case 'start-ack':
+      // The guest's loaded signal (M10): its sim is built and its
+      // construction hash verified. The host's own loaded flag
+      // went up when it sent 'start' — with both in, 'go' flies.
       if (net.role === 'host' && net.phase === 'starting' && net.pendingSim) {
+        net.peerLoaded = true;
+        renderLoading();
         const t0 = performance.now() + 600;
         net.client.send({ type: 'go', inMs: 600 });
         beginOnlineMatch().start(t0);
       }
       break;
     case 'start-abort':
-      lobbyStatus('The other client runs a different build — the match was refused.');
-      net.phase = 'lobby';
+      // The guest failed to load (build mismatch or a failed
+      // download): the match is cancelled for everyone.
+      if (net.phase === 'starting') cancelLoading(false);
+      break;
+    case 'cancel':
+      // The peer cancelled during loading (or, for a guest still
+      // in the room, the host's load failed before 'start'): the
+      // match is off; land back in the Lobby Browser with the
+      // cancellation message. A cancel never echoes back.
+      if (net.phase === 'starting') cancelLoading(false);
+      else if (net.phase === 'lobby' && net.room) {
+        openLobby(null);
+        lobbyStatus(MATCH_CANCELLED_MSG);
+      }
       break;
     case 'go':
       if (net.role === 'guest' && net.pendingSim) {
+        net.peerLoaded = true; // 'go' means the host is loaded too
+        renderLoading();
         beginOnlineMatch().start(performance.now() + (msg.inMs || 600));
+      }
+      break;
+    case 'ready':
+      // M10: the peer's ready flag. Presence is already gated on
+      // admission (a private-room guest counts as present only
+      // after pw-ok), so a ready from a present peer is a ready
+      // that counts. The host's gate runs on every change.
+      if (net.phase === 'lobby' && net.peerPresent) {
+        net.peerReady = !!msg.ready;
+        renderRoom();
+        maybeStartMatch();
+      }
+      break;
+    case 'pw-req':
+      // The host's room is private (a stripped link param can't
+      // hide it): ask for the password before presence counts.
+      if (net.role === 'guest' && net.phase === 'lobby') {
+        net.privacy = 'private';
+        net.hostSeen = true;
+        if (net.pwState === 'na') net.pwState = 'needed';
+        lobbyStatus('This room is private — enter the password to join.');
+        renderRoom();
+      }
+      break;
+    case 'pw':
+      // Host side of the courtesy lock: compare against the
+      // password held in THIS client's memory (set at create
+      // time; never sent anywhere, never stored server-side).
+      if (net.role === 'host' && net.phase === 'lobby'
+        && net.privacy === 'private') {
+        if (checkPassword(net.password, msg.pw)) {
+          net.peerPwOk = true;
+          net.doorGuest = false;
+          net.peerPresent = true;
+          net.peerReady = false;
+          net.client.send({ type: 'pw-ok' });
+          lobbyStatus('Your opponent is here. Press Start when you are both ready.');
+        } else {
+          net.client.send({ type: 'pw-no' });
+          lobbyStatus('A guest entered the wrong password.');
+        }
+        renderRoom();
+        updateNetStatus();
+      }
+      break;
+    case 'pw-ok':
+      if (net.role === 'guest' && net.phase === 'lobby') {
+        net.pwState = 'ok';
+        net.peerPresent = true;
+        net.peerReady = false;
+        lobbyStatus('You are in. Press Start when you are ready — the match begins when both players are ready.');
+        renderRoom();
+        updateNetStatus();
+      }
+      break;
+    case 'pw-no':
+      if (net.role === 'guest' && net.phase === 'lobby') {
+        net.pwState = 'wrong';
+        lobbyStatus('Incorrect password — try again.');
+        renderRoom();
       }
       break;
     case 'resign':
@@ -1621,16 +2024,27 @@ function onNetMessage(msg) {
 }
 
 function connectToRoom() {
+  // M10: the HOST's create connection carries the private flag —
+  // the room registers in the directory as locked (listed, like
+  // the reference game's passworded rooms; only the flag travels,
+  // never the password).
+  const privFlag = net.role === 'host' && net.privacy === 'private'
+    ? '&private=1' : '';
   const wsUrl = RELAY_HTTP.replace(/^http/, 'ws')
-    + `/room/${encodeURIComponent(net.room)}?region=${encodeURIComponent(net.region)}`;
+    + `/room/${encodeURIComponent(net.room)}?region=${encodeURIComponent(net.region)}${privFlag}`;
   net.client = createRelayClient({
     onOpen: () => {
       net.client.send({ type: 'hello', v: 1, role: net.role });
       if (net.role === 'host') {
-        lobbyStatus('Room created. Share the link; your opponent appears here when they open it.');
+        lobbyStatus(net.privacy === 'private'
+          ? 'Private room created. Share the invite link — guests also need the password.'
+          : 'Room created — it is listed in the Lobby Browser for anyone to join.');
+      } else if (net.privacy === 'private') {
+        lobbyStatus('This room is private — enter the password to join.');
       } else {
         lobbyStatus('Joining the room…');
       }
+      renderRoom();
     },
     onMessage: (m) => onNetMessage(m),
     onClose: () => {
@@ -1658,13 +2072,23 @@ function openLobby(join) {
     seed: null, pendingSim: null, recorder: null,
     desyncs: 0, telemetryPosted: false, pingMs: null,
     selectedRegion: null,
+    // M10 room model. The password lives ONLY in the host
+    // client's memory (net.password), set at create time; it is
+    // never persisted and never sent anywhere — guests send
+    // theirs to the host for comparison, over the room pipe.
+    privacy: join && join.private ? 'private' : 'public',
+    password: null,
+    peerPwOk: false, doorGuest: false, hostSeen: false,
+    selfReady: false, peerReady: false,
+    pwState: join && join.private ? 'needed' : 'na',
+    roomLinkValue: '',
+    selfLoaded: false, peerLoaded: false, loadTimer: null,
   };
   showOverlay(netUi.onlineOverlay, true);
-  if (netUi.startBtn) netUi.startBtn.disabled = true;
-  if (netUi.roomLinkRow) netUi.roomLinkRow.hidden = !join;
+  hideLoading();
   if (netUi.createBtn) netUi.createBtn.disabled = !!join;
-  // Browsing shows the games table + create view; joining by link
-  // shows only the status line (and the waiting-view ad sidebar).
+  // Browsing shows the games table + create view; joining enters
+  // the room screen directly (and the waiting-view ad sidebar).
   if (netUi.gamesSection) netUi.gamesSection.hidden = !!join;
   if (netUi.createSection) netUi.createSection.hidden = !!join;
   lobbyStatus(join ? 'Joining the room…' : 'Pick a server, then create the game.');
@@ -1675,6 +2099,7 @@ function openLobby(join) {
   } else {
     startLobbyBrowser();
   }
+  renderRoom();
   updateNetStatus();
 }
 
@@ -1745,14 +2170,31 @@ function renderRegionList(pings) {
 
 function createGame() {
   if (!net || net.room) return;
+  // M10: the privacy choice (Public default / Private + password).
+  const privEl = document.querySelector('input[name="room-privacy"]:checked');
+  net.privacy = privEl && privEl.value === 'private' ? 'private' : 'public';
+  if (net.privacy === 'private') {
+    const pw = netUi.roomPassword ? netUi.roomPassword.value : '';
+    if (!pw) {
+      lobbyStatus('Set a password for the private room first.');
+      if (netUi.roomPassword) netUi.roomPassword.focus();
+      return;
+    }
+    net.password = pw; // host memory only — never persisted
+    if (netUi.roomPassword) netUi.roomPassword.value = '';
+  }
   net.region = net.selectedRegion || net.region || regionList[0].id;
   net.room = makeRoomId();
-  const link = buildPlayUrl(
-    location.origin + location.pathname, net.room, net.region);
-  if (netUi.roomLink) netUi.roomLink.value = link;
-  if (netUi.roomLinkRow) netUi.roomLinkRow.hidden = false;
+  net.roomLinkValue = buildPlayUrl(
+    location.origin + location.pathname, net.room, net.region,
+    { private: net.privacy === 'private' });
   if (netUi.createBtn) netUi.createBtn.disabled = true;
+  // The room screen takes over from the browser + create view.
+  stopLobbyBrowser();
+  if (netUi.gamesSection) netUi.gamesSection.hidden = true;
+  if (netUi.createSection) netUi.createSection.hidden = true;
   renderRegionList({});
+  renderRoom();
   connectToRoom();
 }
 
@@ -1826,7 +2268,7 @@ function renderLobbyGames() {
     const row = document.createElement('div');
     row.className = 'game-row' + (m.room === lobbySelectedRoom ? ' selected' : '');
     row.dataset.room = m.room;
-    row.innerHTML = `<span class="g-title">${m.title}</span>`
+    row.innerHTML = `<span class="g-title">${m.locked ? '<span class="g-lock" title="Private — password required">🔒</span> ' : ''}${m.title}</span>`
       + `<span class="g-loc">${m.server}</span>`
       + `<span class="g-players">${m.playersText}</span>`
       + `<span class="g-ping">${m.pingText}</span>`;
@@ -1866,10 +2308,12 @@ function joinListedGame(room) {
   openLobby(target);
 }
 
-/// The quiet way out of the browser: back to the local game. From
-/// the page-load browser this starts the solo match that has been
-/// waiting behind the panel; from an online match it leaves first.
-function playSoloFromLobby() {
+/// The quiet way out of the browser: into a solo match. M10:
+/// solo passes through the loading screen too — but the screen
+/// lasts exactly as long as the real load takes (the WASM +
+/// artwork fetch on first play; near-instant after that). No
+/// artificial delay, ever. From an online match it leaves first.
+async function playSoloFromLobby() {
   stopLobbyBrowser();
   if (net && (net.phase === 'playing' || net.phase === 'peer-left')) {
     leaveNetMatch('abandoned');
@@ -1879,14 +2323,41 @@ function playSoloFromLobby() {
   }
   if (net) teardownNet();
   showOverlay(netUi.onlineOverlay, false);
+  // Solo loading screen: one seat — you, loading, then loaded.
+  if (netUi) {
+    showOverlay(netUi.loadingOverlay, true);
+    netUi.loadSlotHost.innerHTML =
+      '<span class="slot-name">Blue — You</span>' +
+      '<span class="slot-state">loading…</span>';
+    netUi.loadSlotGuest.style.display = 'none';
+    setLoadingStatus('Loading…');
+  }
+  try {
+    await ensureGameLoaded((t) => setLoadingStatus(t));
+  } catch {
+    hideLoading();
+    openLobby(null);
+    lobbyStatus('The game failed to load — check your connection and try again.');
+    return;
+  }
+  resetSim(matchMode);
+  hideLoading();
   setPaused(false);
   playing = true;
 }
 
 // --- replay playback -----------------------------------------------------------
 
-function startPlayback(rec) {
+async function startPlayback(rec) {
   if (net) teardownNet();
+  // A replay re-simulates the match, so it needs the game loaded
+  // (M10 load order) — a first-ever Watch click loads it here.
+  try {
+    await ensureGameLoaded();
+  } catch {
+    flash('The game failed to load — check your connection and try again.');
+    return;
+  }
   const events = replayEvents(rec);
   if (!events) {
     flash('That file is not a Skirmish II replay.');
@@ -1994,45 +2465,27 @@ function currentReplay() {
 }
 
 async function main() {
-  await init();
-  HALF = null; // set from the first sim instance below
+  // M10 load order: NO WASM init and NO sim at boot. The lobby is
+  // light — the game loads inside the loading phase, when a
+  // match actually starts (ensureGameLoaded). HALF/GW/GH/CS/OBST
+  // and the minimap geometry are set there, from a probe sim.
+  HALF = null;
   fitCanvas();
   addEventListener('resize', () => {
     fitCanvas();
   });
 
-  resetSim();
-  HALF = sim.world_half();
-  GW = sim.grid_width();
-  GH = sim.grid_height();
-  CS = sim.cell_size();
-  OBST = sim.obstacles();
-  mmGeom = createMinimap({
-    worldHalf: HALF, width: minimapCanvas.width, height: minimapCanvas.height,
-  });
-  // Camera centering in resetSim ran before HALF/GW were known-good;
-  // the values come straight from the sim, so just re-center cleanly.
-  {
-    const kinds = sim.entity_kinds();
-    const pos = sim.positions();
-    const tc = kinds.indexOf(KIND_TC);
-    const [ox, oy] = centerCamera(
-      pos[tc * 2], pos[tc * 2 + 1], camS, canvas.width, canvas.height);
-    camOx = ox;
-    camOy = oy;
-  }
-
   // --- Menus -----------------------------------------------------------
-  // No start screen (Claudio's direction, 2026-10-17): the match
-  // starts immediately in the active mode (?mode= may have set it).
-  // The mode radios live in the pause menu; Restart applies the
-  // checked one.
+  // No start screen (Claudio's direction, 2026-10-17): online is
+  // the front door (the Lobby Browser below); solo starts from
+  // it in one tap. The mode radios live in the pause menu;
+  // Restart applies the checked one.
   for (const inp of modeInputs) inp.checked = inp.value === matchMode;
   function chosenMode() {
     const chosen = document.querySelector('input[name="match-mode"]:checked');
     return chosen ? chosen.value : matchMode;
   }
-  playing = true;
+  playing = false; // no match exists until one is entered
   paused = false;
   pauseBtn.addEventListener('click', () => setPaused(true));
   // Idle indicators double as buttons: the same cycle the '.' / ','
@@ -2098,11 +2551,24 @@ async function main() {
     soloBtn: document.getElementById('btn-solo'),
     regionList: document.getElementById('region-list'),
     createBtn: document.getElementById('btn-create-game'),
-    roomLinkRow: document.getElementById('room-link-row'),
-    roomLink: document.getElementById('room-link'),
+    roomPassword: document.getElementById('room-password'),
+    pwSetRow: document.getElementById('pw-set-row'),
+    roomSection: document.getElementById('room-section'),
+    slotHost: document.getElementById('slot-host'),
+    slotGuest: document.getElementById('slot-guest'),
+    roomListedLine: document.getElementById('room-listed-line'),
+    roomPrivateLine: document.getElementById('room-private-line'),
+    pwRow: document.getElementById('pw-row'),
+    pwInput: document.getElementById('pw-input'),
+    pwEnterBtn: document.getElementById('btn-pw-enter'),
+    pwNote: document.getElementById('pw-note'),
+    readyBtn: document.getElementById('btn-ready'),
     copyLinkBtn: document.getElementById('btn-copy-link'),
     lobbyStatus: document.getElementById('lobby-status'),
-    startBtn: document.getElementById('btn-start-game'),
+    loadingOverlay: document.getElementById('loading-overlay'),
+    loadSlotHost: document.getElementById('load-slot-host'),
+    loadSlotGuest: document.getElementById('load-slot-guest'),
+    loadingStatus: document.getElementById('loading-status'),
     netStatus: document.getElementById('net-status'),
     netStatusText: document.getElementById('net-status-text'),
     resignBtn: document.getElementById('btn-resign'),
@@ -2141,11 +2607,28 @@ async function main() {
     netUi.soloBtn.addEventListener('click', playSoloFromLobby);
   }
   if (netUi.createBtn) netUi.createBtn.addEventListener('click', createGame);
-  if (netUi.startBtn) netUi.startBtn.addEventListener('click', hostStartMatch);
+  // M10: the room screen's one button toggles ready; the host's
+  // client starts the match itself when both players are ready.
+  if (netUi.readyBtn) netUi.readyBtn.addEventListener('click', toggleReady);
+  if (netUi.pwEnterBtn) netUi.pwEnterBtn.addEventListener('click', submitPassword);
+  if (netUi.pwInput) {
+    netUi.pwInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') submitPassword();
+    });
+  }
+  // The privacy choice reveals the password field (private rooms).
+  for (const radio of document.querySelectorAll('input[name="room-privacy"]')) {
+    radio.addEventListener('change', () => {
+      if (netUi.pwSetRow) {
+        netUi.pwSetRow.hidden = !(radio.checked && radio.value === 'private');
+      }
+    });
+  }
   if (netUi.copyLinkBtn) {
     netUi.copyLinkBtn.addEventListener('click', () => {
-      netUi.roomLink.select();
-      if (navigator.clipboard) navigator.clipboard.writeText(netUi.roomLink.value);
+      if (net && net.roomLinkValue && navigator.clipboard) {
+        navigator.clipboard.writeText(net.roomLinkValue);
+      }
       flash('Link copied — send it to your opponent.');
     });
   }
@@ -2224,7 +2707,7 @@ async function main() {
     const pp = parsePlayParams(location.search);
     setPaused(true);
     if (pp.room) {
-      openLobby({ room: pp.room, region: pp.region });
+      openLobby({ room: pp.room, region: pp.region, private: pp.private });
     } else {
       openLobby(null);
     }
@@ -2817,6 +3300,17 @@ async function main() {
   let prevFrameAt = null;
   const STEP = 1000 / 60;
   function frame(now) {
+    // M10 load order: before any match is entered there is no
+    // sim at all — the lobby sits over an empty canvas. Paint the
+    // bare backdrop and wait.
+    if (!sim) {
+      ctx.fillStyle = '#0b0f14';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      prevFrameAt = now;
+      last = now;
+      requestAnimationFrame(frame);
+      return;
+    }
     // M8: in an online match the lockstep session owns the tick
     // loop — it applies both players' bundles at their execution
     // turns and ticks there; the free-running accumulator below is

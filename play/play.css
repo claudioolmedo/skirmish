@@ -218,21 +218,8 @@ html, body {
 }
 .region-row.locked { cursor: default; opacity: 0.75; }
 .region-ms { color: #7a6248; font-variant-numeric: tabular-nums; }
-.room-link-row {
-  display: flex;
-  gap: 8px;
-  margin: 0 0 6px;
-}
-.room-link-row input {
-  flex: 1;
-  min-width: 0;
-  padding: 8px 10px;
-  border: 1px solid #c9b48a;
-  border-radius: 8px;
-  background: #fffdf6;
-  color: #4a3820;
-  font-size: 13px;
-}
+/* (the M8 big room-link row is gone — M10 demotes the invite
+   link to one quiet text line under the seats: .invite-row) */
 .net-status {
   margin: 10px 0 0;
   padding: 10px 12px;
@@ -273,7 +260,7 @@ html, body {
 .pb-label { color: #5d4630; font-size: 13px; font-weight: 600; }
 /* [hidden] must win over the flex layouts above (attribute vs class
    specificity), or hidden rows/bars stay visible. */
-.room-link-row[hidden], .playback-bar[hidden], .net-wait[hidden] {
+.playback-bar[hidden], .net-wait[hidden], .pw-row[hidden] {
   display: none !important;
 }
 
@@ -377,3 +364,80 @@ html, body {
     padding: 7px 8px;
   }
 }
+
+/* --- M10: privacy choice, room screen, loading screen ----------- */
+/* The create panel's Public/Private choice reuses the .mode-opt
+   chip language; the password field slides under it. */
+.privacy-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 10px;
+}
+.pw-set-row { margin: 0 0 12px; }
+.pw-set-row input, .pw-row input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid #c9b48a;
+  border-radius: 8px;
+  background: #fffdf6;
+  color: #4a3820;
+  font-size: 13.5px;
+}
+/* The room screen: two calm seat rows — who, which color, present,
+   ready — then ONE prominent Start toggle, then the quiet link. */
+.slot-list { margin: 10px 0 12px; }
+.slot-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid #c9b48a;
+  border-radius: 8px;
+  background: rgba(255, 252, 244, 0.65);
+  color: #4a3820;
+  font-size: 14.5px;
+  margin: 0 0 6px;
+  text-align: left;
+}
+.slot-dot {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(67, 48, 15, 0.5);
+}
+.dot-blue { background: #2b5f9e; }
+.dot-red { background: #9c2b16; }
+.slot-name { font-weight: 600; }
+.slot-state { margin-left: auto; color: #7a6248; font-size: 13.5px; }
+.slot-ready { color: #4d7c0f; font-weight: 700; }
+.pw-row {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 6px;
+}
+.pw-row input { flex: 1; width: auto; }
+.invite-row {
+  margin: 12px 0 0;
+  text-align: center;
+  font-size: 12.5px;
+  color: #7a6248;
+}
+.linklike {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: #7a6248;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.linklike:hover { color: #8a5a10; }
+.g-lock { font-size: 12px; }
+/* The loading screen: same seat rows with loaded states, a status
+   line, and the second waiting-view ad slot under them. */
+.loading-card { max-width: 560px; }
+.loading-ad { margin-top: 18px; }
+.loading-ad .ad-slot-box { margin: 0 auto; }

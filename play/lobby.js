@@ -16,7 +16,7 @@ export const MAX_LOBBY_ROWS = 50;
 const ROOM_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 /// Validate + normalize one GET /lobbies payload. Returns
-/// { open: [{ room, region, players: 1, createdAt }], inProgress }
+/// { open: [{ room, region, players: 1, createdAt, locked }], inProgress }
 /// or null when the payload is not directory-shaped at all.
 /// Individual junk entries are dropped, never trusted: probe rooms
 /// are not games, and "open" in a 1v1 world means exactly one seat
@@ -36,6 +36,10 @@ export function parseLobbies(json) {
       region: typeof e.region === 'string' ? e.region : '',
       players: 1,
       createdAt: Number.isFinite(e.createdAt) ? e.createdAt : 0,
+      // M10: private rooms are listed like the reference game's —
+      // flagged locked, never hidden. Only a literal true counts;
+      // the password itself is never in the directory.
+      locked: e.locked === true,
     });
   }
   open.sort((a, b) => a.createdAt - b.createdAt);
@@ -55,6 +59,7 @@ export function lobbyTitle(regionName) {
 /// (createdAt, pingMs) alongside the display strings.
 export function lobbyRowModel(entry, { regionName, pingMs } = {}) {
   const name = regionName || entry.region || 'Unknown server';
+  const locked = entry.locked === true;
   return {
     room: entry.room,
     region: entry.region,
@@ -64,6 +69,11 @@ export function lobbyRowModel(entry, { regionName, pingMs } = {}) {
     pingMs: typeof pingMs === 'number' ? pingMs : null,
     pingText: typeof pingMs === 'number' ? `${Math.round(pingMs)} ms` : '…',
     createdAt: entry.createdAt || 0,
+    // M10: the lock marker a locked row carries (rendered before
+    // the title, the way the reference browser marks passworded
+    // games).
+    locked,
+    lockText: locked ? '🔒' : '',
   };
 }
 
@@ -90,8 +100,10 @@ export function sortLobbyRows(rows, key = 'created', dir = 1) {
   return out;
 }
 
-/// The join parameters for a listed game ({ room, region } in the
-/// shape openLobby takes), or null when the entry is not joinable.
+/// The join parameters for a listed game ({ room, region, private }
+/// in the shape openLobby takes), or null when the entry is not
+/// joinable. A locked row joins as a private room: the guest
+/// client asks for the password before presence counts.
 export function joinTarget(entry) {
   if (!entry || typeof entry.room !== 'string' || !ROOM_RE.test(entry.room)) {
     return null;
@@ -99,5 +111,6 @@ export function joinTarget(entry) {
   return {
     room: entry.room,
     region: typeof entry.region === 'string' && entry.region ? entry.region : 'wnam',
+    private: entry.locked === true,
   };
 }

@@ -25,7 +25,7 @@ test('parseLobbies accepts a well-formed directory payload', () => {
   assert.equal(parsed.open[0].room, 'zzz999yyyy');
   assert.equal(parsed.open[1].room, 'abc123def4');
   assert.deepEqual(parsed.open[0], {
-    room: 'zzz999yyyy', region: 'weur', players: 1, createdAt: 1000,
+    room: 'zzz999yyyy', region: 'weur', players: 1, createdAt: 1000, locked: false,
   });
 });
 
@@ -118,13 +118,47 @@ test('sortLobbyRows by ping keeps unmeasured rows last in both directions', () =
 test('joinTarget validates the room and defaults the region', () => {
   assert.deepEqual(
     joinTarget({ room: 'abc123def4', region: 'weur' }),
-    { room: 'abc123def4', region: 'weur' });
+    { room: 'abc123def4', region: 'weur', private: false });
   assert.deepEqual(
     joinTarget({ room: 'abc123def4' }),
-    { room: 'abc123def4', region: 'wnam' });
+    { room: 'abc123def4', region: 'wnam', private: false });
   assert.equal(joinTarget(null), null);
   assert.equal(joinTarget({ room: 'bad room' }), null);
   assert.equal(joinTarget({}), null);
+});
+
+test('parseLobbies keeps the M10 locked flag — strictly boolean', () => {
+  const parsed = parseLobbies({
+    open: [
+      { room: 'lockroom01', region: 'wnam', players: 1, createdAt: 5, locked: true },
+      { room: 'openroom01', region: 'weur', players: 1, createdAt: 6 },
+      { room: 'junkroom01', region: 'sam', players: 1, createdAt: 7, locked: 'yes' },
+    ],
+    inProgress: 0,
+  });
+  assert.equal(parsed.open[0].locked, true);
+  assert.equal(parsed.open[1].locked, false);
+  // Anything but a literal true is not a lock (and never a password).
+  assert.equal(parsed.open[2].locked, false);
+});
+
+test('lobbyRowModel carries the lock marker for locked rooms', () => {
+  const locked = lobbyRowModel(
+    { room: 'lockroom01', region: 'wnam', players: 1, createdAt: 5, locked: true },
+    { regionName: 'North America West', pingMs: 42 });
+  assert.equal(locked.locked, true);
+  assert.equal(locked.lockText, '🔒');
+  const open = lobbyRowModel(
+    { room: 'openroom01', region: 'wnam', players: 1, createdAt: 6 },
+    { regionName: 'North America West', pingMs: 42 });
+  assert.equal(open.locked, false);
+  assert.equal(open.lockText, '');
+});
+
+test('joinTarget joins a locked row as a private room', () => {
+  assert.deepEqual(
+    joinTarget({ room: 'lockroom01', region: 'eeur', locked: true }),
+    { room: 'lockroom01', region: 'eeur', private: true });
 });
 
 test('the refresh cadence is the briefed ~5 s', () => {

@@ -165,7 +165,7 @@
       </div>
     </div>
     <p class="overlay-note">Quality changes only the picture — sprites, sharpness, shadows. The game is identical on every device, from an old Chromebook to a gaming PC.</p>
-    <p class="overlay-note">Test build · M9 — the Lobby Browser: the play page opens on the list of open games (server, players, live ping) — join one, or create a lobby and share the link. Matches run in lockstep: both browsers simulate the same game from the same seed and exchange only orders. On top of the M7 generated Arabia with fog of war, the M6 ages and technologies and the M5 match (scripted AI opponent or Sandbox, Conquest victory and defeat). Placeholder art is being replaced piece by piece with our own.</p>
+    <p class="overlay-note">Test build · M10 — rooms the way the classic lobbies work: create a Public room (listed, anyone can join) or a Private one (🔒 listed, password to enter), and the match starts when both players press Start. The game itself loads only once a match begins — the lobby stays light. Matches run in lockstep: both browsers simulate the same game from the same seed and exchange only orders. On top of the M7 generated Arabia with fog of war, the M6 ages and technologies and the M5 match (scripted AI opponent or Sandbox, Conquest victory and defeat). Placeholder art is being replaced piece by piece with our own.</p>
     <p class="overlay-note"><a href="../">← Back to the Skirmish II site</a></p>
   </div>
 </div>
@@ -215,7 +215,7 @@
   <div class="overlay-card lobby-card">
     <button id="online-close" class="card-close" type="button" aria-label="Close online play">✕</button>
     <h2 class="game-title-sm">Lobby Browser</h2>
-    <p class="overlay-sub">Join an open game, or create your own and send the link. No accounts: the link is the invitation.</p>
+    <p class="overlay-sub">Join an open game, or create your own. Games marked 🔒 ask for a password. No accounts: the link is the invitation.</p>
     <div class="lobby-layout">
       <div class="lobby-main">
         <div id="games-section">
@@ -234,21 +234,51 @@
           <h3 class="lobby-h">Create Lobby</h3>
           <p class="overlay-note create-note">Pick the server closest to you both — your friend picks the same one.</p>
           <div id="region-list" class="region-list"></div>
+          <!-- M10: a room is Public (listed, anyone may join) or
+               Private (listed with a lock; joining needs the
+               password the host sets here — it never leaves the
+               host's browser memory). -->
+          <div class="privacy-row" role="radiogroup" aria-label="Room privacy">
+            <label class="mode-opt"><input type="radio" name="room-privacy" value="public" checked> Public — anyone can join</label>
+            <label class="mode-opt"><input type="radio" name="room-privacy" value="private"> Private — password</label>
+          </div>
+          <div id="pw-set-row" class="pw-set-row" hidden>
+            <input id="room-password" type="password" placeholder="Room password" autocomplete="off" maxlength="128">
+          </div>
           <div class="pause-actions">
             <button id="btn-create-game" class="btn btn-gold" type="button">Create Lobby</button>
-            <button id="btn-start-game" class="btn btn-gold" type="button" disabled>Start match</button>
           </div>
-          <div id="room-link-row" class="room-link-row" hidden>
-            <input id="room-link" type="text" readonly value="">
-            <button id="btn-copy-link" class="btn btn-ghost btn-sm" type="button">Copy link</button>
+        </div>
+        <!-- M10 room screen: the two seats, their ready states and
+             ONE Start button (toggle ready). The match begins on
+             its own when both players are ready. The invite link
+             is one quiet line under the seats. -->
+        <div id="room-section" hidden>
+          <h3 class="lobby-h">Your room</h3>
+          <div class="slot-list">
+            <div class="slot-row" id="slot-host"></div>
+            <div class="slot-row" id="slot-guest"></div>
           </div>
+          <p id="room-listed-line" class="overlay-note">Listed in the Lobby Browser — anyone can join.</p>
+          <p id="room-private-line" class="overlay-note" hidden>🔒 Private room — guests need the invite link and the password.</p>
+          <div id="pw-row" class="pw-row" hidden>
+            <input id="pw-input" type="password" placeholder="Room password" autocomplete="off" maxlength="128">
+            <button id="btn-pw-enter" class="btn btn-gold btn-sm" type="button">Enter</button>
+          </div>
+          <p id="pw-note" class="overlay-note" hidden></p>
+          <div class="pause-actions">
+            <button id="btn-ready" class="btn btn-gold btn-big" type="button" disabled>Start</button>
+          </div>
+          <p class="invite-row">Invite link — <button id="btn-copy-link" class="linklike" type="button">copy</button></p>
         </div>
         <p id="lobby-status" class="overlay-note">Pick a server, then create the game.</p>
       </div>
       <aside class="lobby-side" id="lobby-side">
-        <!-- The play page's one ad slot (300x250, config in ../ads.js —
-             see ../ADS.md). It lives only in this lobby/waiting view:
-             never over the game, gone the moment a match starts. -->
+        <!-- One of the play page's two waiting-view ad slots (300x250,
+             config in ../ads.js — see ../ADS.md; the other is on the
+             loading screen). It lives only in this lobby/waiting
+             view: never over the game, gone the moment a match
+             starts. Its content rotates while you wait. -->
         <div class="ad-label">Advertisement</div>
         <div class="ad-slot ad-slot-box" id="ad-slot-lobby">Ads pay for the servers — thanks for being here.</div>
         <div class="ad-note">Ads pay for the servers &amp; keep Skirmish II open.</div>
@@ -275,6 +305,28 @@
     <div class="pause-actions">
       <button id="btn-claim-victory" class="btn btn-gold" type="button" disabled>Claim victory</button>
       <button id="btn-leave-match" class="btn btn-ghost" type="button">Leave match</button>
+    </div>
+  </div>
+</div>
+
+<!-- M10 loading screen: the heavy game (WASM, artwork, the world
+     itself) loads HERE — after both players pressed Start — never
+     before. Each seat shows its loaded state; the host sends 'go'
+     only when both are loaded. A player who leaves or fails to
+     load cancels the match for everyone, back to the Lobby
+     Browser. Carries the play page's second waiting-view ad slot;
+     gone the moment play begins. -->
+<div id="loading-overlay" class="overlay" style="display:none">
+  <div class="overlay-card loading-card">
+    <h2 class="game-title-sm">Loading match</h2>
+    <div class="slot-list">
+      <div class="slot-row" id="load-slot-host"></div>
+      <div class="slot-row" id="load-slot-guest"></div>
+    </div>
+    <p id="loading-status" class="overlay-note">Loading…</p>
+    <div class="loading-ad">
+      <div class="ad-label">Advertisement</div>
+      <div class="ad-slot ad-slot-box" id="ad-slot-loading">Ads pay for the servers — thanks for being here.</div>
     </div>
   </div>
 </div>
