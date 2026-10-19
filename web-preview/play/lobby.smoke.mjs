@@ -387,5 +387,27 @@ await boot(tab);
   console.log('PASS (8) M12.1 phone rules ship in play.css (by construction; no layout engine here)');
 }
 
+// (9) The compact bottom strip (Claudio, 2026-10-19: the
+//     content-sized bar covered ~half of a short desktop
+//     viewport). Same honesty rule as (8): no layout engine
+//     here, so assert the shipped ui.css carries the cap and
+//     the fitting rules the shallow strip is built from.
+{
+  const { readFileSync } = await import('node:fs');
+  const css = readFileSync(new URL('./ui.css', import.meta.url), 'utf8');
+  const barAt = css.indexOf('.ui-bottombar');
+  const barRule = css.slice(barAt, css.indexOf('}', barAt));
+  assert.ok(barRule.includes('height: clamp(150px, 20vh, 232px)'),
+    'the bottom strip height is capped against the viewport');
+  assert.ok(css.includes('grid-template-rows: repeat(3, minmax(0, 1fr)) minmax(0, auto)'),
+    'the three command rows share the strip height; the hint takes only its line(s)');
+  assert.ok(!css.includes('min-height: 68px'),
+    'the old 68px button floor that drove the giant bar is gone');
+  const phoneAt = css.lastIndexOf('@media (max-width: 700px)');
+  assert.ok(phoneAt > 0 && css.slice(phoneAt).includes('.ui-bottombar { height: clamp(134px, 27vh, 30vh)'),
+    'on phones the strip takes a larger share but stays under ~30vh');
+  console.log('PASS (9) compact bottom strip ships in ui.css (by construction; no layout engine here)');
+}
+
 console.log('LOBBY SMOKE: all cases passed');
 process.exit(0);

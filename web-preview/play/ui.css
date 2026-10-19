@@ -35,11 +35,11 @@
 }
 
 .ui-panel-title {
-  font: 700 10.5px/1.2 system-ui, sans-serif;
+  font: 700 10px/1.2 system-ui, sans-serif;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--ui-faint);
-  margin: 0 0 6px;
+  margin: 0 0 4px;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
 }
 
@@ -135,6 +135,14 @@
   right: 0;
   bottom: 0;
   z-index: 20;
+  /* ONE shallow strip, DE-style (Claudio, 2026-10-19: the old
+     content-sized bar ate ~half of a short desktop viewport —
+     the 3-row command grid + hint row set the height and the
+     selection panel stretched to match). The height is now
+     capped against the viewport; the panels inside flex and
+     shrink to fit it, and the canvas shows above it. */
+  height: clamp(150px, 20vh, 232px);
+  box-sizing: border-box;
   display: flex;
   align-items: stretch;
   background:
@@ -149,26 +157,45 @@
 /* command panel (bottom-left) */
 
 .ui-cmd-panel {
-  flex: 0 0 292px;
-  padding: 8px 10px 10px;
+  flex: 0 0 316px;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 8px;
   border-right: 1px solid rgba(0, 0, 0, 0.5);
 }
 
 .cmd-grid {
+  flex: 1 1 auto;
+  min-height: 0;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
+  /* the three button rows share the strip height equally; the
+     hint (always the grid's last child) takes only the line(s)
+     it needs, so the grid fits the capped bar at any height */
+  grid-template-rows: repeat(3, minmax(0, 1fr)) minmax(0, auto);
+  gap: 5px;
+}
+/* nothing selected: the hint is the grid's only child — give it
+   the whole grid instead of the first of four rows */
+.cmd-grid:has(> .ui-cmd-hint:only-child) {
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .cmd-btn {
   position: relative;
-  display: flex;
-  flex-direction: column;
+  /* compact horizontal cell: icon left (spanning both lines),
+     label over cost on the right — fits the capped strip where
+     the old icon-over-label-over-cost stack could not */
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  align-content: center;
   align-items: center;
-  justify-content: center;
-  gap: 1px;
-  min-height: 68px;
-  padding: 6px 4px 5px;
+  column-gap: 6px;
+  min-height: 0;
+  min-width: 0;
+  padding: 3px 7px;
+  text-align: left;
   background:
     linear-gradient(rgba(26, 13, 4, 0.52), rgba(26, 13, 4, 0.52)),
     var(--ui-wood) url("ui-art/tex-wood.webp") center / cover no-repeat;
@@ -200,18 +227,31 @@
   outline: 2px solid var(--gold-bright, #ffcf4d);
   outline-offset: 1px;
 }
-.cmd-btn .cmd-icon { width: 30px; height: 30px; }
+.cmd-btn .cmd-icon {
+  grid-row: 1 / span 2;
+  align-self: center;
+  width: 22px;
+  height: 22px;
+}
 .cmd-btn .cmd-label {
-  font-size: 11.5px;
+  grid-column: 2;
+  align-self: end;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
   font-weight: 600;
   line-height: 1.15;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
 }
 .cmd-btn .cmd-cost {
+  grid-column: 2;
+  align-self: start;
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 10.5px;
+  font-size: 10px;
   color: var(--ui-dim);
   line-height: 1.15;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
@@ -242,9 +282,10 @@
   grid-column: 1 / -1;
   align-self: center;
   color: var(--ui-dim);
-  font-size: 12.5px;
-  line-height: 1.4;
-  padding: 4px 2px;
+  font-size: 10.5px;
+  line-height: 1.3;
+  margin: 0;
+  padding: 1px 2px;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
 
@@ -254,9 +295,12 @@
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 8px 16px;
+  /* content hugs the top of the capped strip — the parchment
+     fills the strip height but never grows it */
+  align-items: flex-start;
+  gap: 12px;
+  padding: 8px 14px;
+  overflow: hidden;
   background: #d9c49a url("ui-art/tex-parchment.webp") center / cover no-repeat;
   box-shadow: inset 0 0 24px rgba(101, 72, 28, 0.35);
   color: var(--ui-ink);
@@ -264,8 +308,8 @@
 
 .sel-portrait {
   flex: none;
-  width: 74px;
-  height: 74px;
+  width: 64px;
+  height: 64px;
   display: grid;
   place-items: center;
   /* the carved medallion is the frame; the icon rests on its center */
@@ -274,12 +318,20 @@
   box-shadow: 0 2px 6px rgba(40, 24, 4, 0.45);
   color: var(--ui-ink);
 }
-.sel-portrait .ui-icon { width: 44px; height: 44px; }
+.sel-portrait .ui-icon { width: 38px; height: 38px; }
 .sel-portrait.empty { color: var(--ui-ink-dim); }
 
-.sel-main { min-width: 0; }
-.sel-name { font-size: 15.5px; font-weight: 700; margin: 0 0 2px; }
-.sel-line { font-size: 12.5px; color: var(--ui-ink-dim); line-height: 1.4; margin: 0; }
+.sel-main { min-width: 0; overflow: hidden; }
+.sel-name { font-size: 14.5px; font-weight: 700; margin: 0 0 2px; }
+.sel-line {
+  font-size: 12.5px;
+  color: var(--ui-ink-dim);
+  line-height: 1.35;
+  margin: 0;
+  /* at most two lines of description inside the capped strip */
+  max-height: 34px;
+  overflow: hidden;
+}
 .sel-line.warn { color: var(--ui-ink-warn); }
 
 /* group selection: one mini-cell per unit (cap the row with CSS;
@@ -288,8 +340,12 @@
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin-top: 6px;
+  margin-top: 5px;
   max-width: 300px;
+  /* at most two icon rows; a longer group scrolls in place
+     (app.js already caps the row with a "+k more" cell) */
+  max-height: 58px;
+  overflow-y: auto;
 }
 .sel-cell {
   width: 27px;
@@ -311,12 +367,21 @@
 
 .ui-minimap-wrap {
   flex: none;
-  padding: 8px 10px 10px;
+  display: flex;
+  align-items: center;
+  padding: 6px 10px;
   border-left: 1px solid rgba(0, 0, 0, 0.5);
 }
 
 #minimap {
   display: block;
+  /* the map fills the capped strip's height (to a sane ceiling)
+     and its width follows the canvas aspect; minimap.js draws
+     into the attribute size and converts clicks via the
+     bounding rect, so CSS scaling is safe */
+  height: min(190px, calc(clamp(150px, 20vh, 232px) - 24px));
+  width: auto;
+  aspect-ratio: 220 / 124;
   background: #0b0f14;
   border: 2px solid #8a6a1f;
   border-radius: 4px;
@@ -328,9 +393,10 @@
 /* ---------- narrow screens ---------- */
 
 @media (max-width: 980px) {
-  .ui-cmd-panel { flex-basis: 232px; }
-  .cmd-btn { min-height: 60px; }
-  .cmd-btn .cmd-icon { width: 26px; height: 26px; }
+  .ui-cmd-panel { flex-basis: 248px; }
+  .cmd-btn { min-height: 0; }
+  .cmd-btn .cmd-icon { width: 20px; height: 20px; }
+  .cmd-btn .cmd-label { font-size: 10px; }
   .sel-portrait { width: 58px; height: 58px; }
   .sel-portrait .ui-icon { width: 34px; height: 34px; }
   #minimap { width: 176px; height: 99px; } /* geometry math uses the
@@ -342,12 +408,20 @@
   .ui-topbar { padding: 6px 12px; height: auto; min-height: 42px; flex-wrap: wrap; gap: 6px 14px; }
   .sel-line { display: none; }
   .sel-grid { display: none; }
-  /* bottom strip must FIT a phone: shrink all three panels instead
-     of letting the selection panel and minimap slide off-screen */
-  .ui-cmd-panel { flex-basis: 138px; padding: 6px 6px 8px; }
-  .cmd-grid { gap: 4px; }
-  .cmd-btn { min-height: 48px; }
-  .cmd-btn .cmd-icon { width: 20px; height: 20px; }
+  /* bottom strip must FIT a phone: it may take a larger share
+     of a short screen than on desktop, but never over ~30vh;
+     shrink all three panels instead of letting the selection
+     panel and minimap slide off-screen */
+  .ui-bottombar { height: clamp(134px, 27vh, 30vh); }
+  .ui-cmd-panel { flex-basis: 150px; padding: 5px 6px; }
+  .cmd-grid { gap: 3px; }
+  /* one-column mini cells: icon over a tiny label; the cost
+     rides the button's tooltip at this width */
+  .cmd-btn { min-height: 0; grid-template-columns: 1fr; column-gap: 0; padding: 2px 3px; }
+  .cmd-btn .cmd-icon { grid-row: 1; grid-column: 1; justify-self: center; width: 17px; height: 17px; }
+  .cmd-btn .cmd-label { grid-column: 1; align-self: center; text-align: center; font-size: 8.5px; }
+  .cmd-btn .cmd-cost { display: none; }
+  .ui-cmd-hint { font-size: 9.5px; }
   .ui-sel-panel { padding: 6px 8px; gap: 8px; }
   .sel-portrait { width: 44px; height: 44px; }
   .sel-portrait .ui-icon { width: 26px; height: 26px; }
