@@ -402,8 +402,8 @@ function drawSpriteW(im, sx, sy, wWorld, dyWorld = 0) {
 // placeholder sprites always used. Exception: the House has
 // dedicated construction stage frames (house-stage1..3.png, one
 // generated strip sliced into thirds of the build) drawn full-size
-// instead of the clip-reveal; stages for the other kinds arrive per
-// building later. Fallback chain per building: this
+// instead of the clip-reveal; every building kind now has its own
+// stage strip (see buildingStageImage). Fallback chain per building: this
 // art -> whatever the renderer used before (original stage art / CC0
 // placeholder / vector). One image serves both players for the test
 // (no per-owner tint yet). Loading starts inside the M10 loading
@@ -420,14 +420,51 @@ const BUILDING_ART_FILES = {
   houseStage2: 'house-stage2.png',
   houseStage3: 'house-stage3.png',
   barracks: 'barracks.png',
+  barracksStage1: 'barracks-stage1.png',
+  barracksStage2: 'barracks-stage2.png',
+  barracksStage3: 'barracks-stage3.png',
   lumber: 'lumber-camp.png',
+  lumberStage1: 'lumber-camp-stage1.png',
+  lumberStage2: 'lumber-camp-stage2.png',
+  lumberStage3: 'lumber-camp-stage3.png',
   mill: 'mill.png',
+  millStage1: 'mill-stage1.png',
+  millStage2: 'mill-stage2.png',
+  millStage3: 'mill-stage3.png',
   mining: 'mining-camp.png',
+  miningStage1: 'mining-camp-stage1.png',
+  miningStage2: 'mining-camp-stage2.png',
+  miningStage3: 'mining-camp-stage3.png',
   range: 'archery-range.png',
+  rangeStage1: 'archery-range-stage1.png',
+  rangeStage2: 'archery-range-stage2.png',
+  rangeStage3: 'archery-range-stage3.png',
   stable: 'stable.png',
+  stableStage1: 'stable-stage1.png',
+  stableStage2: 'stable-stage2.png',
+  stableStage3: 'stable-stage3.png',
   blacksmith: 'blacksmith.png',
+  blacksmithStage1: 'blacksmith-stage1.png',
+  blacksmithStage2: 'blacksmith-stage2.png',
+  blacksmithStage3: 'blacksmith-stage3.png',
   farm: 'farm.png',
+  farmState1: 'farm-state1.png',
+  farmState2: 'farm-state2.png',
+  farmState3: 'farm-state3.png',
+  farmState4: 'farm-state4.png',
 };
+// The construction-stage frame for a building kind at a build
+// progress (thirds, the House rule): stage 1 foundation + posts,
+// stage 2 walls + scaffolding, stage 3 structure complete with roof
+// beams. Null for kinds without stage art (the Town Center, the
+// Farm) — drawArtImage(null) is false, so callers just fall through
+// to their existing chain.
+function buildingStageImage(kind, progress) {
+  const key = BUILDING_ART_KEY[kind];
+  if (!key || kind === 0) return null; // the House has its own path
+  const n = progress < 1 / 3 ? 1 : progress < 2 / 3 ? 2 : 3;
+  return BUILDING_ART.img[key + 'Stage' + n] || null;
+}
 // Building kind (sim ABI order) -> BUILDING_ART key, for the kinds
 // drawn by drawBuilding / drawNewBuilding.
 const BUILDING_ART_KEY = {
@@ -473,6 +510,64 @@ function whenBuildingArtSettled() {
 function buildingArtPending(key) {
   return BUILDING_ART.settled[key] === false;
 }
+// --- Original node + animal art (Base44 sets) -----------------------
+// Same provenance and loading phase as the building art (see
+// BUILDING_ART above; provenance: assets-original/nodes/README.md
+// and assets-original/animals/README.md). Nodes: one image per
+// resource kind, preferred over the CC0 placeholder sprites on the
+// SAME size/anchor contract the placeholders draw with. Animals:
+// four poses per animal from one generated strip (1 idle, 2/3 walk
+// strides, 4 graze/root/browse), drawn bottom-anchored at the
+// entity, flipped horizontally when it faces right (the poses face
+// left). Both sets join the loading phase's readiness set alongside
+// the building art — same settle semantics (loaded or errored,
+// capped), so a match never opens on unsettled art for them either.
+function loadArtSet(art, files, dir) {
+  if (art.loaded) return art.settledPromise;
+  art.loaded = true;
+  const pending = [];
+  for (const [key, file] of Object.entries(files)) {
+    const im = new Image();
+    art.img[key] = im;
+    art.settled[key] = false;
+    pending.push(new Promise((resolve) => {
+      const done = () => { art.settled[key] = true; resolve(); };
+      im.addEventListener('load', done);
+      im.addEventListener('error', done);
+      im.src = assetUrl(dir + file);
+      if (im.complete) done();
+    }));
+  }
+  const cap = new Promise((r) => { setTimeout(r, BUILDING_ART_SETTLE_TIMEOUT_MS); });
+  art.settledPromise = Promise.race([Promise.all(pending), cap]);
+  return art.settledPromise;
+}
+const NODE_ART = { img: {}, settled: {}, loaded: false, settledPromise: null };
+const NODE_ART_FILES = {
+  tree: 'tree.png', berry: 'berry-bush.png', gold: 'gold.png', stone: 'stone.png',
+};
+function loadNodeArt() {
+  return loadArtSet(NODE_ART, NODE_ART_FILES, 'assets-original/nodes/');
+}
+function whenNodeArtSettled() {
+  return NODE_ART.settledPromise || Promise.resolve();
+}
+const ANIMAL_ART = { img: {}, settled: {}, loaded: false, settledPromise: null };
+const ANIMAL_ART_FILES = {
+  sheep1: 'sheep-pose1.png', sheep2: 'sheep-pose2.png',
+  sheep3: 'sheep-pose3.png', sheep4: 'sheep-pose4.png',
+  boar1: 'boar-pose1.png', boar2: 'boar-pose2.png',
+  boar3: 'boar-pose3.png', boar4: 'boar-pose4.png',
+  deer1: 'deer-pose1.png', deer2: 'deer-pose2.png',
+  deer3: 'deer-pose3.png', deer4: 'deer-pose4.png',
+};
+function loadAnimalArt() {
+  return loadArtSet(ANIMAL_ART, ANIMAL_ART_FILES, 'assets-original/animals/');
+}
+function whenAnimalArtSettled() {
+  return ANIMAL_ART.settledPromise || Promise.resolve();
+}
+
 // Draw building art bottom-anchored like the placeholder sprites:
 // full image when frac >= 1, otherwise clip-revealed to the bottom
 // `frac` of the image (the building visibly rises). False when the
@@ -1731,6 +1826,8 @@ function ensureGameLoaded(onStep) {
       if (onStep) onStep('Loading the artwork…');
       loadPlaceholderSprites();
       loadBuildingArt();
+      loadNodeArt();
+      loadAnimalArt();
       loadTierSprites(Q);
       // The local "loaded" readiness includes the building-art
       // set: this promise must not resolve while a building PNG
@@ -1741,8 +1838,11 @@ function ensureGameLoaded(onStep) {
       // so a hung image can never block a match. Every entry
       // funnels through here — solo start, the host's start, the
       // guest's start-ack (the M10 loaded signal), AI rooms,
-      // rejoin and replay — so gating here gates them all.
-      await whenBuildingArtSettled();
+      // rejoin and replay — so gating here gates them all. The
+      // node and animal sets settle under the same rule and join
+      // the same await.
+      await Promise.all([whenBuildingArtSettled(), whenNodeArtSettled(),
+        whenAnimalArtSettled()]);
       // The world constants are the same for every match (fixed
       // world size); read them off a throwaway probe sim so no
       // match code ever runs before they exist.
@@ -4057,6 +4157,7 @@ function progressBar(sx, sy, frac) {
 function drawTree(sx, sy) {
   const u = camS;
   shadow(sx, sy, 1.5 * u);
+  if (drawSpriteH(NODE_ART.img.tree, sx, sy, 4.4)) return;
   if (drawSpriteH(SPRITES.tree, sx, sy, 4.4)) return;
   ctx.fillStyle = '#6b4a2b'; // trunk
   ctx.fillRect(sx - 0.18 * u, sy - 1.5 * u, 0.36 * u, 1.5 * u);
@@ -4077,6 +4178,7 @@ function drawTree(sx, sy) {
 function drawBerry(sx, sy) {
   const u = camS;
   shadow(sx, sy, 1.4 * u);
+  if (drawSpriteH(NODE_ART.img.berry, sx, sy, 1.9)) return;
   if (drawSpriteH(SPRITES.berry, sx, sy, 1.9)) return;
   const blob = (dx, dy, rw, rh, fill) => {
     ctx.fillStyle = fill;
@@ -4098,6 +4200,7 @@ function drawBerry(sx, sy) {
 function drawGold(sx, sy) {
   const u = camS;
   shadow(sx, sy, 1.3 * u);
+  if (drawSpriteW(NODE_ART.img.gold, sx, sy, 2.6)) return;
   if (drawSpriteW(SPRITES.gold, sx, sy, 2.6)) return;
   // Angular crystals: small diamonds in three gold tones.
   diamond(sx - 0.7 * u, sy - 0.45 * u, 0.5 * u, 0.55 * u, '#c78f00');
@@ -4109,6 +4212,7 @@ function drawGold(sx, sy) {
 function drawStone(sx, sy) {
   const u = camS;
   shadow(sx, sy, 1.35 * u);
+  if (drawSpriteW(NODE_ART.img.stone, sx, sy, 2.8)) return;
   if (drawSpriteW(SPRITES.stone, sx, sy, 2.8)) return;
   poly([
     [sx - 0.95 * u, sy], [sx - 0.55 * u, sy - 0.8 * u],
@@ -4157,13 +4261,21 @@ function drawFarmPlot(wx, wy, cropFrac) {
 
 function drawFarm(sx, sy, frac, wx, wy) {
   shadow(sx, sy, 3.4 * camS);
-  // Base44 test art: the farm plot image fitted to the field's
+  // Base44 art: the farm plot image fitted to the field's
   // footprint diamond (width matched to the diamond, aspect kept,
-  // centered on it). The depletion cue survives as a bare-soil tint
-  // that strengthens as the crop runs out. Fallback: the vector plot.
+  // centered on it). The image is one of four growth states picked
+  // by the food fraction remaining (frac > 0.66 ripe, > 0.4 green,
+  // > 0.15 shoots, else planted), so a field visibly winds down as
+  // it is harvested; farm.png itself is the ripe frame. The
+  // depletion cue survives as a bare-soil tint that strengthens as
+  // the crop runs out. Fallback: the vector plot.
   // (A farm UNDER CONSTRUCTION still draws the bare vector plot via
   // drawBuilding/drawFarmPlot — the construction feedback.)
-  const im = BUILDING_ART.img.farm;
+  const stateIm = frac > 0.66 ? BUILDING_ART.img.farmState4
+    : frac > 0.4 ? BUILDING_ART.img.farmState3
+    : frac > 0.15 ? BUILDING_ART.img.farmState2
+    : BUILDING_ART.img.farmState1;
+  const im = spriteReady(stateIm) ? stateIm : BUILDING_ART.img.farm;
   if (spriteReady(im)) {
     const t = worldToScreen(wx - CS, wy - CS);
     const r = worldToScreen(wx + CS, wy - CS);
@@ -4349,9 +4461,10 @@ function drawHouse(b) {
   if (!b.complete) progressBar(sx, sy - 4.9 * camS, b.progress);
 }
 
-// Barracks rendering (M3): the Base44 test art clip-revealed over
-// a 3-cell foundation diamond while under construction, full-size
-// when done; the CC0 placeholder keep sprite
+// Barracks rendering (M3): while under construction, the Base44
+// construction stage frames over a 3-cell foundation diamond (the
+// clip-reveal of the finished art is the fallback), full-size when
+// done; the CC0 placeholder keep sprite
 // (assets-placeholder/barracks.png) with the same treatment is the
 // fallback, and a stone-block vector the last resort. The footprint
 // is 3×3 cells.
@@ -4365,9 +4478,13 @@ function drawBarracks(b) {
   const l = worldToScreen(b.x - half, b.y + half);
   poly([t, r, bt, l], b.complete ? 'rgba(0,0,0,0.12)' : '#8d8578');
   const im = SPRITES.barracks;
-  if (drawArtImage(BUILDING_ART.img.barracks, sx, sy, 13.5, 2.6,
+  if (!b.complete &&
+    drawArtImage(buildingStageImage(2, b.progress), sx, sy, 13.5, 2.6, 1)) {
+    // Construction stage frame drawn (the House rule: dedicated
+    // per-stage frames on the finished art's draw contract).
+  } else if (drawArtImage(BUILDING_ART.img.barracks, sx, sy, 13.5, 2.6,
     b.complete ? 1 : b.progress)) {
-    // Base44 test art drawn (full, or clip-revealed by progress).
+    // Base44 art drawn (full, or clip-revealed by progress).
   } else if (spriteReady(im) && !buildingArtPending('barracks')) {
     // Same pending guard as drawTC: while the real art is still
     // in flight, grow the vector block below rather than the CC0
@@ -4427,9 +4544,10 @@ function drawBuilding(b) {
 }
 
 // The M6 buildings (Lumber Camp, Mill, Mining Camp, Archery Range,
-// Stable, Blacksmith): the Base44 test art over the foundation
-// diamond (full when complete, clip-revealed by progress while
-// building), sized to the footprint width × 1.12 like the Barracks
+// Stable, Blacksmith): the Base44 art over the foundation
+// diamond (full when complete; while building, the construction
+// stage frames, with the clip-reveal of the finished art as the
+// fallback), sized to the footprint width × 1.12 like the Barracks
 // placeholder contract. Fallback: the original vector draws in the
 // Barracks' family — a block growing with progress in a per-kind
 // palette, a small feature on completion, and the owner's pennant
@@ -4453,8 +4571,17 @@ function drawNewBuilding(b) {
   const bt = worldToScreen(b.x + half, b.y + half);
   const l = worldToScreen(b.x - half, b.y + half);
   poly([t, r, bt, l], b.complete ? 'rgba(0,0,0,0.12)' : '#8d8578');
-  if (!drawArtImage(BUILDING_ART.img[BUILDING_ART_KEY[b.kind]], sx, sy,
-    b.size * CS * 1.12, half * 0.45, b.complete ? 1 : b.progress)) {
+  // Under construction: the dedicated stage frame on the finished
+  // art's draw contract (the House rule); the clip-reveal below is
+  // the fallback when a stage frame is not loaded.
+  let artDrawn = false;
+  if (!b.complete) {
+    artDrawn = drawArtImage(buildingStageImage(b.kind, b.progress), sx, sy,
+      b.size * CS * 1.12, half * 0.45, 1);
+  }
+  if (!artDrawn &&
+    !drawArtImage(BUILDING_ART.img[BUILDING_ART_KEY[b.kind]], sx, sy,
+      b.size * CS * 1.12, half * 0.45, b.complete ? 1 : b.progress)) {
     const st = NEW_BUILDING_STYLE[b.kind];
     const hgt = (b.size === 3 ? 3.2 : 2.1) * (b.complete ? 1 : b.progress) * camS;
     poly([l, bt, up(bt, hgt), up(l, hgt)], st.wall);
@@ -4703,11 +4830,76 @@ function drawArcher(i, wx, wy) {
   ctx.stroke();
 }
 
+// --- Animal pose art (Base44 sets, see ANIMAL_ART above) -----------
+// The renderer gets fresh positions every frame but no velocity, so
+// movement and facing are derived per entity from the position
+// delta between draws: still = the idle pose (with an occasional
+// graze/root/browse pose 4 on a slow per-animal phase), moving =
+// walk strides 2/3 alternating on a tick phase. Facing is
+// screen-space: in the dimetric projection, moving right on screen
+// means the world delta has (dx - dy) > 0. The generated poses face
+// left, so rightward movement draws them flipped. Renderer-only
+// state; the vector draws below stay as the fallback.
+const ANIMAL_POSE_STATE = {};
+function animalPoseFor(i, wx, wy) {
+  const st = ANIMAL_POSE_STATE[i] ||
+    (ANIMAL_POSE_STATE[i] = { x: wx, y: wy, face: -1 });
+  const dx = wx - st.x;
+  const dy = wy - st.y;
+  const moving = Math.abs(dx) + Math.abs(dy) > 0.0001;
+  if (moving) {
+    const sdx = dx - dy;
+    if (sdx > 0.0001) st.face = 1;
+    else if (sdx < -0.0001) st.face = -1;
+  }
+  st.x = wx;
+  st.y = wy;
+  return { moving, face: st.face };
+}
+// The pose image for one animal this frame, plus its flip flag.
+// kind is the ANIMAL_ART key prefix: 'sheep' | 'boar' | 'deer'.
+function animalPoseImage(kind, i, wx, wy) {
+  const { moving, face } = animalPoseFor(i, wx, wy);
+  const tick = sim.tick_count();
+  let n;
+  if (moving) n = (Math.floor(tick / 8) + i) % 2 === 0 ? 2 : 3;
+  else n = (Math.floor(tick / 240) + i) % 5 === 0 ? 4 : 1;
+  return { im: ANIMAL_ART.img[kind + n], flip: face > 0 };
+}
+// Draw an animal pose bottom-anchored at (sx, sy), hWorld tall,
+// flipped horizontally when flip is set. False when not loaded.
+function drawAnimalPose(im, sx, sy, hWorld, flip) {
+  if (!spriteReady(im)) return false;
+  const h = hWorld * camS;
+  const w = h * (im.naturalWidth / im.naturalHeight);
+  if (flip) {
+    ctx.save();
+    ctx.translate(sx, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(im, -w / 2, sy - h, w, h);
+    ctx.restore();
+  } else {
+    ctx.drawImage(im, sx - w / 2, sy - h, w, h);
+  }
+  return true;
+}
+
 function drawSheep(i, wx, wy) {
   const [sx, sy] = worldToScreen(wx, wy);
   const u = camS;
   shadow(sx, sy, 0.9 * u);
   if (selection.has(i)) drawSelRing(sx, sy, 1.2);
+  const sheepPose = animalPoseImage('sheep', i, wx, wy);
+  if (drawAnimalPose(sheepPose.im, sx, sy, 2.0, sheepPose.flip)) {
+    // The enemy brand (see the vector draw below) still applies.
+    if (drawOwner === foeOwner()) {
+      ctx.fillStyle = ENEMY_COLOR;
+      ctx.beginPath();
+      ctx.arc(sx + 0.05 * u, sy - 1.35 * u, 0.26 * u, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    return;
+  }
   legs(sx, sy, u, [-0.5, 0.5], '#4a4038');
   ctx.fillStyle = '#e9e6df'; // wool: three overlapping puffs
   for (const [dx, dy, r] of [[-0.45, -0.8, 0.5], [0.35, -0.85, 0.55], [0, -1.1, 0.5]]) {
@@ -4734,6 +4926,8 @@ function drawBoar(i, wx, wy) {
   const u = camS;
   shadow(sx, sy, 1.25 * u);
   if (selection.has(i)) drawSelRing(sx, sy, 1.55);
+  const boarPose = animalPoseImage('boar', i, wx, wy);
+  if (drawAnimalPose(boarPose.im, sx, sy, 2.1, boarPose.flip)) return;
   legs(sx, sy, u, [-0.7, -0.25, 0.5, 0.9], '#3a2a20');
   ctx.fillStyle = '#5d4030'; // bulky body
   ctx.beginPath();
@@ -4764,6 +4958,8 @@ function drawDeer(i, wx, wy) {
   const u = camS;
   shadow(sx, sy, 1.1 * u);
   if (selection.has(i)) drawSelRing(sx, sy, 1.4);
+  const deerPose = animalPoseImage('deer', i, wx, wy);
+  if (drawAnimalPose(deerPose.im, sx, sy, 2.9, deerPose.flip)) return;
   legs(sx, sy, u, [-0.65, -0.25, 0.45, 0.8], '#8a6a42');
   ctx.fillStyle = '#b98d54'; // body
   ctx.beginPath();
