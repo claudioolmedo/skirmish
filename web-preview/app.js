@@ -5219,9 +5219,10 @@ const TRAIN_BLOCK_TITLES = [
 // Contextual commands, bottom-left: units selected (with a villager
 // among them) -> build buttons (driving the existing placement
 // flow); Town Center selected -> train Villager; Barracks selected
-// -> train Militia/Archer; nothing -> a hint line. Button ids are
-// stable across rebuilds; clicks are handled by the one delegated
-// listener on #cmd-grid in main().
+// -> train Militia/Archer; nothing -> an empty panel (DE's command
+// panel carries no explanatory text). Button ids are stable across
+// rebuilds; clicks are handled by the one delegated listener on
+// #cmd-grid in main().
 function renderCommands() {
   const selUnits = selectedUnits();
   const st = entityState();
@@ -5233,7 +5234,7 @@ function renderCommands() {
     ? buildingList().find((b) => b.id === selectedBuilding.id) || null
     : null;
   // M5: an enemy building/TC selection is information-only — its
-  // context renders a hint, never command buttons.
+  // context renders nothing, never command buttons.
   const foeSel = !!selectedBuilding && selectedBuilding.owner === foeOwner();
   // M6: each production/research building gets its own context.
   const BUILDING_CONTEXT = { 2: 'barracks', 6: 'range', 7: 'stable', 8: 'blacksmith' };
@@ -5294,8 +5295,6 @@ function renderCommands() {
             : `${BUILD_NAME[kind]} — ${BUILD_COST[kind]} wood`,
       });
     };
-    const hint = document.createElement('p');
-    hint.className = 'ui-cmd-hint';
     if (buildPage) {
       cmdGrid.append(...PAGE_KINDS[buildPage].map(buildBtn));
       // The page's last slot is Back (root) — a plain return
@@ -5305,9 +5304,6 @@ function renderCommands() {
         id: 'page-back', icon: 'i-back', label: 'Back',
         title: 'Back to the build menu (Esc).',
       }));
-      hint.textContent = buildPage === 'eco'
-        ? 'Economic buildings — the letter on a button places it. Esc goes back.'
-        : 'Military buildings — the letter on a button places it. Esc goes back.';
     } else {
       // DE page model (UI FIX 4 addendum): the root shows ONLY
       // the two category openers, badged with the very letters
@@ -5324,10 +5320,7 @@ function renderCommands() {
           key: 'W', title: 'Military Buildings (W)',
         }),
       );
-      hint.textContent =
-        'Q economic · W military · A drop off resources.';
     }
-    cmdGrid.append(hint);
   } else if (context === 'tc') {
     // M6: the Town Center also researches — Loom and the Feudal
     // advancement share its queue with villager training (TEC-03).
@@ -5441,22 +5434,10 @@ function renderCommands() {
       techBtn('research-padded', 4, 'i-padded', 'padded-armor.png', 'Padded Armor',
         'Research Padded Archer Armor — 100 food · 40 s. Archers: +1/+1 armor.'),
     );
-  } else if (context === 'units') {
-    const hint = document.createElement('p');
-    hint.className = 'ui-cmd-hint';
-    hint.textContent = 'Right-click an animal or enemy to attack, ground to move.';
-    cmdGrid.append(hint);
-  } else if (context === 'foe') {
-    const hint = document.createElement('p');
-    hint.className = 'ui-cmd-hint';
-    hint.textContent = 'Enemy — information only. Select your own units to give orders.';
-    cmdGrid.append(hint);
-  } else {
-    const hint = document.createElement('p');
-    hint.className = 'ui-cmd-hint';
-    hint.textContent = 'Select a villager to build, or the Town Center to train.';
-    cmdGrid.append(hint);
   }
+  // 'units', 'foe' and no-selection contexts render nothing:
+  // DE's command panel carries no explanatory text — with no
+  // command buttons to show, the panel is simply empty wood.
 }
 
 let selSig = ''; // signature of the last-rendered selection panel

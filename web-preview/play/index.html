@@ -87,11 +87,11 @@
   <!-- bottom-left: contextual commands. app.js rebuilds #cmd-grid per
        selection context: villager(s) -> the build menu (root page:
        the Economic / Military openers; a page: its buildings plus
-       Back); Town Center -> train button; nothing -> the hint line.
-       The buttons below are the initial paint (and the no-JS
-       fallback); the game replaces them on its first frame. -->
+       Back); Town Center -> train button; nothing -> empty panel
+       (no title, no hint text — as in DE). The buttons below are
+       the initial paint (and the no-JS fallback); the game
+       replaces them on its first frame. -->
   <section class="ui-cmd-panel" aria-label="Commands">
-    <p class="ui-panel-title">Commands</p>
     <div class="cmd-grid" id="cmd-grid">
       <button id="page-eco" class="cmd-btn" type="button" title="Economic Buildings (Q)">
         <span class="cmd-icon-wrap"><img class="cmd-icon" src="ui-art/icons/house.png" alt=""><span class="cmd-key">Q</span></span>

@@ -34,15 +34,6 @@
   vertical-align: middle;
 }
 
-.ui-panel-title {
-  font: 700 10px/1.2 system-ui, sans-serif;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--ui-faint);
-  margin: 0 0 4px;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
-}
-
 /* ---------- top resource bar ---------- */
 
 .ui-topbar {
@@ -167,23 +158,16 @@
   padding: 5px 8px;
   border-right: 1px solid rgba(0, 0, 0, 0.5);
 }
-.ui-cmd-panel .ui-panel-title { margin-bottom: 2px; }
-
 .cmd-grid {
   flex: 1 1 auto;
   min-height: 0;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  /* the three button rows share the strip height equally; the
-     hint (always the grid's last child) takes only the line(s)
-     it needs, so the grid fits the capped bar at any height */
-  grid-template-rows: repeat(3, minmax(0, 1fr)) minmax(0, auto);
+  /* exactly three button rows sharing the strip height; the
+     panel carries no title and no hint text (DE's panel has
+     neither) — with nothing selected the grid is simply empty */
+  grid-template-rows: repeat(3, minmax(0, 1fr));
   gap: 4px;
-}
-/* nothing selected: the hint is the grid's only child — give it
-   the whole grid instead of the first of four rows */
-.cmd-grid:has(> .ui-cmd-hint:only-child) {
-  grid-template-rows: minmax(0, 1fr);
 }
 
 .cmd-btn {
@@ -289,17 +273,6 @@
   border-radius: 3px;
   padding: 1px 3px;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
-}
-
-.ui-cmd-hint {
-  grid-column: 1 / -1;
-  align-self: center;
-  color: var(--ui-dim);
-  font-size: 10.5px;
-  line-height: 1.3;
-  margin: 0;
-  padding: 1px 2px;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
 
 /* selection panel (bottom-center) — the parchment slab */
@@ -415,13 +388,11 @@
 }
 
 /* short viewports (small laptop windows): the strip sits at
-   its 150px floor — slim the panel chrome (padding, title
-   margin, hint, gaps) so the square cells keep their size */
+   its 150px floor — slim the panel chrome (padding, gaps)
+   so the square cells keep their size */
 @media (max-height: 780px) {
   .ui-cmd-panel { padding-top: 3px; padding-bottom: 3px; }
-  .ui-cmd-panel .ui-panel-title { margin-bottom: 1px; }
   .cmd-grid { gap: 3px; }
-  .ui-cmd-hint { padding-top: 0; padding-bottom: 0; }
 }
 
 @media (max-width: 700px) {
@@ -440,7 +411,6 @@
   .ui-cmd-panel { flex-basis: 176px; padding: 5px 6px; }
   .cmd-grid { gap: 3px; }
   .cmd-btn .cmd-key { font-size: 8px; min-width: 11px; padding: 0 2px; }
-  .ui-cmd-hint { font-size: 9.5px; }
   .ui-sel-panel { padding: 6px 8px; gap: 8px; }
   .sel-portrait { width: 44px; height: 44px; }
   .sel-portrait .ui-icon { width: 26px; height: 26px; }
