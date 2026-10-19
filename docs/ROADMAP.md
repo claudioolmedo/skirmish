@@ -205,6 +205,33 @@ From the [Gap Analysis](GAP-ANALYSIS.md): the items that most make Skirmish II
   60 s while players wait. Zero sim changes. See
   ARCHITECTURE.md, "M8 — lockstep multiplayer" (room model,
   loading phase, directory bullets).
+- **M11 — Lobby Browser fidelity pass (shipped 2026-10-18).**
+  The browser is reshaped on the reference game's Lobby Browser
+  (the Steam "Beginner's Guide to Multiplayer" screens Claudio
+  pointed at — structure mirrored, all art and text our own): a
+  named "Lobby Browser" screen whose table reads **Game Name ·
+  Players · Map · Location · Server** — the Server cell is your
+  measured ping to that region with a colored quality square
+  (green under 120 ms, yellow under 220 ms, red above) — over
+  one controls row: a live **Search** box, **Refresh**, a
+  **Password** checkbox that shows or hides 🔒 rooms, and a
+  **Server** filter (Any + the seven regions), all working on
+  the real directory data. The sidebar keeps the waiting ad
+  slot and gains a **Connection Quality** panel beneath it:
+  every region with your live ping and its quality square,
+  refreshed by the same probe cycle. One bottom action bar —
+  Play solo (quiet), **Join Lobby** (enabled only when a
+  visible row is selected; double-click still joins at once),
+  **Create Lobby** (opens the M10 create panel) — replaces the
+  per-row Join buttons and sortable headers, and an auto-
+  refresh preserves the selection while its game still exists.
+  Deliberately NOT built, because nothing backs them yet —
+  they arrive with their features, not as dead UI: the Ranked /
+  Spectate Games / Clans / Leaderboard tabs, the Game Mode /
+  Map Style / Game Speed / Treaty / Victory filters, and a
+  Restore button. Zero sim changes; relay untouched. See
+  ARCHITECTURE.md, "M8 — lockstep multiplayer" (Lobby Browser
+  shape bullet).
 
 ## Good first contributions
 

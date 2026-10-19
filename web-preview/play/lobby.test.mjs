@@ -7,8 +7,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  LOBBIES_REFRESH_MS, MAX_LOBBY_ROWS,
+  LOBBIES_REFRESH_MS, MAX_LOBBY_ROWS, LOBBY_MAP_NAME,
+  PING_GOOD_MS, PING_OK_MS, pingQuality,
   parseLobbies, lobbyTitle, lobbyRowModel, sortLobbyRows, joinTarget,
+  filterLobbyRows, selectionSurvives,
 } from './lobby.js';
 
 test('parseLobbies accepts a well-formed directory payload', () => {
@@ -163,4 +165,115 @@ test('joinTarget joins a locked row as a private room', () => {
 
 test('the refresh cadence is the briefed ~5 s', () => {
   assert.equal(LOBBIES_REFRESH_MS, 5000);
+});
+
+// ---------------------------------------------------------------- M11
+
+test('pingQuality bands: green < 120, yellow < 220, red above', () => {
+  assert.equal(PING_GOOD_MS, 120);
+  assert.equal(PING_OK_MS, 220);
+  assert.equal(pingQuality(0), 'good');
+  assert.equal(pingQuality(119), 'good');
+  assert.equal(pingQuality(120), 'ok');
+  assert.equal(pingQuality(219), 'ok');
+  assert.equal(pingQuality(220), 'bad');
+  assert.equal(pingQuality(900), 'bad');
+  // No measurement yet: no band, in any disguise.
+  assert.equal(pingQuality(null), null);
+  assert.equal(pingQuality(undefined), null);
+  assert.equal(pingQuality(NaN), null);
+  assert.equal(pingQuality('46'), null);
+});
+
+test('lobbyRowModel carries the M11 columns: Map and ping quality', () => {
+  const row = lobbyRowModel(
+    { room: 'abc123def4', region: 'wnam', players: 1, createdAt: 7 },
+    { regionName: 'North America West', pingMs: 46 });
+  assert.equal(row.mapText, 'Arabia');
+  assert.equal(LOBBY_MAP_NAME, 'Arabia');
+  assert.equal(row.quality, 'good');
+  const far = lobbyRowModel(
+    { room: 'abc123def4', region: 'oc', players: 1, createdAt: 7 },
+    { regionName: 'Oceania', pingMs: 260 });
+  assert.equal(far.quality, 'bad');
+  const unmeasured = lobbyRowModel(
+    { room: 'abc123def4', region: 'oc', players: 1, createdAt: 7 },
+    { regionName: 'Oceania', pingMs: null });
+  assert.equal(unmeasured.quality, null);
+});
+
+const M11_ROWS = () => [
+  lobbyRowModel(
+    { room: 'westopen01', region: 'wnam', players: 1, createdAt: 1 },
+    { regionName: 'North America West', pingMs: 40 }),
+  lobbyRowModel(
+    { room: 'westlock01', region: 'wnam', players: 1, createdAt: 2, locked: true },
+    { regionName: 'North America West', pingMs: 55 }),
+  lobbyRowModel(
+    { room: 'euroopen01', region: 'weur', players: 1, createdAt: 3 },
+    { regionName: 'Europe West', pingMs: 130 }),
+];
+
+test('filterLobbyRows: no filters keeps every row, in order', () => {
+  const rows = M11_ROWS();
+  assert.deepEqual(filterLobbyRows(rows).map((r) => r.room),
+    ['westopen01', 'westlock01', 'euroopen01']);
+  assert.deepEqual(filterLobbyRows(rows, {}).map((r) => r.room),
+    ['westopen01', 'westlock01', 'euroopen01']);
+  assert.equal(rows.length, 3); // input untouched
+});
+
+test('filterLobbyRows: search matches title text, case-insensitively', () => {
+  const rows = M11_ROWS();
+  assert.deepEqual(
+    filterLobbyRows(rows, { search: 'europe' }).map((r) => r.room),
+    ['euroopen01']);
+  assert.deepEqual(
+    filterLobbyRows(rows, { search: '  NORTH AMERICA ' }).map((r) => r.room),
+    ['westopen01', 'westlock01']);
+  assert.deepEqual(
+    filterLobbyRows(rows, { search: 'arabia' }).map((r) => r.room),
+    ['westopen01', 'westlock01', 'euroopen01']);
+  assert.deepEqual(filterLobbyRows(rows, { search: 'oceania' }), []);
+  assert.deepEqual(
+    filterLobbyRows(rows, { search: '' }).map((r) => r.room),
+    ['westopen01', 'westlock01', 'euroopen01']);
+});
+
+test('filterLobbyRows: the Password toggle hides locked rows when off', () => {
+  const rows = M11_ROWS();
+  assert.deepEqual(
+    filterLobbyRows(rows, { showPassword: false }).map((r) => r.room),
+    ['westopen01', 'euroopen01']);
+  assert.deepEqual(
+    filterLobbyRows(rows, { showPassword: true }).map((r) => r.room),
+    ['westopen01', 'westlock01', 'euroopen01']);
+});
+
+test('filterLobbyRows: the Server filter keeps one region; filters combine', () => {
+  const rows = M11_ROWS();
+  assert.deepEqual(
+    filterLobbyRows(rows, { region: 'weur' }).map((r) => r.room),
+    ['euroopen01']);
+  assert.deepEqual(
+    filterLobbyRows(rows, { region: 'oc' }), []);
+  assert.deepEqual(
+    filterLobbyRows(rows, { region: 'wnam', showPassword: false }).map((r) => r.room),
+    ['westopen01']);
+  assert.deepEqual(
+    filterLobbyRows(rows, { region: 'wnam', search: 'europe' }), []);
+});
+
+test('selectionSurvives: the selection lives only while its row does', () => {
+  const rows = M11_ROWS();
+  assert.equal(selectionSurvives('westlock01', rows), true);
+  assert.equal(selectionSurvives('gone000001', rows), false);
+  assert.equal(selectionSurvives(null, rows), false);
+  assert.equal(selectionSurvives('', rows), false);
+  assert.equal(selectionSurvives('westopen01', []), false);
+  // A filtered view decides Join: hidden by the Password toggle,
+  // the locked selection no longer survives.
+  const visible = filterLobbyRows(rows, { showPassword: false });
+  assert.equal(selectionSurvives('westlock01', visible), false);
+  assert.equal(selectionSurvives('westopen01', visible), true);
 });

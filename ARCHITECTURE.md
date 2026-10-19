@@ -806,6 +806,32 @@ dumb relay.
   keeps the gate closed, and a guest leaving resets both flags.
   Ready/password traffic is lobby traffic — it never enters the
   sim or the hashed state (NET-10).
+- **Lobby Browser shape (M11).** The browser screen is modeled
+  structurally on the reference game's Lobby Browser (layout and
+  behavior mirrored; every asset and word is ours). The table's
+  columns are Game Name (the auto title) · Players (`1/2`) ·
+  Map (`Arabia` — the honest constant; every room is 1v1 Arabia
+  today) · Location (region name) · Server (the player's
+  measured ping to that region plus a quality square: green
+  under 120 ms, yellow under 220 ms, red at 220 ms and above —
+  `pingQuality` in `play/lobby.js`). One controls row sits over
+  the table — a live Search over title text, Refresh, a
+  Password checkbox (checked shows 🔒 rooms, unchecked hides
+  them) and a Server dropdown (Any + the seven regions) — and
+  the sidebar adds a **Connection Quality** panel under the ad
+  slot: all seven regions with their live pings and squares,
+  rendered from the same probe cycle that feeds the table. The
+  filter/search/selection decisions are pure functions in
+  `play/lobby.js` (`filterLobbyRows`, `selectionSurvives`): a
+  refresh keeps the selection while its game exists, and Join
+  Lobby enables only for a selection the filters leave visible.
+  One bottom action bar (Play solo · Join Lobby · Create Lobby,
+  the last opening the M10 create panel) consolidates the M9
+  per-row Join buttons and sortable headers. The reference's
+  Ranked/Spectate/Clans/Leaderboard tabs, its Game Mode / Map
+  Style / Game Speed / Treaty / Victory filters and its Restore
+  button are intentionally absent — no backing features exist;
+  they arrive with their features (see ROADMAP, M11).
 - **Loading phase & load order (M10).** The heavy game loads
   AFTER commitment, never before: `/play` opens as a light lobby
   (browser, region pings — WebSocket probes only — room

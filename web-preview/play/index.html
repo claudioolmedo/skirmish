@@ -165,7 +165,7 @@
       </div>
     </div>
     <p class="overlay-note">Quality changes only the picture — sprites, sharpness, shadows. The game is identical on every device, from an old Chromebook to a gaming PC.</p>
-    <p class="overlay-note">Test build · M10 — rooms the way the classic lobbies work: create a Public room (listed, anyone can join) or a Private one (🔒 listed, password to enter), and the match starts when both players press Start. The game itself loads only once a match begins — the lobby stays light. Matches run in lockstep: both browsers simulate the same game from the same seed and exchange only orders. On top of the M7 generated Arabia with fog of war, the M6 ages and technologies and the M5 match (scripted AI opponent or Sandbox, Conquest victory and defeat). Placeholder art is being replaced piece by piece with our own.</p>
+    <p class="overlay-note">Test build · M11 — the Lobby Browser in the classic shape: search and filter the open games, watch every server's connection quality, then join or create. Rooms work the way the classic lobbies do: create a Public room (listed, anyone can join) or a Private one (🔒 listed, password to enter), and the match starts when both players press Start. The game itself loads only once a match begins — the lobby stays light. Matches run in lockstep: both browsers simulate the same game from the same seed and exchange only orders. On top of the M7 generated Arabia with fog of war, the M6 ages and technologies and the M5 match (scripted AI opponent or Sandbox, Conquest victory and defeat). Placeholder art is being replaced piece by piece with our own.</p>
     <p class="overlay-note"><a href="../">← Back to the Skirmish II site</a></p>
   </div>
 </div>
@@ -218,20 +218,38 @@
     <p class="overlay-sub">Join an open game, or create your own. Games marked 🔒 ask for a password. No accounts: the link is the invitation.</p>
     <div class="lobby-layout">
       <div class="lobby-main">
+        <!-- M11: the browser in the reference shape — one controls
+             row (Search · Refresh · Password · Server), the table
+             (Game Name · Players · Map · Location · Server), and one
+             bottom action bar. Row Join buttons and the sortable
+             headers are gone: select a row, then Join Lobby. -->
         <div id="games-section">
-          <div class="games-head">
-            <h3 class="lobby-h">Open games</h3>
+          <div class="games-controls">
+            <label class="games-search">Search
+              <input id="games-search" type="search" placeholder="Game name" autocomplete="off">
+            </label>
             <button id="btn-refresh-games" class="btn btn-ghost btn-sm" type="button">Refresh</button>
+            <label class="games-pw"><input id="games-show-locked" type="checkbox" checked> Password</label>
+            <label class="games-region">Server
+              <select id="games-region-filter">
+                <option value="">Any</option>
+              </select>
+            </label>
           </div>
           <div id="games-list" class="games-list"></div>
           <p id="games-in-progress" class="overlay-note" hidden></p>
           <div class="games-actions">
+            <button id="btn-solo" class="btn-quiet" type="button">Play solo</button>
+            <span class="games-actions-spacer"></span>
             <button id="btn-join-lobby" class="btn btn-gold" type="button" disabled>Join Lobby</button>
-            <button id="btn-solo" class="btn-quiet" type="button">Play solo instead</button>
+            <button id="btn-create-open" class="btn btn-gold" type="button">Create Lobby</button>
           </div>
         </div>
-        <div id="create-section">
-          <h3 class="lobby-h">Create Lobby</h3>
+        <div id="create-section" hidden>
+          <div class="games-head">
+            <h3 class="lobby-h">Create Lobby</h3>
+            <button id="btn-create-back" class="btn-quiet" type="button">← Back to games</button>
+          </div>
           <p class="overlay-note create-note">Pick the server closest to you both — your friend picks the same one.</p>
           <div id="region-list" class="region-list"></div>
           <!-- M10: a room is Public (listed, anyone may join) or
@@ -282,6 +300,15 @@
         <div class="ad-label">Advertisement</div>
         <div class="ad-slot ad-slot-box" id="ad-slot-lobby">Ads pay for the servers — thanks for being here.</div>
         <div class="ad-note">Ads pay for the servers &amp; keep Skirmish II open.</div>
+        <!-- M11: Connection Quality, in the reference browser's
+             spirit — every server with your live measured ping and
+             its quality square (green under 120 ms, yellow under
+             220 ms, red above). Filled by the same probe cycle
+             that feeds the table. -->
+        <div class="conn-quality">
+          <h3 class="lobby-h">Connection Quality</h3>
+          <div id="conn-quality-list" class="conn-quality-list"></div>
+        </div>
       </aside>
     </div>
   </div>

@@ -9,9 +9,37 @@
 // The table follows the traditional lobby browser (Claudio's
 // direction, zero-learning): an auto-generated game title, the
 // server/location, players as filled/max, and the measured ping.
+//
+// M11 shaped the screen on the reference Lobby Browser: a named
+// screen, a Game Name · Players · Map · Location · Server table, a
+// Search / Refresh / Password / Server controls row, a Connection
+// Quality panel (every region with its live ping), and one bottom
+// action bar (Play solo / Join Lobby / Create Lobby). The filter,
+// search and selection decisions live here, pure.
 
 export const LOBBIES_REFRESH_MS = 5000;
 export const MAX_LOBBY_ROWS = 50;
+
+/// The one map every room plays today. The table's Map column is
+/// this honest constant — when more maps exist the room will carry
+/// its own and this becomes a fallback.
+export const LOBBY_MAP_NAME = 'Arabia';
+
+/// Ping quality bands, for the colored square beside a ping (in
+/// the table's Server column and in the Connection Quality panel):
+/// green under 120 ms (a comfortable lockstep link), yellow under
+/// 220 ms (playable, watch it), red at 220 ms and above.
+export const PING_GOOD_MS = 120;
+export const PING_OK_MS = 220;
+
+/// 'good' | 'ok' | 'bad' for a measured ping, null when there is
+/// no measurement yet (the square renders hollow).
+export function pingQuality(ms) {
+  if (typeof ms !== 'number' || !Number.isFinite(ms)) return null;
+  if (ms < PING_GOOD_MS) return 'good';
+  if (ms < PING_OK_MS) return 'ok';
+  return 'bad';
+}
 
 const ROOM_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
@@ -56,18 +84,24 @@ export function lobbyTitle(regionName) {
 }
 
 /// One table row, ready to render. Carries the raw sort keys
-/// (createdAt, pingMs) alongside the display strings.
+/// (createdAt, pingMs) alongside the display strings. M11: the row
+/// speaks in the reference browser's columns — Game Name, Players,
+/// Map, Location (the region's name) and Server (the ping to that
+/// region, with its quality band).
 export function lobbyRowModel(entry, { regionName, pingMs } = {}) {
   const name = regionName || entry.region || 'Unknown server';
   const locked = entry.locked === true;
+  const ms = typeof pingMs === 'number' && Number.isFinite(pingMs) ? pingMs : null;
   return {
     room: entry.room,
     region: entry.region,
     title: lobbyTitle(name),
     server: name,
     playersText: `${entry.players}/2`,
-    pingMs: typeof pingMs === 'number' ? pingMs : null,
-    pingText: typeof pingMs === 'number' ? `${Math.round(pingMs)} ms` : '…',
+    mapText: LOBBY_MAP_NAME,
+    pingMs: ms,
+    pingText: ms !== null ? `${Math.round(ms)} ms` : '…',
+    quality: pingQuality(ms),
     createdAt: entry.createdAt || 0,
     // M10: the lock marker a locked row carries (rendered before
     // the title, the way the reference browser marks passworded
@@ -75,6 +109,34 @@ export function lobbyRowModel(entry, { regionName, pingMs } = {}) {
     locked,
     lockText: locked ? '🔒' : '',
   };
+}
+
+/// The controls row, as a pure decision over row models (M11):
+/// - `search` filters by game-title text (case-insensitive
+///   substring; the title carries the region name, so a place
+///   name finds its games too);
+/// - `showPassword` unchecked hides locked (🔒) rows — the
+///   reference browser's Password toggle;
+/// - `region` (a region id, '' for Any) keeps only that server.
+/// Input order is preserved; the input array is not mutated.
+export function filterLobbyRows(rows, { search = '', showPassword = true, region = '' } = {}) {
+  const q = String(search == null ? '' : search).trim().toLowerCase();
+  const regionId = typeof region === 'string' ? region : '';
+  return rows.filter((r) => {
+    if (!showPassword && r.locked) return false;
+    if (regionId && r.region !== regionId) return false;
+    if (q && !String(r.title).toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+
+/// Does the current selection survive into a row set? Used twice:
+/// against the directory itself on refresh (a game that filled or
+/// vanished drops the selection) and against the VISIBLE rows for
+/// the Join Lobby button (a filtered-out selection cannot join).
+export function selectionSurvives(selectedRoom, rows) {
+  if (typeof selectedRoom !== 'string' || !selectedRoom) return false;
+  return rows.some((r) => r && r.room === selectedRoom);
 }
 
 /// Sort row models for the table. 'created' is the natural lobby
