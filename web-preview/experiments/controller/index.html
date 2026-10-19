@@ -60,35 +60,27 @@
     background: rgba(240, 229, 200, .35); border: 2px solid rgba(240, 229, 200, .7);
   }
 
-  /* ---------- rodas laterais (os dois polegares) ----------
-     O MESMO sistema dos dois lados: um disco onde o polegar
-     descansa. Arrastar à volta do centro da roda gira o destaque
-     no menu radial do centro do ecrã; soltar seleciona. O núcleo
-     da roda é a zona morta = cancelar. Sem botões Xbox. */
-  .sidewheel {
-    position: fixed; z-index: 7; width: 132px; height: 132px;
-    border-radius: 50%; touch-action: none; cursor: pointer;
-    border: 2px solid rgba(240, 229, 200, .55);
-    box-shadow: 0 3px 10px rgba(0,0,0,.5), inset 0 0 0 1px rgba(0,0,0,.3);
-    background: conic-gradient(from -30deg,
-      rgba(232,217,168,.34) 0deg 60deg, rgba(20,14,6,.42) 60deg 120deg,
-      rgba(232,217,168,.34) 120deg 180deg, rgba(20,14,6,.42) 180deg 240deg,
-      rgba(232,217,168,.34) 240deg 300deg, rgba(20,14,6,.42) 300deg 360deg);
+  /* ---------- roda rotativa flutuante (polegar direito) ----------
+     A MESMA roda transparente do joystick, mas do lado direito:
+     aparece onde o polegar pousa e não move nada — é um botão
+     rotativo. Dar a volta com o dedo roda o menu radial do centro
+     do ecrã; soltar seleciona. O marcador dourado dentro da roda
+     gira com a rotação acumulada, a espelhar o menu. */
+  #dial-base, #dial-knob { position: fixed; z-index: 6; border-radius: 50%; pointer-events: none; display: none; }
+  #dial-base {
+    width: 116px; height: 116px;
+    background: rgba(240, 229, 200, .10); border: 2px solid rgba(240, 229, 200, .45);
   }
-  .sidewheel.active { border-color: #ffd75e; box-shadow: 0 0 18px rgba(255,215,94,.6); }
-  .sw-rotor { position: absolute; inset: 0; pointer-events: none; }
-  .sw-marker {
-    position: absolute; left: 50%; top: 6px; width: 14px; height: 14px;
-    margin-left: -7px; border-radius: 50%; background: #ffd75e;
+  #dial-base.on { border-color: #ffd75e; box-shadow: 0 0 16px rgba(255, 215, 94, .55); }
+  #dial-knob {
+    width: 52px; height: 52px;
+    background: rgba(240, 229, 200, .35); border: 2px solid rgba(240, 229, 200, .7);
+  }
+  #dial-rotor { position: absolute; inset: 0; pointer-events: none; }
+  #dial-marker {
+    position: absolute; left: 50%; top: 4px; width: 13px; height: 13px;
+    margin-left: -6.5px; border-radius: 50%; background: #ffd75e;
     border: 2px solid rgba(0,0,0,.5); box-shadow: 0 0 8px rgba(255,215,94,.85);
-  }
-  .sw-core {
-    position: absolute; left: 50%; top: 50%; width: 54px; height: 54px;
-    margin: -27px 0 0 -27px; border-radius: 50%;
-    background: rgba(20, 14, 6, .6); border: 2px solid rgba(240, 229, 200, .4);
-    color: rgba(240, 229, 200, .75); font-size: 15px;
-    display: flex; align-items: center; justify-content: center;
-    pointer-events: none;
   }
 
   #foot {
@@ -100,8 +92,9 @@
   /* ---------- orientação: consola (paisagem) vs retrato ----------
      A classe .landscape/.portrait no <body> é posta por JS via
      matchMedia('(orientation: landscape)') — muda ao virar o
-     telefone, sem recarregar. Paisagem é a postura de consola:
-     rodas nos dois lados, centradas nas margens. */
+     telefone, sem recarregar. Os controlos são flutuantes (seguem
+     os polegares), por isso a orientação só ajusta o cabeçalho e
+     mostra o aviso para virar em retrato. */
   #rotate-hint {
     display: none;
     color: rgba(240, 229, 200, .85); font-size: 11px; letter-spacing: .02em;
@@ -109,18 +102,6 @@
     border-radius: 999px; padding: 4px 10px;
   }
   body.portrait #rotate-hint { display: block; }
-  body.portrait .sidewheel { width: 118px; height: 118px; }
-  body.portrait .sw-core { width: 48px; height: 48px; margin: -24px 0 0 -24px; }
-  body.portrait #wheel-left  { left: 10px;  bottom: calc(58px + env(safe-area-inset-bottom, 0px)); }
-  body.portrait #wheel-right { right: 10px; bottom: calc(58px + env(safe-area-inset-bottom, 0px)); }
-  body.landscape #wheel-left {
-    left: calc(12px + env(safe-area-inset-left, 0px));
-    top: 50%; transform: translateY(-50%);
-  }
-  body.landscape #wheel-right {
-    right: calc(12px + env(safe-area-inset-right, 0px));
-    top: 50%; transform: translateY(-50%);
-  }
   body.landscape #hud-top { padding-top: calc(10px + env(safe-area-inset-top, 0px)); }
   body.landscape #status, body.landscape #hint { max-width: 58vw; }
 </style>
@@ -130,7 +111,7 @@
 <canvas id="world"></canvas>
 
 <div id="hud-top">
-  <div id="hint">Toca no ponto para selecionar · Rodas laterais: gira e solta para dar a ordem</div>
+  <div id="hint">Esquerda move a câmara · Direita: gira à volta da roda para rodar o menu do centro — solta para selecionar</div>
   <div id="status">A carregar…</div>
   <div id="rotate-hint">Vira o telefone para jogar como consola</div>
 </div>
@@ -141,14 +122,8 @@
 <div id="stick-base"></div>
 <div id="stick-knob"></div>
 
-<div class="sidewheel" id="wheel-left">
-  <div class="sw-rotor"><div class="sw-marker"></div></div>
-  <div class="sw-core">✕</div>
-</div>
-<div class="sidewheel" id="wheel-right">
-  <div class="sw-rotor"><div class="sw-marker"></div></div>
-  <div class="sw-core">✕</div>
-</div>
+<div id="dial-base"><div id="dial-rotor"><div id="dial-marker"></div></div></div>
+<div id="dial-knob"></div>
 
 <div id="foot">Experimento de controle — não faz parte do jogo (ainda).</div>
 
@@ -156,14 +131,15 @@
 'use strict';
 /* =====================================================================
    EXPERIMENTO DE CONTROLE — página isolada, não faz parte do jogo.
-   Esquema de RODAS LATERAIS para RTS no telemóvel (v4):
-   - DUAS rodas, uma para cada polegar — o mesmo sistema dos dois
-     lados: arrastar à volta da roda gira o destaque no menu radial
-     que aparece à volta do ponto central; soltar seleciona;
+   Esquema de consola para RTS no telemóvel (v5):
+   - DUAS rodas transparentes flutuantes, uma para cada polegar:
+     à ESQUERDA o joystick de sempre — aparece onde o polegar pousa
+     e arrastar move a câmara; à DIREITA a mesma roda visual, mas é
+     um BOTÃO ROTATIVO — dar a volta com o dedo roda o menu radial
+     à volta do ponto central; soltar seleciona;
    - ponto fixo no centro do ecrã é a mira/ponteiro: um toque nele
      faz a ação inteligente (selecionar / ordenar);
-   - arrastar na metade esquerda, fora da roda, move a câmara
-     (joystick flutuante). Sem botões Xbox.
+   Sem botões Xbox, sem rodas fixas nos cantos.
    ===================================================================== */
 
 var WORLD_W = 2400, WORLD_H = 1600;
@@ -216,7 +192,7 @@ var selected = null;      // a minha unidade selecionada
 var constructions = [];   // casas/fazendas do menu radial (demo)
 var cam = { x: base.x - viewW / 2, y: base.y - viewH / 2 };
 
-/* -------- menu radial: rodas laterais giram, soltar seleciona -------- */
+/* -------- menu radial: a roda da direita gira, soltar seleciona -------- */
 var WHEEL_ITEMS = [
   { id: 'move',   label: 'Mover' },
   { id: 'gather', label: 'Recolher' },
@@ -227,7 +203,7 @@ var WHEEL_ITEMS = [
 ];
 var WHEEL_IN = 52;
 var DOT_TAP_ZONE = 70, DOT_TAP_MS = 350, DOT_TAP_SLOP = 14;
-var wheelGesture = null;  // { id, side, el, rotor, cx, cy, innerR, slice, hadSlice, target }
+var dial = null;  // { id, ax, ay, lastAng, rot, slice, hadSlice, target } — roda rotativa da direita
 var statusOverride = '', statusOverrideUntil = 0;
 function note(text, ms) {
   statusOverride = text;
@@ -270,15 +246,15 @@ var ringEl = document.getElementById('dot-ring');
 function statusText(t) {
   if (t.what === 'unit') {
     if (t.u.side === 'me') return 'Aldeão (teu) — toca no ponto para selecionar';
-    if (t.u.side === 'enemy') return selected ? 'Inimigo — toca no ponto para atacar · ou gira uma roda' : 'Inimigo — seleciona um aldeão primeiro';
-    return selected ? 'Unidade neutra — toca no ponto para atacar · ou gira uma roda' : 'Unidade neutra — seleciona um aldeão primeiro';
+    if (t.u.side === 'enemy') return selected ? 'Inimigo — toca no ponto para atacar · ou gira a roda da direita' : 'Inimigo — seleciona um aldeão primeiro';
+    return selected ? 'Unidade neutra — toca no ponto para atacar · ou gira a roda da direita' : 'Unidade neutra — seleciona um aldeão primeiro';
   }
   if (t.what === 'node') {
     var name = t.n.kind === 'tree' ? 'Árvore' : 'Bagas';
-    return selected ? name + ' — toca no ponto para recolher · ou gira uma roda' : name + ' — seleciona um aldeão primeiro';
+    return selected ? name + ' — toca no ponto para recolher · ou gira a roda da direita' : name + ' — seleciona um aldeão primeiro';
   }
   if (t.what === 'base') return selected ? 'Centro da Vila — toca no ponto para mover para aqui' : 'Centro da Vila — a tua base';
-  return selected ? 'Chão — toca no ponto para mover o selecionado · ou gira uma roda' : 'Chão — toca no ponto sobre um aldeão teu para o selecionar';
+  return selected ? 'Chão — toca no ponto para mover o selecionado · ou gira a roda da direita' : 'Chão — toca no ponto sobre um aldeão teu para o selecionar';
 }
 
 /* ---------------- ordens ---------------- */
@@ -286,22 +262,42 @@ function orderMove(u, x, y) { u.order = { type: 'move', x: x, y: y }; }
 function orderToEntity(u, ent, type) { u.order = { type: type, ent: ent }; }
 
 /* ---------------- menu radial ---------------- */
-/* Ângulo do dedo à volta de um centro → fatia do menu.
-   Convenção única: 0° = cima, cresce no sentido dos ponteiros do
-   relógio, 6 fatias de 60°. Serve para a roda lateral (onde o dedo
-   gira) E para o menu do centro (onde o destaque roda): a rotação
-   é 1:1, no mesmo sentido, dos dois lados. */
-function sectorAt(dx, dy) {
-  var deg = (Math.atan2(dy, dx) * 180 / Math.PI + 90 + 360) % 360;  // 0° = cima
-  return { deg: deg, slice: Math.floor(deg / 60) % WHEEL_ITEMS.length };
+/* A roda da direita é um BOTÃO ROTATIVO: o que conta é a ROTAÇÃO
+   ACUMULADA do dedo à volta do centro da roda (dar a volta), não a
+   posição absoluta do dedo. A rotação roda o destaque no menu do
+   centro 1:1, no mesmo sentido — mesma convenção das fatias do
+   menu: 6 setores de 60°, a começar no Mover. */
+var ROT_THRESHOLD = 20;   // graus de rotação até o destaque acender
+function angDelta(a, b) {   // delta de ângulo a→b em graus, em (-180, 180]
+  var d = (b - a) % 360;
+  if (d > 180) d -= 360;
+  if (d < -180) d += 360;
+  return d;
 }
-function cancelSideWheel() {
-  if (!wheelGesture) return;
-  var g = wheelGesture;
-  wheelGesture = null;
-  g.el.classList.remove('active');
-  if (g.rotor) g.rotor.style.transform = '';
-  if (g.hadSlice) note('Menu cancelado');
+function sliceFromRot(rot) {
+  var deg = ((rot % 360) + 360) % 360;
+  return Math.floor(deg / 60) % WHEEL_ITEMS.length;
+}
+var dialBaseEl = document.getElementById('dial-base');
+var dialKnobEl = document.getElementById('dial-knob');
+var dialRotorEl = document.getElementById('dial-rotor');
+function dialShow(x, y) {
+  dialBaseEl.style.display = dialKnobEl.style.display = 'block';
+  dialBaseEl.style.left = (x - 58) + 'px'; dialBaseEl.style.top = (y - 58) + 'px';
+  dialBaseEl.classList.remove('on');
+  dialRotorEl.style.transform = 'rotate(0deg)';
+  dialKnobEl.style.left = (x - 26) + 'px'; dialKnobEl.style.top = (y - 26) + 'px';
+}
+function dialHide() {
+  dialBaseEl.style.display = dialKnobEl.style.display = 'none';
+  dialBaseEl.classList.remove('on');
+}
+function cancelDial() {
+  if (!dial) return;
+  var had = dial.hadSlice;
+  dial = null;
+  dialHide();
+  if (had) note('Menu cancelado');
 }
 function nearestNode(p, maxD) {
   var best = null, bestD = maxD;
@@ -349,49 +345,56 @@ function executeWheel(idx, target) {
     note('Ordem: Parar');
   }
 }
-function sideWheelEnd(e, cancelled) {
-  if (!wheelGesture || e.pointerId !== wheelGesture.id) return;
-  var g = wheelGesture;
-  wheelGesture = null;
-  g.el.classList.remove('active');
-  if (g.rotor) g.rotor.style.transform = '';
-  if (cancelled) { if (g.hadSlice) note('Menu cancelado'); return; }
+function dialEnd(e, cancelled) {
+  if (!dial || e.pointerId !== dial.id) return;
+  var d = dial;
+  dial = null;
+  dialHide();
+  if (cancelled) { if (d.hadSlice) note('Menu cancelado'); return; }
   if (!selected) return;   // sem seleção o menu aparece desativado — nada executa
-  if (g.slice >= 0) executeWheel(g.slice, g.target);
-  else if (g.hadSlice) note('Menu cancelado');
+  if (d.slice >= 0) executeWheel(d.slice, d.target);
+  else if (d.hadSlice) note('Menu cancelado');
 }
-/* As duas rodas: gesto idêntico dos dois lados. A primeira roda
-   tocada é a dona do destaque; a segunda é ignorada até a
-   primeira soltar — sem estados presos. */
-function bindSideWheel(el, side) {
-  el.addEventListener('pointerdown', function (e) {
-    e.preventDefault(); e.stopPropagation();
-    if (wheelGesture) return;
-    var r = el.getBoundingClientRect();
-    wheelGesture = {
-      id: e.pointerId, side: side, el: el,
-      rotor: el.querySelector('.sw-rotor'),
-      cx: r.left + r.width / 2, cy: r.top + r.height / 2,
-      innerR: r.width / 2 * 0.42,
-      slice: -1, hadSlice: false,
-      target: dotWorld()           // o ponto do mundo fica capturado ao tocar
-    };
-    el.classList.add('active');
-    sideWheelMove(e);              // destaca já a fatia sob o dedo
-  });
-  el.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+/* A roda rotativa nasce onde o polegar direito pousa (metade
+   direita do ecrã) — flutuante, como o joystick. Não move nada:
+   acumula a rotação do dedo à volta do seu centro e roda o
+   destaque do menu do centro; soltar seleciona. Soltar com pouca
+   rotação (sem destaque) cancela. */
+function startDial(e) {
+  if (dial) return;
+  dial = {
+    id: e.pointerId, ax: e.clientX, ay: e.clientY,
+    lastAng: null, rot: 0,
+    slice: -1, hadSlice: false,
+    target: dotWorld()           // o ponto do mundo fica capturado ao tocar
+  };
+  dialShow(e.clientX, e.clientY);
 }
-function sideWheelMove(e) {
-  var g = wheelGesture;
-  if (!g || e.pointerId !== g.id) return;
-  var dx = e.clientX - g.cx, dy = e.clientY - g.cy;
-  if (Math.hypot(dx, dy) < g.innerR) { g.slice = -1; return; }   // núcleo da roda = cancelar
-  var s = sectorAt(dx, dy);
-  g.slice = s.slice; g.hadSlice = true;
-  if (g.rotor) g.rotor.style.transform = 'rotate(' + s.deg + 'deg)';
+function dialMove(e) {
+  var d = dial;
+  if (!d || e.pointerId !== d.id) return;
+  var dx = e.clientX - d.ax, dy = e.clientY - d.ay;
+  var dist = Math.hypot(dx, dy);
+  // o botão da roda segue o dedo, preso ao raio — como o joystick
+  var kx = dx, ky = dy;
+  if (dist > STICK_R) { kx = dx / dist * STICK_R; ky = dy / dist * STICK_R; }
+  dialKnobEl.style.left = (d.ax + kx - 26) + 'px';
+  dialKnobEl.style.top = (d.ay + ky - 26) + 'px';
+  // rotação acumulada: só conta quando o dedo está fora do centro
+  if (dist > 14) {
+    var ang = Math.atan2(dy, dx) * 180 / Math.PI;
+    if (d.lastAng !== null) d.rot += angDelta(d.lastAng, ang);
+    d.lastAng = ang;
+  }
+  if (Math.abs(d.rot) > ROT_THRESHOLD) {
+    d.slice = sliceFromRot(d.rot);
+    d.hadSlice = true;
+  } else {
+    d.slice = -1;
+  }
+  dialRotorEl.style.transform = 'rotate(' + d.rot + 'deg)';
+  dialBaseEl.classList.toggle('on', d.slice >= 0);
 }
-bindSideWheel(document.getElementById('wheel-left'), 'left');
-bindSideWheel(document.getElementById('wheel-right'), 'right');
 
 /* Toque no ponto central = ação inteligente (a antiga ação "A"):
    sem seleção, seleciona a minha unidade sob a mira; com seleção,
@@ -424,21 +427,21 @@ function stickKnob(x, y) {
 function stickHide() { baseEl.style.display = knobEl.style.display = 'none'; }
 
 cv.addEventListener('pointerdown', function (e) {
-  if (wheelGesture) return;   // com uma roda ativa, outros toques não dão ordens
-  // Zona do ponto central (~70 px): um TOQUE faz a ação inteligente.
+  // Zona do ponto central (~70 px): um TOQUE faz a ação inteligente
+  // (com a roda da direita ativa, o ponto está ocupado pelo menu).
   var dc = Math.hypot(e.clientX - window.innerWidth / 2, e.clientY - window.innerHeight / 2);
   if (dc <= DOT_TAP_ZONE) {
-    tapCand = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now() };
+    if (!dial) tapCand = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now() };
     return;
   }
-  if (e.clientX >= window.innerWidth / 2) return;   // metade direita: só a roda comanda
+  if (e.clientX >= window.innerWidth / 2) { startDial(e); return; }   // metade direita: nasce a roda rotativa
   if (stick.id !== null) return;
   stick.id = e.pointerId; stick.ax = e.clientX; stick.ay = e.clientY; stick.dx = 0; stick.dy = 0;
   stick.px = e.clientX; stick.py = e.clientY;
   stickShow(e.clientX, e.clientY);
 });
 window.addEventListener('pointermove', function (e) {
-  if (wheelGesture && e.pointerId === wheelGesture.id) { sideWheelMove(e); return; }
+  if (dial && e.pointerId === dial.id) { dialMove(e); return; }
   if (tapCand && e.pointerId === tapCand.id) {
     if (Math.hypot(e.clientX - tapCand.x, e.clientY - tapCand.y) > DOT_TAP_SLOP) tapCand = null;
     return;
@@ -460,23 +463,23 @@ window.addEventListener('pointercancel', stickEnd);
 window.addEventListener('pointerup', function (e) {
   if (tapCand && e.pointerId === tapCand.id) {
     var c = tapCand; tapCand = null;
-    if (!wheelGesture && performance.now() - c.t < DOT_TAP_MS &&
+    if (!dial && performance.now() - c.t < DOT_TAP_MS &&
         Math.hypot(e.clientX - c.x, e.clientY - c.y) <= DOT_TAP_SLOP) tapDot();
   }
-  sideWheelEnd(e, false);
+  dialEnd(e, false);
 });
 window.addEventListener('pointercancel', function (e) {
   if (tapCand && e.pointerId === tapCand.id) tapCand = null;
-  sideWheelEnd(e, true);
+  dialEnd(e, true);
 });
 document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 
 /* ---------------- orientação: detetar e adaptar ----------------
    matchMedia é o sinal fiável no Safari iOS; screen.orientation é
    só recurso. A classe no <body> muda o layout (CSS) ao vivo, sem
-   recarregar: paisagem = consola (rodas nos dois lados,
-   centradas); retrato = rodas nos cantos inferiores, com o
-   aviso para virar. */
+   recarregar: os controlos são flutuantes e seguem os polegares
+   em qualquer orientação; em retrato aparece o aviso para virar.
+   Rodar a meio de um gesto da roda cancela o menu limpo. */
 function isLandscape() {
   if (window.matchMedia) return window.matchMedia('(orientation: landscape)').matches;
   if (window.screen && screen.orientation && screen.orientation.type) {
@@ -503,7 +506,7 @@ function stickReanchor() {
 }
 
 function applyOrientation() {
-  if (wheelGesture) cancelSideWheel();   // rodar a meio do gesto cancela limpo
+  cancelDial();   // rodar a meio do gesto cancela limpo
   var land = isLandscape();
   document.body.classList.toggle('landscape', land);
   document.body.classList.toggle('portrait', !land);
@@ -636,9 +639,9 @@ function draw() {
     ctx.fillText(b.kind === 'house' ? 'Casa' : 'Fazenda', b.x, b.y + h + 24);
   });
 
-  // alvo capturado ao tocar numa roda lateral
-  if (wheelGesture && selected && wheelGesture.target) {
-    var wt = wheelGesture.target;
+  // alvo capturado ao tocar na roda da direita
+  if (dial && selected && dial.target) {
+    var wt = dial.target;
     ctx.strokeStyle = '#ffd75e'; ctx.lineWidth = 3;
     ctx.beginPath(); ctx.arc(wt.x, wt.y, 16, 0, 7); ctx.stroke();
     ctx.beginPath();
@@ -678,7 +681,7 @@ function draw() {
   });
 
   ctx.restore();
-  if (wheelGesture) drawWheel();
+  if (dial) drawWheel();
   return t;
 }
 
@@ -728,7 +731,7 @@ function drawWheel() {
   ctx.fillStyle = 'rgba(20, 14, 6, .5)'; ctx.fill();
   for (var i = 0; i < WHEEL_ITEMS.length; i++) {
     var a0 = (i * 60 - 90) * Math.PI / 180, a1 = a0 + Math.PI / 3, am = (a0 + a1) / 2;
-    var hot = !disabled && wheelGesture.slice === i;
+    var hot = !disabled && dial.slice === i;
     var ro = hot ? rOut + 12 : rOut;
     ctx.beginPath();
     ctx.arc(cx, cy, ro, a0, a1);
@@ -745,7 +748,7 @@ function drawWheel() {
     ctx.font = 'bold ' + (hot ? 17 : 13.5) + 'px Georgia';
     ctx.fillText(WHEEL_ITEMS[i].label, cx + Math.cos(am) * lr, cy + Math.sin(am) * lr + 5);
   }
-  // centro: a mira — o alvo das ordens (cancelar é no núcleo da roda)
+  // centro: a mira — o alvo das ordens (cancelar é soltar sem destacar)
   ctx.beginPath(); ctx.arc(cx, cy, rIn - 6, 0, 7);
   ctx.fillStyle = 'rgba(20, 14, 6, .55)'; ctx.fill();
   ctx.beginPath(); ctx.arc(cx, cy, 5, 0, 7);
@@ -756,7 +759,7 @@ function drawWheel() {
 var last = performance.now();
 function frame(now) {
   var dt = Math.min(0.05, (now - last) / 1000); last = now;
-  if (stick.id !== null && !wheelGesture) {   // roda ativa: câmara congela
+  if (stick.id !== null && !dial) {   // roda ativa: câmara congela
     cam.x += stick.dx * 950 * dt;
     cam.y += stick.dy * 950 * dt;
     clampCam();
@@ -764,10 +767,10 @@ function frame(now) {
   stepUnits(dt);
   var t = draw();
   var s;
-  if (wheelGesture) {
+  if (dial) {
     if (!selected) s = 'Menu radial — seleciona um aldeão primeiro (toca no ponto sobre ele)';
-    else if (wheelGesture.slice >= 0) s = 'Menu: ' + WHEEL_ITEMS[wheelGesture.slice].label + ' — solta para confirmar';
-    else s = 'Menu radial — gira a roda lateral e solta numa fatia (núcleo da roda cancela)';
+    else if (dial.slice >= 0) s = 'Menu: ' + WHEEL_ITEMS[dial.slice].label + ' — solta para confirmar';
+    else s = 'Menu radial — continua a girar à volta da roda da direita e solta numa fatia';
   } else if (statusOverride && now < statusOverrideUntil) {
     s = statusOverride;
   } else {
@@ -775,7 +778,7 @@ function frame(now) {
   }
   if (statusEl.textContent !== s) statusEl.textContent = s;
   ringEl.classList.toggle('hot', t.what !== 'ground');
-  ringEl.classList.toggle('wheel', !!wheelGesture);
+  ringEl.classList.toggle('wheel', !!dial);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
