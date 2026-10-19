@@ -691,6 +691,23 @@ export function parsePlayParams(search) {
   };
 }
 
+/// Reload rule (Claudio's direction): a room link is consumed
+/// exactly ONCE per tab session. Returns the parsed params when
+/// this boot should join the link's room, or null when it should
+/// open the plain Lobby Browser. `consumedRoom` is the room id
+/// this tab already took from a link — app.js keeps it in
+/// sessionStorage, which survives a reload but not a new tab, so:
+/// a fresh tab opening the link joins; reloading the same tab
+/// (mark present, room matching) lands on the front door instead
+/// of diving back into the room. The game loads only when a match
+/// is actually entered.
+export function linkJoinRoom(search, consumedRoom) {
+  const params = parsePlayParams(search);
+  if (!params.room) return null;
+  if (consumedRoom && params.room === consumedRoom) return null;
+  return params;
+}
+
 /// The region with the lowest measured ping (ties: list order).
 /// Null when nothing measured — the lobby then defaults to the
 /// first region rather than guessing.
