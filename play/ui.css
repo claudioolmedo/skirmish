@@ -187,18 +187,25 @@
 
 .cmd-btn {
   position: relative;
-  /* DE-style STACKED cell (Claudio, 2026-10-19: the horizontal
-     icon-left cells truncated names to "Lumber..." and the
-     grey text was illegible): large icon centered on top, the
-     FULL name below it in bright parchment, the cost in gold
-     under the name. The icon is the one element allowed to
-     shrink (flex) inside the capped strip — the text never
-     clips, truncates, or dims below legibility. */
+  /* ICON-DOMINANT cell (UI FIX 3, Claudio, 2026-10-19: the
+     stacked cell still let the icon lose the flex fight and
+     render as a speck atop a wide pill — the reference game's
+     command button is LED BY A LARGE ICON, its name living in
+     the tooltip). Now the icon area takes everything the row
+     leaves after ONE slim caption line: the wrap flexes
+     (flex: 1 1 auto) and the square art fills it via
+     object-fit: cover. The caption stays visible but
+     subordinate — one line, no ellipsis — and the cost rides
+     ON the icon as a dark chip at its bottom-right corner,
+     the hotkey letter at its top-left, the queue badge at the
+     button's top-right. When space gets tight the caption is
+     what gives (the media queries step its size down), never
+     the icon: the wrap carries a 26px min-height floor. */
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
-  gap: 1px;
+  gap: 2px;
   min-height: 0;
   min-width: 0;
   overflow: hidden;
@@ -251,61 +258,77 @@
   outline: 2px solid var(--gold-bright, #ffcf4d);
   outline-offset: 1px;
 }
-.cmd-btn .cmd-icon {
-  /* height-scaled with the viewport, but flex-shrinks inside
-     short strips so the name and cost always get their lines */
-  flex: 0 1 auto;
-  min-height: 10px;
-  height: clamp(18px, 3.6vh, 32px);
-  width: auto;
-  aspect-ratio: 1 / 1;
-}
-/* PNG icon set (ui-art/icons/): full-bleed squares carrying
-   their own walnut background and gold frame — shown as-is */
-.cmd-btn img.cmd-icon { border-radius: 2px; object-fit: cover; }
-/* when a button carries a hotkey, glyph + letter chip travel
-   together: the wrap takes the glyph's flex slot in the cell,
-   the glyph fills it at 100%, and the .cmd-key chip (already
-   absolutely positioned) overlays the glyph's top-left corner */
+/* The icon area: every button carries one (app.js always wraps
+   the glyph now), it flexes to fill the cell above the caption,
+   and it hosts the overlays — .cmd-key top-left, .cmd-cost
+   bottom-right, both absolutely positioned against it. */
 .cmd-icon-wrap {
   position: relative;
-  flex: 0 1 auto;
-  min-height: 10px;
-  height: clamp(18px, 3.6vh, 32px);
-  aspect-ratio: 1 / 1;
+  flex: 1 1 auto;
+  min-height: 26px;
+  width: 100%;
   line-height: 0;
 }
-.cmd-icon-wrap > .cmd-icon { width: 100%; height: 100%; min-height: 0; }
+/* The glyph fills its wrap completely — no height cap: the
+   flex of the wrap IS the size. PNG set (ui-art/icons/):
+   full-bleed squares carrying their own walnut background and
+   gold frame, made to fill; object-fit: cover crops the square
+   to the wrap's wide band around its center. */
+.cmd-btn .cmd-icon {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+.cmd-btn img.cmd-icon { border-radius: 3px; object-fit: cover; }
 .cmd-btn .cmd-label {
   flex: none;
   width: 100%;
   min-width: 0;
-  /* NO truncation: the full name, centered, wrapping to at
-     most two lines ("Lumber" / "Camp", "Padded Archer" /
-     "Armor"); bright parchment at full contrast */
-  white-space: normal;
+  /* ONE slim caption line under the icon: the full name,
+     centered, never cut off with truncation dots (an unset
+     text-overflow clips only in the pathological case). At
+     ~110px cells the standard size fits names to ~15 chars;
+     longer names run under .long-name a step smaller and
+     still fit the line. */
+  white-space: nowrap;
   overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  font-size: clamp(9.5px, 1.5vh, 12.5px);
+  font-size: clamp(9.5px, 1.4vh, 11.5px);
   font-weight: 600;
-  line-height: 1.1;
+  line-height: 1.15;
   color: #f0e5c8;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
 }
+.cmd-btn.long-name .cmd-label {
+  font-size: 9.5px;
+  letter-spacing: -0.02em;
+}
+/* The cost: a semi-transparent dark chip ON the icon's
+   bottom-right corner — resource icon + gold number per row;
+   a second resource stacks as a second row inside the chip. */
 .cmd-btn .cmd-cost {
-  flex: none;
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  padding: 2px 4px;
+  background: rgba(0, 0, 0, 0.62);
+  border-radius: 2px;
+  font-size: 10px;
+  color: #e8c766; /* gold, like the reference panel — not grey */
+  line-height: 1.25;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+.cmd-btn .cmd-cost-row {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 3px;
-  font-size: clamp(9px, 1.4vh, 12px);
-  color: #e8c766; /* gold, like the reference panel — not grey */
-  line-height: 1.15;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+  gap: 2px;
+  white-space: nowrap;
 }
-.cmd-btn .cmd-cost .ui-icon { width: 13px; height: 13px; }
+.cmd-btn .cmd-cost .ui-icon { width: 10px; height: 10px; }
 .cmd-btn .cmd-badge { /* e.g. training queue length */
   position: absolute;
   top: 3px;
@@ -449,10 +472,11 @@
 @media (max-width: 980px) {
   .ui-cmd-panel { flex-basis: 248px; }
   .cmd-btn { min-height: 0; }
-  .cmd-btn .cmd-icon { height: clamp(16px, 3vh, 24px); }
-  .cmd-btn .cmd-icon-wrap { height: clamp(16px, 3vh, 24px); }
-  /* the label keeps the base clamp and simply wraps to two
-     lines at this panel width — no smaller, dimmer override */
+  .cmd-icon-wrap { min-height: 22px; }
+  /* narrower cells: the caption steps down a size so the one
+     line still holds the full name; the icon stays dominant */
+  .cmd-btn .cmd-label { font-size: 9.5px; }
+  .cmd-btn.long-name .cmd-label { font-size: 8.5px; }
   .sel-portrait { width: 58px; height: 58px; }
   .sel-portrait .ui-icon { width: 34px; height: 34px; }
   #minimap { width: 176px; height: 99px; } /* geometry math uses the
@@ -460,15 +484,18 @@
 }
 
 /* short viewports (small laptop windows): the strip sits at its
-   150px floor — slim the chrome a touch more so the stacked
-   cells keep a visible icon above their two text lines; the
-   text sizes themselves do not move */
+   150px floor — slim the panel chrome (padding, title margin,
+   hint) and let the CAPTION give (9px), so the icon keeps its
+   size instead of shrinking back into a speck */
 @media (max-height: 780px) {
-  .ui-cmd-panel { padding-top: 4px; padding-bottom: 4px; }
+  .ui-cmd-panel { padding-top: 3px; padding-bottom: 3px; }
+  .ui-cmd-panel .ui-panel-title { margin-bottom: 1px; }
   .cmd-grid { gap: 3px; }
   .cmd-btn { padding: 1px 3px; }
-  .cmd-btn .cmd-icon { min-height: 9px; }
-  .cmd-btn .cmd-icon-wrap { min-height: 9px; }
+  .cmd-icon-wrap { min-height: 24px; }
+  .cmd-btn .cmd-label { font-size: 9px; }
+  .cmd-btn.long-name .cmd-label { font-size: 8.5px; }
+  .ui-cmd-hint { padding-top: 0; padding-bottom: 0; }
 }
 
 @media (max-width: 700px) {
@@ -483,14 +510,22 @@
   .ui-bottombar { height: clamp(134px, 27vh, 30vh); }
   .ui-cmd-panel { flex-basis: 150px; padding: 5px 6px; }
   .cmd-grid { gap: 3px; }
-  /* the same DE stack, scaled down: icon over the (wrapping,
-     never truncated) label; the cost rides the button's
-     tooltip at this width */
+  /* the icon stays dominant on phones too: it flexes over a
+     caption that may wrap to two lines at 8.5px (the ~44px
+     cells cannot hold a name on one line), and the cost chip
+     shrinks to the number alone — the resource is in the
+     tooltip, as before */
   .cmd-btn { min-height: 0; padding: 1px 2px; }
-  .cmd-btn .cmd-icon { height: 16px; min-height: 0; }
-  .cmd-btn .cmd-icon-wrap { height: 16px; min-height: 0; }
-  .cmd-btn .cmd-label { font-size: 8.5px; }
-  .cmd-btn .cmd-cost { display: none; }
+  .cmd-icon-wrap { min-height: 20px; }
+  .cmd-btn .cmd-label {
+    font-size: 8.5px;
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  .cmd-btn .cmd-cost { font-size: 9px; padding: 1px 3px; }
+  .cmd-btn .cmd-cost .ui-icon { display: none; }
   .cmd-btn .cmd-key { font-size: 8px; min-width: 11px; padding: 0 2px; }
   .ui-cmd-hint { font-size: 9.5px; }
   .ui-sel-panel { padding: 6px 8px; gap: 8px; }

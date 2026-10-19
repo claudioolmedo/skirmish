@@ -74,6 +74,7 @@
   <button id="idle-mil-btn" class="idle-ind" type="button" title="Idle military — click (or press ,) to select the next one">
     <svg class="ui-icon"><use href="#i-militia"/></svg><span id="idle-mil-count">0</span>
   </button>
+  <button id="fullscreen-btn" class="btn btn-ghost btn-sm" type="button" title="Fullscreen">⛶</button>
   <button id="pause-btn" class="btn btn-ghost btn-sm" type="button" title="Menu (Esc)">
     <svg class="ui-icon" style="width:15px;height:15px"><use href="#i-menu"/></svg> Menu
   </button>
@@ -91,19 +92,16 @@
     <p class="ui-panel-title">Commands</p>
     <div class="cmd-grid" id="cmd-grid">
       <button id="build-0" class="cmd-btn" type="button" title="House — 25 wood, +5 population room">
-        <img class="cmd-icon" src="ui-art/icons/house.png" alt="">
+        <span class="cmd-icon-wrap"><img class="cmd-icon" src="ui-art/icons/house.png" alt=""><span class="cmd-cost"><span class="cmd-cost-row"><svg class="ui-icon"><use href="#i-wood"/></svg>25</span></span></span>
         <span class="cmd-label">House</span>
-        <span class="cmd-cost"><svg class="ui-icon"><use href="#i-wood"/></svg>25</span>
       </button>
       <button id="build-1" class="cmd-btn" type="button" title="Farm — 60 wood, 175 food">
-        <img class="cmd-icon" src="ui-art/icons/farm.png" alt="">
+        <span class="cmd-icon-wrap"><img class="cmd-icon" src="ui-art/icons/farm.png" alt=""><span class="cmd-cost"><span class="cmd-cost-row"><svg class="ui-icon"><use href="#i-wood"/></svg>60</span></span></span>
         <span class="cmd-label">Farm</span>
-        <span class="cmd-cost"><svg class="ui-icon"><use href="#i-wood"/></svg>60</span>
       </button>
       <button id="train" class="cmd-btn" type="button" title="Train a villager at the Town Center (50 food)">
-        <img class="cmd-icon" src="ui-art/icons/villager.png" alt="">
+        <span class="cmd-icon-wrap"><img class="cmd-icon" src="ui-art/icons/villager.png" alt=""><span class="cmd-cost"><span class="cmd-cost-row"><svg class="ui-icon"><use href="#i-food"/></svg>50</span></span></span>
         <span class="cmd-label">Villager</span>
-        <span class="cmd-cost"><svg class="ui-icon"><use href="#i-food"/></svg>50</span>
         <span class="cmd-badge" id="train-badge" style="display:none"></span>
       </button>
     </div>
@@ -138,6 +136,7 @@
       <button id="help-btn" class="btn btn-ghost" type="button">How to play</button>
       <button id="restart-btn" class="btn btn-ghost" type="button">Restart</button>
       <button id="btn-online" class="btn btn-ghost" type="button">Play online</button>
+      <button id="pause-fullscreen-btn" class="btn btn-ghost" type="button">Fullscreen</button>
     </div>
     <div id="net-status" class="net-status" hidden>
       <p id="net-status-text" class="overlay-note"></p>

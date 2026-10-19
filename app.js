@@ -98,6 +98,10 @@ const resStone = document.getElementById('res-stone');
 const resPop = document.getElementById('res-pop');
 const resAge = document.getElementById('res-age'); // M6: the player's age
 const pauseBtn = document.getElementById('pause-btn');
+// Fullscreen toggle (Claudio, 2026-10-19): a top-bar button and
+// a pause-menu entry, both driving the one toggleFullscreen().
+const fullscreenBtn = document.getElementById('fullscreen-btn');
+const pauseFullscreenBtn = document.getElementById('pause-fullscreen-btn');
 // Idle indicators (M4, INF-03): always-visible counts in the top bar;
 // clicking one does what the '.' / ',' keys do (SEL-08/09).
 const idleVilBtn = document.getElementById('idle-vil-btn');
@@ -346,12 +350,14 @@ let placement = null; // { kind } while placing a building
 let buildPage = null;
 let gotoCycleMem = {};
 let buildingGroup = null;
-// M13 edge scrolling: the last pointer position in client px and
-// whether the pointer currently rides over the game canvas (not
-// the UI bars, not an overlay). Fed by the pointer listeners in
-// main(); consumed by applyEdgeScroll() on the frame loop.
+// M13 edge scrolling: the last pointer position in VIEWPORT
+// client px, tracked on the window whatever element the pointer
+// rides over (the 2026-10-19 fix: canvas-only tracking meant the
+// top resource bar swallowed the top edge band — the pointer over
+// the bar never reached the canvas listener, so the top edge
+// never panned). Fed by the pointer listeners in main(); consumed
+// by applyEdgeScroll() on the frame loop.
 let mouseClientPt = null;
-let mouseOverCanvas = false;
 let mouseWorld = null; // last cursor position, world coords
 let flashText = '';
 let flashUntil = 0;
@@ -1400,10 +1406,16 @@ function applyKeys(now) {
 // the pan keys' speed (14 canvas px per 60 Hz frame — screen-
 // relative, so the world speed follows the zoom on its own) and
 // their place in the frame: every branch that pans by keys pans
-// by edges. The gates are the pointer's own: it must ride over
-// the game canvas (never the top/bottom UI bars, whose elements
-// sit above the canvas and take the pointer events instead),
-// inside the window, in a live match view with no modal up.
+// by edges. The position is read in VIEWPORT coordinates: the
+// pointer counts at any of the four window edges whether it
+// rides over the canvas, the top resource bar or the bottom bar
+// (the first build read it canvas-only, and the top bar — whose
+// elements sit above the canvas and take its pointer events —
+// permanently covered the top band, so the top edge never
+// panned; Claudio, 2026-10-19). The remaining gates are the
+// view's own: inside the window (leaving it clears the point), a
+// live match with no modal up — the lobby, room, loading and end
+// card all sit outside body.in-match, paused or ended matches.
 const EDGE_MARGIN_PX = 6; // CSS px from the viewport edge
 const EDGE_PX_PER_FRAME = 14; // the pan keys' P, at 60 Hz
 let lastEdgeAt = null;
@@ -1412,19 +1424,56 @@ function applyEdgeScroll(now) {
   if (lastEdgeAt == null) lastEdgeAt = now;
   const dt = Math.min(Math.max(now - lastEdgeAt, 0), 100);
   lastEdgeAt = now;
-  if (!mouseClientPt || !mouseOverCanvas) return;
+  if (!mouseClientPt) return;
   if (paused || matchEnded || playback) return;
   if (!document.body || !document.body.classList.contains('in-match')) return;
   if (helpOverlay.style.display !== 'none' || pauseMenu.style.display !== 'none') return;
-  const r = canvas.getBoundingClientRect();
-  if (!r.width || !r.height) return;
-  const v = edgePan(
-    mouseClientPt.x - r.left, mouseClientPt.y - r.top,
-    r.width, r.height, EDGE_MARGIN_PX);
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  if (!vw || !vh) return;
+  const v = edgePan(mouseClientPt.x, mouseClientPt.y, vw, vh, EDGE_MARGIN_PX);
   if (!v.x && !v.y) return;
-  const step = EDGE_PX_PER_FRAME * (dt / (1000 / 60)) * (canvas.width / r.width);
+  const r = canvas.getBoundingClientRect();
+  const step = EDGE_PX_PER_FRAME * (dt / (1000 / 60))
+    * (r.width ? canvas.width / r.width : 1);
   camOx += v.x * step;
   camOy += v.y * step;
+}
+
+// --- Fullscreen (2026-10-19) -----------------------------------------------
+// One toggle for the top-bar button and the pause-menu entry:
+// fullscreen keeps the pointer inside the game (with viewport-
+// edge scrolling it can ride the screen edges without slipping
+// out of the window). The glyph/title track the real state via
+// fullscreenchange, so Esc-out-of-fullscreen stays in sync too.
+function isFullscreen() {
+  return !!(document.fullscreenElement || document.webkitFullscreenElement);
+}
+
+function syncFullscreenUi() {
+  const fs = isFullscreen();
+  if (fullscreenBtn) {
+    fullscreenBtn.textContent = fs ? '⤢' : '⛶';
+    fullscreenBtn.title = fs ? 'Exit fullscreen' : 'Fullscreen';
+  }
+  if (pauseFullscreenBtn) {
+    pauseFullscreenBtn.textContent = fs ? 'Exit fullscreen' : 'Fullscreen';
+  }
+}
+
+function toggleFullscreen() {
+  if (isFullscreen()) {
+    const exit = document.exitFullscreen || document.webkitExitFullscreen;
+    if (exit) exit.call(document);
+    return;
+  }
+  const el = document.documentElement;
+  if (el.requestFullscreen) {
+    const p = el.requestFullscreen();
+    if (p && p.catch) p.catch(() => {});
+  } else if (el.webkitRequestFullscreen) {
+    el.webkitRequestFullscreen();
+  }
 }
 
 function setPaused(v) {
@@ -3178,6 +3227,11 @@ async function main() {
   playing = false; // no match exists until one is entered
   paused = false;
   pauseBtn.addEventListener('click', () => setPaused(true));
+  if (fullscreenBtn) fullscreenBtn.addEventListener('click', toggleFullscreen);
+  if (pauseFullscreenBtn) pauseFullscreenBtn.addEventListener('click', toggleFullscreen);
+  document.addEventListener('fullscreenchange', syncFullscreenUi);
+  document.addEventListener('webkitfullscreenchange', syncFullscreenUi);
+  syncFullscreenUi();
   // Idle indicators double as buttons: the same cycle the '.' / ','
   // keys run (SEL-08/09).
   idleVilBtn.addEventListener('click', () => { if (sim) cycleIdle('villager', false); });
@@ -3834,22 +3888,21 @@ async function main() {
 
   canvas.addEventListener('mousemove', (ev) => {
     mouseWorld = eventWorld(ev);
-    // M13 edge scrolling rides on this: the pointer is over the
-    // game canvas itself (the UI bars and overlays are separate
-    // elements above it and report themselves as targets below).
-    mouseClientPt = { x: ev.clientX, y: ev.clientY };
-    mouseOverCanvas = true;
   });
+  // M13 edge scrolling reads the pointer's viewport position
+  // from the window: it counts at the screen edges over ANY
+  // element — canvas, top bar, bottom bar — because the bars
+  // float over the canvas and would otherwise swallow their
+  // edge bands (the top bar did exactly that to the top edge).
+  // Overlays still rest the pan via applyEdgeScroll's own gates.
   addEventListener('mousemove', (e) => {
-    if (e.target !== canvas) mouseOverCanvas = false;
+    mouseClientPt = { x: e.clientX, y: e.clientY };
   });
   document.addEventListener('mouseleave', () => {
     mouseClientPt = null;
-    mouseOverCanvas = false;
   });
   addEventListener('blur', () => {
     mouseClientPt = null;
-    mouseOverCanvas = false;
   });
 
   // ---- AoE2-style selection (left button) ----
@@ -5112,23 +5165,37 @@ function runCommandButton(id) {
   }
 }
 
-function cmdButton({ id, icon, img, label, costIcon, cost, title, disabled, active, badge, key }) {
+function cmdButton({ id, icon, img, label, costIcon, cost, cost2Icon, cost2, title, disabled, active, badge, key }) {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.id = id;
   btn.className = 'cmd-btn' + (active ? ' active' : '');
+  // UI FIX 3 (Claudio, 2026-10-19): the DE command button is led
+  // by its icon — names that overflow one caption line at the
+  // standard size get the 'long-name' class, whose caption runs
+  // a step smaller so the full name still fits on the one line.
+  if (label && label.length > 15) btn.classList.add('long-name');
   btn.disabled = !!disabled;
   btn.title = title;
   // The glyph: the original PNG set where one maps (img), else
-  // the SVG symbol. With a hotkey, the letter chip overlays the
-  // glyph's top-left corner via the .cmd-icon-wrap span.
+  // the SVG symbol. Glyph, hotkey letter and cost chip all live
+  // in .cmd-icon-wrap: the letter overlays the glyph's top-left
+  // corner, the chip its bottom-right.
   const glyph = img
     ? pngIcon(img, 'cmd-icon')
     : `<svg class="cmd-icon"><use href="#${icon}"/></svg>`;
+  // The cost chip carries one row per resource — a second
+  // resource (cost2/cost2Icon, e.g. the Militia's 20 gold beside
+  // its 60 food) stacks under the first inside the same chip.
+  const costRow = (ci, c) =>
+    `<span class="cmd-cost-row"><svg class="ui-icon"><use href="#${ci}"/></svg>${c}</span>`;
+  let chip = costRow(costIcon, cost);
+  if (cost2 != null) chip += costRow(cost2Icon, cost2);
   let html =
-    (key ? `<span class="cmd-icon-wrap">${glyph}<span class="cmd-key">${key}</span></span>` : glyph) +
-    `<span class="cmd-label">${label}</span>` +
-    `<span class="cmd-cost"><svg class="ui-icon"><use href="#${costIcon}"/></svg>${cost}</span>`;
+    `<span class="cmd-icon-wrap">${glyph}` +
+    (key ? `<span class="cmd-key">${key}</span>` : '') +
+    `<span class="cmd-cost">${chip}</span></span>` +
+    `<span class="cmd-label">${label}</span>`;
   if (badge) html += `<span class="cmd-badge" id="train-badge">${badge}</span>`;
   btn.innerHTML = html;
   return btn;
@@ -5281,7 +5348,7 @@ function renderCommands() {
     cmdGrid.append(
       cmdButton({
         id: 'train-militia', icon: 'i-militia', img: 'militia.png', label: 'Militia',
-        costIcon: 'i-food', cost: 60,
+        costIcon: 'i-food', cost: 60, cost2Icon: 'i-gold', cost2: 20,
         disabled: underConstruction || blockM === 2,
         badge: bk.queue > 0 ? `+${bk.queue}` : null,
         key: badgeForButton({ context, id: 'train-militia', index: 0 }),
@@ -5291,7 +5358,7 @@ function renderCommands() {
       }),
       cmdButton({
         id: 'research-maa', icon: 'i-maa', img: 'man-at-arms.png', label: 'Man-at-Arms',
-        costIcon: 'i-food', cost: 100,
+        costIcon: 'i-food', cost: 100, cost2Icon: 'i-gold', cost2: 40,
         disabled: underConstruction || maaDone || rbBk[3] === 2 || rbBk[3] === 3,
         key: badgeForButton({ context, id: 'research-maa', index: 1 }),
         title: underConstruction
@@ -5305,7 +5372,7 @@ function renderCommands() {
     const underConstruction = !bk.complete;
     cmdGrid.append(cmdButton({
       id: 'train-archer', icon: 'i-archer', img: 'archer.png', label: 'Archer',
-      costIcon: 'i-wood', cost: 25,
+      costIcon: 'i-wood', cost: 25, cost2Icon: 'i-gold', cost2: 45,
       disabled: underConstruction || blockA === 2,
       badge: bk.queue > 0 ? `+${bk.queue}` : null,
       key: badgeForButton({ context, id: 'train-archer', index: 0 }),
@@ -5328,11 +5395,12 @@ function renderCommands() {
   } else if (context === 'blacksmith') {
     // M6: the Blacksmith's three Feudal researches.
     const underConstruction = !bk.complete;
-    const techBtn = (id, tag, icon, img, label, title) => {
+    const techBtn = (id, tag, icon, img, label, title, cost2) => {
       const done = (techMask & (1 << tag)) !== 0;
       const rb = rbBk[tag - 2];
       return cmdButton({
         id, icon, img, label, costIcon: 'i-food', cost: 100,
+        cost2Icon: cost2 ? 'i-gold' : undefined, cost2,
         key: badgeForButton({ context, id, index: tag - 2 }),
         disabled: underConstruction || done || rb === 2 || rb === 3,
         title: underConstruction
@@ -5344,7 +5412,7 @@ function renderCommands() {
     };
     cmdGrid.append(
       techBtn('research-fletching', 2, 'i-fletching', 'fletching.png', 'Fletching',
-        'Research Fletching — 100 food · 50 gold · 30 s. Archers: +1 attack, +1 range.'),
+        'Research Fletching — 100 food · 50 gold · 30 s. Archers: +1 attack, +1 range.', 50),
       techBtn('research-scalemail', 3, 'i-scalemail', 'scale-mail.png', 'Scale Mail',
         'Research Scale Mail Armor — 100 food · 40 s. Infantry: +1/+1 armor.'),
       techBtn('research-padded', 4, 'i-padded', 'padded-armor.png', 'Padded Armor',
