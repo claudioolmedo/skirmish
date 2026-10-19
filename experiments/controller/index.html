@@ -47,6 +47,7 @@
     pointer-events: none;
   }
   #dot-ring.hot { border-color: #ffd75e; box-shadow: 0 0 12px rgba(255, 215, 94, .8); }
+  #dot-ring.wheel { border-color: #ffd75e; transform: scale(1.1); box-shadow: 0 0 18px rgba(255, 215, 94, .9); }
 
   /* ---------- floating joystick (left thumb) ---------- */
   #stick-base, #stick-knob { position: fixed; z-index: 6; border-radius: 50%; pointer-events: none; display: none; }
@@ -117,7 +118,7 @@
 <canvas id="world"></canvas>
 
 <div id="hud-top">
-  <div id="hint">Experimento — stick move a câmara · o ponto é a mira · A age no ponto</div>
+  <div id="hint">Experimento — stick move a câmara · o ponto é a mira · A age no ponto · segura no ponto: menu radial</div>
   <div id="status">A carregar…</div>
   <div id="rotate-hint">Vira o telefone para jogar como consola</div>
 </div>
@@ -194,7 +195,26 @@ addUnit(1250, 900, 'neutral'); addUnit(1330, 960, 'neutral');
 addUnit(2000, 700, 'enemy'); addUnit(2080, 780, 'enemy');
 
 var selected = null;      // a minha unidade selecionada
+var constructions = [];   // casas/fazendas do menu radial (demo)
 var cam = { x: base.x - viewW / 2, y: base.y - viewH / 2 };
+
+/* -------- menu radial: segurar no ponto, girar, soltar -------- */
+var WHEEL_ITEMS = [
+  { id: 'move',   label: 'Mover' },
+  { id: 'gather', label: 'Recolher' },
+  { id: 'attack', label: 'Atacar' },
+  { id: 'house',  label: 'Casa' },
+  { id: 'farm',   label: 'Fazenda' },
+  { id: 'stop',   label: 'Parar' }
+];
+var WHEEL_HOLD_MS = 180, WHEEL_ZONE = 70, WHEEL_IN = 52;
+var wheel = null;         // { id, open, x, y, target, slice, timer }
+var statusOverride = '', statusOverrideUntil = 0;
+function note(text, ms) {
+  statusOverride = text;
+  statusOverrideUntil = performance.now() + (ms || 1800);
+}
+function wheelOuter() { return Math.min(158, Math.min(viewW, viewH) * 0.42); }
 
 function clampCam() {
   cam.x = Math.max(0, Math.min(WORLD_W - viewW, cam.x));
@@ -246,6 +266,85 @@ function statusText(t) {
 function orderMove(u, x, y) { u.order = { type: 'move', x: x, y: y }; }
 function orderToEntity(u, ent, type) { u.order = { type: type, ent: ent }; }
 
+/* ---------------- menu radial ---------------- */
+function wheelSliceAt(px, py) {
+  var dx = px - viewW / 2, dy = py - viewH / 2;
+  var d = Math.hypot(dx, dy);
+  if (d < WHEEL_IN || d > wheelOuter()) return -1;      // zona morta / fora = cancelar
+  var deg = (Math.atan2(dy, dx) * 180 / Math.PI + 90 + 360) % 360;  // 0° = cima
+  return Math.floor(deg / 60) % WHEEL_ITEMS.length;
+}
+function startWheel(e) {
+  var pid = e.pointerId;
+  wheel = { id: pid, open: false, x: e.clientX, y: e.clientY, target: null, slice: -1, timer: null };
+  wheel.timer = setTimeout(function () {
+    if (!wheel || wheel.id !== pid) return;
+    wheel.open = true;
+    wheel.target = dotWorld();                 // o ponto do mundo fica capturado
+    wheel.slice = wheelSliceAt(wheel.x, wheel.y);
+  }, WHEEL_HOLD_MS);
+}
+function cancelWheel(silent) {
+  if (!wheel) return;
+  if (wheel.timer) clearTimeout(wheel.timer);
+  wheel = null;
+  if (!silent) note('Menu cancelado');
+}
+function nearestNode(p, maxD) {
+  var best = null, bestD = maxD;
+  nodes.forEach(function (n) {
+    if (n.amount <= 0) return;
+    var d = Math.hypot(n.x - p.x, n.y - p.y);
+    if (d < bestD) { best = n; bestD = d; }
+  });
+  return best;
+}
+function nearestFoe(p, maxD) {
+  var best = null, bestD = maxD;
+  units.forEach(function (u) {
+    if (u.side === 'me' || u.hp <= 0) return;
+    var d = Math.hypot(u.x - p.x, u.y - p.y);
+    if (d < bestD) { best = u; bestD = d; }
+  });
+  return best;
+}
+function executeWheel(idx, target) {
+  var u = selected, item = WHEEL_ITEMS[idx];
+  if (!u || !item || !target) return;
+  if (item.id === 'move') {
+    orderMove(u, target.x, target.y);
+    note('Ordem: Mover para o ponto');
+  } else if (item.id === 'gather') {
+    var n = nearestNode(target, 280);
+    if (n) { orderToEntity(u, n, 'gather'); note('Ordem: Recolher ' + (n.kind === 'tree' ? 'a árvore' : 'as bagas')); }
+    else note('Sem recurso perto do ponto');
+  } else if (item.id === 'attack') {
+    var f = nearestFoe(target, 280);
+    if (f) { orderToEntity(u, f, 'attack'); note('Ordem: Atacar o alvo'); }
+    else note('Sem inimigo perto do ponto');
+  } else if (item.id === 'house' || item.id === 'farm') {
+    var b = {
+      x: target.x, y: target.y, kind: item.id,
+      size: item.id === 'house' ? 54 : 68,
+      progress: 0, built: false
+    };
+    constructions.push(b);
+    u.order = { type: 'build', building: b };
+    note('Ordem: construir ' + (item.id === 'house' ? 'Casa' : 'Fazenda'));
+  } else if (item.id === 'stop') {
+    u.order = null;
+    note('Ordem: Parar');
+  }
+}
+function wheelEnd(e, cancelled) {
+  if (!wheel || e.pointerId !== wheel.id) return;
+  var w = wheel;
+  wheel = null;
+  if (w.timer) clearTimeout(w.timer);
+  if (!w.open || cancelled) return;
+  if (w.slice >= 0) executeWheel(w.slice, w.target);
+}
+
 function pressA() {
   var t = targetAtDot();
   if (t.what === 'unit' && t.u.side === 'me') { selected = t.u; return; }
@@ -263,7 +362,11 @@ function pressY() { cam.x = base.x - viewW / 2; cam.y = base.y - viewH / 2; clam
 
 function bindBtn(id, fn) {
   var el = document.getElementById(id);
-  el.addEventListener('pointerdown', function (e) { e.preventDefault(); e.stopPropagation(); fn(); });
+  el.addEventListener('pointerdown', function (e) {
+    e.preventDefault(); e.stopPropagation();
+    if (wheel && wheel.open) return;   // com o menu aberto, os botões não roubam o gesto
+    fn();
+  });
   el.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 }
 bindBtn('btn-a', pressA);
@@ -288,6 +391,15 @@ function stickKnob(x, y) {
 function stickHide() { baseEl.style.display = knobEl.style.display = 'none'; }
 
 cv.addEventListener('pointerdown', function (e) {
+  // Zona do ponto central (~70 px): segurar abre o menu radial.
+  var dc = Math.hypot(e.clientX - window.innerWidth / 2, e.clientY - window.innerHeight / 2);
+  if (dc <= WHEEL_ZONE) {
+    if (wheel) return;
+    if (!selected) { note('Seleciona um aldeão com o botão A'); return; }
+    startWheel(e);
+    return;
+  }
+  if (wheel) return;   // com o menu a caminho/aberto, não nasce outro stick
   if (e.clientX >= window.innerWidth / 2) return;   // metade direita é dos botões
   if (stick.id !== null) return;
   stick.id = e.pointerId; stick.ax = e.clientX; stick.ay = e.clientY; stick.dx = 0; stick.dy = 0;
@@ -295,6 +407,11 @@ cv.addEventListener('pointerdown', function (e) {
   stickShow(e.clientX, e.clientY);
 });
 window.addEventListener('pointermove', function (e) {
+  if (wheel && e.pointerId === wheel.id) {
+    wheel.x = e.clientX; wheel.y = e.clientY;
+    if (wheel.open) wheel.slice = wheelSliceAt(e.clientX, e.clientY);
+    return;
+  }
   if (e.pointerId !== stick.id) return;
   stick.px = e.clientX; stick.py = e.clientY;
   var dx = e.clientX - stick.ax, dy = e.clientY - stick.ay;
@@ -309,6 +426,8 @@ function stickEnd(e) {
 }
 window.addEventListener('pointerup', stickEnd);
 window.addEventListener('pointercancel', stickEnd);
+window.addEventListener('pointerup', function (e) { wheelEnd(e, false); });
+window.addEventListener('pointercancel', function (e) { wheelEnd(e, true); });
 document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 
 /* ---------------- orientação: detetar e adaptar ----------------
@@ -342,6 +461,7 @@ function stickReanchor() {
 }
 
 function applyOrientation() {
+  if (wheel) cancelWheel(false);   // rodar a meio do menu cancela limpo
   var land = isLandscape();
   document.body.classList.toggle('landscape', land);
   document.body.classList.toggle('portrait', !land);
@@ -366,6 +486,19 @@ function stepUnits(dt) {
     if (!u.order) return;
     var o = u.order, tx, ty, stopD;
     if (o.type === 'move') { tx = o.x; ty = o.y; stopD = 4; }
+    else if (o.type === 'build') {
+      var b = o.building;
+      if (b.built) { u.order = null; return; }
+      tx = b.x; ty = b.y; stopD = b.size * 0.72 + u.r + 4;
+      var bd = Math.hypot(tx - u.x, ty - u.y);
+      if (bd > stopD) {
+        u.x += (tx - u.x) / bd * SPEED * dt; u.y += (ty - u.y) / bd * SPEED * dt;
+      } else {
+        b.progress += dt / 1.8;                 // ~1,8 s a construir (demo)
+        if (b.progress >= 1) { b.progress = 1; b.built = true; u.order = null; }
+      }
+      return;   // ordem de construção tratada aqui — não cai no movimento genérico
+    }
     else {
       if (o.ent.hp !== undefined && o.ent.hp <= 0) { u.order = null; return; }
       if (o.ent.amount !== undefined && o.ent.amount <= 0) { u.order = null; return; }
@@ -432,11 +565,56 @@ function draw() {
     }
   });
 
+  // construções do menu radial (casa/fazenda): translúcidas a
+  // construir, sólidas quando prontas
+  constructions.forEach(function (b) {
+    var h = b.size / 2;
+    ctx.save();
+    if (!b.built) ctx.globalAlpha = 0.45;
+    if (b.kind === 'house') {
+      ctx.fillStyle = '#8a6a44'; ctx.fillRect(b.x - h, b.y - h + 8, b.size, b.size - 8);
+      ctx.fillStyle = '#9c2b16';
+      ctx.beginPath(); ctx.moveTo(b.x - h - 4, b.y - h + 10); ctx.lineTo(b.x, b.y - h - 12); ctx.lineTo(b.x + h + 4, b.y - h + 10); ctx.closePath(); ctx.fill();
+    } else {
+      ctx.fillStyle = '#7a5c33'; ctx.fillRect(b.x - h, b.y - h, b.size, b.size);
+      ctx.strokeStyle = '#4e6b2d'; ctx.lineWidth = 4;
+      for (var r = -1; r <= 1; r++) {
+        ctx.beginPath(); ctx.moveTo(b.x - h + 5, b.y + r * 16);
+        ctx.quadraticCurveTo(b.x, b.y + r * 16 - 6, b.x + h - 5, b.y + r * 16); ctx.stroke();
+      }
+    }
+    ctx.restore();
+    ctx.strokeStyle = b.built ? 'rgba(0,0,0,.5)' : '#ffd75e'; ctx.lineWidth = 2;
+    ctx.strokeRect(b.x - h, b.y - h, b.size, b.size);
+    if (!b.built) {
+      ctx.fillStyle = '#000'; ctx.fillRect(b.x - h, b.y + h + 5, b.size, 6);
+      ctx.fillStyle = '#ffd75e'; ctx.fillRect(b.x - h + 1, b.y + h + 6, (b.size - 2) * b.progress, 4);
+    }
+    ctx.fillStyle = '#f0e5c8'; ctx.font = 'bold 12px Georgia'; ctx.textAlign = 'center';
+    ctx.fillText(b.kind === 'house' ? 'Casa' : 'Fazenda', b.x, b.y + h + 24);
+  });
+
+  // alvo capturado pelo menu radial
+  if (wheel && wheel.open && wheel.target) {
+    ctx.strokeStyle = '#ffd75e'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(wheel.target.x, wheel.target.y, 16, 0, 7); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(wheel.target.x - 22, wheel.target.y); ctx.lineTo(wheel.target.x + 22, wheel.target.y);
+    ctx.moveTo(wheel.target.x, wheel.target.y - 22); ctx.lineTo(wheel.target.x, wheel.target.y + 22);
+    ctx.stroke();
+  }
+
   // unidades
   units.forEach(function (u) {
-    if (u.order && u.order.type === 'move' && u === selected) {
-      ctx.strokeStyle = 'rgba(240,229,200,.5)'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(u.x, u.y); ctx.lineTo(u.order.x, u.order.y); ctx.stroke();
+    if (u.order && u === selected) {
+      var tp = null;
+      if (u.order.type === 'move') tp = u.order;
+      else if (u.order.type === 'build') tp = u.order.building;
+      else if (u.order.ent) tp = u.order.ent;
+      if (tp) {
+        ctx.strokeStyle = 'rgba(240,229,200,.5)'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(u.x, u.y); ctx.lineTo(tp.x, tp.y); ctx.stroke();
+      }
     }
     ctx.fillStyle = u.side === 'me' ? '#2b6fd3' : (u.side === 'enemy' ? '#cf3527' : '#9a958c');
     if (u.flash > 0) ctx.fillStyle = '#ffffff';
@@ -457,23 +635,102 @@ function draw() {
   });
 
   ctx.restore();
+  if (wheel && wheel.open) drawWheel();
   return t;
+}
+
+/* -------- desenho do menu radial (espaço do ecrã) -------- */
+function drawWheelIcon(kind, x, y, s, color) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+  if (kind === 'move') {
+    ctx.beginPath(); ctx.moveTo(-s, 0); ctx.lineTo(s - 3, 0); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(s - 10, -6); ctx.lineTo(s, 0); ctx.lineTo(s - 10, 6); ctx.stroke();
+  } else if (kind === 'gather') {
+    [[-4, 2], [4, 2], [0, 8]].forEach(function (o) {
+      ctx.beginPath(); ctx.arc(o[0], o[1], 4.4, 0, 7); ctx.fill();
+    });
+    ctx.beginPath(); ctx.moveTo(0, -2); ctx.quadraticCurveTo(2, -9, 8, -10); ctx.stroke();
+  } else if (kind === 'attack') {
+    ctx.beginPath(); ctx.moveTo(-s + 2, s - 2); ctx.lineTo(s - 2, -s + 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-s + 2, -s + 2); ctx.lineTo(s - 2, s - 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, 2.6, 0, 7); ctx.fill();
+  } else if (kind === 'house') {
+    ctx.strokeRect(-s + 2, -1, (s - 2) * 2, s - 1);
+    ctx.beginPath(); ctx.moveTo(-s - 1, 0); ctx.lineTo(0, -s); ctx.lineTo(s + 1, 0); ctx.stroke();
+  } else if (kind === 'farm') {
+    for (var r = -1; r <= 1; r++) {
+      ctx.beginPath(); ctx.moveTo(-s, r * 6);
+      ctx.quadraticCurveTo(-s / 2, r * 6 - 4, 0, r * 6);
+      ctx.quadraticCurveTo(s / 2, r * 6 + 4, s, r * 6); ctx.stroke();
+    }
+  } else if (kind === 'stop') {
+    ctx.beginPath();
+    for (var k = 0; k < 8; k++) {
+      var a = k * Math.PI / 4 + Math.PI / 8;
+      var px = Math.cos(a) * s, py = Math.sin(a) * s;
+      if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawWheel() {
+  var cx = viewW / 2, cy = viewH / 2;
+  var rOut = wheelOuter(), rIn = WHEEL_IN;
+  ctx.beginPath(); ctx.arc(cx, cy, rOut + 12, 0, 7);
+  ctx.fillStyle = 'rgba(20, 14, 6, .5)'; ctx.fill();
+  for (var i = 0; i < WHEEL_ITEMS.length; i++) {
+    var a0 = (i * 60 - 90) * Math.PI / 180, a1 = a0 + Math.PI / 3, am = (a0 + a1) / 2;
+    var hot = wheel.slice === i;
+    var ro = hot ? rOut + 12 : rOut;
+    ctx.beginPath();
+    ctx.arc(cx, cy, ro, a0, a1);
+    ctx.arc(cx, cy, rIn, a1, a0, true);
+    ctx.closePath();
+    ctx.fillStyle = hot ? 'rgba(201, 162, 39, .95)' : 'rgba(232, 217, 168, .88)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(28, 20, 6, .8)'; ctx.lineWidth = 2; ctx.stroke();
+    var color = hot ? '#241a02' : '#4a3a16';
+    var ir = rIn + (ro - rIn) * 0.34, lr = rIn + (ro - rIn) * 0.72;
+    drawWheelIcon(WHEEL_ITEMS[i].id, cx + Math.cos(am) * ir, cy + Math.sin(am) * ir, hot ? 12 : 10, color);
+    ctx.fillStyle = color; ctx.textAlign = 'center';
+    ctx.font = 'bold ' + (hot ? 17 : 13.5) + 'px Georgia';
+    ctx.fillText(WHEEL_ITEMS[i].label, cx + Math.cos(am) * lr, cy + Math.sin(am) * lr + 5);
+  }
+  // centro: ponto de cancelamento (zona morta)
+  ctx.beginPath(); ctx.arc(cx, cy, rIn - 6, 0, 7);
+  ctx.fillStyle = 'rgba(20, 14, 6, .55)'; ctx.fill();
+  ctx.fillStyle = '#f0e5c8'; ctx.font = 'bold 11px Georgia'; ctx.textAlign = 'center';
+  ctx.fillText('✕', cx, cy + 4);
 }
 
 /* ---------------- ciclo principal ---------------- */
 var last = performance.now();
 function frame(now) {
   var dt = Math.min(0.05, (now - last) / 1000); last = now;
-  if (stick.id !== null) {
+  if (stick.id !== null && !(wheel && wheel.open)) {   // menu aberto: câmara congela
     cam.x += stick.dx * 950 * dt;
     cam.y += stick.dy * 950 * dt;
     clampCam();
   }
   stepUnits(dt);
   var t = draw();
-  var s = statusText(t);
+  var s;
+  if (wheel && wheel.open) {
+    s = wheel.slice >= 0
+      ? 'Menu: ' + WHEEL_ITEMS[wheel.slice].label + ' — solta para confirmar'
+      : 'Menu radial — gira à volta do centro e solta numa fatia (centro/fora cancela)';
+  } else if (statusOverride && now < statusOverrideUntil) {
+    s = statusOverride;
+  } else {
+    s = statusText(t);
+  }
   if (statusEl.textContent !== s) statusEl.textContent = s;
   ringEl.classList.toggle('hot', t.what !== 'ground');
+  ringEl.classList.toggle('wheel', !!(wheel && wheel.open));
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
