@@ -550,3 +550,126 @@ body:not(.in-match) .playback-bar {
 .loading-card { max-width: 560px; }
 .loading-ad { margin-top: 18px; }
 .loading-ad .ad-slot-box { margin: 0 auto; }
+
+/* --- M12.1: mobile pass — the pre-match screens on phones ------- */
+/* Claudio tests everything on his iPhone ("Para o celular"): the
+   Lobby Browser, Create panel, Room screen and Loading screen
+   were shaped on the reference game's wide browser. At phone
+   widths — this file's rules join the ≤700 px breakpoint the HUD
+   already uses (ui.css) — they reflow: no horizontal scroll, no
+   squeezed columns, thumb-sized targets throughout. Desktop
+   rendering is untouched: every rule lives in this one query,
+   and the in-match HUD keeps its own earlier phone pass. */
+@media (max-width: 700px) {
+  /* The pre-match overlays sit closer to the screen edge: the
+     generic 16px overlay inset plus the wide card padding cost
+     ~70px of a 360px phone before any content renders. */
+  #online-overlay, #loading-overlay { padding: 8px; }
+  .lobby-card, .loading-card { padding: 18px 14px 20px; }
+  .lobby-card .game-title-sm { font-size: 24px; letter-spacing: 0.12em; }
+  #online-overlay .card-close { width: 40px; height: 40px; }
+
+  /* Touch targets: every pre-match control at least 40px tall;
+     primary actions 44px. Scoped to the two pre-match overlays
+     so the pause menu keeps its own sizing. */
+  #online-overlay .btn, #loading-overlay .btn { min-height: 44px; }
+  #online-overlay .btn-sm, #loading-overlay .btn-sm { min-height: 40px; }
+  .btn-quiet { min-height: 40px; padding: 10px 6px; }
+
+  /* Controls row: Search owns the first line; Refresh, the
+     Password toggle and the Server filter share the second
+     (wrapping further if a narrow phone still needs it). The
+     text fields are 16px: iOS Safari never focus-zooms those. */
+  .games-controls { gap: 8px 10px; }
+  .games-search { flex: 1 1 100%; }
+  .games-search input {
+    flex: 1 1 auto;
+    width: auto;
+    min-height: 44px;
+    font-size: 16px;
+  }
+  .games-pw { min-height: 40px; padding: 6px 2px; }
+  .games-pw input { width: 18px; height: 18px; }
+  .games-region select { min-height: 40px; }
+
+  /* The games table condenses to two lines per game instead of
+     five squeezed columns. The rendering does not change at
+     all — CSS grid areas rearrange the same five spans:
+       line 1: 🔒 1v1 Arabia — North America West        1/2
+       line 2: Arabia · North America West · 82 ms ■
+     The header row gives way (the condensed rows read on their
+     own). Selection and double-tap join ride the very same
+     .game-row element and its listeners, untouched. */
+  .game-head { display: none; }
+  .games-list { max-height: 232px; }
+  .game-row {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "title title players"
+      "map loc server";
+    row-gap: 3px;
+    padding: 10px;
+    min-height: 56px;
+    font-size: 13px;
+  }
+  .g-title { grid-area: title; font-weight: 600; }
+  .g-players { grid-area: players; justify-self: end; }
+  .g-map { grid-area: map; }
+  .g-loc {
+    grid-area: loc;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .g-server { grid-area: server; }
+  .g-loc::before, .g-server::before {
+    content: "·";
+    margin-right: 8px;
+    color: #7a6248;
+  }
+
+  /* The action bar sticks to the bottom of the view while the
+     lobby card scrolls under it, so Join Lobby / Create Lobby
+     stay reachable; while it floats it carries the card's
+     parchment tone and a hairline, like a bar pinned over it. */
+  .games-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    margin-bottom: 10px;
+    padding: 10px 2px 4px;
+    background: rgba(217, 196, 154, 0.97);
+    border-top: 1px solid rgba(138, 106, 31, 0.35);
+  }
+
+  /* Create panel: region rows are full thumb targets, the
+     privacy choice stacks, the password field is full-width
+     and 44px, and the settings' guest-slot select flexes
+     beside its name instead of pushing the row off-screen. */
+  .region-row { min-height: 44px; padding: 10px 12px; }
+  .region-list { max-height: 38vh; }
+  .privacy-row { flex-direction: column; }
+  .privacy-row .mode-opt { min-height: 40px; }
+  .pw-set-row input, .pw-row input { min-height: 44px; font-size: 16px; }
+  .settings-box .slot-select { flex: 1 1 auto; min-width: 0; }
+  .slot-select { min-height: 44px; }
+
+  /* Room screen: the seats are full-width rows already; the
+     guest-slot selector becomes a labelled full-width control,
+     and Start takes the whole row — large and obvious. The
+     quiet copy link gets a real tap area too. The loading
+     screen shares the seat rows, so it inherits the sizing. */
+  .slot-row { min-height: 48px; }
+  .slot-control-label { flex-direction: column; align-items: stretch; gap: 6px; }
+  .slot-control-label .slot-select { width: 100%; }
+  #room-section .pause-actions .btn { width: 100%; }
+  .invite-row .linklike { display: inline-block; padding: 10px 8px; }
+
+  /* The ad keeps its desktop 300×250 contract (site.css,
+     ADS.md); on a phone narrower than the box it scales down
+     inside its slot at the same aspect, centered — it never
+     overflows the card. */
+  .ad-slot-box { max-width: 100%; height: auto; aspect-ratio: 300 / 250; }
+  .cq-row { padding: 6px 0; }
+}

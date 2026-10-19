@@ -351,5 +351,41 @@ await boot(tab);
   console.log('PASS (7) Join Lobby joins the selected (locked) room');
 }
 
+// (8) M12.1 mobile pass, verified BY CONSTRUCTION: this VM has
+//     no layout engine, so no smoke can measure rendered pixels.
+//     What can honestly be checked is that the shipped play.css
+//     carries the phone rules the narrow layout is built from —
+//     and that the desktop rules they override are still intact
+//     above them. (Claudio's phone remains the visual check.)
+{
+  const { readFileSync } = await import('node:fs');
+  const css = readFileSync(new URL('./play.css', import.meta.url), 'utf8');
+  const marker = '@media (max-width: 700px)';
+  const at = css.lastIndexOf(marker);
+  assert.ok(at > 0, 'play.css carries the ≤700px phone media query');
+  const phoneCss = css.slice(at);
+  const desktopCss = css.slice(0, at);
+
+  assert.ok(phoneCss.includes('grid-template-areas')
+    && phoneCss.includes('"title title players"')
+    && phoneCss.includes('"map loc server"'),
+    'phone rows condense to two lines (title+players / map·region·server)');
+  assert.ok(phoneCss.includes('.game-head') && phoneCss.includes('display: none'),
+    'the five-column header gives way on phones');
+  assert.ok(phoneCss.includes('.games-search') && phoneCss.includes('flex: 1 1 100%'),
+    'Search takes a full-width line of its own');
+  assert.ok(phoneCss.includes('.region-row') && phoneCss.includes('min-height: 44px'),
+    'region rows are 44px thumb targets');
+  assert.ok(phoneCss.includes('.slot-select') && phoneCss.includes('min-height: 44px'),
+    'the guest-slot selector is a 44px thumb target');
+  assert.ok(phoneCss.includes('.games-actions') && phoneCss.includes('position: sticky'),
+    'the action bar sticks within the scrolling lobby card');
+  assert.ok(phoneCss.includes('.ad-slot-box') && phoneCss.includes('aspect-ratio'),
+    'the ad scales down inside its slot instead of overflowing');
+  assert.ok(desktopCss.includes('grid-template-columns: minmax(0, 1fr) 52px 58px 128px 88px'),
+    'the desktop five-column table rule is untouched');
+  console.log('PASS (8) M12.1 phone rules ship in play.css (by construction; no layout engine here)');
+}
+
 console.log('LOBBY SMOKE: all cases passed');
 process.exit(0);
