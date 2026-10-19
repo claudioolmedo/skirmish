@@ -406,7 +406,27 @@ await boot(tab);
   const phoneAt = css.lastIndexOf('@media (max-width: 700px)');
   assert.ok(phoneAt > 0 && css.slice(phoneAt).includes('.ui-bottombar { height: clamp(134px, 27vh, 30vh)'),
     'on phones the strip takes a larger share but stays under ~30vh');
-  console.log('PASS (9) compact bottom strip ships in ui.css (by construction; no layout engine here)');
+  // Legibility pass (Claudio, 2026-10-19: the horizontal cells
+  // truncated names to "Lumber..." and greyed the text): the
+  // command panel is DE-stacked — full name in bright parchment,
+  // gold cost, and a disabled state that never dims the text.
+  assert.ok(css.includes('flex: 0 0 348px'),
+    'the command panel is widened to ~348px so full names fit their cells');
+  const labelAt = css.indexOf('.cmd-btn .cmd-label');
+  const labelRule = css.slice(labelAt, css.indexOf('}', labelAt));
+  assert.ok(!labelRule.includes('ellipsis') && labelRule.includes('white-space: normal'),
+    'button names never truncate — they wrap in full');
+  assert.ok(labelRule.includes('-webkit-line-clamp: 2') && labelRule.includes('color: #f0e5c8'),
+    'names wrap to at most two lines in bright parchment #f0e5c8');
+  assert.ok(css.includes('height: clamp(18px, 3.6vh, 32px)'),
+    'cell icons scale with the viewport height (DE-large on tall screens)');
+  const costAt = css.indexOf('.cmd-btn .cmd-cost {');
+  assert.ok(css.slice(costAt, css.indexOf('}', costAt)).includes('color: #e8c766'),
+    'costs render in gold #e8c766, not the old dim grey');
+  assert.ok(!css.includes('.cmd-btn:disabled { opacity')
+    && css.includes('.cmd-btn:disabled .cmd-label'),
+    'a disabled button darkens its cell and icon only — name and cost stay legible');
+  console.log('PASS (9) compact bottom strip + legible DE-stacked command cells ship in ui.css (by construction; no layout engine here)');
 }
 
 console.log('LOBBY SMOKE: all cases passed');

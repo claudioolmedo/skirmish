@@ -5206,7 +5206,7 @@ function renderCommands() {
       for (let kind = 0; kind <= 8; kind++) buttons.push(buildBtn(kind));
       cmdGrid.append(...buttons);
       hint.textContent =
-        'Hotkeys: Q economic buildings · W military buildings · A drop off resources.';
+        'Q economic · W military · A drop off resources.';
     }
     cmdGrid.append(hint);
   } else if (context === 'tc') {
