@@ -237,6 +237,43 @@ From the [Gap Analysis](GAP-ANALYSIS.md): the items that most make Skirmish II
   Restore button. Zero sim changes; relay untouched. See
   ARCHITECTURE.md, "M8 — lockstep multiplayer" (Lobby Browser
   shape bullet).
+- **M12 — Configurable rooms: AI slot + match settings (shipped
+  2026-10-18).** The host configures the room the way the
+  reference game's lobby does. The guest seat gets a selector —
+  in the create panel and again on the room screen — **Open**
+  (default; a human may join) / **AI · Easy** / **AI · Normal** /
+  **Closed**; it locks while a human guest is present, so a seat
+  can never be reconfigured out from under a person. With an AI
+  chosen, the ready gate becomes the host's alone (the AI seat
+  always counts as ready, and as loaded the moment the host's
+  own build verifies on the loading screen, which shows both
+  seats as usual) — the full Lobby Browser → room → ready →
+  loading → match flow runs solo, for testing, and the match
+  itself is a LOCAL match against the in-sim scripted AI at the
+  chosen difficulty: there is no second client and no lockstep
+  session, and the docs say so plainly. Its pause menu and end
+  overlay behave like a local match's (Restart replays the same
+  configuration; Back to menu returns to the Lobby Browser), and
+  it records a replay like a local match. The create panel shows
+  the match settings as the reference's create lobby does —
+  **Map: Arabia · Victory: Conquest · Players: 2** — as stated
+  facts, not fake dropdowns, plus the guest-seat choice; the
+  room screen carries one configuration summary line ("1v1 ·
+  Arabia · Conquest · Guest: AI · Normal"). Directory rule: a
+  seat filled by an AI or closed is not an open game — the room
+  leaves the public list while sealed and returns when reopened
+  (the host's client declares it on its create connection, and
+  steers it later with one control frame the room object honors
+  only from the host's connection and never forwards; the relay
+  gained no new classes, /health version 4). Both-ready for
+  human guests, the password flow, the loading/cancel rules,
+  the reload consume-once and the pre-match invisibility are
+  untouched. Deliberately NOT built, because nothing backs them
+  yet — they arrive with their features, not as dead UI: other
+  maps, team sizes beyond 1v1, other victory conditions, game
+  speed and population settings. Zero sim changes. See
+  ARCHITECTURE.md, "M8 — lockstep multiplayer" (guest slot
+  bullet).
 
 ## Good first contributions
 

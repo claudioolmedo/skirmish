@@ -806,6 +806,48 @@ dumb relay.
   keeps the gate closed, and a guest leaving resets both flags.
   Ready/password traffic is lobby traffic — it never enters the
   sim or the hashed state (NET-10).
+- **Guest slot & match settings (M12).** The host configures the
+  room's second seat, as the reference game's lobby allows: the
+  guest slot is **Open** (default — a human may take it), **AI ·
+  Easy** or **AI · Normal** (the in-sim scripted opponent fills
+  it), or **Closed**. The control lives in the create panel —
+  beside the match settings, shown as fixed facts rather than
+  dead dropdowns: Map Arabia, Victory Conquest, Players 2 — and
+  again on the room screen, which also carries a configuration
+  summary line ("1v1 · Arabia · Conquest · Guest: AI · Normal").
+  The room-screen selector disables itself while a human guest
+  is present or at the door: a seat is never reconfigured out
+  from under a person. **Slot semantics.** Open is the M10 room
+  unchanged. Closed admits nobody and cannot start. An AI slot
+  changes the gates, honestly and only there (the pure rules in
+  `play/room.js`): the AI seat always counts as ready, so the
+  start rule becomes the host's ready alone; on the loading
+  screen (the real one — both seats shown) the AI seat counts as
+  loaded the moment the host's own build verifies, because
+  there is nothing else to wait for; and the match that begins
+  is a **local match** — the verified sim is adopted as a local
+  game against the scripted AI at the chosen difficulty
+  (`MatchMode` AiEasy/AiNormal), recorded like a local match,
+  with a local match's pause/Restart/Back-to-menu behavior
+  (Restart replays the same seed and difficulty; Back to menu
+  returns to the Lobby Browser). Say it plainly: **an AI-slot
+  match is a local match wearing the online flow** — the lobby,
+  the room and the loading are genuinely exercised (that is
+  what makes it useful for testing), but no second client
+  exists, no lockstep session starts, and the room dissolves
+  the moment the match begins. **Directory rule.** A seat filled
+  by an AI or closed is not an open game: the room leaves the
+  public open list while sealed and returns when reopened. The
+  host's client declares it — `&listed=0` on its create
+  connection when the seat is filled at create time, and
+  afterwards with one control frame, `{"type":"slot",
+  "listed":bool}`, that the room object intercepts: it is
+  honored only from the connection that presented `&host=1` at
+  accept time (kept as that socket's attachment), it is never
+  forwarded, and it is the one frame the dumb pipe reads. The
+  room's directory report gains the `listed` flag; the Lobby
+  object stores it and serves only listed rooms as open. The
+  relay gained no classes; /health reports version 4.
 - **Lobby Browser shape (M11).** The browser screen is modeled
   structurally on the reference game's Lobby Browser (layout and
   behavior mirrored; every asset and word is ours). The table's

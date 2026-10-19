@@ -449,6 +449,51 @@ body:not(.in-match) .playback-bar {
   color: #4a3820;
   font-size: 13.5px;
 }
+/* --- M12: match settings (create panel) + the guest-seat ------- */
+/* --- selector (create panel and room screen share it) -------- */
+.settings-box {
+  border: 1px solid #c9b48a;
+  border-radius: 8px;
+  background: rgba(255, 252, 244, 0.5);
+  padding: 10px 12px;
+  margin: 0 0 12px;
+}
+.settings-h {
+  margin: 0 0 8px;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #7a6248;
+}
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 0;
+  font-size: 14px;
+  color: #4a3820;
+}
+.setting-name { color: #7a6248; }
+.setting-value { font-weight: 600; }
+.slot-select {
+  padding: 6px 8px;
+  border: 1px solid #c9b48a;
+  border-radius: 8px;
+  background: #fffdf6;
+  color: #4a3820;
+  font-size: 13.5px;
+}
+.slot-select:disabled { opacity: 0.55; }
+.room-config { margin: 2px 0 0; }
+.slot-control-row { margin: 0 0 12px; }
+.slot-control-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: #4a3820;
+}
 /* The room screen: two calm seat rows — who, which color, present,
    ready — then ONE prominent Start toggle, then the quiet link. */
 .slot-list { margin: 10px 0 12px; }
