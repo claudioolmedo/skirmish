@@ -399,7 +399,11 @@ function drawSpriteW(im, sx, sy, wWorld, dyWorld = 0) {
 // toward the footprint's front edge. While a building is under
 // construction the image is clip-revealed by progress over the
 // standard foundation diamond — the same construction feedback the
-// placeholder sprites always used. Fallback chain per building: this
+// placeholder sprites always used. Exception: the House has
+// dedicated construction stage frames (house-stage1..3.png, one
+// generated strip sliced into thirds of the build) drawn full-size
+// instead of the clip-reveal; stages for the other kinds arrive per
+// building later. Fallback chain per building: this
 // art -> whatever the renderer used before (original stage art / CC0
 // placeholder / vector). One image serves both players for the test
 // (no per-owner tint yet). Loading is fire-and-forget alongside the
@@ -408,6 +412,9 @@ const BUILDING_ART = { img: {}, loaded: false };
 const BUILDING_ART_FILES = {
   tc: 'town-center.png',
   house: 'house.png',
+  houseStage1: 'house-stage1.png',
+  houseStage2: 'house-stage2.png',
+  houseStage3: 'house-stage3.png',
   barracks: 'barracks.png',
   lumber: 'lumber-camp.png',
   mill: 'mill.png',
@@ -4204,9 +4211,13 @@ function drawTC(wx, wy, owner = 0) {
   ctx.fillText('TC', cx, cy);
 }
 
-// House rendering. First choice is the Base44 test art (see
-// BUILDING_ART above): clip-revealed by progress over a foundation
-// diamond while under construction. Fallback is our original stage
+// House rendering. First choice is the Base44 art (see
+// BUILDING_ART above): while under construction it draws dedicated
+// construction stage frames (one generated strip, sliced into
+// thirds of the build progress) over a foundation diamond, on the
+// finished art's draw contract so completion has no design jump;
+// the clip-reveal of the finished art is the fallback if a stage
+// frame is not loaded. Fallback is our original stage
 // art (see HOUSE_ORIGINAL above): the sprite carries its own
 // foundation and the construction stage follows build progress.
 // Last resorts: the CC0 placeholder sprite with the same clip-reveal,
@@ -4222,8 +4233,23 @@ function drawHouse(b) {
     const bt = worldToScreen(b.x + CS, b.y + CS);
     const l = worldToScreen(b.x - CS, b.y + CS);
     poly([t, r, bt, l], b.complete ? 'rgba(0,0,0,0.12)' : '#8d8578');
-    drawArtImage(BUILDING_ART.img.house, sx, sy, HOUSE_W, HOUSE_DY,
-      b.complete ? 1 : b.progress);
+    if (b.complete) {
+      drawArtImage(BUILDING_ART.img.house, sx, sy, HOUSE_W, HOUSE_DY, 1);
+    } else {
+      // Construction stages: dedicated per-stage frames drawn
+      // full-size on the finished house's draw contract, so the
+      // build visibly grows stage by stage (foundation + posts ->
+      // walls + scaffolding -> roof beams) and completion lands on
+      // the same design. If the needed stage frame is not loaded
+      // yet, fall back to clip-revealing the finished art.
+      const stage = b.progress < 1 / 3 ? BUILDING_ART.img.houseStage1
+        : b.progress < 2 / 3 ? BUILDING_ART.img.houseStage2
+        : BUILDING_ART.img.houseStage3;
+      if (!drawArtImage(stage, sx, sy, HOUSE_W, HOUSE_DY, 1)) {
+        drawArtImage(BUILDING_ART.img.house, sx, sy, HOUSE_W, HOUSE_DY,
+          b.progress);
+      }
+    }
   } else if (!drawOriginalHouse(b, sx, sy)) {
     // Foundation: the footprint as a flat stone diamond.
     const t = worldToScreen(b.x - CS, b.y - CS);
