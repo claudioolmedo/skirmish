@@ -4167,15 +4167,18 @@ function drawTC(wx, wy, owner = 0) {
   shadow(sx, sy, (r[0] - l[0]) / 2);
   // Building sprite, footprint-based like drawNewBuilding: width =
   // 4 cells x CS x 1.12 (= 17.92 world units at CS = 4), base planted
-  // half-footprint x 0.45 (= 3.6) toward the front corner, so the
-  // art's ground-contact diamond coincides with the 4x4 footprint
-  // diamond. First choice is the Base44 test art; the CC0 placeholder
-  // is the fallback (same draw contract).
+  // The Base44 art is normalized in processing so its measured
+  // ground-contact diamond sits on the canonical diamond (width
+  // 0.893 x canvas, equator at canvas height - 0.2457 x canvas
+  // width): drawn at footprint x 1.12 wide with the anchor 4.4 wu
+  // above the sprite's bottom edge (half-footprint x 0.55), its
+  // base corners land exactly on the 4x4 footprint diamond.
+  // The CC0 placeholder is the fallback (same draw contract).
   const tcArtHalf = (TC_ART_CELLS * CS) / 2;
   if (drawSpriteW(BUILDING_ART.img.tc, sx, sy,
-    TC_ART_CELLS * CS * 1.12, tcArtHalf * 0.45)) return;
+    TC_ART_CELLS * CS * 1.12, tcArtHalf * 0.55)) return;
   if (drawSpriteW(SPRITES.tc, sx, sy,
-    TC_ART_CELLS * CS * 1.12, tcArtHalf * 0.45)) return;
+    TC_ART_CELLS * CS * 1.12, tcArtHalf * 0.55)) return;
   const h = 2.2 * camS; // wall height
   poly([l, b, up(b, h), up(l, h)], '#b09468'); // front-left wall
   poly([b, r, up(r, h), up(b, h)], '#8a6f45'); // front-right wall
