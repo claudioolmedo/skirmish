@@ -260,6 +260,22 @@
   width: auto;
   aspect-ratio: 1 / 1;
 }
+/* PNG icon set (ui-art/icons/): full-bleed squares carrying
+   their own walnut background and gold frame — shown as-is */
+.cmd-btn img.cmd-icon { border-radius: 2px; object-fit: cover; }
+/* when a button carries a hotkey, glyph + letter chip travel
+   together: the wrap takes the glyph's flex slot in the cell,
+   the glyph fills it at 100%, and the .cmd-key chip (already
+   absolutely positioned) overlays the glyph's top-left corner */
+.cmd-icon-wrap {
+  position: relative;
+  flex: 0 1 auto;
+  min-height: 10px;
+  height: clamp(18px, 3.6vh, 32px);
+  aspect-ratio: 1 / 1;
+  line-height: 0;
+}
+.cmd-icon-wrap > .cmd-icon { width: 100%; height: 100%; min-height: 0; }
 .cmd-btn .cmd-label {
   flex: none;
   width: 100%;
@@ -355,6 +371,8 @@
   color: var(--ui-ink);
 }
 .sel-portrait .ui-icon { width: 38px; height: 38px; }
+/* PNG portraits fill their slot as-is (own bg + gold frame) */
+.sel-portrait img.ui-icon, .sel-cell img.ui-icon { border-radius: 2px; object-fit: cover; }
 .sel-portrait.empty { color: var(--ui-ink-dim); }
 
 .sel-main { min-width: 0; overflow: hidden; }
@@ -432,6 +450,7 @@
   .ui-cmd-panel { flex-basis: 248px; }
   .cmd-btn { min-height: 0; }
   .cmd-btn .cmd-icon { height: clamp(16px, 3vh, 24px); }
+  .cmd-btn .cmd-icon-wrap { height: clamp(16px, 3vh, 24px); }
   /* the label keeps the base clamp and simply wraps to two
      lines at this panel width — no smaller, dimmer override */
   .sel-portrait { width: 58px; height: 58px; }
@@ -449,6 +468,7 @@
   .cmd-grid { gap: 3px; }
   .cmd-btn { padding: 1px 3px; }
   .cmd-btn .cmd-icon { min-height: 9px; }
+  .cmd-btn .cmd-icon-wrap { min-height: 9px; }
 }
 
 @media (max-width: 700px) {
@@ -468,6 +488,7 @@
      tooltip at this width */
   .cmd-btn { min-height: 0; padding: 1px 2px; }
   .cmd-btn .cmd-icon { height: 16px; min-height: 0; }
+  .cmd-btn .cmd-icon-wrap { height: 16px; min-height: 0; }
   .cmd-btn .cmd-label { font-size: 8.5px; }
   .cmd-btn .cmd-cost { display: none; }
   .cmd-btn .cmd-key { font-size: 8px; min-width: 11px; padding: 0 2px; }

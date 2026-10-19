@@ -157,6 +157,25 @@ const KIND_ICON = {
   8: 'i-militia',
 };
 
+// Original PNG icon set (2026-10-19, AI generations via Base44 on
+// Claudio's account — provenance in play/ui-art/README.md):
+// full-bleed 128px squares with their own dark walnut background
+// and thin gold frame, drawn in the reference game's icon
+// language (a single large, clear pictogram per button) without
+// copying any of its icons. Where a command button or selection
+// portrait has a PNG below it replaces the older SVG symbol; the
+// symbols remain for everything unmapped (resources, animals).
+// Kind tags here match KIND_NAME / the sim's entity kinds.
+const KIND_PNG = {
+  0: 'villager.png', 2: 'scout.png', 3: 'militia.png', 4: 'archer.png',
+  8: 'man-at-arms.png',
+};
+// An <img> glyph occupying the same slot (and classes) as the
+// SVG icons, so every sizing rule applies unchanged.
+function pngIcon(png, cls) {
+  return `<img class="${cls}" src="ui-art/icons/${png}" alt="">`;
+}
+
 // Building kind tags (must match the sim's BuildingKind::tag):
 // 0 house, 1 farm, 2 barracks (M2.5/M3); 3 lumber camp, 4 mill,
 // 5 mining camp, 6 archery range, 7 stable, 8 blacksmith (M6).
@@ -167,6 +186,11 @@ const BUILD_NAME = ['House', 'Farm', 'Barracks', 'Lumber Camp', 'Mill',
 const BUILD_SIZE = [2, 2, 3, 2, 2, 2, 3, 3, 3];
 const BUILD_ICON = ['i-house', 'i-farm', 'i-tc', 'i-lumber', 'i-mill',
   'i-mining', 'i-range', 'i-stable', 'i-blacksmith'];
+// The PNG set above, per building kind tag (same order as
+// BUILD_ICON): command buttons and building portraits.
+const BUILD_PNG = ['house.png', 'farm.png', 'barracks.png', 'lumber-camp.png',
+  'mill.png', 'mining-camp.png', 'archery-range.png', 'stable.png',
+  'blacksmith.png'];
 // Building max HP by kind tag (the sim's building table, study
 // §5) — for the enemy-building info panel (M5).
 const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200];
@@ -5088,18 +5112,23 @@ function runCommandButton(id) {
   }
 }
 
-function cmdButton({ id, icon, label, costIcon, cost, title, disabled, active, badge, key }) {
+function cmdButton({ id, icon, img, label, costIcon, cost, title, disabled, active, badge, key }) {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.id = id;
   btn.className = 'cmd-btn' + (active ? ' active' : '');
   btn.disabled = !!disabled;
   btn.title = title;
+  // The glyph: the original PNG set where one maps (img), else
+  // the SVG symbol. With a hotkey, the letter chip overlays the
+  // glyph's top-left corner via the .cmd-icon-wrap span.
+  const glyph = img
+    ? pngIcon(img, 'cmd-icon')
+    : `<svg class="cmd-icon"><use href="#${icon}"/></svg>`;
   let html =
-    `<svg class="cmd-icon"><use href="#${icon}"/></svg>` +
+    (key ? `<span class="cmd-icon-wrap">${glyph}<span class="cmd-key">${key}</span></span>` : glyph) +
     `<span class="cmd-label">${label}</span>` +
     `<span class="cmd-cost"><svg class="ui-icon"><use href="#${costIcon}"/></svg>${cost}</span>`;
-  if (key) html += `<span class="cmd-key">${key}</span>`;
   if (badge) html += `<span class="cmd-badge" id="train-badge">${badge}</span>`;
   btn.innerHTML = html;
   return btn;
@@ -5182,7 +5211,7 @@ function renderCommands() {
       else if ((kind === 6 || kind === 7) && !hasBarracks) gate = 'Requires a Barracks';
       const lacksWood = wood < BUILD_COST[kind];
       return cmdButton({
-        id: `build-${kind}`, icon: BUILD_ICON[kind], label: BUILD_NAME[kind],
+        id: `build-${kind}`, icon: BUILD_ICON[kind], img: BUILD_PNG[kind], label: BUILD_NAME[kind],
         costIcon: 'i-wood', cost: BUILD_COST[kind],
         disabled: !!gate || lacksWood,
         active: !!placement && placement.kind === kind,
@@ -5216,7 +5245,7 @@ function renderCommands() {
     const feudalDone = age >= 1;
     cmdGrid.append(
       cmdButton({
-        id: 'train', icon: 'i-train', label: 'Villager',
+        id: 'train', icon: 'i-train', img: 'villager.png', label: 'Villager',
         costIcon: 'i-food', cost: 50,
         disabled: reason === 2, // queue full; other blocks flash on click
         badge: queue > 0 ? `+${queue}` : null,
@@ -5226,7 +5255,7 @@ function renderCommands() {
           : 'Train a villager at the Town Center (50 food).',
       }),
       cmdButton({
-        id: 'research-loom', icon: 'i-loom', label: 'Loom',
+        id: 'research-loom', icon: 'i-loom', img: 'loom.png', label: 'Loom',
         costIcon: 'i-gold', cost: 50,
         disabled: loomDone || rbTc[0] === 2 || rbTc[0] === 3,
         key: badgeForButton({ context, id: 'research-loom', index: 1 }),
@@ -5235,7 +5264,7 @@ function renderCommands() {
           : `Research Loom — 50 gold · 25 s. Villagers gain +15 HP and armor.${RESEARCH_BLOCK_TITLES[rbTc[0]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[0]] : ''}`,
       }),
       cmdButton({
-        id: 'research-feudal', icon: 'i-feudal', label: 'Feudal Age',
+        id: 'research-feudal', icon: 'i-feudal', img: 'feudal.png', label: 'Feudal Age',
         costIcon: 'i-food', cost: 500,
         disabled: feudalDone || rbTc[1] === 2 || rbTc[1] === 3,
         key: badgeForButton({ context, id: 'research-feudal', index: 2 }),
@@ -5251,7 +5280,7 @@ function renderCommands() {
     const maaDone = (techMask & 32) !== 0;
     cmdGrid.append(
       cmdButton({
-        id: 'train-militia', icon: 'i-militia', label: 'Militia',
+        id: 'train-militia', icon: 'i-militia', img: 'militia.png', label: 'Militia',
         costIcon: 'i-food', cost: 60,
         disabled: underConstruction || blockM === 2,
         badge: bk.queue > 0 ? `+${bk.queue}` : null,
@@ -5261,7 +5290,7 @@ function renderCommands() {
           : `Train Militia — 60 food · 20 gold.${TRAIN_BLOCK_TITLES[blockM] ? ' ' + TRAIN_BLOCK_TITLES[blockM] : ''}`,
       }),
       cmdButton({
-        id: 'research-maa', icon: 'i-maa', label: 'Man-at-Arms',
+        id: 'research-maa', icon: 'i-maa', img: 'man-at-arms.png', label: 'Man-at-Arms',
         costIcon: 'i-food', cost: 100,
         disabled: underConstruction || maaDone || rbBk[3] === 2 || rbBk[3] === 3,
         key: badgeForButton({ context, id: 'research-maa', index: 1 }),
@@ -5275,7 +5304,7 @@ function renderCommands() {
   } else if (context === 'range') {
     const underConstruction = !bk.complete;
     cmdGrid.append(cmdButton({
-      id: 'train-archer', icon: 'i-archer', label: 'Archer',
+      id: 'train-archer', icon: 'i-archer', img: 'archer.png', label: 'Archer',
       costIcon: 'i-wood', cost: 25,
       disabled: underConstruction || blockA === 2,
       badge: bk.queue > 0 ? `+${bk.queue}` : null,
@@ -5287,7 +5316,7 @@ function renderCommands() {
   } else if (context === 'stable') {
     const underConstruction = !bk.complete;
     cmdGrid.append(cmdButton({
-      id: 'train-scout', icon: 'i-villager', label: 'Scout Cavalry',
+      id: 'train-scout', icon: 'i-villager', img: 'scout.png', label: 'Scout Cavalry',
       costIcon: 'i-food', cost: 80,
       disabled: underConstruction || blockS === 2,
       badge: bk.queue > 0 ? `+${bk.queue}` : null,
@@ -5299,11 +5328,11 @@ function renderCommands() {
   } else if (context === 'blacksmith') {
     // M6: the Blacksmith's three Feudal researches.
     const underConstruction = !bk.complete;
-    const techBtn = (id, tag, icon, label, title) => {
+    const techBtn = (id, tag, icon, img, label, title) => {
       const done = (techMask & (1 << tag)) !== 0;
       const rb = rbBk[tag - 2];
       return cmdButton({
-        id, icon, label, costIcon: 'i-food', cost: 100,
+        id, icon, img, label, costIcon: 'i-food', cost: 100,
         key: badgeForButton({ context, id, index: tag - 2 }),
         disabled: underConstruction || done || rb === 2 || rb === 3,
         title: underConstruction
@@ -5314,11 +5343,11 @@ function renderCommands() {
       });
     };
     cmdGrid.append(
-      techBtn('research-fletching', 2, 'i-fletching', 'Fletching',
+      techBtn('research-fletching', 2, 'i-fletching', 'fletching.png', 'Fletching',
         'Research Fletching — 100 food · 50 gold · 30 s. Archers: +1 attack, +1 range.'),
-      techBtn('research-scalemail', 3, 'i-scalemail', 'Scale Mail',
+      techBtn('research-scalemail', 3, 'i-scalemail', 'scale-mail.png', 'Scale Mail',
         'Research Scale Mail Armor — 100 food · 40 s. Infantry: +1/+1 armor.'),
-      techBtn('research-padded', 4, 'i-padded', 'Padded Armor',
+      techBtn('research-padded', 4, 'i-padded', 'padded-armor.png', 'Padded Armor',
         'Research Padded Archer Armor — 100 food · 40 s. Archers: +1/+1 armor.'),
     );
   } else if (context === 'units') {
@@ -5390,8 +5419,9 @@ function updateSelPanel() {
     const kind = st.kinds[selUnits[0]];
     const kindName = KIND_NAME[kind] || 'Unit';
     selPortrait.classList.remove('empty');
-    selPortrait.innerHTML =
-      `<svg class="ui-icon"><use href="#${KIND_ICON[kind] || 'i-villager'}"/></svg>`;
+    selPortrait.innerHTML = KIND_PNG[kind]
+      ? pngIcon(KIND_PNG[kind], 'ui-icon')
+      : `<svg class="ui-icon"><use href="#${KIND_ICON[kind] || 'i-villager'}"/></svg>`;
     if (selUnits.length === 1) {
       const id = selUnits[0];
       const hpTxt = `HP ${Math.ceil(st.hp[id * 2])} / ${st.hp[id * 2 + 1]}`;
@@ -5411,7 +5441,9 @@ function updateSelPanel() {
       for (let i = 0; i < shown.length; i++) {
         const cell = document.createElement('span');
         cell.className = 'sel-cell';
-        cell.innerHTML = '<svg class="ui-icon"><use href="#i-villager"/></svg>';
+        cell.innerHTML = KIND_PNG[kind]
+          ? pngIcon(KIND_PNG[kind], 'ui-icon')
+          : '<svg class="ui-icon"><use href="#i-villager"/></svg>';
         selGrid.append(cell);
       }
       if (selUnits.length > shown.length) {
@@ -5423,7 +5455,7 @@ function updateSelPanel() {
     }
   } else if (context === 'tc') {
     selPortrait.classList.remove('empty');
-    selPortrait.innerHTML = '<svg class="ui-icon"><use href="#i-tc"/></svg>';
+    selPortrait.innerHTML = pngIcon('town-center.png', 'ui-icon');
     selName.textContent = 'Town Center';
     const codes = myTcQueue();
     if (reason === 3) {
@@ -5439,8 +5471,7 @@ function updateSelPanel() {
     }
   } else if (context === 'production') {
     selPortrait.classList.remove('empty');
-    selPortrait.innerHTML =
-      `<svg class="ui-icon"><use href="#${BUILD_ICON[bk.kind]}"/></svg>`;
+    selPortrait.innerHTML = pngIcon(BUILD_PNG[bk.kind], 'ui-icon');
     // M13: a Ctrl+Shift go-to selects a whole type at once; the
     // name carries the count (commands address the first).
     selName.textContent = buildingGroup && buildingGroup.length > 1
@@ -5464,23 +5495,21 @@ function updateSelPanel() {
     }
   } else if (context === 'foe-tc') {
     selPortrait.classList.remove('empty');
-    selPortrait.innerHTML = '<svg class="ui-icon"><use href="#i-tc"/></svg>';
+    selPortrait.innerHTML = pngIcon('town-center.png', 'ui-icon');
     selName.textContent = 'Enemy Town Center';
     const id = selectedBuilding.id;
     selInfo.textContent =
       `HP ${Math.max(0, Math.ceil(st.hp[id * 2]))} / ${st.hp[id * 2 + 1]} — destroy it, its buildings and its units to win the match.`;
   } else if (context === 'foe-building') {
     selPortrait.classList.remove('empty');
-    selPortrait.innerHTML =
-      `<svg class="ui-icon"><use href="#${(bk && BUILD_ICON[bk.kind]) || 'i-house'}"/></svg>`;
+    selPortrait.innerHTML = pngIcon(bk ? BUILD_PNG[bk.kind] : 'house.png', 'ui-icon');
     selName.textContent = bk ? `Enemy ${BUILD_NAME[bk.kind]}` : 'Enemy Building';
     selInfo.textContent = bk
       ? `HP ${Math.round(bk.hpFrac * BUILD_MAXHP[bk.kind])} / ${BUILD_MAXHP[bk.kind]}${bk.complete ? '' : ' · under construction'} — information only.`
       : '';
   } else if (context === 'building') {
     selPortrait.classList.remove('empty');
-    selPortrait.innerHTML =
-      `<svg class="ui-icon"><use href="#${(bk && BUILD_ICON[bk.kind]) || 'i-house'}"/></svg>`;
+    selPortrait.innerHTML = pngIcon(bk ? BUILD_PNG[bk.kind] : 'house.png', 'ui-icon');
     selName.textContent = bk
       ? (buildingGroup && buildingGroup.length > 1
         ? `${BUILD_NAME[bk.kind]} ×${buildingGroup.length}`
@@ -5489,7 +5518,7 @@ function updateSelPanel() {
     selInfo.textContent = bk && !bk.complete ? 'Under construction…' : '';
   } else {
     selPortrait.classList.add('empty');
-    selPortrait.innerHTML = '<svg class="ui-icon"><use href="#i-villager"/></svg>';
+    selPortrait.innerHTML = pngIcon('villager.png', 'ui-icon');
     selName.textContent = 'No selection';
     selInfo.textContent =
       'Click a unit, drag to select a group, or click the Town Center.';
