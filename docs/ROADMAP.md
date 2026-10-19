@@ -299,6 +299,38 @@ From the [Gap Analysis](GAP-ANALYSIS.md): the items that most make Skirmish II
   asserts the shipped phone rules exist and the desktop
   rules survive; Claudio's phone is the visual check, as
   with every UI pass.
+- **M13 — The classic grid hotkeys + edge scrolling (shipped
+  2026-10-18).** The keyboard an AoE2 DE player already
+  knows, which is the zero-learning rule applied to input.
+  With villager(s) selected, **Q** opens the economic build
+  page and **W** the military one — the command panel switches
+  to that page's buildings, each badged with its letter, and
+  the letter places the building exactly like clicking it
+  (**Q, E raises a House** — Claudio's call; the House keeps
+  its grid Q too, and the Mining Camp, whose grid E that
+  takes, answers to G). With a building selected, **Q / W /
+  E** run its panel buttons left to right (Town Center:
+  Villager, Loom, Feudal Age; Blacksmith: Fletching, Scale
+  Mail, Padded Archer Armor). **A** drops off a villager's
+  load; **Ctrl+Z / I / G / S / B / A** cycle to a Lumber
+  Camp, Mill, Mining Camp, Blacksmith, Barracks or Archery
+  Range (Ctrl+Shift selects all of the kind; Ctrl+L for the
+  Stable is the browser's and stays unbound — both
+  divergences are recorded in ARCHITECTURE.md, "M13"). A
+  hotkey is a click by another name: same handlers, same
+  disabled-button gating, same `issue()` choke point online;
+  nothing fires while typing, paused, or under an overlay.
+  And **edge scrolling**: rest the mouse at the game area's
+  edge and the camera pans — corners diagonally — at the pan
+  keys' speed, over the canvas only, never the UI bars,
+  paused with the game like the other pans. The mapping
+  tables and resolution are a pure module
+  (`web-preview/play/hotkeys.js`, unit-tested); a stub-DOM
+  smoke drives a real sandbox match by synthetic keys and
+  hand-pumped frames (Q,E → House placement, TC+Q → queued
+  villager, a real Lumber Camp built and jumped to with
+  Ctrl+Z, the pan read off the minimap's viewport rect).
+  Zero sim changes.
 
 ## Good first contributions
 

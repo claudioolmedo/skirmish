@@ -960,6 +960,99 @@ dumb relay.
   the mode's contract (mirror start; no script over 36,000 ticks;
   per-seat play; bit-identical interleaved streams).
 
+## M13 — the classic grid hotkeys + edge scrolling (client, shipped 2026-10-18)
+
+Client-only (web-preview): zero sim changes, WASM hash unmoved.
+The reference game's Definitive Edition input model arrives as
+one pure module (`web-preview/play/hotkeys.js` — tables +
+resolution, unit-tested) plus a thin execution layer in app.js
+whose one rule is that **a hotkey is a click by another name**:
+a resolved key runs `runCommandButton(id)`, the very function
+the command panel's delegated click listener runs (extracted
+from that listener for this milestone), or the same order path
+a right-click runs. Online, every hotkey order therefore flows
+through the `issue()` choke point like any click.
+
+**Build pages (villager(s) selected).** Q arms the ECONOMIC
+page, W the MILITARY page; arming switches the command panel to
+that page's buildings only, each badged with its key letter.
+Esc or a right-click backs out of the page; entering placement
+closes it. Keys (DE grid positions; the building's go-to letter
+also answers as an alias):
+
+| Page | Key | Building | Alias |
+|---|---|---|---|
+| Economic | E (badge) / Q | House | — |
+| Economic | W | Mill | I |
+| Economic | R | Lumber Camp | Z |
+| Economic | A | Farm | F |
+| Economic | G | Mining Camp | — |
+| Military | Q | Barracks | B |
+| Military | W | Archery Range | A |
+| Military | E | Stable | L |
+| Military | S | Blacksmith | — |
+
+**Train / research (building selected).** Q / W / E run the
+panel's buttons left to right — the grid principle applied to
+our own panel: TC — Villager, Loom, Feudal Age; Barracks —
+Militia, Man-at-Arms; Archery Range — Archer; Stable — Scout
+Cavalry; Blacksmith — Fletching, Scale Mail, Padded Archer
+Armor. Every command-panel button carries its letter as a
+small badge (top-left; the queue badge keeps the top-right) so
+the grid is learnable by looking. Availability gating is the
+button's own: a key for a disabled button is consumed (it must
+not leak into camera panning) and does nothing.
+
+**Drop-off.** Villager(s) selected, no page armed: A issues
+the force drop-off (the M6 ForceDeposit order, per loaded
+villager — the same path as right-clicking a drop-off
+building). On the armed economic page, A is the Farm instead;
+the panel context decides, as in the reference game.
+
+**Go-to.** Ctrl+letter cycles our completed buildings of a
+kind — select + center, H's Town Center pattern per type:
+Ctrl+Z Lumber Camp, Ctrl+I Mill, Ctrl+G Mining Camp, Ctrl+S
+Blacksmith, Ctrl+B Barracks, Ctrl+A Archery Range.
+Ctrl+Shift+letter selects ALL of that type at once (no
+centering unless there is exactly one): the selection holds
+the group — the panel names it with a count and its commands
+address the first building; multi-building queue fan-out is
+not built. A missing type answers with a flash naming it.
+
+**The two recorded divergences from the wiki's DE table.**
+(1) On the economic page, **E = House** (Claudio's call,
+2026-10-18: the sequence Q, E must raise a House), where the
+pure grid puts the Mining Camp; the House keeps its grid Q as
+well, and the Mining Camp answers to G, its go-to letter.
+(2) The Stable's go-to, **Ctrl+L, is not bound**: browsers
+reserve it for the address bar and the page never receives
+the event. The Stable still answers on its build page (E,
+alias L without Ctrl).
+
+**Gates.** Hotkeys never fire while the event target is a
+text/password/search input or any editable field; never while
+paused, with the guide open, after the match ends, or during
+replay playback. A held key does not repeat (DE behavior).
+Outside the contexts above, letters fall through untouched —
+WASD keeps panning whenever the grid does not claim the key,
+exactly as in DE. The M4 keys (H, `.`, `,`, Ctrl+1–9, Esc,
+shift-queueing) are unchanged.
+
+**Edge scrolling** (Claudio's addendum, same package): with
+the pointer resting within 6 px of the game canvas's edge,
+the camera pans that way — corners diagonally — at the pan
+keys' own speed (14 canvas px per 60 Hz frame, so world speed
+scales with zoom by itself), applied beside `applyKeys()` in
+every frame branch that pans. It is active only over the
+canvas itself (the top/bottom UI bars and overlays are
+elements above it and take the pointer instead), never when
+the pointer has left the window or the window lost focus,
+never while paused or under a modal — and it coexists with
+right-drag, WASD/arrows and minimap panning, none of which
+changed. The direction math is pure (`edgePan` in
+hotkeys.js); the smoke observes the pan through the minimap's
+viewport rectangle.
+
 ## The sim may
 
 - Use fixed-point arithmetic (`I16F16`: ±32768 range, 1/65536 precision —

@@ -25,6 +25,12 @@
 // H for the Town Center (SEL-10), the 60-unit selection cap
 // (SEL-05), right-click orders on the minimap (SEL-16), and
 // formation-keeping group moves.
+// M13 adds the classic grid hotkeys (play/hotkeys.js): villager
+// build pages on Q / W with the letter on each button placing it
+// (Q, E raises a House), Q / W / E position keys on a selected
+// building's panel, A for force drop-off, Ctrl+letter go-tos —
+// and edge scrolling, the camera pan every other method shares
+// the frame with.
 //
 // The ADAPTIVE QUALITY governor (play/quality.js) sits over all of
 // this: it probes the device, picks a level (sprite direction tier,
@@ -69,6 +75,9 @@ import {
   startGate, guestSlotOf, slotIsAi, slotSealed, slotAiMode,
   slotLabel, roomConfigText,
 } from './play/room.js';
+import {
+  PAGE_KINDS, resolveHotkey, badgeForButton, edgePan,
+} from './play/hotkeys.js';
 
 const assetUrl = (rel) => new URL(rel, import.meta.url).href;
 
@@ -216,10 +225,14 @@ function selectUnits(set) {
   // groups, idle keys) funnels through here, so the cap lives here.
   selection = new Set([...set].slice(0, SELECTION_CAP));
   selectedBuilding = null;
+  buildPage = null; // M13: a selection change closes any build page
+  buildingGroup = null;
 }
 function selectBuilding(descOrNull) {
   selectedBuilding = descOrNull;
   selection = new Set();
+  buildPage = null;
+  buildingGroup = null;
 }
 
 // SEL-05: the selection cap (the rulebook's number).
@@ -301,6 +314,20 @@ function showMatchEnd(ms) {
 }
 let lDrag = null; // left-button drag state, canvas px: { x0, y0, x1, y1, moved }
 let placement = null; // { kind } while placing a building
+// M13 hotkey state (client-only, like placement): the armed
+// villager build page ('eco' | 'mil' | null), the go-to cycle
+// memory (building kind -> last id handed out), and the building
+// id list when a Ctrl+Shift go-to selected a whole type at once
+// (selectedBuilding stays the primary; the panel addresses it).
+let buildPage = null;
+let gotoCycleMem = {};
+let buildingGroup = null;
+// M13 edge scrolling: the last pointer position in client px and
+// whether the pointer currently rides over the game canvas (not
+// the UI bars, not an overlay). Fed by the pointer listeners in
+// main(); consumed by applyEdgeScroll() on the frame loop.
+let mouseClientPt = null;
+let mouseOverCanvas = false;
 let mouseWorld = null; // last cursor position, world coords
 let flashText = '';
 let flashUntil = 0;
@@ -909,6 +936,8 @@ addEventListener('keydown', (e) => {
       helpOverlay.style.display = 'none';
     } else if (placement) {
       placement = null;
+    } else if (buildPage) {
+      buildPage = null; // M13: Esc backs out of an armed build page
     } else if (playing) {
       setPaused(!paused);
     }
@@ -1021,16 +1050,153 @@ function handleGameKey(e) {
       return true;
     }
     default:
+      return handleHotkey(e); // M13: the classic grid (below)
+  }
+}
+
+// --- M13 hotkeys ----------------------------------------------------------
+// The classic grid (play/hotkeys.js holds the tables and the pure
+// resolution; this layer owns the gates and the doing). A resolved
+// key runs the SAME code a panel click runs (runCommandButton) or
+// the same order path a right-click runs — never a parallel one.
+
+/// The renderCommands() context for the current selection,
+/// computed the same way the panel computes it.
+function panelContext() {
+  const sel = selectedUnits();
+  if (sel.length) {
+    const st = entityState();
+    return sel.some((id) => st.kinds[id] === 0) ? 'build' : 'units';
+  }
+  if (!selectedBuilding || selectedBuilding.owner === foeOwner()) {
+    return selectedBuilding ? 'foe' : 'none';
+  }
+  if (selectedBuilding.type === 'tc') return 'tc';
+  const bk = buildingList().find((b) => b.id === selectedBuilding.id);
+  return (bk && { 2: 'barracks', 6: 'range', 7: 'stable', 8: 'blacksmith' }[bk.kind]) || 'none';
+}
+
+/// Force drop-off for the selection (DE's villager A; the M6
+/// ForceDeposit order, exactly as the right-click drop-off path
+/// issues it — the carry heuristic decides who is loaded, the
+/// sim re-validates each order itself).
+function forceDropOffSelected() {
+  const st = entityState();
+  let any = false;
+  for (const id of selectedUnits()) {
+    if (st.kinds[id] === 0 && carryKind.has(id) && issue({ t: 'force_dep', e: id })) any = true;
+  }
+  if (!any) flash('No loaded villagers selected — nothing to drop off.');
+}
+
+/// Go-to (Ctrl+letter): cycle our completed buildings of a kind,
+/// selecting and centering each in turn; with `selectAll`, take
+/// the whole type at once (no centering unless there is one).
+function goToBuildingKind(kind, selectAll) {
+  const list = buildingList().filter(
+    (b) => b.owner === localOwner && b.kind === kind && b.complete);
+  if (!list.length) {
+    flash(`No ${BUILD_NAME[kind]} yet.`);
+    return;
+  }
+  if (selectAll && list.length > 1) {
+    selectBuilding({ type: 'building', id: list[0].id, kind, owner: localOwner });
+    buildingGroup = list.map((b) => b.id);
+    return;
+  }
+  const id = nextInCycle(list.map((b) => b.id), gotoCycleMem[kind] ?? -1);
+  gotoCycleMem[kind] = id;
+  const b = list.find((x) => x.id === id);
+  selectBuilding({ type: 'building', id: b.id, kind: b.kind, owner: b.owner });
+  centerOn(b.x, b.y);
+}
+
+function handleHotkey(e) {
+  if (e.altKey) return false; // the Alt layer is not ours
+  // Never while typing: the lobby search, the room password, any
+  // text field owns its letters outright.
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA'
+    || t.tagName === 'SELECT' || t.isContentEditable)) return false;
+  // Never over a modal state: the pause menu, the guide, a
+  // finished match, a replay. (The M4 keys above keep their
+  // older, wider gate — selection keys are harmless there.)
+  if (paused || matchEnded || playback) return false;
+  if (helpOverlay.style.display !== 'none') return false;
+  const act = resolveHotkey({
+    context: panelContext(), page: buildPage, code: e.code,
+    ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey,
+  });
+  if (!act) return false;
+  e.preventDefault();
+  if (e.repeat) return true; // a held key is one press, as in DE
+  switch (act.type) {
+    case 'arm':
+      buildPage = act.page;
+      renderCommands();
+      return true;
+    case 'button': {
+      const btn = [...cmdGrid.children].find((b) => b.id === act.id);
+      // A gated building's button stands disabled in the panel;
+      // the key is still consumed (it must not leak into camera
+      // panning) but does nothing, like the button itself.
+      if (btn && !btn.disabled) {
+        runCommandButton(act.id);
+        renderCommands();
+      }
+      return true;
+    }
+    case 'drop-off':
+      forceDropOffSelected();
+      return true;
+    case 'goto':
+      goToBuildingKind(act.kind, act.all);
+      return true;
+    default:
       return false;
   }
 }
 
-function applyKeys() {
+function applyKeys(now) {
   const P = 14; // screen px per frame while a pan key is held
   if (keys.has('KeyA') || keys.has('ArrowLeft')) camOx += P;
   if (keys.has('KeyD') || keys.has('ArrowRight')) camOx -= P;
   if (keys.has('KeyW') || keys.has('ArrowUp')) camOy += P;
   if (keys.has('KeyS') || keys.has('ArrowDown')) camOy -= P;
+  applyEdgeScroll(now);
+}
+
+// --- M13: edge scrolling --------------------------------------------------
+// The reference game's camera: rest the pointer against a screen
+// edge and the view pans that way, corners diagonally. It shares
+// the pan keys' speed (14 canvas px per 60 Hz frame — screen-
+// relative, so the world speed follows the zoom on its own) and
+// their place in the frame: every branch that pans by keys pans
+// by edges. The gates are the pointer's own: it must ride over
+// the game canvas (never the top/bottom UI bars, whose elements
+// sit above the canvas and take the pointer events instead),
+// inside the window, in a live match view with no modal up.
+const EDGE_MARGIN_PX = 6; // CSS px from the viewport edge
+const EDGE_PX_PER_FRAME = 14; // the pan keys' P, at 60 Hz
+let lastEdgeAt = null;
+
+function applyEdgeScroll(now) {
+  if (lastEdgeAt == null) lastEdgeAt = now;
+  const dt = Math.min(Math.max(now - lastEdgeAt, 0), 100);
+  lastEdgeAt = now;
+  if (!mouseClientPt || !mouseOverCanvas) return;
+  if (paused || matchEnded || playback) return;
+  if (!document.body || !document.body.classList.contains('in-match')) return;
+  if (helpOverlay.style.display !== 'none' || pauseMenu.style.display !== 'none') return;
+  const r = canvas.getBoundingClientRect();
+  if (!r.width || !r.height) return;
+  const v = edgePan(
+    mouseClientPt.x - r.left, mouseClientPt.y - r.top,
+    r.width, r.height, EDGE_MARGIN_PX);
+  if (!v.x && !v.y) return;
+  const step = EDGE_PX_PER_FRAME * (dt / (1000 / 60)) * (canvas.width / r.width);
+  camOx += v.x * step;
+  camOy += v.y * step;
 }
 
 function setPaused(v) {
@@ -3077,61 +3243,12 @@ async function main() {
 
   // Command panel: ONE delegated listener — renderCommands() rebuilds
   // the buttons per selection context, so per-button refs would go
-  // stale. The sim-facing behavior is unchanged from the old buttons.
+  // stale. The behavior lives in runCommandButton() (top level), so
+  // the M13 hotkeys run the very same code a click runs.
   cmdGrid.addEventListener('click', (ev) => {
     const btn = ev.target.closest('button');
     if (!btn || btn.disabled) return;
-    if (btn.id === 'train') {
-      if (!issue({ t: 'train_vil' })) {
-        const reason = myTrainBlock();
-        flash(['', 'Not enough food for a villager.',
-          'The training queue is full.', 'Housed — build a House first.'][reason] || 'Cannot train right now.');
-      }
-    } else if (btn.id.startsWith('build-')) {
-      const kind = Number(btn.id.slice(6));
-      placement = placement && placement.kind === kind ? null : { kind };
-    } else if (btn.id === 'research-loom' || btn.id === 'research-feudal') {
-      // M6: Town Center research (shared queue with training).
-      const tag = btn.id === 'research-loom' ? 0 : 1;
-      const ok = issue({ t: 'research_tc', tech: tag });
-      if (!ok) {
-        const rb = myResearchBlockTc(tag);
-        flash(tag === 1 && rb === 4
-          ? 'Feudal Age needs 2 completed Dark-Age buildings first (Houses and Farms do not count).'
-          : RESEARCH_BLOCK_TITLES[rb] || 'Cannot research right now.');
-      }
-    } else if (btn.id.startsWith('research-')) {
-      // M6: building research — Blacksmith lines + Man-at-Arms.
-      const tag = {
-        'research-fletching': 2, 'research-scalemail': 3,
-        'research-padded': 4, 'research-maa': 5,
-      }[btn.id];
-      if (tag != null && selectedBuilding && selectedBuilding.type === 'building') {
-        if (!issue({ t: 'research_at', b: selectedBuilding.id, tech: tag })) {
-          flash(RESEARCH_BLOCK_TITLES[sim.research_block_at(selectedBuilding.id, tag)]
-            || 'Cannot research right now.');
-        }
-      }
-    } else if (btn.id === 'train-scout') {
-      const ok = selectedBuilding && selectedBuilding.type === 'building'
-        ? issue({ t: 'train_at', b: selectedBuilding.id, k: 2 })
-        : false;
-      if (!ok && selectedBuilding) {
-        const reason = sim.building_train_block(selectedBuilding.id, 2);
-        flash(['', 'Not enough resources for that unit.',
-          'The training queue is full.', 'Housed — build a House first.'][reason] || 'Cannot train right now.');
-      }
-    } else if (btn.id === 'train-militia' || btn.id === 'train-archer') {
-      const kindTag = btn.id === 'train-militia' ? 3 : 4;
-      const ok = selectedBuilding && selectedBuilding.type === 'building'
-        ? issue({ t: 'train_at', b: selectedBuilding.id, k: kindTag })
-        : false;
-      if (!ok && selectedBuilding) {
-        const reason = sim.building_train_block(selectedBuilding.id, kindTag);
-        flash(['', 'Not enough resources for that unit.',
-          'The training queue is full.', 'Housed — build a House first.'][reason] || 'Cannot train right now.');
-      }
-    }
+    runCommandButton(btn.id);
   });
 
   // Minimap camera control: click or drag to jump the main camera.
@@ -3462,6 +3579,22 @@ async function main() {
 
   canvas.addEventListener('mousemove', (ev) => {
     mouseWorld = eventWorld(ev);
+    // M13 edge scrolling rides on this: the pointer is over the
+    // game canvas itself (the UI bars and overlays are separate
+    // elements above it and report themselves as targets below).
+    mouseClientPt = { x: ev.clientX, y: ev.clientY };
+    mouseOverCanvas = true;
+  });
+  addEventListener('mousemove', (e) => {
+    if (e.target !== canvas) mouseOverCanvas = false;
+  });
+  document.addEventListener('mouseleave', () => {
+    mouseClientPt = null;
+    mouseOverCanvas = false;
+  });
+  addEventListener('blur', () => {
+    mouseClientPt = null;
+    mouseOverCanvas = false;
   });
 
   // ---- AoE2-style selection (left button) ----
@@ -3638,6 +3771,10 @@ async function main() {
       placement = null;
       return;
     }
+    if (buildPage) {
+      buildPage = null; // M13: a right-click backs out of a page too
+      return;
+    }
     const [wx, wy] = eventWorld(e);
     smartOrderAt(wx, wy, e.shiftKey);
   });
@@ -3684,7 +3821,7 @@ async function main() {
       }
       prevFrameAt = now;
       last = now;
-      applyKeys();
+      applyKeys(now);
       draw();
       requestAnimationFrame(frame);
       return;
@@ -3693,7 +3830,7 @@ async function main() {
       drivePlayback(now);
       prevFrameAt = now;
       last = now;
-      applyKeys();
+      applyKeys(now);
       draw();
       requestAnimationFrame(frame);
       return;
@@ -3722,7 +3859,7 @@ async function main() {
     }
     prevFrameAt = now;
     last = now;
-    applyKeys();
+    applyKeys(now);
     draw();
     requestAnimationFrame(frame);
   }
@@ -4473,7 +4610,67 @@ function updateTopBar() {
   }
 }
 
-function cmdButton({ id, icon, label, costIcon, cost, title, disabled, active, badge }) {
+/// Run one command-panel button by id — the single implementation
+/// behind the panel's delegated click listener AND the M13
+/// hotkeys, so a key press and a click can never drift apart.
+/// Callers gate on the button not being disabled (the listener
+/// checks the element; the hotkey path checks it too).
+function runCommandButton(id) {
+  if (id === 'train') {
+    if (!issue({ t: 'train_vil' })) {
+      const reason = myTrainBlock();
+      flash(['', 'Not enough food for a villager.',
+        'The training queue is full.', 'Housed — build a House first.'][reason] || 'Cannot train right now.');
+    }
+  } else if (id.startsWith('build-')) {
+    const kind = Number(id.slice(6));
+    placement = placement && placement.kind === kind ? null : { kind };
+    buildPage = null; // M13: entering placement closes the page
+  } else if (id === 'research-loom' || id === 'research-feudal') {
+    // M6: Town Center research (shared queue with training).
+    const tag = id === 'research-loom' ? 0 : 1;
+    const ok = issue({ t: 'research_tc', tech: tag });
+    if (!ok) {
+      const rb = myResearchBlockTc(tag);
+      flash(tag === 1 && rb === 4
+        ? 'Feudal Age needs 2 completed Dark-Age buildings first (Houses and Farms do not count).'
+        : RESEARCH_BLOCK_TITLES[rb] || 'Cannot research right now.');
+    }
+  } else if (id.startsWith('research-')) {
+    // M6: building research — Blacksmith lines + Man-at-Arms.
+    const tag = {
+      'research-fletching': 2, 'research-scalemail': 3,
+      'research-padded': 4, 'research-maa': 5,
+    }[id];
+    if (tag != null && selectedBuilding && selectedBuilding.type === 'building') {
+      if (!issue({ t: 'research_at', b: selectedBuilding.id, tech: tag })) {
+        flash(RESEARCH_BLOCK_TITLES[sim.research_block_at(selectedBuilding.id, tag)]
+          || 'Cannot research right now.');
+      }
+    }
+  } else if (id === 'train-scout') {
+    const ok = selectedBuilding && selectedBuilding.type === 'building'
+      ? issue({ t: 'train_at', b: selectedBuilding.id, k: 2 })
+      : false;
+    if (!ok && selectedBuilding) {
+      const reason = sim.building_train_block(selectedBuilding.id, 2);
+      flash(['', 'Not enough resources for that unit.',
+        'The training queue is full.', 'Housed — build a House first.'][reason] || 'Cannot train right now.');
+    }
+  } else if (id === 'train-militia' || id === 'train-archer') {
+    const kindTag = id === 'train-militia' ? 3 : 4;
+    const ok = selectedBuilding && selectedBuilding.type === 'building'
+      ? issue({ t: 'train_at', b: selectedBuilding.id, k: kindTag })
+      : false;
+    if (!ok && selectedBuilding) {
+      const reason = sim.building_train_block(selectedBuilding.id, kindTag);
+      flash(['', 'Not enough resources for that unit.',
+        'The training queue is full.', 'Housed — build a House first.'][reason] || 'Cannot train right now.');
+    }
+  }
+}
+
+function cmdButton({ id, icon, label, costIcon, cost, title, disabled, active, badge, key }) {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.id = id;
@@ -4484,6 +4681,7 @@ function cmdButton({ id, icon, label, costIcon, cost, title, disabled, active, b
     `<svg class="cmd-icon"><use href="#${icon}"/></svg>` +
     `<span class="cmd-label">${label}</span>` +
     `<span class="cmd-cost"><svg class="ui-icon"><use href="#${costIcon}"/></svg>${cost}</span>`;
+  if (key) html += `<span class="cmd-key">${key}</span>`;
   if (badge) html += `<span class="cmd-badge" id="train-badge">${badge}</span>`;
   btn.innerHTML = html;
   return btn;
@@ -4544,7 +4742,7 @@ function renderCommands() {
   const sig = [context, Math.floor(wood), Math.floor(myStock()[0]), Math.floor(myStock()[2]),
     reason, queue, bk ? bk.id : -1, bk ? bk.queue : -1, bk && bk.complete ? 1 : 0,
     blockM, blockA, blockS, age, techMask, rbTc.join('.'), rbBk.join('.'),
-    tcQueueCodes, bkQueueCodes,
+    tcQueueCodes, bkQueueCodes, buildPage || '',
     placement ? placement.kind : -1].join('|');
   if (sig === cmdSig) return;
   cmdSig = sig;
@@ -4554,29 +4752,45 @@ function renderCommands() {
     // Farms need a completed Mill; the Feudal buildings show locked
     // (with their requirement in the title) until the age advances;
     // the Range and the Stable also need a completed Barracks.
+    // M13: with a build page armed (Q / W), the panel shows that
+    // page's buildings only, each badged with its hotkey letter.
     const all = buildingList();
     const hasMill = all.some((b) => b.owner === localOwner && b.kind === 4 && b.complete);
     const hasBarracks = all.some((b) => b.owner === localOwner && b.kind === 2 && b.complete);
-    const buttons = [];
-    for (let kind = 0; kind <= 8; kind++) {
+    const buildBtn = (kind) => {
       let gate = null;
       if (kind === 1 && !hasMill) gate = 'Requires a Mill';
       else if (kind >= 6 && age < 1) gate = 'Requires Feudal Age';
       else if ((kind === 6 || kind === 7) && !hasBarracks) gate = 'Requires a Barracks';
       const lacksWood = wood < BUILD_COST[kind];
-      buttons.push(cmdButton({
+      return cmdButton({
         id: `build-${kind}`, icon: BUILD_ICON[kind], label: BUILD_NAME[kind],
         costIcon: 'i-wood', cost: BUILD_COST[kind],
         disabled: !!gate || lacksWood,
         active: !!placement && placement.kind === kind,
+        key: badgeForButton({ context, page: buildPage, id: `build-${kind}` }),
         title: gate
           ? `${BUILD_NAME[kind]} — ${gate}.`
           : lacksWood
             ? `${BUILD_NAME[kind]} — needs ${BUILD_COST[kind]} wood`
             : `${BUILD_NAME[kind]} — ${BUILD_COST[kind]} wood`,
-      }));
+      });
+    };
+    const hint = document.createElement('p');
+    hint.className = 'ui-cmd-hint';
+    if (buildPage) {
+      cmdGrid.append(...PAGE_KINDS[buildPage].map(buildBtn));
+      hint.textContent = buildPage === 'eco'
+        ? 'Economic buildings — the letter on a button places it. Esc goes back.'
+        : 'Military buildings — the letter on a button places it. Esc goes back.';
+    } else {
+      const buttons = [];
+      for (let kind = 0; kind <= 8; kind++) buttons.push(buildBtn(kind));
+      cmdGrid.append(...buttons);
+      hint.textContent =
+        'Hotkeys: Q economic buildings · W military buildings · A drop off resources.';
     }
-    cmdGrid.append(...buttons);
+    cmdGrid.append(hint);
   } else if (context === 'tc') {
     // M6: the Town Center also researches — Loom and the Feudal
     // advancement share its queue with villager training (TEC-03).
@@ -4588,6 +4802,7 @@ function renderCommands() {
         costIcon: 'i-food', cost: 50,
         disabled: reason === 2, // queue full; other blocks flash on click
         badge: queue > 0 ? `+${queue}` : null,
+        key: badgeForButton({ context, id: 'train', index: 0 }),
         title: TRAIN_BLOCK_TITLES[reason]
           ? `Train Villager — ${TRAIN_BLOCK_TITLES[reason]}`
           : 'Train a villager at the Town Center (50 food).',
@@ -4596,6 +4811,7 @@ function renderCommands() {
         id: 'research-loom', icon: 'i-loom', label: 'Loom',
         costIcon: 'i-gold', cost: 50,
         disabled: loomDone || rbTc[0] === 2 || rbTc[0] === 3,
+        key: badgeForButton({ context, id: 'research-loom', index: 1 }),
         title: loomDone
           ? 'Loom — researched. Villagers: +15 HP, +1 melee / +2 pierce armor.'
           : `Research Loom — 50 gold · 25 s. Villagers gain +15 HP and armor.${RESEARCH_BLOCK_TITLES[rbTc[0]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[0]] : ''}`,
@@ -4604,6 +4820,7 @@ function renderCommands() {
         id: 'research-feudal', icon: 'i-feudal', label: 'Feudal Age',
         costIcon: 'i-food', cost: 500,
         disabled: feudalDone || rbTc[1] === 2 || rbTc[1] === 3,
+        key: badgeForButton({ context, id: 'research-feudal', index: 2 }),
         title: feudalDone
           ? 'Feudal Age — you stand in the Feudal Age.'
           : rbTc[1] === 4
@@ -4620,6 +4837,7 @@ function renderCommands() {
         costIcon: 'i-food', cost: 60,
         disabled: underConstruction || blockM === 2,
         badge: bk.queue > 0 ? `+${bk.queue}` : null,
+        key: badgeForButton({ context, id: 'train-militia', index: 0 }),
         title: underConstruction
           ? 'Militia — the Barracks is under construction.'
           : `Train Militia — 60 food · 20 gold.${TRAIN_BLOCK_TITLES[blockM] ? ' ' + TRAIN_BLOCK_TITLES[blockM] : ''}`,
@@ -4628,6 +4846,7 @@ function renderCommands() {
         id: 'research-maa', icon: 'i-maa', label: 'Man-at-Arms',
         costIcon: 'i-food', cost: 100,
         disabled: underConstruction || maaDone || rbBk[3] === 2 || rbBk[3] === 3,
+        key: badgeForButton({ context, id: 'research-maa', index: 1 }),
         title: underConstruction
           ? 'Man-at-Arms — the Barracks is under construction.'
           : maaDone
@@ -4642,6 +4861,7 @@ function renderCommands() {
       costIcon: 'i-wood', cost: 25,
       disabled: underConstruction || blockA === 2,
       badge: bk.queue > 0 ? `+${bk.queue}` : null,
+      key: badgeForButton({ context, id: 'train-archer', index: 0 }),
       title: underConstruction
         ? 'Archer — the Archery Range is under construction.'
         : `Train Archer — 25 wood · 45 gold.${TRAIN_BLOCK_TITLES[blockA] ? ' ' + TRAIN_BLOCK_TITLES[blockA] : ''}`,
@@ -4653,6 +4873,7 @@ function renderCommands() {
       costIcon: 'i-food', cost: 80,
       disabled: underConstruction || blockS === 2,
       badge: bk.queue > 0 ? `+${bk.queue}` : null,
+      key: badgeForButton({ context, id: 'train-scout', index: 0 }),
       title: underConstruction
         ? 'Scout Cavalry — the Stable is under construction.'
         : `Train Scout Cavalry — 80 food · 30 s.${TRAIN_BLOCK_TITLES[blockS] ? ' ' + TRAIN_BLOCK_TITLES[blockS] : ''}`,
@@ -4665,6 +4886,7 @@ function renderCommands() {
       const rb = rbBk[tag - 2];
       return cmdButton({
         id, icon, label, costIcon: 'i-food', cost: 100,
+        key: badgeForButton({ context, id, index: tag - 2 }),
         disabled: underConstruction || done || rb === 2 || rb === 3,
         title: underConstruction
           ? `${label} — the Blacksmith is under construction.`
@@ -4739,7 +4961,7 @@ function updateSelPanel() {
   const sig = [context, selUnits.join(','), JSON.stringify(selectedBuilding),
     queue, reason, singleHp, bk ? bk.queue : -1, bkBlock,
     bk && bk.complete ? 1 : 0, selTcHp, tcQueueCodes, bkQueueCodes, tcProgBucket,
-    myAge(), myTechMask(),
+    myAge(), myTechMask(), (buildingGroup || []).join(','),
     bk ? Math.round(bk.hpFrac * 40) : -1].join('|');
   if (sig === selSig) return;
   selSig = sig;
@@ -4801,7 +5023,11 @@ function updateSelPanel() {
     selPortrait.classList.remove('empty');
     selPortrait.innerHTML =
       `<svg class="ui-icon"><use href="#${BUILD_ICON[bk.kind]}"/></svg>`;
-    selName.textContent = BUILD_NAME[bk.kind];
+    // M13: a Ctrl+Shift go-to selects a whole type at once; the
+    // name carries the count (commands address the first).
+    selName.textContent = buildingGroup && buildingGroup.length > 1
+      ? `${BUILD_NAME[bk.kind]} ×${buildingGroup.length}`
+      : BUILD_NAME[bk.kind];
     const codes = sim.building_queue(bk.id);
     if (!bk.complete) {
       selInfo.textContent = 'Under construction…';
@@ -4837,7 +5063,11 @@ function updateSelPanel() {
     selPortrait.classList.remove('empty');
     selPortrait.innerHTML =
       `<svg class="ui-icon"><use href="#${(bk && BUILD_ICON[bk.kind]) || 'i-house'}"/></svg>`;
-    selName.textContent = bk ? BUILD_NAME[bk.kind] : 'Building';
+    selName.textContent = bk
+      ? (buildingGroup && buildingGroup.length > 1
+        ? `${BUILD_NAME[bk.kind]} ×${buildingGroup.length}`
+        : BUILD_NAME[bk.kind])
+      : 'Building';
     selInfo.textContent = bk && !bk.complete ? 'Under construction…' : '';
   } else {
     selPortrait.classList.add('empty');
