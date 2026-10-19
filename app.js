@@ -4322,7 +4322,7 @@ function drawCarcass(sx, sy, frac) {
 const NODE_DRAW = [drawTree, drawBerry, drawGold, drawStone, drawFarm, drawCarcass, drawCarcass];
 
 // --- Building sprites -----------------------------------------------------
-const TC_HALF = 3.6; // world units: TC footprint half-extent
+const TC_HALF = 8; // world units: TC footprint half-extent (4x4 cells x 4 wu, BLD-16)
 // The Town Center's footprint is 4x4 cells (the DE study; the
 // prompt standard composes the TC art for exactly that). The art is
 // drawn footprint-based like the other Base44 buildings
