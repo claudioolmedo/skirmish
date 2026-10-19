@@ -157,12 +157,16 @@
 /* command panel (bottom-left) */
 
 .ui-cmd-panel {
-  flex: 0 0 316px;
+  /* widened (Claudio, 2026-10-19): the selection panel had
+     slack to give, and full building names need the width —
+     at ~348px every name fits its cell without truncation */
+  flex: 0 0 348px;
   display: flex;
   flex-direction: column;
-  padding: 6px 8px;
+  padding: 5px 8px;
   border-right: 1px solid rgba(0, 0, 0, 0.5);
 }
+.ui-cmd-panel .ui-panel-title { margin-bottom: 2px; }
 
 .cmd-grid {
   flex: 1 1 auto;
@@ -173,7 +177,7 @@
      hint (always the grid's last child) takes only the line(s)
      it needs, so the grid fits the capped bar at any height */
   grid-template-rows: repeat(3, minmax(0, 1fr)) minmax(0, auto);
-  gap: 5px;
+  gap: 4px;
 }
 /* nothing selected: the hint is the grid's only child — give it
    the whole grid instead of the first of four rows */
@@ -183,19 +187,23 @@
 
 .cmd-btn {
   position: relative;
-  /* compact horizontal cell: icon left (spanning both lines),
-     label over cost on the right — fits the capped strip where
-     the old icon-over-label-over-cost stack could not */
-  display: grid;
-  grid-template-columns: auto 1fr;
-  grid-template-rows: auto auto;
-  align-content: center;
+  /* DE-style STACKED cell (Claudio, 2026-10-19: the horizontal
+     icon-left cells truncated names to "Lumber..." and the
+     grey text was illegible): large icon centered on top, the
+     FULL name below it in bright parchment, the cost in gold
+     under the name. The icon is the one element allowed to
+     shrink (flex) inside the capped strip — the text never
+     clips, truncates, or dims below legibility. */
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  column-gap: 6px;
+  justify-content: center;
+  gap: 1px;
   min-height: 0;
   min-width: 0;
-  padding: 3px 7px;
-  text-align: left;
+  overflow: hidden;
+  padding: 2px 4px;
+  text-align: center;
   background:
     linear-gradient(rgba(26, 13, 4, 0.52), rgba(26, 13, 4, 0.52)),
     var(--ui-wood) url("ui-art/tex-wood.webp") center / cover no-repeat;
@@ -222,37 +230,62 @@
     inset 0 -1px 0 rgba(255, 220, 150, 0.15),
     0 1px 2px rgba(0, 0, 0, 0.4);
 }
-.cmd-btn:disabled { opacity: 0.42; cursor: not-allowed; }
+/* disabled/unaffordable: the CELL darkens and the icon greys,
+   but the name and cost stay at full legibility — the old
+   whole-button opacity: .42 made grey text of everything */
+.cmd-btn:disabled {
+  cursor: not-allowed;
+  background:
+    linear-gradient(rgba(8, 4, 1, 0.78), rgba(8, 4, 1, 0.78)),
+    var(--ui-wood) url("ui-art/tex-wood.webp") center / cover no-repeat;
+  border-color: #57431d;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 220, 150, 0.12),
+    inset 0 -3px 0 rgba(0, 0, 0, 0.5),
+    0 2px 5px rgba(0, 0, 0, 0.45);
+}
+.cmd-btn:disabled .cmd-icon { opacity: 0.45; filter: saturate(0.45); }
+.cmd-btn:disabled .cmd-label { color: rgba(240, 229, 200, 0.9); }
+.cmd-btn:disabled .cmd-cost { color: rgba(232, 199, 102, 0.88); }
 .cmd-btn.active { /* placement armed */
   outline: 2px solid var(--gold-bright, #ffcf4d);
   outline-offset: 1px;
 }
 .cmd-btn .cmd-icon {
-  grid-row: 1 / span 2;
-  align-self: center;
-  width: 22px;
-  height: 22px;
+  /* height-scaled with the viewport, but flex-shrinks inside
+     short strips so the name and cost always get their lines */
+  flex: 0 1 auto;
+  min-height: 10px;
+  height: clamp(18px, 3.6vh, 32px);
+  width: auto;
+  aspect-ratio: 1 / 1;
 }
 .cmd-btn .cmd-label {
-  grid-column: 2;
-  align-self: end;
+  flex: none;
+  width: 100%;
   min-width: 0;
-  white-space: nowrap;
+  /* NO truncation: the full name, centered, wrapping to at
+     most two lines ("Lumber" / "Camp", "Padded Archer" /
+     "Armor"); bright parchment at full contrast */
+  white-space: normal;
   overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 11px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  font-size: clamp(9.5px, 1.5vh, 12.5px);
   font-weight: 600;
-  line-height: 1.15;
+  line-height: 1.1;
+  color: #f0e5c8;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
 }
 .cmd-btn .cmd-cost {
-  grid-column: 2;
-  align-self: start;
+  flex: none;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 3px;
-  font-size: 10px;
-  color: var(--ui-dim);
+  font-size: clamp(9px, 1.4vh, 12px);
+  color: #e8c766; /* gold, like the reference panel — not grey */
   line-height: 1.15;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
 }
@@ -267,14 +300,17 @@
 }
 .cmd-btn .cmd-key { /* M13: the grid hotkey letter for this button */
   position: absolute;
-  top: 3px;
-  left: 5px;
-  font: 700 10px/1.4 ui-monospace, Menlo, monospace;
-  color: #fff;
-  background: rgba(0, 0, 0, 0.45);
-  border: 1px solid rgba(255, 255, 255, 0.35);
+  top: 2px;
+  left: 2px;
+  box-sizing: border-box;
+  min-width: 13px;
+  text-align: center;
+  font: 700 10px/1.2 ui-monospace, Menlo, monospace;
+  color: var(--ui-gold-bright); /* gold letter on a dark chip */
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(232, 201, 90, 0.5);
   border-radius: 3px;
-  padding: 0 3px;
+  padding: 1px 3px;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
 }
 
@@ -395,12 +431,24 @@
 @media (max-width: 980px) {
   .ui-cmd-panel { flex-basis: 248px; }
   .cmd-btn { min-height: 0; }
-  .cmd-btn .cmd-icon { width: 20px; height: 20px; }
-  .cmd-btn .cmd-label { font-size: 10px; }
+  .cmd-btn .cmd-icon { height: clamp(16px, 3vh, 24px); }
+  /* the label keeps the base clamp and simply wraps to two
+     lines at this panel width — no smaller, dimmer override */
   .sel-portrait { width: 58px; height: 58px; }
   .sel-portrait .ui-icon { width: 34px; height: 34px; }
   #minimap { width: 176px; height: 99px; } /* geometry math uses the
      canvas attribute size; click handlers convert via bounding rect */
+}
+
+/* short viewports (small laptop windows): the strip sits at its
+   150px floor — slim the chrome a touch more so the stacked
+   cells keep a visible icon above their two text lines; the
+   text sizes themselves do not move */
+@media (max-height: 780px) {
+  .ui-cmd-panel { padding-top: 4px; padding-bottom: 4px; }
+  .cmd-grid { gap: 3px; }
+  .cmd-btn { padding: 1px 3px; }
+  .cmd-btn .cmd-icon { min-height: 9px; }
 }
 
 @media (max-width: 700px) {
@@ -415,12 +463,14 @@
   .ui-bottombar { height: clamp(134px, 27vh, 30vh); }
   .ui-cmd-panel { flex-basis: 150px; padding: 5px 6px; }
   .cmd-grid { gap: 3px; }
-  /* one-column mini cells: icon over a tiny label; the cost
-     rides the button's tooltip at this width */
-  .cmd-btn { min-height: 0; grid-template-columns: 1fr; column-gap: 0; padding: 2px 3px; }
-  .cmd-btn .cmd-icon { grid-row: 1; grid-column: 1; justify-self: center; width: 17px; height: 17px; }
-  .cmd-btn .cmd-label { grid-column: 1; align-self: center; text-align: center; font-size: 8.5px; }
+  /* the same DE stack, scaled down: icon over the (wrapping,
+     never truncated) label; the cost rides the button's
+     tooltip at this width */
+  .cmd-btn { min-height: 0; padding: 1px 2px; }
+  .cmd-btn .cmd-icon { height: 16px; min-height: 0; }
+  .cmd-btn .cmd-label { font-size: 8.5px; }
   .cmd-btn .cmd-cost { display: none; }
+  .cmd-btn .cmd-key { font-size: 8px; min-width: 11px; padding: 0 2px; }
   .ui-cmd-hint { font-size: 9.5px; }
   .ui-sel-panel { padding: 6px 8px; gap: 8px; }
   .sel-portrait { width: 44px; height: 44px; }
