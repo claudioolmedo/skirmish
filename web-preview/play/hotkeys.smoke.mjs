@@ -15,9 +15,13 @@
 // an unloaded villager runs the drop-off path (its feedback
 // shows); Ctrl+Z with no Lumber Camp flashes its feedback, and
 // after one is really built and finished, Ctrl+Z selects it.
-// Edge scrolling: parking the pointer at the canvas's right edge
-// moves the minimap's viewport rect right; moving the pointer
-// over the bottom UI stops the pan.
+// Edge scrolling: the pointer is read in VIEWPORT coordinates,
+// so parking it at any window edge — over the canvas, the top
+// resource bar, or the bottom bar — moves the minimap's
+// viewport rect that way (the canvas-only first build never
+// panned at the top edge: the top bar swallowed the band).
+// The fullscreen toggle's two controls drive the API and sync
+// their glyph/label on fullscreenchange.
 //
 // Run:  node web-preview/play/hotkeys.smoke.mjs
 import assert from 'node:assert/strict';
@@ -465,26 +469,79 @@ assert.equal(tab.el('sel-name').textContent, 'Lumber Camp', 'Ctrl+Shift+Z keeps 
 console.log('PASS (5) go-to: missing-type feedback, then select + center after a real build');
 
 // ------------------------------------------------------------- (6)
-// Edge scrolling: park the pointer at the canvas's right edge —
-// the minimap viewport rect travels right; move the pointer over
-// the bottom UI bar and the pan stops.
+// Edge scrolling reads VIEWPORT coordinates (2026-10-19 fix):
+// the pointer counts at any of the four window edges over ANY
+// element. The stub window is 1280x800.
 const mm = tab.el('minimap');
+const winMove = (x, y, target) => {
+  for (const fn of winListeners.mousemove || []) fn({ clientX: x, clientY: y, target });
+};
 pump(2);
 const before = mm.lastViewport;
 assert.ok(before, 'the minimap drew a viewport rect');
-const onCanvas = { clientX: 299, clientY: 75 };
-view.dispatch('mousemove', onCanvas);
-for (const fn of winListeners.mousemove || []) fn({ ...onCanvas, target: view });
+// Right edge, over the canvas.
+winMove(1279, 400, view);
 pump(30);
 const scrolled = mm.lastViewport;
 assert.ok(scrolled.x > before.x + 2,
   `right-edge parking panned the camera right (viewport ${before.x.toFixed(1)} → ${scrolled.x.toFixed(1)})`);
-const offBar = tab.el('ui-bottom');
-for (const fn of winListeners.mousemove || []) fn({ clientX: 150, clientY: 790, target: offBar });
+// Top edge, over the TOP BAR (its button is the event target) —
+// the band the canvas-only build could never reach.
+winMove(640, 1, tab.el('pause-btn'));
+pump(30);
+const topped = mm.lastViewport;
+assert.ok(Math.abs(topped.y - scrolled.y) > 2,
+  `top edge over the top bar panned the camera (viewport y ${scrolled.y.toFixed(1)} → ${topped.y.toFixed(1)})`);
+// Bottom edge, over the BOTTOM BAR (the command grid): pans
+// back the opposite way.
+winMove(640, 799, tab.el('cmd-grid'));
+pump(30);
+const bottomed = mm.lastViewport;
+assert.ok(Math.abs(bottomed.y - topped.y) > 2
+  && Math.sign(bottomed.y - topped.y) === -Math.sign(topped.y - scrolled.y),
+  'bottom edge over the bottom bar panned the camera the opposite way');
+// Over the bottom bar but NOT at a viewport edge: rests.
+winMove(640, 700, tab.el('cmd-grid'));
+const restFrom = mm.lastViewport;
 pump(10);
-assert.ok(Math.abs(mm.lastViewport.x - scrolled.x) < 0.01,
-  'over the bottom UI bar, edge scrolling rests');
-console.log('PASS (6) edge scrolling pans over the canvas only');
+assert.ok(Math.abs(mm.lastViewport.x - restFrom.x) < 0.01
+  && Math.abs(mm.lastViewport.y - restFrom.y) < 0.01,
+  'away from the viewport edges, edge scrolling rests');
+// Pointer leaves the window: the point clears, the pan stops.
+winMove(1279, 400, view);
+for (const fn of docListeners.mouseleave || []) fn({});
+const leftFrom = mm.lastViewport;
+pump(10);
+assert.ok(Math.abs(mm.lastViewport.x - leftFrom.x) < 0.01,
+  'after the pointer leaves the window, edge scrolling rests');
+console.log('PASS (6) edge scrolling pans at all four viewport edges, over any element');
+
+// ------------------------------------------------------------- (7)
+// Fullscreen toggle: the top-bar button and the pause-menu
+// entry both call the Fullscreen API on the document element;
+// fullscreenchange syncs glyph, title and menu label.
+const fsBtn = tab.el('fullscreen-btn');
+const fsMenuBtn = tab.el('pause-fullscreen-btn');
+assert.equal(fsBtn.title, 'Fullscreen', 'the top-bar button starts titled Fullscreen');
+assert.equal(fsBtn.textContent, '⛶', '…with the enter-fullscreen glyph');
+let fsEntered = 0;
+let fsExited = 0;
+tab.document.documentElement.requestFullscreen = () => { fsEntered += 1; return Promise.resolve(); };
+tab.document.exitFullscreen = () => { fsExited += 1; };
+fsBtn.click();
+assert.equal(fsEntered, 1, 'the top-bar button requests fullscreen on the document element');
+tab.document.fullscreenElement = tab.document.documentElement;
+for (const fn of docListeners.fullscreenchange || []) fn({});
+assert.equal(fsBtn.textContent, '⤢', 'fullscreen state swaps the glyph');
+assert.equal(fsBtn.title, 'Exit fullscreen', '…and the title');
+assert.equal(fsMenuBtn.textContent, 'Exit fullscreen', '…and the pause-menu entry label');
+fsMenuBtn.click();
+assert.equal(fsExited, 1, 'the pause-menu entry exits fullscreen');
+tab.document.fullscreenElement = null;
+for (const fn of docListeners.fullscreenchange || []) fn({});
+assert.equal(fsBtn.textContent, '⛶', 'leaving fullscreen restores the enter glyph');
+assert.equal(fsMenuBtn.textContent, 'Fullscreen', '…and the menu entry label');
+console.log('PASS (7) fullscreen toggle: both controls drive the API, glyph/label sync on fullscreenchange');
 
 console.log('HOTKEYS SMOKE: all cases passed');
 process.exit(0);

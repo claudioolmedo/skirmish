@@ -406,27 +406,40 @@ await boot(tab);
   const phoneAt = css.lastIndexOf('@media (max-width: 700px)');
   assert.ok(phoneAt > 0 && css.slice(phoneAt).includes('.ui-bottombar { height: clamp(134px, 27vh, 30vh)'),
     'on phones the strip takes a larger share but stays under ~30vh');
-  // Legibility pass (Claudio, 2026-10-19: the horizontal cells
-  // truncated names to "Lumber..." and greyed the text): the
-  // command panel is DE-stacked — full name in bright parchment,
-  // gold cost, and a disabled state that never dims the text.
+  // Icon-dominant pass (UI FIX 3, Claudio, 2026-10-19: the
+  // stacked cell let the icon shrink to a speck atop a wide
+  // pill — the reference button is led by a LARGE icon): the
+  // icon area flexes to fill the cell over one slim caption
+  // line, the cost rides on the icon as a corner chip, and a
+  // disabled state never dims the text.
   assert.ok(css.includes('flex: 0 0 348px'),
     'the command panel is widened to ~348px so full names fit their cells');
   const labelAt = css.indexOf('.cmd-btn .cmd-label');
   const labelRule = css.slice(labelAt, css.indexOf('}', labelAt));
-  assert.ok(!labelRule.includes('ellipsis') && labelRule.includes('white-space: normal'),
-    'button names never truncate — they wrap in full');
-  assert.ok(labelRule.includes('-webkit-line-clamp: 2') && labelRule.includes('color: #f0e5c8'),
-    'names wrap to at most two lines in bright parchment #f0e5c8');
-  assert.ok(css.includes('height: clamp(18px, 3.6vh, 32px)'),
-    'cell icons scale with the viewport height (DE-large on tall screens)');
+  assert.ok(!labelRule.includes('ellipsis') && labelRule.includes('white-space: nowrap'),
+    'button names never truncate with an ellipsis — one full caption line');
+  assert.ok(labelRule.includes('color: #f0e5c8'),
+    'names render in bright parchment #f0e5c8');
+  assert.ok(css.includes('.cmd-btn.long-name .cmd-label'),
+    'names too long for the standard caption get the smaller long-name line');
+  const wrapAt = css.indexOf('.cmd-icon-wrap {');
+  const wrapRule = css.slice(wrapAt, css.indexOf('}', wrapAt));
+  assert.ok(wrapRule.includes('flex: 1 1 auto') && wrapRule.includes('min-height: 26px'),
+    'the icon area is flex:1-driven with a 26px floor — it cannot shrink to a speck');
+  assert.ok(!css.includes('height: clamp(18px, 3.6vh, 32px)') && !css.includes('height: clamp(16px, 3vh, 24px)'),
+    'no fixed height cap throttles the icon anymore');
   const costAt = css.indexOf('.cmd-btn .cmd-cost {');
-  assert.ok(css.slice(costAt, css.indexOf('}', costAt)).includes('color: #e8c766'),
-    'costs render in gold #e8c766, not the old dim grey');
+  const costRule = css.slice(costAt, css.indexOf('}', costAt));
+  assert.ok(costRule.includes('position: absolute') && costRule.includes('rgba(0, 0, 0, 0.62)')
+    && costRule.includes('color: #e8c766'),
+    'the cost is a semi-transparent dark chip on the icon, its number in gold #e8c766');
   assert.ok(!css.includes('.cmd-btn:disabled { opacity')
     && css.includes('.cmd-btn:disabled .cmd-label'),
     'a disabled button darkens its cell and icon only — name and cost stay legible');
-  console.log('PASS (9) compact bottom strip + legible DE-stacked command cells ship in ui.css (by construction; no layout engine here)');
+  const appJs = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
+  assert.ok(appJs.includes('cmd-cost-row') && appJs.includes("'long-name'"),
+    'app.js builds the two-row cost chip and flags long names');
+  console.log('PASS (9) compact bottom strip + icon-dominant command cells ship in ui.css (by construction; no layout engine here)');
 }
 
 // (10) The PNG command-icon set (2026-10-19): all twenty original
