@@ -399,8 +399,10 @@ await boot(tab);
   const barRule = css.slice(barAt, css.indexOf('}', barAt));
   assert.ok(barRule.includes('height: clamp(150px, 20vh, 232px)'),
     'the bottom strip height is capped against the viewport');
-  assert.ok(css.includes('grid-template-rows: repeat(3, minmax(0, 1fr)) minmax(0, auto)'),
-    'the three command rows share the strip height; the hint takes only its line(s)');
+  assert.ok(css.includes('grid-template-rows: repeat(3, minmax(0, 1fr));'),
+    'the grid is exactly three command rows sharing the strip height — no hint row');
+  assert.ok(!css.includes('ui-cmd-hint') && !css.includes('ui-panel-title'),
+    'no hint line and no COMMANDS title are styled: DE panel carries no explanatory text');
   assert.ok(!css.includes('min-height: 68px'),
     'the old 68px button floor that drove the giant bar is gone');
   const phoneAt = css.lastIndexOf('@media (max-width: 700px)');
@@ -433,6 +435,8 @@ await boot(tab);
   const appJs = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
   assert.ok(!appJs.includes('cmd-label') && !appJs.includes('cmd-cost') && !appJs.includes('long-name'),
     'app.js renders no name line, no cost chip, no long-name class onto a button');
+  assert.ok(!appJs.includes('ui-cmd-hint') && !appJs.includes('drop off resources'),
+    'app.js renders no hint line under the command grid in any state');
   assert.ok(appJs.includes('cmd-key') && appJs.includes('cmd-badge'),
     'app.js keeps the letter badge and the queue badge on the face');
   assert.ok(appJs.includes('Train Militia — 60 food · 20 gold')
@@ -444,6 +448,8 @@ await boot(tab);
   assert.ok(!playHtml.includes('cmd-label') && !playHtml.includes('cmd-cost')
     && playHtml.includes('id="page-eco"') && playHtml.includes('id="i-back"'),
     'the static first paint matches: openers only, no face text, a return-arrow symbol');
+  assert.ok(!playHtml.includes('ui-cmd-hint') && !playHtml.includes('ui-panel-title'),
+    'the static first paint has no hint line and no Commands title');
   console.log('PASS (9) compact bottom strip + square icon-only command cells (DE page model) ship in ui.css (by construction; no layout engine here)');
 }
 
