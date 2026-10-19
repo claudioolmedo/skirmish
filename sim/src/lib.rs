@@ -2661,21 +2661,42 @@ impl Sim {
         if ax + size > GRID_DIM || ay + size > GRID_DIM {
             return BuildVerdict::Reject;
         }
+        // Town Center footprint reservation (BLD-16, 2026-10-19): a
+        // living Town Center's 4x4 is PASSABLE to units — the TC is
+        // an entity and never enters the blocking grid — but its
+        // ground is reserved against building placement, both
+        // players', the way the reference game reserves the TC's
+        // tiles for construction. The 4x4 is centered on the TC's
+        // cell (anchor = its cell − 1 on each axis), the sim half of
+        // the 4x4 art contract (half-extent 8 world units). At most
+        // two TCs stand in a match, so 32 slots always suffice.
+        let mut tc_reserved = [(0u32, 0u32); 32];
+        let mut tc_reserved_len = 0usize;
+        for e in &self.entities {
+            if e.kind == EntityKind::TownCenter && !e.dead {
+                let (tx, ty) = self.grid.world_to_cell(e.pos_x, e.pos_y);
+                for dy in -1i32..=2 {
+                    for dx in -1i32..=2 {
+                        let (rx, ry) = (tx as i32 + dx, ty as i32 + dy);
+                        if rx >= 0 && ry >= 0 && tc_reserved_len < tc_reserved.len() {
+                            tc_reserved[tc_reserved_len] = (rx as u32, ry as u32);
+                            tc_reserved_len += 1;
+                        }
+                    }
+                }
+            }
+        }
         let cells = build::footprint_cells(ax, ay, size);
         for &(cx, cy) in &cells {
             // Walls and already-blocking buildings.
             if self.grid.is_blocked(cx, cy) {
                 return BuildVerdict::Reject;
             }
-            // Any Town Center's cell (M5: both players' — the TC is
-            // an entity, so its cell is wherever it stands).
-            for e in &self.entities {
-                if e.kind == EntityKind::TownCenter
-                    && !e.dead
-                    && self.grid.world_to_cell(e.pos_x, e.pos_y) == (cx, cy)
-                {
-                    return BuildVerdict::Reject;
-                }
+            // Any living Town Center's reserved 4x4 cell (BLD-16:
+            // both players' — supersedes the pre-2026-10-19 check,
+            // which reserved only the TC's single center cell).
+            if tc_reserved[..tc_reserved_len].contains(&(cx, cy)) {
+                return BuildVerdict::Reject;
             }
             // A living unit standing on the footprint blocks
             // placement (any owner, Gaia included — the reference

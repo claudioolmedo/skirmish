@@ -893,8 +893,9 @@ and defines placement validity (BLD-01).
 table; the full set landed with M6 (2×2 House/Farm/camps, 3×3
 Barracks/Range/Stable/Blacksmith). Two divergences remain: the Farm
 uses a 2×2-cell footprint where the reference's is 3×3 tiles (ECO-14),
-and the TC is a zero-footprint point entity at a fixed cell rather
-than a placed 4×4 building. · *Status:* **DIFFERS**.
+and the TC is an entity rather than a placed building: its 4×4
+footprint is placement-reserved but, per BLD-16, passable to units
+instead of blocking pathing. · *Status:* **DIFFERS**.
 
 **BLD-07 — Repair.** Villagers repair damaged buildings, ships, and siege.
 Restoring a building from 1 HP to full costs 50% of its original build
@@ -986,6 +987,29 @@ Stable and Blacksmith require the Feudal Age; the Range and Stable
 also require a completed Barracks. Buildings not yet in the game
 (Market, Monastery, …) arrive with their milestones. · *Status:*
 **MATCHES**.
+
+**BLD-16 — The Town Center's footprint is passable but reserved.**
+The Town Center occupies a 4×4 footprint (Fandom building table:
+Town Center size 4×4). Unlike every other building's footprint it
+does NOT obstruct movement: units path and walk through it on all
+sides, under its canopy roofs — passability is a documented
+special property of the Town Center, and the reason its
+architecture is a compound around open ground rather than a solid
+block. Its ground is nevertheless reserved: no building footprint
+may overlap any of a living Town Center's 16 cells, either
+player's, so the TC's tiles stay free of construction. Town
+Centers require flat terrain (the map generator flattens and dries
+both start areas). Other buildings block and reserve normally
+(BLD-06, BLD-12).
+*Source:* Fandom building table (Town Center 4×4); GAP 4.1. ·
+*Impl:* shipped 2026-10-19 — the TC stays an entity that never
+enters the nav blocking grid (movement, center-distance deposit
+and training spawn unchanged); `validate_build` reserves each
+living TC's 4×4 cells (anchor = the TC's cell − 1 on each axis)
+against placement, both players'; pinned by
+`sim/tests/tc_footprint.rs` (crossing, deposit, rejection,
+adjacency). The client's selection/hit-test box matches the 4×4
+(TC_HALF = 8 world units). · *Status:* **MATCHES**.
 
 ---
 
@@ -2310,10 +2334,11 @@ side sampling of public data). · *Status:* **MISSING**.
 
 ## A. Rule counts
 
-213 rules total. Counts verified mechanically against the status tags in
+214 rules total. Counts verified mechanically against the status tags in
 this document (2026-10-18, M8 audit; re-verified for M9 the same day —
-the open-games lobby changed no status, see the M9 note in section B,
-so the totals below stand).
+the open-games lobby changed no status, see the M9 note in section B;
+updated 2026-10-19 for BLD-16, the Town Center footprint rule —
+§7 gains one rule, one MATCHES).
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
@@ -2323,7 +2348,7 @@ so the totals below stand).
 | 4 | Selection & orders (SEL) | 16 | 12 | 3 | 1 |
 | 5 | Movement, pathfinding & collision (MOV) | 12 | 3 | 4 | 5 |
 | 6 | Economy & drop-off (ECO) | 17 | 13 | 2 | 2 |
-| 7 | Buildings & placement (BLD) | 15 | 8 | 4 | 3 |
+| 7 | Buildings & placement (BLD) | 16 | 9 | 4 | 3 |
 | 8 | Combat & damage (CMB) | 16 | 10 | 3 | 3 |
 | 9 | Projectiles & ballistics (PRJ) | 10 | 4 | 4 | 2 |
 | 10 | Unit classes & counters (CLS) | 8 | 5 | 0 | 3 |
@@ -2335,7 +2360,7 @@ so the totals below stand).
 | 16 | Victory, scoring & game modes (VIC) | 12 | 0 | 1 | 11 |
 | 17 | Multiplayer determinism (NET) | 11 | 4 | 5 | 2 |
 | 18 | Information rules (INF) | 11 | 2 | 4 | 5 |
-| | **Total** | **213** | **93** | **44** | **76** |
+| | **Total** | **214** | **94** | **44** | **76** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer
@@ -2438,6 +2463,14 @@ directory is pre-match transport metadata (room id, region, socket
 count) that never enters hashed state, so NET-01's letter is
 untouched and INF-07's in-match information split is unaffected.
 The counts in section A are unchanged.*
+
+**TC footprint rule (2026-10-19).** BLD-16 shipped: the Town
+Center's 4×4 is passable to units (it never enters the nav
+blocking grid) and reserved against building placement, both
+players'. No other rule's status changed; section A's counts are
+updated for the one new rule (214 total, 94 MATCHES). The golden
+hash is unchanged — the reservation runs only inside build
+validation.
 
 Cross-cutting at every milestone: NET-05/06 discipline (no local factor
 in the sim; RNG only in fixed iteration) and VIS-09 (fog hides

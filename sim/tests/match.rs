@@ -229,7 +229,12 @@ fn scripted_siege_wins_the_match() {
     let mut sim = Sim::new_match(21, MatchMode::AiEasy);
     let mut driver = HumanScript::default();
     let mut won_at = None;
-    for _ in 0..120_000 {
+    // Window: 240,000 ticks. BLD-16 (2026-10-19) — the Town
+    // Center's footprint is placement-reserved — moved the plots
+    // this script's base grows on; its siege now lands later and
+    // wins on a re-massed second push (see the script's unlatch
+    // rule). The pre-BLD-16 first-push win landed at ~98,500.
+    for _ in 0..240_000 {
         driver.drive(&mut sim);
         sim.tick();
         if sim.match_state() == MatchState::Victory {
@@ -457,6 +462,43 @@ impl HumanScript {
         // a siege, not a raid.
         if army >= 12 {
             self.pushing = true;
+        }
+        // BLD-16 adaptation (2026-10-19): the Town Center footprint
+        // reservation moved the plots this script's base grows on,
+        // so its first push now lands later and bleeds out against
+        // the defenders instead of finishing the Town Center. A
+        // siege that has bled below a floor therefore unlatches
+        // and re-masses (the rally reset below gathers fresh
+        // troops at home) rather than trickling in one by one
+        // forever — the pre-BLD-16 trajectory won on the first
+        // push, so the script never needed a second wave.
+        if self.pushing && army < 5 {
+            self.pushing = false;
+        }
+        if !self.pushing {
+            // Rally home while (re)massing: fresh troops gather at
+            // the home Town Center instead of streaming to the front.
+            let tc = sim.town_center();
+            let (hx, hy) = (tc.pos_x, tc.pos_y);
+            let home_bids: Vec<u32> = sim
+                .buildings()
+                .iter()
+                .filter(|b| {
+                    b.owner == me
+                        && (b.kind == BuildingKind::Barracks
+                            || b.kind == BuildingKind::ArcheryRange)
+                        && b.complete
+                        && b.rally != Some((hx, hy))
+                })
+                .map(|b| b.id)
+                .collect();
+            for bid in home_bids {
+                sim.push_command(Command::SetRally {
+                    building: Some(bid),
+                    x: hx,
+                    y: hy,
+                });
+            }
         }
         if self.pushing {
             let foe_tc = sim

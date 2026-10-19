@@ -1053,6 +1053,50 @@ changed. The direction math is pure (`edgePan` in
 hotkeys.js); the smoke observes the pan through the minimap's
 viewport rectangle.
 
+## TC footprint rule (2026-10-19)
+
+Claudio's rule, stated as a correction of an earlier reading of
+his direction: **the Town Center does not block.** In the
+reference game the TC's 4×4 footprint (Fandom building table) is
+passable to units on all sides — they walk through it, under its
+canopy roofs, which is the architectural point of the compound —
+while its tiles stay reserved against building placement. Rule
+BLD-16 in the rulebook.
+
+What shipped:
+
+- **Movement: unchanged, now pinned.** The TC stays an entity and
+  never enters the dynamic blocking grid; A*, separation and the
+  center-distance deposit rule are exactly as before, and trained
+  villagers spawn as before. `sim/tests/tc_footprint.rs` pins a
+  unit ordered across the TC walking straight through its 4×4,
+  and an unchanged exact-carry deposit at the TC.
+- **Placement reservation (the one real gap).** `validate_build`
+  previously reserved only the TC's single center cell, so a
+  building could be placed over the rest of its footprint. It now
+  rejects any footprint overlapping a living Town Center's 16
+  cells — anchor = the TC's cell − 1 on each axis, the 4×4
+  centered on the TC's cell, the sim half of the 4×4 art contract
+  — for both players' TCs. The tests are discriminating: with the
+  reservation reverted they fail (overlapping anchors were
+  accepted); with it, placement fully outside the 4×4 is still
+  accepted.
+- **Client:** `TC_HALF` 3.6 → 8 world units, so hit-testing,
+  selection drawing and the ground diamond describe the true 4×4.
+  The carry-dot deposit heuristic is untouched — it mirrors the
+  sim's unchanged center-distance rule.
+- **Golden hash: unchanged** (`be584974ce98139d`). The reservation
+  runs only inside build validation, which the golden scenario
+  (no commands, 360 ticks) never invokes. One scripted-match test
+  did feel the new law: its scripted player's preferred plots
+  partially covered its own Town Center's tiles, so its base grew
+  on different plots, its first push bled out, and the test's
+  script gained a regroup rule (unlatch below five soldiers,
+  re-mass, push again) plus a longer window — the same class of
+  test-script adaptation M6 and M7 required, documented in
+  `sim/tests/match.rs`. The AI opponent's trajectories and every
+  replay/hash stream are unchanged.
+
 ## The sim may
 
 - Use fixed-point arithmetic (`I16F16`: ±32768 range, 1/65536 precision —
