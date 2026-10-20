@@ -181,6 +181,35 @@ html, body {
 }
 .quality-btns { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
 
+/* Generated-audio controls (2026-10-20): the pause menu's sound
+   row, in the quality row's column language — a narrow centered
+   stack: title, then the on/off toggle and the volume slider
+   side by side (wrapping on a phone). */
+.audio-row {
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.audio-controls {
+  display: flex;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+}
+.audio-toggle, .audio-volume {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13.5px;
+  color: #43300f;
+  cursor: pointer;
+}
+.audio-toggle input { accent-color: #8a5a10; width: 17px; height: 17px; margin: 0; }
+.audio-volume input { accent-color: #8a5a10; width: 110px; margin: 0; }
+
 /* i18n: the language switcher — one compact row in the lobby
    header area and one in the pause menu; no other chrome. */
 .lang-row {
