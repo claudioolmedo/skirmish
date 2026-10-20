@@ -222,13 +222,20 @@ def shade_of(normal):
     return min(SHADE_STEPS, key=lambda s: abs(s - b))
 
 def render_cell(tris, direction, cw=CELL, ch=CELL, ax=AX, ay=AY,
-                directions=DIRECTIONS):
+                directions=DIRECTIONS, mask_mats=None):
     """Render one posed model in one facing direction -> (ch,cw,4)
     uint8 RGBA. Direction d: facing angle = d*(360/directions) in
     world XY, from +X toward +Y (dir 0 faces +X = screen down-right).
     `directions` is the sheet's tier (8/16/32); the canvas size /
     anchor default to the unit-sprite conventions; buildings pass
-    their own (see the house section below)."""
+    their own (see the house section below).
+    `mask_mats` (directional-sprite milestone): when a set of material
+    names is given, render the PLAYER-COLOR MASK instead — pixels of
+    those materials come out grayscale at their posterized shade
+    level, everything else black, alpha/z-buffer identical to the
+    color pass, so the mask aligns pixel-for-fixel with the sheet.
+    The client remaps masked pixels from the blue ramp to the red
+    ramp at the same shade (see units.py / SPRITE-PIPELINE.md)."""
     size_w, size_h = cw * SS, ch * SS
     rgb = np.zeros((size_h, size_w, 3), dtype=np.float64)
     alp = np.zeros((size_h, size_w), dtype=np.float64)
@@ -244,6 +251,9 @@ def render_cell(tris, direction, cw=CELL, ch=CELL, ax=AX, ay=AY,
         n /= ln
         base = np.array(MATERIALS[mat], dtype=np.float64)
         col = base * shade_of(n)
+        if mask_mats is not None:
+            s = shade_of(n) if mat in mask_mats else 0.0
+            col = np.array([s, s, s], dtype=np.float64)
         sx = ax * SS + (w[:, 0] - w[:, 1]) * P
         sy = ay * SS + ((w[:, 0] + w[:, 1]) * 0.5 - w[:, 2]) * P
         dep = w[:, 0] + w[:, 1]                 # larger = nearer viewer

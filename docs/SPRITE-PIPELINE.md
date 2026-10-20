@@ -159,6 +159,149 @@ file size).
 5. Further units (M3 combat units) are born original — no placeholder
    stage needed once the pipeline exists.
 
+## 10. Directional milestone (2026-10-19) — units, animals, masks, lifecycle
+
+Claudio's ruling: side-view cycles + horizontal flip (the generated
+UNIT_ART / ANIMAL_ART sets) are INTERIM. The standard is the classic
+one — art rendered for the fixed camera **and** the facing direction
+(back view going up-screen, front coming down, 3/4 views on the
+diagonals), designated areas swapping color per player, and buildings
+living the full damage lifecycle (fire, rubble, repair). This section
+is the spec for that milestone; §1–§9 remain in force.
+
+### 10.1 Sheet layout (all units and animals)
+
+- One PNG per (unit, state): **rows = 8 directions, columns =
+  frames**, cell 128×128, anchor feet-center (64, 110), 46 px/unit,
+  drawn at the unit scale factor 1.35 (§5) — the villager v1
+  contract, generalized. Scout Cavalry is the one exception: cell
+  160×160, anchor (80, 138) (horse + rider exceeds the 128 cell).
+- Direction row `d` = facing angle `d × 45°` in world XY from +X
+  toward +Y (§3). Consequences the QA eyeball must confirm: row 1
+  (facing +X+Y, down-screen) is the FRONT view; row 5 (−X−Y,
+  up-screen) is the BACK view; rows 0/2 are front 3/4, rows 4/6
+  back 3/4, rows 3/7 profiles. All 8 rows are rendered from the 3D
+  model — no runtime mirroring (the model is the source of truth;
+  mirroring is how the reference engine economized on *stored* art,
+  not a property we need to reproduce).
+- States and frame counts (LOW tier): idle 4 · walk 8 · gallop 8
+  (scout) · gather 4 · carry 8 · build 4 (villager) · attack 4
+  (militia, man-at-arms) · shoot 4 (archer) · graze 4 (animals).
+  Facing comes from the unit's movement/order vector quantized to
+  8; an idle unit keeps its last facing.
+- Models live in `tools/sprite-pipeline/models/<unit>.py`
+  (articulated low-poly part groups + pose functions, the villager
+  pattern); `tools/sprite-pipeline/units.py` renders every sheet +
+  mask and can emit contact sheets for QA. The side-view generated
+  sets remain in the client's fallback chain beneath these sheets.
+
+### 10.2 Player color — the mask mechanism
+
+The reference engine stores player-color pixels in a reserved
+palette range and remaps them to the player's ramp at draw time.
+Our PNG equivalent, per sheet:
+
+- Alongside `<unit>-<state>.png`, the pipeline renders
+  `<unit>-<state>-pcmask.png`: same layout, same rasterization, but
+  player-color-material pixels are grayscale at their posterized
+  shade level (0.47 / 0.64 / 0.81 / 1.0 → gray 120 / 163 / 207 /
+  255) and all other pixels are black; alpha is identical to the
+  color pass, so the mask aligns pixel-for-pixel.
+- Model parts are flagged as player color in the model source
+  (`PC_MATS`): villager tunic + sleeves; archer's cloth shirt;
+  militia tunic + shield cloth; man-at-arms tabard + shield cloth;
+  scout rider's tunic + saddle blanket. Animals carry none.
+- The client builds the red player's variant once per sheet at
+  load: for each pixel with mask gray > 0, output = red base
+  (#d2342c) × (gray / 255); all other pixels copy the color sheet.
+  Blue is the native render — no variant needed. This replaces the
+  channel-swap approximation (`makeRedSheet`) wherever a mask
+  exists; the swap remains the fallback for mask-less sheets.
+
+### 10.3 Building lifecycle visuals
+
+- **Fire** (client-only overlay): the two documented stages —
+  **smoke puffs at HP ≤ 75%**, **flame clusters at HP ≤ 50%**
+  (cluster size scales with damage inside the flame stage, a
+  presentation detail) — anchored on the building's roof/body.
+  Smoke and flames are original procedural canvas art (animated,
+  flickering), drawn in the building's own painter pass so depth
+  stays correct; shown for any building the local player can
+  currently see. Farms and under-construction buildings do not burn.
+- **Rubble** (client-only decal): when a building leaves the
+  building list (destroyed), a rubble decal — one procedural heap
+  image per footprint class (2×2, 3×3, 4×4) — is drawn at the site,
+  fading out over the rubble duration (§10.5). The sim frees the
+  footprint at destruction (verified: destroyed buildings leave
+  `buildings()` and their cells unblock the same tick), so rubble
+  is pure decoration over free ground; the Town Center (4×4)
+  leaves rubble the same way.
+
+### 10.4 Repair (sim rule)
+
+See the rulebook (BLD section) for the normative text. Summary: a
+villager ordered onto its own complete, damaged building walks to
+it (ring cell, build range — the construction approach) and
+restores HP at the documented flat rate — **750 HP/min for the
+first repairer, +375 HP/min per additional repairer** — while the
+owner pays a continuous wood drip proportional to HP restored,
+totalling 50% of the building's build cost for a full 0→100%
+repair (`REPAIR_COST_FRACTION`); if the owner cannot pay, the
+repairer stops and idles. Undamaged, unfinished, enemy and Gaia
+buildings reject the order silently. The AI does not repair in
+this milestone (recorded gap).
+
+### 10.5 Reference values (Phase 0 study, 2026-10-19)
+
+From public documentation only (openage SLP spec, AoE2 Fandom,
+AoEZone mechanics tests, the Age of Kings manual, the Ensemble
+design document):
+
+- **Directions.** Classic engine: 8 facings per unit = 5 stored
+  (S, SW, W, NW, N) + 3 mirrored at runtime (SE, E, NE), with a
+  separate graphic per action — DOCUMENTED (openage). AoE2 DE
+  itself uses **16 facings** (COMMUNITY-CONSENSUS; the stored/
+  mirrored split for DE's SMX is UNVERIFIED). Our LOW tier (8)
+  matches the classic standard; 16 is our MEDIUM tier count and
+  remains a re-render away for every model in §10.1.
+- **Player color.** Classic: player-color pixels are stored as a
+  **shade offset 0–15** inside the player's 16-color palette block
+  (real index = offset + player × 16), remapped at draw —
+  DOCUMENTED (openage SLP commands 0x06/0x0A; outlines 0x4E/0x5E).
+  DE stores separate data/damage graphics in SMX instead
+  (COMMUNITY-CONSENSUS). Our mask (§10.2) is the same mechanism at
+  posterized fidelity: the mask gray IS the shade offset, ours has
+  4 levels instead of 16. Which body areas carry the color is an
+  art decision per asset (UNVERIFIED as a rule) — ours are listed
+  in §10.2.
+- **Repair.** First villager **750 HP/min**, each additional
+  **+375 HP/min** (total 375·(n+1) HP/min) — DOCUMENTED (Fandom +
+  AoEZone tests). Cost: **50% of build cost, proportional to HP
+  restored**, deducted as the repair progresses; if the owner runs
+  out, the villagers stop and idle — DOCUMENTED. Allied repair is
+  allowed in DE with the owner paying (manual) — out of our scope
+  (no alliances in 1v1). The Town Center is special-cased in DE
+  (full repair 550 wood, 0 stone); our TC is an entity, not a
+  placed building, and TC repair is out of this milestone's scope.
+  Repairing unfinished buildings is not a DE concept — foundations
+  are *constructed* (cost prepaid) — matching our rule that Repair
+  rejects under-construction targets.
+- **Fire.** Two documented stages only: **smoke at HP ≤ 75%**,
+  **flames at HP ≤ 50%** (Age of Kings manual + Ensemble design
+  doc — DOCUMENTED). A third flame phase exists in the reference
+  art but its threshold is UNVERIFIED; our client scales flame
+  cluster size continuously with damage inside the ≤50% stage as a
+  presentation detail, not a claimed threshold. (DE's ≤20%
+  garrison-eject has no counterpart — we have no garrison.)
+- **Rubble.** Destroyed buildings are "reduced to rubble and
+  eventually disappear" (manual — DOCUMENTED); the duration is
+  UNVERIFIED in public sources. DE blocks building (but not
+  movement) on the footprint during its collapse animation
+  (COMMUNITY-CONSENSUS). Our sim has no collapse state — the
+  footprint frees at destruction — so the client decal (§10.3) is
+  pure presentation over free ground, with an **adopted fade of
+  ~20 s (UNVERIFIED value, presentation only)**.
+
 ## 9. QA checklist (per render)
 
 1. Contact-sheet eyeball: silhouette reads at game zoom; facing is
