@@ -204,6 +204,71 @@ html, body {
   color: #4a3418;
   cursor: pointer;
 }
+/* End-of-match feedback block (2026-10-19): an inset parchment
+   box inside the end card, in the .howto language — one question,
+   tappable stars, a short text area, and the GitHub star line.
+   It never blocks the card's own actions: Restart / Back to menu
+   sit below it and stay live whatever the send does. */
+.end-feedback {
+  position: relative;
+  text-align: left;
+  margin: 0 0 18px;
+  background: rgba(61, 42, 18, 0.10);
+  border: 1px solid rgba(61, 42, 18, 0.16);
+  border-radius: 10px;
+  padding: 12px 16px 10px;
+}
+.feedback-close {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  background: none;
+  color: #7a6248;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.feedback-close:hover { border-color: #8a5a10; color: #8a5a10; }
+.feedback-q {
+  margin: 0 26px 6px 0;
+  font: 700 14.5px/1.3 Georgia, 'Times New Roman', serif;
+  color: #43300f;
+}
+.feedback-stars { display: flex; gap: 2px; margin: 0 0 8px; }
+.feedback-star {
+  border: none;
+  background: none;
+  padding: 2px 3px;
+  font-size: 24px;
+  line-height: 1;
+  color: #8a5a10;
+  cursor: pointer;
+}
+.feedback-star:hover { transform: scale(1.12); }
+#feedback-text {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(61, 42, 18, 0.35);
+  border-radius: 8px;
+  background: rgba(255, 250, 235, 0.55);
+  color: #43300f;
+  font: 14px/1.4 system-ui, sans-serif;
+  resize: vertical;
+}
+#feedback-text::placeholder { color: #7a6248; }
+.feedback-error { margin: 0 0 8px; font-size: 13px; color: #9c2b16; }
+.feedback-thanks { margin: 0 0 8px; font-size: 13.5px; font-weight: 600; color: #5d4630; }
+.feedback-gh { margin: 10px 0 2px; font-size: 13.5px; text-align: center; }
+.feedback-gh a { color: #8a5a10; font-weight: 600; }
 
 @media (max-width: 640px) {
   .game-title { font-size: 34px; }

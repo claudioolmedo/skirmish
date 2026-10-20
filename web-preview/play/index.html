@@ -204,6 +204,30 @@
   <div class="overlay-card">
     <h2 class="game-title-sm" id="end-title">Victory!</h2>
     <p class="overlay-sub" id="end-detail"></p>
+    <!-- End-of-match feedback (2026-10-19): one question, an
+         optional star rating, and the GitHub star line. Sent
+         anonymously to the relay's /feedback (see privacy page);
+         app.js hides the form forever once sent
+         (localStorage skirmish2.feedbackDone) and the ✕ hides
+         the whole block for the session. -->
+    <div id="end-feedback" class="end-feedback">
+      <button id="feedback-close" class="feedback-close" type="button" aria-label="Dismiss feedback">✕</button>
+      <div id="feedback-form">
+        <p class="feedback-q" id="feedback-q">What broke for you?</p>
+        <div id="feedback-stars" class="feedback-stars" role="group" aria-label="Rate this match">
+          <button id="feedback-star-1" class="feedback-star" type="button" data-stars="1" aria-label="Rate 1 star">☆</button>
+          <button id="feedback-star-2" class="feedback-star" type="button" data-stars="2" aria-label="Rate 2 stars">☆</button>
+          <button id="feedback-star-3" class="feedback-star" type="button" data-stars="3" aria-label="Rate 3 stars">☆</button>
+          <button id="feedback-star-4" class="feedback-star" type="button" data-stars="4" aria-label="Rate 4 stars">☆</button>
+          <button id="feedback-star-5" class="feedback-star" type="button" data-stars="5" aria-label="Rate 5 stars">☆</button>
+        </div>
+        <textarea id="feedback-text" maxlength="1000" rows="3" placeholder="Tell us what broke, confused you, or felt wrong…"></textarea>
+        <p id="feedback-error" class="feedback-error" hidden></p>
+        <p id="feedback-thanks" class="feedback-thanks" hidden>Thanks! Your feedback was sent.</p>
+        <button id="feedback-send" class="btn btn-gold" type="button">Send feedback</button>
+      </div>
+      <p class="feedback-gh" id="feedback-gh-line"><a href="https://github.com/claudioolmedo/skirmish" target="_blank" rel="noopener">Enjoying it? Star us on GitHub</a></p>
+    </div>
     <div class="pause-actions">
       <button id="end-restart-btn" class="btn btn-gold" type="button">Restart match</button>
       <button id="end-menu-btn" class="btn btn-ghost" type="button">Back to menu</button>
