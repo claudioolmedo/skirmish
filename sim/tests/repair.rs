@@ -106,8 +106,9 @@ struct Damaged {
 
 /// Build an opponent building of `kind` with two builders, have
 /// the human Scout beat it down to at most `stop_hp`, withdraw
-/// the Scout, and return the scene. Both builders end standing
-/// at the site, idle — ready to repair with no travel time.
+/// the Scout, and return the scene. Both builders end back at
+/// their Town Center (see the deadlock note inside), so a repair
+/// order starts with a travel leg, like real play.
 fn damaged_building(seed: u64, kind: BuildingKind, stop_hp: f64) -> Damaged {
     let mut sim = Sim::with_mode(seed, MatchMode::TwoPlayer);
     let opp_tc = find_id(&sim, OWNER_OPPONENT, EntityKind::TownCenter);
@@ -118,11 +119,14 @@ fn damaged_building(seed: u64, kind: BuildingKind, stop_hp: f64) -> Damaged {
 
     // Park the opponent's Scout far from the building site so the
     // damage phase is a clean one-sided beating.
-    let tc = ent(&sim, opp_tc);
+    let (tc_x, tc_y) = {
+        let tc = ent(&sim, opp_tc);
+        (tc.pos_x, tc.pos_y)
+    };
     sim.push_command(Command::Move {
         entity: opp_scout,
-        x: tc.pos_x + I16F16::from_num(80),
-        y: tc.pos_y + I16F16::from_num(80),
+        x: tc_x + I16F16::from_num(80),
+        y: tc_y + I16F16::from_num(80),
     });
 
     // Raise the building with two builders (resume semantics).
@@ -149,18 +153,74 @@ fn damaged_building(seed: u64, kind: BuildingKind, stop_hp: f64) -> Damaged {
     let up = run_until(&mut sim, 30_000, |s| building(s, bid).complete);
     assert!(up, "building never completed");
 
+    // Send both builders back to their Town Center. They must not
+    // be standing on the building's ring when the attacker
+    // arrives: the building chase targets the first ring cell —
+    // the same cell a builder idles on — and an idle villager
+    // there jams the chase in a separation-vs-arrival deadlock
+    // (observed while probing: the Scout held ~4 units off the
+    // footprint forever, order active, never striking).
+    for &v in &opp_villagers[..2] {
+        sim.push_command(Command::Move {
+            entity: v,
+            x: tc_x,
+            y: tc_y,
+        });
+    }
+
     // The human Scout beats it down to the threshold.
     sim.push_command(Command::AttackBuilding {
         entity: human_scout,
         building: bid,
     });
-    let beaten = run_until(&mut sim, 400_000, |s| {
-        s.buildings()
-            .iter()
-            .find(|b| b.id == bid)
-            .map(|b| f(b.hp) <= stop_hp)
-            .unwrap_or(false)
-    });
+    // Stall breaker: the building chase approaches the footprint's
+    // NW *corner* ring cell, and steering's arrival shortfall (up
+    // to 1.0 short of the cell center) can leave a melee attacker
+    // at up to ~3.8 from the footprint edge — beyond MELEE_REACH
+    // (3.0) — while combat re-issues the identical approach
+    // forever (observed in probing: 40 000 ticks, HP frozen). This
+    // is a pre-existing sim edge, not repair behavior; the
+    // fixture works around it by walking the Scout to a west
+    // *edge* ring cell (2.0 from the footprint) whenever no damage
+    // has landed for 3 000 ticks, then re-issuing the attack.
+    let mut last_hp = f(building(&sim, bid).hp);
+    let mut stall = 0u64;
+    let mut ticks = 0u64;
+    let beaten = loop {
+        if f(building(&sim, bid).hp) <= stop_hp {
+            break true;
+        }
+        if ticks > 400_000 {
+            break false;
+        }
+        sim.tick();
+        ticks += 1;
+        let hp = f(building(&sim, bid).hp);
+        if hp < last_hp {
+            last_hp = hp;
+            stall = 0;
+        } else {
+            stall += 1;
+        }
+        if stall >= 3_000 {
+            stall = 0;
+            let (wax, way) = {
+                let b = building(&sim, bid);
+                (b.cell_x - 1, b.cell_y + b.kind.footprint_size() / 2)
+            };
+            let (wx, wy) = anchor_point(&sim, wax, way);
+            sim.push_command(Command::Move {
+                entity: human_scout,
+                x: wx,
+                y: wy,
+            });
+            run_until(&mut sim, 10_000, |s| ent(s, human_scout).order.is_none());
+            sim.push_command(Command::AttackBuilding {
+                entity: human_scout,
+                building: bid,
+            });
+        }
+    };
     assert!(beaten, "the Scout never beat the building down");
     assert!(
         f(building(&sim, bid).hp) > 1.0,
@@ -210,9 +270,9 @@ fn repair_restores_hp_at_the_documented_rate_and_stops_at_full() {
         entity: v1,
         building: bid,
     });
-    // The builder already stands at the site: repair starts
-    // restoring almost immediately.
-    let active = run_until(&mut fx.sim, 5_000, |s| f(building(s, bid).hp) > fx.hp);
+    // The repairer travels from the Town Center first; wait until
+    // the restore actually begins.
+    let active = run_until(&mut fx.sim, 20_000, |s| f(building(s, bid).hp) > fx.hp);
     assert!(active, "repair never started restoring HP");
     assert_eq!(
         ent(&fx.sim, v1).task,
@@ -294,7 +354,9 @@ fn two_repairers_stack_at_the_documented_rate() {
     // Same seed, same damage: the only difference is the second
     // repairer. 750 + 375 = 1125 HP/min is exactly 1.5x the solo
     // rate, so the duo must finish in about 2/3 of the solo time
-    // (both repairers start standing at the site).
+    // (both repairers start together at their Town Center, so the
+    // travel leg is common to both runs and only dilutes the
+    // ratio toward 1).
     let (solo_ticks, solo_wood, solo_hash) = full_repair_run(73, &[0]);
     let (duo_ticks, duo_wood, _) = full_repair_run(73, &[0, 1]);
     assert!(
@@ -451,12 +513,15 @@ fn queued_repair_executes_when_the_villager_goes_idle() {
     let bid = fx.bid;
     let v2 = fx.opp_villagers[1];
     let opp_tc = find_id(&fx.sim, OWNER_OPPONENT, EntityKind::TownCenter);
-    let tc = ent(&fx.sim, opp_tc);
-    let (tx, ty) = (tc.pos_x, tc.pos_y);
-
-    // A plain move first, the repair queued behind it (SEL-12):
-    // the repair sits in the queue while the move runs, then
-    // executes on its own and finishes the job.
+    // A plain move first — ten cells east of the Town Center, a
+    // real walk — with the repair queued behind it (SEL-12): the
+    // repair sits in the queue while the move runs, then executes
+    // on its own and finishes the job.
+    let (tx, ty) = {
+        let tc = ent(&fx.sim, opp_tc);
+        let (cx, cy) = fx.sim.grid().world_to_cell(tc.pos_x, tc.pos_y);
+        fx.sim.grid().cell_center(cx + 10, cy)
+    };
     fx.sim.push_command(Command::Move {
         entity: v2,
         x: tx,
