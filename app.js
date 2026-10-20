@@ -474,7 +474,7 @@ async function sendFeedback() {
     if (feedbackThanks) feedbackThanks.hidden = false;
   } catch {
     if (feedbackError) {
-      feedbackError.textContent = "Couldn't send just now — your text is still here. Please try again.";
+      feedbackError.textContent = t('feedback.error');
       feedbackError.hidden = false;
     }
     if (feedbackSendBtn) feedbackSendBtn.disabled = false;
@@ -3777,6 +3777,24 @@ function applyStaticStrings() {
   setText('end-restart-btn', 'end.restart');
   setText('end-menu-btn', 'end.backToMenu');
   setText('end-replay-btn', 'end.downloadReplay');
+  // End-of-match feedback block (its GitHub line is the anchor's
+  // text; the stub DOMs have no querySelector hit and skip it).
+  setText('feedback-q', 'feedback.question');
+  setAttr('feedback-close', 'aria-label', 'feedback.dismiss');
+  setAttr('feedback-stars', 'aria-label', 'feedback.rateMatch');
+  setPlaceholder('feedback-text', 'feedback.placeholder');
+  setText('feedback-send', 'feedback.send');
+  setText('feedback-thanks', 'feedback.thanks');
+  for (const btn of feedbackStarBtns) {
+    if (btn && btn.setAttribute) {
+      const n = Number(btn.dataset.stars);
+      btn.setAttribute('aria-label', n === 1 ? t('feedback.rateOne') : t('feedback.rateMany', { n }));
+    }
+  }
+  if (document.querySelector) {
+    const ghLink = document.querySelector('#feedback-gh-line a');
+    if (ghLink) ghLink.textContent = t('feedback.starGithub');
+  }
   setText('net-wait', 'netwait.text');
   setText('desync-title', 'desync.title');
   setText('btn-desync-replay', 'end.downloadReplay');
