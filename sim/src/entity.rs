@@ -165,17 +165,23 @@ pub enum QueuedOrder {
         x: I16F16,
         y: I16F16,
     },
+    /// Repair a placed building (villagers). Validation happens
+    /// when the order *executes*, like the base command — a queued
+    /// repair whose target has been destroyed, completed its
+    /// repair, or was never valid is dropped.
+    Repair { building: u32 },
 }
 
 impl QueuedOrder {
     /// Stable tag for the state hash: 0 move, 1 gather, 2 attack,
-    /// 3 build.
+    /// 3 build, 4 repair.
     pub fn tag(self) -> u8 {
         match self {
             QueuedOrder::Move { .. } => 0,
             QueuedOrder::Gather { .. } => 1,
             QueuedOrder::Attack { .. } => 2,
             QueuedOrder::Build { .. } => 3,
+            QueuedOrder::Repair { .. } => 4,
         }
     }
 }
@@ -203,6 +209,20 @@ impl QueuedOrder {
 ///   if the builder drifts out of build range, `→ ToBuild` again. On
 ///   completion the builder goes `Idle` — or, for a Farm, straight to
 ///   gathering the field it just raised.
+///
+/// Repair (BLD-07) is a single phase carrying its building, the
+/// mirror of the construction assignment with the assignment inside
+/// the phase instead of `task_building`:
+///
+/// - `Repair` command: `Idle → Repair { building }` — the villager
+///   paths to the building's ring exactly like a builder
+///   (`assign_builder`'s approach), and while within the same
+///   build range the repair phase restores the building's HP (the
+///   restore itself is applied by the repair tick, right after the
+///   construction tick). The phase ends — the villager goes `Idle`
+///   — when the building reaches full HP, is destroyed, or the
+///   owner's stockpile cannot cover a tick's repair drip (the
+///   documented DE behavior: repairers stop and stand idle).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Task {
     /// No work order. The entity may still hold a plain move order.
@@ -217,11 +237,15 @@ pub enum Task {
     ToBuild,
     /// At the site, actively building (M2.5).
     Building,
+    /// Travelling to — or working on — a damaged completed
+    /// building of the villager's own player, restoring its HP
+    /// (BLD-07). The building id is the repair assignment.
+    Repair { building: u32 },
 }
 
 impl Task {
     /// Stable tag for the state hash: 0 idle, 1 to-node, 2 gathering,
-    /// 3 returning, 4 to-build, 5 building.
+    /// 3 returning, 4 to-build, 5 building, 6 repair.
     pub fn tag(self) -> u8 {
         match self {
             Task::Idle => 0,
@@ -230,6 +254,7 @@ impl Task {
             Task::Returning => 3,
             Task::ToBuild => 4,
             Task::Building => 5,
+            Task::Repair { .. } => 6,
         }
     }
 }

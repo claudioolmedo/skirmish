@@ -65,11 +65,13 @@ mod units;
 mod wasm;
 
 pub use build::{
-    build_rate_thirds, Building, BuildingKind, ARCHERY_RANGE_BUILD_TICKS, ARCHERY_RANGE_WOOD_COST,
-    BARRACKS_BUILD_TICKS, BARRACKS_WOOD_COST, BLACKSMITH_BUILD_TICKS, BLACKSMITH_WOOD_COST,
-    BUILD_RANGE, CAMP_BUILD_TICKS, CAMP_WOOD_COST, FARM_BUILD_TICKS, FARM_WOOD_COST,
-    FOOTPRINT_CELLS, HOUSE_BUILD_TICKS, HOUSE_POP_SUPPORT, HOUSE_WOOD_COST, STABLE_BUILD_TICKS,
-    STABLE_WOOD_COST, TOWN_CENTER_POP_SUPPORT,
+    build_rate_thirds, repair_rate_hp_per_min, Building, BuildingKind,
+    ARCHERY_RANGE_BUILD_TICKS, ARCHERY_RANGE_WOOD_COST, BARRACKS_BUILD_TICKS,
+    BARRACKS_WOOD_COST, BLACKSMITH_BUILD_TICKS, BLACKSMITH_WOOD_COST, BUILD_RANGE,
+    CAMP_BUILD_TICKS, CAMP_WOOD_COST, FARM_BUILD_TICKS, FARM_WOOD_COST, FOOTPRINT_CELLS,
+    HOUSE_BUILD_TICKS, HOUSE_POP_SUPPORT, HOUSE_WOOD_COST, REPAIR_COST_FRACTION,
+    REPAIR_HP_PER_MIN_EXTRA, REPAIR_HP_PER_MIN_FIRST, STABLE_BUILD_TICKS, STABLE_WOOD_COST,
+    TOWN_CENTER_POP_SUPPORT,
 };
 pub use combat::{compute_damage, compute_damage_elev, elevation_factor, Projectile, MELEE_REACH};
 pub use econ::{
@@ -164,7 +166,8 @@ pub const ORDER_QUEUE_CAP: usize = 16;
 /// the AI opponent uses — `TrainVillager` remains the human Town
 /// Center shorthand) and `AttackBuilding`; M6 adds the research
 /// commands (`ResearchTc`, `ResearchTcAt`, `ResearchAt`) and
-/// `ForceDeposit` (the force-drop-off gesture, ECO-07).
+/// `ForceDeposit` (the force-drop-off gesture, ECO-07); the repair
+/// milestone (BLD-07) adds `Repair`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
     /// Does nothing. Exists so the command pipeline is exercised.
@@ -274,6 +277,21 @@ pub enum Command {
     /// units in line (TEC-03). Same rejection discipline as
     /// `ResearchTc` (see `Sim::research_block_at`).
     ResearchAt { building: u32, tech: TechId },
+    /// Order a villager to repair one of its own player's placed
+    /// buildings (BLD-07): travel to the building's ring like a
+    /// builder, then restore its HP at the documented flat rate
+    /// (750 HP/min for the first repairer, +375 HP/min per
+    /// additional one), charged as a wood drip totaling 50% of the
+    /// building's build cost over a full 0→100% repair. Valid
+    /// targets are *complete*, *damaged* buildings owned by the
+    /// villager's player — enemy, Gaia, undamaged, full and
+    /// under-construction targets are ignored (an unfinished
+    /// building is resumed via `Build`, not repaired). The Town
+    /// Center is an entity in this architecture, not a placed
+    /// building, and is NOT a repair target. When the owner's
+    /// stockpile cannot cover a tick's drip, the repairer stops
+    /// and goes idle (the documented DE behavior).
+    Repair { entity: u32, building: u32 },
     /// Force drop-off (M6, ECO-07): a villager carrying resources is
     /// ordered to haul them to the nearest valid drop-off for what
     /// it carries *now* — and, the deposit made, to return to its
@@ -1746,6 +1764,29 @@ impl Sim {
             && entity::is_player_owner(self.buildings[bi].owner)
     }
 
+    /// Would a `Repair` command be accepted right now? (BLD-07.)
+    /// The repairer must be a living villager, and the target a
+    /// *complete*, *damaged* placed building owned by the
+    /// villager's own player — never an enemy's or Gaia's, never
+    /// an undamaged/full one, and never one still under
+    /// construction (a foundation is resumed via `Build`). The
+    /// Town Center, an entity rather than a placed building, is
+    /// never a repair target. A pure query mirroring
+    /// `issue_repair`'s validation, for UI affordances; the
+    /// command path re-validates at apply time.
+    pub fn can_repair(&self, entity: u32, building: u32) -> bool {
+        let (Some(idx), Some(bi)) = (self.entity_index(entity), self.building_index(building))
+        else {
+            return false;
+        };
+        let e = &self.entities[idx];
+        if e.kind != EntityKind::Villager || e.dead {
+            return false;
+        }
+        let b = &self.buildings[bi];
+        b.complete && b.owner == e.owner && b.hp < I16F16::from_num(b.kind.max_hp())
+    }
+
     /// Would a `Queue` command be accepted right now? (M4, SEL-12.)
     /// Light validation only — the order re-validates fully when it
     /// *executes*, because the world can change while it waits: a
@@ -1769,6 +1810,7 @@ impl Sim {
             }
             QueuedOrder::Attack { target } => self.can_attack(entity, target),
             QueuedOrder::Build { .. } => self.entities[idx].kind == EntityKind::Villager,
+            QueuedOrder::Repair { building } => self.can_repair(entity, building),
         }
     }
 
@@ -1892,6 +1934,7 @@ impl Sim {
                 Command::ResearchTc { tech } => self.issue_research_tc(tech),
                 Command::ResearchTcAt { tc, tech } => self.issue_research_tc_at(tc, tech),
                 Command::ResearchAt { building, tech } => self.issue_research_at(building, tech),
+                Command::Repair { entity, building } => self.issue_repair(entity, building),
                 Command::ForceDeposit { entity } => self.issue_force_deposit(entity),
             }
         }
@@ -2189,6 +2232,75 @@ impl Sim {
         e.next_attack_tick = 0;
     }
 
+    /// Apply a `Repair` command (BLD-07): validate (same rules as
+    /// `can_repair`), cancel the villager's current work, and put
+    /// it on repair duty for the building. No cost is charged up
+    /// front — the wood drip runs per tick of actual repair in
+    /// `repair_tick`. A non-queued `Repair` also clears the
+    /// villager's order queue (M4, SEL-12: replace semantics); a
+    /// rejected one changes nothing at all.
+    fn issue_repair(&mut self, entity: u32, building: u32) {
+        if !self.can_repair(entity, building) {
+            return;
+        }
+        let idx = self.entity_index(entity).expect("validated");
+        self.entities[idx].order_queue.clear();
+        self.apply_repair(idx, building);
+    }
+
+    /// The mechanics of a repair order, shared by the `Repair`
+    /// command and by queued-order execution (which must not clear
+    /// the rest of the queue behind it). Returns whether the order
+    /// took effect (repairer assigned).
+    fn apply_repair(&mut self, idx: usize, building: u32) -> bool {
+        let entity = self.entities[idx].id;
+        if !self.can_repair(entity, building) {
+            return false;
+        }
+        self.assign_repairer(idx, building);
+        true
+    }
+
+    /// Put villager `idx` on repair duty for building `bid`
+    /// (BLD-07): the mirror of `assign_builder` — the villager
+    /// travels to the best ring standing spot, and its work step
+    /// takes it from travel to in-range work. The repair
+    /// assignment lives in the `Task::Repair` phase itself, so the
+    /// gather and construction assignments are both cleared (a
+    /// fresh order of any work kind clears the others, as with
+    /// `Build`/`Gather`).
+    fn assign_repairer(&mut self, idx: usize, bid: u32) {
+        let (ax, ay, size) = match self.building_index(bid) {
+            Some(bi) => {
+                let b = &self.buildings[bi];
+                (b.cell_x, b.cell_y, b.kind.footprint_size())
+            }
+            None => return,
+        };
+        {
+            let e = &mut self.entities[idx];
+            e.task = Task::Repair { building: bid };
+            e.task_node = None;
+            e.task_building = None;
+            e.task_dropoff = None;
+        }
+        match self.approach_point(idx, ax, ay, size) {
+            Some((px, py)) => {
+                self.set_move_order(idx, px, py);
+            }
+            None => {
+                // No standing spot right now (crowded site): the
+                // work step probes again — and gives up to Idle if
+                // the site stays unreachable (mirrors
+                // `assign_builder`).
+                let e = &mut self.entities[idx];
+                e.order = None;
+                e.vel_x = I16F16::ZERO;
+                e.vel_y = I16F16::ZERO;
+            }
+        }
+    }
+
     /// Apply a `TrainAt` command (M3): deduct the unit's table cost
     /// and enqueue it at the production building, or reject silently
     /// (see `can_train_at` for the gates).
@@ -2427,6 +2539,8 @@ impl Sim {
                     pos_x,
                     pos_y,
                     progress_thirds: 0,
+                    repair_hp_remainder: 0,
+                    repair_cost_remainder: 0,
                     complete: false,
                     node_id: None,
                     queue: Vec::new(),
@@ -2521,6 +2635,7 @@ impl Sim {
                 true
             }
             QueuedOrder::Build { kind, x, y } => self.apply_build(entity, kind, x, y),
+            QueuedOrder::Repair { building } => self.apply_repair(idx, building),
         }
     }
 
@@ -3008,6 +3123,7 @@ impl Sim {
             }
         }
         self.construction_tick();
+        self.repair_tick();
     }
 
     /// Spawn a unit trained at a production building: on the first
@@ -3313,6 +3429,62 @@ impl Sim {
                     self.entities[idx].task = Task::ToBuild;
                 }
             }
+            Task::Repair { building: bid } => {
+                let bi = match self.building_index(bid) {
+                    Some(bi) => bi,
+                    None => {
+                        // The building is gone (destroyed while
+                        // the repairer worked or travelled — the
+                        // destruction sweep also clears repairers;
+                        // this covers every other removal path).
+                        self.stop_task(idx);
+                        return;
+                    }
+                };
+                let (complete, hp, max_hp, bx, by, ax, ay, range, size) = {
+                    let b = &self.buildings[bi];
+                    (
+                        b.complete,
+                        b.hp,
+                        I16F16::from_num(b.kind.max_hp()),
+                        b.pos_x,
+                        b.pos_y,
+                        b.cell_x,
+                        b.cell_y,
+                        b.kind.build_range(),
+                        b.kind.footprint_size(),
+                    )
+                };
+                if !complete || hp >= max_hp {
+                    // Not repairable after all, or the repair
+                    // finished (another repairer's tick can land
+                    // the final HP before this step runs): the job
+                    // is done — stand down, mirroring how a
+                    // builder leaves a finished site.
+                    self.stop_task(idx);
+                    return;
+                }
+                let d = self.distance_to(idx, bx, by);
+                if d <= range {
+                    // In range: stand and work. The HP restore
+                    // itself is applied by `repair_tick`, which
+                    // counts the in-range repairers each tick.
+                    let e = &mut self.entities[idx];
+                    e.order = None;
+                    e.vel_x = I16F16::ZERO;
+                    e.vel_y = I16F16::ZERO;
+                } else if self.entities[idx].order.is_none() {
+                    match self.approach_point(idx, ax, ay, size) {
+                        Some((px, py)) => {
+                            self.set_move_order(idx, px, py);
+                        }
+                        // No standable ring cell is reachable:
+                        // give up and idle instead of probing the
+                        // ring every tick (mirrors `ToBuild`).
+                        None => self.stop_task(idx),
+                    }
+                }
+            }
         }
     }
 
@@ -3389,6 +3561,128 @@ impl Sim {
             .collect();
         if !retire.is_empty() {
             self.buildings.retain(|b| !retire.contains(&b.id));
+        }
+    }
+
+    /// The repair phase of a tick (BLD-07): runs immediately after
+    /// the construction phase, under the same ordering discipline.
+    /// Every complete, damaged building with at least one repairer
+    /// in range gains HP at the documented flat rate —
+    /// `build::repair_rate_hp_per_min(n)` for n in-range repairers
+    /// (750 HP/min for the first, +375 HP/min per additional),
+    /// independent of the building's build time or max HP — and
+    /// pays for the HP actually restored as a continuous wood drip
+    /// totaling `REPAIR_COST_FRACTION` (50%) of the build cost over
+    /// a full 0→100% repair, charged to the building owner's
+    /// stockpile. Both the HP restore and the drip accumulate
+    /// fractionally on the building (fixed-point remainders), so
+    /// the totals hold exactly over the whole repair. If the owner
+    /// cannot cover a tick's drip, that tick restores nothing and
+    /// the building's repairers stop and go idle — the documented
+    /// DE behavior ("if resources run out, Villagers stop repairing
+    /// and stand idle"). A building reaching full HP likewise
+    /// releases all its repairers, mirroring construction
+    /// completion. The repairer count is taken fresh each tick, so
+    /// repairers joining or leaving simply change the pace.
+    fn repair_tick(&mut self) {
+        // Count the in-range repairers of each building, in
+        // building order — "in range" is the construction range
+        // test (distance to the building's center within its kind's
+        // build range), the same test the work step maintains.
+        let mut counts: Vec<u32> = vec![0; self.buildings.len()];
+        for (idx, e) in self.entities.iter().enumerate() {
+            if e.dead || e.kind != EntityKind::Villager {
+                continue;
+            }
+            if let Task::Repair { building: bid } = e.task {
+                if let Some(bi) = self.building_index(bid) {
+                    let b = &self.buildings[bi];
+                    if b.complete
+                        && self.distance_to(idx, b.pos_x, b.pos_y) <= b.kind.build_range()
+                    {
+                        counts[bi] += 1;
+                    }
+                }
+            }
+        }
+        let mut finished: Vec<u32> = Vec::new();
+        let mut unfunded: Vec<u32> = Vec::new();
+        for (bi, &n) in counts.iter().enumerate() {
+            if n == 0 {
+                continue;
+            }
+            let (owner, kind) = (self.buildings[bi].owner, self.buildings[bi].kind);
+            let max_hp_bits = (kind.max_hp() as i64) << 16;
+            let hp_bits = self.buildings[bi].hp.to_bits() as i64;
+            let missing = max_hp_bits - hp_bits;
+            if missing <= 0 {
+                finished.push(self.buildings[bi].id);
+                continue;
+            }
+            // HP restore: add this tick's rate (HP bits per
+            // minute) to the fractional accumulator; the quotient
+            // over 3600 (ticks per minute) is the whole HP bits
+            // restored this tick, the remainder carries.
+            let acc = self.buildings[bi].repair_hp_remainder
+                + build::repair_rate_hp_per_min(n) * 65_536;
+            let mut restored = acc / 3600;
+            let mut hp_rem = acc % 3600;
+            if restored > missing {
+                restored = missing;
+                hp_rem = 0;
+            }
+            if restored <= 0 {
+                self.buildings[bi].repair_hp_remainder = hp_rem;
+                continue;
+            }
+            // Wood drip for exactly the HP about to be restored:
+            // wood_cost × REPAIR_COST_FRACTION × restored / max_hp,
+            // in numerator form so the total over a full repair is
+            // the fraction of the build cost to < 1 bit.
+            let cost_den = max_hp_bits * 65_536;
+            let cost_acc = self.buildings[bi].repair_cost_remainder
+                + kind.wood_cost().to_bits() as i64
+                    * restored
+                    * build::REPAIR_COST_FRACTION.to_bits() as i64;
+            let drip = cost_acc / cost_den;
+            let cost_rem = cost_acc % cost_den;
+            if !self
+                .stockpile_mut(owner)
+                .spend(ResourceKind::Wood, I16F16::from_bits(drip as i32))
+            {
+                // Cannot cover this tick's drip: nothing is
+                // restored, no accumulator moves, and the
+                // repairers stop and stand idle (BLD-07).
+                unfunded.push(self.buildings[bi].id);
+                continue;
+            }
+            let done = restored == missing;
+            let b = &mut self.buildings[bi];
+            b.hp = I16F16::from_bits((hp_bits + restored) as i32);
+            b.repair_hp_remainder = if done { 0 } else { hp_rem };
+            b.repair_cost_remainder = if done { 0 } else { cost_rem };
+            if done {
+                finished.push(b.id);
+            }
+        }
+        for bid in finished {
+            self.clear_repairers(bid);
+        }
+        for bid in unfunded {
+            self.clear_repairers(bid);
+        }
+    }
+
+    /// Release every repairer assigned to building `bid`: the job
+    /// is over (the building is full, or the owner can no longer
+    /// pay for the repair) — each repairer goes idle where it
+    /// stands, mirroring how construction completion stands its
+    /// builders down.
+    fn clear_repairers(&mut self, bid: u32) {
+        for idx in 0..self.entities.len() {
+            if self.entities[idx].task == (Task::Repair { building: bid }) {
+                self.stop_task(idx);
+            }
         }
     }
 
@@ -3850,6 +4144,11 @@ impl Sim {
             h.write_i32(b.pos_x.to_bits());
             h.write_i32(b.pos_y.to_bits());
             h.write_u64(b.progress_thirds);
+            // Repair accumulators (BLD-07): fractional HP and the
+            // wood drip are state, so a repair in flight replays
+            // bit-identically.
+            h.write_u64(b.repair_hp_remainder as u64);
+            h.write_u64(b.repair_cost_remainder as u64);
             h.write_u8(u8::from(b.complete));
             match b.node_id {
                 None => h.write_u8(0),
@@ -3921,10 +4220,19 @@ impl Sim {
                         h.write_i32(x.to_bits());
                         h.write_i32(y.to_bits());
                     }
+                    QueuedOrder::Repair { building } => h.write_u32(building),
                 }
             }
             // M2: work state — task phase, assignment, carry.
             h.write_u8(e.task.tag());
+            // Repair assignment (BLD-07): written ONLY for a
+            // repair-phase entity, exactly the way the construction
+            // assignment below writes its building id when one is
+            // set — so a state with no repair in flight hashes
+            // exactly as before (the golden stream is untouched).
+            if let Task::Repair { building } = e.task {
+                h.write_u32(building);
+            }
             match e.task_node {
                 None => h.write_u8(0),
                 Some(n) => {
@@ -4372,6 +4680,8 @@ mod tests {
             pos_x: I16F16::ZERO,
             pos_y: I16F16::ZERO,
             progress_thirds: 0,
+            repair_hp_remainder: 0,
+            repair_cost_remainder: 0,
             complete: false,
             node_id: None,
             queue: Vec::new(),

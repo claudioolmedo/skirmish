@@ -37,6 +37,9 @@
 //! — the only knowledge the client may render from. `obstacles()`
 //! now means water ∪ standing trees ∪ placed buildings
 //! (MAP-03/04), so its existing consumers follow the world.
+//! Repair (BLD-07) adds: `push_repair` and its queued form
+//! `push_repair_queued` — a villager order against a placed
+//! building id, like `push_attack_building`'s shape.
 
 use wasm_bindgen::prelude::*;
 
@@ -163,6 +166,24 @@ impl WasmSim {
         if ok {
             self.inner
                 .push_command(Command::AttackBuilding { entity, building });
+        }
+        ok
+    }
+
+    /// Order a villager to repair one of its own player's placed
+    /// buildings (BLD-07): travel to the building's ring and
+    /// restore its HP at the documented flat rate (750 HP/min for
+    /// the first repairer, +375 per additional), charged as a wood
+    /// drip totaling 50% of the build cost over a full repair.
+    /// Only complete, damaged buildings of the villager's own
+    /// player are valid targets. Returns whether the order *would*
+    /// be accepted against the current state (the sim re-validates
+    /// when the command is applied).
+    pub fn push_repair(&mut self, entity: u32, building: u32) -> bool {
+        let ok = self.inner.can_repair(entity, building);
+        if ok {
+            self.inner
+                .push_command(Command::Repair { entity, building });
         }
         ok
     }
@@ -412,6 +433,13 @@ impl WasmSim {
     /// Queue an attack order behind the unit's current order.
     pub fn push_attack_queued(&mut self, entity: u32, target: u32) -> bool {
         self.push_queued(entity, QueuedOrder::Attack { target })
+    }
+
+    /// Queue a repair order behind the villager's current order
+    /// (BLD-07): the repair starts when the villager goes idle,
+    /// and re-validates fully at execution — see `push_repair`.
+    pub fn push_repair_queued(&mut self, entity: u32, building: u32) -> bool {
+        self.push_queued(entity, QueuedOrder::Repair { building })
     }
 
     /// Queue a House build behind the villager's current order. The

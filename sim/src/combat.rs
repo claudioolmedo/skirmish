@@ -873,7 +873,8 @@ impl Sim {
     }
 
     /// Remove a destroyed building (M5): free its footprint cells,
-    /// retire a farm's node with it, put its builders back to idle
+    /// retire a farm's node with it, put its builders and repairers
+    /// back to idle
     /// (a *completed* building's loss leaves its queue and rally
     /// moot — the record is gone), and clear every attacker aimed at
     /// it. Cost is not refunded (no rule grants one).
@@ -902,6 +903,15 @@ impl Sim {
             {
                 e.task = Task::Idle;
                 e.task_building = None;
+                e.task_dropoff = None;
+                e.order = None;
+                e.vel_x = I16F16::ZERO;
+                e.vel_y = I16F16::ZERO;
+            }
+            // Repairers of the fallen building (BLD-07) stand down
+            // the same way: the repair target is gone.
+            if e.task == (Task::Repair { building: bid }) {
+                e.task = Task::Idle;
                 e.task_dropoff = None;
                 e.order = None;
                 e.vel_x = I16F16::ZERO;

@@ -367,6 +367,29 @@ pub fn build_rate_thirds(builders: u32) -> u64 {
     builders as u64 + 2
 }
 
+/// Repair rate of the FIRST villager repairing a building
+/// (BLD-07): 750 HP per minute = 12.5 HP/s. Documented DE values
+/// (Fandom Villager page, Phase 0 study) — repair is a flat HP
+/// rate, independent of the building's build time or max HP; it
+/// is NOT the construction rate.
+pub const REPAIR_HP_PER_MIN_FIRST: i64 = 750;
+/// Repair rate added by each ADDITIONAL repairer (BLD-07):
+/// 375 HP per minute = 6.25 HP/s.
+pub const REPAIR_HP_PER_MIN_EXTRA: i64 = 375;
+/// Repair cost (BLD-07): restoring a building from 0 to full HP
+/// costs this fraction of its build (wood) cost, charged as a
+/// continuous drip proportional to the HP restored each tick.
+pub const REPAIR_COST_FRACTION: I16F16 = I16F16::from_bits(32_768); // 0.5
+
+/// Total repair rate in HP per minute for `repairers` villagers
+/// (≥ 1) working the same building: 750 + 375·(n − 1)
+/// = 375·(n + 1) HP/min — the first repairer works at the full
+/// rate, every additional one at half of it (BLD-07).
+pub fn repair_rate_hp_per_min(repairers: u32) -> i64 {
+    debug_assert!(repairers >= 1);
+    REPAIR_HP_PER_MIN_FIRST + REPAIR_HP_PER_MIN_EXTRA * (repairers as i64 - 1)
+}
+
 /// One placed building, under construction or complete. Position is the
 /// footprint's center in world coordinates; `cell_x`/`cell_y` are the
 /// anchor (minimum) cell of the footprint.
@@ -396,6 +419,24 @@ pub struct Building {
     /// build). The building is non-functional until
     /// `progress_thirds >= kind.build_thirds()`.
     pub progress_thirds: u64,
+    /// Repair fractional-HP accumulator (BLD-07): repair restores
+    /// HP at a flat per-minute rate that does not divide evenly
+    /// into per-tick fixed-point bits, so the sub-bit remainder is
+    /// carried here — each repair tick adds
+    /// `rate_hp_per_min × 65536` to a conceptual accumulator whose
+    /// quotient over 3600 (ticks per minute) is the HP bits
+    /// restored; this field holds that accumulator's remainder
+    /// (0 ≤ r < 3600, in bits-per-minute units). Reset to 0 when
+    /// the building reaches full HP. Part of the hashed state.
+    pub repair_hp_remainder: i64,
+    /// Repair wood-drip accumulator (BLD-07): the per-tick wood
+    /// charge is `wood_cost × REPAIR_COST_FRACTION × restored /
+    /// max_hp`, accumulated in numerator form over the denominator
+    /// `max_hp_bits × 65536` so the drip totals exactly the
+    /// fraction of the build cost over a full repair (to < 1 bit);
+    /// this field holds the numerator remainder. Reset to 0 when
+    /// the building reaches full HP. Part of the hashed state.
+    pub repair_cost_remainder: i64,
     pub complete: bool,
     /// For a completed Farm: the resource node it became. The building
     /// record stays as the footprint registry until the node depletes,
@@ -612,6 +653,21 @@ mod tests {
     }
 
     #[test]
+    fn repair_numbers_are_the_documented_de_values() {
+        // BLD-07 (Fandom Villager page, Phase 0 study): the first
+        // repairer restores 750 HP/min, each additional +375 —
+        // 375·(n + 1) in total; a full 0→100% repair costs 50% of
+        // the build cost.
+        assert_eq!(REPAIR_HP_PER_MIN_FIRST, 750);
+        assert_eq!(REPAIR_HP_PER_MIN_EXTRA, 375);
+        assert_eq!(repair_rate_hp_per_min(1), 750);
+        assert_eq!(repair_rate_hp_per_min(2), 1125);
+        assert_eq!(repair_rate_hp_per_min(3), 1500);
+        assert_eq!(repair_rate_hp_per_min(4), 1875);
+        assert_eq!(REPAIR_COST_FRACTION.to_bits(), 32_768); // 0.5
+    }
+
+    #[test]
     fn progress_fraction_is_measured_in_thirds() {
         let mut b = Building {
             id: 0,
@@ -623,6 +679,8 @@ mod tests {
             pos_x: I16F16::ZERO,
             pos_y: I16F16::ZERO,
             progress_thirds: 0,
+            repair_hp_remainder: 0,
+            repair_cost_remainder: 0,
             complete: false,
             node_id: None,
             queue: Vec::new(),

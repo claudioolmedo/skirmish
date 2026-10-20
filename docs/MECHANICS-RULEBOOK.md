@@ -907,11 +907,21 @@ of those rates. Town Center exception: a full TC repair costs 550 wood
 and no stone, whatever the formula says. Treadmill Crane does not speed
 repair.
 *Source:* wiki, Villager (Age of Empires II) — repair section (rates,
-cost model, TC exception). · *Impl:* repair is a villager task phase like
-Gathering: per-tick HP restore + proportional multi-resource deduction
-(fixed-point accumulators so the 50%-of-cost curve holds exactly over the
-whole repair); the TC cost override is one data row. · *Status:*
-**MISSING** (GAP 2.16).
+cost model, TC exception). · *Impl:* shipped 2026-10-19 for placed
+buildings (see BLD-17 for the implementation rule): a villager task
+phase (`Task::Repair`) mirroring construction's assignment and
+approach; per-tick HP restore at 750 HP/min for the first repairer
+plus 375 HP/min per additional one (`REPAIR_HP_PER_MIN_FIRST` /
+`REPAIR_HP_PER_MIN_EXTRA` in `build.rs`), with a proportional wood
+drip (`REPAIR_COST_FRACTION` = 50% of the build cost over a full
+repair; our buildings cost wood only) — both accumulated in
+fixed point on the building record so the totals hold exactly;
+repairers stop and stand idle when a tick's drip is unaffordable.
+Ships and siege do not exist yet; the Town Center is an entity in
+our architecture, not a placed building, so TC repair and its
+550-wood exception are out of scope. · *Status:* **DIFFERS**
+(placed buildings match; ships/siege and the TC exception not
+implemented).
 
 **BLD-08 — Population support.** Completed buildings add population room:
 House +5, Town Center +5, Castle +20. Losing the building removes the
@@ -1010,6 +1020,47 @@ against placement, both players'; pinned by
 `sim/tests/tc_footprint.rs` (crossing, deposit, rejection,
 adjacency). The client's selection/hit-test box matches the 4×4
 (TC_HALF = 8 world units). · *Status:* **MATCHES**.
+
+**BLD-17 — Repair as implemented (the BLD-07 mechanics in the
+sim).** A villager ordered to repair travels to the building's
+ring exactly like a builder (same approach, same in-range test)
+and then restores HP at the flat documented rate: 750 HP/min for
+the first repairer, +375 HP/min for each additional one —
+375·(n + 1) HP/min in total, independent of the building's build
+time and max HP (repair is NOT construction run in reverse, and
+does not use the multi-builder formula of BLD-04). The cost is
+`REPAIR_COST_FRACTION` = 50% of the building's build cost for a
+full 0→100% repair, charged to the owner's stockpile as a
+continuous drip proportional to the HP restored each tick, for
+HP actually restored only (restoration caps exactly at max HP;
+completion releases every repairer). Valid targets are only the
+repairer's own player's *complete, damaged* placed buildings:
+enemy and Gaia buildings, undamaged/full buildings, and
+foundations under construction are ignored (a foundation is
+resumed via Build); the scripted AI never issues repair. If the
+owner cannot cover a tick's drip, that tick restores nothing and
+the building's repairers stop and stand idle. A repairer pulled
+away (new order, death) or whose building is destroyed leaves
+the task cleanly, as builders do; the queued (Shift+click) form
+exists and re-validates at execution.
+*Source:* BLD-07 (Fandom Villager page — rates, cost model,
+stop-on-empty behavior). · *Impl:* shipped 2026-10-19 —
+`Command::Repair` + `QueuedOrder::Repair`, the `Task::Repair`
+phase carrying its building (hashed like the construction
+assignment), `repair_tick` immediately after `construction_tick`,
+fixed-point HP and cost accumulators on the building record
+(`repair_hp_remainder` / `repair_cost_remainder`, both hashed);
+pinned by `sim/tests/repair.rs` (rate, stacking, drip total,
+rejections, wood-exhaustion stop, queued form). Scope divergence
+from BLD-07: placed buildings only — ships and siege do not
+exist yet, and the Town Center is an entity in our architecture
+rather than a placed building, so TC repair (and its 550-wood
+exception) is out of scope, not implemented. The golden hash is
+unchanged: no field is hashed for a state with no repair in
+flight and no buildings standing. · *Status:* **DIFFERS**
+(placed-building rate, cost and stop behavior match the
+documented values; scope is buildings-only, pending
+verification of the in-game feel against the reference).
 
 ---
 
@@ -2335,11 +2386,13 @@ side sampling of public data). · *Status:* **MISSING**.
 
 ## A. Rule counts
 
-214 rules total. Counts verified mechanically against the status tags in
+215 rules total. Counts verified mechanically against the status tags in
 this document (2026-10-18, M8 audit; re-verified for M9 the same day —
 the open-games lobby changed no status, see the M9 note in section B;
 updated 2026-10-19 for BLD-16, the Town Center footprint rule —
-§7 gains one rule, one MATCHES).
+§7 gains one rule, one MATCHES; updated 2026-10-19 for BLD-17,
+repair — §7 gains one rule, one DIFFERS, and BLD-07 moves
+MISSING → DIFFERS).
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
@@ -2349,7 +2402,7 @@ updated 2026-10-19 for BLD-16, the Town Center footprint rule —
 | 4 | Selection & orders (SEL) | 16 | 12 | 3 | 1 |
 | 5 | Movement, pathfinding & collision (MOV) | 12 | 3 | 4 | 5 |
 | 6 | Economy & drop-off (ECO) | 17 | 13 | 2 | 2 |
-| 7 | Buildings & placement (BLD) | 16 | 9 | 4 | 3 |
+| 7 | Buildings & placement (BLD) | 17 | 9 | 6 | 2 |
 | 8 | Combat & damage (CMB) | 16 | 10 | 3 | 3 |
 | 9 | Projectiles & ballistics (PRJ) | 10 | 4 | 4 | 2 |
 | 10 | Unit classes & counters (CLS) | 8 | 5 | 0 | 3 |
@@ -2361,7 +2414,7 @@ updated 2026-10-19 for BLD-16, the Town Center footprint rule —
 | 16 | Victory, scoring & game modes (VIC) | 12 | 0 | 1 | 11 |
 | 17 | Multiplayer determinism (NET) | 11 | 4 | 5 | 2 |
 | 18 | Information rules (INF) | 11 | 2 | 4 | 5 |
-| | **Total** | **214** | **94** | **44** | **76** |
+| | **Total** | **215** | **94** | **46** | **75** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer
@@ -2472,6 +2525,19 @@ players'. No other rule's status changed; section A's counts are
 updated for the one new rule (214 total, 94 MATCHES). The golden
 hash is unchanged — the reservation runs only inside build
 validation.
+
+**Repair (2026-10-19).** BLD-17 shipped, and BLD-07 re-audited
+from MISSING to DIFFERS: villagers repair their own complete,
+damaged placed buildings at the documented flat rate (750 HP/min
+first repairer, +375 HP/min each additional) for a drip totaling
+50% of the build cost over a full repair, stopping idle when the
+owner cannot pay; the queued form and the lockstep wire case
+landed with it, and the scripted AI never repairs. Section A's
+counts are updated for the one new rule and the one status move
+(215 total, 94 MATCHES, 46 DIFFERS, 75 MISSING). The golden hash
+is unchanged — repair state is hashed only when a repair is in
+flight or a building stands. Town Center repair stays out of
+scope (the TC is an entity, not a placed building).
 
 Cross-cutting at every milestone: NET-05/06 discipline (no local factor
 in the sim; RNG only in fixed iteration) and VIS-09 (fog hides
