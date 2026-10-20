@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Play Skirmish II
+    url: https://skirmish.online/play/
+    about: The game itself — no install, no account. Feedback from a real match is worth ten guesses.
+  - name: The mechanics rulebook
+    url: https://github.com/claudioolmedo/skirmish/blob/main/docs/MECHANICS-RULEBOOK.md
+    about: Every rule of the game, with its status vs Age of Empires II DE (MATCHES / DIFFERS / MISSING). Fidelity reports cite rule IDs from here.

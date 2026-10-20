@@ -99,6 +99,8 @@ down, rule by rule, so anyone can pick it up:
 - [docs/SUSTAINABILITY.md](docs/SUSTAINABILITY.md) — the self-sustaining
   system: how the game funds and maintains itself for the long term
 - [CONTRIBUTING.md](CONTRIBUTING.md) — how to build, test, and submit
+- [docs/CONTRIBUTORS-SYSTEM.md](docs/CONTRIBUTORS-SYSTEM.md) — how to
+  claim an issue, what we promise back, and how contributors get credited
 
 ## License
 

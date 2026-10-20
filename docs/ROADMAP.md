@@ -343,7 +343,12 @@ for each ID gives the exact behavior and an implementation note.
 
 *The first batch below all landed in M4 (2026-10-16) — kept as a record of
 what a good first contribution looks like here. New candidates are gathered
-from the rulebook's DIFFERS/MISSING entries as issues are opened.*
+from the rulebook's DIFFERS/MISSING entries as issues are opened — the live,
+claimable list is the
+[`good first issue`](https://github.com/claudioolmedo/skirmish/labels/good%20first%20issue)
+label on GitHub. Comment on an issue to claim it (first come, first
+served); the flow is described in
+[docs/CONTRIBUTORS-SYSTEM.md](CONTRIBUTORS-SYSTEM.md).*
 
 | Rule | What was built | Scope note |
 |------|---------------|------------|

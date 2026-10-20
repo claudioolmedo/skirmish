@@ -7,6 +7,37 @@ shortlist of good first contributions. Every missing mechanic has a rule
 ID in the [Mechanics Rulebook](docs/MECHANICS-RULEBOOK.md) — pick one and
 build exactly that.
 
+## The first law — the game is chess
+
+**Nobody changes the rules of the game.** Not the maintainer, not a
+contributor, not by accident and not "as an improvement". Skirmish II's
+mechanics are finished the way chess's mechanics are finished: the
+design target is Age of Empires II: Definitive Edition's documented
+behavior, and every contribution converges **toward** that — never away
+from it, never past it, and never into a new variant, mode, or balance
+of our own invention.
+
+Concretely, the work that is accepted here:
+
+- **Bug fixes** — the game does not do what its own rules say.
+- **Fidelity gaps closed toward DE** — a rulebook entry marked DIFFERS or
+  MISSING, implemented to match DE behavior **cited from public evidence**
+  (community wiki, published guides, video timestamps — the
+  *Fidelity report* issue template shows the format).
+- **Art** toward the sprite standard in
+  [docs/SPRITE-PIPELINE.md](docs/SPRITE-PIPELINE.md).
+- **Docs, tests, and infrastructure** — including correcting the docs
+  when they drift from the shipped game.
+
+And the work that is **closed**, politely and with a pointer back to
+this section: proposals to rebalance a unit or cost, add a mechanic or
+mode, "improve" a rule, or fork the game into a variant. This is not a
+judgment on the idea — it is the project's reason to exist. A rule may
+only move when public evidence shows DE behaves differently from what
+we implemented; then the fix is to match DE exactly, no more and no
+less. The pull request template carries the same gate as a mandatory
+checkbox.
+
 ## Repository layout
 
 - `sim/` — the deterministic simulation (pure Rust, no rendering, no I/O)
@@ -96,4 +127,37 @@ Skirmish II is an original implementation inspired by a classic game:
    published by the maintainer.
 
 Not sure where to start? The "Good first contributions" table in
-[docs/ROADMAP.md](docs/ROADMAP.md) is maintained exactly for that.
+[docs/ROADMAP.md](docs/ROADMAP.md) is maintained exactly for that, and
+the ready-to-claim tasks live on GitHub under the
+[`good first issue`](https://github.com/claudioolmedo/skirmish/labels/good%20first%20issue)
+label.
+
+## How contributions are managed
+
+The full system is documented in
+[docs/CONTRIBUTORS-SYSTEM.md](docs/CONTRIBUTORS-SYSTEM.md); the short
+version:
+
+- **Claim before you build.** Comment on an issue ("I'd like to work on
+  this") and wait to be assigned — first come, first served. One active
+  claim per person keeps the queue fair. Once assigned, you have about
+  **two weeks** to open a PR (a draft PR counts — it shows the work is
+  alive). No PR in that window and no word from you, and the issue frees
+  up for the next person. Life happens: a comment asking for more time
+  almost always gets it.
+- **What we promise back.** Every new issue and PR is surfaced to the
+  maintainer by an automated daily digest, and we aim to give a **triage
+  reply within a day** — a label, a clarifying question, or a claim
+  assignment. PR reviews aim for a few days. If a PR cannot land, we say
+  why in the open, on the PR.
+- **The gate is the gate.** PRs that change a rule, a balance value, or
+  a mechanic without cited DE evidence are closed under the first law
+  above — see the pull request template.
+- **Credit.** Contributors are credited in the README and in release
+  notes for the milestones their work lands in. Land **3 merged PRs**
+  and you are listed as a contributor in the site footer credits on
+  skirmish.online. (Standing policy — see
+  [docs/CONTRIBUTORS-SYSTEM.md](docs/CONTRIBUTORS-SYSTEM.md).)
+- **Conduct.** Participation is covered by the
+  [Code of Conduct](CODE_OF_CONDUCT.md). Be kind; we're all here
+  because we love this game.
