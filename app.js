@@ -138,6 +138,25 @@ const endDetail = document.getElementById('end-detail');
 const endRestartBtn = document.getElementById('end-restart-btn');
 const endMenuBtn = document.getElementById('end-menu-btn');
 const modeInputs = document.querySelectorAll('input[name="match-mode"]');
+// End-of-match feedback block (2026-10-19): refs + state. The
+// send goes to the relay's /feedback; once it succeeds the form
+// never shows again (localStorage skirmish2.feedbackDone) — the
+// GitHub star line stays. The ✕ hides the block for the rest of
+// the page session only.
+const feedbackBlock = document.getElementById('end-feedback');
+const feedbackForm = document.getElementById('feedback-form');
+const feedbackQuestion = document.getElementById('feedback-q');
+const feedbackStarsEl = document.getElementById('feedback-stars');
+const feedbackText = document.getElementById('feedback-text');
+const feedbackError = document.getElementById('feedback-error');
+const feedbackThanks = document.getElementById('feedback-thanks');
+const feedbackSendBtn = document.getElementById('feedback-send');
+const feedbackCloseBtn = document.getElementById('feedback-close');
+const feedbackStarBtns = [1, 2, 3, 4, 5]
+  .map((n) => document.getElementById(`feedback-star-${n}`));
+let feedbackStars = 0; // 0 = no rating chosen
+let feedbackCtx = null; // { result, durationTicks } of the ended match
+let feedbackDismissed = false; // session-only (the ✕)
 
 const COLORS = [
   '#e74c3c', '#3498db', '#2ecc71', '#f1c40f',
@@ -374,7 +393,92 @@ function showMatchEnd(ms) {
   endDetail.textContent = ms === 1
     ? t('end.detailVictory', { time: `${mm}:${ss}` })
     : t('end.detailDefeat', { time: `${mm}:${ss}` });
+  feedbackCtx = {
+    result: ms === 1 ? 'victory' : 'defeat',
+    durationTicks: sim.tick_count(),
+  };
+  renderEndFeedback();
   endOverlay.style.display = 'flex';
+}
+
+/// Paint the feedback block for a freshly ended match: hidden
+/// for the session after the ✕; the bare GitHub star line once
+/// feedback was sent in a past session; otherwise the form, with
+/// any unsent text kept (a failed send must never eat it).
+function renderEndFeedback() {
+  if (!feedbackBlock) return;
+  feedbackBlock.style.display = feedbackDismissed ? 'none' : '';
+  let done = false;
+  try {
+    done = localStorage.getItem('skirmish2.feedbackDone') === '1';
+  } catch { /* storage unavailable — treat as not sent */ }
+  if (feedbackForm) feedbackForm.style.display = done ? 'none' : '';
+  if (!done) {
+    // Undo a previous thanks state (reachable when the send
+    // succeeded but localStorage refused the flag).
+    if (feedbackQuestion) feedbackQuestion.hidden = false;
+    if (feedbackStarsEl) feedbackStarsEl.hidden = false;
+    if (feedbackText) feedbackText.hidden = false;
+    if (feedbackSendBtn) feedbackSendBtn.hidden = false;
+  }
+  if (feedbackError) feedbackError.hidden = true;
+  if (feedbackThanks) feedbackThanks.hidden = true;
+  if (feedbackSendBtn) feedbackSendBtn.disabled = false;
+  paintFeedbackStars();
+}
+
+function paintFeedbackStars() {
+  feedbackStarBtns.forEach((btn, i) => {
+    if (!btn) return;
+    const on = i < feedbackStars;
+    btn.textContent = on ? '★' : '☆';
+    btn.classList.toggle('lit', on);
+  });
+}
+
+function setFeedbackStars(n) {
+  feedbackStars = n;
+  paintFeedbackStars();
+}
+
+/// POST the feedback to the relay. Fire-and-forget by design:
+/// success swaps the form for a thanks line and retires it for
+/// good; failure keeps the text and says so quietly. The end
+/// card's own buttons never wait on this.
+async function sendFeedback() {
+  if (!feedbackCtx || feedbackSendBtn.disabled) return;
+  feedbackSendBtn.disabled = true;
+  if (feedbackError) feedbackError.hidden = true;
+  const payload = {
+    stars: feedbackStars > 0 ? feedbackStars : null,
+    text: feedbackText ? feedbackText.value.slice(0, 1000) : '',
+    result: feedbackCtx.result,
+    durationTicks: feedbackCtx.durationTicks,
+    buildVersion: BUILD_VERSION,
+  };
+  try {
+    const resp = await fetch(RELAY_HTTP + '/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!resp || !resp.ok) throw new Error('rejected');
+    try {
+      localStorage.setItem('skirmish2.feedbackDone', '1');
+    } catch { /* the thanks state below still applies */ }
+    // The thanks state: the form's inputs retire, the line stays.
+    if (feedbackQuestion) feedbackQuestion.hidden = true;
+    if (feedbackStarsEl) feedbackStarsEl.hidden = true;
+    if (feedbackText) feedbackText.hidden = true;
+    if (feedbackSendBtn) feedbackSendBtn.hidden = true;
+    if (feedbackThanks) feedbackThanks.hidden = false;
+  } catch {
+    if (feedbackError) {
+      feedbackError.textContent = "Couldn't send just now — your text is still here. Please try again.";
+      feedbackError.hidden = false;
+    }
+    if (feedbackSendBtn) feedbackSendBtn.disabled = false;
+  }
 }
 let lDrag = null; // left-button drag state, canvas px: { x0, y0, x1, y1, moved }
 let placement = null; // { kind } while placing a building
@@ -3863,6 +3967,20 @@ async function main() {
     playing = true;
     setPaused(true);
   });
+
+  // End-of-match feedback: stars paint on click, Send posts to
+  // the relay (sendFeedback owns the thanks/error states), and
+  // the ✕ hides the block for the rest of the page session.
+  feedbackStarBtns.forEach((btn, i) => {
+    if (btn) btn.addEventListener('click', () => setFeedbackStars(i + 1));
+  });
+  if (feedbackSendBtn) feedbackSendBtn.addEventListener('click', () => { sendFeedback(); });
+  if (feedbackCloseBtn) {
+    feedbackCloseBtn.addEventListener('click', () => {
+      feedbackDismissed = true;
+      if (feedbackBlock) feedbackBlock.style.display = 'none';
+    });
+  }
 
   // --- M8 wiring: lobby, online menu entries, replay ----------------
   netUi = {
