@@ -240,3 +240,52 @@ structure before fitting). The winning prompt is recorded in
 `PROMPTS.md` ("TOWN CENTER HORSESHOE — EMPTY GROUND + UPPER
 WALLS"). Iteration 4's winner X is backed up as
 `town-center-horseshoe-v3-backup.png` in the staging area.
+
+Iteration 6 (2026-10-19, Claudio's verdict on iteration 5:
+"Ótimo" — with two literal corrections: "o chão é transparente"
+and "o primeiro andar também tem que ter a mesma proporção para
+alguém estar nele"): **the ground is now TRANSPARENT** — the
+sprite paints no ground whatsoever: inside the 4×4 footprint
+every pixel is either structure or alpha (no dirt diamond, no
+apron, no painted contact shadow; the posts simply end at the
+ground line and the game's terrain renders beneath) — and
+**the upper floor is person-scaled**: its wall band (top of the
+elevated floor slab to the eaves) must itself measure
+≈1.20–1.35× the villager, so a person plausibly stands inside
+that floor. Winner BB4: geometry-first blockout
+(`tc_blockout8.py` — same horseshoe plan and posts; the
+blockout's ground is flat magenta with a guide outline only,
+and its wall band is deliberately over-drawn at 1.52 z because
+the generator compresses the band to ~0.7–0.85 of the drawn
+ratio, the same failure family as the flattened roof pitches),
+the iteration-5 restyle prompt plus a TRANSPARENT GROUND
+paragraph and TALLEST-ELEMENT wall wording, fitted with a
+post-base landmark affine (there is no dirt diamond left to
+ground on: the leftmost/rightmost post bases and one hero post
+base are the landmarks) and a final ×1.10 vertical proportion
+stretch about the equator. Measured on the final fitted art
+against the 73px game-scale villager (judged on
+`tc-lock6-judge.png`, composited over the game's grass):
+**wall band 1.23–1.32×** (90px on the left face, 96px at the
+front corner — inside the 1.20–1.35 band; judge panel (c) is
+the proof: a villager standing ON the elevated deck beside the
+wall, head below the eaves with headroom), **undercroft
+≈1.23×** (a hair under the 1.25 floor of its band),
+**ridge 3.33×** and **turret 3.70×** — both over their old
+bands, disclosed: undercroft + slab + a person-scaled wall +
+roof cannot also keep the old roof numbers, and Claudio's
+proportion rules win. **Alpha audit** of the fitted sprite
+(canonical diamond = 52,441 px): 64.8% transparent, 35.2%
+structure (posts, deck, walls, roofs), **ground-fill pixels:
+ZERO** — verified by masking the fitted art against the warped
+blockout's structure: the generator painted 19 stray px
+outside the structure mask and the pipeline removed them; any
+painted earth or ground shadow is removed the same way.
+Rejected: AA2 (sheds floored on raised plank platforms), BB3
+(windows became open arches with a visible interior floor —
+the loggia failure — and its turret a brick chimney), BB2
+(cloths hanging into the sheds), BB1 (wall band 0.91×,
+door-like shutter windows, invented chimney), AA1/AA3/AA4
+(wall bands 0.98×/0.86×/0.97× — batch 1, before the over-draw).
+Iteration 5's winner Z1 is backed up as
+`town-center-horseshoe-v4-backup.png` in the staging area.
