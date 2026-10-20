@@ -665,8 +665,10 @@ impl Sim {
     /// One building-attacker's tick (M5): the `attack_step`
     /// counterpart for placed buildings. Range is measured to the
     /// footprint's edge (the nearest point of its rectangle), chase
-    /// targets a ring cell beside the footprint — its center is
-    /// solid ground a unit can never stand on — and strikes follow
+    /// targets a stand point just off the footprint's edge — its
+    /// center is solid ground a unit can never stand on, and a ring
+    /// cell's center can sit beyond melee reach of the edge (see
+    /// `building_approach_point`) — and strikes follow
     /// the same delay/reload discipline as entity combat (CMB-04/05).
     fn attack_building_step(&mut self, idx: usize) {
         let tick = self.tick;
@@ -766,11 +768,28 @@ impl Sim {
     }
 
     /// The standing spot for attacking the footprint anchored at
-    /// `(ax, ay)`: the first ring cell (fixed order) that is open and
-    /// reachable from the attacker's position — the same search the
-    /// builder approach uses (see `Sim::approach_point`, which serves
-    /// construction; kept separate so neither path's semantics drift
-    /// into the other).
+    /// `(ax, ay)`: a point STAND_OFF (1.0) outside the footprint's
+    /// edge, on the edge-normal through a ring cell's center —
+    /// never the ring cell's center itself. A ring *corner* cell's
+    /// center sits ~2.83 from the edge on the diagonal, and
+    /// steering's arrival shortfall (a waypoint counts as reached
+    /// up to 1.0 early) stranded attackers up to ~3.8 from the
+    /// edge — beyond MELEE_REACH — while combat re-issued the
+    /// identical approach forever (probed: 40 000 ticks, zero
+    /// damage). Aiming 1.0 off the edge absorbs the whole
+    /// shortfall with margin to spare: arrival ends ≤ 2.0 from
+    /// the edge from every direction, for every footprint size.
+    ///
+    /// The candidate nearest the *attacker* wins (ties break in
+    /// ring order), so a unit no longer walks around the building
+    /// to a fixed corner; a spot another living unit is already
+    /// standing on is skipped while a free one paths, so a group
+    /// spreads around the perimeter instead of piling onto one
+    /// point — occupied spots remain as a fallback for a crowd
+    /// larger than the perimeter. The first candidate (in that
+    /// preference order) whose stand point is standable and
+    /// reachable from the attacker wins; `None` when no ring spot
+    /// is reachable at all (an enclosed building).
     fn building_approach_point(
         &self,
         idx: usize,
@@ -778,17 +797,64 @@ impl Sim {
         ay: u32,
         size: u32,
     ) -> Option<(I16F16, I16F16)> {
+        /// How far outside the footprint edge the attacker aims
+        /// to stand (see the doc above).
+        const STAND_OFF: I16F16 = I16F16::from_bits(65_536); // 1.0
+        /// A stand point this close to another living unit's
+        /// center counts as taken (units rest ~2.0 apart under
+        /// separation): groups take the next spot along.
+        const OCCUPIED: I16F16 = I16F16::from_bits(98_304); // 1.5
+
         let from = (self.entities[idx].pos_x, self.entities[idx].pos_y);
-        for (cx, cy) in crate::build::ring_cells(ax, ay, size) {
+        let attacker_id = self.entities[idx].id;
+        let (bx, by) = crate::build::footprint_center(ax, ay, size);
+        let half = I16F16::from_num(size as i32 * 2);
+        // (distance² to the attacker, ring order, stand point,
+        // occupied) — sorted by the first two for a deterministic
+        // preference order.
+        let mut candidates: Vec<(i64, usize, I16F16, I16F16, bool)> = Vec::new();
+        for (order, (cx, cy)) in crate::build::ring_cells(ax, ay, size).iter().enumerate() {
+            let (cx, cy) = (*cx, *cy);
             if cx >= crate::GRID_DIM || cy >= crate::GRID_DIM {
                 continue;
             }
-            if self.grid.is_blocked(cx, cy) {
+            let center = self.grid.cell_center(cx, cy);
+            // The edge point nearest this cell's center, and the
+            // outward direction from it: axis-aligned for edge
+            // cells, diagonal for corner cells.
+            let ex = (center.0 - bx).clamp(-half, half) + bx;
+            let ey = (center.1 - by).clamp(-half, half) + by;
+            let (dx, dy) = (center.0 - ex, center.1 - ey);
+            let len = steer::vec_len(dx, dy);
+            if len == I16F16::ZERO {
+                continue; // cannot happen: ring centers lie outside the rect
+            }
+            let stand = (ex + dx / len * STAND_OFF, ey + dy / len * STAND_OFF);
+            let cell = self.grid.world_to_cell(stand.0, stand.1);
+            if self.grid.is_blocked(cell.0, cell.1) {
                 continue;
             }
-            let center = self.grid.cell_center(cx, cy);
-            if self.grid.find_path(from, center).is_some() {
-                return Some(center);
+            let occupied = self.entities.iter().any(|u| {
+                u.id != attacker_id
+                    && !u.dead
+                    && u.kind.is_mobile()
+                    && steer::vec_len(u.pos_x - stand.0, u.pos_y - stand.1) <= OCCUPIED
+            });
+            let d = steer::vec_len(stand.0 - from.0, stand.1 - from.1).to_bits() as i64;
+            candidates.push((d * d, order, stand.0, stand.1, occupied));
+        }
+        candidates.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+        // Free spots first; occupied ones only when no free spot
+        // paths (a crowd larger than the perimeter still closes
+        // in behind the front rank).
+        for want_occupied in [false, true] {
+            for &(_, _, sx, sy, occupied) in &candidates {
+                if occupied != want_occupied {
+                    continue;
+                }
+                if self.grid.find_path(from, (sx, sy)).is_some() {
+                    return Some((sx, sy));
+                }
             }
         }
         None
