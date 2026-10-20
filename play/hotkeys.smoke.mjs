@@ -357,7 +357,7 @@ const cmdIds = () => cmdButtons().map((b) => b.id);
 const cmdBtn = (id) => cmdButtons().find((b) => b.id === id);
 // The DE page model (UI FIX 4 addendum): root = the two openers;
 // a page = its buildings + Back in the last slot.
-const ROOT_IDS = ['page-eco', 'page-mil'];
+const ROOT_IDS = ['page-eco', 'page-mil', 'repair']; // + Repair (BLD-17, third slot)
 const ECO_IDS = ['build-0', 'build-4', 'build-1', 'build-3', 'build-5', 'page-back'];
 const MIL_IDS = ['build-2', 'build-6', 'build-7', 'build-8', 'page-back'];
 
@@ -371,11 +371,13 @@ pump(3);
 // placement back onto the page, a second Esc returns to root.
 key('Period');
 pump(2);
-assert.deepEqual(cmdIds(), ROOT_IDS, 'villager selected: the root page — two openers only');
+assert.deepEqual(cmdIds(), ROOT_IDS, 'villager selected: the root page — two openers + Repair');
 assert.ok(cmdBtn('page-eco').innerHTML.includes('<span class="cmd-key">Q</span>'),
   'the Economic opener is badged Q');
 assert.ok(cmdBtn('page-mil').innerHTML.includes('<span class="cmd-key">W</span>'),
   'the Military opener is badged W');
+assert.ok(cmdBtn('repair').innerHTML.includes('<span class=\"cmd-key\">E</span>'),
+  'the Repair button is badged E (BLD-17)');
 
 key('KeyQ');
 assert.deepEqual(cmdIds(), ECO_IDS, 'Q arms the economic page — its five buildings + Back');

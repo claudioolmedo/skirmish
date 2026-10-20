@@ -50,7 +50,7 @@ test('military page: slot letters Q W E / A, Back on C, silent aliases', () => {
 test('an armed page swallows its letters; other letters fall through', () => {
   assert.equal(build({ page: 'eco', code: 'KeyD' }), null, 'D still pans');
   assert.equal(build({ page: 'mil', code: 'KeyR' }), null);
-  assert.equal(build({ code: 'KeyE' }), null, 'unarmed E is not ours');
+  assert.deepEqual(build({ code: 'KeyE' }), { type: 'button', id: 'repair' }, 'unarmed E is Repair (BLD-17, the root panel’s third slot)');
   assert.equal(build({ code: 'KeyS' }), null, 'unarmed S still pans');
 });
 

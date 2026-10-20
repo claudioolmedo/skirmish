@@ -119,6 +119,7 @@ export function validateCommand(c) {
     case 'gather': return isInt(c.e) && isInt(c.n);
     case 'attack': return isInt(c.e) && isInt(c.tg);
     case 'attackb': return isInt(c.e) && isInt(c.b);
+    case 'repair': return isInt(c.e) && isInt(c.b);
     case 'build': return isInt(c.e) && isInt(c.k) && c.k <= 8 && isNum(c.x) && isNum(c.y);
     case 'train_at': return isInt(c.b) && (c.k === 2 || c.k === 3 || c.k === 4);
     case 'train_vil': return true;
@@ -150,6 +151,9 @@ export function applyCommand(sim, cmd, owner, tcOf) {
       ? sim.push_attack_queued(cmd.e, cmd.tg)
       : sim.push_attack(cmd.e, cmd.tg);
     case 'attackb': return sim.push_attack_building(cmd.e, cmd.b);
+    case 'repair': return cmd.q
+      ? sim.push_repair_queued(cmd.e, cmd.b)
+      : sim.push_repair(cmd.e, cmd.b);
     case 'build': return cmd.q
       ? sim[BUILD_FNS_QUEUED[cmd.k]](cmd.e, cmd.x, cmd.y)
       : sim[BUILD_FNS[cmd.k]](cmd.e, cmd.x, cmd.y);

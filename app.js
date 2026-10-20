@@ -346,6 +346,7 @@ function showMatchEnd(ms) {
 }
 let lDrag = null; // left-button drag state, canvas px: { x0, y0, x1, y1, moved }
 let placement = null; // { kind } while placing a building
+let repairArm = false; // Repair targeting armed (villager root panel, E)
 // M13 hotkey state (client-only, like placement): the armed
 // villager build page ('eco' | 'mil' | null), the go-to cycle
 // memory (building kind -> last id handed out), and the building
@@ -739,6 +740,138 @@ function whenUnitArtSettled() {
   return UNIT_ART.settledPromise || Promise.resolve();
 }
 
+// --- Directional sprite sheets (ours — sprite pipeline, §10) --------
+// The directional milestone: sheets rendered from the procedural
+// models in tools/sprite-pipeline/models/ — rows = 8 facing
+// directions (row 0 faces +X world, increasing toward +Y, the same
+// quantization updateVilAnim uses), columns = frames, cell/anchor
+// per unit below, drawn at the pipeline's 1.35 readability scale.
+// These sheets sit ABOVE the generated side-view sets (UNIT_ART /
+// ANIMAL_ART) in every draw chain; the side-view sets remain the
+// fallback beneath them. Player color: sheets with a -pcmask twin
+// (mask gray = the posterized shade of the player-color pixels)
+// get a true palette-remapped red variant at load (buildMaskRed) —
+// the reference engine's palette-remap mechanism, with PNGs.
+const DIR_ART_SPEC = {
+  archer: { states: ['idle', 'walk', 'shoot'], cell: 128, ax: 64, ay: 110, mask: true },
+  militia: { states: ['idle', 'walk', 'attack'], cell: 128, ax: 64, ay: 110, mask: true },
+  maa: { states: ['idle', 'walk', 'attack'], cell: 128, ax: 64, ay: 110, mask: true },
+  scout: { states: ['idle', 'gallop'], cell: 160, ax: 80, ay: 138, mask: true },
+  sheep: { states: ['idle', 'walk', 'graze'], cell: 128, ax: 64, ay: 110, mask: false },
+  boar: { states: ['idle', 'walk', 'graze'], cell: 128, ax: 64, ay: 110, mask: false },
+  deer: { states: ['idle', 'walk', 'graze'], cell: 128, ax: 64, ay: 110, mask: false },
+};
+const DIR_ART = { img: {}, mask: {}, red: {}, settled: {}, loaded: false, settledPromise: null };
+const DIR_PC_RED = [0xd2, 0x34, 0x2c]; // red player's base (blue #2e6fd8 is native)
+
+// The red variant of a sheet from its player-color mask: masked
+// pixels become the red base at the mask's shade; everything else
+// copies the color sheet untouched. Null when shapes disagree.
+function buildMaskRed(img, mask) {
+  const w = img.naturalWidth, h = img.naturalHeight;
+  if (!w || !mask || mask.naturalWidth !== w || mask.naturalHeight !== h) return null;
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const g = c.getContext('2d');
+  g.drawImage(img, 0, 0);
+  const mc = document.createElement('canvas');
+  mc.width = w; mc.height = h;
+  const mg = mc.getContext('2d');
+  mg.drawImage(mask, 0, 0);
+  const id = g.getImageData(0, 0, w, h);
+  const md = mg.getImageData(0, 0, w, h);
+  const d = id.data, m = md.data;
+  for (let p = 0; p < d.length; p += 4) {
+    const s = m[p];
+    if (s > 8 && m[p + 3] > 0) {
+      d[p] = (DIR_PC_RED[0] * s) / 255;
+      d[p + 1] = (DIR_PC_RED[1] * s) / 255;
+      d[p + 2] = (DIR_PC_RED[2] * s) / 255;
+    }
+  }
+  g.putImageData(id, 0, 0);
+  return c;
+}
+
+function loadDirArt() {
+  if (DIR_ART.loaded) return DIR_ART.settledPromise;
+  DIR_ART.loaded = true;
+  const pending = [];
+  const track = (store, key, file) => {
+    const im = new Image();
+    store[key] = im;
+    DIR_ART.settled[key] = false;
+    pending.push(new Promise((resolve) => {
+      const done = () => { DIR_ART.settled[key] = true; resolve(); };
+      im.addEventListener('load', done);
+      im.addEventListener('error', done);
+      im.src = assetUrl('assets-original/' + file);
+      if (im.complete) done();
+    }));
+    return im;
+  };
+  for (const [unit, spec] of Object.entries(DIR_ART_SPEC)) {
+    for (const state of spec.states) {
+      const key = `${unit}-${state}`;
+      const im = track(DIR_ART.img, key, `${key}.png`);
+      if (spec.mask) {
+        const mk = track(DIR_ART.mask, key, `${key}-pcmask.png`);
+        const build = () => {
+          if (spriteReady(im) && spriteReady(mk)) {
+            DIR_ART.red[key] = buildMaskRed(im, mk);
+          }
+        };
+        im.addEventListener('load', build);
+        mk.addEventListener('load', build);
+      }
+    }
+  }
+  const cap = new Promise((r) => { setTimeout(r, BUILDING_ART_SETTLE_TIMEOUT_MS); });
+  DIR_ART.settledPromise = Promise.race([Promise.all(pending), cap]);
+  return DIR_ART.settledPromise;
+}
+function whenDirArtSettled() {
+  return DIR_ART.settledPromise || Promise.resolve();
+}
+
+// The sheet frame for an action at the current sim tick (the
+// sheets' frame counts are the pipeline's: walk/carry 8, gallop 8,
+// the work cycles 4, idle 4 slow).
+function dirSheetFrame(act) {
+  const tick = sim.tick_count();
+  switch (act.action) {
+    case 'walk': case 'carry': return Math.floor(tick / 7) % 8;
+    case 'gallop': return Math.floor(tick / 6) % 8;
+    case 'gather': return Math.floor(tick / 8) % 4;
+    case 'build': return Math.floor(tick / 6) % 4;
+    case 'attack': return Math.floor(tick / 7) % 4;
+    case 'shoot': return Math.min(3, Math.floor((tick - (act.shotTick || 0)) / 5));
+    case 'graze': return Math.floor(tick / 10) % 4;
+    default: return Math.floor(tick / 30) % 4; // idle
+  }
+}
+
+// Draw one directional-sheet cell for `unit` in the state/direction
+// `act` ({action, dir}) at ground point (sx, sy). False when the
+// sheet (or its frame) is not drawable — the caller falls back.
+function drawDirUnit(unit, act, sx, sy) {
+  const spec = DIR_ART_SPEC[unit];
+  if (!spec || !act) return false;
+  const key = `${unit}-${act.action}`;
+  const red = drawOwner === foeOwner() ? DIR_ART.red[key] : null;
+  const im = red || DIR_ART.img[key];
+  if (!unitArtReady(im)) return false;
+  const C = spec.cell;
+  const rows = Math.max(1, Math.round((im.naturalHeight || im.height) / C));
+  const frames = Math.max(1, Math.round((im.naturalWidth || im.width) / C));
+  const d = ((Math.floor((act.dir * rows) / 8) % rows) + rows) % rows;
+  const f = ((dirSheetFrame(act) % frames) + frames) % frames;
+  const k = (camS * 1.35) / 46;
+  ctx.drawImage(im, f * C, d * C, C, C,
+    sx - spec.ax * k, sy - spec.ay * k, C * k, C * k);
+  return true;
+}
+
 // Draw building art bottom-anchored like the placeholder sprites:
 // full image when frac >= 1, otherwise clip-revealed to the bottom
 // `frac` of the image (the building visibly rises). False when the
@@ -774,7 +907,7 @@ function drawArtImage(im, sx, sy, wWorld, dyWorld, frac) {
 // -> CC0 placeholder -> vector circle (all in drawVillager).
 const VIL_ORIGINAL = {
   cell: 128, ax: 64, ay: 110, pxPerUnit: 46, drawScale: 1.35,
-  frames: { idle: 4, walk: 8, gather: 4, carry: 8 },
+  frames: { idle: 4, walk: 8, gather: 4, carry: 8, build: 4 },
   dirs: 8, // rows in the currently loaded sheets (the active tier)
   img: {},
   imgRed: {}, // M5: red palette-swap variants, built per sheet load
@@ -842,11 +975,12 @@ function updateVilAnim(i, wx, wy, now) {
   let state = 'idle';
   if (moving) state = carryKind.has(i) ? 'carry' : 'walk';
   else if (atNodeNow.has(i)) state = 'gather';
+  else if (atBuildNow.has(i)) state = 'build';
   let frame;
   if (state === 'walk' || state === 'carry') {
     frame = Math.floor((a.phase % 1) * VIL_ORIGINAL.frames[state]);
-  } else if (state === 'gather') {
-    frame = Math.floor(now / 140) % VIL_ORIGINAL.frames.gather;
+  } else if (state === 'gather' || state === 'build') {
+    frame = Math.floor(now / 140) % VIL_ORIGINAL.frames[state];
   } else {
     frame = Math.floor(now / 400) % VIL_ORIGINAL.frames.idle;
   }
@@ -935,8 +1069,22 @@ function loadTierSprites(st) {
     im.src = assetUrl(base + `villager-${state}.png`);
     VIL_ORIGINAL.img[state] = im;
     // M5: the opponent's red variant of this sheet (palette swap).
+    // Directional milestone: at the LOW tier the pipeline also
+    // ships a player-color mask per sheet — prefer the true
+    // mask remap (buildMaskRed) and fall back to the channel swap.
     im.addEventListener('load', () => {
-      VIL_ORIGINAL.imgRed[state] = makeRedSheet(im);
+      if (st.tierDir) {
+        VIL_ORIGINAL.imgRed[state] = makeRedSheet(im);
+        return;
+      }
+      const mk = new Image();
+      mk.addEventListener('load', () => {
+        VIL_ORIGINAL.imgRed[state] = buildMaskRed(im, mk) || makeRedSheet(im);
+      });
+      mk.addEventListener('error', () => {
+        VIL_ORIGINAL.imgRed[state] = makeRedSheet(im);
+      });
+      mk.src = assetUrl(`assets-original/villager-${state}-pcmask.png`);
     });
   }
   for (const stage of HOUSE_STAGES) {
@@ -1311,6 +1459,8 @@ addEventListener('keydown', (e) => {
       helpOverlay.style.display = 'none';
     } else if (placement) {
       placement = null;
+    } else if (repairArm) {
+      repairArm = false;
     } else if (buildPage) {
       buildPage = null; // M13: Esc backs out of an armed build page
     } else if (playing) {
@@ -1508,6 +1658,7 @@ function handleHotkey(e) {
   switch (act.type) {
     case 'arm':
       buildPage = act.page;
+      repairArm = false;
       renderCommands();
       return true;
     case 'button': {
@@ -2054,6 +2205,7 @@ function ensureGameLoaded(onStep) {
       loadNodeArt();
       loadAnimalArt();
       loadUnitArt();
+      loadDirArt();
       loadTierSprites(Q);
       // The local "loaded" readiness includes the building-art
       // set: this promise must not resolve while a building PNG
@@ -2068,7 +2220,7 @@ function ensureGameLoaded(onStep) {
       // node and animal sets settle under the same rule and join
       // the same await.
       await Promise.all([whenBuildingArtSettled(), whenNodeArtSettled(),
-        whenAnimalArtSettled(), whenUnitArtSettled()]);
+        whenAnimalArtSettled(), whenUnitArtSettled(), whenDirArtSettled()]);
       // The world constants are the same for every match (fixed
       // world size); read them off a throwaway probe sim so no
       // match code ever runs before they exist.
@@ -3978,6 +4130,25 @@ async function main() {
       }
       if (any) return;
     }
+    // Repair (BLD-17): an own, complete, damaged building takes
+    // every selected villager as a repairer. One exception: a
+    // loaded villager clicking a drop-off building still drops
+    // off first (the block below) — hauling home is the older,
+    // load-bearing gesture, and the Repair button covers camps.
+    if (bT && bT.owner === localOwner && bT.kind !== 1 && bT.complete
+        && bT.hpFrac < 0.999) {
+      const isDrop = bT.kind >= 3 && bT.kind <= 5;
+      const anyLoaded = targets.some(
+        (id) => st.kinds[id] === 0 && carryKind.has(id));
+      if (!(isDrop && anyLoaded)) {
+        let any = false;
+        for (const id of targets) {
+          if (st.kinds[id] !== 0) continue;
+          if (issue({ t: 'repair', e: id, b: bT.id, q: queued || undefined })) any = true;
+        }
+        if (any) return;
+      }
+    }
     // Force drop-off (M6, ECO-07): the click lands on OUR Town
     // Center or one of our camps — every selected villager the
     // carry heuristic sees loaded hauls its load in now, then
@@ -4003,6 +4174,45 @@ async function main() {
         sendMove(id);
       }
     }
+  }
+
+  // Repair targeting (BLD-17): the armed click picks the building;
+  // every selected villager is ordered onto it. An invalid pick
+  // flashes and STAYS armed, exactly like a rejected placement.
+  function attemptRepair(wx, wy, queued = false) {
+    const b = buildingAt(wx, wy);
+    if (!b) {
+      flash('Repair: click one of your own damaged buildings.');
+      return;
+    }
+    if (b.owner !== localOwner) {
+      flash('You can only repair your own buildings.');
+      return;
+    }
+    if (b.kind === 1) {
+      flash('Farms cannot be repaired.');
+      return;
+    }
+    if (!b.complete) {
+      flash('That building is still under construction.');
+      return;
+    }
+    if (b.hpFrac >= 0.999) {
+      flash('That building is undamaged.');
+      return;
+    }
+    const st = entityState();
+    let any = false;
+    for (const id of selectedUnits()) {
+      if (st.kinds[id] !== 0) continue;
+      if (issue({ t: 'repair', e: id, b: b.id, q: queued || undefined })) any = true;
+    }
+    if (!any) {
+      repairArm = false;
+      flash('Select a villager to repair.');
+      return;
+    }
+    if (!queued) repairArm = false;
   }
 
   function attemptPlace(wx, wy, queued = false) {
@@ -4093,6 +4303,10 @@ async function main() {
     const [wx, wy] = eventWorld(ev);
     if (placement) {
       if (!d.moved) attemptPlace(wx, wy, ev.shiftKey); // a placement click, not a drag
+      return;
+    }
+    if (repairArm) {
+      if (!d.moved) attemptRepair(wx, wy, ev.shiftKey); // a targeting click, not a drag
       return;
     }
     if (d.moved) {
@@ -4239,6 +4453,10 @@ async function main() {
     if (!wasClick) return;
     if (placement) {
       placement = null;
+      return;
+    }
+    if (repairArm) {
+      repairArm = false;
       return;
     }
     if (buildPage) {
@@ -4765,6 +4983,161 @@ function drawBarracks(b) {
   if (!b.complete) progressBar(sx, sy - 6.4 * camS, b.progress);
 }
 
+// --- Building fire, smoke and rubble (milestone §10.3) -----------
+// The documented damage stages, nothing more: smoke at HP <= 75%,
+// flames at HP <= 50% (the flame clusters grow with damage inside
+// the stage — presentation, not a third threshold). All original
+// procedural canvas art, drawn in the building's own painter pass.
+function flamePath(cx, baseY, w, h, sway, color, alpha) {
+  ctx.fillStyle = color;
+  ctx.globalAlpha = alpha;
+  ctx.beginPath();
+  ctx.moveTo(cx - w, baseY);
+  ctx.quadraticCurveTo(cx - w * 0.9, baseY - h * 0.55, cx + sway, baseY - h);
+  ctx.quadraticCurveTo(cx + w * 0.9, baseY - h * 0.55, cx + w, baseY);
+  ctx.closePath();
+  ctx.fill();
+  ctx.globalAlpha = 1;
+}
+
+function drawBuildingFireAt(sx, baseY, sizeTiles, hpFrac, seed) {
+  if (hpFrac > 0.75 || hpFrac <= 0) return;
+  const now = performance.now();
+  const u = camS;
+  // Smoke: three puffs rising and thinning, phase-offset per site.
+  for (let k = 0; k < 3; k++) {
+    const cyc = ((now / 1600) + seed * 0.13 + k * 0.37) % 1;
+    const px = sx + Math.sin(seed * 7 + k * 2.4) * sizeTiles * 0.45 * u
+      + Math.sin(cyc * 5 + seed) * 0.4 * u;
+    const py = baseY - cyc * 3.4 * u;
+    const r = (0.55 + cyc * 1.25) * u * (0.7 + sizeTiles * 0.16);
+    ctx.fillStyle = `rgba(46,44,48,${(0.32 * (1 - cyc)).toFixed(3)})`;
+    ctx.beginPath();
+    ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  if (hpFrac > 0.5) return; // smoke stage only
+  const dmg = (0.5 - hpFrac) / 0.5; // 0..1 inside the flame stage
+  const n = 2 + Math.round(dmg * (sizeTiles + 1));
+  const spread = sizeTiles * 1.6 * u;
+  for (let k = 0; k < n; k++) {
+    const fx = sx + ((k / (n - 1)) - 0.5) * spread;
+    const fh = (1.15 + dmg * 1.5) * u
+      * (0.8 + 0.25 * Math.sin(now / 87 + seed * 9 + k * 1.7));
+    const fw = fh * 0.42;
+    const sway = Math.sin(now / 130 + seed * 5 + k) * 0.12 * u;
+    flamePath(fx, baseY + 0.25 * u, fw, fh, sway, '#e8641c', 0.85);
+    flamePath(fx, baseY + 0.25 * u, fw * 0.66, fh * 0.72, sway * 0.6, '#f59b23', 0.9);
+    flamePath(fx, baseY + 0.25 * u, fw * 0.36, fh * 0.45, sway * 0.3, '#ffd94a', 0.95);
+  }
+}
+
+// Rubble: one procedural heap image per footprint class, kept at
+// the site fading out (adopted ~20 s, UNVERIFIED duration — the
+// manual says only "eventually disappear"). The sim footprint
+// frees at destruction; the decal is pure presentation over free
+// ground, fog-gated like the building it replaces.
+const RUBBLE_FADE_MS = 20000;
+const rubbleImgCache = {};
+let rubbleSim = null;
+const rubbleSeen = new Map(); // building id -> {x, y, size, owner}
+const rubbleTCSeen = new Map(); // entity index -> {x, y, owner}
+const rubbleSites = []; // {x, y, size, owner, t0}
+
+function rubbleImage(size) {
+  if (rubbleImgCache[size]) return rubbleImgCache[size];
+  const c = document.createElement('canvas');
+  c.width = 168; c.height = 88;
+  const g = c.getContext('2d');
+  let rngState = 1234 + size * 777;
+  const rnd = () => {
+    rngState = (rngState * 1103515245 + 12345) & 0x7fffffff;
+    return rngState / 0x7fffffff;
+  };
+  // The mound.
+  const grad = g.createLinearGradient(0, 20, 0, 88);
+  grad.addColorStop(0, '#6e5c49');
+  grad.addColorStop(1, '#453a2f');
+  g.fillStyle = grad;
+  g.beginPath();
+  g.ellipse(84, 66, 80, 24, 0, Math.PI, 0);
+  g.fill();
+  // Scattered chunks.
+  for (let k = 0; k < 16; k++) {
+    const rx = 14 + rnd() * 140;
+    const ry = 52 + rnd() * 28;
+    const rw = 5 + rnd() * 11;
+    const rh = 3 + rnd() * 6;
+    g.fillStyle = ['#7d6a54', '#5d4f3e', '#8a7a62', '#4c4133'][k % 4];
+    g.fillRect(rx, ry, rw, rh);
+  }
+  // Two broken beams.
+  g.strokeStyle = '#3d2c1c';
+  g.lineWidth = 5;
+  g.beginPath();
+  g.moveTo(38, 66);
+  g.lineTo(74, 40);
+  g.stroke();
+  g.beginPath();
+  g.moveTo(128, 68);
+  g.lineTo(102, 44);
+  g.stroke();
+  rubbleImgCache[size] = c;
+  return c;
+}
+
+function drawRubble(site, alpha) {
+  const im = rubbleImage(site.size);
+  const [sx, sy] = worldToScreen(site.x, site.y);
+  const w = site.size * CS * 1.06 * camS;
+  const h = w * (im.height / im.width);
+  ctx.globalAlpha = alpha;
+  ctx.drawImage(im, sx - w / 2, sy - h + h * 0.16, w, h);
+  ctx.globalAlpha = 1;
+}
+
+// Per-draw bookkeeping: a complete building (or Town Center) that
+// was renderable and is now gone leaves a rubble site. Enemy sites
+// spawn only when the ground is currently visible — re-scouting a
+// razed building reveals its rubble, never before.
+function updateRubble(buildings, st) {
+  if (rubbleSim !== sim) {
+    rubbleSim = sim;
+    rubbleSeen.clear();
+    rubbleTCSeen.clear();
+    rubbleSites.length = 0;
+  }
+  const now = performance.now();
+  const live = new Set();
+  for (const b of buildings) {
+    live.add(b.id);
+    if (b.kind === 1 || !b.complete) continue; // farms leave no rubble
+    if (b.owner !== foeOwner() || fogAtWorld(b.x, b.y) === 2) {
+      rubbleSeen.set(b.id, { x: b.x, y: b.y, size: b.size, owner: b.owner });
+    }
+  }
+  for (const [id, site] of rubbleSeen) {
+    if (live.has(id)) continue;
+    if (site.owner !== foeOwner() || fogAtWorld(site.x, site.y) === 2) {
+      rubbleSites.push({ ...site, t0: now });
+      rubbleSeen.delete(id);
+    }
+  }
+  for (let i = 0; i < st.count; i++) {
+    if (st.kinds[i] !== KIND_TC) continue;
+    const x = st.pos[i * 2], y = st.pos[i * 2 + 1];
+    if (st.hp[i * 2] >= 1) {
+      rubbleTCSeen.set(i, { x, y, owner: st.owners[i] });
+    } else if (rubbleTCSeen.has(i)) {
+      const site = rubbleTCSeen.get(i);
+      rubbleTCSeen.delete(i);
+      if (site.owner !== foeOwner() || fogAtWorld(x, y) >= 1) {
+        rubbleSites.push({ ...site, size: 4, t0: now });
+      }
+    }
+  }
+}
+
 function drawBuilding(b) {
   if (b.kind === 1) {
     // Farm under construction: bare tilled plot + progress bar.
@@ -4779,6 +5152,13 @@ function drawBuilding(b) {
     drawNewBuilding(b);
   } else {
     drawHouse(b);
+  }
+  // Fire/smoke by damage fraction (milestone §10.3): complete,
+  // non-farm buildings only — a foundation has nothing to burn.
+  if (b.complete && b.kind !== 1) {
+    const [fx, fy] = worldToScreen(b.x, b.y);
+    drawBuildingFireAt(fx, fy - (b.size === 3 ? 5.3 : 4.2) * camS,
+      b.size, b.hpFrac, b.id * 1.71);
   }
   // M5: a damaged building shows its HP above the roof — buildings
   // are attackable now, and their remaining health is information,
@@ -4938,11 +5318,12 @@ function drawVillager(i, wx, wy) {
   shadow(sx, sy, 0.95 * u);
   if (selection.has(i)) drawSelRing(sx, sy, 1.25);
   const anim = updateVilAnim(i, wx, wy, performance.now());
-  // UNIT_ART first: the generated action frames; below them the
-  // original sheet -> CC0 placeholder -> vector chain, unchanged.
-  const ua = unitArtImage('villager', i, wx, wy);
+  // Directional sheet first (the milestone standard); below it the
+  // generated side-view frames, then the CC0 placeholder -> vector
+  // chain, unchanged.
+  const orig = drawOriginalVillager(anim, sx, sy);
+  const ua = orig ? null : unitArtImage('villager', i, wx, wy);
   const art = ua ? drawUnitPose(ua.im, sx, sy, UNIT_ART_H.villager, ua.flip) : false;
-  const orig = art ? false : drawOriginalVillager(anim, sx, sy);
   const spr = art || orig || drawSpriteH(SPRITES.villager, sx, sy, 2.4);
   const by = sy - 1.15 * u; // fallback body center / label anchor
   if (!spr) {
@@ -4999,7 +5380,9 @@ function drawScout(i, wx, wy) {
   const u = camS;
   shadow(sx, sy, 1.2 * u);
   if (selection.has(i)) drawSelRing(sx, sy, 1.5);
-  const ua = unitArtImage('scout', i, wx, wy);
+  const act = unitActionFor('scout', i, wx, wy);
+  if (drawDirUnit('scout', act, sx, sy)) return;
+  const ua = unitArtImage('scout', i, wx, wy, act);
   if (ua && drawUnitPose(ua.im, sx, sy, UNIT_ART_H.scout, ua.flip)) return;
   legs(sx, sy, u, [-0.75, -0.3, 0.45, 0.85], '#5d4630');
   ctx.fillStyle = '#8a6844'; // horse body
@@ -5046,7 +5429,9 @@ function drawFootman(i, wx, wy, unit) {
   const u = camS;
   shadow(sx, sy, 0.95 * u);
   if (selection.has(i)) drawSelRing(sx, sy, 1.25);
-  const ua = unitArtImage(unit, i, wx, wy);
+  const act = unitActionFor(unit, i, wx, wy);
+  if (drawDirUnit(unit, act, sx, sy)) return;
+  const ua = unitArtImage(unit, i, wx, wy, act);
   if (ua && drawUnitPose(ua.im, sx, sy, UNIT_ART_H[unit], ua.flip)) return;
   ctx.fillStyle = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e'; // tunic (player color)
   ctx.beginPath();
@@ -5073,7 +5458,9 @@ function drawArcher(i, wx, wy) {
   const u = camS;
   shadow(sx, sy, 0.95 * u);
   if (selection.has(i)) drawSelRing(sx, sy, 1.25);
-  const ua = unitArtImage('archer', i, wx, wy);
+  const act = unitActionFor('archer', i, wx, wy);
+  if (drawDirUnit('archer', act, sx, sy)) return;
+  const ua = unitArtImage('archer', i, wx, wy, act);
   if (ua && drawUnitPose(ua.im, sx, sy, UNIT_ART_H.archer, ua.flip)) return;
   ctx.fillStyle = drawOwner === foeOwner() ? ENEMY_ARCHER_CLOTH : '#4a6e46'; // tunic (archer green / enemy red)
   ctx.beginPath();
@@ -5109,7 +5496,8 @@ function drawArcher(i, wx, wy) {
 const ANIMAL_POSE_STATE = {};
 function animalPoseFor(i, wx, wy) {
   const st = ANIMAL_POSE_STATE[i] ||
-    (ANIMAL_POSE_STATE[i] = { x: wx, y: wy, face: -1 });
+    (ANIMAL_POSE_STATE[i] = { x: wx, y: wy, face: -1, dir: 2, stamp: -1, pose: null });
+  if (st.stamp === poseStamp && st.pose) return st.pose;
   const dx = wx - st.x;
   const dy = wy - st.y;
   const moving = Math.abs(dx) + Math.abs(dy) > 0.0001;
@@ -5117,13 +5505,30 @@ function animalPoseFor(i, wx, wy) {
     const sdx = dx - dy;
     if (sdx > 0.0001) st.face = 1;
     else if (sdx < -0.0001) st.face = -1;
+    if (Math.hypot(dx, dy) > 0.004) {
+      const d = Math.round(Math.atan2(dy, dx) / (Math.PI / 4));
+      st.dir = ((d % 8) + 8) % 8;
+    }
   }
   st.x = wx;
   st.y = wy;
-  return { moving, face: st.face };
+  st.pose = { moving, face: st.face, dir: st.dir };
+  st.stamp = poseStamp;
+  return st.pose;
 }
 // The pose image for one animal this frame, plus its flip flag.
 // kind is the ANIMAL_ART key prefix: 'sheep' | 'boar' | 'deer'.
+// The directional-sheet action for an animal this draw: walk
+// while it moves, the graze cycle on the same slow phase the
+// side-view poses use, idle otherwise — with the world facing.
+function dirAnimalAct(i, wx, wy) {
+  const pose = animalPoseFor(i, wx, wy);
+  const tick = sim.tick_count();
+  if (pose.moving) return { action: 'walk', dir: pose.dir };
+  if ((Math.floor(tick / 240) + i) % 5 === 0) return { action: 'graze', dir: pose.dir };
+  return { action: 'idle', dir: pose.dir };
+}
+
 function animalPoseImage(kind, i, wx, wy) {
   const { moving, face } = animalPoseFor(i, wx, wy);
   const tick = sim.tick_count();
@@ -5155,6 +5560,16 @@ function drawSheep(i, wx, wy) {
   const u = camS;
   shadow(sx, sy, 0.9 * u);
   if (selection.has(i)) drawSelRing(sx, sy, 1.2);
+  if (drawDirUnit('sheep', dirAnimalAct(i, wx, wy), sx, sy)) {
+    // The enemy brand (see the vector draw below) still applies.
+    if (drawOwner === foeOwner()) {
+      ctx.fillStyle = ENEMY_COLOR;
+      ctx.beginPath();
+      ctx.arc(sx + 0.05 * u, sy - 1.35 * u, 0.26 * u, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    return;
+  }
   const sheepPose = animalPoseImage('sheep', i, wx, wy);
   if (drawAnimalPose(sheepPose.im, sx, sy, 2.0, sheepPose.flip)) {
     // The enemy brand (see the vector draw below) still applies.
@@ -5192,6 +5607,7 @@ function drawBoar(i, wx, wy) {
   const u = camS;
   shadow(sx, sy, 1.25 * u);
   if (selection.has(i)) drawSelRing(sx, sy, 1.55);
+  if (drawDirUnit('boar', dirAnimalAct(i, wx, wy), sx, sy)) return;
   const boarPose = animalPoseImage('boar', i, wx, wy);
   if (drawAnimalPose(boarPose.im, sx, sy, 2.1, boarPose.flip)) return;
   legs(sx, sy, u, [-0.7, -0.25, 0.5, 0.9], '#3a2a20');
@@ -5224,6 +5640,7 @@ function drawDeer(i, wx, wy) {
   const u = camS;
   shadow(sx, sy, 1.1 * u);
   if (selection.has(i)) drawSelRing(sx, sy, 1.4);
+  if (drawDirUnit('deer', dirAnimalAct(i, wx, wy), sx, sy)) return;
   const deerPose = animalPoseImage('deer', i, wx, wy);
   if (drawAnimalPose(deerPose.im, sx, sy, 2.9, deerPose.flip)) return;
   legs(sx, sy, u, [-0.65, -0.25, 0.45, 0.8], '#8a6a42');
@@ -5265,6 +5682,11 @@ function drawDeer(i, wx, wy) {
 // Presentation only, never sim input.
 const UNIT_ART_H = { villager: 2.55, archer: 2.55, militia: 2.6, maa: 2.65, scout: 3.1 };
 const UNIT_POSE_STATE = {};
+// Incremented once per draw() pass: the pose helpers memoize on it
+// so the directional draw and the side-view fallback read ONE
+// position delta per entity per pass (a second read would see a
+// zero delta and report the unit as still).
+let poseStamp = 0;
 const atBuildNow = new Set();
 const archerShoot = new Map(); // entity id -> {tick, face}
 const seenProjKeys = new Set();
@@ -5272,7 +5694,8 @@ let frameSt = null; // the entityState() snapshot of the running draw
 
 function unitPoseFor(i, wx, wy) {
   const st = UNIT_POSE_STATE[i] ||
-    (UNIT_POSE_STATE[i] = { x: wx, y: wy, face: -1 });
+    (UNIT_POSE_STATE[i] = { x: wx, y: wy, face: -1, dir: 2, stamp: -1, pose: null });
+  if (st.stamp === poseStamp && st.pose) return st.pose;
   const dx = wx - st.x;
   const dy = wy - st.y;
   const moving = Math.abs(dx) + Math.abs(dy) > 0.0001;
@@ -5280,10 +5703,19 @@ function unitPoseFor(i, wx, wy) {
     const sdx = dx - dy;
     if (sdx > 0.0001) st.face = 1;
     else if (sdx < -0.0001) st.face = -1;
+    if (Math.hypot(dx, dy) > 0.004) {
+      // Facing for the directional sheets: the world movement
+      // angle quantized to the 8 rows (atan2 convention shared
+      // with the villager sheets, updateVilAnim).
+      const d = Math.round(Math.atan2(dy, dx) / (Math.PI / 4));
+      st.dir = ((d % 8) + 8) % 8;
+    }
   }
   st.x = wx;
   st.y = wy;
-  return { moving, face: st.face };
+  st.pose = { moving, face: st.face, dir: st.dir };
+  st.stamp = poseStamp;
+  return st.pose;
 }
 
 // Per-draw refresh of the two inferred states the pose picker
@@ -5333,7 +5765,12 @@ function updateUnitAnimState(buildings, st) {
     }
     if (best >= 0) {
       const sdx = (proj[p + 2] - proj[p]) - (proj[p + 3] - proj[p + 1]);
-      archerShoot.set(best, { tick: proj[p + 4], face: sdx > 0 ? 1 : -1 });
+      const wdir = Math.round(Math.atan2(proj[p + 3] - proj[p + 1],
+        proj[p + 2] - proj[p]) / (Math.PI / 4));
+      archerShoot.set(best, {
+        tick: proj[p + 4], face: sdx > 0 ? 1 : -1,
+        dir: ((wdir % 8) + 8) % 8,
+      });
     }
   }
   if (seenProjKeys.size > 1024) {
@@ -5374,12 +5811,19 @@ function unitArtPick(unit, action, n) {
 // The frame for one unit this draw: {im, flip, action} or null when
 // the chosen action has no art yet (the caller falls back to the
 // previous drawing for that unit).
-function unitArtImage(unit, i, wx, wy) {
+// The inferred action for one unit this draw: {action, n, face,
+// dir, shotTick}. Shared by the directional-sheet draw (which adds
+// the world facing `dir`) and the side-view picker below; `n` is
+// the side-view frame number, the sheet frame is derived from the
+// action + tick in dirSheetFrame.
+function unitActionFor(unit, i, wx, wy) {
   const pose = unitPoseFor(i, wx, wy);
   const tick = sim.tick_count();
   let action = 'idle';
   let n = 1;
   let face = pose.face;
+  let dir = pose.dir;
+  let shotTick = -1;
   if (unit === 'villager') {
     if (pose.moving) {
       if (carryKind.has(i)) {
@@ -5411,6 +5855,8 @@ function unitArtImage(unit, i, wx, wy) {
         action = 'shoot';
         n = Math.min(3, Math.floor((tick - shot.tick) / 6) + 1);
         face = shot.face; // the arrow's screen direction, not the last walk facing
+        dir = shot.dir; // ...and its world direction, for the sheets
+        shotTick = shot.tick;
       }
     }
   } else { // militia | maa
@@ -5422,8 +5868,13 @@ function unitArtImage(unit, i, wx, wy) {
       n = Math.floor(tick / 7) % 3 + 1;
     }
   }
-  const im = unitArtPick(unit, action, n);
-  return im ? { im, flip: face > 0, action } : null;
+  return { action, n, face, dir, shotTick };
+}
+
+function unitArtImage(unit, i, wx, wy, pre) {
+  const a = pre || unitActionFor(unit, i, wx, wy);
+  const im = unitArtPick(unit, a.action, a.n);
+  return im ? { im, flip: a.face > 0, action: a.action } : null;
 }
 
 // Draw a unit-art frame bottom-anchored at (sx, sy), hWorld tall,
@@ -5589,11 +6040,22 @@ function runCommandButton(id, times = 1) {
     // Q / W hotkeys arm — one shared buildPage state drives the
     // rendered grid for mouse and keyboard alike.
     buildPage = id === 'page-eco' ? 'eco' : 'mil';
+    repairArm = false;
   } else if (id === 'page-back') {
     placement = null;
+    repairArm = false;
     buildPage = null; // back to the root page
+  } else if (id === 'repair') {
+    // BLD-17: arm (or disarm) Repair targeting — the click that
+    // follows picks the building, exactly like build placement.
+    repairArm = !repairArm;
+    if (repairArm) {
+      placement = null;
+      flash('Repair: click one of your damaged buildings.');
+    }
   } else if (id.startsWith('build-')) {
     const kind = Number(id.slice(6));
+    repairArm = false;
     placement = placement && placement.kind === kind ? null : { kind };
     // The page STAYS armed while placement runs (UI FIX 4
     // addendum cancel rule): cancelling placement — Esc, a
@@ -5710,7 +6172,7 @@ function renderCommands() {
   const sig = [context, Math.floor(wood), Math.floor(myStock()[0]), Math.floor(myStock()[2]),
     reason, queue, bk ? bk.id : -1, bk ? bk.queue : -1, bk && bk.complete ? 1 : 0,
     blockM, blockA, blockS, age, techMask, rbTc.join('.'), rbBk.join('.'),
-    tcQueueCodes, bkQueueCodes, buildPage || '',
+    tcQueueCodes, bkQueueCodes, buildPage || '', repairArm ? 1 : 0,
     placement ? placement.kind : -1].join('|');
   if (sig === cmdSig) return;
   cmdSig = sig;
@@ -5768,6 +6230,14 @@ function renderCommands() {
         cmdButton({
           id: 'page-mil', img: 'barracks.png', label: 'Military Buildings',
           key: 'W', title: 'Military Buildings (W)',
+        }),
+        // BLD-17: the root's third slot is Repair, as in the
+        // reference panel — E arms targeting; the click that
+        // follows picks one of our damaged buildings.
+        cmdButton({
+          id: 'repair', icon: 'i-hammer', label: 'Repair',
+          key: 'E', active: repairArm,
+          title: 'Repair — a villager restores a damaged building’s HP. Costs wood as it works; a full repair costs half the building’s price. Click, then click your damaged building. (E)',
         }),
       );
     }
@@ -6105,6 +6575,8 @@ function draw() {
   ctx.fillStyle = '#0b0f14';
   ctx.fillRect(0, 0, W, H);
 
+  poseStamp++; // one pose computation per entity per draw pass
+
   // M7: fog and obstacles change as the match runs (sight moves,
   // trees fall) — refresh both flat layers every frame, like every
   // other sim read here. Terrain and heights are static per match
@@ -6264,6 +6736,18 @@ function draw() {
     if (b.kind === 1 && b.complete) continue; // drawn as a farm node
     draws.push({ key: b.x + b.y + CS, fn: () => drawBuilding(b) });
   }
+  // Rubble decals (milestone §10.3): tracked from the live lists,
+  // drawn at ground level under whatever now walks the site.
+  updateRubble(buildings, st);
+  for (let k = rubbleSites.length - 1; k >= 0; k--) {
+    const site = rubbleSites[k];
+    const age = performance.now() - site.t0;
+    if (age > RUBBLE_FADE_MS) { rubbleSites.splice(k, 1); continue; }
+    if (site.owner === foeOwner() && fogAtWorld(site.x, site.y) === 0) continue;
+    const fadeStart = RUBBLE_FADE_MS - 5000;
+    const alpha = age > fadeStart ? 1 - (age - fadeStart) / 5000 : 1;
+    draws.push({ key: site.x + site.y + 0.5, fn: () => drawRubble(site, alpha) });
+  }
   // Unit draws dispatch by kind (M3); the dead are skipped (they
   // are tombstones in the sim, invisible here). A damaged unit gets
   // an HP bar above it.
@@ -6291,6 +6775,7 @@ function draw() {
           if (f === 2 && hp < maxHp) {
             const [sx, sy] = worldToScreen(wx, wy);
             hpBar(sx, sy - 5.4 * camS, hp / maxHp);
+            drawBuildingFireAt(sx, sy - 4.4 * camS, 4, hp / maxHp, i * 2.39);
           }
         },
       });

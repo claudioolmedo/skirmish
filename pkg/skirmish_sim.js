@@ -708,6 +708,36 @@ export class WasmSim {
         wasm.wasmsim_push_noop(this.__wbg_ptr);
     }
     /**
+     * Order a villager to repair one of its own player's placed
+     * buildings (BLD-07): travel to the building's ring and
+     * restore its HP at the documented flat rate (750 HP/min for
+     * the first repairer, +375 per additional), charged as a wood
+     * drip totaling 50% of the build cost over a full repair.
+     * Only complete, damaged buildings of the villager's own
+     * player are valid targets. Returns whether the order *would*
+     * be accepted against the current state (the sim re-validates
+     * when the command is applied).
+     * @param {number} entity
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_repair(entity, building) {
+        const ret = wasm.wasmsim_push_repair(this.__wbg_ptr, entity, building);
+        return ret !== 0;
+    }
+    /**
+     * Queue a repair order behind the villager's current order
+     * (BLD-07): the repair starts when the villager goes idle,
+     * and re-validates fully at execution — see `push_repair`.
+     * @param {number} entity
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_repair_queued(entity, building) {
+        const ret = wasm.wasmsim_push_repair_queued(this.__wbg_ptr, entity, building);
+        return ret !== 0;
+    }
+    /**
      * Enqueue a technology at a placed building by tech tag
      * (2 fletching, 3 scale mail, 4 padded archer armor at the
      * Blacksmith; 5 man-at-arms at the Barracks). Returns whether
