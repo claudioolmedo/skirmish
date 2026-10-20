@@ -82,6 +82,7 @@ import {
 } from './play/hotkeys.js';
 import { diffFeedEvents } from './play/feed.js';
 import { createAudioEngine, cuesForSnapshotDiff } from './play/audio.js';
+import { ClickMarkers, markerHeads } from './play/clickmarker.js';
 import {
   t, getLocale, setLocale, costText, genderOf,
 } from './play/i18n.js';
@@ -1606,6 +1607,13 @@ function mirrorValid(kind, cx, cy) {
   if (myStock()[1] < BUILD_COST[kind]) return false;
   return true;
 }
+
+// --- Click markers (INF-09) --------------------------------------
+// Transient order-confirmation markers for GROUND orders only;
+// see play/clickmarker.js for the DE evidence and the mapping.
+// Spawned by the order paths below (main view + minimap share
+// smartOrderAt, so both are covered by construction).
+const clickMarkers = new ClickMarkers();
 
 // --- Carry indicator (client-side heuristic) --------------------------
 // The frozen WASM ABI exposes no carry state, so the load dot is
@@ -4552,11 +4560,17 @@ async function main() {
       // selection is empty, so it just flashes the hint).
       const foe = selectedBuilding.owner === foeOwner();
       if (!foe && selectedBuilding.type === 'tc') {
-        if (issue({ t: 'rally_tc', x: wx, y: wy })) playAudioCue('orderBuilding');
+        if (issue({ t: 'rally_tc', x: wx, y: wy })) {
+          playAudioCue('orderBuilding');
+          clickMarkers.add('ground', wx, wy, performance.now());
+        }
         return;
       }
       if (!foe && selectedBuilding.type === 'building' && [2, 6, 7].includes(selectedBuilding.kind)) {
-        if (issue({ t: 'rally_b', b: selectedBuilding.id, x: wx, y: wy })) playAudioCue('orderBuilding');
+        if (issue({ t: 'rally_b', b: selectedBuilding.id, x: wx, y: wy })) {
+          playAudioCue('orderBuilding');
+          clickMarkers.add('ground', wx, wy, performance.now());
+        }
         return;
       }
     }
@@ -4610,9 +4624,12 @@ async function main() {
         return OBST[ccy * GW + ccx] ? [wx, wy] : [tx, ty];
       };
     }
+    let groundMoveSent = false;
     const sendMove = (id) => {
       const [mx, my] = moveDest ? moveDest(id) : [wx, wy];
-      return issue({ t: 'move', e: id, x: mx, y: my, q: queued || undefined });
+      const sent = issue({ t: 'move', e: id, x: mx, y: my, q: queued || undefined });
+      if (sent) groundMoveSent = true;
+      return sent;
     };
     // The order acknowledgement's voice: military if any soldier
     // is among the ordered, else the villager's — one cue per
@@ -4710,6 +4727,14 @@ async function main() {
       }
     }
     if (any) playAudioCue(orderCue());
+    // INF-09 click marker: the click named a NODE (an object) —
+    // no ground marker, exactly as in DE. A pure ground move
+    // (nobody was sent to an object) gets the marker at the
+    // clicked point. Object orders above (attack / repair /
+    // drop-off) returned earlier and never reach this line.
+    if (!n && groundMoveSent) {
+      clickMarkers.add('ground', wx, wy, performance.now());
+    }
   }
 
   // Repair targeting (BLD-17): the armed click picks the building;
@@ -7730,9 +7755,42 @@ function draw() {
     }
   }
 
-  // Wood chips (tree hit feedback): drawn AFTER the fog dim,
-  // in the same late pass as the click markers.
+  // Click markers + wood chips (INF-09 / tree hit feedback):
+  // drawn AFTER the fog dim on purpose — DE shows the move marker
+  // even in the black (Study 1, f_011: the red X sits in the
+  // fog), because it is the player's own order echo, not world
+  // information.
   drawWoodChips(performance.now());
+  {
+    const lowTier = governor.level === 'low';
+    for (const m of clickMarkers.active(performance.now(), lowTier)) {
+      const { heads, alpha } = markerHeads(m.t);
+      const [cx, cy] = worldToScreen(m.x, m.y);
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = '#e23b2e';
+      for (const h of heads) {
+        // Project the head's world offset; the triangle points
+        // from the head toward the centre.
+        const ox = (h.dx - h.dy) * camS;
+        const oy = ((h.dx + h.dy) / 2) * camS;
+        const ang = Math.atan2(-oy, -ox);
+        const L = 0.42 * camS;
+        const W = 0.30 * camS;
+        ctx.save();
+        ctx.translate(cx + ox, cy + oy);
+        ctx.rotate(ang);
+        ctx.beginPath();
+        ctx.moveTo(L / 2, 0);
+        ctx.lineTo(-L / 2, -W / 2);
+        ctx.lineTo(-L / 2, W / 2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+      ctx.restore();
+    }
+  }
 
   // Building selection: a gold outline around the footprint — the
   // building counterpart of the unit selection ring.

@@ -2364,6 +2364,42 @@ placement ghost ships (invalid = red); the order queue shipped with M4
 rendered — the sim's queue is not exposed to the renderer. · *Status:*
 **DIFFERS**.
 
+**INF-09a — The click marker (transient order confirmation).** A
+right-click whose order resolves to a GROUND target (plain move from
+the main view or the minimap, a queued ground move, a rally-point set)
+plays a brief marker at the exact clicked point: four red arrowheads
+start apart on the diagonals, converge until they meet, then fade —
+~0.45 s total. A right-click on an OBJECT (resource node, unit,
+building — gather / attack / repair / drop-off) shows NO ground
+marker, and no target pulse is drawn either: none is visible in the
+evidence. Build placement shows no marker (its ghost is the feedback).
+*Evidence:* Study 1 DE footage (`~/workspace/skirmish-study/video1/`,
+Spanish beginner tutorial), frame-analysed 2026-10-20 — the marker is
+visible mid-animation in `frames/f_011.jpg` (red X in the fog at the
+scout's destination) and its full life was measured from the raw
+video at 29.97 fps: heads start separated, converge to an X over
+~0.3 s, collapse and vanish by ~0.45 s; red throughout (sampled
+pixels in the #d2342c–#e23b2e family). The same marker fires on
+repeated ground clicks throughout the video (e.g. the scout's
+re-tasking clicks at ~80.7–83 s), including clicks into unexplored
+fog — it is the player's own order echo, not world information. The
+original Age of Kings manual separately documents the QUEUED form:
+"A waypoint marker appears at each point" (Shift + right-click) —
+in current DE those queued markers are persistent flags (Study 2,
+flag grounded in `frames/f_006.jpg`); the persistent-flag half
+remains open below. The official support article "Waypoint Markers"
+adds that, for queued group orders, only the group leader's markers
+display. Attack-move does not exist as an order in Skirmish II's
+current scope, so no red-variant is invented for it. *Impl
+(2026-10-20):* `play/clickmarker.js` — pure mapping (resolved order
+kind -> marker) + animation math, unit-tested; `app.js` spawns the
+marker from `smartOrderAt`/`orderAt` (rally sets and pure ground
+moves only; any object resolution returns earlier and spawns
+nothing) and draws it after the fog dim, like DE. LOW tier shortens
+it to 300 ms, never removes it. Client-only: no sim, command or
+hash impact. · *Status:* **MATCHES** for the transient marker;
+queued-order persistent flags remain **DIFFERS** under INF-09.
+
 **INF-10 — Sound is an information channel.** Unit acknowledgements,
 work sounds, combat noise scaled by distance to the camera, alert horns
 (INF-01), and milestone stingers carry game state to the player's ears.
@@ -2386,13 +2422,14 @@ side sampling of public data). · *Status:* **MISSING**.
 
 ## A. Rule counts
 
-215 rules total. Counts verified mechanically against the status tags in
+216 rules total. Counts verified mechanically against the status tags in
 this document (2026-10-18, M8 audit; re-verified for M9 the same day —
 the open-games lobby changed no status, see the M9 note in section B;
 updated 2026-10-19 for BLD-16, the Town Center footprint rule —
 §7 gains one rule, one MATCHES; updated 2026-10-19 for BLD-17,
 repair — §7 gains one rule, one DIFFERS, and BLD-07 moves
-MISSING → DIFFERS).
+MISSING → DIFFERS; updated 2026-10-20 for INF-09a, the click
+marker — §18 gains one rule, one MATCHES).
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
@@ -2413,8 +2450,8 @@ MISSING → DIFFERS).
 | 15 | AI behavior & difficulty (AI) | 9 | 4 | 3 | 2 |
 | 16 | Victory, scoring & game modes (VIC) | 12 | 0 | 1 | 11 |
 | 17 | Multiplayer determinism (NET) | 11 | 4 | 5 | 2 |
-| 18 | Information rules (INF) | 11 | 2 | 4 | 5 |
-| | **Total** | **215** | **94** | **46** | **75** |
+| 18 | Information rules (INF) | 12 | 3 | 4 | 5 |
+| | **Total** | **216** | **95** | **46** | **75** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer
