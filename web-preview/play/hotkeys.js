@@ -7,29 +7,35 @@
 //
 // The layout is the reference game's Definitive Edition grid:
 // a selected object's command panel is a grid and the key IS the
-// button's position — top row Q W E R T, middle A S D F G,
-// bottom Z X C V B. Two layers sit on top of that principle:
+// button's position on the PHYSICAL keyboard — the panel's rows
+// are the keyboard's rows. Our panels are three columns wide, so
+// the whole map is exactly:
+//     row 1: Q W E
+//     row 2: A S D
+//     row 3: Z X C
+// (the last slot of a 3x3 page, row 3 col 3, is C). Every letter
+// below is a slot position first; badges show the slot letter.
 //
 // 1. Villager build pages. With villager(s) selected, Q arms the
-//    ECONOMIC page and W the MILITARY page; on an armed page the
-//    letters follow the wiki's DE build positions (economic:
-//    House Q, Mill W, Mining Camp E, Lumber Camp R, Farm A,
-//    Town Center Z; military: Barracks Q, Archery Range W,
-//    Stable E, Blacksmith S), each building ALSO answering to
-//    its documented go-to letter as an alias. One deliberate
-//    divergence, Claudio's call (2026-10-18): the sequence
-//    Q, E must raise a House, so on the economic page E = House
-//    too — and the Mining Camp, whose grid letter E is thereby
-//    taken, answers to G (its go-to letter). Recorded in
-//    ARCHITECTURE.md (M13).
-// 2. Panel keys. With a building selected, Q / W / E run the
-//    panel's buttons left to right — the grid principle applied
-//    to our own panel (Barracks: Militia, Man-at-Arms;
-//    Blacksmith: Fletching, Scale Mail, Padded Archer Armor;
-//    Range/Stable: their single train button on Q). ONE
-//    exception, the Town Center (2026-10-19 study fix): DE's own
-//    TC panel arrangement gives Villager Q, Loom A, Feudal Age
-//    W — see PANEL_KEYS below for the evidence.
+//    ECONOMIC page and W the MILITARY page (the root panel's two
+//    slots). On an armed page the buttons sit in grid order —
+//    economic: House Q, Mill W, Farm E, Lumber Camp A, Mining
+//    Camp S, Back C; military: Barracks Q, Archery Range W,
+//    Stable E, Blacksmith A, Back C. A building may ALSO answer
+//    to a silent alias (its go-to letter, mostly) — but ONLY
+//    where the alias collides with no button's slot letter in
+//    the same context. Two historical aliases died by that rule
+//    (pure-grid pass, 2026-10-19, Claudio's call, superseding
+//    his own 2026-10-18 exception): E no longer doubles as
+//    House (E is the Farm's slot) and A no longer doubles as
+//    the Archery Range (A is the Blacksmith's slot).
+// 2. Panel keys. A selected building's buttons take their slot
+//    letters too — see PANEL_KEYS: mostly plain left-to-right
+//    (Barracks: Militia Q, Man-at-Arms W; Range: Archer Q;
+//    Stable: Scout Q), with DE's own two-row arrangements where
+//    the reference panel has them: the Town Center (Villager Q,
+//    Feudal Age W, Loom A below the Villager) and the Blacksmith
+//    (Fletching Q, Scale Mail W, Padded Archer Armor A).
 //
 // Go-to (jump to a building type) is Ctrl+letter with the
 // reference's letters: Lumber Camp Z, Mill I, Mining Camp G,
@@ -45,8 +51,9 @@
 
 // kind: 0 House, 1 Farm, 2 Barracks, 3 Lumber Camp, 4 Mill,
 //       5 Mining Camp, 6 Archery Range, 7 Stable, 8 Blacksmith.
+// PAGE_KINDS is the pages' GRID (render) order: slot 0 first.
 export const PAGE_KINDS = {
-  eco: [0, 1, 3, 4, 5],
+  eco: [0, 4, 1, 3, 5],
   mil: [2, 6, 7, 8],
 };
 
@@ -57,31 +64,33 @@ export const PAGE_FOR_KIND = {
 };
 
 /**
- * Key code -> building kind on an armed page: the DE grid
- * position first, the building's go-to letter as an alias.
- * Economic E is House (Claudio) as well as Q; the Mining Camp
- * sits on G because its grid E is the House's.
+ * Key code -> building kind on an armed page: the button's slot
+ * letter first (grid order: slots run Q W E / A S D / Z X C),
+ * plus silent aliases that collide with no slot letter in the
+ * same context. 'back' is the page's Back button (last slot, C).
  */
 export const PAGE_KEYS = {
   eco: {
-    KeyQ: 0, KeyE: 0, // House (grid Q; E by Claudio's call)
-    KeyW: 4, KeyI: 4, // Mill
-    KeyR: 3, KeyZ: 3, // Lumber Camp
-    KeyA: 1, KeyF: 1, // Farm
-    KeyG: 5, // Mining Camp (grid E taken by the House — see header)
+    KeyQ: 0, // House — slot 0
+    KeyW: 4, KeyI: 4, // Mill — slot 1 (alias: its go-to I)
+    KeyE: 1, KeyF: 1, // Farm — slot 2 (alias F)
+    KeyA: 3, KeyR: 3, KeyZ: 3, // Lumber Camp — slot 3 (aliases R, Z)
+    KeyS: 5, KeyG: 5, // Mining Camp — slot 4 (alias: its go-to G)
+    KeyC: 'back', // Back — the last slot
   },
   mil: {
-    KeyQ: 2, KeyB: 2, // Barracks
-    KeyW: 6, KeyA: 6, // Archery Range
-    KeyE: 7, KeyL: 7, // Stable
-    KeyS: 8, // Blacksmith
+    KeyQ: 2, KeyB: 2, // Barracks — slot 0 (alias B)
+    KeyW: 6, // Archery Range — slot 1 (old alias A dropped: A is the Blacksmith's slot)
+    KeyE: 7, KeyL: 7, // Stable — slot 2 (alias L)
+    KeyA: 8, // Blacksmith — slot 3
+    KeyC: 'back', // Back — the last slot
   },
 };
 
 /** The one letter shown as a button's key badge on an armed page. */
 export const PAGE_BADGE = {
-  eco: { 0: 'E', 1: 'A', 3: 'R', 4: 'W', 5: 'G' },
-  mil: { 2: 'Q', 6: 'W', 7: 'E', 8: 'S' },
+  eco: { 0: 'Q', 4: 'W', 1: 'E', 3: 'A', 5: 'S' },
+  mil: { 2: 'Q', 6: 'W', 7: 'E', 8: 'A' },
 };
 
 /** Panel contexts whose buttons answer to position keys, in order. */
@@ -93,24 +102,41 @@ export const PANEL_BUTTONS = {
   blacksmith: ['research-fletching', 'research-scalemail', 'research-padded'],
 };
 
-// Per-context letter overrides where DE does NOT run the plain
-// position keys. The Town Center is the documented case: in DE
-// the grid letter IS the button's panel position, and the TC
-// panel's own arrangement is not our button order — Create
-// Villager sits top-left (Q), Loom sits below it (A — the study
-// video's in-game tooltip reads "Loom … (Hotkey: A)"), and the
-// Feudal Age advancement takes the top row's second slot (W).
-// Sources: Age of Empires wiki, "Hotkey" (DE grid layout: the
-// key is the button's panel position) + the 2026-10-19 player
-// study (frame f_025, Loom tooltip). Villager-context letters
-// are unaffected: 'build' is not in this table, so a villager's
-// A still means force drop-off, resolved by context exactly as
-// DE resolves it. Maps button id -> [KeyboardEvent.code, letter].
+// The slot letter of every button on every building panel
+// (button id -> [KeyboardEvent.code, letter]). The plain cases
+// run left to right along the grid's first row (Barracks:
+// Militia Q, Man-at-Arms W; Range: Archer Q; Stable: Scout Q).
+// Two panels reproduce DE's own two-row arrangements instead:
+// the Town Center — Create Villager top-left (Q), the Feudal
+// Age advancement top-row second (W), Loom below the Villager
+// (A — the study video's in-game tooltip reads "Loom …
+// (Hotkey: A)"; sources: Age of Empires wiki, "Hotkey" — the
+// letter IS the button's panel position — plus the 2026-10-19
+// player study, frame f_025) — and the Blacksmith, whose
+// Padded Archer Armor sits under Fletching (A), not after
+// Scale Mail. Villager-context letters are unaffected: 'build'
+// is not in this table, so a villager's A still means force
+// drop-off, resolved by context exactly as DE resolves it.
 export const PANEL_KEYS = {
   tc: {
     train: ['KeyQ', 'Q'],
     'research-loom': ['KeyA', 'A'],
     'research-feudal': ['KeyW', 'W'],
+  },
+  barracks: {
+    'train-militia': ['KeyQ', 'Q'],
+    'research-maa': ['KeyW', 'W'],
+  },
+  range: {
+    'train-archer': ['KeyQ', 'Q'],
+  },
+  stable: {
+    'train-scout': ['KeyQ', 'Q'],
+  },
+  blacksmith: {
+    'research-fletching': ['KeyQ', 'Q'],
+    'research-scalemail': ['KeyW', 'W'],
+    'research-padded': ['KeyA', 'A'],
   },
 };
 export const POSITION_CODES = ['KeyQ', 'KeyW', 'KeyE'];
@@ -152,8 +178,9 @@ export function resolveHotkey({ context, page, code, ctrl = false, shift = false
   }
   if (context === 'build') {
     if (page) {
-      const kind = PAGE_KEYS[page][code];
-      return kind != null ? { type: 'button', id: `build-${kind}` } : null;
+      const hit = PAGE_KEYS[page][code];
+      if (hit === 'back') return { type: 'button', id: 'page-back' };
+      return hit != null ? { type: 'button', id: `build-${hit}` } : null;
     }
     if (code === 'KeyQ') return { type: 'arm', page: 'eco' };
     if (code === 'KeyW') return { type: 'arm', page: 'mil' };
@@ -162,9 +189,10 @@ export function resolveHotkey({ context, page, code, ctrl = false, shift = false
   }
   const buttons = PANEL_BUTTONS[context];
   if (buttons) {
-    // A context with documented DE letters (PANEL_KEYS) resolves
-    // by letter, not by our button order; every other panel runs
-    // its buttons left to right on the position keys.
+    // Every context in PANEL_BUTTONS carries its slot letters in
+    // PANEL_KEYS (the pure physical grid — see the table); the
+    // position-code fallback below only guards a future panel
+    // that has not been given its letters yet.
     const byLetter = PANEL_KEYS[context];
     if (byLetter) {
       for (const [id, [keyCode]] of Object.entries(byLetter)) {
@@ -186,8 +214,11 @@ export function resolveHotkey({ context, page, code, ctrl = false, shift = false
  * panel included): no badge — no key runs the button directly.
  */
 export function badgeForButton({ context, page, id, index }) {
-  if (context === 'build' && page && id.startsWith('build-')) {
-    return PAGE_BADGE[page][Number(id.slice(6))] || null;
+  if (context === 'build' && page) {
+    if (id === 'page-back') return 'C'; // the page's last slot
+    if (id.startsWith('build-')) {
+      return PAGE_BADGE[page][Number(id.slice(6))] || null;
+    }
   }
   const byLetter = PANEL_KEYS[context];
   if (byLetter && byLetter[id]) return byLetter[id][1];

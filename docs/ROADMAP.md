@@ -305,14 +305,17 @@ From the [Gap Analysis](GAP-ANALYSIS.md): the items that most make Skirmish II
   With villager(s) selected, **Q** opens the economic build
   page and **W** the military one — the command panel switches
   to that page's buildings, each badged with its letter, and
-  the letter places the building exactly like clicking it
-  (**Q, E raises a House** — Claudio's call; the House keeps
-  its grid Q too, and the Mining Camp, whose grid E that
-  takes, answers to G). With a building selected, **Q / W /
-  E** run its panel buttons left to right (Blacksmith: Fletching, Scale
-  Mail, Padded Archer Armor) — except the Town Center, which
-  takes DE's own letters (**Q** Villager, **A** Loom, **W**
-  Feudal Age; 2026-10-19 study fix). **A** drops off a villager's
+  the letter places the building exactly like clicking it.
+  Every letter is the button's place in the physical keyboard
+  grid (panels are three wide: rows **Q W E / A S D / Z X C**)
+  — **Q, Q raises a House**, the Farm holds E, the Lumber
+  Camp A, the Mining Camp S, and each page's Back sits on C
+  (pure-grid pass, 2026-10-19, superseding the brief Q, E =
+  House exception). With a building selected, the panel's
+  buttons take their slot letters (Blacksmith: Fletching
+  **Q**, Scale Mail **W**, Padded Archer Armor **A**) — the
+  Town Center keeping DE's own letters (**Q** Villager, **A**
+  Loom, **W** Feudal Age; 2026-10-19 study fix). **A** drops off a villager's
   load; **Ctrl+Z / I / G / S / B / A** cycle to a Lumber
   Camp, Mill, Mining Camp, Blacksmith, Barracks or Archery
   Range (Ctrl+Shift selects all of the kind; Ctrl+L for the
@@ -328,7 +331,7 @@ From the [Gap Analysis](GAP-ANALYSIS.md): the items that most make Skirmish II
   tables and resolution are a pure module
   (`web-preview/play/hotkeys.js`, unit-tested); a stub-DOM
   smoke drives a real sandbox match by synthetic keys and
-  hand-pumped frames (Q,E → House placement, TC+Q → queued
+  hand-pumped frames (Q,Q → House placement, TC+Q → queued
   villager, a real Lumber Camp built and jumped to with
   Ctrl+Z, the pan read off the minimap's viewport rect).
   Zero sim changes.

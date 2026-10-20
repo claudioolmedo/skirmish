@@ -2075,8 +2075,9 @@ impl Sim {
 
     /// Apply a `Move` command: clamp the target into the world, recompute
     /// the A* path immediately (deterministically), and install the order.
-    /// Unknown entities and unreachable/blocked targets clear the order —
-    /// the entity simply holds position. For a villager, `Move` cancels
+    /// Unknown entities and genuinely unreachable targets clear the order —
+    /// the entity simply holds position; a target on a blocked cell snaps
+    /// to the nearest open cell instead (see `apply_move`). For a villager, `Move` cancels
     /// its gather task; the carry is kept (counted only on a later
     /// deposit — e.g. after a fresh `Gather` order). A `Move` also
     /// cancels any attack engagement. Orderable entities (M3): living
@@ -2099,6 +2100,19 @@ impl Sim {
     /// The mechanics of a move order, shared by the `Move` command
     /// and by queued-order execution (which must not clear the rest
     /// of the queue behind it).
+    ///
+    /// A PLAYER move aimed at a BLOCKED cell (a tree, a berry
+    /// bush, a building's footprint) snaps to the nearest open
+    /// cell: the reference game walks the unit up to the obstacle
+    /// instead of ignoring the click. The dropped order was the
+    /// "my sheep won't walk" play-test break (Claudio,
+    /// 2026-10-19) — a plain move is a captured sheep's ONLY
+    /// order, and its clicks land around the TC, houses and
+    /// trees. The snap lives HERE, not in `set_move_order`: the
+    /// sim's internal steering (hauler drop-off approaches,
+    /// gather standing cells, combat chases) calls that directly
+    /// and its fail-then-fallback logic depends on the honest
+    /// answer.
     fn apply_move(&mut self, idx: usize, x: I16F16, y: I16F16) {
         {
             let e = &mut self.entities[idx];
@@ -2108,7 +2122,16 @@ impl Sim {
             e.task_dropoff = None;
             e.clear_combat();
         }
-        self.set_move_order(idx, clamp_pos(x), clamp_pos(y));
+        let (tx, ty) = (clamp_pos(x), clamp_pos(y));
+        if !self.set_move_order(idx, tx, ty) {
+            let (gx, gy) = self.grid.world_to_cell(tx, ty);
+            if self.grid.is_blocked(gx, gy) {
+                if let Some(cell) = self.grid.nearest_free_cell(gx, gy, 4) {
+                    let (cx, cy) = self.grid.cell_center(cell.0, cell.1);
+                    self.set_move_order(idx, cx, cy);
+                }
+            }
+        }
     }
 
     /// Apply an `Attack` command (M3): validate (same rules as
@@ -4139,16 +4162,28 @@ mod tests {
     }
 
     #[test]
-    fn move_to_blocked_target_holds_position() {
+    fn move_to_blocked_target_walks_up_to_it() {
+        // A move aimed into a blocked cell no longer drops the
+        // order (pre-2026-10-19 behavior): the unit walks to the
+        // nearest open cell beside the obstacle, as in the
+        // reference game — for a captured sheep, whose only
+        // order is a plain move, the dropped order read as
+        // "the sheep won't walk" (Claudio's play-test).
         let mut sim = Sim::new(11);
-        let before: Vec<(I16F16, I16F16)> =
-            sim.entities().iter().map(|e| (e.pos_x, e.pos_y)).collect();
-        // M7: the arena walls are gone — the blocked target is now
-        // a standing tree's cell (MAP-04: a tree blocks its cell).
+        let vil = sim.entities().iter().find(|e| e.id == 1).unwrap();
+        let (vx, vy) = (vil.pos_x, vil.pos_y);
+        // M7: the arena walls are gone — the blocked target is a
+        // standing tree's cell (MAP-04: a tree blocks its cell).
+        // Take the tree nearest the villager so the walk is short.
         let tree = sim
             .nodes()
             .iter()
-            .find(|n| n.kind == NodeKind::Tree)
+            .filter(|n| n.kind == NodeKind::Tree)
+            .min_by_key(|n| {
+                let dx = n.pos_x.to_num::<f64>() - vx.to_num::<f64>();
+                let dy = n.pos_y.to_num::<f64>() - vy.to_num::<f64>();
+                (dx * dx + dy * dy) as i64
+            })
             .expect("a tree");
         let (tx, ty) = (tree.pos_x, tree.pos_y);
         sim.push_command(Command::Move {
@@ -4156,14 +4191,20 @@ mod tests {
             x: tx,
             y: ty,
         });
-        for _ in 0..120 {
+        for _ in 0..3600 {
             sim.tick();
         }
-        let after: Vec<(I16F16, I16F16)> =
-            sim.entities().iter().map(|e| (e.pos_x, e.pos_y)).collect();
-        assert_eq!(before, after, "entity moved toward a blocked target");
         let v = sim.entities().iter().find(|e| e.id == 1).unwrap();
-        assert!(v.order.is_none());
+        assert!(v.order.is_none(), "the snapped walk completes");
+        let d = ((v.pos_x - tx) * (v.pos_x - tx) + (v.pos_y - ty) * (v.pos_y - ty)).sqrt();
+        assert!(
+            d < I16F16::from_num(7),
+            "villager ended {d} wu from the tree it was ordered onto — it should stand beside it"
+        );
+        assert!(
+            v.pos_x != vx || v.pos_y != vy,
+            "the villager actually walked"
+        );
     }
 
     #[test]

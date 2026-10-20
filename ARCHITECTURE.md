@@ -980,32 +980,39 @@ through the `issue()` choke point like any click.
 **Build pages (villager(s) selected).** Q arms the ECONOMIC
 page, W the MILITARY page; arming switches the command panel to
 that page's buildings only, each badged with its key letter.
-Esc or a right-click backs out of the page; entering placement
-closes it. Keys (DE grid positions; the building's go-to letter
-also answers as an alias):
+Esc or a right-click backs out of the page; the page stays
+armed while placement runs (UI FIX 4). Keys are the buttons'
+places in the PHYSICAL keyboard grid — the panels are three
+columns wide, so the rows are Q W E / A S D / Z X C, and the
+page's Back button takes the last slot, C (pure-grid pass,
+2026-10-19). A silent alias (the building's go-to letter,
+mostly) also answers where it collides with no slot letter in
+the same context:
 
-| Page | Key | Building | Alias |
+| Page | Key (badge) | Building | Alias |
 |---|---|---|---|
-| Economic | E (badge) / Q | House | — |
+| Economic | Q | House | — |
 | Economic | W | Mill | I |
-| Economic | R | Lumber Camp | Z |
-| Economic | A | Farm | F |
-| Economic | G | Mining Camp | — |
+| Economic | E | Farm | F |
+| Economic | A | Lumber Camp | R, Z |
+| Economic | S | Mining Camp | G |
+| Economic | C | Back | — |
 | Military | Q | Barracks | B |
-| Military | W | Archery Range | A |
+| Military | W | Archery Range | — |
 | Military | E | Stable | L |
-| Military | S | Blacksmith | — |
+| Military | A | Blacksmith | — |
+| Military | C | Back | — |
 
-**Train / research (building selected).** Q / W / E run the
-panel's buttons left to right — the grid principle applied to
-our own panel: Barracks —
-Militia, Man-at-Arms; Archery Range — Archer; Stable — Scout
-Cavalry; Blacksmith — Fletching, Scale Mail, Padded Archer
-Armor. ONE exception (2026-10-19 study fix): the Town Center
-takes DE's own letters — Villager **Q**, Loom **A**, Feudal Age
-**W** (the wiki's grid rule: the letter is the button's panel
-position, and DE's TC panel is arranged that way; the study
-video's Loom tooltip reads "(Hotkey: A)"). Every command-panel button carries its letter as a
+**Train / research (building selected).** The same grid:
+each button's letter is its panel slot. Barracks — Militia
+**Q**, Man-at-Arms **W**; Archery Range — Archer **Q**; Stable
+— Scout Cavalry **Q**; Blacksmith — Fletching **Q**, Scale Mail
+**W**, Padded Archer Armor **A**. The Town Center takes DE's
+own arrangement (2026-10-19 study fix) — Villager **Q**, Loom
+**A**, Feudal Age **W** (the wiki's grid rule: the letter is
+the button's panel position, and DE's TC panel is arranged
+that way; the study video's Loom tooltip reads "(Hotkey:
+A)"). Every command-panel button carries its letter as a
 small badge (top-left) so
 the grid is learnable by looking — and NOTHING else on the
 face: the production queue count is not badged (Claudio,
@@ -1017,8 +1024,8 @@ not leak into camera panning) and does nothing.
 **Drop-off.** Villager(s) selected, no page armed: A issues
 the force drop-off (the M6 ForceDeposit order, per loaded
 villager — the same path as right-clicking a drop-off
-building). On the armed economic page, A is the Farm instead;
-the panel context decides, as in the reference game.
+building). On the armed economic page, A is the Lumber Camp
+instead; the panel context decides, as in the reference game.
 
 **Go-to.** Ctrl+letter cycles our completed buildings of a
 kind — select + center, H's Town Center pattern per type:
@@ -1030,15 +1037,19 @@ the group — the panel names it with a count and its commands
 address the first building; multi-building queue fan-out is
 not built. A missing type answers with a flash naming it.
 
-**The two recorded divergences from the wiki's DE table.**
-(1) On the economic page, **E = House** (Claudio's call,
-2026-10-18: the sequence Q, E must raise a House), where the
-pure grid puts the Mining Camp; the House keeps its grid Q as
-well, and the Mining Camp answers to G, its go-to letter.
-(2) The Stable's go-to, **Ctrl+L, is not bound**: browsers
+**The recorded divergences from the wiki's DE table.**
+(1) The Stable's go-to, **Ctrl+L, is not bound**: browsers
 reserve it for the address bar and the page never receives
 the event. The Stable still answers on its build page (E,
-alias L without Ctrl).
+alias L without Ctrl). (2) Superseded 2026-10-19: the
+economic page briefly ran **E = House** (Claudio's call,
+2026-10-18) with the Mining Camp displaced to G; Claudio
+replaced it with the pure physical grid — the letter IS the
+button's keyboard place (rows Q W E / A S D / Z X C) — so
+Q, Q raises a House, the Farm holds E, the Mining Camp holds
+S (G survives only as its silent alias), and the Archery
+Range's old A alias was dropped (A is the Blacksmith's slot
+on the military page).
 
 **Gates.** Hotkeys never fire while the event target is a
 text/password/search input or any editable field; never while

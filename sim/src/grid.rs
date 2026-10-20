@@ -125,6 +125,36 @@ impl Grid {
         self.terrain[Self::idx(x, y)]
     }
 
+    /// The nearest unblocked cell to (x, y), searching expanding
+    /// Chebyshev rings (radius 1..=max_ring) in a fixed scan order
+    /// (dy outer, dx inner — fully deterministic). `None` when no
+    /// cell in range is free. Used to land a move order whose
+    /// target cell is itself blocked next to the obstacle instead
+    /// of dropping the order (the reference game's behavior: a
+    /// click on a tree or a building walks the unit up to it).
+    pub fn nearest_free_cell(&self, x: u32, y: u32, max_ring: u32) -> Option<(u32, u32)> {
+        if !self.is_blocked(x, y) {
+            return Some((x, y));
+        }
+        for r in 1..=max_ring as i32 {
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    if dx.abs() != r && dy.abs() != r {
+                        continue; // ring cells only
+                    }
+                    let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                    if nx < 0 || ny < 0 {
+                        continue;
+                    }
+                    if !self.is_blocked(nx as u32, ny as u32) {
+                        return Some((nx as u32, ny as u32));
+                    }
+                }
+            }
+        }
+        None
+    }
+
     /// Set a cell's terrain tag (generator use).
     pub fn set_terrain(&mut self, x: u32, y: u32, tag: u8) {
         if x >= GRID_DIM || y >= GRID_DIM {
