@@ -122,3 +122,29 @@ front gap, scout beside the TC) live in the art staging area; the
 corrected winning prompt is recorded in `PROMPTS.md` ("TOWN CENTER
 HORSESHOE — winning prompt"). The lock-ring version is backed up as
 `town-center-lockring-backup.png` in the staging area.
+
+## Town Center — horseshoe HEIGHT iteration (2026-10-19, iteration 3)
+
+`town-center.png` replaced again (same 512×494 canvas, same draw
+contract — drop-in, no renderer change). Claudio's review of the
+iteration-2 judge sheet: the villager still read **too big against
+the building** — "make it TALLER so the villager sits at the right
+height; the problem is the height; taller still fits". The fix is
+vertical only: same horseshoe plan, same 4×4 base on the canonical
+diamond, the building grows UP the canvas. The blockout was rebuilt
+with raised storeys (`tc_blockout4.py`: hall eaves 1.95 z, hip apex
+2.95, turret apex 3.15, canopies raised for headroom, and the hall
+door drawn as a stone **arch gateway** — the generator paints
+furniture-scale doors ~0.3–0.6× a villager no matter the slab, but
+an arch is architecture and holds its size). Measured on the final
+fitted art against the 73px game-scale villager (winner R, judged
+on `tc-lock3-judge.png` with a villager at the door, a villager
+under the canopy, a villager entering the open front, and a mounted
+scout beside the TC): **door (gateway) 1.29×, canopy clearance
+1.39×, hall eaves 1.86×, hall ridge 2.40×, bell turret 3.06×** —
+against iteration 2's door 0.31× / ridge 1.93× / turret 2.23×, the
+villager now sits at the right height at every feature. The
+iteration-2 horseshoe is backed up as
+`town-center-horseshoe-v1-backup.png` in the staging area; the
+winning prompt and full measurement table are recorded in
+`PROMPTS.md` ("TOWN CENTER HORSESHOE — HEIGHT").
