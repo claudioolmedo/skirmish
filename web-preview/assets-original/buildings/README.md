@@ -75,3 +75,22 @@ same way. `farm.png` is the ripe frame. While a completed farm is
 being gathered, the renderer picks the state by the food fraction
 remaining (ripe → green → shoots → planted as it depletes), on the
 same fitted-to-the-diamond draw contract the single farm image used.
+
+## Town Center — lock-plan iteration (2026-10-19)
+
+`town-center.png` was replaced (same 512×494 canvas, same draw
+contract — drop-in, no renderer change). The previous art (R8a, a
+Base44 v8 generation) read as one closed building mass, which hides
+the game's Town Center rule: the TC does NOT block — units pass
+through its 4×4 area. The new art follows the DE "lock" plan
+(Claudio's study note in `PROMPTS.md`): building mass only at the
+PERIMETER — a two-storey hall at the back, gallery wings on the
+sides, and a ring of open lean-to canopy roofs on timber posts —
+around a clearly EMPTY central courtyard of bare earth, so a unit
+crossing the center stays visible. Generated with the media image
+pipeline from the winning prompt recorded in `PROMPTS.md`
+("TOWN CENTER LOCK PLAN — winning prompt"), judged on the footprint
+grid against three sibling candidates (judge sheet in the art
+staging area, `tc-lock-judge.png`), chroma-keyed and exact-fit
+affine-warped onto the canonical diamond. R8a remains in git
+history and as `town-center-r8a-backup.png` in the staging area.
