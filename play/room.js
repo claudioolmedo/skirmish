@@ -118,12 +118,12 @@ export function slotAiMode(slot) {
   return null;
 }
 
-export function slotLabel(slot) {
+export function slotLabel(slot, s = null) {
   switch (slot) {
-    case 'ai-easy': return 'AI · Easy';
-    case 'ai-normal': return 'AI · Normal';
-    case 'closed': return 'Closed';
-    default: return 'Open';
+    case 'ai-easy': return (s && s.aiEasy) || 'AI · Easy';
+    case 'ai-normal': return (s && s.aiNormal) || 'AI · Normal';
+    case 'closed': return (s && s.closed) || 'Closed';
+    default: return (s && s.open) || 'Open';
   }
 }
 
@@ -132,7 +132,9 @@ export function slotLabel(slot) {
 /// shown are the game's fixed facts today (map, victory,
 /// players) plus the guest slot — from the guest's own seat the
 /// last part simply reads "You".
-export function roomConfigText({ guestSlot = 'open', selfIsGuest = false } = {}) {
-  const guest = selfIsGuest ? 'You' : slotLabel(guestSlot);
-  return `1v1 · Arabia · Conquest · Guest: ${guest}`;
+export function roomConfigText({ guestSlot = 'open', selfIsGuest = false } = {}, s = null) {
+  const guest = selfIsGuest
+    ? ((s && s.you) || 'You')
+    : slotLabel(guestSlot, s && s.slot);
+  return s && s.format ? s.format(guest) : `1v1 · Arabia · Conquest · Guest: ${guest}`;
 }

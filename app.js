@@ -81,6 +81,9 @@ import {
   PAGE_KINDS, resolveHotkey, badgeForButton, edgePan,
 } from './play/hotkeys.js';
 import { diffFeedEvents } from './play/feed.js';
+import {
+  t, getLocale, setLocale, costText, genderOf,
+} from './play/i18n.js';
 
 const assetUrl = (rel) => new URL(rel, import.meta.url).href;
 
@@ -154,7 +157,12 @@ const CARRY_COLORS = ['#d9a05b', '#ff5da2', '#ffd700', '#c3c8cd', '#ff5da2', '#f
 // Entity kind tags (must match the sim's EntityKind::tag).
 const KIND_TC = 1;
 const KIND_SHEEP = 5;
-const KIND_NAME = {
+// i18n: the display-name tables below are rebuilt from
+// play/i18n.js on every locale switch (refreshNames) — the
+// semantic ids index the string table (unit.<id>, building.<id>).
+const KIND_I18N = ['villager', 'townCenter', 'scout', 'militia', 'archer',
+  'sheep', 'boar', 'deer', 'manAtArms'];
+let KIND_NAME = {
   0: 'Villager', 1: 'Town Center', 2: 'Scout Cavalry', 3: 'Militia',
   4: 'Archer', 5: 'Sheep', 6: 'Boar', 7: 'Deer', 8: 'Man-at-Arms',
 };
@@ -189,7 +197,9 @@ function pngIcon(png, cls) {
 // 5 mining camp, 6 archery range, 7 stable, 8 blacksmith (M6).
 // Costs and footprints mirror the sim (MECHANICS-STUDY §5).
 const BUILD_COST = [25, 60, 175, 100, 100, 100, 175, 175, 150];
-const BUILD_NAME = ['House', 'Farm', 'Barracks', 'Lumber Camp', 'Mill',
+const BUILD_I18N = ['house', 'farm', 'barracks', 'lumber', 'mill',
+  'mining', 'range', 'stable', 'blacksmith'];
+let BUILD_NAME = ['House', 'Farm', 'Barracks', 'Lumber Camp', 'Mill',
   'Mining Camp', 'Archery Range', 'Stable', 'Blacksmith'];
 const BUILD_SIZE = [2, 2, 3, 2, 2, 2, 3, 3, 3];
 const BUILD_ICON = ['i-house', 'i-farm', 'i-tc', 'i-lumber', 'i-mill',
@@ -217,26 +227,48 @@ const BUILDING_MINIMAP_COLOR = {
 // Ages and technologies (M6). Age tags match the sim's Age::tag;
 // tech tags match TechId::tag. Costs/times mirror the sim's table
 // (study §8, OPENING-SPEC §2.6–2.7).
-const AGE_NAMES = ['Dark Age', 'Feudal Age'];
-const TECH_NAME = {
+let AGE_NAMES = ['Dark Age', 'Feudal Age'];
+let TECH_NAME = {
   0: 'Loom', 1: 'Feudal Age', 2: 'Fletching', 3: 'Scale Mail Armor',
   4: 'Padded Archer Armor', 5: 'Man-at-Arms',
 };
 // Research-block explanations, indexed by the sim's ResearchBlock
 // tag (0 ok — unused, 1 funds, 2 queue full, 3 already done,
 // 4 requirements).
-const RESEARCH_BLOCK_TITLES = [
+let RESEARCH_BLOCK_TITLES = [
   '',
   'Not enough resources.',
   'The queue is full.',
   'Already researched.',
   'Requirements not met yet.',
 ];
+// i18n: rebuild every display-name table from the string table
+// in the active locale. Called once at load and on each switch.
+function refreshNames() {
+  const kn = {};
+  KIND_I18N.forEach((id, tag) => { kn[tag] = t('unit.' + id); });
+  KIND_NAME = kn;
+  BUILD_NAME = BUILD_I18N.map((id) => t('building.' + id));
+  AGE_NAMES = [t('age.dark'), t('age.feudal')];
+  TECH_NAME = {
+    0: t('tech.loom'), 1: t('age.feudal'), 2: t('tech.fletching'),
+    3: t('tech.scalemail'), 4: t('tech.padded'), 5: t('tech.maa'),
+  };
+  RESEARCH_BLOCK_TITLES = [
+    '', t('block.noResources'), t('block.queueFullTrain'),
+    t('block.alreadyDone'), t('block.requirements'),
+  ];
+  TRAIN_BLOCK_TITLES = [
+    '', t('block.noResources'), t('block.queueFull'), t('block.housedLong'),
+  ];
+}
+// (First refreshNames() runs at the top of main() — the tables'
+// later declarations must be initialized first.)
 // A queue entry's display name: unit codes are entity kind tags;
 // research codes are 100 + tech tag.
 const queueEntryName = (code) => (code < 100
-  ? (KIND_NAME[code] || 'Unit')
-  : (TECH_NAME[code - 100] || 'Research'));
+  ? (KIND_NAME[code] || t('unit.fallback'))
+  : (TECH_NAME[code - 100] || t('research.fallback')));
 
 // --- Game shell state (client-only; never sim input) -------------------
 let playing = false; // the match is live: the sim ticks (set at init — no start screen)
@@ -338,10 +370,10 @@ function showMatchEnd(ms) {
   const secs = Math.floor(sim.tick_count() / 60);
   const mm = String(Math.floor(secs / 60)).padStart(2, '0');
   const ss = String(secs % 60).padStart(2, '0');
-  endTitle.textContent = ms === 1 ? 'Victory!' : 'Defeat';
+  endTitle.textContent = ms === 1 ? t('end.victory') : t('end.defeat');
   endDetail.textContent = ms === 1
-    ? `The enemy has been eliminated. Match time ${mm}:${ss}.`
-    : `Your village has fallen. Match time ${mm}:${ss}.`;
+    ? t('end.detailVictory', { time: `${mm}:${ss}` })
+    : t('end.detailDefeat', { time: `${mm}:${ss}` });
   endOverlay.style.display = 'flex';
 }
 let lDrag = null; // left-button drag state, canvas px: { x0, y0, x1, y1, moved }
@@ -430,6 +462,21 @@ function pushFeedLine(text) {
   if (drop.unref) drop.unref();
 }
 
+/// The feed's localized formatters (play/feed.js takes them as
+/// an argument; its own defaults are the English originals). The
+/// participles agree with the entity's gender in the active
+/// locale (pt 'Casa construída', es 'Milicia creada').
+function feedFmt() {
+  const loc = getLocale();
+  return {
+    built: (name, kind) => t('feed.built.' + genderOf(loc, 'building', BUILD_I18N[kind]), { name }),
+    created: (name, kind) => t('feed.created.' + genderOf(loc, 'unit', KIND_I18N[kind]), { name }),
+    research: (name) => t('feed.research', { name }),
+    feudal: t('feed.feudal'),
+    sheep: t('feed.sheep'),
+  };
+}
+
 /// Diff the current own-player state against the last frame's
 /// and post any events. Called once per frame from the live
 /// branches of the frame loop (never during replay playback:
@@ -441,7 +488,8 @@ function updateEventFeed() {
   const lines = diffFeedEvents(feedPrev, snap, {
     buildingName: (k) => BUILD_NAME[k],
     unitName: (k) => KIND_NAME[k],
-  });
+    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5 }[key]],
+  }, feedFmt());
   feedPrev = snap;
   for (const text of lines) pushFeedLine(text);
 }
@@ -1134,8 +1182,7 @@ function applyQuality(level, { announce = false } = {}) {
   fitCanvas();
   updateQualityUi();
   if (announce) {
-    const name = level[0].toUpperCase() + level.slice(1);
-    flash(`Quality set to ${name} — adjusted for your device. The game is the same at every level.`);
+    flash(t('flash.qualitySet', { name: t('quality.' + level) }));
   }
 }
 
@@ -1502,7 +1549,7 @@ function liveGroupMembers(n) {
 function cycleIdle(kind, selectAll) {
   const ids = kind === 'villager' ? [...myIdleVillagers()] : [...myIdleMilitary()];
   if (!ids.length) {
-    flash(kind === 'villager' ? 'No idle villagers.' : 'No idle military units.');
+    flash(kind === 'villager' ? t('flash.noIdleVil') : t('flash.noIdleMil'));
     return;
   }
   if (selectAll) {
@@ -1611,7 +1658,7 @@ function forceDropOffSelected() {
   for (const id of selectedUnits()) {
     if (st.kinds[id] === 0 && carryKind.has(id) && issue({ t: 'force_dep', e: id })) any = true;
   }
-  if (!any) flash('No loaded villagers selected — nothing to drop off.');
+  if (!any) flash(t('flash.noLoadedVil'));
 }
 
 /// Go-to (Ctrl+letter): cycle our completed buildings of a kind,
@@ -1621,7 +1668,7 @@ function goToBuildingKind(kind, selectAll) {
   const list = buildingList().filter(
     (b) => b.owner === localOwner && b.kind === kind && b.complete);
   if (!list.length) {
-    flash(`No ${BUILD_NAME[kind]} yet.`);
+    flash(t('flash.noBuildingYet', { name: BUILD_NAME[kind] }));
     return;
   }
   if (selectAll && list.length > 1) {
@@ -1749,10 +1796,10 @@ function syncFullscreenUi() {
   const fs = isFullscreen();
   if (fullscreenBtn) {
     fullscreenBtn.textContent = fs ? '⤢' : '⛶';
-    fullscreenBtn.title = fs ? 'Exit fullscreen' : 'Fullscreen';
+    fullscreenBtn.title = fs ? t('top.exitFullscreen') : t('top.fullscreen');
   }
   if (pauseFullscreenBtn) {
-    pauseFullscreenBtn.textContent = fs ? 'Exit fullscreen' : 'Fullscreen';
+    pauseFullscreenBtn.textContent = fs ? t('top.exitFullscreen') : t('top.fullscreen');
   }
 }
 
@@ -2099,8 +2146,7 @@ function netMatchEnd(localMs, opts) {
   if (opts.desync) {
     if (netUi) {
       netUi.desyncDetail.textContent =
-        `The two clients' simulations diverged at turn ${opts.desyncTurn}. ` +
-        'The match cannot continue — download the replay to help diagnose it.';
+        t('desync.detail', { turn: opts.desyncTurn });
     }
     showOverlay(netUi && netUi.desyncOverlay, true);
     return;
@@ -2153,19 +2199,16 @@ function updateNetStatus() {
     if (netUi && netUi.resignBtn) netUi.resignBtn.hidden = true;
     return;
   }
-  const stateTxt = {
-    lobby: 'in the lobby',
-    starting: 'loading…',
-    playing: 'match in progress',
-    'peer-left': 'opponent disconnected',
-    rebuilding: 'rebuilding the match…',
-    ended: 'match over',
-    desync: 'desynchronized',
-  }[net.phase] || net.phase;
+  const stateKey = {
+    lobby: 'lobby', starting: 'starting', playing: 'playing',
+    'peer-left': 'peerLeft', rebuilding: 'rebuilding',
+    ended: 'ended', desync: 'desync',
+  }[net.phase];
+  const stateTxt = stateKey ? t('net.state.' + stateKey) : net.phase;
   netUi.netStatus.hidden = false;
   netUi.netStatusText.textContent =
-    `Online · ${regionName(net.region)} · you are the ${net.role === 'host' ? 'host (blue)' : 'guest (red)'} · ${stateTxt}` +
-    (net.pingMs != null ? ` · ping ${net.pingMs} ms` : '');
+    `${t('net.online')} · ${regionName(net.region)} · ${net.role === 'host' ? t('net.youHost') : t('net.youGuest')} · ${stateTxt}` +
+    (net.pingMs != null ? ` · ${t('net.ping', { ms: net.pingMs })}` : '');
   if (netUi.resignBtn) {
     netUi.resignBtn.hidden = !(net.phase === 'playing' || net.phase === 'peer-left');
   }
@@ -2195,11 +2238,11 @@ let gameLoadPromise = null;
 function ensureGameLoaded(onStep) {
   if (!gameLoadPromise) {
     gameLoadPromise = (async () => {
-      if (onStep) onStep('Downloading the game…');
+      if (onStep) onStep(t('load.stepDownload'));
       const mod = await import('./pkg/skirmish_sim.js');
       await mod.default(); // fetch + instantiate the .wasm
       WasmSim = mod.WasmSim;
-      if (onStep) onStep('Loading the artwork…');
+      if (onStep) onStep(t('load.stepArtwork'));
       loadPlaceholderSprites();
       loadBuildingArt();
       loadNodeArt();
@@ -2233,7 +2276,7 @@ function ensureGameLoaded(onStep) {
       mmGeom = createMinimap({
         worldHalf: HALF, width: minimapCanvas.width, height: minimapCanvas.height,
       });
-      if (onStep) onStep('Building the world…');
+      if (onStep) onStep(t('load.stepWorld'));
     })();
     // A failed load (offline, blocked fetch) may be retried by
     // the next attempt to play — don't cache the rejection.
@@ -2260,13 +2303,13 @@ function renderLoading() {
   netUi.loadSlotGuest.style.display = '';
   const row = (label, loaded) =>
     `<span class="slot-name">${label}</span>` +
-    `<span class="slot-state">${loaded ? 'loaded ✓' : 'loading…'}</span>`;
-  netUi.loadSlotHost.innerHTML = row('Blue — Host', m.blueLoaded);
+    `<span class="slot-state">${loaded ? t('load.loaded') : t('load.loadingSeat')}</span>`;
+  netUi.loadSlotHost.innerHTML = row(t('load.blueHost'), m.blueLoaded);
   // M12: with an AI guest slot the red seat names the AI (it is
   // this same client's sim — it shows loaded the moment the
   // host's build verifies).
   const guestLabel = slotIsAi(net.guestSlot)
-    ? `Red — ${slotLabel(net.guestSlot)}` : 'Red — Guest';
+    ? t('load.redAi', { slot: slotLabel(net.guestSlot, slotStrings()) }) : t('load.redGuest');
   netUi.loadSlotGuest.innerHTML = row(guestLabel, m.redLoaded);
 }
 
@@ -2284,7 +2327,7 @@ function enterLoading() {
   showOverlay(netUi.onlineOverlay, false);
   showOverlay(netUi.loadingOverlay, true);
   renderLoading();
-  setLoadingStatus('Loading…');
+  setLoadingStatus(t('load.status'));
   clearTimeout(net.loadTimer);
   net.loadTimer = setTimeout(() => cancelLoading('timeout'), LOAD_TIMEOUT_MS);
   updateNetStatus();
@@ -2304,7 +2347,7 @@ function markSelfLoaded() {
 
 /// The one cancellation message (addendum rule): a player left or
 /// failed to load — the match is cancelled for everyone.
-const MATCH_CANCELLED_MSG = 'Match cancelled — a player left or failed to load.';
+const matchCancelledMsg = () => t('load.matchCancelled');
 
 /// Cancel a match that is still loading and return to the Lobby
 /// Browser. `notify` tells the peer (its own cancel — or its
@@ -2318,7 +2361,7 @@ function cancelLoading(notify) {
   }
   hideLoading();
   openLobby(null);
-  lobbyStatus(MATCH_CANCELLED_MSG);
+  lobbyStatus(matchCancelledMsg());
 }
 
 // --- room-link consume-once --------------------------------------------------
@@ -2380,7 +2423,7 @@ async function hostStartMatch() {
   });
   // The host's own build IS its verification — it is loaded.
   markSelfLoaded();
-  setLoadingStatus('Waiting for your opponent to load…');
+  setLoadingStatus(t('load.waitOpponent'));
   updateNetStatus();
 }
 
@@ -2416,7 +2459,7 @@ async function guestHandleStart(msg) {
   // the construction hash verified. The host sends 'go' only
   // once both loaded signals are in.
   net.client.send({ type: 'start-ack' });
-  setLoadingStatus('Loaded — waiting for the host…');
+  setLoadingStatus(t('load.waitHost'));
 }
 
 // --- M12: the AI guest slot --------------------------------------
@@ -2450,7 +2493,7 @@ async function hostStartAiMatch() {
   markSelfLoaded();
   net.peerLoaded = true;
   renderLoading();
-  setLoadingStatus('Starting the match…');
+  setLoadingStatus(t('load.starting'));
   beginAiMatch(mode);
 }
 
@@ -2534,6 +2577,29 @@ function myAdmitted() {
     : guestAdmitted({ isPrivate: net.privacy === 'private', pwState: net.pwState });
 }
 
+/// i18n: the localized label sets the pure room/lobby modules
+/// take (their own defaults are the English originals).
+function slotStrings() {
+  return {
+    open: t('slot.open'), closed: t('slot.closed'),
+    aiEasy: t('mode.aiEasy'), aiNormal: t('mode.aiNormal'),
+  };
+}
+function roomConfigStrings() {
+  return {
+    slot: slotStrings(),
+    you: t('room.you'),
+    format: (guest) => t('room.config', { guest }),
+  };
+}
+function lobbyStrings() {
+  return {
+    unknownServer: t('lobby.unknownServer'),
+    titleFmt: (region) => t('lobby.titleAuto', { region }),
+    mapName: t('map.arabia'),
+  };
+}
+
 function renderRoom() {
   if (!netUi || !netUi.roomSection) return;
   const inRoom = !!(net && net.room);
@@ -2548,36 +2614,36 @@ function renderRoom() {
   const guestReady = aiSlot ? true : (isHost ? net.peerReady : net.selfReady);
   let hostState;
   let guestState;
-  if (isHost) hostState = 'You';
-  else hostState = (net.peerPresent || net.hostSeen) ? 'Here' : 'Waiting…';
+  if (isHost) hostState = t('room.you');
+  else hostState = (net.peerPresent || net.hostSeen) ? t('room.here') : t('room.waiting');
   if (!isHost) {
-    guestState = priv && net.pwState !== 'ok' ? 'You — password required' : 'You';
+    guestState = priv && net.pwState !== 'ok' ? t('room.youPw') : t('room.you');
   } else if (aiSlot) {
-    guestState = slotLabel(slot);
+    guestState = slotLabel(slot, slotStrings());
   } else if (slot === 'closed') {
-    guestState = 'Closed — no guest will join';
+    guestState = t('room.closedState');
   } else if (net.peerPwOk || net.peerPresent) {
-    guestState = 'Here';
+    guestState = t('room.here');
   } else if (net.doorGuest) {
-    guestState = 'At the door — password';
+    guestState = t('room.atDoor');
   } else {
-    guestState = 'Waiting for a guest…';
+    guestState = t('room.waitingGuest');
   }
-  const badge = (r) => (r ? ' · <span class="slot-ready">Ready ✓</span>' : '');
+  const badge = (r) => (r ? ` · <span class="slot-ready">${t('room.readyBadge')}</span>` : '');
   netUi.slotHost.innerHTML =
     '<span class="slot-dot dot-blue"></span>' +
-    '<span class="slot-name">Host — Blue</span>' +
+    `<span class="slot-name">${t('room.hostSeat')}</span>` +
     `<span class="slot-state">${hostState}${badge(hostReady)}</span>`;
   netUi.slotGuest.innerHTML =
     '<span class="slot-dot dot-red"></span>' +
-    '<span class="slot-name">Guest — Red</span>' +
+    `<span class="slot-name">${t('room.guestSeat')}</span>` +
     `<span class="slot-state">${guestState}${badge(guestReady)}</span>`;
   // M12: the configuration summary — the game's fixed facts
   // plus the guest seat, from the viewer's own side of it.
   if (netUi.roomConfigLine) {
     netUi.roomConfigLine.textContent = roomConfigText({
       guestSlot: slot, selfIsGuest: !isHost,
-    });
+    }, roomConfigStrings());
   }
   // M12: the guest-seat selector is the host's alone, and it
   // locks while a human guest is present (or at the door): the
@@ -2600,7 +2666,7 @@ function renderRoom() {
   netUi.pwRow.hidden = !showPw;
   const showPwNote = showPw && net.pwState === 'wrong';
   netUi.pwNote.hidden = !showPwNote;
-  if (showPwNote) netUi.pwNote.textContent = 'Incorrect password — try again.';
+  if (showPwNote) netUi.pwNote.textContent = t('status.incorrectPw');
   // The Start toggle: live only for an admitted player with an
   // admitted, present peer — or, with an AI seat, for the host
   // alone (the AI always counts as ready).
@@ -2609,7 +2675,7 @@ function renderRoom() {
     guestSlot: slot,
   });
   netUi.readyBtn.disabled = !can;
-  netUi.readyBtn.textContent = net.selfReady ? '✓ Ready — tap to cancel' : 'Start';
+  netUi.readyBtn.textContent = net.selfReady ? t('room.readyCancel') : t('room.start');
   netUi.readyBtn.classList.toggle('active', !!net.selfReady);
 }
 
@@ -2657,7 +2723,7 @@ function submitPassword() {
   netUi.pwInput.value = '';
   net.pwState = 'sent';
   net.client.send({ type: 'pw', pw });
-  lobbyStatus('Checking the password…');
+  lobbyStatus(t('status.checkingPw'));
   renderRoom();
 }
 
@@ -2675,7 +2741,7 @@ async function rejoinFromResync(msg) {
   try {
     await ensureGameLoaded();
   } catch {
-    lobbyStatus('The game failed to load — check your connection and try rejoining again.');
+    lobbyStatus(t('status.rebuildFail'));
     return;
   }
   net.phase = 'rebuilding';
@@ -2683,7 +2749,7 @@ async function rejoinFromResync(msg) {
   const slot = typeof msg.yourSlot === 'number' ? msg.yourSlot : 1;
   net.role = slot === 0 ? 'host' : 'guest';
   const owner = slot === 0 ? 0 : 2;
-  lobbyStatus('Rebuilding the match from the recorded game…');
+  lobbyStatus(t('status.rebuilding'));
   showOverlay(netUi.onlineOverlay, true);
   const fresh = WasmSim.new_match(msg.seed, MODE_TAG.online);
   adoptSim(fresh, owner);
@@ -2707,7 +2773,7 @@ async function rejoinFromResync(msg) {
   net.session = makeNetSession();
   net.resyncDelay = msg.delay || 4;
   net.client.send({ type: 'resync-done' });
-  lobbyStatus('Rebuilt — resuming…');
+  lobbyStatus(t('status.rebuilt'));
 }
 
 function sendResync() {
@@ -2741,8 +2807,8 @@ function onPeerGone() {
         (REJOIN_GRACE_MS - (Date.now() - net.peerLeftAt)) / 1000));
       if (netUi.peerDetail) {
         netUi.peerDetail.textContent = left > 0
-          ? `Your opponent's connection dropped. If they reopen the same link within ${left} s, the match resumes where it stopped.`
-          : 'The rejoin window has closed. You may claim the victory, or leave the match.';
+          ? t('peer.detailGrace', { secs: left })
+          : t('peer.detailClosed');
       }
       if (left <= 0 && netUi.claimBtn) netUi.claimBtn.disabled = false;
     }, 250);
@@ -2761,7 +2827,7 @@ function onPeerGone() {
     net.selfReady = false;
     net.peerPwOk = false;
     net.doorGuest = false;
-    lobbyStatus('Your opponent left the room.');
+    lobbyStatus(t('status.opponentLeft'));
     renderRoom();
     updateNetStatus();
   }
@@ -2792,7 +2858,7 @@ function onNetMessage(msg) {
         && net.privacy === 'private' && !net.peerPwOk) {
         net.doorGuest = true;
         net.client.send({ type: 'pw-req' });
-        lobbyStatus('A guest is at the door — waiting for the password.');
+        lobbyStatus(t('status.guestAtDoor'));
         renderRoom();
         updateNetStatus();
         break;
@@ -2806,7 +2872,7 @@ function onNetMessage(msg) {
       net.hellosSeen = (net.hellosSeen || 0) + 1;
       if (guestAtDoor) {
         net.hostSeen = true;
-        lobbyStatus('This room is private — enter the password to join.');
+        lobbyStatus(t('status.privateEnter'));
         renderRoom();
         updateNetStatus();
         break;
@@ -2818,9 +2884,9 @@ function onNetMessage(msg) {
       if (isNewPresence && net.phase === 'lobby') net.peerReady = false;
       if (net.phase === 'lobby' || net.phase === 'starting') {
         if (net.role === 'host') {
-          lobbyStatus('Your opponent is here. Press Start when you are both ready.');
+          lobbyStatus(t('status.opponentHere'));
         } else {
-          lobbyStatus('Connected. Press Start when you are ready — the match begins when both players are ready.');
+          lobbyStatus(t('status.connected'));
         }
         renderRoom();
       } else if (net.phase === 'peer-left' || (net.phase === 'playing' && wasGone)) {
@@ -2839,7 +2905,7 @@ function onNetMessage(msg) {
       break;
     }
     case 'room-full':
-      lobbyStatus('This room already has two players.');
+      lobbyStatus(t('status.roomFull'));
       break;
     case 'start':
       if (net.role === 'guest' && net.phase === 'lobby') guestHandleStart(msg);
@@ -2869,7 +2935,7 @@ function onNetMessage(msg) {
       if (net.phase === 'starting') cancelLoading(false);
       else if (net.phase === 'lobby' && net.room) {
         openLobby(null);
-        lobbyStatus(MATCH_CANCELLED_MSG);
+        lobbyStatus(matchCancelledMsg());
       }
       break;
     case 'go':
@@ -2897,7 +2963,7 @@ function onNetMessage(msg) {
         net.privacy = 'private';
         net.hostSeen = true;
         if (net.pwState === 'na') net.pwState = 'needed';
-        lobbyStatus('This room is private — enter the password to join.');
+        lobbyStatus(t('status.privateEnter'));
         renderRoom();
       }
       break;
@@ -2913,10 +2979,10 @@ function onNetMessage(msg) {
           net.peerPresent = true;
           net.peerReady = false;
           net.client.send({ type: 'pw-ok' });
-          lobbyStatus('Your opponent is here. Press Start when you are both ready.');
+          lobbyStatus(t('status.opponentHere'));
         } else {
           net.client.send({ type: 'pw-no' });
-          lobbyStatus('A guest entered the wrong password.');
+          lobbyStatus(t('status.wrongPwGuest'));
         }
         renderRoom();
         updateNetStatus();
@@ -2927,7 +2993,7 @@ function onNetMessage(msg) {
         net.pwState = 'ok';
         net.peerPresent = true;
         net.peerReady = false;
-        lobbyStatus('You are in. Press Start when you are ready — the match begins when both players are ready.');
+        lobbyStatus(t('status.youAreIn'));
         renderRoom();
         updateNetStatus();
       }
@@ -2935,7 +3001,7 @@ function onNetMessage(msg) {
     case 'pw-no':
       if (net.role === 'guest' && net.phase === 'lobby') {
         net.pwState = 'wrong';
-        lobbyStatus('Incorrect password — try again.');
+        lobbyStatus(t('status.incorrectPw'));
         renderRoom();
       }
       break;
@@ -2957,7 +3023,7 @@ function onNetMessage(msg) {
         const atTurn = st.turn + st.delay + 2;
         net.client.send({ type: 'resume', atTurn });
         net.session.rebase(atTurn, performance.now() + 700);
-        flash('Opponent reconnected — match resumed.');
+        flash(t('flash.reconnectedPeer'));
       }
       break;
     case 'resume':
@@ -2970,7 +3036,7 @@ function onNetMessage(msg) {
         setPaused(false);
         playing = true;
         updateNetStatus();
-        flash('Reconnected — match resumed.');
+        flash(t('flash.reconnectedSelf'));
       }
       break;
     default:
@@ -3026,18 +3092,18 @@ function connectToRoom() {
         // M12: a sealed seat changes what "created" means — the
         // room is not in the public list and needs no guest.
         if (slotIsAi(net.guestSlot)) {
-          lobbyStatus(`Room created — the guest seat is ${slotLabel(net.guestSlot)}. Press Start when you are ready.`);
+          lobbyStatus(t('status.roomAi', { slot: slotLabel(net.guestSlot, slotStrings()) }));
         } else if (net.guestSlot === 'closed') {
-          lobbyStatus('Room created — the guest seat is closed. Reopen it to let a player join.');
+          lobbyStatus(t('status.roomClosed'));
         } else if (net.privacy === 'private') {
-          lobbyStatus('Private room created. Share the invite link — guests also need the password.');
+          lobbyStatus(t('status.roomPrivate'));
         } else {
-          lobbyStatus('Room created — it is listed in the Lobby Browser for anyone to join.');
+          lobbyStatus(t('status.roomPublic'));
         }
       } else if (net.privacy === 'private') {
-        lobbyStatus('This room is private — enter the password to join.');
+        lobbyStatus(t('status.privateEnter'));
       } else {
-        lobbyStatus('Joining the room…');
+        lobbyStatus(t('status.joining'));
       }
       renderRoom();
     },
@@ -3090,7 +3156,7 @@ function openLobby(join) {
   // room screen directly (and the waiting-view ad sidebar).
   if (netUi.gamesSection) netUi.gamesSection.hidden = !!join;
   if (netUi.createSection) netUi.createSection.hidden = true;
-  lobbyStatus(join ? 'Joining the room…' : 'Pick a server, then create the game.');
+  lobbyStatus(join ? t('status.joining') : t('status.pickServer'));
   loadRegionsAndPings();
   if (join) {
     stopLobbyBrowser();
@@ -3178,7 +3244,7 @@ function createGame() {
   if (net.privacy === 'private') {
     const pw = netUi.roomPassword ? netUi.roomPassword.value : '';
     if (!pw) {
-      lobbyStatus('Set a password for the private room first.');
+      lobbyStatus(t('status.setPwFirst'));
       if (netUi.roomPassword) netUi.roomPassword.focus();
       return;
     }
@@ -3252,6 +3318,7 @@ function renderLobbyGames() {
   const models = lobbyGames.open.map((e) => lobbyRowModel(e, {
     regionName: regionName(e.region),
     pingMs: lobbyPings[e.region],
+    strings: lobbyStrings(),
   }));
   // Lobby order (oldest game first), then the controls row's
   // filters decide what is visible (M11).
@@ -3260,25 +3327,25 @@ function renderLobbyGames() {
   list.innerHTML = '';
   const head = document.createElement('div');
   head.className = 'game-row game-head';
-  head.innerHTML = '<span class="g-title">Game Name</span>'
-    + '<span class="g-players">Players</span>'
-    + '<span class="g-map">Map</span>'
-    + '<span class="g-loc">Location</span>'
-    + '<span class="g-server">Server</span>';
+  head.innerHTML = `<span class="g-title">${t('lobby.colGame')}</span>`
+    + `<span class="g-players">${t('lobby.colPlayers')}</span>`
+    + `<span class="g-map">${t('lobby.colMap')}</span>`
+    + `<span class="g-loc">${t('lobby.colLocation')}</span>`
+    + `<span class="g-server">${t('lobby.colServer')}</span>`;
   list.append(head);
   if (!rows.length) {
     const empty = document.createElement('p');
     empty.className = 'games-empty';
     empty.textContent = lobbyGames.open.length
-      ? 'No games match — clear the search or filters.'
-      : 'No open games right now — create one with Create Lobby.';
+      ? t('lobby.emptyFiltered')
+      : t('lobby.emptyNone');
     list.append(empty);
   }
   for (const m of rows) {
     const row = document.createElement('div');
     row.className = 'game-row' + (m.room === lobbySelectedRoom ? ' selected' : '');
     row.dataset.room = m.room;
-    row.innerHTML = `<span class="g-title">${m.locked ? '<span class="g-lock" title="Private — password required">🔒</span> ' : ''}${m.title}</span>`
+    row.innerHTML = `<span class="g-title">${m.locked ? `<span class="g-lock" title="${t('lobby.lockTitle')}">🔒</span> ` : ''}${m.title}</span>`
       + `<span class="g-players">${m.playersText}</span>`
       + `<span class="g-map">${m.mapText}</span>`
       + `<span class="g-loc">${m.server}</span>`
@@ -3299,7 +3366,7 @@ function renderLobbyGames() {
     const n = lobbyGames.inProgress;
     netUi.gamesNote.hidden = !(n > 0);
     netUi.gamesNote.textContent = n > 0
-      ? `${n} match${n === 1 ? '' : 'es'} in progress`
+      ? t(n === 1 ? 'lobby.inProgressOne' : 'lobby.inProgressOther', { n })
       : '';
   }
 }
@@ -3313,7 +3380,7 @@ function renderRegionFilter() {
   sel.innerHTML = '';
   const any = document.createElement('option');
   any.value = '';
-  any.textContent = 'Any';
+  any.textContent = t('lobby.any');
   sel.append(any);
   for (const r of regionList) {
     const opt = document.createElement('option');
@@ -3369,17 +3436,17 @@ async function playSoloFromLobby() {
   if (netUi) {
     showOverlay(netUi.loadingOverlay, true);
     netUi.loadSlotHost.innerHTML =
-      '<span class="slot-name">Blue — You</span>' +
-      '<span class="slot-state">loading…</span>';
+      `<span class="slot-name">${t('load.blueYou')}</span>` +
+      `<span class="slot-state">${t('load.loadingSeat')}</span>`;
     netUi.loadSlotGuest.style.display = 'none';
-    setLoadingStatus('Loading…');
+    setLoadingStatus(t('load.status'));
   }
   try {
     await ensureGameLoaded((t) => setLoadingStatus(t));
   } catch {
     hideLoading();
     openLobby(null);
-    lobbyStatus('The game failed to load — check your connection and try again.');
+    lobbyStatus(t('status.loadFail'));
     return;
   }
   resetSim(matchMode);
@@ -3398,12 +3465,12 @@ async function startPlayback(rec) {
   try {
     await ensureGameLoaded();
   } catch {
-    flash('The game failed to load — check your connection and try again.');
+    flash(t('status.loadFail'));
     return;
   }
   const events = replayEvents(rec);
   if (!events) {
-    flash('That file is not a Skirmish II replay.');
+    flash(t('flash.notReplay'));
     return;
   }
   const owners = Array.isArray(rec.seats) && rec.seats.length >= 2
@@ -3424,14 +3491,15 @@ async function startPlayback(rec) {
   playback.last = performance.now();
   if (netUi && netUi.playbackBar) {
     netUi.playbackBar.hidden = false;
-    netUi.pbLabel.textContent = 'Replay — ' + (rec.region ? regionName(rec.region) + ' · ' : '')
-      + `seed ${rec.seed}`;
-    netUi.pbToggle.textContent = 'Pause';
+    netUi.pbLabel.textContent = t('pb.line', {
+      detail: (rec.region ? regionName(rec.region) + ' · ' : '') + t('pb.seedPart', { seed: rec.seed }),
+    });
+    netUi.pbToggle.textContent = t('pb.pause');
     netUi.pbSpeed.textContent = '1×';
   }
   playing = true;
   setPaused(false);
-  flash('Playing the replay. Orders are disabled; camera is free.');
+  flash(t('flash.playingReplay'));
 }
 
 function exitPlayback() {
@@ -3443,9 +3511,9 @@ function exitPlayback() {
 }
 
 function stepReplayTick() {
-  const t = sim.tick_count();
+  const tickNow = sim.tick_count();
   while (playback.idx < playback.events.length
-      && playback.events[playback.idx].tick <= t) {
+      && playback.events[playback.idx].tick <= tickNow) {
     const e = playback.events[playback.idx++];
     for (const c of e.s0) netApplyCommand(sim, c, playback.owners[0], (o) => netTcIdOf(sim, o));
     if (e.s1) {
@@ -3456,8 +3524,8 @@ function stepReplayTick() {
   if (playback.totalTicks && sim.tick_count() >= playback.totalTicks) {
     playback.done = true;
     playback.playing = false;
-    if (netUi) netUi.pbToggle.textContent = 'Play';
-    flash('Replay ended.');
+    if (netUi) netUi.pbToggle.textContent = t('pb.play');
+    flash(t('flash.replayEnded'));
   }
 }
 
@@ -3485,7 +3553,7 @@ function drivePlayback(now) {
 /// Download a replay object as a .json file.
 function downloadReplay(replayObj) {
   if (!replayObj) {
-    flash('No replay recorded yet.');
+    flash(t('flash.noReplayYet'));
     return;
   }
   const blob = new Blob([JSON.stringify(replayObj)], { type: 'application/json' });
@@ -3509,6 +3577,190 @@ function currentReplay() {
     });
   }
   return null;
+}
+
+// --- i18n: static strings + the language switch -------------------
+// applyStaticStrings re-voices every static element of the page
+// from the string table (play/i18n.js). applyLocale is the ONE
+// switch path (both language selects call it): persist the
+// choice, rebuild the name tables, re-voice the statics, and
+// re-run the live renderers so the current screen changes
+// language immediately, without a reload.
+function setText(id, key, vars) {
+  const e = document.getElementById(id);
+  if (e) e.textContent = t(key, vars);
+}
+function setAttr(id, attr, key) {
+  const e = document.getElementById(id);
+  if (e && e.setAttribute) e.setAttribute(attr, t(key));
+}
+function setTitle(id, key) {
+  const e = document.getElementById(id);
+  if (e) e.title = t(key);
+}
+function setPlaceholder(id, key) {
+  const e = document.getElementById(id);
+  if (e) e.placeholder = t(key);
+}
+function setOptions(id, pairs) {
+  const sel = document.getElementById(id);
+  if (!sel || !sel.options) return;
+  for (const opt of sel.options) {
+    const k = pairs[opt.value];
+    if (k) opt.textContent = t(k);
+  }
+}
+
+function applyStaticStrings() {
+  document.title = t('title.play');
+  if (document.documentElement) document.documentElement.lang = getLocale();
+  // Top bar (the age chip / idle titles; the fullscreen button's
+  // title is syncFullscreenUi's, called by applyLocale).
+  setAttr('res-group', 'aria-label', 'top.resources');
+  setTitle('res-age-chip', 'top.currentAge');
+  setTitle('idle-vil-btn', 'top.idleVillagers');
+  setTitle('idle-mil-btn', 'top.idleMilitary');
+  setTitle('pause-btn', 'top.menuTitle');
+  const pauseBtnEl = document.getElementById('pause-btn');
+  if (pauseBtnEl && pauseBtnEl.childNodes) {
+    for (const node of pauseBtnEl.childNodes) {
+      if (node.nodeType === 3) node.textContent = ' ' + t('top.menu');
+    }
+  }
+  setAttr('cmd-panel', 'aria-label', 'panel.commands');
+  setAttr('sel-panel', 'aria-label', 'panel.selection');
+  setAttr('minimap-wrap', 'aria-label', 'panel.minimap');
+  setTitle('page-eco', 'cmd.ecoTitle');
+  setTitle('page-mil', 'cmd.milTitle');
+  // Pause menu.
+  setText('pause-title', 'pause.title');
+  setAttr('menu-close', 'aria-label', 'pause.closeMenu');
+  setText('resume-btn', 'pause.resume');
+  setText('help-btn', 'pause.howToPlay');
+  setText('restart-btn', 'pause.restart');
+  setText('btn-online', 'pause.playOnline');
+  setText('net-note', 'pause.netNote');
+  setText('btn-resign', 'pause.resign');
+  setText('btn-download-replay', 'end.downloadReplay');
+  setText('btn-watch-replay', 'pause.watchReplay');
+  setAttr('mode-row', 'aria-label', 'pause.matchMode');
+  setText('mode-sandbox-txt', 'mode.sandbox');
+  setText('mode-easy-txt', 'mode.aiEasy');
+  setText('mode-normal-txt', 'mode.aiNormal');
+  setText('mode-note', 'pause.modeNote');
+  setAttr('quality-row', 'aria-label', 'pause.visualQuality');
+  setText('quality-title', 'pause.quality');
+  setText('q-auto', 'quality.auto');
+  setText('q-high', 'quality.high');
+  setText('q-medium', 'quality.medium');
+  setText('q-low', 'quality.low');
+  setText('quality-note', 'pause.qualityNote');
+  setText('test-note', 'pause.testBuildNote');
+  setText('back-site-link', 'pause.backToSite');
+  setText('lang-label-lobby', 'lang.label');
+  setText('lang-label-pause', 'lang.label');
+  // Help overlay (the items carry <strong> markup — innerHTML).
+  setText('help-title', 'help.title');
+  setAttr('help-close-x', 'aria-label', 'help.closeGuide');
+  setText('help-close', 'help.close');
+  setText('help-esc-note', 'help.escNote');
+  if (document.querySelectorAll) {
+    document.querySelectorAll('.howto li').forEach((li, i) => {
+      li.innerHTML = t('help.i' + (i + 1));
+    });
+  }
+  // End card + net overlays.
+  setText('end-restart-btn', 'end.restart');
+  setText('end-menu-btn', 'end.backToMenu');
+  setText('end-replay-btn', 'end.downloadReplay');
+  setText('net-wait', 'netwait.text');
+  setText('desync-title', 'desync.title');
+  setText('btn-desync-replay', 'end.downloadReplay');
+  setText('btn-desync-close', 'end.backToMenu');
+  setText('peer-title', 'peer.title');
+  setText('peer-detail', 'peer.detailDefault');
+  setText('btn-claim-victory', 'peer.claim');
+  setText('btn-leave-match', 'peer.leave');
+  // Lobby browser + create panel + room screen.
+  setAttr('online-close', 'aria-label', 'lobby.close');
+  setText('lobby-title-h', 'lobby.title');
+  setText('lobby-sub', 'lobby.sub');
+  setText('lbl-search', 'lobby.search');
+  setPlaceholder('games-search', 'lobby.searchPlaceholder');
+  setText('btn-refresh-games', 'lobby.refresh');
+  setText('lbl-password', 'lobby.password');
+  setText('lbl-server', 'lobby.server');
+  setText('btn-solo', 'lobby.playSolo');
+  setText('btn-join-lobby', 'lobby.join');
+  setText('btn-create-open', 'lobby.create');
+  setText('create-title-h', 'create.title');
+  setText('btn-create-back', 'create.back');
+  setText('create-note', 'create.note');
+  setAttr('privacy-row', 'aria-label', 'create.privacyLabel');
+  setText('priv-public-txt', 'create.public');
+  setText('priv-private-txt', 'create.private');
+  setPlaceholder('room-password', 'create.pwPlaceholder');
+  setText('settings-title', 'set.title');
+  setText('set-map-name', 'set.map');
+  setText('set-map-value', 'map.arabia');
+  setText('set-victory-name', 'set.victory');
+  setText('set-victory-value', 'set.victoryValue');
+  setText('set-players-name', 'set.players');
+  setText('set-guest-name', 'set.guestSlot');
+  const slotOptions = {
+    open: 'slot.openOption', 'ai-easy': 'mode.aiEasy',
+    'ai-normal': 'mode.aiNormal', closed: 'slot.closedOption',
+  };
+  setOptions('create-guest-slot', slotOptions);
+  setOptions('guest-slot-select', slotOptions);
+  setText('btn-create-game', 'lobby.create');
+  setText('room-title-h', 'room.title');
+  setText('slot-control-txt', 'set.guestSlot');
+  setText('room-listed-line', 'room.listedLine');
+  setText('room-private-line', 'room.privateLine');
+  setPlaceholder('pw-input', 'room.pwPlaceholder');
+  setText('btn-pw-enter', 'room.enter');
+  setText('invite-txt', 'room.invite');
+  setText('btn-copy-link', 'room.copy');
+  setText('conn-title-h', 'conn.title');
+  setText('loading-title-h', 'load.title');
+  // Ad slots: the caption + note (the slot bodies belong to ads.js).
+  if (document.querySelectorAll) {
+    document.querySelectorAll('.ad-label').forEach((e) => { e.textContent = t('ad.label'); });
+    document.querySelectorAll('.ad-note').forEach((e) => { e.textContent = t('ad.note'); });
+  }
+  // Playback bar (its label is startPlayback's while one runs).
+  setText('pb-exit', 'pb.exit');
+  if (!playback) setText('pb-label', 'pb.label');
+}
+
+function applyLocale(loc) {
+  setLocale(loc);
+  refreshNames();
+  applyStaticStrings();
+  syncFullscreenUi();
+  cmdSig = '';
+  selSig = '';
+  lastAge = -1;
+  for (const id of ['lang-select', 'lang-select-pause']) {
+    const s = document.getElementById(id);
+    if (s) s.value = getLocale();
+  }
+  if (netUi) {
+    renderLobbyGames();
+    renderRegionFilter();
+    renderConnQuality();
+    renderRegionList(lobbyPings);
+    renderRoom();
+    updateNetStatus();
+    // In the browser (no room yet) the status line is the
+    // standing pick-a-server prompt — re-voice it too. In a
+    // room it carries event history and is left alone.
+    if (net && !net.room) lobbyStatus(t('status.pickServer'));
+    if (playback && netUi.pbToggle) {
+      netUi.pbToggle.textContent = playback.playing ? t('pb.pause') : t('pb.play');
+    }
+  }
 }
 
 async function main() {
@@ -3763,7 +4015,7 @@ async function main() {
           navigator.clipboard.writeText(net.roomLinkValue);
         }
       }
-      flash('Link copied — send it to your opponent.');
+      flash(t('flash.linkCopied'));
     });
   }
   if (netUi.resignBtn) {
@@ -3811,7 +4063,7 @@ async function main() {
         setPaused(false);
         startPlayback(rec);
       } catch {
-        flash('That file is not a Skirmish II replay.');
+        flash(t('flash.notReplay'));
       }
     });
   }
@@ -3819,7 +4071,7 @@ async function main() {
     netUi.pbToggle.addEventListener('click', () => {
       if (!playback || playback.done) return;
       playback.playing = !playback.playing;
-      netUi.pbToggle.textContent = playback.playing ? 'Pause' : 'Play';
+      netUi.pbToggle.textContent = playback.playing ? t('pb.pause') : t('pb.play');
     });
   }
   if (netUi.pbSpeed) {
@@ -3834,6 +4086,15 @@ async function main() {
   if (netUi.pbExit) netUi.pbExit.addEventListener('click', exitPlayback);
 
   // M9: the play page OPENS on the Lobby Browser (online-first) —
+  // i18n: voice the whole page in the stored/detected locale
+  // before the lobby opens, and wire the two language selects
+  // (lobby header + pause menu) to the one switch path.
+  refreshNames();
+  applyLocale(getLocale());
+  for (const id of ['lang-select', 'lang-select-pause']) {
+    const sel = document.getElementById(id);
+    if (sel) sel.addEventListener('change', () => applyLocale(sel.value));
+  }
   // the local match waits behind the panel and "Play solo instead"
   // starts it in one tap. Arriving by link skips the browser and
   // joins that room directly; ?online=1 lands on the browser too.
@@ -4045,11 +4306,11 @@ async function main() {
     if (targets.length === 0) {
       flash(selectedBuilding != null
         ? (selectedBuilding.owner === foeOwner()
-          ? 'That is the enemy’s — look, but the orders are not yours.'
+          ? t('flash.enemyOrders')
           : selectedBuilding.type === 'tc'
-            ? 'The Town Center trains villagers from the Commands panel.'
-            : 'Train units from the Commands panel.')
-        : 'Select a unit first.');
+            ? t('flash.tcTrains')
+            : t('flash.trainFromPanel'))
+        : t('flash.selectUnitFirst'));
       return;
     }
     const st = entityState();
@@ -4182,23 +4443,23 @@ async function main() {
   function attemptRepair(wx, wy, queued = false) {
     const b = buildingAt(wx, wy);
     if (!b) {
-      flash('Repair: click one of your own damaged buildings.');
+      flash(t('flash.repairArmOwn'));
       return;
     }
     if (b.owner !== localOwner) {
-      flash('You can only repair your own buildings.');
+      flash(t('flash.repairOwnOnly'));
       return;
     }
     if (b.kind === 1) {
-      flash('Farms cannot be repaired.');
+      flash(t('flash.repairFarms'));
       return;
     }
     if (!b.complete) {
-      flash('That building is still under construction.');
+      flash(t('flash.repairConstruction'));
       return;
     }
     if (b.hpFrac >= 0.999) {
-      flash('That building is undamaged.');
+      flash(t('flash.repairUndamaged'));
       return;
     }
     const st = entityState();
@@ -4209,7 +4470,7 @@ async function main() {
     }
     if (!any) {
       repairArm = false;
-      flash('Select a villager to repair.');
+      flash(t('flash.repairSelectVil'));
       return;
     }
     if (!queued) repairArm = false;
@@ -4234,7 +4495,7 @@ async function main() {
     }
     if (builder == null) {
       placement = null;
-      flash('Select a villager to build.');
+      flash(t('flash.buildSelectVil'));
       return;
     }
     const [cx, cy] = worldToCell(wx, wy);
@@ -4254,7 +4515,7 @@ async function main() {
     if (ok) {
       if (!queued) placement = null;
     } else {
-      flash(`Cannot build a ${BUILD_NAME[placement.kind]} there.`);
+      flash(t('flash.cannotBuildThere', { name: BUILD_NAME[placement.kind] }));
     }
   }
 
@@ -5959,7 +6220,7 @@ function updateTopBar() {
   const age = myAge();
   if (age !== lastAge) {
     lastAge = age;
-    resAge.textContent = AGE_NAMES[age] || 'Dark Age';
+    resAge.textContent = AGE_NAMES[age] || AGE_NAMES[0];
   }
   const pop = myPop();
   const cap = myPopCap();
@@ -6000,15 +6261,15 @@ function attemptTrain(id) {
 function flashTrainRefusal(id) {
   if (id === 'train') {
     const reason = myTrainBlock();
-    flash(['', 'Not enough food for a villager.',
-      'The training queue is full.', 'Housed — build a House first.'][reason] || 'Cannot train right now.');
+    flash(['', t('train.noFoodVillager'),
+      t('block.queueFull'), t('train.housedShort')][reason] || t('block.cannotTrain'));
     return;
   }
   if (selectedBuilding) {
     const kindTag = { 'train-scout': 2, 'train-militia': 3, 'train-archer': 4 }[id];
     const reason = sim.building_train_block(selectedBuilding.id, kindTag);
-    flash(['', 'Not enough resources for that unit.',
-      'The training queue is full.', 'Housed — build a House first.'][reason] || 'Cannot train right now.');
+    flash(['', t('train.noResourcesUnit'),
+      t('block.queueFull'), t('train.housedShort')][reason] || t('block.cannotTrain'));
   }
 }
 
@@ -6051,7 +6312,7 @@ function runCommandButton(id, times = 1) {
     repairArm = !repairArm;
     if (repairArm) {
       placement = null;
-      flash('Repair: click one of your damaged buildings.');
+      flash(t('flash.repairArm'));
     }
   } else if (id.startsWith('build-')) {
     const kind = Number(id.slice(6));
@@ -6069,8 +6330,8 @@ function runCommandButton(id, times = 1) {
     if (!ok) {
       const rb = myResearchBlockTc(tag);
       flash(tag === 1 && rb === 4
-        ? 'Feudal Age needs 2 completed Dark-Age buildings first (Houses and Farms do not count).'
-        : RESEARCH_BLOCK_TITLES[rb] || 'Cannot research right now.');
+        ? t('cmd.feudalNeeds')
+        : RESEARCH_BLOCK_TITLES[rb] || t('block.cannotResearch'));
     }
   } else if (id.startsWith('research-')) {
     // M6: building research — Blacksmith lines + Man-at-Arms.
@@ -6081,7 +6342,7 @@ function runCommandButton(id, times = 1) {
     if (tag != null && selectedBuilding && selectedBuilding.type === 'building') {
       if (!issue({ t: 'research_at', b: selectedBuilding.id, tech: tag })) {
         flash(RESEARCH_BLOCK_TITLES[sim.research_block_at(selectedBuilding.id, tag)]
-          || 'Cannot research right now.');
+          || t('block.cannotResearch'));
       }
     }
   }
@@ -6120,7 +6381,8 @@ let cmdSig = ''; // signature of the last-rendered command context
 
 // Train-block explanations, indexed by the sim's TrainBlock tag
 // (shared shape for the Town Center and production buildings).
-const TRAIN_BLOCK_TITLES = [
+// i18n: rebuilt by refreshNames().
+let TRAIN_BLOCK_TITLES = [
   '',
   'Not enough resources.',
   'The training queue is full.',
@@ -6189,9 +6451,9 @@ function renderCommands() {
     const hasBarracks = all.some((b) => b.owner === localOwner && b.kind === 2 && b.complete);
     const buildBtn = (kind) => {
       let gate = null;
-      if (kind === 1 && !hasMill) gate = 'Requires a Mill';
-      else if (kind >= 6 && age < 1) gate = 'Requires Feudal Age';
-      else if ((kind === 6 || kind === 7) && !hasBarracks) gate = 'Requires a Barracks';
+      if (kind === 1 && !hasMill) gate = t('gate.mill');
+      else if (kind >= 6 && age < 1) gate = t('gate.feudal');
+      else if ((kind === 6 || kind === 7) && !hasBarracks) gate = t('gate.barracks');
       const lacksWood = wood < BUILD_COST[kind];
       return cmdButton({
         id: `build-${kind}`, icon: BUILD_ICON[kind], img: BUILD_PNG[kind], label: BUILD_NAME[kind],
@@ -6200,10 +6462,9 @@ function renderCommands() {
         active: !!placement && placement.kind === kind,
         key: badgeForButton({ context, page: buildPage, id: `build-${kind}` }),
         title: gate
-          ? `${BUILD_NAME[kind]} — ${gate}.`
-          : lacksWood
-            ? `${BUILD_NAME[kind]} — needs ${BUILD_COST[kind]} wood`
-            : `${BUILD_NAME[kind]} — ${BUILD_COST[kind]} wood`,
+          ? t('cmd.buildGate', { name: BUILD_NAME[kind], gate })
+          : t(lacksWood ? 'cmd.buildNeeds' : 'cmd.buildOk',
+            { name: BUILD_NAME[kind], cost: costText([[BUILD_COST[kind], 'wood']]) }),
       });
     };
     if (buildPage) {
@@ -6212,9 +6473,9 @@ function renderCommands() {
       // glyph, no PNG; its click runs the same state change an
       // Esc on the open page runs.
       cmdGrid.append(cmdButton({
-        id: 'page-back', icon: 'i-back', label: 'Back',
+        id: 'page-back', icon: 'i-back', label: t('cmd.back'),
         key: badgeForButton({ context, page: buildPage, id: 'page-back' }),
-        title: 'Back to the build menu (Esc).',
+        title: t('cmd.backTitle'),
       }));
     } else {
       // DE page model (UI FIX 4 addendum): the root shows ONLY
@@ -6224,20 +6485,20 @@ function renderCommands() {
       // reference game's villager panel.
       cmdGrid.append(
         cmdButton({
-          id: 'page-eco', img: 'house.png', label: 'Economic Buildings',
-          key: 'Q', title: 'Economic Buildings (Q)',
+          id: 'page-eco', img: 'house.png', label: t('cmd.economic'),
+          key: 'Q', title: t('cmd.ecoTitle'),
         }),
         cmdButton({
-          id: 'page-mil', img: 'barracks.png', label: 'Military Buildings',
-          key: 'W', title: 'Military Buildings (W)',
+          id: 'page-mil', img: 'barracks.png', label: t('cmd.military'),
+          key: 'W', title: t('cmd.milTitle'),
         }),
         // BLD-17: the root's third slot is Repair, as in the
         // reference panel — E arms targeting; the click that
         // follows picks one of our damaged buildings.
         cmdButton({
-          id: 'repair', icon: 'i-hammer', label: 'Repair',
+          id: 'repair', icon: 'i-hammer', label: t('cmd.repair'),
           key: 'E', active: repairArm,
-          title: 'Repair — a villager restores a damaged building’s HP. Costs wood as it works; a full repair costs half the building’s price. Click, then click your damaged building. (E)',
+          title: t('cmd.repairTitle'),
         }),
       );
     }
@@ -6253,8 +6514,8 @@ function renderCommands() {
         disabled: reason === 2, // queue full; other blocks flash on click
         key: badgeForButton({ context, id: 'train', index: 0 }),
         title: TRAIN_BLOCK_TITLES[reason]
-          ? `Train Villager — ${TRAIN_BLOCK_TITLES[reason]}`
-          : 'Train a villager at the Town Center (50 food). Hotkey: Q · Shift queues five.',
+          ? t('cmd.trainVilBlocked', { block: TRAIN_BLOCK_TITLES[reason] })
+          : t('cmd.trainVilTitle', { cost: costText([[50, 'food']]) }),
       }),
       cmdButton({
         id: 'research-loom', icon: 'i-loom', img: 'loom.png', label: 'Loom',
@@ -6262,8 +6523,8 @@ function renderCommands() {
         disabled: loomDone || rbTc[0] === 2 || rbTc[0] === 3,
         key: badgeForButton({ context, id: 'research-loom', index: 1 }),
         title: loomDone
-          ? 'Loom — researched. Villagers: +15 HP, +1 melee / +2 pierce armor.'
-          : `Research Loom — 50 gold · 25 s. Villagers gain +15 HP and armor. Hotkey: A.${RESEARCH_BLOCK_TITLES[rbTc[0]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[0]] : ''}`,
+          ? t('cmd.loomDone', { name: TECH_NAME[0] })
+          : t('cmd.loomTitle', { name: TECH_NAME[0], cost: costText([[50, 'gold']]), secs: 25 }) + (RESEARCH_BLOCK_TITLES[rbTc[0]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[0]] : ''),
       }),
       cmdButton({
         id: 'research-feudal', icon: 'i-feudal', img: 'feudal.png', label: 'Feudal Age',
@@ -6271,10 +6532,10 @@ function renderCommands() {
         disabled: feudalDone || rbTc[1] === 2 || rbTc[1] === 3,
         key: badgeForButton({ context, id: 'research-feudal', index: 2 }),
         title: feudalDone
-          ? 'Feudal Age — you stand in the Feudal Age.'
+          ? t('cmd.feudalDone', { age: AGE_NAMES[1] })
           : rbTc[1] === 4
-            ? 'Advance to the Feudal Age — needs 2 completed Dark-Age buildings first (Houses and Farms do not count). Hotkey: W.'
-            : `Advance to the Feudal Age — 500 food · 130 s. Unlocks the Archery Range, Stable and Blacksmith. Hotkey: W.${RESEARCH_BLOCK_TITLES[rbTc[1]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[1]] : ''}`,
+            ? t('cmd.feudalGate', { age: AGE_NAMES[1] })
+            : t('cmd.feudalTitle', { age: AGE_NAMES[1], cost: costText([[500, 'food']]), secs: 130 }) + (RESEARCH_BLOCK_TITLES[rbTc[1]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[1]] : ''),
       }),
     );
   } else if (context === 'barracks') {
@@ -6287,8 +6548,8 @@ function renderCommands() {
         disabled: underConstruction || blockM === 2,
         key: badgeForButton({ context, id: 'train-militia', index: 0 }),
         title: underConstruction
-          ? 'Militia — the Barracks is under construction.'
-          : `Train Militia — 60 food · 20 gold · Shift queues five.${TRAIN_BLOCK_TITLES[blockM] ? ' ' + TRAIN_BLOCK_TITLES[blockM] : ''}`,
+          ? t('cmd.underConstruction', { name: KIND_NAME[3], building: BUILD_NAME[2] })
+          : t('cmd.trainTitle', { name: KIND_NAME[3], cost: costText([[60, 'food'], [20, 'gold']]) }) + (TRAIN_BLOCK_TITLES[blockM] ? ' ' + TRAIN_BLOCK_TITLES[blockM] : ''),
       }),
       cmdButton({
         id: 'research-maa', icon: 'i-maa', img: 'man-at-arms.png', label: 'Man-at-Arms',
@@ -6296,10 +6557,10 @@ function renderCommands() {
         disabled: underConstruction || maaDone || rbBk[3] === 2 || rbBk[3] === 3,
         key: badgeForButton({ context, id: 'research-maa', index: 1 }),
         title: underConstruction
-          ? 'Man-at-Arms — the Barracks is under construction.'
+          ? t('cmd.underConstruction', { name: TECH_NAME[5], building: BUILD_NAME[2] })
           : maaDone
-            ? 'Man-at-Arms — researched. Your Militia fight as Men-at-Arms.'
-            : `Upgrade to Man-at-Arms — 100 food · 40 gold · 40 s. Every Militia becomes a Man-at-Arms.${RESEARCH_BLOCK_TITLES[rbBk[3]] ? ' ' + RESEARCH_BLOCK_TITLES[rbBk[3]] : ''}`,
+            ? t('cmd.maaDone', { name: TECH_NAME[5], militia: KIND_NAME[3], name2: TECH_NAME[5] })
+            : t('cmd.maaTitle', { name: TECH_NAME[5], cost: costText([[100, 'food'], [40, 'gold']]), secs: 40, militia: KIND_NAME[3] }) + (RESEARCH_BLOCK_TITLES[rbBk[3]] ? ' ' + RESEARCH_BLOCK_TITLES[rbBk[3]] : ''),
       }),
     );
   } else if (context === 'range') {
@@ -6310,8 +6571,8 @@ function renderCommands() {
       disabled: underConstruction || blockA === 2,
       key: badgeForButton({ context, id: 'train-archer', index: 0 }),
       title: underConstruction
-        ? 'Archer — the Archery Range is under construction.'
-        : `Train Archer — 25 wood · 45 gold · Shift queues five.${TRAIN_BLOCK_TITLES[blockA] ? ' ' + TRAIN_BLOCK_TITLES[blockA] : ''}`,
+        ? t('cmd.underConstruction', { name: KIND_NAME[4], building: BUILD_NAME[6] })
+        : t('cmd.trainTitle', { name: KIND_NAME[4], cost: costText([[25, 'wood'], [45, 'gold']]) }) + (TRAIN_BLOCK_TITLES[blockA] ? ' ' + TRAIN_BLOCK_TITLES[blockA] : ''),
     }));
   } else if (context === 'stable') {
     const underConstruction = !bk.complete;
@@ -6321,8 +6582,8 @@ function renderCommands() {
       disabled: underConstruction || blockS === 2,
       key: badgeForButton({ context, id: 'train-scout', index: 0 }),
       title: underConstruction
-        ? 'Scout Cavalry — the Stable is under construction.'
-        : `Train Scout Cavalry — 80 food · 30 s · Shift queues five.${TRAIN_BLOCK_TITLES[blockS] ? ' ' + TRAIN_BLOCK_TITLES[blockS] : ''}`,
+        ? t('cmd.underConstruction', { name: KIND_NAME[2], building: BUILD_NAME[7] })
+        : t('cmd.trainTitleTime', { name: KIND_NAME[2], cost: costText([[80, 'food']]), secs: 30 }) + (TRAIN_BLOCK_TITLES[blockS] ? ' ' + TRAIN_BLOCK_TITLES[blockS] : ''),
     }));
   } else if (context === 'blacksmith') {
     // M6: the Blacksmith's three Feudal researches.
@@ -6336,19 +6597,19 @@ function renderCommands() {
         key: badgeForButton({ context, id, index: tag - 2 }),
         disabled: underConstruction || done || rb === 2 || rb === 3,
         title: underConstruction
-          ? `${label} — the Blacksmith is under construction.`
+          ? t('cmd.underConstruction', { name: TECH_NAME[tag], building: BUILD_NAME[8] })
           : done
-            ? `${label} — researched.`
+            ? t('cmd.researchDone', { name: TECH_NAME[tag] })
             : `${title}${RESEARCH_BLOCK_TITLES[rb] ? ' ' + RESEARCH_BLOCK_TITLES[rb] : ''}`,
       });
     };
     cmdGrid.append(
       techBtn('research-fletching', 2, 'i-fletching', 'fletching.png', 'Fletching',
-        'Research Fletching — 100 food · 50 gold · 30 s. Archers: +1 attack, +1 range.', 50),
+        t('cmd.fletchingTitle', { name: TECH_NAME[2], cost: costText([[100, 'food'], [50, 'gold']]), secs: 30 }), 50),
       techBtn('research-scalemail', 3, 'i-scalemail', 'scale-mail.png', 'Scale Mail',
-        'Research Scale Mail Armor — 100 food · 40 s. Infantry: +1/+1 armor.'),
+        t('cmd.scalemailTitle', { name: TECH_NAME[3], cost: costText([[100, 'food']]), secs: 40 })),
       techBtn('research-padded', 4, 'i-padded', 'padded-armor.png', 'Padded Armor',
-        'Research Padded Archer Armor — 100 food · 40 s. Archers: +1/+1 armor.'),
+        t('cmd.paddedTitle', { name: TECH_NAME[4], cost: costText([[100, 'food']]), secs: 40 })),
     );
   }
   // 'units', 'foe' and no-selection contexts render nothing:
@@ -6405,26 +6666,25 @@ function updateSelPanel() {
   selInfo.classList.remove('warn');
   if (context === 'units') {
     const kind = st.kinds[selUnits[0]];
-    const kindName = KIND_NAME[kind] || 'Unit';
+    const kindName = KIND_NAME[kind] || t('unit.fallback');
     selPortrait.classList.remove('empty');
     selPortrait.innerHTML = KIND_PNG[kind]
       ? pngIcon(KIND_PNG[kind], 'ui-icon')
       : `<svg class="ui-icon"><use href="#${KIND_ICON[kind] || 'i-villager'}"/></svg>`;
     if (selUnits.length === 1) {
       const id = selUnits[0];
-      const hpTxt = `HP ${Math.ceil(st.hp[id * 2])} / ${st.hp[id * 2 + 1]}`;
+      const hpTxt = t('sel.hp', { cur: Math.ceil(st.hp[id * 2]), max: st.hp[id * 2 + 1] });
       selName.textContent = kindName;
       if (kind === 0) {
-        selInfo.textContent =
-          `${hpTxt} — right-click a node to gather, ground to move, an animal to attack.`;
+        selInfo.textContent = t('sel.villagerInfo', { hp: hpTxt });
       } else if (kind === KIND_SHEEP) {
-        selInfo.textContent = `${hpTxt} — your sheep. Right-click the ground to move it.`;
+        selInfo.textContent = t('sel.sheepInfo', { hp: hpTxt });
       } else {
-        selInfo.textContent = `${hpTxt} — right-click an animal or enemy to attack.`;
+        selInfo.textContent = t('sel.militaryInfo', { hp: hpTxt });
       }
     } else {
       selName.textContent = `${selUnits.length} · ${kindName}`;
-      selInfo.textContent = 'Right-click to order the group.';
+      selInfo.textContent = t('sel.groupInfo');
       const shown = selUnits.slice(0, 12);
       for (let i = 0; i < shown.length; i++) {
         const cell = document.createElement('span');
@@ -6444,7 +6704,7 @@ function updateSelPanel() {
   } else if (context === 'tc') {
     selPortrait.classList.remove('empty');
     selPortrait.innerHTML = pngIcon('town-center.png', 'ui-icon');
-    selName.textContent = 'Town Center';
+    selName.textContent = t('unit.townCenter');
     const codes = myTcQueue();
     if (codes.length > 0) {
       // The queue line comes first (addendum, 2026-10-19): with
@@ -6453,15 +6713,15 @@ function updateSelPanel() {
       // the stall note rides along instead of replacing it.
       const head = codes[0];
       selInfo.textContent = (head >= 100
-        ? `Researching ${queueEntryName(head)}… ${Math.round(myTcProgress() * 100)}% · Queue ${codes.length}`
-        : `Training a villager… ${Math.round(myTcProgress() * 100)}% · Queue ${codes.length}`)
-        + (reason === 3 ? ' · Housed — training stalls until a House stands.' : '');
+        ? t('sel.researchingQ', { name: queueEntryName(head), pct: Math.round(myTcProgress() * 100), n: codes.length })
+        : t('sel.trainingVilQ', { pct: Math.round(myTcProgress() * 100), n: codes.length }))
+        + (reason === 3 ? t('sel.housedSuffix') : '');
       if (reason === 3) selInfo.classList.add('warn');
     } else if (reason === 3) {
-      selInfo.textContent = 'Housed — training stalls until a House stands.';
+      selInfo.textContent = t('sel.housedLine');
       selInfo.classList.add('warn');
     } else {
-      selInfo.textContent = 'Train villagers and research from the Commands panel. Right-click the map to set a rally point.';
+      selInfo.textContent = t('sel.tcIdle');
     }
   } else if (context === 'production') {
     selPortrait.classList.remove('empty');
@@ -6473,35 +6733,36 @@ function updateSelPanel() {
       : BUILD_NAME[bk.kind];
     const codes = sim.building_queue(bk.id);
     if (!bk.complete) {
-      selInfo.textContent = 'Under construction…';
+      selInfo.textContent = t('sel.underConstruction');
     } else if (codes.length > 0) {
       const head = codes[0];
       selInfo.textContent = (head >= 100
-        ? `Researching ${queueEntryName(head)}… · Queue ${codes.length}`
-        : `Training ${queueEntryName(head)}… · Queue ${codes.length}`)
-        + (bkBlock === 3 ? ' · Housed — training stalls until a House stands.' : '');
+        ? t('sel.researchingB', { name: queueEntryName(head), n: codes.length })
+        : t('sel.trainingB', { name: queueEntryName(head), n: codes.length }))
+        + (bkBlock === 3 ? t('sel.housedSuffix') : '');
       if (bkBlock === 3) selInfo.classList.add('warn');
     } else if (bkBlock === 3) {
-      selInfo.textContent = 'Housed — training stalls until a House stands.';
+      selInfo.textContent = t('sel.housedLine');
       selInfo.classList.add('warn');
     } else {
       selInfo.textContent = bk.kind === 8
-        ? 'Research technologies from the Commands panel.'
-        : 'Train from the Commands panel. Right-click the map to set a rally point.';
+        ? t('sel.blacksmithIdle')
+        : t('sel.productionIdle');
     }
   } else if (context === 'foe-tc') {
     selPortrait.classList.remove('empty');
     selPortrait.innerHTML = pngIcon('town-center.png', 'ui-icon');
-    selName.textContent = 'Enemy Town Center';
+    selName.textContent = t('sel.enemyTc');
     const id = selectedBuilding.id;
-    selInfo.textContent =
-      `HP ${Math.max(0, Math.ceil(st.hp[id * 2]))} / ${st.hp[id * 2 + 1]} — destroy it, its buildings and its units to win the match.`;
+    selInfo.textContent = t('sel.enemyTcInfo', {
+      hp: t('sel.hp', { cur: Math.max(0, Math.ceil(st.hp[id * 2])), max: st.hp[id * 2 + 1] }),
+    });
   } else if (context === 'foe-building') {
     selPortrait.classList.remove('empty');
     selPortrait.innerHTML = pngIcon(bk ? BUILD_PNG[bk.kind] : 'house.png', 'ui-icon');
-    selName.textContent = bk ? `Enemy ${BUILD_NAME[bk.kind]}` : 'Enemy Building';
+    selName.textContent = bk ? t('sel.enemyName', { name: BUILD_NAME[bk.kind] }) : t('sel.enemyName', { name: t('building.fallback') });
     selInfo.textContent = bk
-      ? `HP ${Math.round(bk.hpFrac * BUILD_MAXHP[bk.kind])} / ${BUILD_MAXHP[bk.kind]}${bk.complete ? '' : ' · under construction'} — information only.`
+      ? t('sel.enemyInfo', { cur: Math.round(bk.hpFrac * BUILD_MAXHP[bk.kind]), max: BUILD_MAXHP[bk.kind], under: bk.complete ? '' : t('sel.underSuffix') })
       : '';
   } else if (context === 'building') {
     selPortrait.classList.remove('empty');
@@ -6510,14 +6771,13 @@ function updateSelPanel() {
       ? (buildingGroup && buildingGroup.length > 1
         ? `${BUILD_NAME[bk.kind]} ×${buildingGroup.length}`
         : BUILD_NAME[bk.kind])
-      : 'Building';
-    selInfo.textContent = bk && !bk.complete ? 'Under construction…' : '';
+      : t('building.fallback');
+    selInfo.textContent = bk && !bk.complete ? t('sel.underConstruction') : '';
   } else {
     selPortrait.classList.add('empty');
     selPortrait.innerHTML = pngIcon('villager.png', 'ui-icon');
-    selName.textContent = 'No selection';
-    selInfo.textContent =
-      'Click a unit, drag to select a group, or click the Town Center.';
+    selName.textContent = t('sel.none');
+    selInfo.textContent = t('sel.noneInfo');
   }
 }
 
@@ -7002,7 +7262,7 @@ function draw() {
 
 main().catch((e) => {
   // No #hud text line anymore: load failures surface on the toast.
-  toast.textContent = 'Failed to load the game (WASM): ' + e;
+  toast.textContent = t('flash.wasmFail', { err: e });
   toast.style.display = 'block';
   console.error(e);
 });
