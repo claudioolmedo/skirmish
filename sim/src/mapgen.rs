@@ -379,19 +379,17 @@ fn fallback() -> GeneratedMap {
         .iter()
         .map(|&(k, dx, dy)| (k, (tc_a.0 as i32 + dx) as u32, (tc_a.1 as i32 + dy) as u32))
         .collect();
-    // Forests as fixed rectangles: main woodline west, second north.
+    // Forests as fixed rectangles: main woodline west, second
+    // north — solid blocks (the readability pass removed the old
+    // modulo holes; a template forest is a contiguous mass too).
     for x in 8..=12u32 {
         for y in 52..=58u32 {
-            if (x + y) % 7 != 0 {
-                nodes_a.push((NodeKind::Tree, x, y));
-            }
+            nodes_a.push((NodeKind::Tree, x, y));
         }
     }
     for x in 30..=34u32 {
         for y in 42..=45u32 {
-            if (x + y) % 6 != 0 {
-                nodes_a.push((NodeKind::Tree, x, y));
-            }
+            nodes_a.push((NodeKind::Tree, x, y));
         }
     }
     let animal_offsets: &[(EntityKind, i32, i32)] = &[
@@ -693,14 +691,27 @@ impl Gen {
         true
     }
 
-    /// A forest blob: free cells of a disc, each claimed with
-    /// `density`% probability, in fixed cell order. Returns the
-    /// number of trees placed.
-    fn forest(&mut self, center: (u32, u32), radius: i32, density: u32) -> usize {
+    /// A forest blob: a CONTIGUOUS mass of trees (forest
+    /// readability pass, 2026-10-20 — Claudio's live-play feedback:
+    /// the old 82%-density disc left ~1 in 5 interior cells empty,
+    /// so a woodline read as scattered single trees on empty
+    /// diamonds instead of a bosque). Every free cell of the disc
+    /// is claimed; only the rim (cells whose distance is within
+    /// one tile of the radius) is ragged — each rim cell is claimed
+    /// with 60% probability, and a rim cell that would stick out
+    /// alone (no claimed neighbour yet, in fixed cell order) is
+    /// skipped, so the edge stays irregular without isolated
+    /// one-tree islands. Interior holes never occur. Cells are
+    /// visited in fixed order and every probability draw comes from
+    /// the seeded stream, so a seed's forest is byte-identical on
+    /// every machine. Returns the number of trees placed.
+    fn forest(&mut self, center: (u32, u32), radius: i32) -> usize {
         let mut placed = 0;
+        let mut claimed: Vec<(u32, u32)> = Vec::new();
         for dy in -radius..=radius {
             for dx in -radius..=radius {
-                if dx * dx + dy * dy > radius * radius {
+                let d2 = dx * dx + dy * dy;
+                if d2 > radius * radius {
                     continue;
                 }
                 let (x, y) = (center.0 as i32 + dx, center.1 as i32 + dy);
@@ -711,10 +722,31 @@ impl Gen {
                 if !self.free(x, y) {
                     continue;
                 }
-                if self.rng.below(100) < density {
-                    if self.put_node(NodeKind::Tree, x, y) {
-                        placed += 1;
+                // Rim cells: strictly inside the disc's outer ring
+                // (distance > radius - 1) are the ragged edge.
+                // Integer-only, like the rest of generation.
+                let rim = d2 > (radius - 1) * (radius - 1);
+                if rim {
+                    if self.rng.below(100) >= 60 {
+                        continue;
                     }
+                    // No isolated rim spikes: at least one already
+                    // claimed 8-neighbour (fixed order ⇒ the cells
+                    // above/left are the ones that can exist yet;
+                    // interior cells below/right are claimed later
+                    // with certainty only when non-rim — a rim cell
+                    // whose only neighbours are unvisited rim cells
+                    // is dropped, keeping the mass connected).
+                    let has_nb = claimed.iter().any(|&(cx, cy)| {
+                        cx.abs_diff(x) <= 1 && cy.abs_diff(y) <= 1 && (cx, cy) != (x, y)
+                    });
+                    if !has_nb {
+                        continue;
+                    }
+                }
+                if self.put_node(NodeKind::Tree, x, y) {
+                    claimed.push((x, y));
+                    placed += 1;
                 }
             }
         }
@@ -782,7 +814,16 @@ impl Gen {
                     continue;
                 }
                 let (x, y) = (x as u32, y as u32);
-                if !self.free(x, y) || self.rng.below(100) >= 80 {
+                if !self.free(x, y) {
+                    continue;
+                }
+                // Solid interior, ragged rim — the same forest
+                // shape as the woodlines (see `forest`); the rim
+                // draw keeps the neutral dressing's total wood
+                // comparable to the pre-pass density fill.
+                if dx * dx + dy * dy > (radius - 1) * (radius - 1)
+                    && self.rng.below(100) >= 60
+                {
                     continue;
                 }
                 if self.claim(x, y) {
@@ -845,7 +886,7 @@ impl Gen {
         // 10–15 tiles out — center 13–17 with radius 3–4.
         let center = self.pick_point_in_band(tc, 13, 17)?;
         let r1 = 3 + self.rng.below(2) as i32;
-        let placed = self.forest(center, r1, 82);
+        let placed = self.forest(center, r1);
         if placed < 22 {
             return None;
         }
@@ -853,7 +894,7 @@ impl Gen {
         // center 15–20, radius 2–3.
         let center2 = self.pick_point_in_band(tc, 15, 20)?;
         let r2 = 2 + self.rng.below(2) as i32;
-        let placed2 = self.forest(center2, r2, 82);
+        let placed2 = self.forest(center2, r2);
         if placed2 < 9 {
             return None;
         }
@@ -988,8 +1029,61 @@ mod tests {
     }
 
     #[test]
+    fn forests_are_contiguous_masses() {
+        // Forest readability pass (2026-10-20): a woodline must be
+        // one touching mass, not scattered singles. The only
+        // package trees allowed to stand alone are the 3 deliberate
+        // stragglers, so >= 90% of a start's trees must have at
+        // least one tree among their 8 neighbours. Counts are
+        // printed (run with --nocapture) as the before/after record:
+        // the pre-pass 82%-density disc gave 39-70 trees per start
+        // on these seeds with ~18% interior holes.
+        for seed in [1u64, 2, 3, 7, 42, 99, 1234, 31337] {
+            let m = generate(seed);
+            let a = &m.starts[0];
+            let set: std::collections::HashSet<(u32, u32)> = a
+                .nodes
+                .iter()
+                .filter(|n| n.0 == NodeKind::Tree)
+                .map(|n| (n.1, n.2))
+                .collect();
+            let mut with_nb = 0;
+            for &(x, y) in &set {
+                let mut nb = false;
+                for dx in -1i32..=1 {
+                    for dy in -1i32..=1 {
+                        if dx == 0 && dy == 0 {
+                            continue;
+                        }
+                        let nx = x as i32 + dx;
+                        let ny = y as i32 + dy;
+                        if nx >= 0 && ny >= 0 && set.contains(&(nx as u32, ny as u32)) {
+                            nb = true;
+                        }
+                    }
+                }
+                if nb {
+                    with_nb += 1;
+                }
+            }
+            println!(
+                "seed {seed}: trees/start={} with_tree_neighbour={with_nb} neutral={}",
+                set.len(),
+                m.neutral_nodes.len()
+            );
+            assert!(
+                with_nb * 10 >= set.len() * 9,
+                "seed {seed}: forest not contiguous: {with_nb}/{} trees have a tree neighbour",
+                set.len()
+            );
+        }
+    }
+
+    #[test]
     fn fallback_template_validates() {
         let m = fallback();
         assert!(validate(&m), "the fallback template must always validate");
     }
 }
+
+

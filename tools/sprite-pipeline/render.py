@@ -67,6 +67,7 @@ MATERIALS = {
     'door':     hex2rgb('#54381f'),
     'window':   hex2rgb('#ffcf6e'),  # warm lit glass
     'wood':     hex2rgb('#a9803e'),  # raw construction timber / logs
+    'steel':    hex2rgb('#b9bec7'),  # axe head (gather tool)
 }
 
 # ----------------------------------------------------------------------
@@ -152,6 +153,16 @@ def build_villager():
     return parts
 
 LOAD_TRIS = box_tris(0, 0.0, 1.72, 1.97, 0.50, 0.38, 0.43, 0.33, 'load')
+
+# The gather AXE (chop readability pass, 2026-10-20): a haft hanging
+# from the right hand, continuing the forearm's line, with a steel
+# head at the far end. Built unposed (arm hanging straight down,
+# like the arm parts); pose_model applies the armR pivot rotation,
+# the waist pitch and the bob exactly as for the arm itself, so the
+# axe stays glued to the hand through the whole swing. Only the
+# gather pose sets 'tool'.
+AXE_TRIS = (box_tris(0.30, 0.01, 0.36, 0.88, 0.055, 0.055, mat='wood')
+            + box_tris(0.30, 0.05, 0.36, 0.54, 0.07, 0.26, mat='steel'))
 VILLAGER = build_villager()
 PIVOTS = {'legL': (-0.11, HIP_Y, HIP_Z), 'legR': (0.11, HIP_Y, HIP_Z),
           'armL': (-SH_X, 0.0, SH_Z), 'armR': (SH_X, 0.0, SH_Z)}
@@ -175,6 +186,12 @@ def pose_model(pose):
     if pose.get('load'):
         for verts, mat in LOAD_TRIS:
             v = xform(verts, torso_mat, WAIST)
+            v = v + np.array([0.0, 0.0, pose.get('bob', 0.0)])
+            out.append((v, mat))
+    if pose.get('tool'):
+        for verts, mat in AXE_TRIS:
+            v = xform(verts, rot_x(pose.get('armR', 0.0)), PIVOTS['armR'])
+            v = xform(v, torso_mat, WAIST)
             v = v + np.array([0.0, 0.0, pose.get('bob', 0.0)])
             out.append((v, mat))
     return out
@@ -202,12 +219,18 @@ def pose_carry(f, n=8):
     return p
 
 def pose_gather(f, n=4):
-    # Chop cycle: raise back, strike down-forward, impact, recover.
-    arm = (-70.0, 30.0, 58.0, -12.0)[f % n]
-    torso = (5.0, 18.0, 30.0, 12.0)[f % n]
+    # Chop cycle: raise high back, swing through, IMPACT (frame 2,
+    # deepest torso pitch, axe fully forward-down), recover. The
+    # arc was widened and an axe added (2026-10-20 readability
+    # pass): at game zoom the old bare-arm bend read as a villager
+    # merely standing by the tree. Both hands ride the haft —
+    # armL tracks armR at 92% — so the swing reads two-handed.
+    arm = (-92.0, 0.0, 72.0, -26.0)[f % n]
+    torso = (2.0, 13.0, 34.0, 10.0)[f % n]
     return {'legL': 12.0, 'legR': -10.0,
-            'armL': -6.0, 'armR': arm,
-            'torso': torso, 'bob': 0.0, 'load': False}
+            'armL': arm * 0.92, 'armR': arm,
+            'torso': torso, 'bob': 0.0, 'load': False,
+            'tool': True}
 
 STATES = {'idle': (pose_idle, 4), 'walk': (pose_walk, 8),
           'gather': (pose_gather, 4), 'carry': (pose_carry, 8)}

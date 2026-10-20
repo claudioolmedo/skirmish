@@ -174,11 +174,22 @@ fn golden_hash_regression() {
     // correction's evidence. (Live-match hash streams, which do
     // move units, all change; they are pinned by their own replay
     // tests, not by this tripwire.)
+    //
+    // Forest contiguity (2026-10-20): the generator's woodlines
+    // changed shape only — discs now fill solid (no interior
+    // holes) with ragged rims, and the fallback forests lost
+    // their modulo holes. Seed 42's per-start tree count moved
+    // 57 -> 64 (per-seed before/after counts for 8 seeds are
+    // pinned in mapgen::tests::forests_are_contiguous_masses);
+    // no commands are issued in this scenario and no mechanic
+    // changed — the stream changes through the generated layout
+    // alone. New value verified stable across independent runs
+    // (replay example, seed 42, 360 ticks, run twice).
     let mut sim = Sim::new(42);
     let mut hash = 0;
     for _ in 0..360 {
         hash = sim.tick();
     }
     assert_eq!(sim.tick_count(), 360);
-    assert_eq!(format!("{:016x}", hash), "be584974ce98139d");
+    assert_eq!(format!("{:016x}", hash), "cd0176cdad2845d2");
 }

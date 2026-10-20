@@ -45,6 +45,14 @@ def _apply(pose):
             v = xform(verts, torso_mat, _WAIST)
             v = v + np.array([0.0, 0.0, pose.get('bob', 0.0)])
             out.append((v, mat))
+    if pose.get('tool'):
+        # The gather axe (see render.AXE_TRIS): armR pivot first,
+        # then the waist pitch — glued to the right hand.
+        for verts, mat in render.AXE_TRIS:
+            v = xform(verts, rot_x(pose.get('armR', 0.0)), _PIVOTS['armR'])
+            v = xform(v, torso_mat, _WAIST)
+            v = v + np.array([0.0, 0.0, pose.get('bob', 0.0)])
+            out.append((v, mat))
     return out
 
 

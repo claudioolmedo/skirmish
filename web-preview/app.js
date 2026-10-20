@@ -850,7 +850,8 @@ function loadArtSet(art, files, dir) {
 }
 const NODE_ART = { img: {}, settled: {}, loaded: false, settledPromise: null };
 const NODE_ART_FILES = {
-  tree: 'tree.png', berry: 'berry-bush.png', gold: 'gold.png', stone: 'stone.png',
+  tree: 'tree.png', treeDmg1: 'tree-dmg1.png', treeDmg2: 'tree-dmg2.png',
+  berry: 'berry-bush.png', gold: 'gold.png', stone: 'stone.png',
 };
 function loadNodeArt() {
   return loadArtSet(NODE_ART, NODE_ART_FILES, 'assets-original/nodes/');
@@ -1166,6 +1167,16 @@ function updateVilAnim(i, wx, wy, now) {
   if (moving) state = carryKind.has(i) ? 'carry' : 'walk';
   else if (atNodeNow.has(i)) state = 'gather';
   else if (atBuildNow.has(i)) state = 'build';
+  // Facing (forest readability pass): a stationary gatherer turns
+  // to FACE its node for the whole harvest — movement facing used
+  // to strand it sideways to the tree, one of the reasons the chop
+  // read as "standing by the tree".
+  const gTarget = state === 'gather' ? atNodeTarget.get(i) : null;
+  if (gTarget) {
+    const dirs = VIL_ORIGINAL.dirs;
+    const d = Math.round(Math.atan2(gTarget.y - wy, gTarget.x - wx) / ((Math.PI * 2) / dirs));
+    a.dir = ((d % dirs) + dirs) % dirs;
+  }
   let frame;
   if (state === 'walk' || state === 'carry') {
     frame = Math.floor((a.phase % 1) * VIL_ORIGINAL.frames[state]);
@@ -1173,6 +1184,14 @@ function updateVilAnim(i, wx, wy, now) {
     frame = Math.floor(now / 140) % VIL_ORIGINAL.frames[state];
   } else {
     frame = Math.floor(now / 400) % VIL_ORIGINAL.frames.idle;
+  }
+  // Hit feedback: frame 2 of the gather cycle is the axe's impact
+  // frame (sprite pipeline pose_gather). A villager gathering WOOD
+  // lands one hit per cycle on its tree — the tree renderer turns
+  // that into a wobble + wood chips. Deduped per tree per cycle.
+  if (state === 'gather' && frame === GATHER_IMPACT_FRAME
+      && gTarget && gTarget.kind === 0) {
+    noteTreeHit(gTarget, wx, wy, now);
   }
   return { state, dir: a.dir, frame };
 }
@@ -1599,6 +1618,10 @@ const DEPOSIT_R2 = 3.6 * 3.6;
 const lastNodeKind = new Map();
 const carryKind = new Map();
 const atNodeNow = new Set(); // villagers currently within gather range of a node
+// The nearest node per villager (forest readability pass): the
+// gather presentation faces THIS node and lands its hit feedback
+// on it — position-keyed tree state lives with the tree renderer.
+const atNodeTarget = new Map(); // villager idx -> {id, x, y, kind}
 
 function updateCarry(nodes, tcPos, pos, kinds, hp) {
   for (let i = 0; i < kinds.length; i++) {
@@ -1607,22 +1630,32 @@ function updateCarry(nodes, tcPos, pos, kinds, hp) {
       carryKind.delete(i);
       lastNodeKind.delete(i);
       atNodeNow.delete(i);
+      atNodeTarget.delete(i);
       continue;
     }
     const wx = pos[i * 2];
     const wy = pos[i * 2 + 1];
     let atKind = null;
+    let atNode = null;
+    let atD2 = AT_NODE_R2;
     for (const n of nodes) {
       if (n.amount <= 0) continue;
       const dx = n.x - wx;
       const dy = n.y - wy;
-      if (dx * dx + dy * dy <= AT_NODE_R2) {
+      const d2 = dx * dx + dy * dy;
+      if (d2 <= atD2) {
+        atD2 = d2;
         atKind = n.kind;
-        break;
+        atNode = n;
       }
     }
-    if (atKind !== null) atNodeNow.add(i);
-    else atNodeNow.delete(i);
+    if (atKind !== null) {
+      atNodeNow.add(i);
+      atNodeTarget.set(i, { id: atNode.id, x: atNode.x, y: atNode.y, kind: atNode.kind });
+    } else {
+      atNodeNow.delete(i);
+      atNodeTarget.delete(i);
+    }
     if (atKind !== null) {
       lastNodeKind.set(i, atKind);
     } else if (lastNodeKind.has(i) && !carryKind.has(i)) {
@@ -5128,10 +5161,217 @@ function progressBar(sx, sy, frac) {
   ctx.fillRect(x, sy, w * Math.max(0, Math.min(1, frac)), h);
 }
 
-function drawTree(sx, sy) {
+
+// --- Trees: damage stages, hit feedback, falling, stumps --------
+// Forest readability pass (2026-10-20, Claudio's live-play
+// feedback). Everything here is renderer-only presentation over
+// the node's remaining-wood fraction — the same channel farm
+// growth stages use. The sim's gather rate, wood per tree and
+// node lifecycle are untouched; nothing here feeds back into a
+// command or the hash.
+//
+//   frac > 2/3   intact widened pine (canopies overlap into a
+//                forest mass; per-tree flip/scale/tint from a
+//                position hash, so no two neighbours stamp alike)
+//   1/3 .. 2/3   tree-dmg1 art (notch, ~30% foliage gone) + lean
+//   frac < 1/3   tree-dmg2 art (deep notch, ~60% gone) + lean
+//   depletion    client-side tip-over (~0.5 s, away from the last
+//                cutter when known) leaving a fading stump
+//                (~18 s, the rubble-decal pattern)
+//   each axe hit the tree wobbles briefly and sheds wood chips
+//                (pooled particles; LOW sheds fewer, never none
+//                of the wobble)
+const GATHER_IMPACT_FRAME = 2; // pose_gather's strike frame
+const TREE_H = 5.6; // world units: widened art is ~0.76 aspect,
+                    // so neighbours 4 wu apart overlap canopies
+const FALL_MS = 500;
+const STUMP_FADE_MS = 18000;
+const treeKey = (x, y) => `${Math.round(x * 8)},${Math.round(y * 8)}`;
+const treeWobble = new Map(); // key -> hit time (ms)
+const treeLastHit = new Map(); // key -> {x, y} last cutter pos
+const treePrev = new Map(); // key -> {x, y, frac} last frame
+const fallingTrees = []; // {x, y, stage, ang, t0, stumpDone}
+const stumpSites = []; // {x, y, t0}
+const woodChips = []; // {x, y, vx, vy, t0, life, rot}
+let treeSim = null;
+
+function treeHash(x, y, salt) {
+  let h = (Math.imul(Math.round(x * 8) + salt * 1013904223, 374761393)
+    + Math.imul(Math.round(y * 8), 668265263)) >>> 0;
+  h = (h ^ (h >> 13)) >>> 0;
+  h = Math.imul(h, 1274126177) >>> 0;
+  return ((h ^ (h >> 16)) >>> 0) / 4294967296;
+}
+
+// Fall direction (screen angle) for a tree at (x, y): away from
+// its last cutter when a hit is on record, else a fixed
+// per-position direction.
+function treeFallAngle(x, y) {
+  const hit = treeLastHit.get(treeKey(x, y));
+  if (hit) {
+    const dx = x - hit.x;
+    const dy = y - hit.y;
+    if (dx * dx + dy * dy > 0.01) return Math.atan2((dx + dy) / 2, dx - dy);
+  }
+  return treeHash(x, y, 7) * Math.PI * 2;
+}
+
+// One axe hit on a tree node (from updateVilAnim's impact frame).
+// Deduped per tree per 140 ms gather-cycle step.
+const treeHitCycle = new Map(); // key -> last cycle index fed
+function noteTreeHit(node, vx, vy, now) {
+  const key = treeKey(node.x, node.y);
+  const cycle = Math.floor(now / 140);
+  if (treeHitCycle.get(key) === cycle) return;
+  treeHitCycle.set(key, cycle);
+  treeWobble.set(key, now);
+  treeLastHit.set(key, { x: vx, y: vy });
+  // Wood chips from the trunk at axe height, flung away from the
+  // cutter and up. Pooled + capped; LOW spawns fewer (the wobble
+  // above is the information and is never tier-gated).
+  const low = governor.level === 'low';
+  const n = low ? 2 : 4;
+  const dx = node.x - vx;
+  const dy = node.y - vy;
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len;
+  const uy = dy / len;
+  for (let k = 0; k < n; k++) {
+    if (woodChips.length >= 240) woodChips.shift();
+    const sp = 2.2 + treeHash(node.x + k, node.y, k + 3) * 2.4;
+    woodChips.push({
+      x: node.x + ux * 0.3, y: node.y + uy * 0.3, z: 1.15,
+      vx: ux * sp + (treeHash(node.x, node.y + k, 11) - 0.5) * 1.6,
+      vy: uy * sp + (treeHash(node.x, node.y + k, 13) - 0.5) * 1.6,
+      vz: 2.6 + treeHash(node.x, node.y + k, 17) * 1.8,
+      t0: now, life: low ? 380 : 520,
+      rot: treeHash(node.x, node.y + k, 19) * 6.28,
+    });
+  }
+}
+
+// Per-frame tree bookkeeping: remember live trees; a tree that
+// was here and is gone (depleted) starts its tip-over — but only
+// on explored ground (VIS-06: memory, never invention).
+function updateTreeTracking(nodes, now) {
+  if (treeSim !== sim) {
+    treeSim = sim;
+    treePrev.clear();
+    treeWobble.clear();
+    treeLastHit.clear();
+    treeHitCycle.clear();
+    fallingTrees.length = 0;
+    stumpSites.length = 0;
+    woodChips.length = 0;
+  }
+  const live = new Set();
+  for (const n of nodes) {
+    if (n.kind !== 0 || n.amount <= 0) continue;
+    const key = treeKey(n.x, n.y);
+    live.add(key);
+    treePrev.set(key, { x: n.x, y: n.y, frac: n.amount / NODE_MAX[0] });
+  }
+  for (const [key, prev] of treePrev) {
+    if (live.has(key)) continue;
+    treePrev.delete(key);
+    if (fogAtWorld(prev.x, prev.y) === 0) continue;
+    fallingTrees.push({
+      x: prev.x, y: prev.y,
+      stage: prev.frac > 2 / 3 ? 0 : prev.frac > 1 / 3 ? 1 : 2,
+      ang: treeFallAngle(prev.x, prev.y), t0: now, stumpDone: false,
+    });
+  }
+  // Finished falls become stumps.
+  for (let k = fallingTrees.length - 1; k >= 0; k--) {
+    const f = fallingTrees[k];
+    if (now - f.t0 > FALL_MS && !f.stumpDone) {
+      f.stumpDone = true;
+      stumpSites.push({ x: f.x, y: f.y, t0: now });
+    }
+    if (now - f.t0 > FALL_MS + 120) fallingTrees.splice(k, 1);
+  }
+  for (let k = stumpSites.length - 1; k >= 0; k--) {
+    if (now - stumpSites[k].t0 > STUMP_FADE_MS) stumpSites.splice(k, 1);
+  }
+}
+
+// Tinted variants of a tree image (deterministic per-tree tint
+// jitter, baked once into offscreen canvases — no per-frame
+// filter cost). Buckets: 0 neutral, 1 warm, 2 cool.
+const treeTintCache = new Map();
+function treeTinted(im, bucket) {
+  if (bucket === 0 || !spriteReady(im)) return im;
+  let per = treeTintCache.get(im);
+  if (!per) {
+    per = [null, null, null];
+    treeTintCache.set(im, per);
+  }
+  if (!per[bucket]) {
+    const c = document.createElement('canvas');
+    c.width = im.naturalWidth;
+    c.height = im.naturalHeight;
+    const g = c.getContext('2d');
+    g.drawImage(im, 0, 0);
+    g.globalCompositeOperation = 'source-atop';
+    g.fillStyle = bucket === 1 ? 'rgba(255, 176, 84, 0.10)' : 'rgba(110, 150, 255, 0.10)';
+    g.fillRect(0, 0, c.width, c.height);
+    per[bucket] = c;
+  }
+  return per[bucket];
+}
+
+function treeStageImage(frac) {
+  if (frac > 2 / 3) return NODE_ART.img.tree;
+  if (frac > 1 / 3) return spriteReady(NODE_ART.img.treeDmg1) ? NODE_ART.img.treeDmg1 : NODE_ART.img.tree;
+  return spriteReady(NODE_ART.img.treeDmg2) ? NODE_ART.img.treeDmg2 : NODE_ART.img.tree;
+}
+
+// Draw one tree image with the pass's transforms: base planted at
+// (sx, sy) exactly (the trunk anchor never moves), variation
+// scale/flip/lean applied around it, optional extra rotation for
+// the falling animation.
+function drawTreeImage(im, sx, sy, wx, wy, opts = {}) {
+  const h = TREE_H * camS * (opts.scale ?? 1);
+  const w = h * (im.naturalWidth / im.naturalHeight);
+  ctx.save();
+  ctx.translate(sx + (opts.ox || 0), sy);
+  if (opts.rot) ctx.rotate(opts.rot);
+  if (opts.flip) ctx.scale(-1, 1);
+  if (opts.alpha != null) ctx.globalAlpha = opts.alpha;
+  ctx.drawImage(im, -w / 2, -h, w, h);
+  ctx.restore();
+}
+
+function drawTree(sx, sy, frac = 1, wx = 0, wy = 0) {
   const u = camS;
   shadow(sx, sy, 1.5 * u);
-  if (drawSpriteH(NODE_ART.img.tree, sx, sy, 4.4)) return;
+  const key = treeKey(wx, wy);
+  const stage = frac > 2 / 3 ? 0 : frac > 1 / 3 ? 1 : 2;
+  // Deterministic per-tree variation from the position hash.
+  const flip = treeHash(wx, wy, 1) < 0.5;
+  const scale = 0.92 + treeHash(wx, wy, 2) * 0.16; // ±8%
+  const bucket = Math.floor(treeHash(wx, wy, 3) * 3);
+  // Damage lean: grows with the stage, toward the fall side.
+  const lean = (stage === 1 ? 0.028 : stage === 2 ? 0.062 : 0)
+    * (Math.cos(treeFallAngle(wx, wy)) >= 0 ? 1 : -1);
+  // Hit wobble: a short decaying shake after the last axe impact.
+  let ox = 0;
+  let wob = 0;
+  const hitAt = treeWobble.get(key);
+  if (hitAt != null) {
+    const age = performance.now() - hitAt;
+    if (age < 240) {
+      const d = 1 - age / 240;
+      ox = Math.sin(age / 22) * 0.09 * u * d;
+      wob = Math.sin(age / 22) * 0.02 * d;
+    }
+  }
+  const im = treeStageImage(frac);
+  if (spriteReady(im)) {
+    drawTreeImage(treeTinted(im, bucket), sx, sy, wx, wy,
+      { flip, scale, rot: lean + wob, ox });
+    return;
+  }
   if (drawSpriteH(SPRITES.tree, sx, sy, 4.4)) return;
   ctx.fillStyle = '#6b4a2b'; // trunk
   ctx.fillRect(sx - 0.18 * u, sy - 1.5 * u, 0.36 * u, 1.5 * u);
@@ -5148,6 +5388,75 @@ function drawTree(sx, sy) {
   ctx.arc(sx + 0.05 * u, sy - 2.55 * u, 0.8 * u, 0, Math.PI * 2);
   ctx.fill();
 }
+
+// A falling tree mid-tip-over (spawned by updateTreeTracking).
+function drawFallingTree(f, now) {
+  const im = treeStageImage(f.stage === 0 ? 1 : f.stage === 1 ? 0.5 : 0.2);
+  if (!spriteReady(im)) return;
+  const [sx, sy] = worldToScreen(f.x, f.y);
+  const p = Math.min(1, (now - f.t0) / FALL_MS);
+  const ease = p * p * (3 - 2 * p);
+  // Rotate the tree's up-vector toward the fall direction.
+  let target = f.ang + Math.PI / 2;
+  while (target > Math.PI) target -= Math.PI * 2;
+  while (target < -Math.PI) target += Math.PI * 2;
+  const rot = target * ease * 0.94;
+  const alpha = p > 0.6 ? 1 - (p - 0.6) / 0.4 * 0.55 : 1;
+  const flip = treeHash(f.x, f.y, 1) < 0.5;
+  const scale = 0.92 + treeHash(f.x, f.y, 2) * 0.16;
+  drawTreeImage(im, sx, sy, f.x, f.y, { flip, scale, rot, alpha });
+}
+
+// The stump a felled tree leaves: a short trunk stub with a pale
+// fresh-cut top, drawn in the node family's vector language.
+function drawStump(site, alpha) {
+  const [sx, sy] = worldToScreen(site.x, site.y);
+  const u = camS;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  shadow(sx, sy, 0.9 * u);
+  ctx.fillStyle = '#6b4a2b';
+  ctx.beginPath();
+  ctx.moveTo(sx - 0.30 * u, sy);
+  ctx.lineTo(sx - 0.22 * u, sy - 0.78 * u);
+  ctx.lineTo(sx + 0.22 * u, sy - 0.78 * u);
+  ctx.lineTo(sx + 0.30 * u, sy);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#d9b380'; // fresh-cut top
+  ctx.beginPath();
+  ctx.ellipse(sx, sy - 0.78 * u, 0.22 * u, 0.09 * u, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+// Wood chips in flight (screen-projected from world each frame;
+// gravity in world units). Drawn after the fog dim with the
+// click markers — live action feedback stays readable.
+function drawWoodChips(now) {
+  for (let k = woodChips.length - 1; k >= 0; k--) {
+    const c = woodChips[k];
+    const age = now - c.t0;
+    if (age > c.life) {
+      woodChips.splice(k, 1);
+      continue;
+    }
+    const t = age / 1000;
+    const wx = c.x + c.vx * t;
+    const wy = c.y + c.vy * t;
+    const wz = Math.max(0, c.z + c.vz * t - 4.4 * t * t);
+    const [sx, sy] = worldToScreen(wx, wy);
+    const s = Math.max(1.6, camS * 0.16);
+    ctx.save();
+    ctx.globalAlpha = 1 - (age / c.life) * 0.5;
+    ctx.translate(sx, sy - wz * camS);
+    ctx.rotate(c.rot + age / 90);
+    ctx.fillStyle = (k % 3 === 0) ? '#d9b380' : '#8a6238';
+    ctx.fillRect(-s / 2, -s / 4, s, s / 2);
+    ctx.restore();
+  }
+}
+
 
 function drawBerry(sx, sy) {
   const u = camS;
@@ -7297,6 +7606,19 @@ function draw() {
     if (b.kind === 1 && b.complete) continue; // drawn as a farm node
     draws.push({ key: b.x + b.y + CS, fn: () => drawBuilding(b) });
   }
+  // Tree depletion tracking (falling trees + stumps) — the same
+  // per-frame bookkeeping pattern as rubble, over the node list.
+  updateTreeTracking(nodes, performance.now());
+  for (const f of fallingTrees) {
+    draws.push({ key: f.x + f.y + 0.4, fn: () => drawFallingTree(f, performance.now()) });
+  }
+  for (const site of stumpSites) {
+    const age = performance.now() - site.t0;
+    const fadeStart = STUMP_FADE_MS - 5000;
+    const alpha = age > fadeStart ? 1 - (age - fadeStart) / 5000 : 1;
+    if (fogAtWorld(site.x, site.y) === 0) continue;
+    draws.push({ key: site.x + site.y + 0.3, fn: () => drawStump(site, alpha) });
+  }
   // Rubble decals (milestone §10.3): tracked from the live lists,
   // drawn at ground level under whatever now walks the site.
   updateRubble(buildings, st);
@@ -7407,6 +7729,10 @@ function draw() {
       diamond(cx, cy, hw, hh, 'rgba(6, 8, 12, 0.48)');
     }
   }
+
+  // Wood chips (tree hit feedback): drawn AFTER the fog dim,
+  // in the same late pass as the click markers.
+  drawWoodChips(performance.now());
 
   // Building selection: a gold outline around the footprint — the
   // building counterpart of the unit selection ring.

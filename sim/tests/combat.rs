@@ -419,7 +419,23 @@ fn build_barracks_and_archer(sim: &mut Sim) {
     };
     let (mx, my) = anchor_near(sim, 1, BuildingKind::Mill, berry_cell);
     build_at(sim, 1, BuildingKind::Mill, mx, my);
-    let (lx, ly) = anchor_near(sim, 2, BuildingKind::LumberCamp, tree_cell);
+    // The camp anchor is searched from a center stepped from the
+    // woodline tree TOWARD the Town Center, so the camp lands on
+    // the open edge between forest and base — where a player puts
+    // it. (Forest contiguity pass, 2026-10-20: woodlines are now
+    // solid masses, and the old search's first buildable ring
+    // could be a rim bite INSIDE the mass; a 2x2 camp there plugs
+    // the only corridor and the choppers' chain route dies —
+    // correct sim behavior, wrong script.)
+    let tc_cell0 = cell_of(sim, sim.town_center().pos_x, sim.town_center().pos_y);
+    let step_toward_tc = |a: u32, b: u32| -> u32 {
+        (a as i32 + (b as i32 - a as i32).signum() * 3).clamp(0, 119) as u32
+    };
+    let camp_center = (
+        step_toward_tc(tree_cell.0, tc_cell0.0),
+        step_toward_tc(tree_cell.1, tc_cell0.1),
+    );
+    let (lx, ly) = anchor_near(sim, 2, BuildingKind::LumberCamp, camp_center);
     build_at(sim, 2, BuildingKind::LumberCamp, lx, ly);
     let tree = tree0_id;
     sim.push_command(Command::Gather {

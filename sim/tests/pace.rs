@@ -139,6 +139,33 @@ fn militia_cruise_is_point_nine_tiles_per_sec() {
     });
     assert!(trained, "militia never trained");
     let militia = kind_id(&sim, EntityKind::Militia);
+    // Lane discipline (see the module docs): the pace leg needs an
+    // unimpeded stretch. On seed 42's generated layout the near
+    // flock stands exactly on the Barracks-exit lane east, and a
+    // traveler herding a sheep sits at the half-speed displacement
+    // equilibrium for as long as the shove lasts (measured: the
+    // whole 120-unit leg at 0.45) — that measures the flock, not
+    // the table. Step the Militia one lane north first, off the
+    // flock line; the leg itself is unchanged. (Lane moved by the
+    // 2026-10-20 forest contiguity pass, which regenerated the
+    // layout; on the clear lane the same estimator reads 0.9000.)
+    let m = ent(&sim, militia);
+    let (mx, my) = (m.pos_x, m.pos_y);
+    sim.push_command(Command::Move {
+        entity: militia,
+        x: mx,
+        y: my - I16F16::from_num(16),
+    });
+    sim.tick();
+    let stepped = run_until(&mut sim, 10_000, |s| {
+        s.entities()
+            .iter()
+            .find(|e| e.id == militia)
+            .unwrap()
+            .order
+            .is_none()
+    });
+    assert!(stepped, "militia never reached its pace lane");
     assert_pace(&mut sim, militia, 0.90, 20_000);
 }
 
