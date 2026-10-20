@@ -70,15 +70,15 @@
   <div class="ui-topbar-spacer"></div>
   <!-- Idle indicators (M4, INF-03): always-visible idle counts; the
        buttons run the same cycle as the '.' / ',' keys (SEL-08/09). -->
-  <button id="idle-vil-btn" class="idle-ind" type="button" title="Idle villagers — click (or press .) to select the next one">
-    <svg class="ui-icon"><use href="#i-villager"/></svg><span id="idle-vil-count">0</span>
+  <button id="idle-vil-btn" class="idle-ind idle-villager-pill" type="button" title="Idle villagers — click (or press .) to select the next one">
+    <img class="idle-portrait" src="ui-art/icons/villager.png" alt=""><span id="idle-vil-count">0</span>
   </button>
   <button id="idle-mil-btn" class="idle-ind" type="button" title="Idle military — click (or press ,) to select the next one">
     <svg class="ui-icon"><use href="#i-militia"/></svg><span id="idle-mil-count">0</span>
   </button>
   <button id="fullscreen-btn" class="btn btn-ghost btn-sm" type="button" title="Fullscreen">⛶</button>
   <button id="pause-btn" class="btn btn-ghost btn-sm" type="button" title="Menu (Esc)">
-    <svg class="ui-icon" style="width:15px;height:15px"><use href="#i-menu"/></svg> Menu
+    <svg class="ui-icon" style="width:15px;height:15px"><use href="#i-menu"/></svg> <span id="pause-btn-label">Menu</span>
   </button>
 </header>
 
@@ -165,9 +165,17 @@
         <button id="q-low" class="btn btn-ghost btn-sm" type="button">Low</button>
       </div>
     </div>
-    <p class="overlay-note" id="quality-note">Quality changes only the picture — sprites, sharpness, shadows. The game is identical on every device, from an old Chromebook to a gaming PC.</p>
+    <p class="overlay-note" id="quality-note">Quality changes only the picture.</p>
+    <div class="audio-row" id="audio-row" role="group" aria-label="Sound">
+      <span class="quality-title" id="audio-title">Sound</span>
+      <div class="audio-controls">
+        <label class="audio-toggle"><input id="audio-enabled" type="checkbox" checked> <span id="audio-enabled-txt">Sound on</span></label>
+        <label class="audio-volume"><span id="audio-volume-txt">Volume</span> <input id="audio-volume" type="range" min="0" max="100" step="1" value="80"></label>
+      </div>
+    </div>
+    <p class="overlay-note" id="audio-note">Every sound is synthesized in your browser — no audio files.</p>
     <div class="lang-row"><label id="lang-label-pause" for="lang-select-pause">Language</label><select id="lang-select-pause" class="lang-select"><option value="en">EN</option><option value="pt-BR">PT</option><option value="es">ES</option></select></div>
-    <p class="overlay-note" id="test-note">Test build · M13 + Base44 art test (buildings) — the classic keyboard arrives: the grid hotkeys (Q / W open a villager's build pages, the letter on each button places or trains, A drops off a villager's load, Ctrl+letter jumps to a building kind) and edge scrolling — rest the mouse at the screen edge and the camera pans. The Lobby Browser in the classic shape: search and filter the open games, watch every server's connection quality, then join or create. Rooms work the way the classic lobbies do: create a Public room (listed, anyone can join) or a Private one (🔒 listed, password to enter), configure the guest seat — a human, an AI at Easy or Normal, or closed — and the match starts when both players press Start (an AI seat is always ready, so the full room → loading → match flow works solo for testing). The game itself loads only once a match begins — the lobby stays light. Two-human matches run in lockstep: both browsers simulate the same game from the same seed and exchange only orders. On top of the M7 generated Arabia with fog of war, the M6 ages and technologies and the M5 match (scripted AI opponent or Sandbox, Conquest victory and defeat). The buildings wear the first Base44 art test set (original art generated from our own prompts) while its look is judged; the remaining placeholder art is being replaced piece by piece with our own.</p>
+    <p class="overlay-note" id="test-note">Test build · M13</p>
     <p class="overlay-note"><a id="back-site-link" href="../">← Back to the Skirmish II site</a></p>
   </div>
 </div>

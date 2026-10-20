@@ -81,11 +81,26 @@ import {
   PAGE_KINDS, resolveHotkey, badgeForButton, edgePan,
 } from './play/hotkeys.js';
 import { diffFeedEvents } from './play/feed.js';
+import { createAudioEngine, cuesForSnapshotDiff } from './play/audio.js';
 import {
   t, getLocale, setLocale, costText, genderOf,
 } from './play/i18n.js';
 
 const assetUrl = (rel) => new URL(rel, import.meta.url).href;
+
+// --- Generated audio (2026-10-20, Claudio's request) -------------
+// The engine (play/audio.js) synthesizes every cue with the Web
+// Audio API — no files, no samples. It is fed ONLY from UI
+// actions below and from own-seat state transitions (the event
+// feed's snapshots, HP/idle/housed diffs in the top-bar update):
+// never from the sim's internals, and it never writes back —
+// lockstep determinism is untouched. The context stays locked
+// until the first user gesture (see the unlock listeners in
+// main()); cues asked for before that are dropped by design.
+const gameAudio = createAudioEngine();
+function playAudioCue(cue) {
+  try { return gameAudio.play(cue); } catch { return false; }
+}
 
 const params = new URLSearchParams(location.search);
 const seed = parseInt(params.get('seed') || '7', 10);
@@ -124,6 +139,10 @@ const minimapCanvas = document.getElementById('minimap');
 const mmCtx = minimapCanvas.getContext('2d');
 const toast = document.getElementById('toast');
 const pauseMenu = document.getElementById('pause-menu');
+// Generated-audio controls (pause menu): the on/off toggle and
+// the volume slider; wired in main(), voiced by applyStaticStrings.
+const audioEnabledInput = document.getElementById('audio-enabled');
+const audioVolumeInput = document.getElementById('audio-volume');
 const resumeBtn = document.getElementById('resume-btn');
 const restartBtn = document.getElementById('restart-btn');
 const helpBtn = document.getElementById('help-btn');
@@ -397,6 +416,7 @@ function showMatchEnd(ms) {
     result: ms === 1 ? 'victory' : 'defeat',
     durationTicks: sim.tick_count(),
   };
+  playAudioCue(ms === 1 ? 'victory' : 'defeat');
   renderEndFeedback();
   endOverlay.style.display = 'flex';
 }
@@ -589,13 +609,20 @@ function updateEventFeed() {
   if (!sim || playback) return;
   const snap = ownFeedSnapshot();
   if (!feedPrev) { feedPrev = snap; return; }
-  const lines = diffFeedEvents(feedPrev, snap, {
+  const prev = feedPrev;
+  const lines = diffFeedEvents(prev, snap, {
     buildingName: (k) => BUILD_NAME[k],
     unitName: (k) => KIND_NAME[k],
     techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5 }[key]],
   }, feedFmt());
   feedPrev = snap;
   for (const text of lines) pushFeedLine(text);
+  // Generated audio: the same own-seat transition the feed just
+  // voiced earns its cue (construction complete, a villager
+  // trained, research complete, the age fanfare). The mapping
+  // is play/audio.js's pure cuesForSnapshotDiff; the engine's
+  // gate throttles repeats.
+  for (const cue of cuesForSnapshotDiff(prev, snap)) playAudioCue(cue);
 }
 
 /// Per-match reset (resetSim / adoptSim): the next snapshot
@@ -603,6 +630,17 @@ function updateEventFeed() {
 function resetEventFeed() {
   feedPrev = null;
   if (feedEl) feedEl.innerHTML = '';
+}
+
+/// Per-match reset of the audio world-state diffs (the HP map
+/// behind the under-attack cue, the housed edge, the idle-count
+/// edge): the next updateTopBar seeds them silently, so a fresh
+/// match never "takes damage" from the last one's numbers.
+function resetAudioWorldState() {
+  audioPrevHp = null;
+  audioHousedPrev = false;
+  lastIdleVil = -1;
+  lastIdleMil = -1;
 }
 
 // --- Placeholder sprites (CC0 test art) --------------------------------
@@ -1658,6 +1696,7 @@ function cycleIdle(kind, selectAll) {
   }
   if (selectAll) {
     selectUnits(new Set(ids));
+    playAudioCue('select');
     return;
   }
   const id = nextInCycle(ids, kind === 'villager' ? idleCycleVil : idleCycleMil);
@@ -1666,6 +1705,7 @@ function cycleIdle(kind, selectAll) {
   selectUnits(new Set([id]));
   const pos = sim.positions();
   centerOn(pos[id * 2], pos[id * 2 + 1]);
+  playAudioCue('select');
 }
 
 function handleGameKey(e) {
@@ -1687,11 +1727,13 @@ function handleGameKey(e) {
       const next = new Set(selection);
       for (const id of liveGroupMembers(n)) next.add(id);
       selectUnits(next);
+      playAudioCue('select');
       return true;
     }
     const members = liveGroupMembers(n);
     if (!members.length) return true;
     selectUnits(new Set(members));
+    playAudioCue('select');
     if (groupTaps.tap(n, performance.now()) === 'center') {
       const pos = sim.positions();
       let sx = 0;
@@ -1722,6 +1764,7 @@ function handleGameKey(e) {
         selectBuilding({ type: 'tc', id: tc, owner: localOwner });
         const pos = sim.positions();
         centerOn(pos[tc * 2], pos[tc * 2 + 1]);
+        playAudioCue('select');
       }
       return true;
     }
@@ -1763,6 +1806,7 @@ function forceDropOffSelected() {
     if (st.kinds[id] === 0 && carryKind.has(id) && issue({ t: 'force_dep', e: id })) any = true;
   }
   if (!any) flash(t('flash.noLoadedVil'));
+  else playAudioCue('orderVillager');
 }
 
 /// Go-to (Ctrl+letter): cycle our completed buildings of a kind,
@@ -1778,6 +1822,7 @@ function goToBuildingKind(kind, selectAll) {
   if (selectAll && list.length > 1) {
     selectBuilding({ type: 'building', id: list[0].id, kind, owner: localOwner });
     buildingGroup = list.map((b) => b.id);
+    playAudioCue('select');
     return;
   }
   const id = nextInCycle(list.map((b) => b.id), gotoCycleMem[kind] ?? -1);
@@ -1785,6 +1830,7 @@ function goToBuildingKind(kind, selectAll) {
   const b = list.find((x) => x.id === id);
   selectBuilding({ type: 'building', id: b.id, kind: b.kind, owner: b.owner });
   centerOn(b.x, b.y);
+  playAudioCue('select');
 }
 
 function handleHotkey(e) {
@@ -1811,6 +1857,7 @@ function handleHotkey(e) {
       buildPage = act.page;
       repairArm = false;
       renderCommands();
+      playAudioCue('click');
       return true;
     case 'button': {
       const btn = [...cmdGrid.children].find((b) => b.id === act.id);
@@ -1924,8 +1971,11 @@ function toggleFullscreen() {
 
 function setPaused(v) {
   if (!playing) return;
+  const wasPaused = paused;
   paused = v;
   pauseMenu.style.display = paused ? 'flex' : 'none';
+  // Generated audio: the menu's own open/close cues.
+  if (wasPaused !== paused) playAudioCue(paused ? 'menuOpen' : 'menuClose');
   // M8: connection details live in the pause menu (the top bar
   // stays clean) — refresh them whenever the menu opens online.
   if (v && net) {
@@ -2039,6 +2089,7 @@ function resetSim(mode = matchMode) {
   });
   seenBuildings.clear(); // M7: last-known enemy buildings are per-match
   resetEventFeed();
+  resetAudioWorldState();
   refreshWorldLayers();
   vilAnim.clear();
   prevPos.clear();
@@ -2143,6 +2194,7 @@ function adoptSim(newSim, owner) {
   endOverlay.style.display = 'none';
   seenBuildings.clear();
   resetEventFeed();
+  resetAudioWorldState();
   refreshWorldLayers();
   vilAnim.clear();
   prevPos.clear();
@@ -3725,12 +3777,11 @@ function applyStaticStrings() {
   setTitle('idle-vil-btn', 'top.idleVillagers');
   setTitle('idle-mil-btn', 'top.idleMilitary');
   setTitle('pause-btn', 'top.menuTitle');
-  const pauseBtnEl = document.getElementById('pause-btn');
-  if (pauseBtnEl && pauseBtnEl.childNodes) {
-    for (const node of pauseBtnEl.childNodes) {
-      if (node.nodeType === 3) node.textContent = ' ' + t('top.menu');
-    }
-  }
+  // The label lives in its own span (play/index.html): writing
+  // EVERY text node of the button — the old loop — also rewrote
+  // the whitespace node before the banner icon, which painted
+  // the word twice ("Menu [banner] Menu", Claudio 2026-10-20).
+  setText('pause-btn-label', 'top.menu');
   setAttr('cmd-panel', 'aria-label', 'panel.commands');
   setAttr('sel-panel', 'aria-label', 'panel.selection');
   setAttr('minimap-wrap', 'aria-label', 'panel.minimap');
@@ -3759,6 +3810,11 @@ function applyStaticStrings() {
   setText('q-medium', 'quality.medium');
   setText('q-low', 'quality.low');
   setText('quality-note', 'pause.qualityNote');
+  setAttr('audio-row', 'aria-label', 'audio.title');
+  setText('audio-title', 'audio.title');
+  setText('audio-enabled-txt', 'audio.enabled');
+  setText('audio-volume-txt', 'audio.volume');
+  setText('audio-note', 'audio.note');
   setText('test-note', 'pause.testBuildNote');
   setText('back-site-link', 'pause.backToSite');
   setText('lang-label-lobby', 'lang.label');
@@ -3883,6 +3939,16 @@ function applyLocale(loc) {
       netUi.pbToggle.textContent = playback.playing ? t('pb.pause') : t('pb.play');
     }
   }
+  syncAudioUi();
+}
+
+/// Reflect the audio engine's persisted settings in the pause
+/// menu's controls (called on boot, on every locale switch —
+/// applyStaticStrings re-voices the labels — and after a change).
+function syncAudioUi() {
+  const s = gameAudio.settings();
+  if (audioEnabledInput) audioEnabledInput.checked = s.enabled;
+  if (audioVolumeInput) audioVolumeInput.value = String(Math.round(s.volume * 100));
 }
 
 async function main() {
@@ -3918,6 +3984,38 @@ async function main() {
   // keys run (SEL-08/09).
   idleVilBtn.addEventListener('click', () => { if (sim) cycleIdle('villager', false); });
   idleMilBtn.addEventListener('click', () => { if (sim) cycleIdle('military', false); });
+  // Generated audio: the first pointer/key gesture unlocks the
+  // context (autoplay policy — capture phase, so it runs before
+  // the gesture's own handlers and their cues can sound).
+  addEventListener('pointerdown', () => { gameAudio.unlock(); }, true);
+  addEventListener('keydown', () => { gameAudio.unlock(); }, true);
+  // The pause menu's sound controls: persisted on/off + volume.
+  if (audioEnabledInput) {
+    audioEnabledInput.addEventListener('change', () => {
+      gameAudio.setEnabled(!!audioEnabledInput.checked);
+      if (audioEnabledInput.checked) {
+        gameAudio.unlock();
+        playAudioCue('click');
+      }
+    });
+  }
+  if (audioVolumeInput) {
+    audioVolumeInput.addEventListener('input', () => {
+      gameAudio.setVolume(Number(audioVolumeInput.value) / 100);
+    });
+    audioVolumeInput.addEventListener('change', () => playAudioCue('click'));
+  }
+  syncAudioUi();
+  // The generic UI click: one delegated listener voices ordinary
+  // chrome clicks. Surfaces with their own cue (the command grid,
+  // the canvas, the menu open/close buttons, the idle pills) are
+  // skipped — they speak for themselves.
+  document.addEventListener('click', (ev) => {
+    const t = ev.target;
+    if (!t || !t.closest) return;
+    if (t.closest('#cmd-grid, #view, #pause-btn, #resume-btn, #menu-close, #idle-vil-btn, #idle-mil-btn')) return;
+    if (t.closest('button, select, input, .game-row')) playAudioCue('click');
+  });
   resumeBtn.addEventListener('click', () => setPaused(false));
   menuClose.addEventListener('click', () => setPaused(false));
   helpCloseX.addEventListener('click', () => { helpOverlay.style.display = 'none'; });
@@ -4421,11 +4519,11 @@ async function main() {
       // selection is empty, so it just flashes the hint).
       const foe = selectedBuilding.owner === foeOwner();
       if (!foe && selectedBuilding.type === 'tc') {
-        issue({ t: 'rally_tc', x: wx, y: wy });
+        if (issue({ t: 'rally_tc', x: wx, y: wy })) playAudioCue('orderBuilding');
         return;
       }
       if (!foe && selectedBuilding.type === 'building' && [2, 6, 7].includes(selectedBuilding.kind)) {
-        issue({ t: 'rally_b', b: selectedBuilding.id, x: wx, y: wy });
+        if (issue({ t: 'rally_b', b: selectedBuilding.id, x: wx, y: wy })) playAudioCue('orderBuilding');
         return;
       }
     }
@@ -4481,8 +4579,14 @@ async function main() {
     }
     const sendMove = (id) => {
       const [mx, my] = moveDest ? moveDest(id) : [wx, wy];
-      issue({ t: 'move', e: id, x: mx, y: my, q: queued || undefined });
+      return issue({ t: 'move', e: id, x: mx, y: my, q: queued || undefined });
     };
+    // The order acknowledgement's voice: military if any soldier
+    // is among the ordered, else the villager's — one cue per
+    // order, however many units it names (generated audio).
+    const orderCue = () => (targets.some((id) => [2, 3, 4, 8].includes(st.kinds[id]))
+      ? 'orderMilitary'
+      : targets.some((id) => st.kinds[id] === 0) ? 'orderVillager' : null);
     // The enemy Town Center (M5): entityAt skips Town Centers, so
     // it gets its own pick — an attack order for everyone who can
     // fight. Our own TC is never a target: clicks on it fall
@@ -4497,7 +4601,7 @@ async function main() {
         if (st.kinds[id] === KIND_SHEEP) continue;
         if (issue({ t: 'attack', e: id, tg: tcT, q: queued || undefined })) any = true;
       }
-      if (any) return;
+      if (any) { playAudioCue(orderCue()); return; }
     }
     let t = entityAt(wx, wy);
     // M7: a non-own unit is a target only while currently visible
@@ -4511,7 +4615,7 @@ async function main() {
         if (st.kinds[id] === KIND_SHEEP) continue; // sheep don't fight
         if (issue({ t: 'attack', e: id, tg: t, q: queued || undefined })) any = true;
       }
-      if (any) return;
+      if (any) { playAudioCue(orderCue()); return; }
       // Nobody could attack (e.g. only sheep selected): fall through
       // to a plain move toward the point.
     }
@@ -4525,7 +4629,7 @@ async function main() {
         if (st.kinds[id] === KIND_SHEEP) continue;
         if (issue({ t: 'attackb', e: id, b: bT.id })) any = true;
       }
-      if (any) return;
+      if (any) { playAudioCue(orderCue()); return; }
     }
     // Repair (BLD-17): an own, complete, damaged building takes
     // every selected villager as a repairer. One exception: a
@@ -4543,7 +4647,7 @@ async function main() {
           if (st.kinds[id] !== 0) continue;
           if (issue({ t: 'repair', e: id, b: bT.id, q: queued || undefined })) any = true;
         }
-        if (any) return;
+        if (any) { playAudioCue('orderVillager'); return; }
       }
     }
     // Force drop-off (M6, ECO-07): the click lands on OUR Town
@@ -4558,19 +4662,21 @@ async function main() {
       for (const id of targets) {
         if (st.kinds[id] === 0 && carryKind.has(id) && issue({ t: 'force_dep', e: id })) any = true;
       }
-      if (any) return;
+      if (any) { playAudioCue('orderVillager'); return; }
     }
     let n = nodeAt(wx, wy);
     // M7: a node on unexplored ground cannot be ordered — the
     // click is a ground move instead.
     if (n && !cellExploredW(n.x, n.y)) n = null;
+    let any = false;
     for (const id of targets) {
       if (n && st.kinds[id] === 0) {
-        issue({ t: 'gather', e: id, n: n.id, q: queued || undefined });
-      } else {
-        sendMove(id);
+        if (issue({ t: 'gather', e: id, n: n.id, q: queued || undefined })) any = true;
+      } else if (sendMove(id)) {
+        any = true;
       }
     }
+    if (any) playAudioCue(orderCue());
   }
 
   // Repair targeting (BLD-17): the armed click picks the building;
@@ -4610,6 +4716,7 @@ async function main() {
       return;
     }
     if (!queued) repairArm = false;
+    playAudioCue('orderVillager');
   }
 
   function attemptPlace(wx, wy, queued = false) {
@@ -4650,6 +4757,7 @@ async function main() {
     });
     if (ok) {
       if (!queued) placement = null;
+      playAudioCue('buildingPlaced'); // the wood knock
     } else {
       flash(t('flash.cannotBuildThere', { name: BUILD_NAME[placement.kind] }));
     }
@@ -4725,6 +4833,7 @@ async function main() {
       } else {
         selectUnits(new Set(boxed));
       }
+      if (boxed.length) playAudioCue('select');
       return;
     }
     // Plain click.
@@ -4738,6 +4847,7 @@ async function main() {
       } else {
         selectUnits(new Set([v]));
       }
+      playAudioCue('select');
     } else if (!ev.shiftKey) {
       // No unit hit: the Town Center and placed buildings are
       // selections of their own (kept OUT of the unit Set); empty
@@ -4752,10 +4862,12 @@ async function main() {
       if (tc != null && (st.owners[tc] === localOwner
           || cellExploredW(st.pos[tc * 2], st.pos[tc * 2 + 1]))) {
         selectBuilding({ type: 'tc', id: tc, owner: st.owners[tc] });
+        playAudioCue('select');
       } else {
         const b = buildingAt(wx, wy);
         if (b && (b.owner !== foeOwner() || cellExploredW(b.x, b.y))) {
           selectBuilding({ type: 'building', id: b.id, kind: b.kind, owner: b.owner });
+          playAudioCue('select');
         } else selectUnits(new Set());
       }
     }
@@ -4780,6 +4892,7 @@ async function main() {
     } else {
       selectUnits(new Set(same));
     }
+    if (same.length) playAudioCue('select');
   });
 
   // Zoom toward the cursor with the mouse wheel.
@@ -6345,6 +6458,12 @@ function drawArrowShape(cx, cy, ang, detailed) {
 let lastIdleVil = -1;
 let lastIdleMil = -1;
 let lastAge = -1; // M6: the last age tag shown in the top bar
+// Generated-audio world state: the previous frame's own-seat HP
+// map (entities + buildings) behind the under-attack cue, and
+// the housed edge. Seeded silently on the first frame of a
+// match (resetAudioWorldState, next to the feed's reset).
+let audioPrevHp = null;
+let audioHousedPrev = false;
 
 function updateTopBar() {
   const [food, wood, gold, stone] = myStock();
@@ -6362,11 +6481,16 @@ function updateTopBar() {
   const cap = myPopCap();
   resPop.textContent = `${pop} / ${cap}`;
   // Warn tint when housed (reason 3) or simply at the cap.
-  resPop.classList.toggle('warn', myTrainBlock() === 3 || pop >= cap);
+  const housedNow = myTrainBlock() === 3 || pop >= cap;
+  resPop.classList.toggle('warn', housedNow);
   // Idle indicators (INF-03): live counts from the sim's idle
   // queries; the buttons light up while anyone is standing free.
   const nVil = myIdleVillagers().length;
   if (nVil !== lastIdleVil) {
+    // Generated audio: a villager BECOMING idle earns at most
+    // one very soft tick (the engine throttles it to one per
+    // 20 s, and the count only rising counts — never a nag).
+    if (lastIdleVil >= 0 && nVil > lastIdleVil) playAudioCue('idleTick');
     lastIdleVil = nVil;
     idleVilCount.textContent = String(nVil);
     idleVilBtn.classList.toggle('has-idle', nVil > 0);
@@ -6377,6 +6501,38 @@ function updateTopBar() {
     idleMilCount.textContent = String(nMil);
     idleMilBtn.classList.toggle('has-idle', nMil > 0);
   }
+  updateAudioWorldState(housedNow);
+}
+
+/// Generated audio from own-seat state transitions: the housed
+/// edge, and HP dropping anywhere in our own village (units,
+/// the Town Center, buildings) — the under-attack warning. All
+/// of it reads state the client already holds for its own seat
+/// (fog-fair by construction), only while a match is being
+/// played (never during replay playback), and the engine's
+/// gate hard-throttles the attack cue to one per 9 s.
+function updateAudioWorldState(housedNow) {
+  if (!sim || playback) return;
+  if (housedNow && !audioHousedPrev) playAudioCue('housed');
+  audioHousedPrev = housedNow;
+  const hp = new Map();
+  const st = entityState();
+  for (let i = 0; i < st.count; i++) {
+    if (st.owners[i] === localOwner) hp.set('e' + i, st.hp[i * 2]);
+  }
+  for (const b of buildingList()) {
+    if (b.owner === localOwner) hp.set('b' + b.id, b.hpFrac);
+  }
+  if (audioPrevHp) {
+    for (const [key, value] of hp) {
+      const before = audioPrevHp.get(key);
+      if (before != null && value < before - 1e-9) {
+        playAudioCue('underAttack');
+        break;
+      }
+    }
+  }
+  audioPrevHp = hp;
 }
 
 /// One training attempt for a train button; true when the sim
@@ -6430,6 +6586,7 @@ function runCommandButton(id, times = 1) {
     let done = 0;
     while (done < times && attemptTrain(id)) done++;
     if (done === 0) flashTrainRefusal(id);
+    else playAudioCue(id === 'train' ? 'orderVillager' : 'orderMilitary');
     return;
   }
   if (id === 'page-eco' || id === 'page-mil') {
@@ -6438,10 +6595,12 @@ function runCommandButton(id, times = 1) {
     // rendered grid for mouse and keyboard alike.
     buildPage = id === 'page-eco' ? 'eco' : 'mil';
     repairArm = false;
+    playAudioCue('click');
   } else if (id === 'page-back') {
     placement = null;
     repairArm = false;
     buildPage = null; // back to the root page
+    playAudioCue('click');
   } else if (id === 'repair') {
     // BLD-17: arm (or disarm) Repair targeting — the click that
     // follows picks the building, exactly like build placement.
@@ -6450,10 +6609,12 @@ function runCommandButton(id, times = 1) {
       placement = null;
       flash(t('flash.repairArm'));
     }
+    playAudioCue('click');
   } else if (id.startsWith('build-')) {
     const kind = Number(id.slice(6));
     repairArm = false;
     placement = placement && placement.kind === kind ? null : { kind };
+    playAudioCue(placement ? 'orderBuilding' : 'click');
     // The page STAYS armed while placement runs (UI FIX 4
     // addendum cancel rule): cancelling placement — Esc, a
     // right-click, re-clicking the building — lands back on the
@@ -6468,6 +6629,8 @@ function runCommandButton(id, times = 1) {
       flash(tag === 1 && rb === 4
         ? t('cmd.feudalNeeds')
         : RESEARCH_BLOCK_TITLES[rb] || t('block.cannotResearch'));
+    } else {
+      playAudioCue('orderBuilding');
     }
   } else if (id.startsWith('research-')) {
     // M6: building research — Blacksmith lines + Man-at-Arms.
@@ -6479,6 +6642,8 @@ function runCommandButton(id, times = 1) {
       if (!issue({ t: 'research_at', b: selectedBuilding.id, tech: tag })) {
         flash(RESEARCH_BLOCK_TITLES[sim.research_block_at(selectedBuilding.id, tag)]
           || t('block.cannotResearch'));
+      } else {
+        playAudioCue('orderBuilding');
       }
     }
   }
