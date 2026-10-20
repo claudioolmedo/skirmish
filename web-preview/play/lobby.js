@@ -79,8 +79,8 @@ export function parseLobbies(json) {
 
 /// The auto-generated game title. Nobody types a name in v1: a game
 /// is "1v1 Arabia" on its region, the way a DE lobby row reads.
-export function lobbyTitle(regionName) {
-  return `1v1 Arabia — ${regionName}`;
+export function lobbyTitle(regionName, fmt = null) {
+  return fmt ? fmt(regionName) : `1v1 Arabia — ${regionName}`;
 }
 
 /// One table row, ready to render. Carries the raw sort keys
@@ -88,17 +88,17 @@ export function lobbyTitle(regionName) {
 /// speaks in the reference browser's columns — Game Name, Players,
 /// Map, Location (the region's name) and Server (the ping to that
 /// region, with its quality band).
-export function lobbyRowModel(entry, { regionName, pingMs } = {}) {
-  const name = regionName || entry.region || 'Unknown server';
+export function lobbyRowModel(entry, { regionName, pingMs, strings = null } = {}) {
+  const name = regionName || entry.region || (strings && strings.unknownServer) || 'Unknown server';
   const locked = entry.locked === true;
   const ms = typeof pingMs === 'number' && Number.isFinite(pingMs) ? pingMs : null;
   return {
     room: entry.room,
     region: entry.region,
-    title: lobbyTitle(name),
+    title: lobbyTitle(name, strings && strings.titleFmt),
     server: name,
     playersText: `${entry.players}/2`,
-    mapText: LOBBY_MAP_NAME,
+    mapText: (strings && strings.mapName) || LOBBY_MAP_NAME,
     pingMs: ms,
     pingText: ms !== null ? `${Math.round(ms)} ms` : '…',
     quality: pingQuality(ms),

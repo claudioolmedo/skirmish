@@ -181,6 +181,30 @@ html, body {
 }
 .quality-btns { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
 
+/* i18n: the language switcher — one compact row in the lobby
+   header area and one in the pause menu; no other chrome. */
+.lang-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 10px 0 2px;
+  font: 700 11px/1.2 system-ui, sans-serif;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #7a6248;
+}
+#pause-menu .lang-row { justify-content: center; margin-top: 14px; }
+.lang-select {
+  font: 600 12px/1.2 system-ui, sans-serif;
+  padding: 3px 6px;
+  border-radius: 6px;
+  border: 1px solid #b99c68;
+  background: #f6ecd7;
+  color: #4a3418;
+  cursor: pointer;
+}
+
 @media (max-width: 640px) {
   .game-title { font-size: 34px; }
   .overlay-card { padding: 20px; }

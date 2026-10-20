@@ -59,13 +59,13 @@
 
 <!-- TOP: resource bar -->
 <header class="ui-topbar">
-  <div class="ui-res-group" role="status" aria-label="Resources">
+  <div class="ui-res-group" id="res-group" role="status" aria-label="Resources">
     <span class="res res-food"><svg class="ui-icon"><use href="#i-food"/></svg><span class="res-val" id="res-food">200</span></span>
     <span class="res res-wood"><svg class="ui-icon"><use href="#i-wood"/></svg><span class="res-val" id="res-wood">200</span></span>
     <span class="res res-gold"><svg class="ui-icon"><use href="#i-gold"/></svg><span class="res-val" id="res-gold">100</span></span>
     <span class="res res-stone"><svg class="ui-icon"><use href="#i-stone"/></svg><span class="res-val" id="res-stone">200</span></span>
     <span class="res res-pop"><svg class="ui-icon"><use href="#i-pop"/></svg><span class="res-val" id="res-pop">3 / 5</span></span>
-    <span class="res res-age" title="Your current age"><svg class="ui-icon"><use href="#i-age"/></svg><span class="res-val" id="res-age">Dark Age</span></span>
+    <span class="res res-age" id="res-age-chip" title="Your current age"><svg class="ui-icon"><use href="#i-age"/></svg><span class="res-val" id="res-age">Dark Age</span></span>
   </div>
   <div class="ui-topbar-spacer"></div>
   <!-- Idle indicators (M4, INF-03): always-visible idle counts; the
@@ -98,7 +98,7 @@
        (no title, no hint text — as in DE). The buttons below are
        the initial paint (and the no-JS fallback); the game
        replaces them on its first frame. -->
-  <section class="ui-cmd-panel" aria-label="Commands">
+  <section class="ui-cmd-panel" id="cmd-panel" aria-label="Commands">
     <div class="cmd-grid" id="cmd-grid">
       <button id="page-eco" class="cmd-btn" type="button" title="Economic Buildings (Q)">
         <span class="cmd-icon-wrap"><img class="cmd-icon" src="ui-art/icons/house.png" alt=""><span class="cmd-key">Q</span></span>
@@ -110,7 +110,7 @@
   </section>
 
   <!-- bottom-center: selection info -->
-  <section class="ui-sel-panel" aria-label="Selection">
+  <section class="ui-sel-panel" id="sel-panel" aria-label="Selection">
     <div class="sel-portrait" id="sel-portrait">
       <img class="ui-icon" src="ui-art/icons/villager.png" alt="">
     </div>
@@ -122,7 +122,7 @@
   </section>
 
   <!-- bottom-right: minimap (rendered by minimap.js) -->
-  <section class="ui-minimap-wrap" aria-label="Minimap">
+  <section class="ui-minimap-wrap" id="minimap-wrap" aria-label="Minimap">
     <canvas id="minimap" width="220" height="124"></canvas>
   </section>
 </footer>
@@ -132,7 +132,7 @@
 <div id="pause-menu" class="overlay" style="display:none">
   <div class="overlay-card">
     <button id="menu-close" class="card-close" type="button" aria-label="Close menu">✕</button>
-    <h2 class="game-title-sm">Paused</h2>
+    <h2 class="game-title-sm" id="pause-title">Paused</h2>
     <div class="pause-actions">
       <button id="resume-btn" class="btn btn-gold" type="button">Resume</button>
       <button id="help-btn" class="btn btn-ghost" type="button">How to play</button>
@@ -142,7 +142,7 @@
     </div>
     <div id="net-status" class="net-status" hidden>
       <p id="net-status-text" class="overlay-note"></p>
-      <p class="overlay-note">An online match keeps running while this menu is open — your opponent is playing too.</p>
+      <p class="overlay-note" id="net-note">An online match keeps running while this menu is open — your opponent is playing too.</p>
       <button id="btn-resign" class="btn btn-ghost btn-sm" type="button" hidden>Resign match</button>
     </div>
     <div class="pause-actions">
@@ -150,14 +150,14 @@
       <label id="btn-watch-replay" class="btn btn-ghost btn-sm" for="replay-file">Watch replay</label>
       <input id="replay-file" type="file" accept=".json,application/json" hidden>
     </div>
-    <div class="mode-row" role="radiogroup" aria-label="Match mode">
-      <label class="mode-opt"><input type="radio" name="match-mode" value="sandbox"> Sandbox</label>
-      <label class="mode-opt"><input type="radio" name="match-mode" value="easy"> AI · Easy</label>
-      <label class="mode-opt"><input type="radio" name="match-mode" value="normal" checked> AI · Normal</label>
+    <div class="mode-row" id="mode-row" role="radiogroup" aria-label="Match mode">
+      <label class="mode-opt"><input type="radio" name="match-mode" value="sandbox"> <span id="mode-sandbox-txt">Sandbox</span></label>
+      <label class="mode-opt"><input type="radio" name="match-mode" value="easy"> <span id="mode-easy-txt">AI · Easy</span></label>
+      <label class="mode-opt"><input type="radio" name="match-mode" value="normal" checked> <span id="mode-normal-txt">AI · Normal</span></label>
     </div>
-    <p class="overlay-note">Pick a mode and press Restart to begin a fresh match in it (same seed).</p>
-    <div class="quality-row" role="group" aria-label="Visual quality">
-      <span class="quality-title">Quality</span>
+    <p class="overlay-note" id="mode-note">Pick a mode and press Restart to begin a fresh match in it (same seed).</p>
+    <div class="quality-row" id="quality-row" role="group" aria-label="Visual quality">
+      <span class="quality-title" id="quality-title">Quality</span>
       <div class="quality-btns">
         <button id="q-auto" class="btn btn-ghost btn-sm" type="button">Auto</button>
         <button id="q-high" class="btn btn-ghost btn-sm" type="button">High</button>
@@ -165,16 +165,17 @@
         <button id="q-low" class="btn btn-ghost btn-sm" type="button">Low</button>
       </div>
     </div>
-    <p class="overlay-note">Quality changes only the picture — sprites, sharpness, shadows. The game is identical on every device, from an old Chromebook to a gaming PC.</p>
-    <p class="overlay-note">Test build · M13 + Base44 art test (buildings) — the classic keyboard arrives: the grid hotkeys (Q / W open a villager's build pages, the letter on each button places or trains, A drops off a villager's load, Ctrl+letter jumps to a building kind) and edge scrolling — rest the mouse at the screen edge and the camera pans. The Lobby Browser in the classic shape: search and filter the open games, watch every server's connection quality, then join or create. Rooms work the way the classic lobbies do: create a Public room (listed, anyone can join) or a Private one (🔒 listed, password to enter), configure the guest seat — a human, an AI at Easy or Normal, or closed — and the match starts when both players press Start (an AI seat is always ready, so the full room → loading → match flow works solo for testing). The game itself loads only once a match begins — the lobby stays light. Two-human matches run in lockstep: both browsers simulate the same game from the same seed and exchange only orders. On top of the M7 generated Arabia with fog of war, the M6 ages and technologies and the M5 match (scripted AI opponent or Sandbox, Conquest victory and defeat). The buildings wear the first Base44 art test set (original art generated from our own prompts) while its look is judged; the remaining placeholder art is being replaced piece by piece with our own.</p>
-    <p class="overlay-note"><a href="../">← Back to the Skirmish II site</a></p>
+    <p class="overlay-note" id="quality-note">Quality changes only the picture — sprites, sharpness, shadows. The game is identical on every device, from an old Chromebook to a gaming PC.</p>
+    <div class="lang-row"><label id="lang-label-pause" for="lang-select-pause">Language</label><select id="lang-select-pause" class="lang-select"><option value="en">EN</option><option value="pt-BR">PT</option><option value="es">ES</option></select></div>
+    <p class="overlay-note" id="test-note">Test build · M13 + Base44 art test (buildings) — the classic keyboard arrives: the grid hotkeys (Q / W open a villager's build pages, the letter on each button places or trains, A drops off a villager's load, Ctrl+letter jumps to a building kind) and edge scrolling — rest the mouse at the screen edge and the camera pans. The Lobby Browser in the classic shape: search and filter the open games, watch every server's connection quality, then join or create. Rooms work the way the classic lobbies do: create a Public room (listed, anyone can join) or a Private one (🔒 listed, password to enter), configure the guest seat — a human, an AI at Easy or Normal, or closed — and the match starts when both players press Start (an AI seat is always ready, so the full room → loading → match flow works solo for testing). The game itself loads only once a match begins — the lobby stays light. Two-human matches run in lockstep: both browsers simulate the same game from the same seed and exchange only orders. On top of the M7 generated Arabia with fog of war, the M6 ages and technologies and the M5 match (scripted AI opponent or Sandbox, Conquest victory and defeat). The buildings wear the first Base44 art test set (original art generated from our own prompts) while its look is judged; the remaining placeholder art is being replaced piece by piece with our own.</p>
+    <p class="overlay-note"><a id="back-site-link" href="../">← Back to the Skirmish II site</a></p>
   </div>
 </div>
 
 <div id="help-overlay" class="overlay" style="display:none">
   <div class="overlay-card help-card">
     <button id="help-close-x" class="card-close" type="button" aria-label="Close guide">✕</button>
-    <h2 class="game-title-sm">How to play</h2>
+    <h2 class="game-title-sm" id="help-title">How to play</h2>
     <div class="howto">
       <ul>
         <li><strong>Click a villager</strong> to select it; <strong>drag</strong> to select a group; <strong>Shift+click</strong> adds or removes one; <strong>double-click</strong> selects every villager on screen. Click empty ground to deselect. One selection holds at most <strong>60</strong> units.</li>
@@ -195,7 +196,7 @@
     <div class="pause-actions">
       <button id="help-close" class="btn btn-gold" type="button">Close</button>
     </div>
-    <p class="overlay-note">Esc closes this guide too.</p>
+    <p class="overlay-note" id="help-esc-note">Esc closes this guide too.</p>
   </div>
 </div>
 
@@ -216,8 +217,9 @@
 <div id="online-overlay" class="overlay" style="display:none">
   <div class="overlay-card lobby-card">
     <button id="online-close" class="card-close" type="button" aria-label="Close online play">✕</button>
-    <h2 class="game-title-sm">Lobby Browser</h2>
-    <p class="overlay-sub">Join an open game, or create your own. Games marked 🔒 ask for a password. No accounts: the link is the invitation.</p>
+    <h2 class="game-title-sm" id="lobby-title-h">Lobby Browser</h2>
+    <p class="overlay-sub" id="lobby-sub">Join an open game, or create your own. Games marked 🔒 ask for a password. No accounts: the link is the invitation.</p>
+    <div class="lang-row"><label id="lang-label-lobby" for="lang-select">Language</label><select id="lang-select" class="lang-select"><option value="en">EN</option><option value="pt-BR">PT</option><option value="es">ES</option></select></div>
     <div class="lobby-layout">
       <div class="lobby-main">
         <!-- M11: the browser in the reference shape — one controls
@@ -227,12 +229,12 @@
              headers are gone: select a row, then Join Lobby. -->
         <div id="games-section">
           <div class="games-controls">
-            <label class="games-search">Search
+            <label class="games-search"><span id="lbl-search">Search</span>
               <input id="games-search" type="search" placeholder="Game name" autocomplete="off">
             </label>
             <button id="btn-refresh-games" class="btn btn-ghost btn-sm" type="button">Refresh</button>
-            <label class="games-pw"><input id="games-show-locked" type="checkbox" checked> Password</label>
-            <label class="games-region">Server
+            <label class="games-pw"><input id="games-show-locked" type="checkbox" checked> <span id="lbl-password">Password</span></label>
+            <label class="games-region"><span id="lbl-server">Server</span>
               <select id="games-region-filter">
                 <option value="">Any</option>
               </select>
@@ -249,18 +251,18 @@
         </div>
         <div id="create-section" hidden>
           <div class="games-head">
-            <h3 class="lobby-h">Create Lobby</h3>
+            <h3 class="lobby-h" id="create-title-h">Create Lobby</h3>
             <button id="btn-create-back" class="btn-quiet" type="button">← Back to games</button>
           </div>
-          <p class="overlay-note create-note">Pick the server closest to you both — your friend picks the same one.</p>
+          <p class="overlay-note create-note" id="create-note">Pick the server closest to you both — your friend picks the same one.</p>
           <div id="region-list" class="region-list"></div>
           <!-- M10: a room is Public (listed, anyone may join) or
                Private (listed with a lock; joining needs the
                password the host sets here — it never leaves the
                host's browser memory). -->
-          <div class="privacy-row" role="radiogroup" aria-label="Room privacy">
-            <label class="mode-opt"><input type="radio" name="room-privacy" value="public" checked> Public — anyone can join</label>
-            <label class="mode-opt"><input type="radio" name="room-privacy" value="private"> Private — password</label>
+          <div class="privacy-row" id="privacy-row" role="radiogroup" aria-label="Room privacy">
+            <label class="mode-opt"><input type="radio" name="room-privacy" value="public" checked> <span id="priv-public-txt">Public — anyone can join</span></label>
+            <label class="mode-opt"><input type="radio" name="room-privacy" value="private"> <span id="priv-private-txt">Private — password</span></label>
           </div>
           <div id="pw-set-row" class="pw-set-row" hidden>
             <input id="room-password" type="password" placeholder="Room password" autocomplete="off" maxlength="128">
@@ -273,11 +275,11 @@
                screen carries): a human, an AI at a difficulty,
                or nobody. -->
           <div class="settings-box">
-            <h4 class="settings-h">Match settings</h4>
-            <div class="setting-row"><span class="setting-name">Map</span><span class="setting-value">Arabia</span></div>
-            <div class="setting-row"><span class="setting-name">Victory</span><span class="setting-value">Conquest</span></div>
-            <div class="setting-row"><span class="setting-name">Players</span><span class="setting-value">2</span></div>
-            <div class="setting-row"><span class="setting-name">Guest slot</span>
+            <h4 class="settings-h" id="settings-title">Match settings</h4>
+            <div class="setting-row"><span class="setting-name" id="set-map-name">Map</span><span class="setting-value" id="set-map-value">Arabia</span></div>
+            <div class="setting-row"><span class="setting-name" id="set-victory-name">Victory</span><span class="setting-value" id="set-victory-value">Conquest</span></div>
+            <div class="setting-row"><span class="setting-name" id="set-players-name">Players</span><span class="setting-value">2</span></div>
+            <div class="setting-row"><span class="setting-name" id="set-guest-name">Guest slot</span>
               <select id="create-guest-slot" class="slot-select">
                 <option value="open" selected>Open — anyone may join</option>
                 <option value="ai-easy">AI · Easy</option>
@@ -295,7 +297,7 @@
              its own when both players are ready. The invite link
              is one quiet line under the seats. -->
         <div id="room-section" hidden>
-          <h3 class="lobby-h">Your room</h3>
+          <h3 class="lobby-h" id="room-title-h">Your room</h3>
           <p id="room-config-line" class="overlay-note room-config"></p>
           <div class="slot-list">
             <div class="slot-row" id="slot-host"></div>
@@ -305,7 +307,7 @@
                and locked while a human guest is present. The same
                control the create panel carries. -->
           <div id="slot-control-row" class="slot-control-row" hidden>
-            <label class="slot-control-label">Guest slot
+            <label class="slot-control-label"><span id="slot-control-txt">Guest slot</span>
               <select id="guest-slot-select" class="slot-select">
                 <option value="open">Open — anyone may join</option>
                 <option value="ai-easy">AI · Easy</option>
@@ -324,7 +326,7 @@
           <div class="pause-actions">
             <button id="btn-ready" class="btn btn-gold btn-big" type="button" disabled>Start</button>
           </div>
-          <p class="invite-row">Invite link — <button id="btn-copy-link" class="linklike" type="button">copy</button></p>
+          <p class="invite-row"><span id="invite-txt">Invite link —</span> <button id="btn-copy-link" class="linklike" type="button">copy</button></p>
         </div>
         <p id="lobby-status" class="overlay-note">Pick a server, then create the game.</p>
       </div>
@@ -343,7 +345,7 @@
              220 ms, red above). Filled by the same probe cycle
              that feeds the table. -->
         <div class="conn-quality">
-          <h3 class="lobby-h">Connection Quality</h3>
+          <h3 class="lobby-h" id="conn-title-h">Connection Quality</h3>
           <div id="conn-quality-list" class="conn-quality-list"></div>
         </div>
       </aside>
@@ -353,7 +355,7 @@
 
 <div id="desync-overlay" class="overlay" style="display:none">
   <div class="overlay-card">
-    <h2 class="game-title-sm">Desync detected</h2>
+    <h2 class="game-title-sm" id="desync-title">Desync detected</h2>
     <p class="overlay-sub" id="desync-detail"></p>
     <div class="pause-actions">
       <button id="btn-desync-replay" class="btn btn-gold" type="button">Download replay</button>
@@ -364,7 +366,7 @@
 
 <div id="peer-overlay" class="overlay" style="display:none">
   <div class="overlay-card">
-    <h2 class="game-title-sm">Opponent disconnected</h2>
+    <h2 class="game-title-sm" id="peer-title">Opponent disconnected</h2>
     <p class="overlay-sub" id="peer-detail">Your opponent's connection dropped.</p>
     <div class="pause-actions">
       <button id="btn-claim-victory" class="btn btn-gold" type="button" disabled>Claim victory</button>
@@ -382,7 +384,7 @@
      gone the moment play begins. -->
 <div id="loading-overlay" class="overlay" style="display:none">
   <div class="overlay-card loading-card">
-    <h2 class="game-title-sm">Loading match</h2>
+    <h2 class="game-title-sm" id="loading-title-h">Loading match</h2>
     <div class="slot-list">
       <div class="slot-row" id="load-slot-host"></div>
       <div class="slot-row" id="load-slot-guest"></div>
