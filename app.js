@@ -27,10 +27,11 @@
 // formation-keeping group moves.
 // M13 adds the classic grid hotkeys (play/hotkeys.js): villager
 // build pages on Q / W with the letter on each button placing it
-// (Q, E raises a House), Q / W / E position keys on a selected
-// building's panel, A for force drop-off, Ctrl+letter go-tos —
-// and edge scrolling, the camera pan every other method shares
-// the frame with.
+// — the letter IS the button's place in the physical keyboard
+// grid (rows Q W E / A S D / Z X C, so Q, Q raises a House) —
+// slot letters on a selected building's panel, A for force
+// drop-off, Ctrl+letter go-tos — and edge scrolling, the camera
+// pan every other method shares the frame with.
 //
 // The ADAPTIVE QUALITY governor (play/quality.js) sits over all of
 // this: it probes the device, picks a level (sprite direction tier,
@@ -680,6 +681,62 @@ function loadAnimalArt() {
 }
 function whenAnimalArtSettled() {
   return ANIMAL_ART.settledPromise || Promise.resolve();
+}
+// --- Original unit animation art (generated sets, 2026-10-19) -------
+// Side-view action frames per unit (provenance:
+// assets-original/units/README.md), drawn with the ANIMAL_ART model:
+// one action strip per verb, frames sliced onto a shared
+// bottom-aligned canvas per unit, poses face LEFT and the renderer
+// flips them horizontally when the unit moves right on screen.
+// This is side-view cycles + flip, NOT 8-direction sheets. The state
+// -> action mapping lives in unitArtImage() (beside the animal pose
+// code below); every state without art falls back to the previous
+// drawing (procedural sheets / vector), so no state regresses.
+// Player color: every human unit's cloth is the player blue, and
+// the enemy draws a red palette-swap variant built at load with
+// makeRedSheet — the same swap the villager sheets use (M5).
+const UNIT_ART = { img: {}, imgRed: {}, settled: {}, loaded: false, settledPromise: null };
+const UNIT_ART_FILES = {
+  villagerWalk1: 'villager/walk-1.png', villagerWalk2: 'villager/walk-2.png',
+  villagerWalk3: 'villager/walk-3.png', villagerWalk4: 'villager/walk-4.png',
+  villagerGather1: 'villager/gather-1.png', villagerGather2: 'villager/gather-2.png',
+  villagerGather3: 'villager/gather-3.png',
+  villagerCarry1: 'villager/carry-1.png', villagerCarry2: 'villager/carry-2.png',
+  villagerBuild1: 'villager/build-1.png', villagerBuild2: 'villager/build-2.png',
+  villagerIdle1: 'villager/idle-1.png',
+  archerWalk1: 'archer/walk-1.png', archerWalk2: 'archer/walk-2.png',
+  archerWalk3: 'archer/walk-3.png', archerWalk4: 'archer/walk-4.png',
+  archerShoot1: 'archer/shoot-1.png', archerShoot2: 'archer/shoot-2.png',
+  archerShoot3: 'archer/shoot-3.png',
+  archerIdle1: 'archer/idle-1.png',
+  militiaWalk1: 'militia/walk-1.png', militiaWalk2: 'militia/walk-2.png',
+  militiaWalk3: 'militia/walk-3.png', militiaWalk4: 'militia/walk-4.png',
+  militiaAttack1: 'militia/attack-1.png', militiaAttack2: 'militia/attack-2.png',
+  militiaAttack3: 'militia/attack-3.png',
+  militiaIdle1: 'militia/idle-1.png',
+  maaWalk1: 'maa/walk-1.png', maaWalk2: 'maa/walk-2.png',
+  maaWalk3: 'maa/walk-3.png', maaWalk4: 'maa/walk-4.png',
+  maaAttack1: 'maa/attack-1.png', maaAttack2: 'maa/attack-2.png',
+  maaAttack3: 'maa/attack-3.png',
+  maaIdle1: 'maa/idle-1.png',
+  scoutGallop1: 'scout/gallop-1.png', scoutGallop2: 'scout/gallop-2.png',
+  scoutGallop3: 'scout/gallop-3.png', scoutGallop4: 'scout/gallop-4.png',
+  scoutIdle1: 'scout/idle-1.png',
+};
+function loadUnitArt() {
+  const p = loadArtSet(UNIT_ART, UNIT_ART_FILES, 'assets-original/units/');
+  if (!UNIT_ART.redHooked) {
+    UNIT_ART.redHooked = true;
+    for (const [key, im] of Object.entries(UNIT_ART.img)) {
+      const build = () => { UNIT_ART.imgRed[key] = makeRedSheet(im); };
+      if (im.complete && im.naturalWidth > 0) build();
+      else im.addEventListener('load', build);
+    }
+  }
+  return p;
+}
+function whenUnitArtSettled() {
+  return UNIT_ART.settledPromise || Promise.resolve();
 }
 
 // Draw building art bottom-anchored like the placeholder sprites:
@@ -1686,6 +1743,9 @@ function resetSim(mode = matchMode) {
   lastNodeKind.clear();
   carryKind.clear();
   atNodeNow.clear();
+  archerShoot.clear();
+  seenProjKeys.clear();
+  for (const k of Object.keys(UNIT_POSE_STATE)) delete UNIT_POSE_STATE[k];
   selectUnits(new Set()); // also clears any building selection
   placement = null;
   // M4 client state resets with the match: control groups and the
@@ -1787,6 +1847,9 @@ function adoptSim(newSim, owner) {
   lastNodeKind.clear();
   carryKind.clear();
   atNodeNow.clear();
+  archerShoot.clear();
+  seenProjKeys.clear();
+  for (const k of Object.keys(UNIT_POSE_STATE)) delete UNIT_POSE_STATE[k];
   selectUnits(new Set());
   placement = null;
   controlGroups.clear();
@@ -1990,6 +2053,7 @@ function ensureGameLoaded(onStep) {
       loadBuildingArt();
       loadNodeArt();
       loadAnimalArt();
+      loadUnitArt();
       loadTierSprites(Q);
       // The local "loaded" readiness includes the building-art
       // set: this promise must not resolve while a building PNG
@@ -2004,7 +2068,7 @@ function ensureGameLoaded(onStep) {
       // node and animal sets settle under the same rule and join
       // the same await.
       await Promise.all([whenBuildingArtSettled(), whenNodeArtSettled(),
-        whenAnimalArtSettled()]);
+        whenAnimalArtSettled(), whenUnitArtSettled()]);
       // The world constants are the same for every match (fixed
       // world size); read them off a throwaway probe sim so no
       // match code ever runs before they exist.
@@ -4869,8 +4933,12 @@ function drawVillager(i, wx, wy) {
   shadow(sx, sy, 0.95 * u);
   if (selection.has(i)) drawSelRing(sx, sy, 1.25);
   const anim = updateVilAnim(i, wx, wy, performance.now());
-  const orig = drawOriginalVillager(anim, sx, sy);
-  const spr = orig || drawSpriteH(SPRITES.villager, sx, sy, 2.4);
+  // UNIT_ART first: the generated action frames; below them the
+  // original sheet -> CC0 placeholder -> vector chain, unchanged.
+  const ua = unitArtImage('villager', i, wx, wy);
+  const art = ua ? drawUnitPose(ua.im, sx, sy, UNIT_ART_H.villager, ua.flip) : false;
+  const orig = art ? false : drawOriginalVillager(anim, sx, sy);
+  const spr = art || orig || drawSpriteH(SPRITES.villager, sx, sy, 2.4);
   const by = sy - 1.15 * u; // fallback body center / label anchor
   if (!spr) {
     ctx.fillStyle = drawOwner === foeOwner() ? ENEMY_COLOR : COLORS[i % COLORS.length];
@@ -4883,9 +4951,10 @@ function drawVillager(i, wx, wy) {
   }
   const ck = carryKind.get(i);
   if (ck !== undefined) {
-    // With our carry sheet the load is drawn on the unit itself, so the
+    // With a carry drawing the load is on the unit itself, so the
     // kind-colored dot rides above the bundle; otherwise above the head.
-    const dotH = orig ? (anim.state === 'carry' ? 3.28 : 2.6) : spr ? 2.8 : 2.35;
+    const dotH = art ? (ua.action === 'carry' ? 3.05 : 2.8)
+      : orig ? (anim.state === 'carry' ? 3.28 : 2.6) : spr ? 2.8 : 2.35;
     ctx.fillStyle = CARRY_COLORS[ck];
     ctx.beginPath();
     ctx.arc(sx, sy - dotH * u, 0.4 * u, 0, Math.PI * 2);
@@ -4925,6 +4994,8 @@ function drawScout(i, wx, wy) {
   const u = camS;
   shadow(sx, sy, 1.2 * u);
   if (selection.has(i)) drawSelRing(sx, sy, 1.5);
+  const ua = unitArtImage('scout', i, wx, wy);
+  if (ua && drawUnitPose(ua.im, sx, sy, UNIT_ART_H.scout, ua.flip)) return;
   legs(sx, sy, u, [-0.75, -0.3, 0.45, 0.85], '#5d4630');
   ctx.fillStyle = '#8a6844'; // horse body
   ctx.beginPath();
@@ -4957,10 +5028,21 @@ function drawScout(i, wx, wy) {
 }
 
 function drawMilitia(i, wx, wy) {
+  drawFootman(i, wx, wy, 'militia');
+}
+function drawManAtArms(i, wx, wy) {
+  drawFootman(i, wx, wy, 'maa');
+}
+// Shared draw for the two sword footmen; `unit` picks the art set
+// (the Man-at-Arms wears the heavier armor in his own frames; the
+// vector fallback below is the same body for both, as before).
+function drawFootman(i, wx, wy, unit) {
   const [sx, sy] = worldToScreen(wx, wy);
   const u = camS;
   shadow(sx, sy, 0.95 * u);
   if (selection.has(i)) drawSelRing(sx, sy, 1.25);
+  const ua = unitArtImage(unit, i, wx, wy);
+  if (ua && drawUnitPose(ua.im, sx, sy, UNIT_ART_H[unit], ua.flip)) return;
   ctx.fillStyle = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e'; // tunic (player color)
   ctx.beginPath();
   ctx.ellipse(sx, sy - 0.85 * u, 0.62 * u, 0.8 * u, 0, 0, Math.PI * 2);
@@ -4986,6 +5068,8 @@ function drawArcher(i, wx, wy) {
   const u = camS;
   shadow(sx, sy, 0.95 * u);
   if (selection.has(i)) drawSelRing(sx, sy, 1.25);
+  const ua = unitArtImage('archer', i, wx, wy);
+  if (ua && drawUnitPose(ua.im, sx, sy, UNIT_ART_H.archer, ua.flip)) return;
   ctx.fillStyle = drawOwner === foeOwner() ? ENEMY_ARCHER_CLOTH : '#4a6e46'; // tunic (archer green / enemy red)
   ctx.beginPath();
   ctx.ellipse(sx, sy - 0.85 * u, 0.58 * u, 0.8 * u, 0, 0, Math.PI * 2);
@@ -5159,6 +5243,243 @@ function drawDeer(i, wx, wy) {
     ctx.moveTo(sx + 1.3 * u, sy - 2.2 * u);
     ctx.lineTo(sx + (1.3 + 0.3 * s) * u, sy - 2.65 * u);
     ctx.stroke();
+  }
+}
+
+// --- Unit animation art (UNIT_ART sets) -----------------------------
+// Same inference model as the animals: the renderer gets positions
+// every frame and no velocity or order state, so movement/facing
+// come from the per-entity position delta, and work states come
+// from the heuristics the client already maintains — carryKind (a
+// villager hauling a load) and atNodeNow (a villager at a resource
+// node) — plus two snapshots refreshed once per draw in
+// updateUnitAnimState: atBuildNow (a villager beside its owner's
+// unfinished building) and archerShoot (an archer whose arrow was
+// just seen spawning). Melee attack is inferred by adjacency: a
+// footman standing beside a living non-owned entity is mid-fight.
+// Presentation only, never sim input.
+const UNIT_ART_H = { villager: 2.55, archer: 2.55, militia: 2.6, maa: 2.65, scout: 3.1 };
+const UNIT_POSE_STATE = {};
+const atBuildNow = new Set();
+const archerShoot = new Map(); // entity id -> {tick, face}
+const seenProjKeys = new Set();
+let frameSt = null; // the entityState() snapshot of the running draw
+
+function unitPoseFor(i, wx, wy) {
+  const st = UNIT_POSE_STATE[i] ||
+    (UNIT_POSE_STATE[i] = { x: wx, y: wy, face: -1 });
+  const dx = wx - st.x;
+  const dy = wy - st.y;
+  const moving = Math.abs(dx) + Math.abs(dy) > 0.0001;
+  if (moving) {
+    const sdx = dx - dy;
+    if (sdx > 0.0001) st.face = 1;
+    else if (sdx < -0.0001) st.face = -1;
+  }
+  st.x = wx;
+  st.y = wy;
+  return { moving, face: st.face };
+}
+
+// Per-draw refresh of the two inferred states the pose picker
+// needs beyond carryKind/atNodeNow. Called from draw() with the
+// frame's building list and entity snapshot.
+function updateUnitAnimState(buildings, st) {
+  atBuildNow.clear();
+  const pos = st.pos;
+  for (let i = 0; i < st.count; i++) {
+    if (st.kinds[i] !== 0 || st.hp[i * 2] < 1) continue; // villagers only
+    const wx = pos[i * 2];
+    const wy = pos[i * 2 + 1];
+    for (const b of buildings) {
+      if (b.complete || b.owner !== st.owners[i]) continue;
+      const rr = (b.size * CS) / 2 + 3.0;
+      const dx = b.x - wx;
+      const dy = b.y - wy;
+      if (dx * dx + dy * dy <= rr * rr) {
+        atBuildNow.add(i);
+        break;
+      }
+    }
+  }
+  // Archer releases: a projectile whose spawn key was not in the
+  // previous draw is new; its start point is the shooter's position
+  // at release (the sim's only ranged unit is the Archer).
+  const proj = sim.projectiles();
+  const now = sim.tick_count();
+  const live = new Set();
+  for (let p = 0; p < proj.length; p += 6) {
+    const key = proj[p + 4] + ':' + proj[p] + ':' + proj[p + 1];
+    live.add(key);
+    if (seenProjKeys.has(key)) continue;
+    seenProjKeys.add(key);
+    if (now - proj[p + 4] > 3) continue; // first sighting, but stale
+    let best = -1;
+    let bestD2 = 2.0 * 2.0;
+    for (let i = 0; i < st.count; i++) {
+      if (st.kinds[i] !== 4 || st.hp[i * 2] < 1) continue;
+      const dx = pos[i * 2] - proj[p];
+      const dy = pos[i * 2 + 1] - proj[p + 1];
+      const d2 = dx * dx + dy * dy;
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        best = i;
+      }
+    }
+    if (best >= 0) {
+      const sdx = (proj[p + 2] - proj[p]) - (proj[p + 3] - proj[p + 1]);
+      archerShoot.set(best, { tick: proj[p + 4], face: sdx > 0 ? 1 : -1 });
+    }
+  }
+  if (seenProjKeys.size > 1024) {
+    for (const k of seenProjKeys) if (!live.has(k)) seenProjKeys.delete(k);
+  }
+}
+
+// A living entity that is not i's owner's, close enough to be the
+// footman's melee opponent (an enemy unit, or a Gaia animal — a
+// boar being fought reads exactly the same).
+function foeNearUnit(i, wx, wy) {
+  if (!frameSt) return false;
+  const st = frameSt;
+  const pos = st.pos;
+  for (let j = 0; j < st.count; j++) {
+    if (j === i || st.hp[j * 2] < 1) continue;
+    if (st.owners[j] === st.owners[i] || st.kinds[j] === KIND_TC) continue;
+    const dx = pos[j * 2] - wx;
+    const dy = pos[j * 2 + 1] - wy;
+    if (dx * dx + dy * dy <= 2.3 * 2.3) return true;
+  }
+  return false;
+}
+
+// A UNIT_ART image is drawable when loaded; the enemy variant is a
+// palette-swap CANVAS, which spriteReady (an <img> test) would
+// reject — accept either shape, like drawOriginalVillager does.
+function unitArtReady(im) {
+  return !!im && (im.naturalWidth > 0 || im.width > 0);
+}
+function unitArtPick(unit, action, n) {
+  const key = unit + action[0].toUpperCase() + action.slice(1) + n;
+  const red = drawOwner === foeOwner() ? UNIT_ART.imgRed[key] : null;
+  const im = red || UNIT_ART.img[key];
+  return unitArtReady(im) ? im : null;
+}
+
+// The frame for one unit this draw: {im, flip, action} or null when
+// the chosen action has no art yet (the caller falls back to the
+// previous drawing for that unit).
+function unitArtImage(unit, i, wx, wy) {
+  const pose = unitPoseFor(i, wx, wy);
+  const tick = sim.tick_count();
+  let action = 'idle';
+  let n = 1;
+  let face = pose.face;
+  if (unit === 'villager') {
+    if (pose.moving) {
+      if (carryKind.has(i)) {
+        action = 'carry';
+        n = (Math.floor(tick / 7) + i) % 2 + 1;
+      } else {
+        action = 'walk';
+        n = (Math.floor(tick / 7) + i) % 4 + 1;
+      }
+    } else if (atNodeNow.has(i)) {
+      action = 'gather';
+      n = Math.floor(tick / 8) % 3 + 1;
+    } else if (atBuildNow.has(i)) {
+      action = 'build';
+      n = Math.floor(tick / 6) % 2 + 1;
+    }
+  } else if (unit === 'scout') {
+    if (pose.moving) {
+      action = 'gallop';
+      n = (Math.floor(tick / 6) + i) % 4 + 1;
+    }
+  } else if (unit === 'archer') {
+    if (pose.moving) {
+      action = 'walk';
+      n = (Math.floor(tick / 7) + i) % 4 + 1;
+    } else {
+      const shot = archerShoot.get(i);
+      if (shot && tick - shot.tick <= 18) {
+        action = 'shoot';
+        n = Math.min(3, Math.floor((tick - shot.tick) / 6) + 1);
+        face = shot.face; // the arrow's screen direction, not the last walk facing
+      }
+    }
+  } else { // militia | maa
+    if (pose.moving) {
+      action = 'walk';
+      n = (Math.floor(tick / 7) + i) % 4 + 1;
+    } else if (foeNearUnit(i, wx, wy)) {
+      action = 'attack';
+      n = Math.floor(tick / 7) % 3 + 1;
+    }
+  }
+  const im = unitArtPick(unit, action, n);
+  return im ? { im, flip: face > 0, action } : null;
+}
+
+// Draw a unit-art frame bottom-anchored at (sx, sy), hWorld tall,
+// flipped horizontally when flip is set. False when not drawable.
+function drawUnitPose(im, sx, sy, hWorld, flip) {
+  if (!unitArtReady(im)) return false;
+  const h = hWorld * camS;
+  const w = h * ((im.naturalWidth || im.width) / (im.naturalHeight || im.height));
+  if (flip) {
+    ctx.save();
+    ctx.translate(sx, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(im, -w / 2, sy - h, w, h);
+    ctx.restore();
+  } else {
+    ctx.drawImage(im, sx - w / 2, sy - h, w, h);
+  }
+  return true;
+}
+
+// An arrow in flight, centered at (cx, cy) and rotated to `ang`
+// (its screen-space direction of travel): wooden shaft, steel
+// triangular head, and — when `detailed` — pale fletching barbs at
+// the tail. Replaces the M3 tail-line/dot marks.
+function drawArrowShape(cx, cy, ang, detailed) {
+  const u = camS;
+  const hx = Math.cos(ang);
+  const hy = Math.sin(ang);
+  const px = -hy;
+  const py = hx;
+  const half = 0.62 * u; // half the arrow's length
+  const tipX = cx + hx * half;
+  const tipY = cy + hy * half;
+  const tailX = cx - hx * half;
+  const tailY = cy - hy * half;
+  const hbX = cx + hx * half * 0.45; // the head's base center
+  const hbY = cy + hy * half * 0.45;
+  ctx.strokeStyle = '#a97c46'; // shaft
+  ctx.lineWidth = Math.max(1, u * 0.1);
+  ctx.beginPath();
+  ctx.moveTo(tailX, tailY);
+  ctx.lineTo(hbX, hbY);
+  ctx.stroke();
+  ctx.fillStyle = '#d9d9d9'; // head
+  const hw = 0.13 * u;
+  ctx.beginPath();
+  ctx.moveTo(tipX, tipY);
+  ctx.lineTo(hbX + px * hw, hbY + py * hw);
+  ctx.lineTo(hbX - px * hw, hbY - py * hw);
+  ctx.closePath();
+  ctx.fill();
+  if (detailed) {
+    ctx.strokeStyle = '#e8ddc8'; // fletching
+    ctx.lineWidth = Math.max(1, u * 0.07);
+    for (const s of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(tailX, tailY);
+      ctx.lineTo(tailX + (hx * 0.28 + px * s * 0.16) * u,
+        tailY + (hy * 0.28 + py * s * 0.16) * u);
+      ctx.stroke();
+    }
   }
 }
 
@@ -5883,7 +6204,9 @@ function draw() {
       break;
     }
   }
+  frameSt = st; // snapshot for the unit-animation inference (foeNearUnit)
   updateCarry(nodes, tcPos, pos, kinds, st.hp);
+  updateUnitAnimState(buildings, st);
 
   // Active paths as thin ground lines (our living units only — the
   // TC never moves, and Gaia's routes stay hidden). Cosmetic:
@@ -5939,7 +6262,7 @@ function draw() {
   // are tombstones in the sim, invisible here). A damaged unit gets
   // an HP bar above it.
   const UNIT_DRAW = [drawVillager, null, drawScout, drawMilitia, drawArcher,
-    drawSheep, drawBoar, drawDeer, drawMilitia]; // 8: Man-at-Arms (M6) — the Militia draw for now
+    drawSheep, drawBoar, drawDeer, drawManAtArms]; // 8: Man-at-Arms (M6)
   for (let i = 0; i < count; i++) {
     const wx = pos[i * 2];
     const wy = pos[i * 2 + 1];
@@ -5991,15 +6314,14 @@ function draw() {
   for (const d of draws) d.fn();
 
   // Arrows in flight (M3): interpolate along the sim's fixed
-  // trajectory. MEDIUM/HIGH draw the cosmetic arc + tail line; LOW
-  // draws a plain dot at the same interpolated position — the
-  // arrow's existence and position are information, the arc is not.
+  // trajectory and draw an oriented arrow (drawArrowShape) rotated
+  // to the screen-space direction of travel — the delta between
+  // the interpolated positions at t and t + dt, arc lift included,
+  // so the arrow pitches with its arc. LOW drops only the
+  // fletching; the arrow and its heading are information.
   {
     const proj = sim.projectiles();
     const now = sim.tick_count();
-    if (Q.projTrail) ctx.strokeStyle = '#e8ddc8';
-    if (Q.projTrail) ctx.lineWidth = Math.max(1, camS * 0.16);
-    else ctx.fillStyle = '#e8ddc8';
     for (let p = 0; p < proj.length; p += 6) {
       const span = Math.max(1, proj[p + 5] - proj[p + 4]);
       const t = Math.max(0, Math.min(1, (now - proj[p + 4]) / span));
@@ -6008,22 +6330,15 @@ function draw() {
       // M7 (VIS-01): an arrow is a unit for knowledge — drawn only
       // while its cell is currently visible.
       if (!cellVisibleW(wx, wy)) continue;
-      const [sx, sy] = worldToScreen(wx, wy);
-      if (!Q.projTrail) {
-        ctx.beginPath();
-        ctx.arc(sx, sy, Math.max(1.2, camS * 0.28), 0, Math.PI * 2);
-        ctx.fill();
-        continue;
-      }
       const lift = Math.sin(Math.PI * t) * 1.2 * camS;
-      const dx = proj[p + 2] - proj[p];
-      const dy = proj[p + 3] - proj[p + 1];
-      const dl = Math.hypot(dx, dy) || 1;
-      const tail = 0.9 * camS;
-      ctx.beginPath();
-      ctx.moveTo(sx - (dx / dl) * tail, sy - lift - (dy / dl) * tail * 0.5);
-      ctx.lineTo(sx, sy - lift);
-      ctx.stroke();
+      const [sx, sy] = worldToScreen(wx, wy);
+      const t2 = Math.min(1, t + 0.06);
+      const wx2 = proj[p] + (proj[p + 2] - proj[p]) * t2;
+      const wy2 = proj[p + 1] + (proj[p + 3] - proj[p + 1]) * t2;
+      const [sx2, sy2] = worldToScreen(wx2, wy2);
+      const lift2 = Math.sin(Math.PI * t2) * 1.2 * camS;
+      const ang = Math.atan2((sy2 - lift2) - (sy - lift), sx2 - sx);
+      drawArrowShape(sx, sy - lift, ang, Q.projTrail);
     }
   }
 

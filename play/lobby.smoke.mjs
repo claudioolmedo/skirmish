@@ -479,5 +479,46 @@ await boot(tab);
   console.log('PASS (10) all 20 PNG command icons ship and are mapped in app.js');
 }
 
+// (11) The unit-animation set (2026-10-19): every generated action
+//      frame ships under assets-original/units/<unit>/, app.js
+//      loads them through UNIT_ART into the same readiness gate as
+//      the other art sets, and the state->action picker exists.
+{
+  const { existsSync, statSync, readFileSync } = await import('node:fs');
+  const FRAMES = [
+    'villager/walk-1', 'villager/walk-2', 'villager/walk-3', 'villager/walk-4',
+    'villager/gather-1', 'villager/gather-2', 'villager/gather-3',
+    'villager/carry-1', 'villager/carry-2',
+    'villager/build-1', 'villager/build-2', 'villager/idle-1',
+    'archer/walk-1', 'archer/walk-2', 'archer/walk-3', 'archer/walk-4',
+    'archer/shoot-1', 'archer/shoot-2', 'archer/shoot-3', 'archer/idle-1',
+    'militia/walk-1', 'militia/walk-2', 'militia/walk-3', 'militia/walk-4',
+    'militia/attack-1', 'militia/attack-2', 'militia/attack-3', 'militia/idle-1',
+    'maa/walk-1', 'maa/walk-2', 'maa/walk-3', 'maa/walk-4',
+    'maa/attack-1', 'maa/attack-2', 'maa/attack-3', 'maa/idle-1',
+    'scout/gallop-1', 'scout/gallop-2', 'scout/gallop-3', 'scout/gallop-4',
+    'scout/idle-1',
+  ];
+  for (const name of FRAMES) {
+    const p = new URL(`../assets-original/units/${name}.png`, import.meta.url);
+    assert.ok(existsSync(p) && statSync(p).size > 1000,
+      `unit frame ${name}.png ships in assets-original/units/`);
+  }
+  const app = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
+  for (const name of FRAMES) {
+    const file = name.split('/')[1] + '.png';
+    const unit = name.split('/')[0];
+    assert.ok(app.includes(`${unit}/${file}`),
+      `app.js UNIT_ART_FILES maps ${name}.png`);
+  }
+  assert.ok(app.includes('loadUnitArt()') && app.includes('whenUnitArtSettled()'),
+    'app.js loads UNIT_ART and awaits it in the readiness gate');
+  assert.ok(app.includes('function unitArtImage'),
+    'app.js picks unit-art frames from observable state (unitArtImage)');
+  assert.ok(app.includes('function drawArrowShape'),
+    'app.js draws projectiles as oriented arrows (drawArrowShape)');
+  console.log('PASS (11) all 41 unit-animation frames ship, load via UNIT_ART, and join the readiness gate');
+}
+
 console.log('LOBBY SMOKE: all cases passed');
 process.exit(0);
