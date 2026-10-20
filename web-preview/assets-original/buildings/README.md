@@ -148,3 +148,46 @@ iteration-2 horseshoe is backed up as
 `town-center-horseshoe-v1-backup.png` in the staging area; the
 winning prompt and full measurement table are recorded in
 `PROMPTS.md` ("TOWN CENTER HORSESHOE — HEIGHT").
+
+## Town Center — ELEVATION iteration (2026-10-19, iteration 4)
+
+`town-center.png` replaced again (same 512×494 canvas, same draw
+contract — drop-in, no renderer change). Claudio's verdict on
+iteration 3 was "ficou ótimo" (it turned out great) — with one
+structural correction: "para manter a ilusão que está caminhando
+debaixo, deveria ter outro andar e não ter nada embaixo" (to keep
+the illusion that the villager is walking UNDERNEATH, the building
+should have another storey and nothing underneath). His reference
+photo (a raised-platform building on columns only, study copy in
+the staging area): the whole compound stands on COLUMNS ONLY — a
+raised floor deck, ground level completely empty — and the
+crossing is proven by a figure passing BEHIND the front columns
+under the raised floor, occluded by the posts, visible in the
+gaps.
+
+The change is structural only — same horseshoe plan, same height
+bands: the enclosed hall now starts at FIRST-FLOOR level on a
+timber beam + floor-slab band carried by massive posts (four
+corners + one center post; no mid posts on the courtyard faces, so
+each face is one wide opening); underneath the hall — and across
+the whole 4×4 — is open undercroft: posts and bare earth, nothing
+enclosed at ground level anywhere. The stone arch moved up with
+the floor and is now an upper-level LOGGIA (railed balcony arch,
+no door to the ground, no stairs). The side wings are open sheds
+on posts (Claudio: "dos lados está certo" — the sides were right),
+no walls, no ground-level floors.
+
+Measured on the final fitted art against the 73px game-scale
+villager (winner X, judged on `tc-lock4-judge.png` — panel (a) is
+the proof composite: a villager under the hall, drawn behind the
+front posts, occluded by them and visible in the gap):
+**undercroft clearance 1.31×** (inside the 1.25–1.45 band),
+**hall ridge 2.98×** and **bell turret 3.27×** — both over their
+round-3 bands (2.4–2.7 / 2.8–3.1) on the TALL side, the direction
+of every height correction Claudio has given; disclosed here and
+in `PROMPTS.md`, where the winning prompt is recorded ("TOWN
+CENTER HORSESHOE — ELEVATION"). Rejected siblings: W (same
+blockout — the generator crushed its undercroft to ~1.0×, so the
+villager's head hits the deck) and Y (undercroft tall but the
+turret blew up to 4.03×). Iteration 3's winner R is backed up as
+`town-center-horseshoe-v2-backup.png` in the staging area.
