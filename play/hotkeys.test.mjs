@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   PAGE_KINDS, PAGE_FOR_KIND, PAGE_KEYS, PAGE_BADGE, PANEL_BUTTONS,
-  POSITION_CODES, GOTO_KEYS, resolveHotkey, badgeForButton, edgePan,
+  PANEL_KEYS, GOTO_KEYS, resolveHotkey, badgeForButton, edgePan,
 } from './hotkeys.js';
 
 const build = (over = {}) => resolveHotkey({ context: 'build', page: null, ...over });
@@ -14,31 +14,37 @@ test('Q arms the economic page, W the military page (villager context)', () => {
   assert.deepEqual(build({ code: 'KeyW' }), { type: 'arm', page: 'mil' });
 });
 
-test('Claudio: Q then E raises a House — and grid Q does too', () => {
-  assert.deepEqual(build({ page: 'eco', code: 'KeyE' }), { type: 'button', id: 'build-0' });
+test('pure grid: Q then Q raises a House — the letter is the slot', () => {
   assert.deepEqual(build({ page: 'eco', code: 'KeyQ' }), { type: 'button', id: 'build-0' });
+  // E is the Farm's slot — it no longer doubles as House (the
+  // 2026-10-18 exception was superseded by the pure grid).
+  assert.deepEqual(build({ page: 'eco', code: 'KeyE' }), { type: 'button', id: 'build-1' });
 });
 
-test('economic page: the DE build positions and their aliases', () => {
+test('economic page: slot letters Q W E / A S, Back on C, silent aliases', () => {
   const eco = (code) => build({ page: 'eco', code });
-  assert.equal(eco('KeyW').id, 'build-4', 'Mill on W');
+  assert.equal(eco('KeyQ').id, 'build-0', 'House on Q (slot 0)');
+  assert.equal(eco('KeyW').id, 'build-4', 'Mill on W (slot 1)');
   assert.equal(eco('KeyI').id, 'build-4', 'Mill alias I');
-  assert.equal(eco('KeyR').id, 'build-3', 'Lumber Camp on R');
-  assert.equal(eco('KeyZ').id, 'build-3', 'Lumber Camp alias Z');
-  assert.equal(eco('KeyA').id, 'build-1', 'Farm on A');
+  assert.equal(eco('KeyE').id, 'build-1', 'Farm on E (slot 2)');
   assert.equal(eco('KeyF').id, 'build-1', 'Farm alias F');
-  assert.equal(eco('KeyG').id, 'build-5', 'Mining Camp on G (its grid E is the House)');
+  assert.equal(eco('KeyA').id, 'build-3', 'Lumber Camp on A (slot 3)');
+  assert.equal(eco('KeyR').id, 'build-3', 'Lumber Camp alias R');
+  assert.equal(eco('KeyZ').id, 'build-3', 'Lumber Camp alias Z');
+  assert.equal(eco('KeyS').id, 'build-5', 'Mining Camp on S (slot 4)');
+  assert.equal(eco('KeyG').id, 'build-5', 'Mining Camp alias G (its go-to)');
+  assert.deepEqual(eco('KeyC'), { type: 'button', id: 'page-back' }, 'Back on C (last slot)');
 });
 
-test('military page: the DE build positions and their aliases', () => {
+test('military page: slot letters Q W E / A, Back on C, silent aliases', () => {
   const mil = (code) => build({ page: 'mil', code });
   assert.equal(mil('KeyQ').id, 'build-2', 'Barracks on Q');
   assert.equal(mil('KeyB').id, 'build-2', 'Barracks alias B');
   assert.equal(mil('KeyW').id, 'build-6', 'Archery Range on W');
-  assert.equal(mil('KeyA').id, 'build-6', 'Archery Range alias A');
   assert.equal(mil('KeyE').id, 'build-7', 'Stable on E');
   assert.equal(mil('KeyL').id, 'build-7', 'Stable alias L');
-  assert.equal(mil('KeyS').id, 'build-8', 'Blacksmith on S');
+  assert.equal(mil('KeyA').id, 'build-8', 'Blacksmith on A — the Range\u2019s old A alias is dropped');
+  assert.deepEqual(mil('KeyC'), { type: 'button', id: 'page-back' }, 'Back on C (last slot)');
 });
 
 test('an armed page swallows its letters; other letters fall through', () => {
@@ -50,12 +56,13 @@ test('an armed page swallows its letters; other letters fall through', () => {
 
 test('A with villagers and no page armed is the DE drop-off', () => {
   assert.deepEqual(build({ code: 'KeyA' }), { type: 'drop-off' });
-  // On the armed economic page the same letter is the Farm — the
-  // panel context decides, as in the reference game.
-  assert.equal(build({ page: 'eco', code: 'KeyA' }).type, 'button');
+  // On the armed economic page the same letter is the Lumber
+  // Camp (its slot) — the panel context decides, as in the
+  // reference game.
+  assert.equal(build({ page: 'eco', code: 'KeyA' }).id, 'build-3');
 });
 
-test('panel position keys run a selected building\u2019s buttons in order', () => {
+test('panel slot letters run a selected building\u2019s buttons', () => {
   const at = (context, code) => resolveHotkey({ context, page: null, code });
   assert.equal(at('barracks', 'KeyQ').id, 'train-militia');
   assert.equal(at('barracks', 'KeyW').id, 'research-maa');
@@ -64,7 +71,10 @@ test('panel position keys run a selected building\u2019s buttons in order', () =
   assert.equal(at('stable', 'KeyQ').id, 'train-scout');
   assert.equal(at('blacksmith', 'KeyQ').id, 'research-fletching');
   assert.equal(at('blacksmith', 'KeyW').id, 'research-scalemail');
-  assert.equal(at('blacksmith', 'KeyE').id, 'research-padded');
+  // Padded Archer Armor sits under Fletching in DE's panel:
+  // second row, first slot — A, not E.
+  assert.equal(at('blacksmith', 'KeyA').id, 'research-padded');
+  assert.equal(at('blacksmith', 'KeyE'), null, 'E is not a Blacksmith letter');
 });
 
 test('Town Center letters are DE’s own: Villager Q, Loom A, Feudal W', () => {
@@ -111,9 +121,12 @@ test('go-to: Ctrl+letter jumps to a building type, in any context', () => {
   assert.equal(build({ page: 'eco', code: 'KeyG', ctrl: true }).type, 'goto');
 });
 
-test('every building sits on exactly one page, with a working badge', () => {
+test('every building sits on exactly one page, in grid order, with a working badge', () => {
   assert.deepEqual([...PAGE_KINDS.eco, ...PAGE_KINDS.mil].sort((a, b) => a - b),
     [0, 1, 2, 3, 4, 5, 6, 7, 8], 'the two pages partition the nine buildings');
+  // Grid (render) order: the slots run Q W E / A S / ... in order.
+  assert.deepEqual(PAGE_KINDS.eco, [0, 4, 1, 3, 5], 'economic: House, Mill, Farm, Lumber, Mining');
+  assert.deepEqual(PAGE_KINDS.mil, [2, 6, 7, 8], 'military: Barracks, Range, Stable, Blacksmith');
   for (const [page, kinds] of Object.entries(PAGE_KINDS)) {
     for (const kind of kinds) {
       assert.equal(PAGE_FOR_KIND[kind], page);
@@ -123,20 +136,28 @@ test('every building sits on exactly one page, with a working badge', () => {
         'the badge letter\u2019s key runs this very building');
       assert.equal(badgeForButton({ context: 'build', page, id: `build-${kind}` }), badge);
     }
+    // The page's Back button: last slot, C, badged and keyed.
+    assert.equal(badgeForButton({ context: 'build', page, id: 'page-back' }), 'C');
   }
   // No badge where no key acts: the unarmed build panel.
   assert.equal(badgeForButton({ context: 'build', page: null, id: 'build-0' }), null);
 });
 
-test('badges in train/research contexts are the position letters', () => {
+test('badges in train/research contexts are the slot letters', () => {
+  // Every panel's buttons carry their PANEL_KEYS letter.
   for (const [context, ids] of Object.entries(PANEL_BUTTONS)) {
-    if (context === 'tc') continue; // DE's own TC letters — the test below
-    ids.forEach((id, i) => {
-      assert.equal(badgeForButton({ context, id, index: i }), 'QWE'[i], `${context}/${id}`);
-      assert.equal(POSITION_CODES[i], `Key${'QWE'[i]}`);
-    });
+    for (const id of ids) {
+      assert.equal(badgeForButton({ context, id, index: 0 }),
+        PANEL_KEYS[context][id][1], `${context}/${id}`);
+      assert.equal(PANEL_KEYS[context][id][0], `Key${PANEL_KEYS[context][id][1]}`);
+    }
   }
-  // The Town Center exception: DE letters, not positions.
+  // The grid shapes, spelled out: first-row panels on Q/W, the
+  // Blacksmith's third research on A (second row), the TC's
+  // DE arrangement Q / A / W.
+  assert.equal(badgeForButton({ context: 'barracks', id: 'train-militia', index: 0 }), 'Q');
+  assert.equal(badgeForButton({ context: 'barracks', id: 'research-maa', index: 1 }), 'W');
+  assert.equal(badgeForButton({ context: 'blacksmith', id: 'research-padded', index: 2 }), 'A');
   assert.equal(badgeForButton({ context: 'tc', id: 'train', index: 0 }), 'Q');
   assert.equal(badgeForButton({ context: 'tc', id: 'research-loom', index: 1 }), 'A');
   assert.equal(badgeForButton({ context: 'tc', id: 'research-feudal', index: 2 }), 'W');

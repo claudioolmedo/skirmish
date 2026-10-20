@@ -9,7 +9,7 @@
 //
 // Proves: '.' selects an idle villager → the panel root shows
 // ONLY the two build-page openers (badged Q / W) → Q arms the
-// economic page (its five buildings + Back, House badged E) → E
+// economic page (its five buildings + Back, House badged Q) → Q
 // enters House placement and the panel STAYS on the page; Esc
 // cancels the placement back onto the page, a second Esc returns
 // to the root; Q,W enters Mill placement; W arms the military
@@ -358,15 +358,16 @@ const cmdBtn = (id) => cmdButtons().find((b) => b.id === id);
 // The DE page model (UI FIX 4 addendum): root = the two openers;
 // a page = its buildings + Back in the last slot.
 const ROOT_IDS = ['page-eco', 'page-mil'];
-const ECO_IDS = ['build-0', 'build-1', 'build-3', 'build-4', 'build-5', 'page-back'];
+const ECO_IDS = ['build-0', 'build-4', 'build-1', 'build-3', 'build-5', 'page-back'];
 const MIL_IDS = ['build-2', 'build-6', 'build-7', 'build-8', 'page-back'];
 
 pump(3);
 
 // ------------------------------------------------------------- (1)
 // '.' picks an idle villager: the root shows only the two page
-// openers. Q arms the economic page; E places a House (Claudio's
-// sequence) and the panel stays on the page; Esc cancels the
+// openers. Q arms the economic page; Q again places a House
+// (the pure grid: the letter is the button's slot) and the
+// panel stays on the page; Esc cancels the
 // placement back onto the page, a second Esc returns to root.
 key('Period');
 pump(2);
@@ -378,14 +379,14 @@ assert.ok(cmdBtn('page-mil').innerHTML.includes('<span class="cmd-key">W</span>'
 
 key('KeyQ');
 assert.deepEqual(cmdIds(), ECO_IDS, 'Q arms the economic page — its five buildings + Back');
-assert.ok(cmdBtn('build-0').innerHTML.includes('<span class="cmd-key">E</span>'),
-  'the House button is badged E');
+assert.ok(cmdBtn('build-0').innerHTML.includes('<span class="cmd-key">Q</span>'),
+  'the House button is badged Q (its grid slot)');
 assert.ok(cmdBtn('build-4').innerHTML.includes('<span class="cmd-key">W</span>'),
   'the Mill button is badged W');
 
-key('KeyE');
+key('KeyQ');
 assert.deepEqual(cmdIds(), ECO_IDS, 'placing keeps the page — the panel stays on economic');
-assert.ok(cmdBtn('build-0').className.includes('active'), 'E entered House placement');
+assert.ok(cmdBtn('build-0').className.includes('active'), 'Q entered House placement');
 
 key('Escape');
 pump(2);
@@ -394,7 +395,7 @@ assert.deepEqual(cmdIds(), ECO_IDS, '…and lands back on the page the House cam
 key('Escape');
 pump(2);
 assert.deepEqual(cmdIds(), ROOT_IDS, 'a second Esc returns to the root page');
-console.log('PASS (1) root openers; Q arms economic; E places; Esc steps back page by page');
+console.log('PASS (1) root openers; Q arms economic; Q places; Esc steps back page by page');
 
 // ------------------------------------------------------------- (2)
 // Q then W (the Mill's key on the economic page) places a Mill;
@@ -476,8 +477,8 @@ assert.equal(tab.el('toast').textContent, 'No Lumber Camp yet.', 'Ctrl+Z reports
 key('Period');
 pump(2);
 key('KeyQ');
-key('KeyR');
-assert.ok(cmdBtn('build-3').className.includes('active'), 'Q,R entered Lumber Camp placement');
+key('KeyA');
+assert.ok(cmdBtn('build-3').className.includes('active'), 'Q,A entered Lumber Camp placement');
 // Click near the centered villager: identical down/up points (a
 // true click, under the drag threshold). Fractional client px —
 // the stub viewport is 300x150 against a 1280x800 canvas, so a
@@ -607,6 +608,8 @@ clickBtn('page-eco');
 assert.deepEqual(cmdIds(), ECO_IDS, 'clicking the Economic opener opens the economic page');
 assert.ok(cmdBtn('page-back').innerHTML.includes('#i-back'),
   'Back carries the return-arrow glyph');
+assert.ok(cmdBtn('page-back').innerHTML.includes('<span class="cmd-key">C</span>'),
+  '…and is badged C — the page\u2019s last grid slot');
 clickBtn('page-back');
 assert.deepEqual(cmdIds(), ROOT_IDS, 'Back from economic returns to the root too');
 console.log('PASS (8) mouse and keyboard share one page state: opener clicks, Back clicks');

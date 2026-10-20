@@ -3782,14 +3782,19 @@ async function main() {
 
   // Left-click pick: one of OUR living units (villagers, Scout,
   // military, captured sheep) — Gaia's animals are never selected.
+  // The sheep is the smallest sprite in the game and its wool
+  // sits well above its ground point, so it gets a wider pick
+  // radius: clicks on the visible body must select it (the
+  // 1.9 wu standard radius only covers clicks near its feet).
   function unitAt(wx, wy) {
     const st = entityState();
     let best = null;
     let bestD2 = 1.9 * 1.9;
     for (let i = 0; i < st.count; i++) {
       if (!isOwnUnit(st, i)) continue;
+      const r = st.kinds[i] === KIND_SHEEP ? 2.75 : 1.9;
       const d2 = (st.pos[i * 2] - wx) ** 2 + (st.pos[i * 2 + 1] - wy) ** 2;
-      if (d2 < bestD2) {
+      if (d2 < r * r && (best === null || d2 < bestD2)) {
         bestD2 = d2;
         best = i;
       }
@@ -5746,6 +5751,7 @@ function renderCommands() {
       // Esc on the open page runs.
       cmdGrid.append(cmdButton({
         id: 'page-back', icon: 'i-back', label: 'Back',
+        key: badgeForButton({ context, page: buildPage, id: 'page-back' }),
         title: 'Back to the build menu (Esc).',
       }));
     } else {
