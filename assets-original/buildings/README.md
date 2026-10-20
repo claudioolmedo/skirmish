@@ -191,3 +191,52 @@ blockout — the generator crushed its undercroft to ~1.0×, so the
 villager's head hits the deck) and Y (undercroft tall but the
 turret blew up to 4.03×). Iteration 3's winner R is backed up as
 `town-center-horseshoe-v2-backup.png` in the staging area.
+
+## Town Center — EMPTY GROUND + UPPER-FLOOR WALLS iteration (2026-10-19, iteration 5)
+
+`town-center.png` replaced again (same 512×494 canvas, same draw
+contract — drop-in, no renderer change). Claudio's refinement of
+iteration 4 (22:45): "O primeiro está certo, mas não tem que ter
+nada no chão e também paredes no primeiro andar; se vc colocar
+aldeão atrás, vai dar a sensação que está atravessando" — the
+elevated first floor is right, but (1) the ground plane must be
+literally EMPTY apart from the columns, and (2) the enclosed
+walls belong on the upper floor. Iteration 4's winner had shipped
+with a cart, crates, barrels and hay standing under the sheds,
+and its hall face was mostly an open loggia — an open deck, not
+a room.
+
+The change (blockout6 extends blockout5; geometry encodes it):
+the ground across the whole 4×4 is bare earth + columns ONLY —
+no props, no stored goods, no ground deck, no stairs or ladder,
+nothing occupying the ground plane; diagonal braces stay HIGH,
+tucked directly under the raised floor band. The hall above the
+slab is now a CLOSED ROOM VOLUME: solid timber-framed plaster
+walls on every face with small arched windows set into the wall
+— no loggia, no balcony, no railing; the walls start at the
+raised deck and stop at the eaves, and nothing wall-like reaches
+the ground. Same horseshoe plan, same massive posts (four
+corners + one center post under the hall, exactly two hero posts
+per shed), same height structure.
+
+Measured on the final fitted art against the 73px game-scale
+villager (winner Z1, judged on `tc-lock5-judge.png` — panel (a)
+is the proof composite: a villager under the elevated floor,
+drawn behind the front posts, occluded by them and visible in
+the gap, standing on completely bare ground; a second villager
+stands fully visible in the empty undercroft under the left
+shed): **undercroft clearance 1.45×** (top of the 1.25–1.45
+band), **hall ridge 2.83×** (over the 2.4–2.7 band on the tall
+side, less than iteration 4's shipped 2.98×), **turret 2.78×**
+(at the floor of the 2.8–3.1 band). Ground-emptiness verified on
+the fitted art: zero non-column elements touch or occupy the
+ground plane. Rejected siblings: Z2 (same numbers except turret
+3.40× — over the cap), Z4 (ridge 2.40× / turret 2.88× in band
+but its undercroft posts measure 1.16× — below the 1.25 floor,
+the core rule, rejected like W in round 4), Z3 (the generator
+floored both sheds on raised plank platforms — the
+whole-compound deck failure of iteration 4's V — rejected on
+structure before fitting). The winning prompt is recorded in
+`PROMPTS.md` ("TOWN CENTER HORSESHOE — EMPTY GROUND + UPPER
+WALLS"). Iteration 4's winner X is backed up as
+`town-center-horseshoe-v3-backup.png` in the staging area.
