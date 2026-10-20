@@ -239,6 +239,7 @@ await sleep(400);
   assert.ok(row.innerHTML.includes('1v1 Arábia — North America West'), 'row title localized, region name kept');
   assert.ok(row.innerHTML.includes('Arábia'), 'map column in PT');
   assert.equal(tab.el('pause-title').textContent, 'Pausado', 'pause title in PT');
+  assert.equal(tab.el('feedback-q').textContent, 'O que quebrou para você?', 'end card feedback question in PT');
   assert.equal(tab.el('lang-select').value, 'pt-BR', 'the select shows the active locale');
   console.log('PASS (1) boot with stored pt-BR renders the lobby in Portuguese');
 }
