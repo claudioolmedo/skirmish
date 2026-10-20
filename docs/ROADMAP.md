@@ -336,6 +336,29 @@ From the [Gap Analysis](GAP-ANALYSIS.md): the items that most make Skirmish II
   Ctrl+Z, the pan read off the minimap's viewport rect).
   Zero sim changes.
 
+- **M14 — Directional sprites, player color, building lifecycle
+  (shipped 2026-10-19).** Claudio's three art rules, landed
+  together. (1) **Direction-true sprites**: every unit and animal
+  is now rendered from the procedural models in
+  `tools/sprite-pipeline/models/` for the fixed camera AND the
+  facing direction — 8 directions × action cycles (villager adds
+  Build; the scout gallops; animals graze), the sheets leading
+  every draw chain with the generated side-view sets kept as the
+  fallback beneath (spec: docs/SPRITE-PIPELINE.md §10; the
+  reference's classic set is 8 facings, DE ships 16 — our MEDIUM
+  tier count, a re-render away). (2) **Player color by mask**:
+  designated areas (tunics, the archer's shirt, the MAA's tabard,
+  shield faces, the scout's saddle blanket) ship a per-sheet
+  shade mask and the enemy's red is a true palette remap at draw
+  — the reference engine's mechanism (a stored shade offset
+  remapped per player), at posterized fidelity. (3) **The
+  building lifecycle**: smoke at HP ≤ 75%, flames at ≤ 50%,
+  rubble decals over the freed footprint, and **Repair** (BLD-17)
+  — a villager restores an own damaged building at the
+  documented 750 HP/min (+375 per extra repairer) for 50% of its
+  build cost, via right-click, the villager root panel's third
+  button, or hotkey **E**. The AI does not repair yet (gap).
+
 ## Good first contributions
 
 Small, self-contained, and each one closes a named rule. The rulebook entry

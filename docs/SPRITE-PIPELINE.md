@@ -167,7 +167,7 @@ one — art rendered for the fixed camera **and** the facing direction
 (back view going up-screen, front coming down, 3/4 views on the
 diagonals), designated areas swapping color per player, and buildings
 living the full damage lifecycle (fire, rubble, repair). This section
-is the spec for that milestone; §1–§9 remain in force.
+is the spec for that milestone; §1–§8 and §11 remain in force.
 
 ### 10.1 Sheet layout (all units and animals)
 
@@ -302,7 +302,42 @@ design document):
   pure presentation over free ground, with an **adopted fade of
   ~20 s (UNVERIFIED value, presentation only)**.
 
-## 9. QA checklist (per render)
+### 10.6 As built (2026-10-19)
+
+Shipped in this milestone:
+
+- **Models** (`tools/sprite-pipeline/models/`, rendered by
+  `units.py`): villager (idle/walk/gather/carry/build), archer
+  (idle/walk/shoot), militia + man-at-arms (idle/walk/attack),
+  scout cavalry (idle/gallop, 160px cells), sheep/boar/deer
+  (idle/walk/graze) — every sheet 8 directions × the §10.1 frame
+  counts, contact sheets verified per unit (dir 1 = front,
+  dir 5 = back). Player-color masks ship for every humanoid +
+  scout state (villager/archer shirts and tunics `cloth`, militia
+  tunic + shield face, MAA tabard + shield face, scout tunic +
+  saddle blanket); animals carry no player color.
+- **Client**: the directional sheets lead every unit/animal draw
+  chain (facing from the movement vector quantized to the 8 rows,
+  idle keeps the last facing); the mask-remapped red variant is
+  built once per sheet at load and replaces the channel swap
+  wherever a mask exists (villager included, at the LOW tier;
+  MEDIUM/HIGH villager tiers still use the swap — their folders
+  carry no masks yet). The side-view generated sets remain the
+  fallback beneath. Buildings: smoke ≤75% HP, flames ≤50% with
+  damage-scaled clusters, rubble decals ~20 s over the freed
+  footprint, all fog-gated — BLD-18 / BLD-19 in the rulebook.
+- **Repair**: sim command + client paths (right-click, root-panel
+  button on E, hotkey E) per §10.4 — BLD-17. The AI does not
+  repair (recorded gap).
+- **Known limits**: the militia's wide armed stance touches the
+  cell edges on two walk frames (nothing clipped; the villager's
+  3px-margin standard is met by every other sheet); the sheep's
+  wool body is a single ring of boxes by design (head proud of
+  the ring, ears + muzzle read at game scale); the deer's slim
+  antler boxes read as a crown in pure side views; the scout's
+  neck root can show daylight in two side views (cosmetic).
+
+## 11. QA checklist (per render)
 
 1. Contact-sheet eyeball: silhouette reads at game zoom; facing is
    unambiguous in all 8 directions; walk cycle has a clear stride.

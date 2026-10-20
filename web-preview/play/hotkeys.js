@@ -18,7 +18,9 @@
 //
 // 1. Villager build pages. With villager(s) selected, Q arms the
 //    ECONOMIC page and W the MILITARY page (the root panel's two
-//    slots). On an armed page the buttons sit in grid order —
+//    openers); the root's third slot, E, is Repair (BLD-17) — it
+//    arms repair targeting, run through the same button handler
+//    as its panel click. On an armed page the buttons sit in grid order —
 //    economic: House Q, Mill W, Farm E, Lumber Camp A, Mining
 //    Camp S, Back C; military: Barracks Q, Archery Range W,
 //    Stable E, Blacksmith A, Back C. A building may ALSO answer
@@ -184,6 +186,7 @@ export function resolveHotkey({ context, page, code, ctrl = false, shift = false
     }
     if (code === 'KeyQ') return { type: 'arm', page: 'eco' };
     if (code === 'KeyW') return { type: 'arm', page: 'mil' };
+    if (code === 'KeyE') return { type: 'button', id: 'repair' };
     if (code === 'KeyA') return { type: 'drop-off' };
     return null;
   }

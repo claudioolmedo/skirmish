@@ -1075,6 +1075,36 @@ changed. The direction math is pure (`edgePan` in
 hotkeys.js); the smoke observes the pan through the minimap's
 viewport rectangle.
 
+## Repair and the building lifecycle (2026-10-19)
+
+Rulebook BLD-17/18/19. The sim gains a Repair command pair —
+`Command::Repair { entity, building }` and its queued form (wire
+`{t:'repair', e, b, q}`; WASM `push_repair` / `push_repair_queued`)
+— validated like Build: a living own villager, an own, complete,
+damaged building, else a silent no-op. The repairer walks the
+construction approach (ring cell, build range, path re-issue like
+a builder's) and works in the construction block of the tick:
+**750 HP/min for the first repairer on a building, +375 HP/min
+per additional** (the documented DE rate — a flat HP rate, NOT
+the build-time formula), drawn from a per-building fractional
+accumulator and paid for as a continuous wood drip of **50% of
+the building's build cost per full repair**
+(`REPAIR_COST_FRACTION`); when the owner cannot cover a tick's
+drip the repairer stops and idles. HP reach max exactly; the
+task then completes. Repair state (target assignment +
+accumulator) is hashed like the construction assignment, and the
+golden scenario — which contains no repair — is untouched. The
+AI never issues Repair in this milestone (recorded gap).
+
+The lifecycle visuals are client-side: buildings smoke at
+HP ≤ 75% and flame at ≤ 50% (procedural canvas overlays in the
+building's painter pass, Town Center included), and a destroyed
+building leaves a fading rubble decal (~20 s) over its footprint
+— the sim frees the footprint at destruction (BLD-07) and the
+decal is presentation only, fog-gated like the building it
+replaces. Directional unit/animal sprites and the player-color
+mask mechanism are specified in docs/SPRITE-PIPELINE.md §10.
+
 ## TC footprint rule (2026-10-19)
 
 Claudio's rule, stated as a correction of an earlier reading of
