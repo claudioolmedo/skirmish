@@ -94,3 +94,31 @@ grid against three sibling candidates (judge sheet in the art
 staging area, `tc-lock-judge.png`), chroma-keyed and exact-fit
 affine-warped onto the canonical diamond. R8a remains in git
 history and as `town-center-r8a-backup.png` in the staging area.
+
+## Town Center — horseshoe iteration (2026-10-19, iteration 2)
+
+`town-center.png` replaced again (same 512×494 canvas, same draw
+contract — drop-in, no renderer change). Claudio's screenshot review
+of the lock-ring version: it read **out of proportion, with too many
+columns, no horseshoe front — and too small**. The corrected plan is
+a **horseshoe (U) open at the FRONT**: a tall two-storey hall with a
+steep slate hip roof and bell turret fills the back of the diamond,
+solid gabled wings run down the two sides, each carrying an open
+wooden canopy on exactly **two massive timber posts**, and the bare-
+earth courtyard runs unbroken out through the open front — no roof
+bar, no wall, nothing crossing the entrance — so the pass-through
+reads from the camera and the compound fills its 4×4 diamond with
+presence, towering over villagers and a mounted scout.
+
+Process note: open-front wordings repeatedly drifted the generator
+into frontal elevations (eight attempts). The winning route seeds
+the image pipeline with a **flat-color geometric blockout rendered
+in the game's own 2:1 dimetric math** (hall/wings/canopies/posts as
+volumes on the diamond) and restyles it — geometry first, detail
+second. The blockout script (`tc_blockout2.py`), the winning
+candidate and the judge sheet (`tc-lock2-judge.png`: fitted diamond
++ grid, villager in the courtyard, villager entering through the
+front gap, scout beside the TC) live in the art staging area; the
+corrected winning prompt is recorded in `PROMPTS.md` ("TOWN CENTER
+HORSESHOE — winning prompt"). The lock-ring version is backed up as
+`town-center-lockring-backup.png` in the staging area.
