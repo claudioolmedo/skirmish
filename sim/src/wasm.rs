@@ -334,6 +334,39 @@ impl WasmSim {
         ok
     }
 
+    /// Toggle AutoExplore (SEL-17) on a player's starting Scout
+    /// Cavalry: with `enabled` the scout explores its owner's fog
+    /// frontier on its own; disabling stops it where it stands.
+    /// Returns whether the order *would* be accepted (a living
+    /// starting scout — trained scouts are never eligible); the sim
+    /// re-validates when the command is applied.
+    pub fn push_auto_explore(&mut self, entity: u32, enabled: bool) -> bool {
+        let ok = self.inner.can_auto_explore(entity);
+        if ok {
+            self.inner.push_command(Command::SetAutoExplore { entity, enabled });
+        }
+        ok
+    }
+
+    /// Per-entity AutoExplore flags (0/1) in entity-id order — the
+    /// command panel's pressed state for the toggle button.
+    pub fn entity_auto_explore(&self) -> Vec<u8> {
+        self.inner
+            .entities()
+            .iter()
+            .map(|e| u8::from(e.auto_explore))
+            .collect()
+    }
+
+    /// The entity id of `owner`'s starting Scout Cavalry (SEL-17
+    /// eligibility), or -1 when the match spawned none for them.
+    pub fn starting_scout(&self, owner: u32) -> i32 {
+        match self.inner.starting_scout_of(owner as u8) {
+            Some(id) => id as i32,
+            None => -1,
+        }
+    }
+
     /// Order a villager to build a House with its 2×2-cell footprint
     /// anchored at the cell containing the world point `(x, y)`. The
     /// 25-wood cost is deducted at placement (next tick). Returns

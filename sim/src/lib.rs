@@ -301,6 +301,17 @@ pub enum Command {
     /// right-click on their own Town Center or camp. Rejected when
     /// the villager carries nothing or no valid drop-off stands.
     ForceDeposit { entity: u32 },
+    /// Toggle AutoExplore (SEL-17) on a player's *starting* Scout
+    /// Cavalry. With `enabled`, the scout hands its movement to the
+    /// sim's frontier walker: it repeatedly rides to the nearest
+    /// unexplored cell of its owner's fog grid until a manual order
+    /// lands or the mode is toggled off (off stops it where it
+    /// stands). Valid only for the starting scout of each player —
+    /// eligibility is fixed at spawn (see `Sim::is_starting_scout`);
+    /// trained scouts, other kinds, dead or unknown entities ignore
+    /// the command. The toggle replaces the scout's current order
+    /// and queue, like any fresh direct order.
+    SetAutoExplore { entity: u32, enabled: bool },
 }
 
 /// Why Town Center training cannot currently proceed (M2.5). The
@@ -1744,6 +1755,174 @@ impl Sim {
         self.steer_to_dropoff(idx, owner, target);
     }
 
+    // --- AutoExplore (SEL-17) ------------------------------------
+    // The starting Scout Cavalry of each player may hand its
+    // movement to a frontier walker: it rides to the nearest
+    // unexplored cell of its OWNER's fog grid, re-picking on
+    // arrival (or at the fog cadence when its target was explored
+    // by other means). Everything here is a pure function of hashed
+    // state — the fog grid, positions, the tick counter — so a
+    // replay reproduces every ride exactly.
+
+    /// Is this entity a player's *starting* Scout Cavalry? Fixed
+    /// at spawn by construction: each player spawns exactly one
+    /// Scout, before any production exists, and entities are never
+    /// removed (death is a tombstone) — so the starting scout is
+    /// the lowest-id Scout Cavalry of its owner for the whole
+    /// match, and a trained scout (always a later id) never is.
+    /// Deriving it keeps the rule a pure function of state that is
+    /// already hashed (ids, kinds, owners).
+    pub fn is_starting_scout(&self, entity: u32) -> bool {
+        let idx = match self.entity_index(entity) {
+            Some(i) => i,
+            None => return false,
+        };
+        let e = &self.entities[idx];
+        e.kind == EntityKind::ScoutCavalry
+            && is_player_owner(e.owner)
+            && !self
+                .entities
+                .iter()
+                .any(|o| o.kind == EntityKind::ScoutCavalry && o.owner == e.owner && o.id < e.id)
+    }
+
+    /// The entity id of `owner`'s starting Scout Cavalry, if the
+    /// match spawned one (every standard start does). The client
+    /// uses this to place the AutoExplore button; the scout may be
+    /// dead — aliveness is `can_auto_explore`'s gate, not this
+    /// query's.
+    pub fn starting_scout_of(&self, owner: u8) -> Option<u32> {
+        self.entities
+            .iter()
+            .filter(|e| e.kind == EntityKind::ScoutCavalry && e.owner == owner)
+            .map(|e| e.id)
+            .min()
+    }
+
+    /// Would a `SetAutoExplore` command be accepted right now? The
+    /// entity must be a living starting Scout Cavalry (SEL-17).
+    pub fn can_auto_explore(&self, entity: u32) -> bool {
+        match self.entity_index(entity) {
+            Some(idx) => !self.entities[idx].dead && self.is_starting_scout(entity),
+            None => false,
+        }
+    }
+
+    /// Whether AutoExplore is currently on for an entity (the
+    /// client's button state; tests pin the toggle/cancel rules
+    /// through this).
+    pub fn auto_explore_on(&self, entity: u32) -> bool {
+        match self.entity_index(entity) {
+            Some(idx) => self.entities[idx].auto_explore,
+            None => false,
+        }
+    }
+
+    /// Apply a `SetAutoExplore` command: validate, then set the
+    /// mode. Either way the toggle replaces the scout's current
+    /// order and queue (a fresh direct order, SEL-12) and clears
+    /// any combat engagement; with the mode off the scout simply
+    /// stops where it stands.
+    fn issue_auto_explore(&mut self, entity: u32, enabled: bool) {
+        if !self.can_auto_explore(entity) {
+            return;
+        }
+        let idx = self.entity_index(entity).expect("validated");
+        let e = &mut self.entities[idx];
+        e.auto_explore = enabled;
+        e.auto_target = None;
+        e.order = None;
+        e.order_queue.clear();
+        e.vel_x = I16F16::ZERO;
+        e.vel_y = I16F16::ZERO;
+        e.clear_combat();
+        e.task = Task::Idle;
+        e.task_node = None;
+        e.task_building = None;
+        e.task_dropoff = None;
+    }
+
+    /// The per-tick AutoExplore step (tick phase 5.5): every scout
+    /// with the mode on and no ride in progress picks its next
+    /// frontier cell. A scout with a combat target is left to the
+    /// combat phase (it cannot gain one on its own — the Scout's
+    /// stance never auto-acquires, CMB-09 — but a stale engagement
+    /// must not fight the walker).
+    fn auto_explore_tick(&mut self) {
+        for idx in 0..self.entities.len() {
+            {
+                let e = &self.entities[idx];
+                if !e.auto_explore || e.dead {
+                    continue;
+                }
+            }
+            if self.entities[idx].attack_target.is_some()
+                || self.entities[idx].attack_building.is_some()
+            {
+                continue;
+            }
+            let slot = match player_slot(self.entities[idx].owner) {
+                Some(s) => s,
+                None => continue,
+            };
+            // Cadence re-pick: if the target cell has been explored
+            // since it was picked (the scout's own LoS usually gets
+            // there first), drop the ride at the fog recompute
+            // cadence and re-pick from where the scout stands.
+            if self.tick % FOG_RECOMPUTE_INTERVAL == 0 {
+                if let Some((tx, ty)) = self.entities[idx].auto_target {
+                    if self.fog[slot][(ty * GRID_DIM + tx) as usize] != 0 {
+                        let e = &mut self.entities[idx];
+                        e.auto_target = None;
+                        e.order = None;
+                        e.vel_x = I16F16::ZERO;
+                        e.vel_y = I16F16::ZERO;
+                    }
+                }
+            }
+            if self.entities[idx].order.is_some() {
+                continue;
+            }
+            self.auto_explore_pick(idx, slot);
+        }
+    }
+
+    /// Pick the exploration target for scout `idx`: the nearest
+    /// unexplored cell of its owner's fog grid (squared cell
+    /// distance; ties go to the lowest linear cell index — the
+    /// scan is row-major, so the choice is a pure function of the
+    /// grid and the scout's cell). Unreachable or blocked cells
+    /// are skipped in that same order (at most 32 candidates are
+    /// path-tested per pick); if none accepts a path the scout
+    /// stands and the pick retries next tick.
+    fn auto_explore_pick(&mut self, idx: usize, slot: usize) {
+        self.entities[idx].auto_target = None;
+        let (px, py) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
+        let (scx, scy) = self.grid.world_to_cell(px, py);
+        let mut cands: Vec<(i64, u32)> = Vec::new();
+        for cy in 0..GRID_DIM {
+            for cx in 0..GRID_DIM {
+                if self.fog[slot][(cy * GRID_DIM + cx) as usize] == 0 {
+                    let dx = cx as i64 - scx as i64;
+                    let dy = cy as i64 - scy as i64;
+                    cands.push((dx * dx + dy * dy, cy * GRID_DIM + cx));
+                }
+            }
+        }
+        cands.sort_unstable();
+        for &(_, lin) in cands.iter().take(32) {
+            let (cx, cy) = (lin % GRID_DIM, lin / GRID_DIM);
+            if self.grid.is_blocked(cx, cy) {
+                continue;
+            }
+            let (wx, wy) = self.grid.cell_center(cx, cy);
+            if self.set_move_order(idx, wx, wy) {
+                self.entities[idx].auto_target = Some((cx, cy));
+                return;
+            }
+        }
+    }
+
     /// Would an `AttackBuilding` command be accepted right now?
     /// (M5.) Mirrors `can_attack` for placed buildings: the attacker
     /// must be a living player unit with an attack row, and the
@@ -1936,6 +2115,9 @@ impl Sim {
                 Command::ResearchAt { building, tech } => self.issue_research_at(building, tech),
                 Command::Repair { entity, building } => self.issue_repair(entity, building),
                 Command::ForceDeposit { entity } => self.issue_force_deposit(entity),
+                Command::SetAutoExplore { entity, enabled } => {
+                    self.issue_auto_explore(entity, enabled)
+                }
             }
         }
 
@@ -2069,6 +2251,15 @@ impl Sim {
         //    has no dead tick between links.
         self.advance_queues();
 
+        // 5.5. AutoExplore (SEL-17): a starting Scout with the mode
+        //    on and no ride in progress picks its next frontier cell
+        //    from its owner's fog grid. Runs after the queues (a
+        //    queued order that just started owns the scout — and
+        //    issuing it already cancelled the mode) and before the
+        //    AI step, so the order it installs steers next tick like
+        //    any other.
+        self.auto_explore_tick();
+
         // 6. The scripted opponent decides (M5): on its cadence the
         //    AI reads live state and enqueues ordinary commands into
         //    the same FIFO the human uses (AI-01) — they apply at the
@@ -2164,6 +2355,10 @@ impl Sim {
             e.task_building = None;
             e.task_dropoff = None;
             e.clear_combat();
+            // SEL-17: a manual order takes the scout back — the
+            // AutoExplore walker never survives one.
+            e.auto_explore = false;
+            e.auto_target = None;
         }
         let (tx, ty) = (clamp_pos(x), clamp_pos(y));
         if !self.set_move_order(idx, tx, ty) {
@@ -2199,6 +2394,8 @@ impl Sim {
         e.task_node = None;
         e.task_building = None;
         e.task_dropoff = None;
+        e.auto_explore = false;
+        e.auto_target = None;
         e.order = None;
         e.attack_target = Some(target);
         e.attack_building = None;
@@ -2224,6 +2421,8 @@ impl Sim {
         e.task_node = None;
         e.task_building = None;
         e.task_dropoff = None;
+        e.auto_explore = false;
+        e.auto_target = None;
         e.order = None;
         e.attack_target = None;
         e.attack_building = Some(building);
@@ -2344,6 +2543,11 @@ impl Sim {
             Some(ni) => self.nodes[ni].resource(),
             None => return,
         };
+        // SEL-17: a gather order is a manual order (defensive —
+        // only villagers gather, and a villager never carries the
+        // AutoExplore flag; the cancel keeps the rule total).
+        self.entities[idx].auto_explore = false;
+        self.entities[idx].auto_target = None;
         self.entities[idx].task_node = Some(node);
         self.entities[idx].task_building = None;
         match self.entities[idx].carry_kind {
@@ -2569,6 +2773,11 @@ impl Sim {
             return;
         }
         let idx = self.entity_index(entity).expect("validated");
+        // SEL-17: queueing an order is a manual order too — it
+        // cancels AutoExplore, so the queue can actually advance
+        // (the walker would otherwise keep the scout busy forever).
+        self.entities[idx].auto_explore = false;
+        self.entities[idx].auto_target = None;
         self.entities[idx].order_queue.push(order);
     }
 
@@ -4317,6 +4526,24 @@ impl Sim {
             h.write_u64(e.flee_until);
             h.write_i32(e.flee_from_x.to_bits());
             h.write_i32(e.flee_from_y.to_bits());
+            // SEL-17: AutoExplore state — written ONLY while the
+            // mode is on, exactly the Task::Repair pattern above,
+            // so a match that never toggles it hashes
+            // byte-identically to before (the golden stream is
+            // untouched); a match that does is fully covered — the
+            // flag and its current frontier cell are state, and a
+            // replay must reproduce every ride.
+            if e.auto_explore {
+                h.write_u8(0xAE);
+                match e.auto_target {
+                    None => h.write_u8(0),
+                    Some((cx, cy)) => {
+                        h.write_u8(1);
+                        h.write_u32(cx);
+                        h.write_u32(cy);
+                    }
+                }
+            }
         }
         // M3: projectiles in flight, in spawn order.
         h.write_u32(self.projectiles.len() as u32);

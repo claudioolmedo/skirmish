@@ -36,6 +36,8 @@ test('validateCommand accepts the full vocabulary and rejects junk', () => {
     { t: 'rally_tc', x: 1, y: 2 },
     { t: 'rally_b', b: 3, x: 1, y: 2 },
     { t: 'force_dep', e: 7 },
+    { t: 'auto_explore', e: 4, on: true },
+    { t: 'auto_explore', e: 4, on: false },
   ];
   for (const c of ok) assert.equal(validateCommand(c), true, JSON.stringify(c));
   const bad = [
@@ -46,6 +48,8 @@ test('validateCommand accepts the full vocabulary and rejects junk', () => {
     { t: 'train_at', b: 1, k: 5 },
     { t: 'research_tc', tech: 2 },
     { t: 'gather', e: 1 },
+    { t: 'auto_explore', e: 4 },
+    { t: 'auto_explore', e: 4, on: 1 },
   ];
   for (const c of bad) assert.equal(validateCommand(c), false, JSON.stringify(c));
 });

@@ -528,6 +528,50 @@ issues the smart order (SEL-11, via the same `smartOrderAt` the main
 view uses — including rally-setting with a building selected, and the
 Shift-queued form). · *Status:* **MATCHES**.
 
+**SEL-17 — Auto-Explore (Auto Scout).** The *starting* Scout Cavalry —
+and only it — can be toggled into Auto Scout: it then rides the same
+scouting pattern the AI uses, exploring on its own, until the player
+issues it any manual order (which takes priority and ends the mode) or
+toggles the mode off (it stops where it stands). It never initiates
+attacks on its own (the Scout's stance is Stand Ground in the Dark
+Age, CMB-09). DE added a dedicated panel button on the scout's command
+panel and, in current builds, a remappable Autoscout hotkey (its
+documented default letter is **UNVERIFIED** from public sources);
+Skirmish II binds the toggle to **G** by product decision, in the
+units context only, after every existing G binding (the armed
+villager eco-page alias and Ctrl+G go-to) has resolved.
+*Source:* Age of Empires official site, Update 35584 spotlight ("Auto
+Scouting … only available for your starting Scout unit(s), not for
+trained Scouts … issuing a manual command will take priority"); AoE
+wiki (Scout unit): the feature arrived in update 36202 restricted to
+the start-spawned scouting unit, and **since update 111772 every
+scout unit has the option** — so the starting-only rule below matches
+DE 2020–2023 and **DIFFERS** from current DE; Update 169123 notes
+("Normalized the Stop and Autoscout hotkeys behavior on scouts")
+confirm a dedicated Autoscout hotkey exists in current DE. Study nº 2
+(video evidence) shows the dedicated panel button and the scout
+riding the fog edge alone. · *Impl:* shipped 2026-10-20 —
+`Command::SetAutoExplore` + `push_auto_explore` ABI; eligibility is
+derived from spawn order (the lowest-id Scout Cavalry of each owner;
+entities are tombstoned, never removed, so a trained scout is never
+eligible, and a dead starting scout ends the feature). The walker is
+a pure function of hashed state: nearest unexplored cell of the
+owner's fog grid (squared cell distance, ties to the lowest linear
+cell index), existing A*/steering, re-pick on arrival or at the fog
+cadence (15 ticks) when the target was explored meanwhile; any
+Move/Attack/AttackBuilding/Gather/queued order cancels the mode in
+the shared `apply_*` paths. Its state joins the hash only while the
+mode is on (the Task::Repair pattern), so untouched matches hash
+byte-identically to before. Client: an icon-only toggle button with
+the G badge on the Scout Cavalry's command panel (shown only for the
+eligible scout, pressed state mirrors the sim flag) + the G key in
+the units context; the order flows through the lockstep vocabulary
+(`auto_explore`). · *Status:* **MATCHES** (starting-scout-only
+eligibility, frontier exploration, manual-order priority, toggle-off
+stop — against DE's original Auto Scout); **DIFFERS** from current
+DE, which extends the option to all scouts (111772); DE's hotkey
+default **UNVERIFIED**, G is our product binding.
+
 ---
 
 ## 5. Movement, pathfinding & collision
