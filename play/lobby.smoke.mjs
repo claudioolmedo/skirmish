@@ -443,9 +443,15 @@ await boot(tab);
     'ui.css styles no queue badge either — the count lives in the selection info line');
   assert.ok(appJs.includes('SHIFT_TRAIN_COUNT = 5'),
     'the Shift+train repeat count is five (gap 4), pinned at the source');
-  assert.ok(appJs.includes('Train Militia — 60 food · 20 gold')
-    && appJs.includes('Train Archer — 25 wood · 45 gold'),
-    'the hover tooltip carries name + FULL cost, both resources included');
+  // i18n: the tooltip strings live in the string table now —
+  // assert the COMPOSED English titles carry name + full cost.
+  const { tIn, costText } = await import('./i18n.js');
+  assert.equal(
+    tIn('en', 'cmd.trainTitle', { name: 'Militia', cost: costText([[60, 'food'], [20, 'gold']], 'en') }),
+    'Train Militia — 60 food · 20 gold · Shift queues five.');
+  assert.equal(
+    tIn('en', 'cmd.trainTitle', { name: 'Archer', cost: costText([[25, 'wood'], [45, 'gold']], 'en') }),
+    'Train Archer — 25 wood · 45 gold · Shift queues five.');
   assert.ok(appJs.includes("'page-eco'") && appJs.includes("'page-mil'") && appJs.includes("'page-back'"),
     'app.js builds the DE page model: two openers + Back on each page');
   const playHtml = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
