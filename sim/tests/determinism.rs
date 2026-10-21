@@ -185,11 +185,28 @@ fn golden_hash_regression() {
     // changed — the stream changes through the generated layout
     // alone. New value verified stable across independent runs
     // (replay example, seed 42, 360 ticks, run twice).
+    //
+    // Herdables rework (2026-10-20, deliberate update): the hash
+    // now also serializes each sheep's wander schedule, Gaia sheep
+    // genuinely wander (seeded-RNG steps around their spawn post,
+    // AI-06), conversion counts nearby units and unguarded sheep
+    // can be stolen, and a sheep's Line of Sight is 2 tiles (wiki,
+    // Herdable animal) instead of 3. Scenario equivalence for THIS
+    // tripwire was verified directly against the previous build:
+    // at tick 360 the entity census is identical (3 villagers,
+    // 1 scout, 8 sheep all still Gaia, 2 boars, 6 deer, 1 Town
+    // Center), every non-sheep entity's position and HP are
+    // bit-identical, and the sheep positions are bit-identical
+    // too (the wander cadence is lazy; no step has landed yet) —
+    // the value moves on the new hash coverage and the new sheep
+    // rules alone, not on any change to the world this scenario
+    // builds. New value verified stable across independent runs
+    // (run-to-run determinism test in this file).
     let mut sim = Sim::new(42);
     let mut hash = 0;
     for _ in 0..360 {
         hash = sim.tick();
     }
     assert_eq!(sim.tick_count(), 360);
-    assert_eq!(format!("{:016x}", hash), "cd0176cdad2845d2");
+    assert_eq!(format!("{:016x}", hash), "93c1e963b7a09619");
 }

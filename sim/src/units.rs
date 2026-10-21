@@ -294,8 +294,13 @@ static MAN_AT_ARMS: UnitSpec = UnitSpec {
     train_ticks: 1260, // inert (upgrade-only kind); mirrors Militia
 };
 
-/// Sheep (OPENING-SPEC §2.2): 100 food, speed 0.7, LoS ~3, worked at
-/// the shepherd rate once dead. HP is UNVERIFIED — no provided doc
+/// Sheep (OPENING-SPEC §2.2): 100 food, speed 0.7, worked at the
+/// shepherd rate once dead. Line of Sight 2 tiles: the wiki's
+/// Herdable animal article gives the per-animal breakdown ("Cows,
+/// Sheep, and Turkeys have 2 Line of Sight, while the rest have
+/// 3"); the Sheep article's prose says 3 — the per-animal table is
+/// adopted and the conflict is recorded in the rulebook (AI-06).
+/// HP is UNVERIFIED — no provided doc
 /// pins sheep HP; 7 is adopted as a tuning constant (a villager's
 /// 3-damage strikes kill in 3 hits, matching the reference feel that
 /// sheep fall quickly but not to a single poke).
@@ -312,7 +317,7 @@ static SHEEP: UnitSpec = UnitSpec {
     projectile_speed: I16F16::ZERO,
     scatter: I16F16::ZERO,
     speed: I16F16::from_bits(3_058), // 0.7 tiles/s (absolute scale, see header)
-    los: I16F16::from_bits(786_432),  // 12 (~3 tiles)
+    los: I16F16::from_bits(524_288),  // 8 (2 tiles — wiki, Herdable animal)
     radius: I16F16::from_bits(65_536),
     carcass_food: 100,
     carcass_decay_bits: 273, // 0.25 food/s (ECO-12)

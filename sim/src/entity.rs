@@ -420,6 +420,12 @@ pub struct Entity {
     /// picked; the walker re-picks on arrival, or at the fog
     /// recompute cadence when the cell has been explored meanwhile.
     pub auto_target: Option<(u32, u32)>,
+    /// Sheep: the tick at which a Gaia sheep next reconsiders
+    /// wandering (short steps around its home post, long graze
+    /// pauses between them). Zero means "not yet scheduled" — the
+    /// wander step initializes it from the entity id on first sight.
+    /// Owned sheep never wander; inert for other kinds.
+    pub wander_until: u64,
 }
 
 impl Entity {
@@ -462,6 +468,7 @@ impl Entity {
             flee_from_y: I16F16::ZERO,
             auto_explore: false,
             auto_target: None,
+            wander_until: 0,
         }
     }
 

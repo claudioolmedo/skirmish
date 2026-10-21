@@ -41,7 +41,7 @@ use fixed::types::I16F16;
 use crate::build::BuildingKind;
 use crate::classes as cls;
 use crate::econ::{NodeKind, ResourceNode};
-use crate::entity::{is_player_owner, EntityKind, Task, OWNER_GAIA};
+use crate::entity::{is_player_owner, EntityKind, Task, OWNER_GAIA, OWNER_OPPONENT, OWNER_PLAYER};
 use crate::units::{self, UnitSpec};
 use crate::{steer, Sim};
 
@@ -51,8 +51,11 @@ use crate::{steer, Sim};
 /// slack CMB-06's landing check needs without letting units hit
 /// across a crowd.
 pub const MELEE_REACH: I16F16 = I16F16::from_bits(196_608); // 3.0
-/// A Gaia sheep is captured when a player unit comes this close
-/// (OPENING-SPEC §2.2: captured by adjacency/proximity).
+/// A herdable converts when a player unit stands this close
+/// (4.0 wu = 1 tile). The wiki states the rule as proximity only —
+/// "moving any of their units next to it" (Herdable animal) — and
+/// gives no number; 1 tile is the tuned constant that reads as
+/// "next to it" (rulebook AI-06).
 pub const CAPTURE_RANGE: I16F16 = I16F16::from_bits(262_144); // 4.0
 /// An un-locked boar gives up when it is this far from its target…
 const GIVE_UP_CHASE: I16F16 = I16F16::from_bits(1_310_720); // 20.0
@@ -239,36 +242,76 @@ impl Sim {
         self.death_sweep();
     }
 
-    /// Sheep capture (ECO-13 / AI-06): a Gaia sheep with any living
-    /// player unit (not the Town Center) within capture range
-    /// changes sides — to the first such unit's player, in id order
-    /// (M5: either player can capture; with two players near one
-    /// sheep the lower id decides, deterministically). Ownership
-    /// then stays — stealing a captured sheep back is a multiplayer
-    /// rule for later.
+    /// Sheep conversion (ECO-13 / AI-06; wiki, Sheep + Herdable
+    /// animal): a herdable belongs to the player whose units stand
+    /// near it. A Gaia sheep converts to the player with the MOST
+    /// units within capture range (an exact tie leaves it wild —
+    /// the wiki names no tie-break, so the deterministic choice is
+    /// to hold). An owned sheep stays its owner's while any
+    /// friendly unit remains in range; left with no friendly unit
+    /// nearby, it falls to an enemy whose unit passes by — sheep
+    /// can be stolen this way. Only a player's real mobile units
+    /// count: buildings (the Town Center included) never convert,
+    /// and herdables never hold a herd for anyone.
     fn capture_sheep(&mut self) {
         for idx in 0..self.entities.len() {
             let e = &self.entities[idx];
-            if e.kind != EntityKind::Sheep || e.owner != OWNER_GAIA || e.dead {
+            if e.kind != EntityKind::Sheep || e.dead {
                 continue;
             }
             let (sx, sy) = (e.pos_x, e.pos_y);
-            let captor = self.entities.iter().find(|u| {
-                is_player_owner(u.owner)
-                    && !u.dead
-                    && u.kind.is_mobile()
-                    && steer::vec_len(u.pos_x - sx, u.pos_y - sy) <= CAPTURE_RANGE
-            });
-            if let Some(u) = captor {
-                let owner = u.owner;
-                self.entities[idx].owner = owner;
+            // Presence per owner tag (slot 1 is Gaia and stays 0).
+            let mut near = [0u32; 3];
+            for u in &self.entities {
+                if u.dead
+                    || u.kind == EntityKind::Sheep
+                    || !u.kind.is_mobile()
+                    || !is_player_owner(u.owner)
+                {
+                    continue;
+                }
+                if steer::vec_len(u.pos_x - sx, u.pos_y - sy) <= CAPTURE_RANGE {
+                    near[u.owner as usize] += 1;
+                }
+            }
+            let cur = self.entities[idx].owner;
+            let next = if cur == OWNER_GAIA {
+                if near[OWNER_PLAYER as usize] > near[OWNER_OPPONENT as usize] {
+                    Some(OWNER_PLAYER)
+                } else if near[OWNER_OPPONENT as usize] > near[OWNER_PLAYER as usize] {
+                    Some(OWNER_OPPONENT)
+                } else {
+                    None
+                }
+            } else if near[cur as usize] == 0 {
+                let foe = if cur == OWNER_PLAYER {
+                    OWNER_OPPONENT
+                } else {
+                    OWNER_PLAYER
+                };
+                if near[foe as usize] > 0 {
+                    Some(foe)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            if let Some(owner) = next {
+                let e = &mut self.entities[idx];
+                e.owner = owner;
+                // A converted sheep stops and waits for its new
+                // owner: a Gaia wander step or the old owner's
+                // queued moves do not carry over the flip.
+                e.order = None;
+                e.order_queue.clear();
             }
         }
     }
 
-    /// Gaia behavior: the boar's lure loop and deer flight. Runs
-    /// before the attack machines so a boar's aggro becomes its
-    /// attack target on the same tick.
+    /// Gaia behavior: the boar's lure loop, deer flight, and sheep
+    /// wander. Runs before the attack machines so a boar's aggro
+    /// becomes its attack target on the same tick.
     fn animal_ai(&mut self) {
         for idx in 0..self.entities.len() {
             let (kind, dead) = (self.entities[idx].kind, self.entities[idx].dead);
@@ -278,9 +321,72 @@ impl Sim {
             match kind {
                 EntityKind::Boar => self.boar_ai(idx),
                 EntityKind::Deer => self.deer_ai(idx),
+                EntityKind::Sheep => self.sheep_wander(idx),
                 _ => {}
             }
         }
+    }
+
+    /// Gaia sheep wander (AI-06; wiki, Gaia: "all predator,
+    /// huntable, and herdable animals can wander in a specific
+    /// area"): short slow steps around the spawn post with long
+    /// graze pauses between them, every choice drawn from the
+    /// seeded RNG in entity order. Owned sheep never wander —
+    /// they hold position until their owner orders them.
+    fn sheep_wander(&mut self, idx: usize) {
+        {
+            let e = &self.entities[idx];
+            if e.owner != OWNER_GAIA || e.order.is_some() {
+                return;
+            }
+            if e.wander_until == 0 {
+                // First sight: schedule the first decision a few
+                // seconds out, staggered by id so the herd never
+                // steps in lockstep on the opening ticks.
+                let first = self.tick + 240 + (e.id as u64 * 67) % 480;
+                self.entities[idx].wander_until = first;
+                return;
+            }
+            if self.tick < e.wander_until {
+                return;
+            }
+        }
+        // Decide this round: graze on, or take a short step. The
+        // next decision lands 12–30 s out either way, so a walking
+        // sheep (a ≤1-tile step takes ~1.5 s at sheep speed)
+        // always arrives and grazes long before the following
+        // one. The cadence is deliberately lazy — reference sheep
+        // mostly stand and graze, shuffling a tile or so now and
+        // then — and three of four rounds are pure grazing.
+        let next = self.tick + 720 + self.rng.below(1080) as u64;
+        self.entities[idx].wander_until = next;
+        if self.rng.below(4) != 0 {
+            return; // graze this round
+        }
+        let (px, py, hx, hy) = {
+            let e = &self.entities[idx];
+            (e.pos_x, e.pos_y, e.home_x, e.home_y)
+        };
+        let dx = self.rng.below(9) as i32 - 4; // ±4 wu = ±1 tile
+        let dy = self.rng.below(9) as i32 - 4;
+        if dx == 0 && dy == 0 {
+            return;
+        }
+        // Leash: the step's target stays within ~2 tiles of the
+        // post, so a herd drifts around its area instead of
+        // marching off across the map.
+        let mut tx = px + I16F16::from_num(dx);
+        let mut ty = py + I16F16::from_num(dy);
+        let (lx, ly) = (tx - hx, ty - hy);
+        let len = steer::vec_len(lx, ly);
+        let leash = I16F16::from_num(8);
+        if len > leash {
+            tx = hx + lx * leash / len;
+            ty = hy + ly * leash / len;
+        }
+        let tx = crate::clamp_pos(tx);
+        let ty = crate::clamp_pos(ty);
+        self.set_move_order(idx, tx, ty);
     }
 
     /// The boar lure loop (OPENING-SPEC §2.2): aggro mirrors into the

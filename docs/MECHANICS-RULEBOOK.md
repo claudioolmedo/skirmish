@@ -831,7 +831,11 @@ carcasses (ECO-11), worked at the shepherd rate 0.330/s.
 shipped (M3) — ownership transfers by proximity in the combat phase's
 capture step; killing is an ordinary attack order against an own
 animal, and the killer auto-harvests the carcass (worked at the
-0.330/s shepherd rate for herd carcasses). · *Status:* **MATCHES**.
+0.330/s shepherd rate for herd carcasses). Extended 2026-10-20 to the
+full AI-06 rule (majority conversion for wild sheep, steal of an
+unguarded owned sheep, Gaia wander; client owner-colour band and
+information selection for animals that are not yours). · *Status:*
+**MATCHES**.
 
 **ECO-14 — Farms.** A Farm is a 3×3 building holding 175 food. Only one
 villager works a farm; the farm's own inherent work rate (0.4 food/s)
@@ -2020,16 +2024,45 @@ becomes the property of the player whose unit comes within capture
 proximity of it. It stays owned while any friendly unit remains nearby;
 if it is left without friendly units nearby and another player's unit
 passes, ownership transfers to them (sheep can be stolen this way).
-*Source:* wiki, Sheep / Herdable animal (capture and transfer rules). ·
-*Impl:* a proximity sweep on a slow cadence over herdable entities (id
-order; nearest qualifying player wins ties by player id); ownership is
-the entity `owner` field (MAP-12). The capture radius is UNVERIFIED in
-the sources consulted — adopt ~2 tiles as a tuned constant. · *Status:*
-**DIFFERS** (M3, 2026-10-16: proximity capture ships for either player —
-the first in-range player unit's owner takes the sheep, and the AI
-herds its own the same way. The steal-back half does not ship: an owned
-sheep never re-captures to a passer-by, so herds cannot be stolen by
-walking past.)
+*Source:* wiki, Sheep ("Nearing a neutral Sheep will cause it to become
+aligned to that player's faction… the Sheep will stay under the control
+of the player that first discovers it, as long as friendly units are in
+close proximity… if no friendly units are nearby and another team's
+unit happens to pass by, the Sheep will fall under the control of that
+player"; the article's Celts exception does not arise — Skirmish II has
+no civilizations) and Herdable animal ("Capturing an animal is
+accomplished simply by moving any of their units next to it. If
+multiple civilizations have units near an animal, the animal will be
+owned by the player who has the most units nearby"; "Cows, Sheep, and
+Turkeys have 2 Line of Sight, while the rest have 3"); Gaia ("all
+predator, huntable, and herdable animals can wander in a specific
+area"). · *Impl:* a per-tick presence sweep in the combat phase over
+herdable entities: only living mobile non-herdable units of a player
+count (buildings and other herdables never hold a herd). A wild sheep
+converts to the player with the most units in range (an exact tie
+holds — the sources name no tie-break, so holding is the adopted
+deterministic choice); an owned sheep transfers only when its owner
+has no unit in range and an enemy does. Conversion clears the sheep's
+orders — it stops and waits for its new owner. The capture radius is
+UNVERIFIED as a number in the sources (the rule is stated as proximity
+/ "next to it") — adopt **1 tile** as the tuned constant. A sheep's
+Line of Sight is 2 tiles: the Herdable animal per-animal breakdown is
+adopted over the Sheep article's prose value of 3, and the conflict is
+recorded here. Wild sheep also wander: the animal AI gives Gaia sheep
+short seeded-RNG steps (≤1 tile) around their spawn post (leash
+~2 tiles) on a lazy 12–30 s decision cadence that mostly grazes
+(three rounds in four) — reference sheep shuffle a little, they do
+not march; owned sheep never wander. Client
+side, an owned sheep wears its owner's colour as a band on the animal
+and rings in that colour when selected; a wild sheep (and the enemy's)
+can be clicked for an information selection, portrait and hit points
+only. · *Status:* **MATCHES** (reworked 2026-10-20 after a live
+play-test found the gaps: M3 shipped the first half only — first
+in-range unit won, ownership was permanent, and Gaia sheep had no
+wander behavior at all, so they stood at spawn and herds could not be
+stolen. The full rule above now ships, with sim tests for wander
+determinism, the unguarded steal, owned-sheep stillness, and the
+2-tile sheep sight.)
 
 **AI-07 — Huntable behavior: deer flee, boars fight.** Deer and similar
 prey graze idly and flee from an attacker that wounds or approaches them.

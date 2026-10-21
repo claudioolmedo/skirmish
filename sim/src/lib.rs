@@ -4544,6 +4544,10 @@ impl Sim {
                     }
                 }
             }
+            // Sheep wander schedule (AI-06): derived from tick + RNG,
+            // but hashed like every other entity field so a wander
+            // divergence can never hide.
+            h.write_u64(e.wander_until);
         }
         // M3: projectiles in flight, in spawn order.
         h.write_u32(self.projectiles.len() as u32);

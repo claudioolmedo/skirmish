@@ -229,12 +229,20 @@ fn scripted_siege_wins_the_match() {
     let mut sim = Sim::new_match(21, MatchMode::AiEasy);
     let mut driver = HumanScript::default();
     let mut won_at = None;
-    // Window: 240,000 ticks. BLD-16 (2026-10-19) — the Town
+    // Window: 480,000 ticks. BLD-16 (2026-10-19) — the Town
     // Center's footprint is placement-reserved — moved the plots
     // this script's base grows on; its siege now lands later and
     // wins on a re-massed second push (see the script's unlatch
     // rule). The pre-BLD-16 first-push win landed at ~98,500.
-    for _ in 0..240_000 {
+    // Herdables rework (2026-10-20): the window grows again —
+    // Gaia sheep wander and convert by presence now (AI-06), so
+    // the opening herds drift, kills land a little farther out,
+    // and the script's long threshold chain re-paces end to end.
+    // Measured on this seed with the new behaviour: Victory at
+    // tick 355,686 on the pre-forest Arabia, and at 424,130 with
+    // the forest-contiguity generator merged — the script's full
+    // arc (Feudal, massed army, second push) intact both times.
+    for _ in 0..480_000 {
         driver.drive(&mut sim);
         sim.tick();
         if sim.match_state() == MatchState::Victory {
