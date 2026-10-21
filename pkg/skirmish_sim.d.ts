@@ -49,6 +49,11 @@ export class WasmSim {
      */
     cell_size(): number;
     /**
+     * Per-entity AutoExplore flags (0/1) in entity-id order — the
+     * command panel's pressed state for the toggle button.
+     */
+    entity_auto_explore(): Uint8Array;
+    /**
      * Number of entities (Town Center + villagers).
      */
     entity_count(): number;
@@ -213,6 +218,15 @@ export class WasmSim {
      * Queue an attack order behind the unit's current order.
      */
     push_attack_queued(entity: number, target: number): boolean;
+    /**
+     * Toggle AutoExplore (SEL-17) on a player's starting Scout
+     * Cavalry: with `enabled` the scout explores its owner's fog
+     * frontier on its own; disabling stops it where it stands.
+     * Returns whether the order *would* be accepted (a living
+     * starting scout — trained scouts are never eligible); the sim
+     * re-validates when the command is applied.
+     */
+    push_auto_explore(entity: number, enabled: boolean): boolean;
     /**
      * Order a villager to build an Archery Range (175 wood, 3×3 —
      * M6; Feudal Age, requires a Barracks) — see
@@ -445,6 +459,11 @@ export class WasmSim {
      */
     research_block_tc(tech_tag: number): number;
     /**
+     * The entity id of `owner`'s starting Scout Cavalry (SEL-17
+     * eligibility), or -1 when the match spawned none for them.
+     */
+    starting_scout(owner: number): number;
+    /**
      * Current state hash as hex, without advancing the sim.
      */
     state_hash(): string;
@@ -545,6 +564,7 @@ export interface InitOutput {
     readonly wasmsim_building_train_block: (a: number, b: number, c: number) => number;
     readonly wasmsim_buildings: (a: number) => [number, number];
     readonly wasmsim_cell_size: (a: number) => number;
+    readonly wasmsim_entity_auto_explore: (a: number) => [number, number];
     readonly wasmsim_entity_count: (a: number) => number;
     readonly wasmsim_entity_hp: (a: number) => [number, number];
     readonly wasmsim_entity_kinds: (a: number) => [number, number];
@@ -576,6 +596,7 @@ export interface InitOutput {
     readonly wasmsim_push_attack: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_attack_building: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_attack_queued: (a: number, b: number, c: number) => number;
+    readonly wasmsim_push_auto_explore: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_build_archery_range: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_archery_range_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_barracks: (a: number, b: number, c: number, d: number) => number;
@@ -618,6 +639,7 @@ export interface InitOutput {
     readonly wasmsim_research_block_at: (a: number, b: number, c: number) => number;
     readonly wasmsim_research_block_tc: (a: number, b: number) => number;
     readonly wasmsim_research_block_tc_at: (a: number, b: number, c: number) => number;
+    readonly wasmsim_starting_scout: (a: number, b: number) => number;
     readonly wasmsim_state_hash: (a: number) => [number, number];
     readonly wasmsim_stockpile: (a: number) => [number, number];
     readonly wasmsim_stockpile_for: (a: number, b: number) => [number, number];

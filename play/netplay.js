@@ -128,6 +128,7 @@ export function validateCommand(c) {
     case 'rally_tc': return isNum(c.x) && isNum(c.y);
     case 'rally_b': return isInt(c.b) && isNum(c.x) && isNum(c.y);
     case 'force_dep': return isInt(c.e);
+    case 'auto_explore': return isInt(c.e) && typeof c.on === 'boolean';
     default: return false;
   }
 }
@@ -164,6 +165,7 @@ export function applyCommand(sim, cmd, owner, tcOf) {
     case 'rally_tc': return sim.push_set_rally_tc_of(tcOf(owner), cmd.x, cmd.y);
     case 'rally_b': return sim.push_set_rally_building(cmd.b, cmd.x, cmd.y);
     case 'force_dep': return sim.push_force_deposit(cmd.e);
+    case 'auto_explore': return sim.push_auto_explore(cmd.e, cmd.on);
     default: return false;
   }
 }

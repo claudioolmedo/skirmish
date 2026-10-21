@@ -94,6 +94,17 @@ export class WasmSim {
         return ret;
     }
     /**
+     * Per-entity AutoExplore flags (0/1) in entity-id order — the
+     * command panel's pressed state for the toggle button.
+     * @returns {Uint8Array}
+     */
+    entity_auto_explore() {
+        const ret = wasm.wasmsim_entity_auto_explore(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
      * Number of entities (Town Center + villagers).
      * @returns {number}
      */
@@ -430,6 +441,21 @@ export class WasmSim {
      */
     push_attack_queued(entity, target) {
         const ret = wasm.wasmsim_push_attack_queued(this.__wbg_ptr, entity, target);
+        return ret !== 0;
+    }
+    /**
+     * Toggle AutoExplore (SEL-17) on a player's starting Scout
+     * Cavalry: with `enabled` the scout explores its owner's fog
+     * frontier on its own; disabling stops it where it stands.
+     * Returns whether the order *would* be accepted (a living
+     * starting scout — trained scouts are never eligible); the sim
+     * re-validates when the command is applied.
+     * @param {number} entity
+     * @param {boolean} enabled
+     * @returns {boolean}
+     */
+    push_auto_explore(entity, enabled) {
+        const ret = wasm.wasmsim_push_auto_explore(this.__wbg_ptr, entity, enabled);
         return ret !== 0;
     }
     /**
@@ -916,6 +942,16 @@ export class WasmSim {
     research_block_tc(tech_tag) {
         const ret = wasm.wasmsim_research_block_tc(this.__wbg_ptr, tech_tag);
         return ret >>> 0;
+    }
+    /**
+     * The entity id of `owner`'s starting Scout Cavalry (SEL-17
+     * eligibility), or -1 when the match spawned none for them.
+     * @param {number} owner
+     * @returns {number}
+     */
+    starting_scout(owner) {
+        const ret = wasm.wasmsim_starting_scout(this.__wbg_ptr, owner);
+        return ret;
     }
     /**
      * Current state hash as hex, without advancing the sim.

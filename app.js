@@ -1836,6 +1836,23 @@ function panelContext() {
   return (bk && { 2: 'barracks', 6: 'range', 7: 'stable', 8: 'blacksmith' }[bk.kind]) || 'none';
 }
 
+/// AutoExplore toggle (SEL-17): flips the mode on the LOCAL
+/// player's starting Scout Cavalry when — and only when — that
+/// scout is in the current selection. The sim is the eligibility
+/// truth (starting scout only, alive); the client mirrors the one
+/// rule it needs for the button and the key: the scout's id comes
+/// from the sim, the on/off state from the sim's flag array.
+/// Shared by the command-panel button and the G key, so both run
+/// the very same order. Returns whether the order was issued.
+function toggleAutoExplore() {
+  const id = sim.starting_scout(localOwner);
+  if (id < 0 || !selection.has(id)) return false;
+  const on = !(sim.entity_auto_explore()[id] === 1);
+  if (!issue({ t: 'auto_explore', e: id, on })) return false;
+  playAudioCue('orderMilitary');
+  return true;
+}
+
 /// Force drop-off for the selection (DE's villager A; the M6
 /// ForceDeposit order, exactly as the right-click drop-off path
 /// issues it — the carry heuristic decides who is loaded, the
@@ -1886,11 +1903,31 @@ function handleHotkey(e) {
   // older, wider gate — selection keys are harmless there.)
   if (paused || matchEnded || playback) return false;
   if (helpOverlay.style.display !== 'none') return false;
+  const ctx = panelContext();
   const act = resolveHotkey({
-    context: panelContext(), page: buildPage, code: e.code,
+    context: ctx, page: buildPage, code: e.code,
     ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey,
   });
-  if (!act) return false;
+  if (!act) {
+    // SEL-17: G toggles AutoExplore — but ONLY in the units
+    // context (a military selection: the scout's panel lives
+    // there), only unmodified, and only after every existing
+    // binding had its say: the build pages' G alias (Mining Camp,
+    // on the armed villager eco page) resolves above and keeps
+    // the key, and Ctrl+G (go-to Mining Camp) resolves to its
+    // goto action above too. Anywhere else G stays unbound — no
+    // invented global behaviour.
+    if (e.code === 'KeyG' && !e.ctrlKey && !e.metaKey && !e.altKey
+        && ctx === 'units') {
+      e.preventDefault();
+      if (!e.repeat) {
+        toggleAutoExplore();
+        renderCommands();
+      }
+      return true;
+    }
+    return false;
+  }
   e.preventDefault();
   if (e.repeat) return true; // a held key is one press, as in DE
   switch (act.type) {
@@ -2091,6 +2128,7 @@ function applyLocalOrder(cmd) {
     case 'rally_tc': return sim.push_set_rally_tc(cmd.x, cmd.y);
     case 'rally_b': return sim.push_set_rally_building(cmd.b, cmd.x, cmd.y);
     case 'force_dep': return sim.push_force_deposit(cmd.e);
+    case 'auto_explore': return sim.push_auto_explore(cmd.e, cmd.on);
     default: return false;
   }
 }
@@ -6935,6 +6973,10 @@ function runCommandButton(id, times = 1) {
     repairArm = false;
     buildPage = null; // back to the root page
     playAudioCue('click');
+  } else if (id === 'auto-explore') {
+    // SEL-17: the starting scout's AutoExplore toggle — the same
+    // order the G key issues (toggleAutoExplore plays the cue).
+    toggleAutoExplore();
   } else if (id === 'repair') {
     // BLD-17: arm (or disarm) Repair targeting — the click that
     // follows picks the building, exactly like build placement.
@@ -7053,6 +7095,13 @@ function renderCommands() {
         : selectedBuilding.type === 'tc' ? 'tc'
         : (bk && BUILDING_CONTEXT[bk.kind]) || 'none')
       : 'none';
+  // SEL-17: the AutoExplore button lives in the units context and
+  // only when the LOCAL player's starting Scout Cavalry is in the
+  // selection (a trained scout never gets it — eligibility is the
+  // sim's spawn-order rule; the client only mirrors the id/state).
+  const startScout = context === 'units' ? sim.starting_scout(localOwner) : -1;
+  const scoutSel = startScout >= 0 && selUnits.includes(startScout);
+  const scoutAuto = scoutSel ? sim.entity_auto_explore()[startScout] : 0;
   const age = myAge();
   const techMask = myTechMask();
   const blockM = bk && context === 'barracks' ? sim.building_train_block(bk.id, 3) : -1;
@@ -7070,6 +7119,7 @@ function renderCommands() {
     reason, queue, bk ? bk.id : -1, bk ? bk.queue : -1, bk && bk.complete ? 1 : 0,
     blockM, blockA, blockS, age, techMask, rbTc.join('.'), rbBk.join('.'),
     tcQueueCodes, bkQueueCodes, buildPage || '', repairArm ? 1 : 0,
+    scoutSel ? startScout : -1, scoutAuto,
     placement ? placement.kind : -1].join('|');
   if (sig === cmdSig) return;
   cmdSig = sig;
@@ -7247,9 +7297,20 @@ function renderCommands() {
         t('cmd.paddedTitle', { name: TECH_NAME[4], cost: costText([[100, 'food']]), secs: 40 })),
     );
   }
-  // 'units', 'foe' and no-selection contexts render nothing:
-  // DE's command panel carries no explanatory text — with no
-  // command buttons to show, the panel is simply empty wood.
+  if (context === 'units' && scoutSel) {
+    // SEL-17: the starting scout's AutoExplore toggle (G). The
+    // pressed face mirrors the sim's flag; the tooltip carries
+    // the name and the state, as every command button here.
+    cmdGrid.append(cmdButton({
+      id: 'auto-explore', icon: 'i-explore', label: t('cmd.autoExplore'),
+      active: !!scoutAuto, key: 'G',
+      title: t(scoutAuto ? 'cmd.autoExploreOnTitle' : 'cmd.autoExploreTitle'),
+    }));
+  }
+  // 'foe' and no-selection contexts (and a units selection without
+  // the starting scout) render nothing: DE's command panel carries
+  // no explanatory text — with no command buttons to show, the
+  // panel is simply empty wood.
 }
 
 let selSig = ''; // signature of the last-rendered selection panel
