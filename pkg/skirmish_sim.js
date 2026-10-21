@@ -105,6 +105,19 @@ export class WasmSim {
         return v1;
     }
     /**
+     * Could AutoExplore (SEL-17) be toggled on this entity right
+     * now — a living Scout Cavalry owned by a player? The client
+     * mirrors its button placement and the G key from this query
+     * (it replaces the old starting-scout id lookup: eligibility
+     * is a per-entity rule now, not a spawn-order identity).
+     * @param {number} entity
+     * @returns {boolean}
+     */
+    entity_can_auto_explore(entity) {
+        const ret = wasm.wasmsim_entity_can_auto_explore(this.__wbg_ptr, entity);
+        return ret !== 0;
+    }
+    /**
      * Number of entities (Town Center + villagers).
      * @returns {number}
      */
@@ -444,12 +457,13 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
-     * Toggle AutoExplore (SEL-17) on a player's starting Scout
-     * Cavalry: with `enabled` the scout explores its owner's fog
-     * frontier on its own; disabling stops it where it stands.
-     * Returns whether the order *would* be accepted (a living
-     * starting scout — trained scouts are never eligible); the sim
-     * re-validates when the command is applied.
+     * Toggle AutoExplore (SEL-17) on a player's Scout Cavalry:
+     * with `enabled` the scout explores its owner's fog frontier
+     * on its own; disabling stops it where it stands. Returns
+     * whether the order *would* be accepted (a living Scout
+     * Cavalry owned by a player — every scout is eligible,
+     * starting and trained alike); the sim re-validates when the
+     * command is applied.
      * @param {number} entity
      * @param {boolean} enabled
      * @returns {boolean}
@@ -942,16 +956,6 @@ export class WasmSim {
     research_block_tc(tech_tag) {
         const ret = wasm.wasmsim_research_block_tc(this.__wbg_ptr, tech_tag);
         return ret >>> 0;
-    }
-    /**
-     * The entity id of `owner`'s starting Scout Cavalry (SEL-17
-     * eligibility), or -1 when the match spawned none for them.
-     * @param {number} owner
-     * @returns {number}
-     */
-    starting_scout(owner) {
-        const ret = wasm.wasmsim_starting_scout(this.__wbg_ptr, owner);
-        return ret;
     }
     /**
      * Current state hash as hex, without advancing the sim.
