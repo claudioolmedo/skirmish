@@ -317,6 +317,13 @@ let selection = new Set(); // selected unit ids — orders go ONLY to these (AoE
 // Center (an entity) or { type: 'building', id, kind } for a placed
 // building (House/Farm/Barracks). Null when units are selected.
 let selectedBuilding = null;
+// The info-selected animal, if any: the entity id of a living
+// animal that is NOT ours (wild Gaia sheep/boar/deer, or the
+// enemy's sheep). Information only — it takes no orders; the
+// selection panel shows its portrait and hit points, as the
+// reference does for an animal you click but do not own.
+// Mutually exclusive with the unit/building selections.
+let selectedAnimal = null;
 
 // Selection invariants: the unit selection and the building selection
 // are mutually exclusive — selecting one clears the other — and
@@ -328,12 +335,21 @@ function selectUnits(set) {
   // groups, idle keys) funnels through here, so the cap lives here.
   selection = new Set([...set].slice(0, SELECTION_CAP));
   selectedBuilding = null;
+  selectedAnimal = null;
   buildPage = null; // M13: a selection change closes any build page
   buildingGroup = null;
 }
 function selectBuilding(descOrNull) {
   selectedBuilding = descOrNull;
   selection = new Set();
+  selectedAnimal = null;
+  buildPage = null;
+  buildingGroup = null;
+}
+function selectAnimal(id) {
+  selectedAnimal = id;
+  selection = new Set();
+  selectedBuilding = null;
   buildPage = null;
   buildingGroup = null;
 }
@@ -4528,6 +4544,32 @@ async function main() {
     return best;
   }
 
+  // Left-click pick for an animal that is NOT ours (a wild Gaia
+  // sheep/boar/deer — kind tags 5/6/7 — or the enemy's sheep): an
+  // information selection only. The reference lets you click any
+  // animal to inspect it; in earlier builds the click silently
+  // cleared the selection, which read as "sheep can't be
+  // selected" (Claudio, 2026-10-20). Fog rule matches enemy
+  // targets: only what is currently visible can be picked.
+  function animalAt(wx, wy) {
+    const st = entityState();
+    let best = null;
+    let bestD2 = Infinity;
+    for (let i = 0; i < st.count; i++) {
+      const k = st.kinds[i];
+      if (k !== KIND_SHEEP && k !== 6 && k !== 7) continue;
+      if (st.owners[i] === localOwner || st.hp[i * 2] < 1) continue;
+      if (!cellVisibleW(st.pos[i * 2], st.pos[i * 2 + 1])) continue;
+      const r = k === KIND_SHEEP ? 2.75 : 2.2;
+      const d2 = (st.pos[i * 2] - wx) ** 2 + (st.pos[i * 2 + 1] - wy) ** 2;
+      if (d2 < r * r && d2 < bestD2) {
+        bestD2 = d2;
+        best = i;
+      }
+    }
+    return best;
+  }
+
   // Right-click target pick: ANY living entity (ours or Gaia's —
   // the attack-target test). Slightly more generous radius: boars
   // are big, and a missed click should still read as an attack.
@@ -4623,7 +4665,9 @@ async function main() {
   function orderAt(wx, wy, queued = false) {
     const targets = selectedUnits();
     if (targets.length === 0) {
-      flash(selectedBuilding != null
+      flash(selectedAnimal != null
+        ? t('flash.notYourAnimal')
+        : selectedBuilding != null
         ? (selectedBuilding.owner === foeOwner()
           ? t('flash.enemyOrders')
           : selectedBuilding.type === 'tc'
@@ -4945,11 +4989,18 @@ async function main() {
       }
       playAudioCue('select');
     } else if (!ev.shiftKey) {
-      // No unit hit: the Town Center and placed buildings are
-      // selections of their own (kept OUT of the unit Set); empty
-      // ground clears both selections. M5: the enemy's TC and
-      // buildings select too — for information only (their owner
-      // rides along in the descriptor; the panels gate on it).
+      // No unit hit: an animal that is not ours selects for
+      // information (see animalAt); the Town Center and placed
+      // buildings are selections of their own (kept OUT of the
+      // unit Set); empty ground clears both selections. M5: the
+      // enemy's TC and buildings select too — for information
+      // only (their owner rides along in the descriptor; the
+      // panels gate on it).
+      const a = animalAt(wx, wy);
+      if (a != null) {
+        selectAnimal(a);
+        return;
+      }
       const tc = tcAt(wx, wy);
       const st = entityState();
       // M7: information selection obeys fog too — an enemy Town
@@ -6172,8 +6223,8 @@ function drawBuildingFeature(kind, sx, sy, hgt) {
 }
 
 // Gold selection ring under a unit (shared by every unit draw).
-function drawSelRing(sx, sy, rWorld) {
-  ctx.strokeStyle = '#ffcf4d';
+function drawSelRing(sx, sy, rWorld, color) {
+  ctx.strokeStyle = color || '#ffcf4d';
   ctx.lineWidth = Math.max(1.5, camS * 0.22);
   ctx.beginPath();
   ctx.ellipse(sx, sy, rWorld * camS, (rWorld / 2) * camS, 0, 0, Math.PI * 2);
@@ -6437,30 +6488,40 @@ function drawAnimalPose(im, sx, sy, hWorld, flip) {
   return true;
 }
 
+// The owner band on a sheep: an ellipse stroke around the torso
+// in the owner's colour — the "lenço na cor do dono" (Claudio,
+// 2026-10-20) — drawn over whichever sprite path rendered the
+// animal, so it reads at game zoom from every facing. A null
+// colour (a wild Gaia sheep) draws nothing: unowned, unmarked.
+function drawSheepBand(sx, sy, u, color) {
+  if (!color) return;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(1.5, 0.30 * u);
+  ctx.beginPath();
+  ctx.ellipse(sx, sy - 1.02 * u, 0.80 * u, 0.36 * u, 0, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
 function drawSheep(i, wx, wy) {
   const [sx, sy] = worldToScreen(wx, wy);
   const u = camS;
+  // The sheep's owner as a colour: blue for our herd, red for the
+  // enemy's, none while it is wild. (Client owner tags: 0 = the
+  // human seat, 1 = Gaia, 2 = the opponent.)
+  const ownerColor = drawOwner === 1 ? null
+    : (drawOwner === foeOwner() ? ENEMY_COLOR : OWN_COLOR);
   shadow(sx, sy, 0.9 * u);
-  if (selection.has(i)) drawSelRing(sx, sy, 1.2);
+  if (selection.has(i)) drawSelRing(sx, sy, 1.2, ownerColor);
+  else if (selectedAnimal === i) drawSelRing(sx, sy, 1.2);
   if (drawDirUnit('sheep', dirAnimalAct(i, wx, wy), sx, sy)) {
-    // The enemy brand (see the vector draw below) still applies.
-    if (drawOwner === foeOwner()) {
-      ctx.fillStyle = ENEMY_COLOR;
-      ctx.beginPath();
-      ctx.arc(sx + 0.05 * u, sy - 1.35 * u, 0.26 * u, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    // The owner band applies on this path too (see drawSheepBand).
+    drawSheepBand(sx, sy, u, ownerColor);
     return;
   }
   const sheepPose = animalPoseImage('sheep', i, wx, wy);
   if (drawAnimalPose(sheepPose.im, sx, sy, 2.0, sheepPose.flip)) {
-    // The enemy brand (see the vector draw below) still applies.
-    if (drawOwner === foeOwner()) {
-      ctx.fillStyle = ENEMY_COLOR;
-      ctx.beginPath();
-      ctx.arc(sx + 0.05 * u, sy - 1.35 * u, 0.26 * u, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    // The owner band applies on this path too (see drawSheepBand).
+    drawSheepBand(sx, sy, u, ownerColor);
     return;
   }
   legs(sx, sy, u, [-0.5, 0.5], '#4a4038');
@@ -6474,14 +6535,7 @@ function drawSheep(i, wx, wy) {
   ctx.beginPath();
   ctx.ellipse(sx + 0.95 * u, sy - 0.8 * u, 0.3 * u, 0.22 * u, 0.4, 0, Math.PI * 2);
   ctx.fill();
-  // M5: a captured sheep wears its owner's mark — a red brand dot
-  // for the enemy's herd (our own sheep stay unmarked, as before).
-  if (drawOwner === foeOwner()) {
-    ctx.fillStyle = ENEMY_COLOR;
-    ctx.beginPath();
-    ctx.arc(sx + 0.05 * u, sy - 1.35 * u, 0.26 * u, 0, Math.PI * 2);
-    ctx.fill();
-  }
+  drawSheepBand(sx, sy, u, ownerColor);
 }
 
 function drawBoar(i, wx, wy) {
@@ -7320,6 +7374,20 @@ let selSig = ''; // signature of the last-rendered selection panel
 // "+k"); Town Center / Barracks -> portrait + queue state; nothing
 // -> guidance.
 function updateSelPanel() {
+  // Info-selected animal bookkeeping, before anything reads the
+  // selection: a dead animal drops the selection; one that
+  // converts to us mid-selection becomes a real unit selection
+  // (it can take orders now); one stolen by the enemy stays an
+  // information selection under its new owner.
+  if (selectedAnimal != null) {
+    const st0 = entityState();
+    const i = selectedAnimal;
+    if (i >= st0.count || st0.hp[i * 2] < 1) {
+      selectedAnimal = null;
+    } else if (st0.owners[i] === localOwner) {
+      selectUnits(new Set([i]));
+    }
+  }
   const selUnits = selectedUnits();
   const st = entityState();
   const queue = myTrainQueueLen();
@@ -7337,6 +7405,7 @@ function updateSelPanel() {
         ? (foeSel ? 'foe-tc' : 'tc')
         : foeSel ? 'foe-building'
         : bk && PROD_KINDS.includes(bk.kind) ? 'production' : 'building')
+      : selectedAnimal != null ? 'animal'
       : 'none';
   const singleHp = selUnits.length === 1 ? Math.floor(st.hp[selUnits[0] * 2]) : -1;
   const TRAINS_TAG = { 2: 3, 6: 4, 7: 2 };
@@ -7351,6 +7420,9 @@ function updateSelPanel() {
   const selTcHp = selectedBuilding && selectedBuilding.type === 'tc'
     ? Math.floor(st.hp[selectedBuilding.id * 2]) : -1;
   const sig = [context, selUnits.join(','), JSON.stringify(selectedBuilding),
+    selectedAnimal != null
+      ? `${selectedAnimal}:${Math.floor(st.hp[selectedAnimal * 2])}:${st.owners[selectedAnimal]}`
+      : '',
     queue, reason, singleHp, bk ? bk.queue : -1, bkBlock,
     bk && bk.complete ? 1 : 0, selTcHp, tcQueueCodes, bkQueueCodes, tcProgBucket,
     myAge(), myTechMask(), (buildingGroup || []).join(','),
@@ -7445,6 +7517,23 @@ function updateSelPanel() {
         ? t('sel.blacksmithIdle')
         : t('sel.productionIdle');
     }
+  } else if (context === 'animal') {
+    // An animal that is not ours: portrait, name, hit points, and
+    // one honest line about what it is (wild / the enemy's). No
+    // commands — the command panel stays in its empty state.
+    const i = selectedAnimal;
+    const kind = st.kinds[i];
+    selPortrait.classList.remove('empty');
+    selPortrait.innerHTML = KIND_PNG[kind]
+      ? pngIcon(KIND_PNG[kind], 'ui-icon')
+      : `<svg class="ui-icon"><use href="#${KIND_ICON[kind] || 'i-villager'}"/></svg>`;
+    selName.textContent = KIND_NAME[kind] || t('unit.fallback');
+    const hpTxt = t('sel.hp', { cur: Math.ceil(st.hp[i * 2]), max: st.hp[i * 2 + 1] });
+    selInfo.textContent = kind === KIND_SHEEP
+      ? (st.owners[i] === 1
+        ? t('sel.gaiaSheepInfo', { hp: hpTxt })
+        : t('sel.foeSheepInfo', { hp: hpTxt }))
+      : t('sel.wildAnimalInfo', { hp: hpTxt });
   } else if (context === 'foe-tc') {
     selPortrait.classList.remove('empty');
     selPortrait.innerHTML = pngIcon('town-center.png', 'ui-icon');
