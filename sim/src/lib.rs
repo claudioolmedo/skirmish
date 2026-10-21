@@ -301,16 +301,17 @@ pub enum Command {
     /// right-click on their own Town Center or camp. Rejected when
     /// the villager carries nothing or no valid drop-off stands.
     ForceDeposit { entity: u32 },
-    /// Toggle AutoExplore (SEL-17) on a player's *starting* Scout
-    /// Cavalry. With `enabled`, the scout hands its movement to the
-    /// sim's frontier walker: it repeatedly rides to the nearest
+    /// Toggle AutoExplore (SEL-17) on a player's Scout Cavalry.
+    /// With `enabled`, the scout hands its movement to the sim's
+    /// frontier walker: it repeatedly rides to the nearest
     /// unexplored cell of its owner's fog grid until a manual order
     /// lands or the mode is toggled off (off stops it where it
-    /// stands). Valid only for the starting scout of each player —
-    /// eligibility is fixed at spawn (see `Sim::is_starting_scout`);
-    /// trained scouts, other kinds, dead or unknown entities ignore
-    /// the command. The toggle replaces the scout's current order
-    /// and queue, like any fresh direct order.
+    /// stands). Valid for any living Scout Cavalry owned by a
+    /// player — the starting scout and trained scouts alike
+    /// (current DE, update 111772: every scout has the option);
+    /// other kinds, dead or unknown entities ignore the command.
+    /// The toggle replaces the scout's current order and queue,
+    /// like any fresh direct order.
     SetAutoExplore { entity: u32, enabled: bool },
 }
 
@@ -1756,54 +1757,27 @@ impl Sim {
     }
 
     // --- AutoExplore (SEL-17) ------------------------------------
-    // The starting Scout Cavalry of each player may hand its
-    // movement to a frontier walker: it rides to the nearest
-    // unexplored cell of its OWNER's fog grid, re-picking on
-    // arrival (or at the fog cadence when its target was explored
-    // by other means). Everything here is a pure function of hashed
-    // state — the fog grid, positions, the tick counter — so a
-    // replay reproduces every ride exactly.
+    // Any Scout Cavalry of either player may hand its movement
+    // to a frontier walker: it rides to the nearest unexplored
+    // cell of its OWNER's fog grid, re-picking on arrival (or at
+    // the fog cadence when its target was explored by other
+    // means). Everything here is a pure function of hashed state
+    // — the fog grid, positions, the tick counter — so a replay
+    // reproduces every ride exactly.
 
-    /// Is this entity a player's *starting* Scout Cavalry? Fixed
-    /// at spawn by construction: each player spawns exactly one
-    /// Scout, before any production exists, and entities are never
-    /// removed (death is a tombstone) — so the starting scout is
-    /// the lowest-id Scout Cavalry of its owner for the whole
-    /// match, and a trained scout (always a later id) never is.
-    /// Deriving it keeps the rule a pure function of state that is
-    /// already hashed (ids, kinds, owners).
-    pub fn is_starting_scout(&self, entity: u32) -> bool {
-        let idx = match self.entity_index(entity) {
-            Some(i) => i,
-            None => return false,
-        };
-        let e = &self.entities[idx];
-        e.kind == EntityKind::ScoutCavalry
-            && is_player_owner(e.owner)
-            && !self
-                .entities
-                .iter()
-                .any(|o| o.kind == EntityKind::ScoutCavalry && o.owner == e.owner && o.id < e.id)
-    }
-
-    /// The entity id of `owner`'s starting Scout Cavalry, if the
-    /// match spawned one (every standard start does). The client
-    /// uses this to place the AutoExplore button; the scout may be
-    /// dead — aliveness is `can_auto_explore`'s gate, not this
-    /// query's.
-    pub fn starting_scout_of(&self, owner: u8) -> Option<u32> {
-        self.entities
-            .iter()
-            .filter(|e| e.kind == EntityKind::ScoutCavalry && e.owner == owner)
-            .map(|e| e.id)
-            .min()
-    }
-
-    /// Would a `SetAutoExplore` command be accepted right now? The
-    /// entity must be a living starting Scout Cavalry (SEL-17).
+    /// Would a `SetAutoExplore` command be accepted right now?
+    /// The entity must be a living Scout Cavalry owned by a
+    /// player (SEL-17: eligibility is every scout — starting and
+    /// trained alike — per current DE, update 111772, and
+    /// Claudio's 2026-10-20 ruling "tem que ser como no
+    /// original"; each scout carries its own flag and target, so
+    /// any number may explore independently at once).
     pub fn can_auto_explore(&self, entity: u32) -> bool {
         match self.entity_index(entity) {
-            Some(idx) => !self.entities[idx].dead && self.is_starting_scout(entity),
+            Some(idx) => {
+                let e = &self.entities[idx];
+                !e.dead && e.kind == EntityKind::ScoutCavalry && is_player_owner(e.owner)
+            }
             None => false,
         }
     }
@@ -2251,7 +2225,7 @@ impl Sim {
         //    has no dead tick between links.
         self.advance_queues();
 
-        // 5.5. AutoExplore (SEL-17): a starting Scout with the mode
+        // 5.5. AutoExplore (SEL-17): a Scout with the mode
         //    on and no ride in progress picks its next frontier cell
         //    from its owner's fog grid. Runs after the queues (a
         //    queued order that just started owns the scout — and

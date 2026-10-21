@@ -334,12 +334,13 @@ impl WasmSim {
         ok
     }
 
-    /// Toggle AutoExplore (SEL-17) on a player's starting Scout
-    /// Cavalry: with `enabled` the scout explores its owner's fog
-    /// frontier on its own; disabling stops it where it stands.
-    /// Returns whether the order *would* be accepted (a living
-    /// starting scout — trained scouts are never eligible); the sim
-    /// re-validates when the command is applied.
+    /// Toggle AutoExplore (SEL-17) on a player's Scout Cavalry:
+    /// with `enabled` the scout explores its owner's fog frontier
+    /// on its own; disabling stops it where it stands. Returns
+    /// whether the order *would* be accepted (a living Scout
+    /// Cavalry owned by a player — every scout is eligible,
+    /// starting and trained alike); the sim re-validates when the
+    /// command is applied.
     pub fn push_auto_explore(&mut self, entity: u32, enabled: bool) -> bool {
         let ok = self.inner.can_auto_explore(entity);
         if ok {
@@ -358,13 +359,13 @@ impl WasmSim {
             .collect()
     }
 
-    /// The entity id of `owner`'s starting Scout Cavalry (SEL-17
-    /// eligibility), or -1 when the match spawned none for them.
-    pub fn starting_scout(&self, owner: u32) -> i32 {
-        match self.inner.starting_scout_of(owner as u8) {
-            Some(id) => id as i32,
-            None => -1,
-        }
+    /// Could AutoExplore (SEL-17) be toggled on this entity right
+    /// now — a living Scout Cavalry owned by a player? The client
+    /// mirrors its button placement and the G key from this query
+    /// (it replaces the old starting-scout id lookup: eligibility
+    /// is a per-entity rule now, not a spawn-order identity).
+    pub fn entity_can_auto_explore(&self, entity: u32) -> bool {
+        self.inner.can_auto_explore(entity)
     }
 
     /// Order a villager to build a House with its 2×2-cell footprint

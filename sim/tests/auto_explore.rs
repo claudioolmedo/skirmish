@@ -1,20 +1,28 @@
-//! AutoExplore (SEL-17): the starting Scout Cavalry explores its
-//! owner's fog frontier on its own.
+//! AutoExplore (SEL-17): a Scout Cavalry explores its owner's
+//! fog frontier on its own.
 //!
-//! Pins the feature's contract: only the starting scout is
-//! eligible (eligibility is derived from spawn order — the
-//! lowest-id Scout Cavalry of each owner — so a trained scout,
-//! always a later id, can never carry the flag; the rejection side
-//! is exercised here on every other kind, the acceptance side on
-//! both players' starting scouts), the walker actually explores,
-//! any manual order cancels the mode, toggling off stops the
-//! scout where it stands, and two runs fed the same commands stay
-//! bit-identical (the mode is hashed state, not a client trick).
+//! Pins the feature's contract: EVERY Scout Cavalry is eligible
+//! — the starting scout and trained scouts alike (current DE,
+//! update 111772; widened 2026-10-20 on Claudio's ruling after
+//! the first version shipped starting-only, matching DE
+//! 2020–2023) — while every other kind still rejects the toggle.
+//! The walker actually explores, any manual order cancels the
+//! mode, toggling off stops the scout where it stands, and two
+//! runs fed the same commands stay bit-identical (the mode is
+//! hashed state, not a client trick).
 
-use skirmish_sim::{Command, EntityKind, QueuedOrder, Sim, OWNER_OPPONENT, OWNER_PLAYER};
+use fixed::types::I16F16;
+use skirmish_sim::{
+    Age, BuildingKind, Command, EntityKind, NodeKind, QueuedOrder, ResourceKind, Sim, TechId,
+    OWNER_OPPONENT, OWNER_PLAYER,
+};
 
-fn starting_scout(sim: &Sim, owner: u8) -> u32 {
-    sim.starting_scout_of(owner).expect("a starting scout")
+fn scout_of(sim: &Sim, owner: u8) -> u32 {
+    sim.entities()
+        .iter()
+        .find(|e| e.kind == EntityKind::ScoutCavalry && e.owner == owner)
+        .expect("a scout")
+        .id
 }
 
 fn explored_cells(sim: &Sim, owner: u8) -> usize {
@@ -35,7 +43,7 @@ fn auto_explore_rides_and_the_frontier_grows() {
     let seed = 42;
     let mut auto = Sim::new(seed);
     let mut control = Sim::new(seed);
-    let scout = starting_scout(&auto, OWNER_PLAYER);
+    let scout = scout_of(&auto, OWNER_PLAYER);
     let spawn = pos_of(&auto, scout);
     auto.push_command(Command::SetAutoExplore {
         entity: scout,
@@ -66,7 +74,7 @@ fn auto_explore_rides_and_the_frontier_grows() {
 fn auto_explore_is_bit_deterministic() {
     let run = |seed: u64| -> Vec<u64> {
         let mut sim = Sim::new(seed);
-        let scout = starting_scout(&sim, OWNER_PLAYER);
+        let scout = scout_of(&sim, OWNER_PLAYER);
         sim.push_command(Command::SetAutoExplore {
             entity: scout,
             enabled: true,
@@ -97,7 +105,7 @@ fn auto_explore_is_bit_deterministic() {
 #[test]
 fn a_manual_move_cancels_auto_explore() {
     let mut sim = Sim::new(7);
-    let scout = starting_scout(&sim, OWNER_PLAYER);
+    let scout = scout_of(&sim, OWNER_PLAYER);
     sim.push_command(Command::SetAutoExplore {
         entity: scout,
         enabled: true,
@@ -130,7 +138,7 @@ fn a_manual_move_cancels_auto_explore() {
 #[test]
 fn a_queued_order_cancels_auto_explore() {
     let mut sim = Sim::new(11);
-    let scout = starting_scout(&sim, OWNER_PLAYER);
+    let scout = scout_of(&sim, OWNER_PLAYER);
     sim.push_command(Command::SetAutoExplore {
         entity: scout,
         enabled: true,
@@ -156,7 +164,7 @@ fn a_queued_order_cancels_auto_explore() {
 #[test]
 fn toggling_off_stops_the_scout_where_it_stands() {
     let mut sim = Sim::new(13);
-    let scout = starting_scout(&sim, OWNER_PLAYER);
+    let scout = scout_of(&sim, OWNER_PLAYER);
     sim.push_command(Command::SetAutoExplore {
         entity: scout,
         enabled: true,
@@ -183,24 +191,26 @@ fn toggling_off_stops_the_scout_where_it_stands() {
 }
 
 #[test]
-fn only_the_starting_scout_is_eligible() {
-    let mut sim = Sim::new(17);
-    let scout = starting_scout(&sim, OWNER_PLAYER);
+fn every_scout_is_eligible_other_kinds_are_not() {
+    let sim = Sim::new(17);
+    let scout = scout_of(&sim, OWNER_PLAYER);
     assert!(sim.can_auto_explore(scout));
-    assert!(sim.is_starting_scout(scout));
-    // Every other kind rejects the toggle: Town Center, villagers,
-    // and the Gaia herd.
+    // The eligibility rule is exactly "living Scout Cavalry owned
+    // by a player": every other entity in the start — Town
+    // Center, villagers, and the whole Gaia herd (sheep are
+    // Scout-shaped in no way, and their owner is Gaia besides) —
+    // rejects the toggle.
     for e in sim.entities().iter() {
-        if e.id == scout {
-            continue;
-        }
-        assert!(
-            !sim.can_auto_explore(e.id),
-            "entity {} ({:?}) must not be auto-explore eligible",
+        let expect = e.kind == EntityKind::ScoutCavalry
+            && (e.owner == OWNER_PLAYER || e.owner == OWNER_OPPONENT);
+        assert_eq!(
+            sim.can_auto_explore(e.id),
+            expect,
+            "entity {} ({:?}, owner {}) eligibility mismatch",
             e.id,
-            e.kind
+            e.kind,
+            e.owner
         );
-        assert!(!sim.is_starting_scout(e.id));
     }
     let villager = sim
         .entities()
@@ -208,6 +218,7 @@ fn only_the_starting_scout_is_eligible() {
         .find(|e| e.kind == EntityKind::Villager)
         .map(|e| e.id)
         .expect("a villager");
+    let mut sim = sim;
     sim.push_command(Command::SetAutoExplore {
         entity: villager,
         enabled: true,
@@ -215,11 +226,232 @@ fn only_the_starting_scout_is_eligible() {
     sim.tick();
     assert!(!sim.auto_explore_on(villager));
 
-    // Both seats' starting scouts are eligible in a match.
+    // Both seats' scouts are eligible in a match.
     let m = Sim::new_match(19, skirmish_sim::MatchMode::TwoPlayer);
-    let mine = starting_scout(&m, OWNER_PLAYER);
-    let theirs = starting_scout(&m, OWNER_OPPONENT);
+    let mine = scout_of(&m, OWNER_PLAYER);
+    let theirs = scout_of(&m, OWNER_OPPONENT);
     assert!(m.can_auto_explore(mine));
     assert!(m.can_auto_explore(theirs));
     assert_ne!(mine, theirs);
+}
+
+// --- The trained-scout route (helpers mirror sim/tests/tech.rs) --
+
+fn anchor_point(sim: &Sim, cx: u32, cy: u32) -> (I16F16, I16F16) {
+    sim.grid().cell_center(cx, cy)
+}
+
+fn build(sim: &mut Sim, entity: u32, kind: BuildingKind, cx: u32, cy: u32) {
+    let (x, y) = anchor_point(sim, cx, cy);
+    sim.push_command(Command::Build {
+        entity,
+        kind,
+        x,
+        y,
+    });
+}
+
+fn run_until(sim: &mut Sim, cap: u64, mut done: impl FnMut(&Sim) -> bool) -> bool {
+    for _ in 0..cap {
+        if done(sim) {
+            return true;
+        }
+        sim.tick();
+    }
+    done(sim)
+}
+
+fn first_node(sim: &Sim, kind: NodeKind) -> u32 {
+    sim.nodes().iter().find(|n| n.kind == kind).unwrap().id
+}
+
+/// First node of `kind` that still holds resources.
+fn first_live_node(sim: &Sim, kind: NodeKind) -> u32 {
+    sim.nodes()
+        .iter()
+        .find(|n| n.kind == kind && n.amount_left > I16F16::from_num(0))
+        .unwrap()
+        .id
+}
+
+fn building_id(sim: &Sim, kind: BuildingKind) -> u32 {
+    sim.buildings()
+        .iter()
+        .find(|b| b.kind == kind && b.complete)
+        .unwrap()
+        .id
+}
+
+/// Raise `kind` at `(cx, cy)` with `entity` and wait for completion.
+fn raise(sim: &mut Sim, entity: u32, kind: BuildingKind, cx: u32, cy: u32) {
+    build(sim, entity, kind, cx, cy);
+    let up = run_until(sim, 30_000, |s| {
+        s.buildings()
+            .iter()
+            .any(|b| b.kind == kind && b.complete)
+    });
+    assert!(up, "{kind:?} never completed");
+}
+
+/// A woodline tree for sustained chopping: a forest EDGE tree —
+/// a standing cell beside it that the pathfinder reaches from the
+/// Town Center, and several tree neighbors within the retarget
+/// radius, so a depleted trunk chains to the next. (Copied from
+/// tech.rs: the first tree in id order is a lone straggler whose
+/// 100 wood starves any long gather.)
+fn woodline_tree(sim: &Sim) -> u32 {
+    let tc = sim.town_center();
+    let trees: Vec<_> = sim
+        .nodes()
+        .iter()
+        .filter(|n| n.kind == NodeKind::Tree && !n.is_depleted())
+        .collect();
+    let neighbors = |t: &skirmish_sim::ResourceNode| {
+        trees
+            .iter()
+            .filter(|o| {
+                let dx = o.pos_x.to_num::<f64>() - t.pos_x.to_num::<f64>();
+                let dy = o.pos_y.to_num::<f64>() - t.pos_y.to_num::<f64>();
+                dx * dx + dy * dy <= 144.0
+            })
+            .count()
+    };
+    let workable = |t: &skirmish_sim::ResourceNode| {
+        let (cx, cy) = sim.grid().world_to_cell(t.pos_x, t.pos_y);
+        (-1i32..=1).any(|dy| {
+            (-1i32..=1).any(|dx| {
+                let (nx, ny) = (cx as i32 + dx, cy as i32 + dy);
+                if nx < 0 || ny < 0 || sim.grid().is_blocked(nx as u32, ny as u32) {
+                    return false;
+                }
+                let center = sim.grid().cell_center(nx as u32, ny as u32);
+                sim.grid().find_path((tc.pos_x, tc.pos_y), center).is_some()
+            })
+        })
+    };
+    trees
+        .iter()
+        .filter(|t| workable(t) && neighbors(t) >= 3)
+        .max_by_key(|t| neighbors(t))
+        .expect("no workable woodline tree")
+        .id
+}
+
+/// Play the standard start up to the Feudal Age: Mill + Lumber
+/// Camp (the requirement pair), berries until 500 food, click up.
+/// (Mirrors tech.rs's `reach_feudal`.)
+fn reach_feudal(sim: &mut Sim) {
+    raise(sim, 2, BuildingKind::Mill, 21, 20);
+    // Lumber Camp anchor (16, 20): the natural (18, 21) spot has a
+    // sheep standing on it, and placement refuses to cover a
+    // standing unit (M6 validate_build rule).
+    raise(sim, 3, BuildingKind::LumberCamp, 16, 20);
+    let berry = first_node(sim, NodeKind::BerryBush);
+    sim.push_command(Command::Gather {
+        entity: 1,
+        node: berry,
+    });
+    sim.push_command(Command::Gather {
+        entity: 2,
+        node: berry,
+    });
+    let food = run_until(sim, 120_000, |s| {
+        s.stockpile().amount(ResourceKind::Food) >= I16F16::from_num(500)
+    });
+    assert!(food, "never gathered the Feudal food");
+    assert_eq!(sim.feudal_building_count(OWNER_PLAYER), 2);
+    assert!(sim.can_research_tc(TechId::FeudalAge));
+    sim.push_command(Command::ResearchTc {
+        tech: TechId::FeudalAge,
+    });
+    let up = run_until(sim, 30_000, |s| s.age_of(OWNER_PLAYER) == Age::Feudal);
+    assert!(up, "never reached Feudal");
+}
+
+/// Wait until the wood stockpile holds at least `want`.
+fn wait_wood(sim: &mut Sim, want: i32) {
+    let ok = run_until(sim, 240_000, |s| {
+        s.stockpile().amount(ResourceKind::Wood) >= I16F16::from_num(want)
+    });
+    assert!(ok, "never stocked {want} wood");
+}
+
+#[test]
+fn a_trained_scout_is_eligible_and_explores() {
+    // The full production route (seed and flow mirror tech.rs's
+    // Stable test): Feudal, chop, raise a Barracks (BLD-15: the
+    // Stable requires one standing), then the Stable, bank the
+    // Scout's 80 food, train one — a scout that did NOT spawn
+    // with the match must take the toggle exactly like the
+    // starting one.
+    let mut sim = Sim::new(101);
+    let starting = scout_of(&sim, OWNER_PLAYER);
+    reach_feudal(&mut sim);
+    let tree = woodline_tree(&sim);
+    for id in 1..=3 {
+        sim.push_command(Command::Gather {
+            entity: id,
+            node: tree,
+        });
+    }
+    wait_wood(&mut sim, 175);
+    raise(&mut sim, 1, BuildingKind::Barracks, 27, 20);
+    // The Barracks spent the stockpile; refill for the Stable.
+    let tree = woodline_tree(&sim);
+    for id in 1..=3 {
+        sim.push_command(Command::Gather {
+            entity: id,
+            node: tree,
+        });
+    }
+    wait_wood(&mut sim, 175);
+    raise(&mut sim, 1, BuildingKind::Stable, 27, 30);
+    let stable = building_id(&sim, BuildingKind::Stable);
+    let berry = first_live_node(&sim, NodeKind::BerryBush);
+    sim.push_command(Command::Gather {
+        entity: 2,
+        node: berry,
+    });
+    let fed = run_until(&mut sim, 180_000, |s| {
+        s.stockpile().amount(ResourceKind::Food) >= I16F16::from_num(80)
+    });
+    assert!(fed, "never banked the Scout's 80 food");
+    assert!(sim.can_train_at(stable, EntityKind::ScoutCavalry));
+    sim.push_command(Command::TrainAt {
+        building: stable,
+        kind: EntityKind::ScoutCavalry,
+    });
+    let trained = run_until(&mut sim, 30_000, |s| {
+        s.entities()
+            .iter()
+            .any(|e| e.kind == EntityKind::ScoutCavalry && e.owner == OWNER_PLAYER && e.id != starting)
+    });
+    assert!(trained, "the Stable never produced its scout");
+    let trained = sim
+        .entities()
+        .iter()
+        .find(|e| e.kind == EntityKind::ScoutCavalry && e.owner == OWNER_PLAYER && e.id != starting)
+        .expect("the trained scout")
+        .id;
+    assert!(
+        sim.can_auto_explore(trained),
+        "a trained scout must be auto-explore eligible"
+    );
+    sim.push_command(Command::SetAutoExplore {
+        entity: trained,
+        enabled: true,
+    });
+    sim.tick();
+    assert!(sim.auto_explore_on(trained), "the trained scout refused the mode");
+    // And it actually rides: three minutes unattended.
+    let spawn = pos_of(&sim, trained);
+    for _ in 0..10_800 {
+        sim.tick();
+    }
+    assert!(sim.auto_explore_on(trained), "the trained scout's mode died");
+    let travelled = dist(pos_of(&sim, trained), spawn);
+    assert!(
+        travelled > 20.0,
+        "the trained scout barely moved ({travelled:.1} world units)"
+    );
 }

@@ -410,10 +410,10 @@ pub struct Entity {
     // --- AutoExplore state (SEL-17; inert on every other entity) ---
     /// AutoExplore mode: the entity walks its owner's fog frontier
     /// on its own. Only ever set by the `SetAutoExplore` command on
-    /// the owner's *starting* Scout Cavalry (eligibility is derived
-    /// from spawn order — see `Sim::is_starting_scout`); cleared by
-    /// any manual order (Move / Attack / AttackBuilding / Gather /
-    /// queued) and by toggling the mode off.
+    /// a player's Scout Cavalry (any scout, starting or trained —
+    /// SEL-17); cleared by any manual order (Move / Attack /
+    /// AttackBuilding / Gather / queued) and by toggling the mode
+    /// off.
     pub auto_explore: bool,
     /// The fog cell the auto-explorer is currently riding toward.
     /// Only `Some` while `auto_explore` is on and a target has been

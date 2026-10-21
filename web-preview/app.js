@@ -1853,18 +1853,29 @@ function panelContext() {
 }
 
 /// AutoExplore toggle (SEL-17): flips the mode on the LOCAL
-/// player's starting Scout Cavalry when — and only when — that
-/// scout is in the current selection. The sim is the eligibility
-/// truth (starting scout only, alive); the client mirrors the one
-/// rule it needs for the button and the key: the scout's id comes
-/// from the sim, the on/off state from the sim's flag array.
-/// Shared by the command-panel button and the G key, so both run
-/// the very same order. Returns whether the order was issued.
+/// player's Scout Cavalry in the current selection — ANY scout,
+/// starting or trained (current DE, update 111772; Claudio's
+/// 2026-10-20 ruling). The sim is the eligibility truth (living
+/// Scout Cavalry owned by a player); the client mirrors it per
+/// entity through `entity_can_auto_explore`, and reads the
+/// on/off state from the sim's flag array. With several scouts
+/// selected the toggle is uniform: if any selected scout is off,
+/// all turn on; if all are on, all turn off — each scout still
+/// explores independently in the sim. Shared by the
+/// command-panel button and the G key, so both run the very same
+/// order. Returns whether any order was issued.
 function toggleAutoExplore() {
-  const id = sim.starting_scout(localOwner);
-  if (id < 0 || !selection.has(id)) return false;
-  const on = !(sim.entity_auto_explore()[id] === 1);
-  if (!issue({ t: 'auto_explore', e: id, on })) return false;
+  const flags = sim.entity_auto_explore();
+  const scouts = selectedUnits().filter((id) => sim.entity_can_auto_explore(id));
+  if (!scouts.length) return false;
+  const on = !scouts.every((id) => flags[id] === 1);
+  let issued = false;
+  for (const id of scouts) {
+    if ((flags[id] === 1) !== on && issue({ t: 'auto_explore', e: id, on })) {
+      issued = true;
+    }
+  }
+  if (!issued) return false;
   playAudioCue('orderMilitary');
   return true;
 }
@@ -7028,7 +7039,7 @@ function runCommandButton(id, times = 1) {
     buildPage = null; // back to the root page
     playAudioCue('click');
   } else if (id === 'auto-explore') {
-    // SEL-17: the starting scout's AutoExplore toggle — the same
+    // SEL-17: the selected scouts' AutoExplore toggle — the same
     // order the G key issues (toggleAutoExplore plays the cue).
     toggleAutoExplore();
   } else if (id === 'repair') {
@@ -7150,12 +7161,17 @@ function renderCommands() {
         : (bk && BUILDING_CONTEXT[bk.kind]) || 'none')
       : 'none';
   // SEL-17: the AutoExplore button lives in the units context and
-  // only when the LOCAL player's starting Scout Cavalry is in the
-  // selection (a trained scout never gets it — eligibility is the
-  // sim's spawn-order rule; the client only mirrors the id/state).
-  const startScout = context === 'units' ? sim.starting_scout(localOwner) : -1;
-  const scoutSel = startScout >= 0 && selUnits.includes(startScout);
-  const scoutAuto = scoutSel ? sim.entity_auto_explore()[startScout] : 0;
+  // shows when any of the LOCAL player's Scout Cavalry is in the
+  // selection — every scout is eligible, starting or trained
+  // (current DE, update 111772); the sim answers eligibility per
+  // entity and the client only mirrors it. The pressed face is on
+  // when any selected scout is exploring (a mixed selection
+  // toggles uniformly — see toggleAutoExplore).
+  const selScouts = context === 'units'
+    ? selUnits.filter((id) => sim.entity_can_auto_explore(id)) : [];
+  const scoutSel = selScouts.length > 0;
+  const scoutAuto = scoutSel
+    && selScouts.some((id) => sim.entity_auto_explore()[id] === 1);
   const age = myAge();
   const techMask = myTechMask();
   const blockM = bk && context === 'barracks' ? sim.building_train_block(bk.id, 3) : -1;
@@ -7173,7 +7189,7 @@ function renderCommands() {
     reason, queue, bk ? bk.id : -1, bk ? bk.queue : -1, bk && bk.complete ? 1 : 0,
     blockM, blockA, blockS, age, techMask, rbTc.join('.'), rbBk.join('.'),
     tcQueueCodes, bkQueueCodes, buildPage || '', repairArm ? 1 : 0,
-    scoutSel ? startScout : -1, scoutAuto,
+    scoutSel ? selScouts.join('.') : -1, scoutAuto ? 1 : 0,
     placement ? placement.kind : -1].join('|');
   if (sig === cmdSig) return;
   cmdSig = sig;
@@ -7352,9 +7368,10 @@ function renderCommands() {
     );
   }
   if (context === 'units' && scoutSel) {
-    // SEL-17: the starting scout's AutoExplore toggle (G). The
-    // pressed face mirrors the sim's flag; the tooltip carries
-    // the name and the state, as every command button here.
+    // SEL-17: the AutoExplore toggle (G) for the selected
+    // scout(s). The pressed face mirrors the sim's flag; the
+    // tooltip carries the name and the state, as every command
+    // button here.
     cmdGrid.append(cmdButton({
       id: 'auto-explore', icon: 'i-explore', label: t('cmd.autoExplore'),
       active: !!scoutAuto, key: 'G',
@@ -7362,7 +7379,7 @@ function renderCommands() {
     }));
   }
   // 'foe' and no-selection contexts (and a units selection without
-  // the starting scout) render nothing: DE's command panel carries
+  // a scout) render nothing: DE's command panel carries
   // no explanatory text — with no command buttons to show, the
   // panel is simply empty wood.
 }
