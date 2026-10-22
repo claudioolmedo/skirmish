@@ -152,6 +152,9 @@ export const GOTO_KEYS = {
   KeyS: 8, // Blacksmith
   KeyB: 2, // Barracks
   KeyA: 6, // Archery Range
+  // Ctrl+L (Stable on the wiki's table) stays unbound: the
+  // browser reserves Ctrl+L for its address bar and the key
+  // never reaches the page (hotkeys.test.mjs pins this).
 };
 
 /**

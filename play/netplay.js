@@ -129,6 +129,11 @@ export function validateCommand(c) {
     case 'rally_b': return isInt(c.b) && isNum(c.x) && isNum(c.y);
     case 'force_dep': return isInt(c.e);
     case 'auto_explore': return isInt(c.e) && typeof c.on === 'boolean';
+    case 'stop': return isInt(c.e);
+    case 'delete': return isInt(c.e);
+    case 'deleteb': return isInt(c.b);
+    case 'cancel_tc': return isInt(c.tc) && isInt(c.i) && c.i <= 15;
+    case 'cancel_b': return isInt(c.b) && isInt(c.i) && c.i <= 15;
     default: return false;
   }
 }
@@ -166,6 +171,11 @@ export function applyCommand(sim, cmd, owner, tcOf) {
     case 'rally_b': return sim.push_set_rally_building(cmd.b, cmd.x, cmd.y);
     case 'force_dep': return sim.push_force_deposit(cmd.e);
     case 'auto_explore': return sim.push_auto_explore(cmd.e, cmd.on);
+    case 'stop': return sim.push_stop(cmd.e);
+    case 'delete': return sim.push_delete(cmd.e);
+    case 'deleteb': return sim.push_delete_building(cmd.b);
+    case 'cancel_tc': return sim.push_cancel_queue_tc(cmd.tc, cmd.i);
+    case 'cancel_b': return sim.push_cancel_queue_building(cmd.b, cmd.i);
     default: return false;
   }
 }

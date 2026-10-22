@@ -703,6 +703,58 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Cancel one entry of a placed building's production queue
+     * (TEC-05), refunding its full cost to the building's owner.
+     * Returns whether the order *would* be accepted; the sim
+     * re-validates at apply time.
+     * @param {number} building
+     * @param {number} index
+     * @returns {boolean}
+     */
+    push_cancel_queue_building(building, index) {
+        const ret = wasm.wasmsim_push_cancel_queue_building(this.__wbg_ptr, building, index);
+        return ret !== 0;
+    }
+    /**
+     * Cancel one entry of a Town Center's production queue
+     * (TEC-05), refunding its full cost to the TC's owner.
+     * Returns whether the order *would* be accepted; the sim
+     * re-validates at apply time.
+     * @param {number} tc
+     * @param {number} index
+     * @returns {boolean}
+     */
+    push_cancel_queue_tc(tc, index) {
+        const ret = wasm.wasmsim_push_cancel_queue_tc(this.__wbg_ptr, tc, index);
+        return ret !== 0;
+    }
+    /**
+     * Delete a placed building deliberately (SEL-14): a
+     * foundation is a cancellation and refunds its full wood
+     * cost (BLD-02); a completed building refunds nothing.
+     * Returns whether the order *would* be accepted; the sim
+     * re-validates at apply time.
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_delete_building(building) {
+        const ret = wasm.wasmsim_push_delete_building(this.__wbg_ptr, building);
+        return ret !== 0;
+    }
+    /**
+     * Delete a unit deliberately (SEL-14): any living entity
+     * owned by a player, the Town Center included. It dies this
+     * tick through the ordinary death sweep; an animal leaves
+     * its carcass. Returns whether the order *would* be
+     * accepted; the sim re-validates at apply time.
+     * @param {number} entity
+     * @returns {boolean}
+     */
+    push_delete(entity) {
+        const ret = wasm.wasmsim_push_delete(this.__wbg_ptr, entity);
+        return ret !== 0;
+    }
+    /**
      * Force drop-off (M6, ECO-07): order a loaded villager to haul
      * its carry to the nearest valid drop-off now, then return to
      * its previous work on its own. Returns whether the order
@@ -870,6 +922,19 @@ export class WasmSim {
      */
     push_set_rally_tc_of(tc, x, y) {
         const ret = wasm.wasmsim_push_set_rally_tc_of(this.__wbg_ptr, tc, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Stop a unit's current order immediately (SEL-14): it
+     * stands idle where it is; a villager keeps its carry.
+     * Returns whether the order *would* be accepted (any living,
+     * player-owned, mobile entity); the sim re-validates when
+     * the command is applied.
+     * @param {number} entity
+     * @returns {boolean}
+     */
+    push_stop(entity) {
+        const ret = wasm.wasmsim_push_stop(this.__wbg_ptr, entity);
         return ret !== 0;
     }
     /**

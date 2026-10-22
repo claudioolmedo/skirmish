@@ -53,6 +53,17 @@ test('group numbers are validated', () => {
   assert.throws(() => g.members(2.5));
 });
 
+test('the full DE range exists: 1–10 plain, 11–20 on the Alt layer (SEL-07)', () => {
+  assert.equal(GROUP_COUNT, 20);
+  const g = createControlGroups();
+  g.assign(10, [1, 2]); // the 0 key
+  g.assign(20, [3]); // Ctrl+Alt+0
+  g.addToGroup(11, [4, 5]); // Shift+Alt+1 appends
+  assert.deepEqual(g.members(10), [1, 2]);
+  assert.deepEqual(g.members(20), [3]);
+  assert.deepEqual(g.members(11), [4, 5]);
+});
+
 test('tap tracker: second rapid tap centers, slow tap selects', () => {
   const t = createTapTracker(350);
   assert.equal(t.tap(1, 1000), 'select');
