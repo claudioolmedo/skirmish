@@ -216,6 +216,21 @@
   <div class="overlay-card">
     <h2 class="game-title-sm" id="end-title">Victory!</h2>
     <p class="overlay-sub" id="end-detail"></p>
+    <!-- Final score (VIC-04): the four DE categories per player,
+         read from the sim at the decision tick. Labels and
+         numbers only — the DE statistics screen's shape. -->
+    <table id="end-score" class="end-score">
+      <thead>
+        <tr><th></th><th id="end-score-you">You</th><th id="end-score-foe">Enemy</th></tr>
+      </thead>
+      <tbody>
+        <tr><th id="end-score-military-l">Military</th><td id="end-score-you-military">0</td><td id="end-score-foe-military">0</td></tr>
+        <tr><th id="end-score-economy-l">Economy</th><td id="end-score-you-economy">0</td><td id="end-score-foe-economy">0</td></tr>
+        <tr><th id="end-score-technology-l">Technology</th><td id="end-score-you-technology">0</td><td id="end-score-foe-technology">0</td></tr>
+        <tr><th id="end-score-society-l">Society</th><td id="end-score-you-society">0</td><td id="end-score-foe-society">0</td></tr>
+        <tr class="end-score-total"><th id="end-score-total-l">Total</th><td id="end-score-you-total">0</td><td id="end-score-foe-total">0</td></tr>
+      </tbody>
+    </table>
     <!-- End-of-match feedback (2026-10-19): one question, an
          optional star rating, and the GitHub star line. Sent
          anonymously to the relay's /feedback (see privacy page);

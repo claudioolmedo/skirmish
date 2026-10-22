@@ -1047,6 +1047,20 @@ export class WasmSim {
         return ret >>> 0;
     }
     /**
+     * Any player's score by owner tag (VIC-04):
+     * `[military, economy, technology, society, total]` for owner
+     * 0 (human) or 2 (opponent); Gaia and unknown tags read the
+     * zero breakdown. Behind the end-of-match score table.
+     * @param {number} owner
+     * @returns {Float64Array}
+     */
+    score_for(owner) {
+        const ret = wasm.wasmsim_score_for(this.__wbg_ptr, owner);
+        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v1;
+    }
+    /**
      * Current state hash as hex, without advancing the sim.
      * @returns {string}
      */

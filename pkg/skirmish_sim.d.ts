@@ -519,6 +519,13 @@ export class WasmSim {
      */
     research_block_tc(tech_tag: number): number;
     /**
+     * Any player's score by owner tag (VIC-04):
+     * `[military, economy, technology, society, total]` for owner
+     * 0 (human) or 2 (opponent); Gaia and unknown tags read the
+     * zero breakdown. Behind the end-of-match score table.
+     */
+    score_for(owner: number): Float64Array;
+    /**
      * Current state hash as hex, without advancing the sim.
      */
     state_hash(): string;
@@ -702,6 +709,7 @@ export interface InitOutput {
     readonly wasmsim_research_block_at: (a: number, b: number, c: number) => number;
     readonly wasmsim_research_block_tc: (a: number, b: number) => number;
     readonly wasmsim_research_block_tc_at: (a: number, b: number, c: number) => number;
+    readonly wasmsim_score_for: (a: number, b: number) => [number, number];
     readonly wasmsim_state_hash: (a: number) => [number, number];
     readonly wasmsim_stockpile: (a: number) => [number, number];
     readonly wasmsim_stockpile_for: (a: number, b: number) => [number, number];
