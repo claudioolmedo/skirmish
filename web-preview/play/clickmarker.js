@@ -10,9 +10,9 @@
 // (#e33 family). A right-click on an OBJECT (unit, building,
 // resource node — e.g. a tree to chop) shows NO ground marker.
 // Queued (Shift) waypoints additionally plant persistent flags
-// (the manual's "a waypoint marker appears at each point");
-// those persistent flags are a separate, still-open half of
-// INF-09 — this module is only the transient confirmation.
+// (the manual's "a waypoint marker appears at each point") —
+// those are play/pennants.js (INF-09, shipped 2026-10-21); this
+// module is only the transient confirmation.
 //
 // This module is pure logic + a tiny state list, so the
 // order-type -> marker mapping is unit-testable in Node. All

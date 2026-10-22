@@ -21,7 +21,9 @@
 //! `Sim`, as always); 6 berry bushes at 5–8; 4 near sheep at 4–8 and
 //! 2+2 far sheep at 10–16; 3 straggler trees at 4–8; a main woodline
 //! (forest edge 10–15) and a second woodline; 7 main gold at 10–16
-//! with 4 more behind it; 5 main stone at 10–16 with 4 behind; 2
+//! with two 4-tile secondaries farther out (one behind the main,
+//! one at a split anchor — §2.3's "Back golds: 2 × 4"); 5 main
+//! stone at 10–16 with 4 behind; 2
 //! boars at 15–24 in split directions; deer herds of 3 at 12–18 and
 //! 3 more at 20–28. Heights are gentle value-noise hills, flattened
 //! around each start and its packages (disc + per-node flattening),
@@ -352,7 +354,8 @@ fn fallback() -> GeneratedMap {
         (NodeKind::Tree, -5, -4),
         (NodeKind::Tree, 4, -6),
         (NodeKind::Tree, -6, 3),
-        // Main gold (7) north-east at ~12; back gold (4) behind it.
+        // Main gold (7) north-east at ~12; back gold (4) behind
+        // it, second secondary (4) split east.
         (NodeKind::GoldMine, 10, -6),
         (NodeKind::GoldMine, 11, -6),
         (NodeKind::GoldMine, 10, -5),
@@ -364,6 +367,12 @@ fn fallback() -> GeneratedMap {
         (NodeKind::GoldMine, 17, -10),
         (NodeKind::GoldMine, 16, -9),
         (NodeKind::GoldMine, 17, -9),
+        // Second secondary gold (4) east at ~19–20 — the split
+        // anchor, clear of the deer herd and the far sheep pair.
+        (NodeKind::GoldMine, 19, 2),
+        (NodeKind::GoldMine, 20, 2),
+        (NodeKind::GoldMine, 19, 3),
+        (NodeKind::GoldMine, 20, 3),
         // Main stone (5) south-west at ~12; back stone (4).
         (NodeKind::StoneMine, -10, 7),
         (NodeKind::StoneMine, -11, 7),
@@ -898,12 +907,22 @@ impl Gen {
         if placed2 < 9 {
             return None;
         }
-        // Main gold: 7 tiles at 10–16; back gold: 4 behind it.
+        // Main gold: 7 tiles at 10–16; TWO secondary 4-piles
+        // farther out (study 2, NEW 4: the reference Arabia gold
+        // is 7 + 4 + 4, and OPENING-SPEC §2.3 always said so —
+        // "Back golds: 2 × 4"). The first sits behind the main
+        // along its direction; the second takes a split anchor —
+        // a fresh band pick farther out, the same treatment the
+        // boars get below.
         let gold_anchor = self.pick_in_band(tc, 10, 14)?;
         if !self.cluster(gold_anchor, NodeKind::GoldMine, 7, 1) {
             return None;
         }
         if !self.back_cluster(tc, gold_anchor, NodeKind::GoldMine, 4) {
+            return None;
+        }
+        let gold2_anchor = self.pick_in_band(tc, 16, 22)?;
+        if !self.cluster(gold2_anchor, NodeKind::GoldMine, 4, 1) {
             return None;
         }
         // Main stone: 5 tiles at 10–16; back stone: 4 behind it.
@@ -1011,7 +1030,32 @@ mod tests {
             let a = &m.starts[0];
             let n = |k: NodeKind| a.nodes.iter().filter(|x| x.0 == k).count();
             assert_eq!(n(NodeKind::BerryBush), 6);
-            assert_eq!(n(NodeKind::GoldMine), 11);
+            // Gold is 7 + 4 + 4 (study 2, NEW 4): the count pins
+            // the package; the bounds pin its shape — nothing
+            // beyond 28 tiles, and at least one cell (the split
+            // secondary's anchor, picked in the 16–22 band) sits
+            // at 16+ tiles, farther out than the main's band.
+            assert_eq!(n(NodeKind::GoldMine), 15);
+            let (tcx, tcy) = (a.tc_cell.0 as i32, a.tc_cell.1 as i32);
+            let gold_max_d2 = a
+                .nodes
+                .iter()
+                .filter(|x| x.0 == NodeKind::GoldMine)
+                .map(|x| {
+                    let dx = x.1 as i32 - tcx;
+                    let dy = x.2 as i32 - tcy;
+                    dx * dx + dy * dy
+                })
+                .max()
+                .unwrap_or(0);
+            assert!(
+                gold_max_d2 <= 28 * 28,
+                "seed {seed}: gold beyond 28 tiles (d2 {gold_max_d2})"
+            );
+            assert!(
+                gold_max_d2 >= 16 * 16,
+                "seed {seed}: no secondary gold at 16+ tiles (max d2 {gold_max_d2})"
+            );
             assert_eq!(n(NodeKind::StoneMine), 9);
             assert!(n(NodeKind::Tree) >= 30, "woodlines too thin: {}", n(NodeKind::Tree));
             let an = |k: EntityKind| a.animals.iter().filter(|x| x.0 == k).count();

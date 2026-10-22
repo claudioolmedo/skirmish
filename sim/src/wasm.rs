@@ -599,6 +599,19 @@ impl WasmSim {
         out
     }
 
+    /// One entity's order route as flat world-point pairs
+    /// `[x0, y0, x1, y1, ...]` (INF-09): the current order's
+    /// target (only while orders are queued behind it) followed
+    /// by each queued order's target. Behind the client's
+    /// waypoint-pennant render. Render-only, like `rally_points`.
+    pub fn entity_order_route(&self, entity: u32) -> Vec<f64> {
+        self.inner
+            .order_route(entity)
+            .iter()
+            .flat_map(|(x, y)| [x.to_num::<f64>(), y.to_num::<f64>()])
+            .collect()
+    }
+
     // --- M4: idle queries (SEL-08/09, INF-03) -----------------------
 
     /// Ids of the idle villagers (no work task, no move order, no

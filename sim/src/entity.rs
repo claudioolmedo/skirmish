@@ -316,6 +316,18 @@ pub struct Entity {
     /// the entity is fully idle (no work task, no move order, no
     /// attack target). Plain data — part of the hashed state.
     pub order_queue: Vec<QueuedOrder>,
+    /// Provenance of the CURRENT order (INF-09): true while the
+    /// order now executing entered execution from the queue —
+    /// popped by the queue advance, including a queued order that
+    /// started immediately on an idle entity. Set by the advance,
+    /// cleared by every non-queued command (they all clear the
+    /// queue too). Its one reader is `Sim::order_route`: the
+    /// reference flags every point of a queued chain including
+    /// the leg in progress — and the last leg, when the queue
+    /// behind it is already empty — while a plain order shows no
+    /// persistent flag at all; this bit is what tells the two
+    /// apart. Plain data, conditionally hashed (see `Sim::hash`).
+    pub order_from_queue: bool,
     /// Current phase of the work cycle (villagers only).
     pub task: Task,
     /// The persistent gather assignment: the node this villager works
@@ -441,6 +453,7 @@ impl Entity {
             vel_y: I16F16::ZERO,
             order: None,
             order_queue: Vec::new(),
+            order_from_queue: false,
             task: Task::Idle,
             task_node: None,
             task_building: None,

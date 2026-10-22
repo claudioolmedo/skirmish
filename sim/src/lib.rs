@@ -133,12 +133,15 @@ const START_SCOUT_OFFSET: (i32, i32) = (5, 5);
 pub const FOG_RECOMPUTE_INTERVAL: u64 = 15;
 /// The Town Center's sight radius in tiles (M7, VIS-02/03): the
 /// unit table's Town Center row carries no LoS (it never acquires
-/// targets), so the fog model needs its own value. ADOPTED —
-/// building LoS values are not pinned by the project docs
-/// (UNVERIFIED); Town Watch / Town Patrol (+4) are not implemented.
-pub const TC_SIGHT_TILES: u32 = 6;
+/// targets), so the fog model needs its own value. 8 tiles is the
+/// reference game's documented Town Center LoS (public building
+/// tables; study 2's exploration lesson is anchored on this disc —
+/// the scout's spiral starts at the edge of the TC's line of
+/// sight). Town Watch / Town Patrol (+4) are not implemented.
+pub const TC_SIGHT_TILES: u32 = 8;
 /// A placed building's sight radius in tiles (M7, VIS-02/03).
-/// ADOPTED for every kind — see `TC_SIGHT_TILES` (UNVERIFIED).
+/// ADOPTED for every other kind (UNVERIFIED) — the Town Center's
+/// own value is documented; see `TC_SIGHT_TILES`.
 pub const BUILDING_SIGHT_TILES: u32 = 4;
 /// The hard cap on any sight radius, in tiles (VIS-04).
 pub const MAX_SIGHT_TILES: u32 = 20;
@@ -1747,6 +1750,7 @@ impl Sim {
         {
             let e = &mut self.entities[idx];
             e.order_queue.clear();
+            e.order_from_queue = false;
             e.clear_combat();
             e.task = Task::Returning;
             e.task_dropoff = Some(target);
@@ -1807,6 +1811,7 @@ impl Sim {
         e.auto_target = None;
         e.order = None;
         e.order_queue.clear();
+        e.order_from_queue = false;
         e.vel_x = I16F16::ZERO;
         e.vel_y = I16F16::ZERO;
         e.clear_combat();
@@ -2001,6 +2006,100 @@ impl Sim {
         let bi = self.building_index(building)?;
         let b = &self.buildings[bi];
         b.rally.map(|(x, y)| (x, y, b.rally_node))
+    }
+
+    /// The entity's order route as world points, for the client's
+    /// waypoint-pennant render (INF-09): the current order's
+    /// target — included while the order belongs to a queued
+    /// chain (orders still queued behind it, or the order itself
+    /// entered execution from the queue: `order_from_queue`),
+    /// matching the reference, where a plain order shows no
+    /// persistent flag and a queued chain flags every point
+    /// including the leg in progress and the last leg — followed
+    /// by each queued order's target in FIFO order. Object
+    /// orders resolve to their target's current position (node,
+    /// entity, or building). Render-only: read-only; the route
+    /// itself is never hashed (its inputs are).
+    pub fn order_route(&self, entity: u32) -> Vec<(I16F16, I16F16)> {
+        let mut out = Vec::new();
+        let Some(ei) = self.entity_index(entity) else {
+            return out;
+        };
+        let e = &self.entities[ei];
+        if e.dead {
+            return out;
+        }
+        if !e.order_queue.is_empty() || e.order_from_queue {
+            if let Some(p) = self.current_order_target(e) {
+                out.push(p);
+            }
+        }
+        for q in &e.order_queue {
+            if let Some(p) = self.queued_order_target(q) {
+                out.push(p);
+            }
+        }
+        out
+    }
+
+    /// The world point the entity's CURRENT order is aimed at, if
+    /// it has one. Work assignments resolve to the assignment (the
+    /// node / building), not the steering point of the current
+    /// leg — a hauling villager's gather order targets its node
+    /// on the outbound and the return leg alike.
+    fn current_order_target(&self, e: &Entity) -> Option<(I16F16, I16F16)> {
+        if let Task::Repair { building } = e.task {
+            return self.building_pos(building);
+        }
+        if let Some(node) = e.task_node {
+            if matches!(e.task, Task::ToNode | Task::Gathering | Task::Returning) {
+                return self.node_pos(node);
+            }
+        }
+        if let Some(b) = e.task_building {
+            return self.building_pos(b);
+        }
+        if let Some(b) = e.attack_building {
+            return self.building_pos(b);
+        }
+        if let Some(o) = &e.order {
+            return Some((o.target_x, o.target_y));
+        }
+        if let Some(t) = e.attack_target {
+            return self.entity_pos(t);
+        }
+        None
+    }
+
+    /// The world point a QUEUED order is aimed at (INF-09), if
+    /// its target still exists.
+    fn queued_order_target(&self, q: &QueuedOrder) -> Option<(I16F16, I16F16)> {
+        match *q {
+            QueuedOrder::Move { x, y } => Some((x, y)),
+            QueuedOrder::Build { x, y, .. } => Some((x, y)),
+            QueuedOrder::Gather { node } => self.node_pos(node),
+            QueuedOrder::Attack { target } => self.entity_pos(target),
+            QueuedOrder::Repair { building } => self.building_pos(building),
+        }
+    }
+
+    fn entity_pos(&self, id: u32) -> Option<(I16F16, I16F16)> {
+        let e = &self.entities[self.entity_index(id)?];
+        if e.dead {
+            None
+        } else {
+            Some((e.pos_x, e.pos_y))
+        }
+    }
+
+    fn node_pos(&self, id: u32) -> Option<(I16F16, I16F16)> {
+        let n = &self.nodes[self.node_index(id)?];
+        Some((n.pos_x, n.pos_y))
+    }
+
+    fn building_pos(&self, id: u32) -> Option<(I16F16, I16F16)> {
+        let b = &self.buildings[self.building_index(id)?];
+        Some((b.pos_x, b.pos_y))
     }
 
     /// Idle villagers (M4, SEL-08): living human villagers with no
@@ -2302,6 +2401,7 @@ impl Sim {
             return;
         }
         self.entities[idx].order_queue.clear();
+        self.entities[idx].order_from_queue = false;
         self.apply_move(idx, x, y);
     }
 
@@ -2357,6 +2457,7 @@ impl Sim {
         }
         let idx = self.entity_index(entity).expect("validated");
         self.entities[idx].order_queue.clear();
+        self.entities[idx].order_from_queue = false;
         self.apply_attack(idx, target);
     }
 
@@ -2390,6 +2491,7 @@ impl Sim {
         }
         let idx = self.entity_index(entity).expect("validated");
         self.entities[idx].order_queue.clear();
+        self.entities[idx].order_from_queue = false;
         let e = &mut self.entities[idx];
         e.task = Task::Idle;
         e.task_node = None;
@@ -2418,6 +2520,7 @@ impl Sim {
         }
         let idx = self.entity_index(entity).expect("validated");
         self.entities[idx].order_queue.clear();
+        self.entities[idx].order_from_queue = false;
         self.apply_repair(idx, building);
     }
 
@@ -2506,6 +2609,7 @@ impl Sim {
             _ => return,
         }
         self.entities[idx].order_queue.clear();
+        self.entities[idx].order_from_queue = false;
         self.begin_gather(idx, node);
     }
 
@@ -2674,6 +2778,7 @@ impl Sim {
         };
         if self.apply_build(entity, kind, x, y) {
             self.entities[idx].order_queue.clear();
+            self.entities[idx].order_from_queue = false;
         }
     }
 
@@ -2780,6 +2885,11 @@ impl Sim {
             while !self.entities[idx].order_queue.is_empty() {
                 let order = self.entities[idx].order_queue.remove(0);
                 if self.execute_queued(idx, order) {
+                    // INF-09: the order now executing came from
+                    // the queue — its waypoint keeps its flag
+                    // until it completes, even once the queue
+                    // behind it is empty.
+                    self.entities[idx].order_from_queue = true;
                     break;
                 }
             }
@@ -4405,6 +4515,16 @@ impl Sim {
                     }
                     QueuedOrder::Repair { building } => h.write_u32(building),
                 }
+            }
+            // INF-09: the current order's queue provenance
+            // (`order_from_queue`) — written ONLY when set,
+            // exactly the way the repair assignment below is
+            // written only in phase, so a state with no queued
+            // chain in flight hashes exactly as before (the
+            // golden stream is untouched). The byte cannot be
+            // mistaken for what follows: task tags are 0..=6.
+            if e.order_from_queue {
+                h.write_u8(0xF1);
             }
             // M2: work state — task phase, assignment, carry.
             h.write_u8(e.task.tag());

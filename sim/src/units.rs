@@ -202,10 +202,12 @@ static SCOUT_CAVALRY: UnitSpec = UnitSpec {
 
 /// Militia (study §3.2): HP 40, attack 4 melee, armor 0/1, RoF 2.0 s,
 /// attack delay ≈0.50 s (30 ticks), speed 0.90, LoS 4. The base tier
-/// has no bonus attacks (Man-at-Arms gains them later). Cost per the
-/// M3 brief: 60 F / 20 G — note the study's table lists the current
-/// patched-DE cost as 50 F / 20 G; the brief pinned 60 F and the
-/// discrepancy is recorded in the milestone report. Train 21 s.
+/// has no bonus attacks (Man-at-Arms gains them later). Cost
+/// 50 F / 20 G — the current DE value: update 141935 (Chronicles:
+/// Battle for Greece) removed Supplies and set the Militia line to
+/// 50 F / 20 G (Age of Empires wiki, "Militia", Changelog). The
+/// M3 brief's 60 F was the pre-141935 cost; corrected 2026-10-21.
+/// Train 21 s.
 static MILITIA: UnitSpec = UnitSpec {
     max_hp: 40,
     attacks: &[(cls::MELEE, 4)],
@@ -223,7 +225,7 @@ static MILITIA: UnitSpec = UnitSpec {
     radius: I16F16::from_bits(65_536),
     carcass_food: 0,
     carcass_decay_bits: 0,
-    food_cost: 60,
+    food_cost: 50,
     wood_cost: 0,
     gold_cost: 20,
     train_ticks: 1260, // 21 s

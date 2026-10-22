@@ -339,7 +339,9 @@ spec; anything the sources don't pin down is marked UNVERIFIED in
   placement/blocking machinery generalized from 2×2). Trains
   Militia (60 F / 20 G — the M3 brief's figure; the study's table
   lists the reference game's later-patch 50 F — recorded divergence,
-  one-line change in `units.rs`) and Archer (25 W / 45 G) with the
+  one-line change in `units.rs`. Corrected 2026-10-21 to the
+  current-DE 50 F / 20 G: update 141935 removed Supplies and set
+  the line's cost) and Archer (25 W / 45 G) with the
   Town Center's queue/pop rules: enqueue needs queue room + funds;
   progress stalls while housed and resumes by itself.
 - **Standard start (OPENING-SPEC §2).** 3 villagers + Scout Cavalry
@@ -609,7 +611,9 @@ bitset** (`players: [PlayerState; 2]`), both hashed.
 - **UNVERIFIED values adopted this milestone** (flagged in code and
   rulebook VIS-03): building sight radii — Town Center 6 tiles,
   other buildings 4. The unit LoS column is the study's; Town
-  Watch/Patrol are not implemented.
+  Watch/Patrol are not implemented. (The Town Center value was
+  corrected 2026-10-21 to the documented 8 tiles; the other
+  buildings' 4 remains adopted/unverified.)
 - **Hash changes (deliberate).** The four grid layers and both fog
   grids are hashed (chunk-fed — the FNV writer takes 8 bytes per
   multiply so the 120×120 layers cost like the old 50×50 byte

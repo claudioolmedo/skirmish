@@ -202,11 +202,26 @@ fn golden_hash_regression() {
     // rules alone, not on any change to the world this scenario
     // builds. New value verified stable across independent runs
     // (run-to-run determinism test in this file).
+    //
+    // Study-2 remainder (2026-10-21, deliberate update): two
+    // documented-DE corrections, each re-baselined separately so
+    // the attribution is exact. (1) Town Center sight 6 -> 8
+    // tiles (VIS-03; the fog grids are hashed state, so the wider
+    // starting discs move the stream): 93c1e963b7a09619 ->
+    // ade9599580510543. (2) Arabia gold 7+4 -> 7+4+4 (MAP-09 /
+    // OPENING-SPEC §2.3: a second 4-tile secondary per start,
+    // farther out at a split anchor; seed 42's layout gains 8 gold
+    // nodes): ade9599580510543 -> 042e33a17a6192ae. The Militia
+    // cost correction shipped in the same run (60 F -> 50 F,
+    // update 141935) does NOT move this value: the scenario
+    // issues no commands and trains nothing — costs never enter
+    // it. New value verified stable across independent runs
+    // (run-to-run determinism test in this file).
     let mut sim = Sim::new(42);
     let mut hash = 0;
     for _ in 0..360 {
         hash = sim.tick();
     }
     assert_eq!(sim.tick_count(), 360);
-    assert_eq!(format!("{:016x}", hash), "93c1e963b7a09619");
+    assert_eq!(format!("{:016x}", hash), "042e33a17a6192ae");
 }

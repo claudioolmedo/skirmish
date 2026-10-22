@@ -235,7 +235,11 @@ validates (resources reachable, a land path between the starts, no
 start enclosed, shoreline clearance) and regenerates with the next
 sub-seed on failure — bounded at 64 attempts, then a fixed fallback
 template that validates by construction. Relics are not distributed
-yet (they land with §12). · *Status:* **MATCHES** (the start package
+yet (they land with §12). Gold layout corrected 2026-10-21 to the
+spec's own text (§2.3 "Back golds: 2 × 4"; study 2, NEW 4):
+**7 main + two 4-tile secondaries farther out** per start (one
+behind the main, one at a split anchor) — the generator previously
+placed only one secondary. · *Status:* **MATCHES** (the start package
 and fairness guarantee; relics pending §12).
 
 **MAP-10 — Straggler trees are ordinary trees.** The single trees scattered
@@ -296,11 +300,15 @@ LoS (Town Watch +4, Town Patrol +4).
 *Source:* MECHANICS-STUDY §3, §8; Technology wiki. · *Impl:* shipped in
 part (M7) — the unit tables carry a `los` column (world units, tiles ×
 4) and fog reads the owner's *effective* row, so the Scout's Feudal
-LoS rise applies (TEC-06). Building LoS is two **adopted constants —
-Town Center 6 tiles, other buildings 4 — flagged UNVERIFIED**: the
-project docs do not pin building LoS values. Town Watch / Town Patrol
-(+4) are not implemented, and no other tech patches LoS yet. ·
-*Status:* **DIFFERS**.
+LoS rise applies (TEC-06). Building LoS: the Town Center's is the
+reference's documented **8 tiles** (public building tables; study
+2's exploration lesson is anchored on the TC's sight disc) —
+shipped 2026-10-21, replacing the adopted 6. Other buildings use
+one **adopted constant — 4 tiles — flagged UNVERIFIED**: the
+project docs do not pin it. Town Watch / Town Patrol (+4) are not
+implemented, and no other tech patches LoS yet. · *Status:*
+**DIFFERS** (the unimplemented LoS techs and the unverified
+non-TC building value).
 
 **VIS-04 — LoS is capped at 20 tiles.** No unit or building sees farther
 than 20 tiles, whatever its stats or technologies say.
@@ -2443,9 +2451,23 @@ pure client renderings of commands the player just gave; they appear in
 no hash and no replay data beyond the commands themselves.
 *Source:* GAP 11.8; NET-08/10 (what replays contain). · *Impl:* the
 placement ghost ships (invalid = red); the order queue shipped with M4
-(SEL-12), but move/attack markers and queued-order flags are still not
-rendered — the sim's queue is not exposed to the renderer. · *Status:*
-**DIFFERS**.
+(SEL-12); the transient move marker ships as INF-09a (2026-10-20);
+attack orders draw nothing, per the same evidence (an object
+right-click shows no marker and no pulse). The queued-order flags —
+the last unrendered half — shipped 2026-10-21: the sim exposes each
+entity's order route read-only (`order_route` / the
+`entity_order_route` ABI: the current order's target while it
+belongs to a chain — orders queued behind it, or the order itself
+popped from the queue, tracked by the conditionally-hashed
+`order_from_queue` provenance bit — then every queued order's
+target, object orders resolved to their target's current
+position), and the client plants a small player-colour pennant at
+each point for the selected own units (group selections draw only
+the leader's chain, per the "Waypoint Markers" article cited in
+INF-09a), drawn after the fog dim like DE, whose flags sit in the
+black (study 2, `frames/f_006.jpg`). A flag exists exactly while
+its order does: completion, replacement and death remove it by
+construction. · *Status:* **MATCHES**.
 
 **INF-09a — The click marker (transient order confirmation).** A
 right-click whose order resolves to a GROUND target (plain move from
@@ -2481,7 +2503,8 @@ moves only; any object resolution returns earlier and spawns
 nothing) and draws it after the fog dim, like DE. LOW tier shortens
 it to 300 ms, never removes it. Client-only: no sim, command or
 hash impact. · *Status:* **MATCHES** for the transient marker;
-queued-order persistent flags remain **DIFFERS** under INF-09.
+the queued-order persistent flags shipped 2026-10-21 under
+INF-09 (which is now MATCHES in full).
 
 **INF-10 — Sound is an information channel.** Unit acknowledgements,
 work sounds, combat noise scaled by distance to the camera, alert horns
@@ -2515,7 +2538,16 @@ MISSING → DIFFERS; updated 2026-10-20 for INF-09a, the click
 marker — §18 gains one rule, one MATCHES; SEL-17's status was
 clarified the same day — its eligibility widened to all scouts,
 so the entry is now a full MATCHES against current DE, with no
-change to the totals: the entry's lead tag was already MATCHES).
+change to the totals: the entry's lead tag was already MATCHES;
+updated 2026-10-21 for INF-09, the waypoint pennants — INF-09
+moves DIFFERS → MATCHES, so §18 trades one DIFFERS for one
+MATCHES with the rule count unchanged. The same run corrected
+VIS-03's Town Center sight to the documented 8 tiles (status
+unchanged) and MAP-09's gold layout to 7+4+4 (status
+unchanged), and corrected the Militia cost to the current-DE
+50 F / 20 G (update 141935) — recorded at the unit table in
+`sim/src/units.rs`; the rulebook carries no per-unit cost
+entry).
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
@@ -2536,8 +2568,8 @@ change to the totals: the entry's lead tag was already MATCHES).
 | 15 | AI behavior & difficulty (AI) | 9 | 4 | 3 | 2 |
 | 16 | Victory, scoring & game modes (VIC) | 12 | 0 | 1 | 11 |
 | 17 | Multiplayer determinism (NET) | 11 | 4 | 5 | 2 |
-| 18 | Information rules (INF) | 12 | 3 | 4 | 5 |
-| | **Total** | **216** | **95** | **46** | **75** |
+| 18 | Information rules (INF) | 12 | 4 | 3 | 5 |
+| | **Total** | **216** | **96** | **45** | **75** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer

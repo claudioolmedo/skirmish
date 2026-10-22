@@ -228,6 +228,123 @@ fn queued_order_for_an_idle_unit_starts_immediately() {
     assert!(v.order_queue.is_empty());
 }
 
+// ---------------------------------------------------------------------
+// INF-09: the order route behind the waypoint pennants
+// ---------------------------------------------------------------------
+
+#[test]
+fn order_route_flags_the_whole_queued_chain() {
+    let mut sim = Sim::new(7);
+    let a = cell_point(&sim, 15, 23);
+    let b = cell_point(&sim, 15, 30);
+    let c = cell_point(&sim, 12, 15);
+    // A plain move alone: no route — in the reference a plain
+    // order plants no persistent flag (INF-09).
+    sim.push_command(Command::Move {
+        entity: 1,
+        x: a.0,
+        y: a.1,
+    });
+    sim.tick();
+    assert!(
+        sim.order_route(1).is_empty(),
+        "a plain move must not produce a route"
+    );
+    // Queue two legs behind it: the route is the leg in progress
+    // followed by the queued points, in FIFO order.
+    sim.push_command(Command::Queue {
+        entity: 1,
+        order: QueuedOrder::Move { x: b.0, y: b.1 },
+    });
+    sim.push_command(Command::Queue {
+        entity: 1,
+        order: QueuedOrder::Move { x: c.0, y: c.1 },
+    });
+    sim.tick();
+    assert_eq!(
+        sim.order_route(1),
+        vec![a, b, c],
+        "route must flag the current leg + queued points in order"
+    );
+    // A plain replacement order clears the chain — and the flags.
+    let d = cell_point(&sim, 19, 19);
+    sim.push_command(Command::Move {
+        entity: 1,
+        x: d.0,
+        y: d.1,
+    });
+    sim.tick();
+    assert!(
+        sim.order_route(1).is_empty(),
+        "a replaced chain must leave no route"
+    );
+}
+
+#[test]
+fn order_route_keeps_the_last_leg_flagged() {
+    let mut sim = Sim::new(7);
+    // Two short legs near the villager's start: the second leg
+    // must stay flagged while it executes with an EMPTY queue
+    // behind it (it entered execution from the queue), and the
+    // route must empty only when it completes.
+    let start = {
+        let v = ent(&sim, 1);
+        (v.pos_x, v.pos_y)
+    };
+    let a = (start.0 + I16F16::from_num(8), start.1);
+    let b = (start.0 + I16F16::from_num(16), start.1);
+    sim.push_command(Command::Queue {
+        entity: 1,
+        order: QueuedOrder::Move { x: a.0, y: a.1 },
+    });
+    sim.push_command(Command::Queue {
+        entity: 1,
+        order: QueuedOrder::Move { x: b.0, y: b.1 },
+    });
+    sim.tick();
+    assert_eq!(sim.order_route(1), vec![a, b]);
+    // First leg completes; the second executes from the queue.
+    let on_last = run_until(&mut sim, 20_000, |s| {
+        s.order_route(1) == vec![b]
+    });
+    assert!(on_last, "the last leg lost its flag: {:?}", sim.order_route(1));
+    // And it completes: no route remains.
+    let done = run_until(&mut sim, 20_000, |s| s.order_route(1).is_empty());
+    assert!(done, "route never emptied after the chain completed");
+}
+
+#[test]
+fn order_route_resolves_object_orders_to_target_positions() {
+    let mut sim = Sim::new(7);
+    let berry = first_node(&sim, skirmish_sim::NodeKind::BerryBush);
+    let berry_pos = sim
+        .nodes()
+        .iter()
+        .find(|n| n.id == berry)
+        .map(|n| (n.pos_x, n.pos_y))
+        .unwrap();
+    let tree = first_node(&sim, skirmish_sim::NodeKind::Tree);
+    let tree_pos = sim
+        .nodes()
+        .iter()
+        .find(|n| n.id == tree)
+        .map(|n| (n.pos_x, n.pos_y))
+        .unwrap();
+    sim.push_command(Command::Move {
+        entity: 2,
+        x: berry_pos.0,
+        y: berry_pos.1,
+    });
+    sim.push_command(Command::Queue {
+        entity: 2,
+        order: QueuedOrder::Gather { node: tree },
+    });
+    sim.tick();
+    // Head = the current move's point; the queued gather resolves
+    // to the NODE's position.
+    assert_eq!(sim.order_route(2), vec![berry_pos, tree_pos]);
+}
+
 #[test]
 fn queued_attack_executes_after_the_current_move() {
     let mut sim = Sim::new(11);

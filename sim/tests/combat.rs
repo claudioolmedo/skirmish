@@ -632,7 +632,8 @@ fn militia_production_and_population_interplay() {
     });
     assert!(built, "barracks never completed");
     let bid = sim.buildings()[0].id;
-    // Train a Militia: 60 food / 20 gold deducted on enqueue.
+    // Train a Militia: 50 food / 20 gold deducted on enqueue
+    // (current DE, update 141935).
     let (f0, g0) = (
         sim.stockpile().amount(skirmish_sim::ResourceKind::Food),
         sim.stockpile().amount(skirmish_sim::ResourceKind::Gold),
@@ -644,7 +645,7 @@ fn militia_production_and_population_interplay() {
     sim.tick();
     assert_eq!(
         sim.stockpile().amount(skirmish_sim::ResourceKind::Food),
-        f0 - I16F16::from_num(60)
+        f0 - I16F16::from_num(50)
     );
     assert_eq!(
         sim.stockpile().amount(skirmish_sim::ResourceKind::Gold),

@@ -684,7 +684,7 @@ fn man_at_arms_upgrades_existing_and_future_militia() {
     wait_wood(&mut sim, 175);
     raise(&mut sim, 1, BuildingKind::Barracks, 27, 20);
     let barracks = building_id(&sim, BuildingKind::Barracks);
-    // Food for a Militia (60) and the upgrade (100): two villagers
+    // Food for a Militia (50) and the upgrade (100): two villagers
     // back on the berries.
     let berry = first_node(&sim, NodeKind::BerryBush);
     sim.push_command(Command::Gather {
