@@ -78,6 +78,7 @@ const EN = {
   'feed.created.f': '{name} Created',
   'feed.research': '{name} Research Complete',
   'feed.feudal': 'Feudal Age Research Complete',
+  'feed.foeFeudal': 'Enemy advanced to the Feudal Age',
   'feed.sheep': 'Sheep Found',
   // --- top bar ---------------------------------------------------
   'top.resources': 'Resources',
@@ -452,6 +453,7 @@ const PT_BR = {
   'feed.created.f': '{name} criada',
   'feed.research': '{name}: pesquisa concluída',
   'feed.feudal': 'Avanço para a Idade Feudal concluído',
+  'feed.foeFeudal': 'O inimigo avançou para a Idade Feudal',
   'feed.sheep': 'Ovelha encontrada',
   // --- top bar ---------------------------------------------------------
   'top.resources': 'Recursos',
@@ -826,6 +828,7 @@ const ES = {
   'feed.created.f': '{name} creada',
   'feed.research': '{name}: investigación completada',
   'feed.feudal': 'Avance a la Edad Feudal completado',
+  'feed.foeFeudal': 'El enemigo avanzó a la Edad Feudal',
   'feed.sheep': 'Oveja encontrada',
   // --- top bar ---------------------------------------------------------
   'top.resources': 'Recursos',

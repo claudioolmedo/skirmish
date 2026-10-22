@@ -38,6 +38,8 @@ export const CUE_INTERVALS_MS = {
   ageAdvance: 1500,
   housed: 12000,
   underAttack: 9000,
+  combat: 450,
+  work: 400,
   idleTick: 20000,
   victory: 2000,
   defeat: 2000,
@@ -56,6 +58,7 @@ const PRIORITY_CUES = new Set(['victory', 'defeat', 'ageAdvance', 'housed', 'und
  *   { type: 'buildingPlaced' } / { type: 'selection' }
  *   { type: 'feed', kind: 'built'|'created'|'research'|'age', unitKind }
  *   { type: 'housed' } / { type: 'attack' } / { type: 'idle' }
+ *   { type: 'combat' } / { type: 'work' }  (gain-scaled, INF-10)
  *   { type: 'end', result: 'victory'|'defeat' }
  * Unknown events map to null (silence).
  */
@@ -83,6 +86,8 @@ export function cueForEvent(event) {
       return null;
     case 'housed': return 'housed';
     case 'attack': return 'underAttack';
+    case 'combat': return 'combat';
+    case 'work': return 'work';
     case 'idle': return 'idleTick';
     case 'end': return event.result === 'defeat' ? 'defeat' : 'victory';
     default: return null;
@@ -122,6 +127,19 @@ export function cuesForSnapshotDiff(prev, next) {
     if (techAdvanced) cues.push('researchComplete');
   }
   return cues;
+}
+
+/**
+ * Distance attenuation (pure): INF-10's combat and work noise
+ * is scaled by distance to the camera — full volume at `near`
+ * world units or closer, silent at `far` or beyond, linear in
+ * between. Returns a 0..1 gain multiplier.
+ */
+export function distanceGain(dist, near = 4, far = 38) {
+  if (!Number.isFinite(dist)) return 0;
+  if (dist <= near) return 1;
+  if (dist >= far) return 0;
+  return 1 - (dist - near) / (far - near);
 }
 
 /**
@@ -259,7 +277,11 @@ export function createAudioEngine({
 
   // One small synthesized recipe per cue — pitch, rhythm and
   // timbre carry the meaning; volume stays tasteful throughout.
-  function schedule(cue) {
+  // `gainScale` (0..1) is the caller's distance attenuation —
+  // only the ambient combat/work cues honor it (INF-10); the
+  // addressed cues (orders, alerts, stingers) always play at
+  // their authored level.
+  function schedule(cue, gainScale = 1) {
     switch (cue) {
       case 'click':
         tone({ freq: 840, type: 'square', dur: 0.035, gain: 0.07 });
@@ -318,6 +340,18 @@ export function createAudioEngine({
         tone({ freq: 180, freqEnd: 160, type: 'square', dur: 0.10, gain: 0.10 });
         tone({ freq: 180, freqEnd: 160, type: 'square', at: 0.15, dur: 0.10, gain: 0.10 });
         break;
+      case 'combat': { // a distant skirmish: soft clash + thud
+        const g = Math.max(0, Math.min(1, gainScale));
+        noise({ dur: 0.09, gain: 0.15 * g, freq: 900, q: 0.6 });
+        tone({ freq: 138, freqEnd: 92, type: 'triangle', dur: 0.07, gain: 0.10 * g });
+        break;
+      }
+      case 'work': { // one tool strike: axe on wood, hammer tap
+        const g = Math.max(0, Math.min(1, gainScale));
+        noise({ dur: 0.045, gain: 0.13 * g, freq: 1150, q: 0.7 });
+        tone({ freq: 210, freqEnd: 150, type: 'triangle', dur: 0.04, gain: 0.05 * g });
+        break;
+      }
       case 'idleTick': // barely there
         tone({ freq: 980, type: 'sine', dur: 0.03, gain: 0.022 });
         break;
@@ -354,8 +388,12 @@ export function createAudioEngine({
       }
       return true;
     },
-    /** Play a cue name or semantic event; true when it sounded. */
-    play(event) {
+    /**
+     * Play a cue name or semantic event; true when it sounded.
+     * `opts.gain` (0..1) attenuates the ambient cues (combat,
+     * work — INF-10's distance scaling); other cues ignore it.
+     */
+    play(event, opts = {}) {
       const cue = cueForEvent(event);
       if (!cue || !settings.enabled || !armed) return false;
       if (!gate.allow(cue)) return false;
@@ -365,7 +403,9 @@ export function createAudioEngine({
         const p = c.resume();
         if (p && p.catch) p.catch(() => {});
       }
-      schedule(cue);
+      const gain = Number.isFinite(opts.gain)
+        ? Math.max(0, Math.min(1, opts.gain)) : 1;
+      schedule(cue, gain);
       return true;
     },
     setEnabled(enabled) {

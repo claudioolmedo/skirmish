@@ -81,7 +81,10 @@ import {
   PAGE_KINDS, resolveHotkey, badgeForButton, edgePan,
 } from './play/hotkeys.js';
 import { diffFeedEvents } from './play/feed.js';
-import { createAudioEngine, cuesForSnapshotDiff } from './play/audio.js';
+import { createAudioEngine, cuesForSnapshotDiff, distanceGain } from './play/audio.js';
+import {
+  firstHpDrop, nearestHpDrop, alertFresh, alertFlashOn, alertDue,
+} from './play/alerts.js';
 import { ClickMarkers, markerHeads } from './play/clickmarker.js';
 import { pennantsForSelection, pennantShape } from './play/pennants.js';
 import {
@@ -102,6 +105,11 @@ const assetUrl = (rel) => new URL(rel, import.meta.url).href;
 const gameAudio = createAudioEngine();
 function playAudioCue(cue) {
   try { return gameAudio.play(cue); } catch { return false; }
+}
+/// An ambient cue attenuated by distance to the camera (INF-10:
+/// combat and work noise scale with how far the action is).
+function playAudioCueScaled(cue, gain) {
+  try { return gameAudio.play(cue, { gain }); } catch { return false; }
 }
 
 const params = new URLSearchParams(location.search);
@@ -551,16 +559,18 @@ function flash(msg) {
 // DE's top-left event log ("House Built", "Villager Created",
 // "Sheep Found", "Loom Research Complete"...): how a player
 // tracks the game while looking somewhere else. Own-player
-// events only, detected by diffing snapshots of the state the
+// events, detected by diffing snapshots of the state the
 // client already reads every frame for its own seat (completed
 // buildings, living units by kind, researched techs, age, owned
-// sheep) — nothing here observes the opponent, so the feed is
-// fog-fair by construction. The diff -> message mapping is the
+// sheep) — the feed is fog-fair by construction. ONE public
+// datum is observed across the table (INF-02/INF-07: every
+// player's current Age is always public): the opponent's age
+// advance is announced too. The diff -> message mapping is the
 // pure play/feed.js; this layer owns the snapshot and the DOM.
-// No audio (that is a separate, later gap).
 
 const FEED_MAX_LINES = 5;
 let feedPrev = null; // previous snapshot; null until a match seeds it
+let feedFoeAge = -1; // last announced opponent age; -1 = unseeded
 
 function ownFeedSnapshot() {
   const built = {};
@@ -637,6 +647,18 @@ function updateEventFeed() {
   }, feedFmt());
   feedPrev = snap;
   for (const text of lines) pushFeedLine(text);
+  // INF-02: the opponent's age advance is a global event and
+  // age is public (INF-07) — announce it like DE does, with
+  // the same milestone stinger. Seeded silently alongside the
+  // own snapshot; only Feudal exists in the current scope.
+  if (seatAware()) {
+    const foeAge = sim.age_for(foeOwner());
+    if (feedFoeAge >= 0 && foeAge > feedFoeAge) {
+      pushFeedLine(t('feed.foeFeudal'));
+      playAudioCue('ageAdvance');
+    }
+    feedFoeAge = foeAge;
+  }
   // Generated audio: the same own-seat transition the feed just
   // voiced earns its cue (construction complete, a villager
   // trained, research complete, the age fanfare). The mapping
@@ -649,6 +671,7 @@ function updateEventFeed() {
 /// seeds silently, and stale lines from the last match go.
 function resetEventFeed() {
   feedPrev = null;
+  feedFoeAge = -1;
   if (feedEl) feedEl.innerHTML = '';
 }
 
@@ -658,6 +681,8 @@ function resetEventFeed() {
 /// match never "takes damage" from the last one's numbers.
 function resetAudioWorldState() {
   audioPrevHp = null;
+  audioPrevHpAll = null;
+  lastAttackAlert = null;
   audioHousedPrev = false;
   lastIdleVil = -1;
   lastIdleMil = -1;
@@ -1212,6 +1237,20 @@ function updateVilAnim(i, wx, wy, now) {
   if (state === 'gather' && frame === GATHER_IMPACT_FRAME
       && gTarget && gTarget.kind === 0) {
     noteTreeHit(gTarget, wx, wy, now);
+  }
+  // Work sounds (INF-10, 2026-10-22 night run): the same
+  // impact frame earns one tool-strike tick — axe, pick or
+  // hammer — gain-scaled by the worker's distance to the
+  // camera center. The engine's gate (one per 400 ms)
+  // collapses a whole crew into a single tick per window;
+  // off-screen work stays silent. Never during replay
+  // playback: the feed and the sounds report the match being
+  // played, not watched.
+  if ((state === 'gather' || state === 'build') && frame === GATHER_IMPACT_FRAME
+      && !playback) {
+    const [ccx, ccy] = s2w(canvas.width / 2, canvas.height / 2, camS, camOx, camOy);
+    const gain = distanceGain(Math.hypot(wx - ccx, wy - ccy));
+    if (gain > 0.02) playAudioCueScaled('work', gain);
   }
   return { state, dir: a.dir, frame };
 }
@@ -1900,6 +1939,19 @@ function handleGameKey(e) {
             playAudioCue('select');
           }
         }
+      }
+      return true;
+    }
+    case 'Backspace': // SEL-10 / INF-01: jump to the most
+    case 'Home': {    // recent attack alert's location. The
+      // sources name both keys (GAP: Backspace; the wiki's
+      // Return-of-Rome table: Home), so both are bound to the
+      // same jump — neither reading is left unbound.
+      if (e.ctrlKey || e.metaKey || e.altKey) return false;
+      e.preventDefault();
+      if (!e.repeat && lastAttackAlert) {
+        centerOn(lastAttackAlert.x, lastAttackAlert.y);
+        playAudioCue('select');
       }
       return true;
     }
@@ -7050,6 +7102,8 @@ let lastAge = -1; // M6: the last age tag shown in the top bar
 // the housed edge. Seeded silently on the first frame of a
 // match (resetAudioWorldState, next to the feed's reset).
 let audioPrevHp = null;
+let audioPrevHpAll = null; // every entity/building, for combat noise
+let lastAttackAlert = null; // INF-01: { x, y, at } of the latest located alert
 let audioHousedPrev = false;
 
 function updateTopBar() {
@@ -7098,28 +7152,56 @@ function updateTopBar() {
 /// (fog-fair by construction), only while a match is being
 /// played (never during replay playback), and the engine's
 /// gate hard-throttles the attack cue to one per 9 s.
+///
+/// INF-01 (2026-10-22 night run): the same own-HP diff now
+/// also LOCATES the alert — play/alerts.js finds which own
+/// thing lost HP and where it stands; the minimap flashes
+/// there for a few seconds and the go-to key jumps the camera
+/// to it (SEL-10). One located alert per 9 s, the cue's own
+/// clock, so horn and marker can never disagree.
+///
+/// INF-10 (2026-10-22 night run): the all-owners HP diff earns
+/// ambient combat noise, gain-scaled by the nearest drop's
+/// distance to the camera center — a fight is heard in
+/// proportion to how close the view is to it.
 function updateAudioWorldState(housedNow) {
   if (!sim || playback) return;
   if (housedNow && !audioHousedPrev) playAudioCue('housed');
   audioHousedPrev = housedNow;
   const hp = new Map();
+  const hpAll = new Map();
+  const meta = new Map();
   const st = entityState();
   for (let i = 0; i < st.count; i++) {
-    if (st.owners[i] === localOwner) hp.set('e' + i, st.hp[i * 2]);
+    const key = 'e' + i;
+    hpAll.set(key, st.hp[i * 2]);
+    meta.set(key, { x: st.pos[i * 2], y: st.pos[i * 2 + 1] });
+    if (st.owners[i] === localOwner) hp.set(key, st.hp[i * 2]);
   }
   for (const b of buildingList()) {
-    if (b.owner === localOwner) hp.set('b' + b.id, b.hpFrac);
+    const key = 'b' + b.id;
+    hpAll.set(key, b.hpFrac);
+    meta.set(key, { x: b.x, y: b.y });
+    if (b.owner === localOwner) hp.set(key, b.hpFrac);
   }
   if (audioPrevHp) {
-    for (const [key, value] of hp) {
-      const before = audioPrevHp.get(key);
-      if (before != null && value < before - 1e-9) {
-        playAudioCue('underAttack');
-        break;
+    const drop = firstHpDrop(audioPrevHp, hp, meta);
+    if (drop) {
+      playAudioCue('underAttack');
+      const now = performance.now();
+      if (alertDue(lastAttackAlert, now)) {
+        lastAttackAlert = { x: drop.x, y: drop.y, at: now };
       }
+    }
+    const [ccx, ccy] = s2w(canvas.width / 2, canvas.height / 2, camS, camOx, camOy);
+    const fight = nearestHpDrop(audioPrevHpAll, hpAll, meta, ccx, ccy);
+    if (fight) {
+      const gain = distanceGain(fight.dist);
+      if (gain > 0.02) playAudioCueScaled('combat', gain);
     }
   }
   audioPrevHp = hp;
+  audioPrevHpAll = hpAll;
 }
 
 /// One training attempt for a train button; true when the sim
@@ -8367,6 +8449,14 @@ function draw() {
         ? { ...b, color: ENEMY_COLOR }
         : { ...b, color: BUILDING_MINIMAP_COLOR[b.kind] })),
       entities: mmEntities,
+      // INF-01: flash the latest attack location while it is
+      // fresh; play/alerts.js owns the lifetime/blink math.
+      alert: alertFresh(lastAttackAlert, performance.now())
+        ? {
+          x: lastAttackAlert.x, y: lastAttackAlert.y,
+          on: alertFlashOn(lastAttackAlert, performance.now()),
+        }
+        : null,
       cam: { s: camS, ox: camOx, oy: camOy, viewW: W, viewH: H },
     });
   }

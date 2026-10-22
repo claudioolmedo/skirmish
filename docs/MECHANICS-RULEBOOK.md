@@ -473,14 +473,15 @@ Ctrl+letter cycling shipped with the M13 go-to (every shipped kind:
 Ctrl+B Barracks, Ctrl+A Archery Range, Ctrl+S Blacksmith, Ctrl+G
 Mining Camp, Ctrl+Z Lumber Camp, Ctrl+I Mill — the wiki Hotkey page's
 table, fetched 2026-10-21); Space centering on the current selection
-shipped in the 2026-10-21/22 night run. Two pieces stay open: the
-alert jump — the sources conflict (GAP says Backspace; the wiki's
-Return-of-Rome table says Home) and INF-01 does not track alert
-locations client-side, so there is nothing to jump to yet; and
-Ctrl+L (Stable) is reserved by the browser for its address bar — the
-key never reaches the page, so it stays deliberately unbound
-(pinned by `hotkeys.test.mjs`). · *Status:* **DIFFERS** (the alert
-jump only, plus the platform-reserved Ctrl+L).
+shipped in the 2026-10-21/22 night run. The alert jump shipped
+2026-10-22 with INF-01: INF-01 now tracks alert locations
+client-side (`play/alerts.js`), and because the sources conflict
+(GAP says Backspace; the wiki's Return-of-Rome table says Home)
+BOTH keys are bound to the same jump to the most recent alert.
+One piece stays open: Ctrl+L (Stable) is reserved by the browser
+for its address bar — the key never reaches the page, so it stays
+deliberately unbound (pinned by `hotkeys.test.mjs`). · *Status:*
+**DIFFERS** (the platform-reserved Ctrl+L only).
 
 **SEL-11 — Right-click is a smart order.** Right-clicking with a selection
 issues the context order implied by the target: resource node → gather;
@@ -2468,19 +2469,48 @@ marker at the location (minimap + Backspace jumps there, SEL-10).
 Alerts are rate-limited so a raid cannot spam the channel into useless-
 ness.
 *Source:* GAP 11.2; wiki, Mini map (signal conventions). · *Impl:*
-client-side: damage events must therefore be *observable* — the ABI
-gains an event/diff feed at M3 (or the client diffs HP arrays; the
-events feed is cleaner and is what audio needs too, INF-10). ·
-*Status:* **MISSING** (no combat, no alerts, no audio).
+client-side, as this entry's own note prescribed — the client diffs
+HP arrays. Clause-by-clause audit (2026-10-22 night run, against
+the shipped client): (1) *audible warning* — the own-seat HP diff
+(entities + buildings, in `updateAudioWorldState`) plays the
+underAttack horn; shipped with the audio layer 2026-10-20.
+(2) *flashing marker at the location* — shipped 2026-10-22:
+`play/alerts.js` turns the same diff into a located alert (the
+first own thing that lost HP, at its position); the minimap
+paints a flashing X there (6 s lifetime, 500 ms blink cadence,
+the click-marker red), drawn by `renderMinimap` from state the
+caller computes — the renderer stays a dumb painter.
+(3) *Backspace jumps there* — shipped 2026-10-22 under SEL-10:
+the jump is bound to BOTH keys the sources name (GAP's Backspace,
+the wiki Return-of-Rome table's Home), centering the camera on
+the most recent alert. (4) *rate-limited* — one located alert
+per 9 s, the horn's own clock (`ALERT_MIN_INTERVAL_MS` ===
+`CUE_INTERVALS_MS.underAttack`, pinned equal by
+`alerts.test.mjs`), so horn and marker can never disagree about
+whether an attack was announced. · *Status:* **MATCHES**.
 
 **INF-02 — Milestones are announced.** Your own completions (research
 finished, building finished, wonder progress) and global events (any
 player advances an Age, a Wonder is completed anywhere, a relic/wonder
 countdown starts — VIC-02/03) appear as messages/sounds. Countdowns are
 visible to all players while active.
-*Source:* GAP 11.2; standard reference UI behavior. · *Impl:* the same
-event feed as INF-01, with per-event audience flags resolved client-
-side. · *Status:* **MISSING**.
+*Source:* GAP 11.2; standard reference UI behavior. · *Impl:* the
+event feed (play/feed.js diffs + app.js's snapshot layer), with
+the audience resolved exactly as this entry requires. Clause-by-
+clause audit (2026-10-22 night run): (1) *your own completions* —
+research finished and building finished post feed lines and play
+their stingers (shipped 2026-10-19/20 with the feed and audio
+packages). (2) *global events: any player advances an Age* —
+shipped 2026-10-22: the feed layer also tracks the opponent's
+age through `age_for` — a player's current Age is always public
+(INF-07), so this observes no private state — and posts the
+announcement with the age stinger. (3) *wonder progress, a
+Wonder completed anywhere, a relic/wonder countdown* — no
+Wonders or Relics exist in the game's scope yet (VIC-02/03 are
+themselves unbuilt features); those clauses attach when those
+features land, and the "countdowns visible to all players"
+clause with them. Every clause that has an instance in the
+current scope is satisfied. · *Status:* **MATCHES**.
 
 **INF-03 — Idle and housed indicators are always visible.** The UI shows
 a live idle-villager indicator (with the SEL-08 key behind it), an idle-
@@ -2498,9 +2528,11 @@ attack alerts (INF-01), and displays ally flares: a flare is a visible
 X marker + sound placed for allies only (Signal Allies).
 *Source:* wiki, Mini map / Signal Allies; GAP 11.1. · *Impl:* minimap
 rendering shipped (terrain, nodes, buildings, entities, viewport rect);
-fog shading shipped with M7 (VIS-10); flares are a client command + net
-message (NET-10). · *Status:* **DIFFERS** (map and fog yes;
-flares/alert flashes no).
+fog shading shipped with M7 (VIS-10); the attack-alert flash shipped
+2026-10-22 with INF-01 (a flashing X at the alert location);
+flares are a client command + net message (NET-10) and wait for
+team games — there are no allies to signal yet. · *Status:*
+**DIFFERS** (map, fog and alert flashes yes; ally flares no).
 
 **INF-05 — Selection panel shows identity and health.** A single selected
 unit/building shows its portrait, HP bar, attack/armor stats, and (for
@@ -2509,9 +2541,12 @@ shows a grid of portraits with per-unit HP tinting. Enemy entities show
 HP when visible; their orders, queues, and cargo never.
 *Source:* GAP 11.5, 11.6. · *Impl:* the selection panel ships with kind
 name + HP (M3's HP model + ABI) and, for production buildings, the
-queue contents — units and research alike (M6); attack/armor stats
-are not shown, and rally points have no visual marker yet.
-· *Status:* **DIFFERS**.
+queue contents — units and research alike (M6). Rally points DO
+have their visual marker — the selected building's/TC's rally flag
+(`drawRallyFlag`, shipped with SEL-13; this entry's earlier text
+was stale, corrected 2026-10-22). What remains open is only the
+attack/armor stats, which are not shown. · *Status:* **DIFFERS**
+(attack/armor stats only).
 
 **INF-06 — The command panel is the tech tree's front door.** A selected
 unit/building's panel shows exactly its available actions (build menu,
@@ -2610,8 +2645,26 @@ work sounds, combat noise scaled by distance to the camera, alert horns
 All audio is original (clean-room), generated/synthesized in-house; no
 reference audio asset may be used.
 *Source:* GAP §12 (audio system); clean-room doctrine (see the clean-room section of the project README). ·
-*Impl:* renderer-side only, driven by the event feed (INF-01); zero
-audio exists in the client today. · *Status:* **MISSING**.
+*Impl:* renderer-side only (play/audio.js), driven by UI actions
+and client-side state diffs; zero sim, command or hash contact.
+Clause-by-clause audit (2026-10-22 night run): (1) *unit
+acknowledgements* — order cues per actor kind (villager /
+military / building), selection and UI cues; shipped 2026-10-20.
+(2) *alert horns* — the INF-01 underAttack horn, same package.
+(3) *milestone stingers* — age fanfare, research, construction,
+victory/defeat; same package. (4) *work sounds* — shipped
+2026-10-22: a villager's gather/build animation impact frame
+(the same frame that drives the tree-hit feedback) earns one
+tool-strike tick, gain-scaled by the worker's distance to the
+camera center. (5) *combat noise scaled by distance to the
+camera* — shipped 2026-10-22: an all-owners HP diff (the
+combat happening anywhere is world state the client already
+renders) takes the drop nearest the camera center and plays
+the combat cue through `distanceGain` (full at ≤4 wu, silent
+at ≥38 wu; the engine's gate keeps it to one hit per 450 ms).
+(6) *all audio original* — every cue is synthesized at runtime
+with the Web Audio API (oscillators + filtered noise); there
+are no samples and no audio files. · *Status:* **MATCHES**.
 
 **INF-11 — Scores and statistics close the loop.** During the match, a
 scoreboard shows live scores/ages/populations (INF-07). After the match,
@@ -2658,7 +2711,20 @@ construction HP, CMB-08 the full auto-targeting chain) and two
 narrowings with no status change (ECO-03 — Wheelbarrow shipped,
 Hand Cart waits for the Castle Age; SEL-11 — build-resume
 routed, the garrison context stays open), recounted mechanically
-below).
+below; updated again 2026-10-22 (night run, final package) for
+the stale-entry verification sweep of §18: INF-01, INF-02 and
+INF-10 were audited clause-by-clause against the shipped client
+— the audio layer and event feed (2026-10-19/20) already
+satisfied most clauses, and the genuine gaps were closed the
+same night (INF-01's located alert: minimap flash + the
+Backspace/Home jump; INF-02's opponent age announcement;
+INF-10's work sounds and distance-scaled combat noise) — so
+all three move MISSING → MATCHES, and three entries narrow
+with no status change (INF-04 — alert flashes now yes, ally
+flares still no; SEL-10 — the alert jump shipped, only the
+platform-reserved Ctrl+L remains; INF-05 — the rally marker
+was already shipped, only attack/armor stats remain),
+recounted mechanically below).
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
@@ -2679,8 +2745,8 @@ below).
 | 15 | AI behavior & difficulty (AI) | 9 | 5 | 2 | 2 |
 | 16 | Victory, scoring & game modes (VIC) | 12 | 1 | 0 | 11 |
 | 17 | Multiplayer determinism (NET) | 11 | 4 | 5 | 2 |
-| 18 | Information rules (INF) | 12 | 4 | 3 | 5 |
-| | **Total** | **217** | **109** | **35** | **73** |
+| 18 | Information rules (INF) | 12 | 7 | 3 | 2 |
+| | **Total** | **217** | **112** | **35** | **70** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer
