@@ -83,6 +83,7 @@ import {
 import { diffFeedEvents } from './play/feed.js';
 import { createAudioEngine, cuesForSnapshotDiff } from './play/audio.js';
 import { ClickMarkers, markerHeads } from './play/clickmarker.js';
+import { pennantsForSelection, pennantShape } from './play/pennants.js';
 import {
   t, getLocale, setLocale, costText, genderOf,
 } from './play/i18n.js';
@@ -7100,7 +7101,7 @@ function cmdButton({ id, icon, img, label, costIcon, cost, cost2Icon, cost2, tit
   // JUST a square with its icon — no name and no price printed
   // on the face. Name and full cost (both resources, where two
   // apply) live in the hover tooltip: every call site's title
-  // states them (e.g. 'Train Militia — 60 food · 20 gold').
+  // states them (e.g. 'Train Militia — 50 food · 20 gold').
   // The label/cost arguments stay in the signature because the
   // call sites pass them alongside the title; the face renders
   // only the glyph and the hotkey letter at its top-left corner.
@@ -7304,7 +7305,7 @@ function renderCommands() {
         key: badgeForButton({ context, id: 'train-militia', index: 0 }),
         title: underConstruction
           ? t('cmd.underConstruction', { name: KIND_NAME[3], building: BUILD_NAME[2] })
-          : t('cmd.trainTitle', { name: KIND_NAME[3], cost: costText([[60, 'food'], [20, 'gold']]) }) + (TRAIN_BLOCK_TITLES[blockM] ? ' ' + TRAIN_BLOCK_TITLES[blockM] : ''),
+          : t('cmd.trainTitle', { name: KIND_NAME[3], cost: costText([[50, 'food'], [20, 'gold']]) }) + (TRAIN_BLOCK_TITLES[blockM] ? ' ' + TRAIN_BLOCK_TITLES[blockM] : ''),
       }),
       cmdButton({
         id: 'research-maa', icon: 'i-maa', img: 'man-at-arms.png', label: 'Man-at-Arms',
@@ -7955,6 +7956,43 @@ function draw() {
         ctx.fill();
         ctx.restore();
       }
+      ctx.restore();
+    }
+  }
+
+  // Waypoint pennants (INF-09): the persistent flags of the
+  // selected units' queued order chains, read from the sim's
+  // order routes every frame — a flag exists exactly while its
+  // order does (completion, replacement and death remove it by
+  // construction). Drawn after the fog dim like the click
+  // marker: DE plants the flags IN the black (study 2, f_006) —
+  // they are the player's own order echo, not world
+  // information. Only the leader's chain draws for a group
+  // selection (the "Waypoint Markers" article, via
+  // play/pennants.js). Own units only, in the player's colour.
+  if (selection.size) {
+    const st = entityState();
+    const routes = [];
+    for (const id of selection) {
+      if (isOwnUnit(st, id)) routes.push(sim.entity_order_route(id));
+    }
+    const shape = pennantShape();
+    for (const p of pennantsForSelection(routes)) {
+      const [sx, sy] = worldToScreen(p.x, p.y);
+      ctx.save();
+      ctx.strokeStyle = 'rgba(216, 220, 224, 0.9)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(sx + shape.poleTop[0] * camS, sy + shape.poleTop[1] * camS);
+      ctx.stroke();
+      ctx.fillStyle = OWN_COLOR;
+      ctx.beginPath();
+      ctx.moveTo(sx + shape.poleTop[0] * camS, sy + shape.poleTop[1] * camS);
+      ctx.lineTo(sx + shape.tip[0] * camS, sy + shape.tip[1] * camS);
+      ctx.lineTo(sx + shape.low[0] * camS, sy + shape.low[1] * camS);
+      ctx.closePath();
+      ctx.fill();
       ctx.restore();
     }
   }

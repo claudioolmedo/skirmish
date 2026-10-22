@@ -80,6 +80,14 @@ export class WasmSim {
      */
     entity_kinds(): Uint8Array;
     /**
+     * One entity's order route as flat world-point pairs
+     * `[x0, y0, x1, y1, ...]` (INF-09): the current order's
+     * target (only while orders are queued behind it) followed
+     * by each queued order's target. Behind the client's
+     * waypoint-pennant render. Render-only, like `rally_points`.
+     */
+    entity_order_route(entity: number): Float64Array;
+    /**
      * Per-entity owner tags in id order (M3): 0 = the human player,
      * 1 = Gaia, 2 = the AI opponent (M5). A sheep flips 1 → its
      * capturer's tag when captured.
@@ -573,6 +581,7 @@ export interface InitOutput {
     readonly wasmsim_entity_count: (a: number) => number;
     readonly wasmsim_entity_hp: (a: number) => [number, number];
     readonly wasmsim_entity_kinds: (a: number) => [number, number];
+    readonly wasmsim_entity_order_route: (a: number, b: number) => [number, number];
     readonly wasmsim_entity_owners: (a: number) => [number, number];
     readonly wasmsim_entity_path: (a: number, b: number) => [number, number];
     readonly wasmsim_fog: (a: number) => [number, number];

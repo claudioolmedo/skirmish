@@ -13,6 +13,7 @@ export const wasmsim_entity_can_auto_explore: (a: number, b: number) => number;
 export const wasmsim_entity_count: (a: number) => number;
 export const wasmsim_entity_hp: (a: number) => [number, number];
 export const wasmsim_entity_kinds: (a: number) => [number, number];
+export const wasmsim_entity_order_route: (a: number, b: number) => [number, number];
 export const wasmsim_entity_owners: (a: number) => [number, number];
 export const wasmsim_entity_path: (a: number, b: number) => [number, number];
 export const wasmsim_fog: (a: number) => [number, number];
