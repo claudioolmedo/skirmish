@@ -40,6 +40,15 @@
 //!   100 food / 40 gold, 40 s is adopted from the reference game's
 //!   public values and flagged UNVERIFIED (not in the project
 //!   docs) here and in the M6 report.
+//! - Wheelbarrow: 175 food / 50 wood, 75 s, Town Center, Feudal
+//!   Age (wiki, Technology (Age of Empires II) — economy table;
+//!   wiki, Wheelbarrow (Age of Empires II)). Effects: villager
+//!   carry capacity +25% as the wiki's comparison table resolves
+//!   it (10 → 13 ordinary, 35 → 44 hunted meat) and villager
+//!   speed +10% — TEC-06's first *percentage* patch: the speed
+//!   scalar multiplies the layered row (base + flat adds) in
+//!   `Sim::stats_for`. Its successor Hand Cart is a Castle Age
+//!   technology (same sources) and waits for that Age (ECO-03).
 
 use crate::build::BuildingKind;
 use crate::entity::EntityKind;
@@ -82,21 +91,24 @@ pub enum TechId {
     PaddedArcherArmor,
     /// Barracks, Feudal: the Militia line upgrades (CLS-03).
     ManAtArms,
+    /// Town Center, Feudal: villager carry + speed (ECO-03).
+    Wheelbarrow,
 }
 
 impl TechId {
     /// All technologies, in tag order.
-    pub const ALL: [TechId; 6] = [
+    pub const ALL: [TechId; 7] = [
         TechId::Loom,
         TechId::FeudalAge,
         TechId::Fletching,
         TechId::ScaleMail,
         TechId::PaddedArcherArmor,
         TechId::ManAtArms,
+        TechId::Wheelbarrow,
     ];
 
     /// Stable tag: 0 loom, 1 feudal age, 2 fletching, 3 scale mail,
-    /// 4 padded archer armor, 5 man-at-arms.
+    /// 4 padded archer armor, 5 man-at-arms, 6 wheelbarrow.
     pub fn tag(self) -> u8 {
         match self {
             TechId::Loom => 0,
@@ -105,6 +117,7 @@ impl TechId {
             TechId::ScaleMail => 3,
             TechId::PaddedArcherArmor => 4,
             TechId::ManAtArms => 5,
+            TechId::Wheelbarrow => 6,
         }
     }
 
@@ -122,7 +135,7 @@ impl TechId {
     /// placed building kind.
     pub fn host(self) -> TechHost {
         match self {
-            TechId::Loom | TechId::FeudalAge => TechHost::TownCenter,
+            TechId::Loom | TechId::FeudalAge | TechId::Wheelbarrow => TechHost::TownCenter,
             TechId::Fletching | TechId::ScaleMail | TechId::PaddedArcherArmor => {
                 TechHost::Building(BuildingKind::Blacksmith)
             }
@@ -151,6 +164,7 @@ impl TechId {
             TechId::ScaleMail => 2400,
             TechId::PaddedArcherArmor => 2400,
             TechId::ManAtArms => 2400, // UNVERIFIED (module docs)
+            TechId::Wheelbarrow => 4500,
         }
     }
 
@@ -164,6 +178,7 @@ impl TechId {
             TechId::ScaleMail => (100, 0, 0, 0),
             TechId::PaddedArcherArmor => (100, 0, 0, 0),
             TechId::ManAtArms => (100, 0, 40, 0), // UNVERIFIED (module docs)
+            TechId::Wheelbarrow => (175, 50, 0, 0),
         }
     }
 }
@@ -257,11 +272,17 @@ mod tests {
         assert_eq!(TechId::ScaleMail.ticks(), 40 * 60);
         assert_eq!(TechId::PaddedArcherArmor.cost(), (100, 0, 0, 0));
         assert_eq!(TechId::PaddedArcherArmor.ticks(), 40 * 60);
+        // Wheelbarrow: 175 F / 50 W, 75 s, Town Center (wiki,
+        // Technology (Age of Empires II), economy table).
+        assert_eq!(TechId::Wheelbarrow.cost(), (175, 50, 0, 0));
+        assert_eq!(TechId::Wheelbarrow.ticks(), 75 * 60);
+        assert_eq!(TechId::Wheelbarrow.host(), TechHost::TownCenter);
+        assert_eq!(TechId::Wheelbarrow.age_required(), Age::Feudal);
         // Tags are stable and round-trip.
         for t in TechId::ALL {
             assert_eq!(TechId::from_tag(t.tag()), Some(t));
         }
-        assert_eq!(TechId::from_tag(6), None);
+        assert_eq!(TechId::from_tag(7), None);
     }
 
     #[test]

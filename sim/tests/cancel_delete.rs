@@ -515,7 +515,13 @@ fn a_house_built_in_dark_reaches_the_feudal_max_and_new_houses_start_there() {
         "the repaired House must reach the Feudal max of 750, not stop at 550"
     );
 
-    // And a House placed now starts at the Feudal value outright.
+    // And a House placed now: its construction ceiling follows
+    // the Feudal column too (BLD-11 as a lookup). Under BLD-05
+    // (2026-10-22) a foundation carries HP proportional to its
+    // progress — it starts at the line's 1 HP floor, not at its
+    // max — and reaches exactly 750 at completion. (This tail
+    // asserted the pre-BLD-05 full-HP-at-placement simplification
+    // when written; BLD-05's documented rule supersedes it.)
     if f(sim.stockpile_of(OWNER_PLAYER).amount(ResourceKind::Wood)) < 25.0 {
         sim.push_command(Command::Gather {
             entity: vils[2],
@@ -529,11 +535,31 @@ fn a_house_built_in_dark_reaches_the_feudal_max_and_new_houses_start_there() {
     let cell = open_anchor_near(&sim, tc, vils[1], BuildingKind::House);
     build_at(&mut sim, vils[1], BuildingKind::House, cell);
     sim.tick();
-    let fresh = sim
+    let fresh_id = sim
         .buildings()
         .iter()
         .filter(|b| b.kind == BuildingKind::House && b.id != house)
         .last()
-        .expect("the second House was placed");
-    assert_eq!(f(fresh.hp), 750.0, "a Feudal House starts at 750 HP");
+        .expect("the second House was placed")
+        .id;
+    let fresh = sim.buildings().iter().find(|b| b.id == fresh_id).unwrap();
+    // The builder started in range, so a few thirds already
+    // accrued in the placement tick: HP sits at the line's floor
+    // end (~1), nowhere near the 750 max it completes at.
+    let hp0 = f(fresh.hp);
+    assert!(
+        hp0 >= 1.0 && hp0 < 3.0,
+        "a fresh foundation starts at BLD-05's 1 HP floor, got {hp0}"
+    );
+    assert!(!fresh.complete);
+    let done = run_until(&mut sim, 120_000, |s| {
+        s.buildings().iter().find(|b| b.id == fresh_id).unwrap().complete
+    });
+    assert!(done, "the second House never completed");
+    let fresh = sim.buildings().iter().find(|b| b.id == fresh_id).unwrap();
+    assert_eq!(
+        f(fresh.hp),
+        750.0,
+        "a House completed in Feudal lands exactly at the Feudal max of 750"
+    );
 }

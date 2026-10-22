@@ -5,6 +5,7 @@
 //! diverge. If any of these fail, the sim has a nondeterminism bug and
 //! nothing else may proceed until it is fixed.
 
+use fixed::types::I16F16;
 use skirmish_sim::{Command, Sim, TICKS_PER_SECOND};
 
 /// Ticks per scenario: 600 = 10 seconds of game time at 60 Hz, enough to
@@ -82,6 +83,49 @@ fn hash_covers_rng_state() {
         b.tick();
     }
     assert_ne!(a.state_hash(), b.state_hash());
+}
+
+#[test]
+fn hash_parts_localize_a_divergence() {
+    // SIM-06: the subsystem checksums are prefixes of the one
+    // canonical stream — `full` always equals `state_hash()` — and
+    // they localize a divergence. Two runs differing only by a move
+    // order agree on the RNG and world parts and disagree from the
+    // entity (targeting) part on; two runs differing by seed
+    // disagree already at the world part (different generated map).
+    let mut a = Sim::new(42);
+    let mut b = Sim::new(42);
+    // Move the first villager of run B somewhere (entity 0 is a
+    // villager in the standard opening package).
+    let villager = b
+        .entities()
+        .iter()
+        .find(|e| e.kind == skirmish_sim::EntityKind::Villager)
+        .map(|e| e.id)
+        .expect("opening package has a villager");
+    b.push_command(Command::Move {
+        entity: villager,
+        x: I16F16::from_num(20),
+        y: I16F16::from_num(20),
+    });
+    for _ in 0..30 {
+        a.tick();
+        b.tick();
+    }
+    let (pa, pb) = (a.state_hash_parts(), b.state_hash_parts());
+    assert_eq!(pa.full, a.state_hash());
+    assert_eq!(pb.full, b.state_hash());
+    assert_eq!(pa.rng, pb.rng, "a move order draws no RNG");
+    assert_eq!(pa.world, pb.world, "the generated world is identical");
+    assert_ne!(pa.targeting, pb.targeting, "the moved villager is entity state");
+    assert_ne!(pa.full, pb.full);
+
+    let mut c = Sim::new(43);
+    for _ in 0..30 {
+        c.tick();
+    }
+    let pc = c.state_hash_parts();
+    assert_ne!(pa.world, pc.world, "a different seed generates a different map");
 }
 
 #[test]

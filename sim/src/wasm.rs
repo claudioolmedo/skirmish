@@ -244,6 +244,12 @@ impl WasmSim {
         self.push_research_tc(TechId::FeudalAge)
     }
 
+    /// Enqueue Wheelbarrow at the Town Center (175 food, 50 wood,
+    /// 75 s; Feudal Age — ECO-03).
+    pub fn push_research_wheelbarrow(&mut self) -> bool {
+        self.push_research_tc(TechId::Wheelbarrow)
+    }
+
     fn push_research_tc(&mut self, tech: TechId) -> bool {
         let ok = self.inner.can_research_tc(tech);
         if ok {

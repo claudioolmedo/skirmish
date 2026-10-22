@@ -437,6 +437,37 @@ pub const REPAIR_HP_PER_MIN_EXTRA: i64 = 375;
 /// continuous drip proportional to the HP restored each tick.
 pub const REPAIR_COST_FRACTION: I16F16 = I16F16::from_bits(32_768); // 0.5
 
+/// BLD-05: the HP ceiling of an under-construction building —
+/// the proportional line from 1 HP at zero progress to the full
+/// maximum at completion (a building reaches full HP exactly when
+/// its construction does). Current HP rides the same distance
+/// below the ceiling for its whole construction: damage taken
+/// while building persists (the construction phase adds the
+/// ceiling's per-tick rise to whatever HP stands, never more).
+/// The 1 HP intercept is the proportional line's natural floor —
+/// a building dies below 1 HP (CMB-02's threshold, applied to
+/// buildings in `combat::damage_building`), so a fresh foundation
+/// stands at exactly 1 HP until the first construction tick.
+/// (The reference's exact starting fraction is UNVERIFIED in
+/// public sources; the proportional growth itself is the
+/// documented behavior — RULEBOOK BLD-05.) Integer math over raw
+/// fixed-point bits; progress is clamped to the build total (the
+/// completing tick overshoots it).
+pub fn construction_hp_ceiling(
+    max_hp: i32,
+    progress_thirds: u64,
+    build_thirds: u64,
+) -> I16F16 {
+    let max_bits = (max_hp as i64) << 16;
+    let one_hp = 1i64 << 16;
+    let p = progress_thirds.min(build_thirds) as i64;
+    let total = build_thirds as i64;
+    if total <= 0 {
+        return I16F16::from_bits(max_bits as i32);
+    }
+    I16F16::from_bits((one_hp + (max_bits - one_hp) * p / total) as i32)
+}
+
 /// Total repair rate in HP per minute for `repairers` villagers
 /// (≥ 1) working the same building: 750 + 375·(n − 1)
 /// = 375·(n + 1) HP/min — the first repairer works at the full
@@ -460,11 +491,11 @@ pub struct Building {
     /// building as that player's. Part of the hashed state.
     pub owner: u8,
     /// Current hit points (M5): a placed building can be attacked
-    /// and destroyed (see `combat::damage_building`). Set to the
-    /// kind's table maximum at placement — an under-construction
-    /// building has full HP in M5 (the reference scales HP with
-    /// construction progress; recorded v1 simplification). Part of
-    /// the hashed state.
+    /// and destroyed (see `combat::damage_building`). While under
+    /// construction the HP rides below the proportional ceiling of
+    /// `construction_hp_ceiling` (BLD-05): placed at 1 HP, rising
+    /// with progress, reaching the kind's table maximum exactly at
+    /// completion if undamaged. Part of the hashed state.
     pub hp: I16F16,
     pub cell_x: u32,
     pub cell_y: u32,

@@ -123,7 +123,7 @@ export function validateCommand(c) {
     case 'build': return isInt(c.e) && isInt(c.k) && c.k <= 8 && isNum(c.x) && isNum(c.y);
     case 'train_at': return isInt(c.b) && (c.k === 2 || c.k === 3 || c.k === 4);
     case 'train_vil': return true;
-    case 'research_tc': return c.tech === 0 || c.tech === 1;
+    case 'research_tc': return c.tech === 0 || c.tech === 1 || c.tech === 6;
     case 'research_at': return isInt(c.b) && isInt(c.tech) && c.tech <= 5;
     case 'rally_tc': return isNum(c.x) && isNum(c.y);
     case 'rally_b': return isInt(c.b) && isNum(c.x) && isNum(c.y);

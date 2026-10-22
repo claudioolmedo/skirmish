@@ -632,3 +632,78 @@ fn a_builder_joining_mid_build_changes_the_pace() {
     );
     assert_eq!(sim.population_cap(), 10);
 }
+
+#[test]
+fn foundation_hp_grows_with_construction_bld05() {
+    // BLD-05: a foundation's HP is proportional to its construction
+    // progress — 1 HP at placement, full maximum exactly at
+    // completion (House: 550 HP in the Dark Age, 4500 build-thirds).
+    let mut sim = Sim::new(31);
+    let (hx, hy) = open_anchor_near_tc(&sim, 1, BuildingKind::House);
+    build(&mut sim, 1, BuildingKind::House, hx, hy);
+    sim.tick(); // placement applied here
+    assert_eq!(sim.buildings().len(), 1);
+    let fresh = sim.buildings()[0].hp.to_num::<f64>();
+    assert!(
+        (1.0..3.0).contains(&fresh),
+        "a fresh foundation must stand at the foot of the HP line (~1 HP), got {fresh}"
+    );
+    // Work to at least half progress: the ceiling there is
+    // 1 + (550 - 1) * 2250/4500 = 275.5 HP.
+    let half = run_until(&mut sim, 20_000, |s| s.buildings()[0].progress_thirds >= 2250);
+    assert!(half);
+    let mid = sim.buildings()[0].hp.to_num::<f64>();
+    assert!(
+        (270.0..282.0).contains(&mid),
+        "half-built house must stand near half HP (~275), got {mid}"
+    );
+    let done = run_until(&mut sim, 20_000, |s| s.buildings()[0].complete);
+    assert!(done);
+    assert_eq!(
+        sim.buildings()[0].hp,
+        I16F16::from_num(550),
+        "an undamaged building completes at exactly full HP"
+    );
+}
+
+#[test]
+fn build_resume_accepts_an_order_on_any_foundation_cell() {
+    // SEL-11 (2026-10-22): a Build order aimed at ANY cell of a
+    // standing foundation resumes it — a right-click smart order
+    // lands wherever on the building the player clicked, not
+    // necessarily its anchor cell. The resume never double-charges
+    // and never places a second building.
+    let mut sim = Sim::new(31);
+    let (hx, hy) = open_anchor_near_tc(&sim, 1, BuildingKind::House);
+    build(&mut sim, 1, BuildingKind::House, hx, hy);
+    sim.tick();
+    assert_eq!(sim.buildings().len(), 1);
+    let wood_after_place = sim.stockpile().amount(ResourceKind::Wood);
+    // Villager 2 is ordered onto the foundation's far cell
+    // (anchor + 1, + 1 — a 2x2 House's south-east cell).
+    let (x, y) = anchor_point(&sim, hx + 1, hy + 1);
+    sim.push_command(Command::Build {
+        entity: 2,
+        kind: BuildingKind::House,
+        x,
+        y,
+    });
+    sim.tick();
+    assert_eq!(
+        sim.buildings().len(),
+        1,
+        "an off-anchor build order must resume, not place a second house"
+    );
+    assert_eq!(
+        sim.stockpile().amount(ResourceKind::Wood),
+        wood_after_place,
+        "a resume must not charge again"
+    );
+    let joined = run_until(&mut sim, 20_000, |s| villager(s, 2).task == Task::Building);
+    assert!(joined, "the second villager never joined via the off-anchor order");
+    assert_eq!(
+        villager(&sim, 2).task_building,
+        Some(sim.buildings()[0].id),
+        "the resumer must be assigned to the standing foundation"
+    );
+}

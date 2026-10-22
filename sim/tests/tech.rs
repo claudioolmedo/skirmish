@@ -804,3 +804,91 @@ fn ai_match_replays_bit_identically_and_ages_up() {
         "AI never raised its Mill"
     );
 }
+
+#[test]
+fn wheelbarrow_gates_costs_and_patches_carry_and_speed() {
+    // ECO-03 (2026-10-22): Wheelbarrow — Town Center, Feudal Age,
+    // 175 food / 50 wood, 75 s (wiki, Technology (Age of Empires
+    // II)). Effects: carry 10 -> 13 (hunt 35 -> 44, the wiki's
+    // comparison table) and villager speed +10%.
+    let mut sim = Sim::new(61);
+    // Dark Age: locked (the Town Center hosts it, the Age refuses).
+    assert_eq!(
+        sim.research_block_tc(TechId::Wheelbarrow),
+        ResearchBlock::Locked
+    );
+    reach_feudal(&mut sim);
+    // Restock to the price: wood first (all hands), then food.
+    all_chop(&mut sim);
+    wait_wood(&mut sim, 50);
+    let berry = first_live_node(&sim, NodeKind::BerryBush);
+    for id in 1..=3 {
+        sim.push_command(Command::Gather {
+            entity: id,
+            node: berry,
+        });
+    }
+    let fed = run_until(&mut sim, 240_000, |s| {
+        s.stockpile().amount(ResourceKind::Food) >= I16F16::from_num(175)
+    });
+    assert!(fed, "never restocked the Wheelbarrow food");
+    // Baseline row (no Loom in this run): speed 3495 bits.
+    let base = sim.stats_for(OWNER_PLAYER, EntityKind::Villager);
+    assert_eq!(base.speed.to_bits(), 3_495);
+    assert!(sim.can_research_tc(TechId::Wheelbarrow));
+    let (f0, w0) = (
+        sim.stockpile().amount(ResourceKind::Food),
+        sim.stockpile().amount(ResourceKind::Wood),
+    );
+    sim.push_command(Command::ResearchTc {
+        tech: TechId::Wheelbarrow,
+    });
+    sim.tick();
+    assert_eq!(
+        sim.stockpile().amount(ResourceKind::Food),
+        f0 - I16F16::from_num(175),
+        "Wheelbarrow must charge exactly 175 food at enqueue"
+    );
+    assert_eq!(
+        sim.stockpile().amount(ResourceKind::Wood),
+        w0 - I16F16::from_num(50),
+        "Wheelbarrow must charge exactly 50 wood at enqueue"
+    );
+    let done = run_until(&mut sim, 10_000, |s| {
+        s.has_tech(OWNER_PLAYER, TechId::Wheelbarrow)
+    });
+    assert!(done, "Wheelbarrow never completed");
+    assert_eq!(
+        sim.research_block_tc(TechId::Wheelbarrow),
+        ResearchBlock::AlreadyDone
+    );
+    // Speed: exactly the layered row x 11/10 in integer bits.
+    let patched = sim.stats_for(OWNER_PLAYER, EntityKind::Villager);
+    assert_eq!(patched.speed.to_bits(), (3_495 * 11) / 10);
+    // Carry: a wood villager now hauls 13 before turning home
+    // (never 14) — observed over a full gather cycle.
+    let tree = woodline_tree(&sim);
+    sim.push_command(Command::Gather {
+        entity: 1,
+        node: tree,
+    });
+    let mut max_carry = I16F16::ZERO;
+    let mut deposited = false;
+    for _ in 0..60_000 {
+        sim.tick();
+        let c = villager(&sim, 1).carry;
+        if c > max_carry {
+            max_carry = c;
+        }
+        if max_carry > I16F16::ZERO && c == I16F16::ZERO {
+            deposited = true;
+            break;
+        }
+    }
+    assert!(deposited, "the wood villager never completed a haul");
+    assert_eq!(
+        max_carry,
+        I16F16::from_num(13),
+        "Wheelbarrow carry must top out at exactly 13"
+    );
+}

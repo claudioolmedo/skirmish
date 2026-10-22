@@ -141,9 +141,20 @@ impl NodeKind {
     /// meat bundles to 35 (ECO-03 — the case keys off the node kind,
     /// not a villager state).
     pub fn carry_cap(self) -> I16F16 {
-        match self {
-            NodeKind::CarcassHunt => HUNT_CARRY_CAPACITY,
-            _ => CARRY_CAPACITY,
+        self.carry_cap_for(false)
+    }
+
+    /// The carry cap for a villager whose owner may have researched
+    /// Wheelbarrow (ECO-03): the wiki's comparison table resolves
+    /// the +25% as 10 → 13 ordinary and 35 → 44 hunted meat (the
+    /// internal bonus is 26.95% so no case rounds below +25% —
+    /// wiki, Wheelbarrow (Age of Empires II)).
+    pub fn carry_cap_for(self, wheelbarrow: bool) -> I16F16 {
+        match (self, wheelbarrow) {
+            (NodeKind::CarcassHunt, true) => WHEELBARROW_HUNT_CARRY_CAPACITY,
+            (NodeKind::CarcassHunt, false) => HUNT_CARRY_CAPACITY,
+            (_, true) => WHEELBARROW_CARRY_CAPACITY,
+            (_, false) => CARRY_CAPACITY,
         }
     }
 
@@ -256,6 +267,10 @@ impl Stockpile {
 pub const CARRY_CAPACITY: I16F16 = I16F16::from_bits(655_360);
 /// Carry capacity from a hunt carcass (boar/deer meat): 35 (ECO-03).
 pub const HUNT_CARRY_CAPACITY: I16F16 = I16F16::from_bits(2_293_760); // 35
+/// Wheelbarrow carry capacity (ECO-03): 13 (wiki comparison table).
+pub const WHEELBARROW_CARRY_CAPACITY: I16F16 = I16F16::from_bits(851_968); // 13
+/// Wheelbarrow hunt carry capacity (ECO-03): 44 (wiki table).
+pub const WHEELBARROW_HUNT_CARRY_CAPACITY: I16F16 = I16F16::from_bits(2_883_584); // 44
 /// Villager training cost: 50 food, deducted when the order is enqueued.
 pub const VILLAGER_FOOD_COST: I16F16 = I16F16::from_bits(3_276_800); // 50
 /// Villager training time: 25 s at 60 Hz.

@@ -521,6 +521,25 @@ struct PlayerState {
     techs: u64,
 }
 
+/// SIM-06 subsystem checksums: the running values of the one
+/// canonical state hash (SIM-05) at subsystem boundaries. Each
+/// field is the hash of the stream prefix up to that boundary, so
+/// comparing two runs part by part names the first subsystem whose
+/// state diverged: `rng` (tick + RNG words), `world` (grid layers —
+/// terrain, heights, and the block layers pathfinding reads),
+/// `economy` (progression, stockpiles, nodes, queues, buildings),
+/// `targeting` (entities incl. their combat/targeting state, and
+/// projectiles). `full` is the complete `state_hash()` value; the
+/// stream's tail (AI clock, fog grids) is covered by `full` alone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HashParts {
+    pub rng: u64,
+    pub world: u64,
+    pub economy: u64,
+    pub targeting: u64,
+    pub full: u64,
+}
+
 /// The headless deterministic simulation.
 pub struct Sim {
     tick: u64,
@@ -978,6 +997,13 @@ impl Sim {
             s.armor_melee += 1;
             s.armor_pierce += 2;
             s.speed += I16F16::from_bits(437); // +0.1 tiles/s (absolute tile scale)
+        }
+        // Wheelbarrow (ECO-03): villagers +10% speed — TEC-06's
+        // first percentage patch. The scalar multiplies the layered
+        // row (base + the flat adds above), in exact integer bits:
+        // speed × 11/10, truncating the sub-bit remainder.
+        if kind == EntityKind::Villager && p.techs & TechId::Wheelbarrow.bit() != 0 {
+            s.speed = I16F16::from_bits(((s.speed.to_bits() as i64 * 11) / 10) as i32);
         }
         // Fletching (study §8): archers +1 attack, +1 tile of range.
         if kind == EntityKind::Archer && p.techs & TechId::Fletching.bit() != 0 {
@@ -3058,7 +3084,15 @@ impl Sim {
                     id,
                     kind,
                     owner: builder_owner,
-                    hp: I16F16::from_num(kind.max_hp_at(self.age_of(builder_owner))),
+                    // BLD-05: a foundation starts at the foot of
+                    // the construction-HP line (1 HP), not at full
+                    // HP; the construction phase raises it with
+                    // progress from here.
+                    hp: build::construction_hp_ceiling(
+                        kind.max_hp_at(self.age_of(builder_owner)),
+                        0,
+                        kind.build_thirds(),
+                    ),
                     cell_x,
                     cell_y,
                     pos_x,
@@ -3303,13 +3337,21 @@ impl Sim {
         // Resume before placement checks: the footprint of a standing
         // incomplete building is *supposed* to be occupied — by
         // itself. Only the owner's own villagers resume it (M5: a
-        // building under construction belongs to its placer).
+        // building under construction belongs to its placer). The
+        // order's cell may be ANY cell of the standing footprint,
+        // not only its anchor (2026-10-22, SEL-11: a right-click
+        // smart order lands wherever on the foundation the player
+        // clicked; the placement ghost always names the anchor and
+        // resolves identically).
         for b in &self.buildings {
+            let bsize = b.kind.footprint_size();
             if !b.complete
                 && b.kind == kind
                 && b.owner == self.entities[idx].owner
-                && b.cell_x == ax
-                && b.cell_y == ay
+                && ax >= b.cell_x
+                && ax < b.cell_x + bsize
+                && ay >= b.cell_y
+                && ay < b.cell_y + bsize
             {
                 return BuildVerdict::Resume(b.id);
             }
@@ -3809,12 +3851,17 @@ impl Sim {
                 };
                 let rate = self.nodes[ni].kind.gather_rate();
                 // Carry capacity is the node's, not a global (ECO-03):
-                // 35 from a hunt carcass, 10 elsewhere. A villager
-                // arriving already fuller than this node's cap (it
-                // hauled meat, then was re-tasked) has negative room:
-                // `take` clamps to nothing and the full check below
-                // sends it home to deposit first.
-                let cap = self.nodes[ni].kind.carry_cap();
+                // 35 from a hunt carcass, 10 elsewhere — scaled by
+                // the gatherer's owner's Wheelbarrow (13 / 44) when
+                // researched. A villager arriving already fuller
+                // than this node's cap (it hauled meat, then was
+                // re-tasked) has negative room: `take` clamps to
+                // nothing and the full check below sends it home to
+                // deposit first.
+                let wheelbarrow = player_slot(self.entities[idx].owner)
+                    .map(|s| self.players[s].techs & TechId::Wheelbarrow.bit() != 0)
+                    .unwrap_or(false);
+                let cap = self.nodes[ni].kind.carry_cap_for(wheelbarrow);
                 let room = cap - self.entities[idx].carry;
                 let take = rate.min(room).min(self.nodes[ni].amount_left);
                 if take > I16F16::ZERO {
@@ -4067,10 +4114,26 @@ impl Sim {
             if n == 0 || self.buildings[bi].complete {
                 continue;
             }
+            // BLD-05: HP grows with construction — the ceiling
+            // rises along the proportional line as progress accrues,
+            // and the standing HP rises by the same amount (damage
+            // taken mid-build persists: HP stays exactly as far
+            // below the ceiling as the damage left it).
+            let (kind, owner, id) = {
+                let b = &self.buildings[bi];
+                (b.kind, b.owner, b.id)
+            };
+            let max_hp = kind.max_hp_at(self.age_of(owner));
+            let total = kind.build_thirds();
             let b = &mut self.buildings[bi];
+            let ceiling_before = build::construction_hp_ceiling(max_hp, b.progress_thirds, total);
             b.progress_thirds += build::build_rate_thirds(n);
-            if b.progress_thirds >= b.kind.build_thirds() {
-                completed.push(b.id);
+            let ceiling_after = build::construction_hp_ceiling(max_hp, b.progress_thirds, total);
+            if ceiling_after > ceiling_before {
+                b.hp = (b.hp + (ceiling_after - ceiling_before)).min(ceiling_after);
+            }
+            if b.progress_thirds >= total {
+                completed.push(id);
             }
         }
         for bid in completed {
@@ -4589,12 +4652,30 @@ impl Sim {
     /// RNG words, the grid layout, the stockpile, the nodes, the training
     /// queue, and every entity field (including orders and work state) as
     /// raw bits, in a fixed order. Platform-independent by construction.
+    /// For subsystem-level forensics see `state_hash_parts` (SIM-06).
     pub fn state_hash(&self) -> u64 {
+        self.hash_parts().full
+    }
+
+    /// SIM-06: the same canonical byte stream as `state_hash`,
+    /// with the running hash snapshotted at subsystem boundaries,
+    /// so a desync report can name the diverging subsystem instead
+    /// of just the tick. The snapshots are pure reads of the FNV
+    /// state — not one extra byte enters the stream, so `full`
+    /// is bit-identical to the historical `state_hash()` value
+    /// (the golden-hash tests pin that identity).
+    pub fn state_hash_parts(&self) -> HashParts {
+        self.hash_parts()
+    }
+
+    fn hash_parts(&self) -> HashParts {
         let mut h = Fnv1a64::new();
         h.write_u64(self.tick);
         let (rng_state, rng_inc) = self.rng.state_words();
         h.write_u64(rng_state);
         h.write_u64(rng_inc);
+        // SIM-06 boundary: the RNG stream.
+        let part_rng = h.finish();
         // The grid layers, chunk-fed (M7): terrain and heights from
         // the generator, the tree-block layer (MAP-04 — a falling
         // tree changes the hash), and the dynamic layer of placed
@@ -4607,6 +4688,9 @@ impl Sim {
         h.write_bytes_chunked(self.grid.height_bytes());
         h.write_bytes_chunked(self.grid.node_block_bytes());
         h.write_bytes_chunked(self.grid.dynamic_bytes());
+        // SIM-06 boundary: world state + the pathfinding substrate
+        // (terrain, heights, and both block layers).
+        let part_world = h.finish();
         // M5: the match mode — a sandbox and a match with identical
         // openings must never share a hash stream.
         h.write_u8(self.mode.tag());
@@ -4716,6 +4800,9 @@ impl Sim {
                 }
             }
         }
+        // SIM-06 boundary: progression, stockpiles, nodes, queues
+        // and buildings — the economy block.
+        let part_economy = h.finish();
         h.write_u32(self.entities.len() as u32);
         for e in &self.entities {
             h.write_u32(e.id);
@@ -4920,6 +5007,9 @@ impl Sim {
                 h.write_i32(value);
             }
         }
+        // SIM-06 boundary: entities (positions, orders, combat and
+        // targeting state) and projectiles in flight.
+        let part_targeting = h.finish();
         // M5: the AI opponent's scheduling state (its decisions read
         // live state, but the wave clock is state of its own).
         h.write_u64(self.ai.next_wave_tick);
@@ -4929,7 +5019,13 @@ impl Sim {
         for slot in &self.fog {
             h.write_bytes_chunked(slot);
         }
-        h.finish()
+        HashParts {
+            rng: part_rng,
+            world: part_world,
+            economy: part_economy,
+            targeting: part_targeting,
+            full: h.finish(),
+        }
     }
 
     /// State hash as a 16-character lowercase hex string.

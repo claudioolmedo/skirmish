@@ -11,8 +11,8 @@
 
 use fixed::types::I16F16;
 use skirmish_sim::{
-    Age, BuildingKind, Command, Entity, EntityKind, NodeKind, ResourceKind, Sim, TechId,
-    OWNER_GAIA, OWNER_PLAYER,
+    Age, BuildingKind, Command, Entity, EntityKind, MatchMode, NodeKind, ResourceKind, Sim,
+    TechId, OWNER_GAIA, OWNER_OPPONENT, OWNER_PLAYER,
 };
 
 fn f(v: I16F16) -> f64 {
@@ -727,4 +727,237 @@ fn separation_is_suppressed_while_a_melee_unit_attacks() {
         saw_suppressed_in_range,
         "never observed the engaged-and-crowded state"
     );
+}
+
+// ---- CMB-08: the auto-acquisition priority chain (2026-10-22) ----
+//
+// An idle military unit acquires, in order: (1) the closest enemy
+// unit in LoS, (2) the enemy Town Center in LoS, (3) the closest
+// other enemy building in LoS (Farms never). These scenes run in
+// TwoPlayer mode so both seats are scripted: the opponent's units
+// are walked to a far corner, leaving its buildings bare.
+
+fn opp_tc(sim: &Sim) -> &Entity {
+    sim.entities()
+        .iter()
+        .find(|e| e.kind == EntityKind::TownCenter && e.owner == OWNER_OPPONENT)
+        .unwrap()
+}
+
+/// Walk every opponent unit (villagers + scout) far from the
+/// opponent Town Center, and wait until they are all at least
+/// 60 world units from it.
+fn walk_opponent_away(sim: &mut Sim) {
+    let tc = opp_tc(sim);
+    let (ox, oy) = (tc.pos_x, tc.pos_y);
+    let ids: Vec<u32> = sim
+        .entities()
+        .iter()
+        .filter(|e| e.owner == OWNER_OPPONENT && e.kind != EntityKind::TownCenter)
+        .map(|e| e.id)
+        .collect();
+    for id in ids {
+        sim.push_command(Command::Move {
+            entity: id,
+            x: ox + I16F16::from_num(150),
+            y: oy + I16F16::from_num(150),
+        });
+    }
+    let tc_pos = (f(ox), f(oy));
+    let gone = run_until(sim, 90_000, |s| {
+        s.entities()
+            .iter()
+            .filter(|e| e.owner == OWNER_OPPONENT && e.kind != EntityKind::TownCenter)
+            .all(|e| {
+                let dx = f(e.pos_x) - tc_pos.0;
+                let dy = f(e.pos_y) - tc_pos.1;
+                (dx * dx + dy * dy) > 60.0 * 60.0
+            })
+    });
+    assert!(gone, "opponent units never left their Town Center");
+}
+
+/// Train one player Militia through the real production path
+/// (Barracks by villager 1 beside the player's Town Center).
+fn train_player_militia(sim: &mut Sim) -> u32 {
+    let tc = sim.town_center();
+    let tc_cell = cell_of(sim, tc.pos_x, tc.pos_y);
+    let (bx, by) = anchor_near(sim, 1, BuildingKind::Barracks, tc_cell);
+    let (x, y) = cell_point(sim, bx, by);
+    sim.push_command(Command::Build {
+        entity: 1,
+        kind: BuildingKind::Barracks,
+        x,
+        y,
+    });
+    let built = run_until(sim, 60_000, |s| {
+        s.buildings()
+            .iter()
+            .any(|b| b.kind == BuildingKind::Barracks && b.complete)
+    });
+    assert!(built, "barracks never completed");
+    let bid = sim
+        .buildings()
+        .iter()
+        .find(|b| b.kind == BuildingKind::Barracks)
+        .unwrap()
+        .id;
+    sim.push_command(Command::TrainAt {
+        building: bid,
+        kind: EntityKind::Militia,
+    });
+    let trained = run_until(sim, 30_000, |s| {
+        s.entities()
+            .iter()
+            .any(|e| e.kind == EntityKind::Militia && e.owner == OWNER_PLAYER)
+    });
+    assert!(trained, "militia never trained");
+    sim.entities()
+        .iter()
+        .find(|e| e.kind == EntityKind::Militia && e.owner == OWNER_PLAYER)
+        .unwrap()
+        .id
+}
+
+fn move_and_settle(sim: &mut Sim, entity: u32, x: I16F16, y: I16F16) {
+    sim.push_command(Command::Move { entity, x, y });
+    let settled = run_until(sim, 90_000, |s| ent(s, entity).order.is_none());
+    assert!(settled, "entity {entity} never settled at its staging point");
+}
+
+/// The opponent raises a House near the map center — far from
+/// its Town Center, so the chain's step (2) cannot pre-empt the
+/// building step in these scenes (a house beside the TC stands
+/// inside the TC's own step-(2) shadow from most angles).
+/// Returns its id.
+fn opp_house(sim: &mut Sim) -> u32 {
+    let tc = opp_tc(sim);
+    let tc_cell = cell_of(sim, tc.pos_x, tc.pos_y);
+    let my_tc = sim.town_center();
+    let my_cell = cell_of(sim, my_tc.pos_x, my_tc.pos_y);
+    let mid = (
+        (tc_cell.0 + my_cell.0) / 2,
+        (tc_cell.1 + my_cell.1) / 2,
+    );
+    let builder = sim
+        .entities()
+        .iter()
+        .find(|e| e.owner == OWNER_OPPONENT && e.kind == EntityKind::Villager)
+        .unwrap()
+        .id;
+    let (hx, hy) = anchor_near(sim, builder, BuildingKind::House, mid);
+    let (x, y) = cell_point(sim, hx, hy);
+    sim.push_command(Command::Build {
+        entity: builder,
+        kind: BuildingKind::House,
+        x,
+        y,
+    });
+    let built = run_until(sim, 60_000, |s| {
+        s.buildings()
+            .iter()
+            .any(|b| b.kind == BuildingKind::House && b.complete)
+    });
+    assert!(built, "opponent house never completed");
+    sim.buildings()
+        .iter()
+        .find(|b| b.kind == BuildingKind::House)
+        .unwrap()
+        .id
+}
+
+#[test]
+fn cmb08_idle_militia_acquires_enemy_building() {
+    let mut sim = Sim::with_mode(11, MatchMode::TwoPlayer);
+    let house = opp_house(&mut sim);
+    walk_opponent_away(&mut sim);
+    let mid = train_player_militia(&mut sim);
+    let (hx, hy) = {
+        let b = sim.buildings().iter().find(|b| b.id == house).unwrap();
+        (b.pos_x, b.pos_y)
+    };
+    // Stage inside the Militia's LoS (16) of the house, with no
+    // enemy unit anywhere near: the chain must reach step (3).
+    move_and_settle(&mut sim, mid, hx + I16F16::from_num(8), hy);
+    let acquired = run_until(&mut sim, 5_000, |s| {
+        ent(s, mid).attack_building == Some(house)
+    });
+    assert!(acquired, "idle militia never auto-acquired the bare enemy house");
+    let hp0 = sim.buildings().iter().find(|b| b.id == house).unwrap().hp;
+    let dented = run_until(&mut sim, 30_000, |s| {
+        s.buildings()
+            .iter()
+            .find(|b| b.id == house)
+            .map(|b| b.hp < hp0)
+            .unwrap_or(true)
+    });
+    assert!(dented, "acquired house took no damage");
+}
+
+#[test]
+fn cmb08_units_outrank_buildings_then_building_falls_to_step_3() {
+    let mut sim = Sim::with_mode(12, MatchMode::TwoPlayer);
+    let house = opp_house(&mut sim);
+    // One opponent villager stays behind, standing by the house;
+    // everyone else walks away.
+    let guard = sim
+        .entities()
+        .iter()
+        .filter(|e| e.owner == OWNER_OPPONENT && e.kind == EntityKind::Villager)
+        .nth(1)
+        .unwrap()
+        .id;
+    let (hx, hy) = {
+        let b = sim.buildings().iter().find(|b| b.id == house).unwrap();
+        (b.pos_x, b.pos_y)
+    };
+    // Walk-off for the rest: reuse the helper, then bring the
+    // guard back to the house (the helper moved it too).
+    walk_opponent_away(&mut sim);
+    move_and_settle(&mut sim, guard, hx - I16F16::from_num(6), hy);
+    let mid = train_player_militia(&mut sim);
+    move_and_settle(&mut sim, mid, hx + I16F16::from_num(8), hy);
+    // Step (1) beats step (3): the villager is the target, not
+    // the house, while both stand inside the Militia's LoS.
+    let engaged = run_until(&mut sim, 5_000, |s| {
+        let m = ent(s, mid);
+        m.attack_target == Some(guard) || ent(s, guard).dead
+    });
+    assert!(engaged, "militia never engaged the guard villager");
+    assert!(
+        ent(&sim, mid).attack_building.is_none() || ent(&sim, guard).dead,
+        "militia targeted the house while a unit stood in sight"
+    );
+    // The guard dies to the militia; with no unit left in sight,
+    // the chain falls through to the house.
+    let dead = run_until(&mut sim, 60_000, |s| ent(s, guard).dead);
+    assert!(dead, "the guard villager never died");
+    let acquired = run_until(&mut sim, 10_000, |s| {
+        ent(s, mid).attack_building == Some(house)
+    });
+    assert!(acquired, "after the kill, the militia never fell through to the house");
+}
+
+#[test]
+fn cmb08_idle_militia_acquires_enemy_town_center() {
+    let mut sim = Sim::with_mode(13, MatchMode::TwoPlayer);
+    let tc_id = opp_tc(&sim).id;
+    walk_opponent_away(&mut sim);
+    let mid = train_player_militia(&mut sim);
+    let (tx, ty) = {
+        let tc = opp_tc(&sim);
+        (tc.pos_x, tc.pos_y)
+    };
+    // 12 world units from the TC's center: inside the Militia's
+    // LoS of 16, with no unit or building of the opponent near —
+    // the chain must stop at step (2).
+    move_and_settle(&mut sim, mid, tx + I16F16::from_num(12), ty);
+    let acquired = run_until(&mut sim, 5_000, |s| {
+        ent(s, mid).attack_target == Some(tc_id)
+    });
+    assert!(acquired, "idle militia never auto-acquired the bare enemy Town Center");
+    let dented = run_until(&mut sim, 30_000, |s| {
+        ent(s, tc_id).hp < I16F16::from_num(2400)
+    });
+    assert!(dented, "the acquired Town Center took no damage");
 }

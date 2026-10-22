@@ -79,10 +79,15 @@ field order; golden-hash tests pin it. · *Status:* **MATCHES**.
 **SIM-06 — Subsystem checksums for forensics.** World state, pathfinding,
 targeting, and the RNG stream are checksummed separately in diagnostics, so
 a desync report names the diverging subsystem, not just the tick.
-*Source:* OPENAGE-RESEARCH §2.6, §5.4. · *Impl:* extend `state_hash()` with
-per-subsystem subtotal hashes exposed in tests/debug builds when M3 adds
-targeting; the shipped hash stays one value. · *Status:* **MISSING**
-(single combined hash only today).
+*Source:* OPENAGE-RESEARCH §2.6, §5.4. · *Impl:* shipped in the
+2026-10-21/22 night run — `Sim::state_hash_parts()` exposes a
+`HashParts { rng, world, economy, targeting, full }` snapshot: each
+part is the one FNV-1a stream read at a subsystem boundary (RNG
+words → world/grid state → economy/buildings → entities/targeting/
+projectiles), so a divergence localizes to the first differing
+part; `state_hash()` stays the single combined value, and the
+parts are pure reads of the same stream, so the golden hashes are
+unchanged by construction. · *Status:* **MATCHES**.
 
 **SIM-07 — Fixed phase order inside a tick.** A tick runs its phases in one
 fixed order (today: apply commands → movement steering/integration → economy
@@ -482,9 +487,15 @@ issues the context order implied by the target: resource node → gather;
 enemy unit/building → attack; own garrisonable building → garrison; own
 building (villager) → build/repair context; ground → move.
 *Source:* GAP 2.2. · *Impl:* the client's `orderAt` resolves the target
-class, then pushes the matching sim command. Today only gather/move
-resolve; attack (M3), garrison and repair (M6) extend the same function. ·
-*Status:* **DIFFERS** (gather/move only).
+class, then pushes the matching sim command: gather, move, attack
+(entity, Town Center, building), force drop-off, repair (own complete
+damaged building — BLD-17) and, since the 2026-10-21/22 night run,
+build-resume — a right-click on an own foundation sends every
+selected villager to construct it (the sim's Build order resumes a
+standing foundation, never a second charge; the order's cell may be
+any cell of its footprint, not only the anchor). Still open: the
+garrison context — no garrison system exists (the GAR entries wait).
+· *Status:* **DIFFERS** (garrison context only).
 
 **SEL-12 — Queued orders (waypoints).** Holding Shift while issuing orders
 *appends* them to each unit's order queue instead of replacing it; the
@@ -774,11 +785,19 @@ most 10 resources at once before returning to deposit — except food from
 hunted animals, of which they carry 35. Carry technologies raise the cap
 (Wheelbarrow → 13, Hand Cart → 20) alongside their speed effects.
 *Source:* MECHANICS-STUDY §2.4, §6.2 (hunt exception + Wheelbarrow +25% /
-Hand Cart +50% capacity figures). · *Impl:* `CARRY_CAPACITY` per task
-source + per-player cap patch; the 35 case keys off the node kind (hunt
-carcass), not a villager state. · *Status:* **DIFFERS** (the flat 10 and
-the hunt 35 both ship — M3; the carry-cap technologies do not exist
-yet).
+Hand Cart +50% capacity figures); wiki, Technology (Age of Empires II)
+and Wheelbarrow (Age of Empires II) (fetched 2026-10-22: Wheelbarrow —
+Feudal Age, Town Center, 175 food / 50 wood, 75 s; carry table 10 → 13
+ordinary, 35 → 44 hunted meat; speed +10%; Hand Cart is a Castle Age
+technology, 300 food / 200 wood, 55 s). · *Impl:* `CARRY_CAPACITY` per
+task source; the 35 case keys off the node kind (hunt carcass), not a
+villager state. Wheelbarrow shipped in the 2026-10-21/22 night run —
+carry 10 → 13 / hunt 35 → 44 via `NodeKind::carry_cap_for`, and the
+speed +10% as TEC-06's first *percentage* patch (the layered row ×
+11/10 in `stats_for`). Still open: Hand Cart (its 20-cap case and
++10% speed) — it waits for the Castle Age, the tech's own Age.
+· *Status:* **DIFFERS** (Wheelbarrow ships; Hand Cart waits for the
+Castle Age).
 
 **ECO-04 — The gather loop.** Gather until the carry is full or the node
 empties, travel to a drop-off, deposit instantly, return to the node, and
@@ -982,11 +1001,19 @@ construction has HP proportional to its progress; it reaches full HP
 exactly at completion. Foundations can be attacked and destroyed (CMB-15)
 and can never be converted (MNK-08). (The exact starting fraction is
 UNVERIFIED; proportional growth is the documented behavior.)
-*Source:* GAP 4.19. · *Impl:* buildings have HP since M5 and can be
-attacked and destroyed at any stage — but an under-construction
-building carries its *full* HP from placement, not a
-progress-proportional value: a recorded v1 simplification.
-· *Status:* **DIFFERS**.
+*Source:* GAP 4.19. · *Impl:* shipped in the 2026-10-21/22 night
+run — `build::construction_hp_ceiling` puts standing HP on the
+proportional line, from 1 HP at placement to the building's
+current-age max HP exactly at completion (integer bits: 1 +
+(max − 1) × progress / total); a construction tick lifts HP by
+the ceiling's delta only, so damage taken mid-build persists
+through completion, and repair still cannot pass the ceiling.
+The line's intercept is this entry's own open point — the exact
+starting fraction stays UNVERIFIED (above); 1 HP is the
+proportional line's floor. Tests:
+`construction::foundation_hp_grows_with_construction_bld05`,
+`melee_building::foundation_damage_persists_through_completion_bld05`.
+· *Status:* **MATCHES**.
 
 **BLD-06 — Footprints are data.** Every building kind has a footprint in
 tiles (TC 4×4, House 2×2, Farm 3×3, Tower 1×1, Castle 4×4,
@@ -1260,14 +1287,21 @@ enemy buildings. Rams violate (1): they target buildings only, even when
 attacked by units. Trebuchets target buildings and other Trebuchets.
 Farms, walls, gates, and herdables are never auto-targeted; killing sheep
 is always an explicit order (ECO-13).
-*Source:* MECHANICS-STUDY §9.2 (priority chain pinned). · *Impl:* a single
-acquisition function in `combat.rs`; ties by squared distance then lowest
-entity id — never sqrt, never float. Shipped narrower than the chain
-(M3/M5): an idle Militia, Man-at-Arms or Archer with no order acquires
-the closest *unit* in line of sight — a boar, or an enemy player's
-unit (the enemy Town Center expressly excluded). Buildings and Town
-Centers are never auto-acquired; razing is always an explicit order
-(or the AI's wave orders, AI-04). · *Status:* **DIFFERS**.
+*Source:* MECHANICS-STUDY §9.2 (priority chain pinned); wiki, Siege
+unit (Age of Empires II), "Attack priority" (fetched 2026-10-22:
+units prioritize enemy units over buildings; no unit auto-attacks
+walls and gates unless manually targeted). · *Impl:* a single
+acquisition function in `combat.rs`; ties by squared distance then
+lowest entity id — never sqrt, never float. Shipped in full for
+the roster in scope in the 2026-10-21/22 night run: the idle
+unit resolves the chain in order — closest enemy *unit* (a boar,
+or an enemy player's unit), then the enemy Town Center entities
+in line of sight, then other enemy buildings there, Farms
+expressly excluded (this rule's never-auto-targeted clause).
+Walls, gates, rams and trebuchets do not exist in this roster.
+Acquisition is idle-only: an explicit order always wins, and
+villagers and scouts never auto-acquire. Tests: `combat::cmb08_*`.
+· *Status:* **MATCHES**.
 
 **CMB-09 — Stances govern pursuit, not damage.** Four stances:
 *Aggressive* — pursue targets indefinitely. *Defensive* — engage nearby
@@ -1636,8 +1670,10 @@ folds the owner's age layer and researched patches into the base row at
 lookup time, so no tech is a code branch in the consumers. Shipped
 patches (M6) are all flat: Loom (exactly the example above, +0.1 speed
 included), Fletching, Scale Mail Armor, Padded Archer Armor, and the
-Man-at-Arms line upgrade (CLS-03). Percentage patches have no instance
-yet. · *Status:* **MATCHES**.
+Man-at-Arms line upgrade (CLS-03). The first percentage patch shipped
+in the 2026-10-21/22 night run: Wheelbarrow's villager speed × 11/10,
+multiplying the layered row in `stats_for` (ECO-03). · *Status:*
+**MATCHES**.
 
 **TEC-07 — Techs chain by prerequisites.** Technologies require an age, a
 building, and often a prior tech (Wheelbarrow → Hand Cart; Devotion →
@@ -2615,18 +2651,25 @@ BLD-11, TEC-04, TEC-05, VIC-01), recounted mechanically below.
 The same recount corrected two pre-existing table drifts the
 per-entry tags expose: §4 counts 17 rules (SEL-17's entry was
 never added to the row) and §15's AI-06 has been MATCHES since
-its 2026-10-20 rework — the document holds 217 rules, not 216).
+its 2026-10-20 rework — the document holds 217 rules, not 216;
+updated 2026-10-22 for the second gap batch: three status moves
+to MATCHES (SIM-06 subsystem checksums, BLD-05 proportional
+construction HP, CMB-08 the full auto-targeting chain) and two
+narrowings with no status change (ECO-03 — Wheelbarrow shipped,
+Hand Cart waits for the Castle Age; SEL-11 — build-resume
+routed, the garrison context stays open), recounted mechanically
+below).
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
-| 1 | Simulation & time (SIM) | 12 | 10 | 1 | 1 |
+| 1 | Simulation & time (SIM) | 12 | 11 | 1 | 0 |
 | 2 | Map, terrain & elevation (MAP) | 12 | 7 | 4 | 1 |
 | 3 | Visibility & exploration (VIS) | 10 | 8 | 1 | 1 |
 | 4 | Selection & orders (SEL) | 17 | 15 | 2 | 0 |
 | 5 | Movement, pathfinding & collision (MOV) | 12 | 4 | 3 | 5 |
 | 6 | Economy & drop-off (ECO) | 17 | 13 | 2 | 2 |
-| 7 | Buildings & placement (BLD) | 17 | 11 | 4 | 2 |
-| 8 | Combat & damage (CMB) | 16 | 10 | 3 | 3 |
+| 7 | Buildings & placement (BLD) | 17 | 12 | 3 | 2 |
+| 8 | Combat & damage (CMB) | 16 | 11 | 2 | 3 |
 | 9 | Projectiles & ballistics (PRJ) | 10 | 4 | 4 | 2 |
 | 10 | Unit classes & counters (CLS) | 8 | 5 | 0 | 3 |
 | 11 | Technologies & age advancement (TEC) | 11 | 5 | 3 | 3 |
@@ -2637,7 +2680,7 @@ its 2026-10-20 rework — the document holds 217 rules, not 216).
 | 16 | Victory, scoring & game modes (VIC) | 12 | 1 | 0 | 11 |
 | 17 | Multiplayer determinism (NET) | 11 | 4 | 5 | 2 |
 | 18 | Information rules (INF) | 12 | 4 | 3 | 5 |
-| | **Total** | **217** | **106** | **37** | **74** |
+| | **Total** | **217** | **109** | **35** | **73** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer

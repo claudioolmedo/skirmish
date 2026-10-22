@@ -239,3 +239,74 @@ fn melee_group_arriving_together_razes_a_barracks() {
         building_hp(&sc.sim, sc.bid)
     );
 }
+
+#[test]
+fn foundation_damage_persists_through_completion_bld05() {
+    // BLD-05: HP grows with construction progress, and damage
+    // taken mid-build is NOT healed by building — a building that
+    // took D damage under construction completes at max - D.
+    let mut sim = Sim::with_mode(42, MatchMode::TwoPlayer);
+    let opp_tc = find_id(&sim, OWNER_OPPONENT, EntityKind::TownCenter);
+    let v1 = villagers_of(&sim, OWNER_OPPONENT)[0];
+    let (ax, ay) = open_anchor_near(&sim, opp_tc, v1, BuildingKind::House);
+    assert!(ax >= 1, "need a staging cell west of the footprint");
+    let (x, y) = sim.grid().cell_center(ax, ay);
+    sim.push_command(Command::Build {
+        entity: v1,
+        kind: BuildingKind::House,
+        x,
+        y,
+    });
+    sim.tick();
+    assert_eq!(sim.buildings().len(), 1, "placement was rejected");
+    let bid = sim.buildings()[0].id;
+    let fresh = building_hp(&sim, bid).expect("foundation exists");
+    assert!(fresh < 3.0, "fresh foundation must stand at ~1 HP, got {fresh}");
+    // Build until the HP line is well clear of one-shot range.
+    let grown = run_until(&mut sim, 60_000, |s| {
+        building_hp(s, bid).map(|hp| hp >= 200.0).unwrap_or(false)
+    });
+    assert!(grown, "foundation HP never grew with progress");
+    // Freeze the ceiling: send the builder home before the attack.
+    let (tc_x, tc_y) = {
+        let tc = ent(&sim, opp_tc);
+        (tc.pos_x, tc.pos_y)
+    };
+    sim.push_command(Command::Move {
+        entity: v1,
+        x: tc_x,
+        y: tc_y,
+    });
+    run_until(&mut sim, 30_000, |s| ent(s, v1).order.is_none());
+    let hp_before = building_hp(&sim, bid).expect("foundation exists");
+    // The player's Scout dents the foundation (ordered attack).
+    let scout = find_id(&sim, OWNER_PLAYER, EntityKind::ScoutCavalry);
+    stage_at(&mut sim, scout, ax - 1, ay);
+    sim.push_command(Command::AttackBuilding {
+        entity: scout,
+        building: bid,
+    });
+    let dropped = run_until(&mut sim, 30_000, |s| {
+        building_hp(s, bid).map(|hp| hp <= hp_before - 10.0).unwrap_or(true)
+    });
+    assert!(dropped, "the scout never dented the foundation");
+    let damage_seen = hp_before - building_hp(&sim, bid).expect("foundation exists");
+    // Stop the attack (one more hit may land before the order
+    // applies — the tolerance below allows exactly one), resume
+    // the build, and finish: the damage must persist to the end.
+    sim.push_command(Command::Stop { entity: scout });
+    sim.push_command(Command::Build {
+        entity: v1,
+        kind: BuildingKind::House,
+        x,
+        y,
+    });
+    let done = run_until(&mut sim, 60_000, |s| building(s, bid).complete);
+    assert!(done, "the resumed house never completed");
+    let final_hp = building_hp(&sim, bid).expect("house exists");
+    let missing = 550.0 - final_hp;
+    assert!(
+        missing >= damage_seen - 0.01 && missing <= damage_seen + 5.5,
+        "final HP {final_hp}: missing {missing}, expected the {damage_seen} damage dealt (plus at most one in-flight hit)"
+    );
+}

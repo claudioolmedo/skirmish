@@ -270,7 +270,7 @@ const BUILDING_MINIMAP_COLOR = {
 let AGE_NAMES = ['Dark Age', 'Feudal Age'];
 let TECH_NAME = {
   0: 'Loom', 1: 'Feudal Age', 2: 'Fletching', 3: 'Scale Mail Armor',
-  4: 'Padded Archer Armor', 5: 'Man-at-Arms',
+  4: 'Padded Archer Armor', 5: 'Man-at-Arms', 6: 'Wheelbarrow',
 };
 // Research-block explanations, indexed by the sim's ResearchBlock
 // tag (0 ok — unused, 1 funds, 2 queue full, 3 already done,
@@ -293,6 +293,7 @@ function refreshNames() {
   TECH_NAME = {
     0: t('tech.loom'), 1: t('age.feudal'), 2: t('tech.fletching'),
     3: t('tech.scalemail'), 4: t('tech.padded'), 5: t('tech.maa'),
+    6: t('tech.wheelbarrow'),
   };
   RESEARCH_BLOCK_TITLES = [
     '', t('block.noResources'), t('block.queueFullTrain'),
@@ -585,6 +586,7 @@ function ownFeedSnapshot() {
       scalemail: (mask & 8) !== 0,
       padded: (mask & 16) !== 0,
       maa: (mask & 32) !== 0,
+      wheelbarrow: (mask & 64) !== 0,
     },
   };
 }
@@ -631,7 +633,7 @@ function updateEventFeed() {
   const lines = diffFeedEvents(prev, snap, {
     buildingName: (k) => BUILD_NAME[k],
     unitName: (k) => KIND_NAME[k],
-    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5 }[key]],
+    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6 }[key]],
   }, feedFmt());
   feedPrev = snap;
   for (const text of lines) pushFeedLine(text);
@@ -2275,7 +2277,9 @@ function applyLocalOrder(cmd) {
     case 'train_vil': return sim.push_train_villager();
     case 'research_tc': return cmd.tech === 0
       ? sim.push_research_loom()
-      : sim.push_research_feudal();
+      : cmd.tech === 6
+        ? sim.push_research_wheelbarrow()
+        : sim.push_research_feudal();
     case 'research_at': return sim.push_research_at(cmd.b, cmd.tech);
     case 'rally_tc': return sim.push_set_rally_tc(cmd.x, cmd.y);
     case 'rally_b': return sim.push_set_rally_building(cmd.b, cmd.x, cmd.y);
@@ -4904,6 +4908,22 @@ async function main() {
       }
       if (any) { playAudioCue(orderCue()); return; }
     }
+    // Build-resume (SEL-11, 2026-10-22): an own foundation —
+    // a building still under construction, Farms included —
+    // takes every selected villager as a builder. The sim's
+    // Build order resumes the standing foundation (never a
+    // second charge, never a second building), and the click
+    // may land on any of its cells.
+    if (bT && bT.owner === localOwner && !bT.complete) {
+      let any = false;
+      for (const id of targets) {
+        if (st.kinds[id] !== 0) continue;
+        // Command coordinates: `push_build` re-derives the cell
+        // from the world point, so the click point is the order.
+        if (issue({ t: 'build', k: bT.kind, e: id, x: wx, y: wy, q: queued || undefined })) any = true;
+      }
+      if (any) { playAudioCue('orderVillager'); return; }
+    }
     // Repair (BLD-17): an own, complete, damaged building takes
     // every selected villager as a repairer. One exception: a
     // loaded villager clicking a drop-off building still drops
@@ -7201,9 +7221,9 @@ function runCommandButton(id, times = 1) {
     // right-click, re-clicking the building — lands back on the
     // page the building came from; only a further Esc, a
     // right-click on the open page, or Back returns to the root.
-  } else if (id === 'research-loom' || id === 'research-feudal') {
+  } else if (id === 'research-loom' || id === 'research-feudal' || id === 'research-wheelbarrow') {
     // M6: Town Center research (shared queue with training).
-    const tag = id === 'research-loom' ? 0 : 1;
+    const tag = id === 'research-loom' ? 0 : id === 'research-wheelbarrow' ? 6 : 1;
     const ok = issue({ t: 'research_tc', tech: tag });
     if (!ok) {
       const rb = myResearchBlockTc(tag);
@@ -7317,10 +7337,11 @@ function renderCommands() {
   const blockM = bk && context === 'barracks' ? sim.building_train_block(bk.id, 3) : -1;
   const blockA = bk && context === 'range' ? sim.building_train_block(bk.id, 4) : -1;
   const blockS = bk && context === 'stable' ? sim.building_train_block(bk.id, 2) : -1;
-  // Research blocks: the TC pair (Loom 0, Feudal 1) and the
-  // building techs (Fletching 2, Scale Mail 3, Padded 4, MAA 5).
+  // Research blocks: the TC trio (Loom 0, Feudal 1, Wheelbarrow 6)
+  // and the building techs (Fletching 2, Scale Mail 3, Padded 4,
+  // MAA 5).
   const rbTc = context === 'tc'
-    ? [myResearchBlockTc(0), myResearchBlockTc(1)] : [-1, -1];
+    ? [myResearchBlockTc(0), myResearchBlockTc(1), myResearchBlockTc(6)] : [-1, -1, -1];
   const rbBk = bk && (context === 'blacksmith' || context === 'barracks')
     ? [2, 3, 4, 5].map((t) => sim.research_block_at(bk.id, t)) : [];
   const tcQueueCodes = context === 'tc' ? myTcQueue().join('.') : '';
@@ -7402,6 +7423,7 @@ function renderCommands() {
     // advancement share its queue with villager training (TEC-03).
     const loomDone = (techMask & 1) !== 0;
     const feudalDone = age >= 1;
+    const wbDone = (techMask & 64) !== 0;
     cmdGrid.append(
       cmdButton({
         id: 'train', icon: 'i-train', img: 'villager.png', label: 'Villager',
@@ -7431,6 +7453,19 @@ function renderCommands() {
           : rbTc[1] === 4
             ? t('cmd.feudalGate', { age: AGE_NAMES[1] })
             : t('cmd.feudalTitle', { age: AGE_NAMES[1], cost: costText([[500, 'food']]), secs: 130 }) + (RESEARCH_BLOCK_TITLES[rbTc[1]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[1]] : ''),
+      }),
+      // Wheelbarrow (2026-10-22, ECO-03): Feudal Age Town Center
+      // research — villagers carry +25% and move +10% faster.
+      // Glyph-only button (the stroke-symbol tier; no PNG icon
+      // exists in the art set for it).
+      cmdButton({
+        id: 'research-wheelbarrow', icon: 'i-wheelbarrow', label: 'Wheelbarrow',
+        costIcon: 'i-food', cost: 175, cost2Icon: 'i-wood', cost2: 50,
+        disabled: wbDone || rbTc[2] === 2 || rbTc[2] === 3,
+        key: badgeForButton({ context, id: 'research-wheelbarrow', index: 3 }),
+        title: wbDone
+          ? t('cmd.wheelbarrowDone', { name: TECH_NAME[6] })
+          : t('cmd.wheelbarrowTitle', { name: TECH_NAME[6], cost: costText([[175, 'food'], [50, 'wood']]), secs: 75 }) + (RESEARCH_BLOCK_TITLES[rbTc[2]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[2]] : ''),
       }),
     );
   } else if (context === 'barracks') {

@@ -490,14 +490,19 @@ impl Sim {
     }
 
     /// Auto-acquisition (CMB-08): idle Militia-line units and Archers of *any*
-    /// player engage the closest enemy inside their LoS. In M3 the
-    /// only enemies were boars; since M5 an opposing player's units
-    /// qualify too (its Town Center never does — razing a Town
-    /// Center is always an explicit order, never an accident of
-    /// proximity). Herdables and deer are never auto-targeted
-    /// (killing them is always an explicit order), villagers never
-    /// auto-attack, and the Scout's Dark Age default stance is Stand
-    /// Ground (CMB-09), so it does not acquire either.
+    /// player engage targets inside their LoS by the rule's
+    /// priority chain: (1) the closest attackable enemy *unit*;
+    /// (2) if none, the enemy Town Center; (3) if none, the
+    /// closest other enemy building (Farms are never auto-targeted;
+    /// walls and gates do not exist yet and would be excluded the
+    /// same way). In M3 the only enemies were boars; since M5 an
+    /// opposing player's units qualify too. Steps (2)–(3) landed
+    /// 2026-10-22 (before that, buildings were never auto-acquired
+    /// and razing was always an explicit order). Herdables and deer
+    /// are never auto-targeted (killing them is always an explicit
+    /// order), villagers never auto-attack, and the Scout's Dark
+    /// Age default stance is Stand Ground (CMB-09), so it does not
+    /// acquire either.
     fn acquire_targets(&mut self) {
         for idx in 0..self.entities.len() {
             let e = &self.entities[idx];
@@ -541,6 +546,67 @@ impl Sim {
             if let Some((_, tid)) = best {
                 let e = &mut self.entities[idx];
                 e.attack_target = Some(tid);
+                e.attack_engaged = false;
+                e.strike_tick = None;
+                continue;
+            }
+            // CMB-08 step (2): no enemy unit in sight — the enemy
+            // Town Center, if it stands inside this unit's LoS.
+            // (The Town Center is an entity in our model; the unit
+            // scan above deliberately passes it over so this step
+            // can rank it below every unit.)
+            let mut best_tc: Option<(i64, u32)> = None;
+            for t in &self.entities {
+                if t.dead
+                    || t.kind != EntityKind::TownCenter
+                    || !is_player_owner(t.owner)
+                    || t.owner == owner
+                {
+                    continue;
+                }
+                let d = steer::vec_len(t.pos_x - px, t.pos_y - py);
+                if d > spec.los {
+                    continue;
+                }
+                let db = d.to_bits() as i64;
+                let key = (db * db, t.id);
+                if best_tc.map(|b| key < b).unwrap_or(true) {
+                    best_tc = Some(key);
+                }
+            }
+            if let Some((_, tid)) = best_tc {
+                let e = &mut self.entities[idx];
+                e.attack_target = Some(tid);
+                e.attack_engaged = false;
+                e.strike_tick = None;
+                continue;
+            }
+            // CMB-08 step (3): other enemy buildings, closest first
+            // (ties to the lowest building id). Farms are never
+            // auto-targeted (the rule's exclusion); foundations
+            // count — they are buildings, and the reference game
+            // treats them as such.
+            let mut best_b: Option<(i64, u32)> = None;
+            for b in &self.buildings {
+                if !is_player_owner(b.owner) || b.owner == owner {
+                    continue;
+                }
+                if b.kind == BuildingKind::Farm {
+                    continue;
+                }
+                let d = steer::vec_len(b.pos_x - px, b.pos_y - py);
+                if d > spec.los {
+                    continue;
+                }
+                let db = d.to_bits() as i64;
+                let key = (db * db, b.id);
+                if best_b.map(|x| key < x).unwrap_or(true) {
+                    best_b = Some(key);
+                }
+            }
+            if let Some((_, bid)) = best_b {
+                let e = &mut self.entities[idx];
+                e.attack_building = Some(bid);
                 e.attack_engaged = false;
                 e.strike_tick = None;
             }
