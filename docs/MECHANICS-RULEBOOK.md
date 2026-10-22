@@ -2707,11 +2707,66 @@ gathered, technologies, and the map revealed.
 the VIC-04 run counters + a score history sampled per minute (client-
 side sampling of public data). · *Status:* **MISSING**.
 
+**INF-12 — Occluded units are outlined in their owner's colour.** When a
+unit is partially or completely hidden behind a taller object drawn
+in front of it — a building, the Town Center, a tree — the unit's
+silhouette shows through the occluder in the unit owner's colour, so
+the hidden part stays readable and the unit stays selectable. It
+applies to every unit the local seat can currently see — its own
+units and enemy units alike (an enemy scout parked behind the
+player's Town Center is the canonical case; Claudio's live report,
+2026-10-22) — and to animals, whose owner's colour shows through
+the outline even though the sprite carries none. It is a
+pixel-occlusion aid only: a unit outside the seat's current fog
+visibility shows nothing — explored memory is not visibility.
+*Source:* AoE wiki, "Player" (§ Colors): "If the unit is obscured
+or behind something, a player-colored outline of the unit will be
+visible"; of animals, the colour "can still be seen through its
+outline (if behind a building) or its health bar"; the same page's
+gallery captions an image "Outlines of units behind a Stone Wall
+in Age of Empires II: Definitive Edition". The Age of Kings manual
+lists among its interface improvements "Units behind buildings and
+trees are visible" — trees occlude too, not only buildings.
+Ensemble's Age of Empires II design document ("Unit Visibility"):
+the outline shows through the obscuring object for a unit
+"partially or completely hidden by a taller object in the
+foreground", through up to two levels of obscuring objects, the
+obscured unit remains selectable inside its outline area, and "All
+player controlled units will be visible, including owned units,
+allied units, and enemy units". A DE-forum report
+(forums.ageofempires.com, "Unit borders can't be seen behind
+palisade walls", 2019) shows players expecting "a blue silhouette
+(or whatever colour you are)" behind the Town Center, House, Mill,
+Barracks, Watch Tower, Stone Walls/Gates, Stable, Archery Range,
+Market, Blacksmith, Siege Workshop, Monastery, University and
+Castle, and reports its absence behind palisade walls/gates,
+Lumber Camps, Mining Camps, Docks and packed Trebuchets as a bug —
+the intended rule is every building; ours follows the intent (no
+walls in our roster; camps are full buildings). DE exposes no
+setting for this — it is always on (the adjustable "Obscured Unit
+Alpha" belongs to Age of Empires III/IV) — so ours has none either,
+and it is never shed at any quality level (information, not
+cosmetics; LOW only clips the silhouette to the occluders' rects
+instead of their pixel alpha). · *Impl:* client only (2026-10-22) —
+`web-preview/play/occlusion.js` holds the pure decision
+(alpha-tight screen rects; painter depth — an occluder must be
+drawn in front; the union covered-fraction, materially covered =
+≥ 15% of the unit's alpha-tight rect; and the hard fog gate:
+`fogVisible` must be literal current visibility) and is
+unit-tested, incl. the enemy-scout-behind-own-TC case; `app.js`
+records each draw item's sprite calls during the painter's pass
+and paints an occluded unit's own sprite alpha, flattened to its
+owner's colour, over the occluders, clipped to the occluders'
+alpha. The Town Center occludes as the entity it is; trees
+occlude as nodes; a foundation occludes at its full drawn height
+(the construction clip is not replayed into the mask — a transient
+of seconds). No sim, command or hash contact. · *Status:* **MATCHES**.
+
 ---
 
 ## A. Rule counts
 
-217 rules total. Counts verified mechanically against the status tags in
+218 rules total. Counts verified mechanically against the status tags in
 this document (2026-10-18, M8 audit; re-verified for M9 the same day —
 the open-games lobby changed no status, see the M9 note in section B;
 updated 2026-10-19 for BLD-16, the Town Center footprint rule —
@@ -2759,7 +2814,10 @@ was already shipped, only attack/armor stats remain),
 recounted mechanically below; updated 2026-10-22 for VIC-04,
 the score formula — VIC-04 moves MISSING → MATCHES, so §16
 trades one MISSING for one MATCHES with the rule count
-unchanged, recounted mechanically below).
+unchanged, recounted mechanically below; updated 2026-10-22 for
+INF-12, the occluded-unit outline — §18 gains one rule, one
+MATCHES (Claudio's live report: the enemy scout parked behind his
+Town Center), recounted mechanically below).
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
@@ -2780,8 +2838,8 @@ unchanged, recounted mechanically below).
 | 15 | AI behavior & difficulty (AI) | 9 | 5 | 2 | 2 |
 | 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |
 | 17 | Multiplayer determinism (NET) | 11 | 4 | 5 | 2 |
-| 18 | Information rules (INF) | 12 | 7 | 3 | 2 |
-| | **Total** | **217** | **113** | **35** | **69** |
+| 18 | Information rules (INF) | 13 | 8 | 3 | 2 |
+| | **Total** | **218** | **114** | **35** | **69** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer
