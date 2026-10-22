@@ -1111,7 +1111,9 @@ impl Sim {
     /// The effective stat row of a unit kind for an owner (M6,
     /// TEC-06): the base table row layered with the owner's age
     /// (CLS-04 — the Scout's Feudal row) and researched technologies
-    /// (Loom, Fletching, the Blacksmith armor lines). Every stat
+    /// (Loom, Fletching, the Blacksmith armor lines, and the
+    /// 2026-10-22 Feudal completion set: Forging, Scale Barding
+    /// Armor, Bloodlines). Every stat
     /// consumer — movement speed, combat, the HP display — reads
     /// through here, so a completed research changes the whole
     /// empire's numbers the tick it lands, with no per-unit state
@@ -1177,6 +1179,41 @@ impl Sim {
         {
             s.armor_melee += 1;
             s.armor_pierce += 1;
+        }
+        // The Feudal completion set (2026-10-22; wiki pages in
+        // the tech module docs). Cavalry membership is read off
+        // the row's own class mask (CLS-01), never a kind list —
+        // a future mounted kind inherits both patches by its
+        // table row alone.
+        let cavalry = s.classes & crate::classes::bit(crate::classes::CAVALRY) != 0;
+        // Forging: infantry and cavalry melee attack +1 — the
+        // affected rows swap to their Forging attack tables
+        // (units.rs); bonus pairs are unchanged.
+        if p.techs & TechId::Forging.bit() != 0 {
+            match kind {
+                EntityKind::Militia => s.attacks = units::MILITIA_FORGING_ATTACKS,
+                EntityKind::ManAtArms => s.attacks = units::MAN_AT_ARMS_FORGING_ATTACKS,
+                EntityKind::Spearman => s.attacks = units::SPEARMAN_FORGING_ATTACKS,
+                EntityKind::ScoutCavalry => {
+                    s.attacks = if p.age >= Age::Feudal {
+                        units::SCOUT_FEUDAL_FORGING_ATTACKS
+                    } else {
+                        units::SCOUT_FORGING_ATTACKS
+                    };
+                }
+                _ => {}
+            }
+        }
+        // Scale Barding Armor: cavalry +1/+1 armor.
+        if cavalry && p.techs & TechId::ScaleBarding.bit() != 0 {
+            s.armor_melee += 1;
+            s.armor_pierce += 1;
+        }
+        // Bloodlines: mounted units +20 max HP (the current-HP
+        // grant for units already standing is the completion
+        // sweep in `apply_research`, Loom's precedent).
+        if cavalry && p.techs & TechId::Bloodlines.bit() != 0 {
+            s.max_hp += 20;
         }
         s
     }
@@ -1891,7 +1928,7 @@ impl Sim {
     /// A completed research lands (M6): record it on the owner and
     /// run its completion sweep, if any. Effects that are pure data
     /// patches (Fletching, the armor lines) need no sweep — every
-    /// lookup reads the owner's researched set (TEC-06). Two do:
+    /// lookup reads the owner's researched set (TEC-06). These do:
     /// - Feudal Age flips the owner's age (TEC-04: empire-wide, at
     ///   once — lookups key on the age, so nothing else moves).
     /// - Loom grants existing villagers the +15 HP with the new
@@ -1900,6 +1937,15 @@ impl Sim {
     /// - Man-at-Arms swaps every living Militia of the owner to
     ///   the Man-at-Arms kind (CLS-03's line upgrade: position,
     ///   orders and current HP are kept; the max rises — no heal).
+    /// - Bloodlines (2026-10-22) grants existing mounted units
+    ///   the +20 HP with the new maximum — Loom's rule, on the
+    ///   cavalry class mask.
+    /// - Horse Collar (2026-10-22) tops up the owner's standing
+    ///   farms: since DE update 169123 a farm standing at the
+    ///   research tick gains 75 × (remaining ⁄ full)² (wiki,
+    ///   Horse Collar — its worked example: a half-full farm
+    ///   gains a quarter of the 75). Farms raised afterwards are
+    ///   stamped at creation (see the farm completion path).
     fn apply_research(&mut self, owner: u8, tech: TechId) {
         let Some(slot) = player_slot(owner) else {
             return;
@@ -1913,6 +1959,37 @@ impl Sim {
                 for e in &mut self.entities {
                     if e.owner == owner && e.kind == EntityKind::Villager && !e.dead {
                         e.hp += I16F16::from_num(15);
+                    }
+                }
+            }
+            TechId::Bloodlines => {
+                self.players[slot].techs |= tech.bit();
+                for e in &mut self.entities {
+                    if e.owner == owner
+                        && !e.dead
+                        && units::spec(e.kind).classes
+                            & crate::classes::bit(crate::classes::CAVALRY)
+                            != 0
+                    {
+                        e.hp += I16F16::from_num(20);
+                    }
+                }
+            }
+            TechId::HorseCollar => {
+                self.players[slot].techs |= tech.bit();
+                let full = NodeKind::Farm.full_amount();
+                let farm_nodes: Vec<u32> = self
+                    .buildings
+                    .iter()
+                    .filter(|b| {
+                        b.owner == owner && b.kind == BuildingKind::Farm && b.complete
+                    })
+                    .filter_map(|b| b.node_id)
+                    .collect();
+                for nid in farm_nodes {
+                    if let Some(node) = self.nodes.iter_mut().find(|n| n.id == nid) {
+                        let frac = node.amount_left / full;
+                        node.amount_left += I16F16::from_num(75) * frac * frac;
                     }
                 }
             }
@@ -4014,7 +4091,15 @@ impl Sim {
                         return;
                     }
                 };
-                let rate = self.nodes[ni].kind.gather_rate();
+                // The gather rate is the node's base rate patched
+                // by the gatherer's owner's economy technologies
+                // (TEC-06 percentage patches, applied at lookup):
+                // Double-Bit Axe on trees, Gold / Stone Mining on
+                // their mines (tech::patched_gather_rate).
+                let owner_techs = player_slot(self.entities[idx].owner)
+                    .map(|s| self.players[s].techs)
+                    .unwrap_or(0);
+                let rate = crate::tech::patched_gather_rate(self.nodes[ni].kind, owner_techs);
                 // Carry capacity is the node's, not a global (ECO-03):
                 // 35 from a hunt carcass, 10 elsewhere — scaled by
                 // the gatherer's owner's Wheelbarrow (13 / 44) when
@@ -4023,9 +4108,7 @@ impl Sim {
                 // re-tasked) has negative room: `take` clamps to
                 // nothing and the full check below sends it home to
                 // deposit first.
-                let wheelbarrow = player_slot(self.entities[idx].owner)
-                    .map(|s| self.players[s].techs & TechId::Wheelbarrow.bit() != 0)
-                    .unwrap_or(false);
+                let wheelbarrow = owner_techs & TechId::Wheelbarrow.bit() != 0;
                 let cap = self.nodes[ni].kind.carry_cap_for(wheelbarrow);
                 let room = cap - self.entities[idx].carry;
                 let take = rate.min(room).min(self.nodes[ni].amount_left);
@@ -4531,6 +4614,18 @@ impl Sim {
         let (px, py) = (self.buildings[bi].pos_x, self.buildings[bi].pos_y);
         let nid = self.nodes.len() as u32;
         self.nodes.push(ResourceNode::placed(nid, NodeKind::Farm, px, py));
+        // Horse Collar (ECO-14): a farm raised by an owner who
+        // holds the tech is stamped with the raised amount
+        // (175 + 75) at creation — a stored value, not a live
+        // lookup (standing farms are topped up proportionally
+        // once, at the research tick, in `apply_research`).
+        let farm_owner = self.buildings[bi].owner;
+        if player_slot(farm_owner)
+            .map(|s| self.players[s].techs & TechId::HorseCollar.bit() != 0)
+            .unwrap_or(false)
+        {
+            self.nodes[nid as usize].amount_left += I16F16::from_num(75);
+        }
         if let Some(bi) = self.building_index(bid) {
             self.buildings[bi].node_id = Some(nid);
         }

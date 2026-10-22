@@ -781,7 +781,14 @@ fishing ship 0.280/0.487 per second). Technology patches scale rates
 (TEC-06); nothing about rates lives in code.
 *Source:* MECHANICS-STUDY §6.1 (aoe2.net overlay rates, cross-checked). ·
 *Impl:* shipped — `econ.rs` stores the rates as pre-rounded fixed-point
-per-tick constants; the sim *is* the cross-check (59/59 tests). ·
+per-tick constants; the sim *is* the cross-check (59/59 tests). The
+first rate patches shipped 2026-10-22 (TEC-06): Double-Bit Axe scales
+the wood rate ×120/100, Gold Mining the gold rate ×115/100 and Stone
+Mining the stone rate ×115/100 (wiki pages, fetched that run),
+applied at the gather lookup from the gatherer's owner's researched
+set (`tech::patched_gather_rate`); the integration tests measure the
+exact node drain before and after (426→511, 415→477, 393→451
+bits/tick). ·
 *Status:* **MATCHES** (land rates; fishing/hunt rates land with their
 systems).
 
@@ -958,9 +965,13 @@ completes, the proportional top-up above must be applied to the
 owner's standing farms from their stored amounts. Work-rate cap
 clamps the gather rate in the
 farm case. Today: farm exists with 175 food and the retire-on-deplete
-flow; footprint is 2×2 cells (BLD-12 note) and there are no farm techs
-yet. · *Status:* **DIFFERS** (core farm loop matches; footprint, cap, and
-tech rules pending M6/M7 conventions).
+flow; footprint is 2×2 cells (BLD-12 note). Horse Collar shipped
+2026-10-22: farms raised by an owner holding the tech are stamped
+250 at creation, and the completion sweep tops up the owner's
+standing farms by 75 × (remaining ⁄ 175)² exactly. Heavy Plow and
+Crop Rotation wait for their Ages. · *Status:* **DIFFERS** (core
+farm loop and Horse Collar match; footprint, work-rate cap, and
+the reseed queue pending M6/M7 conventions).
 
 **ECO-15 — Fishing.** Villagers gather shore fish at 0.426/s. Fishing
 Ships gather from fish spots (0.280/s shore, 0.487/s deep-sea) and deposit
@@ -1795,8 +1806,23 @@ patches (M6) are all flat: Loom (exactly the example above, +0.1 speed
 included), Fletching, Scale Mail Armor, Padded Archer Armor, and the
 Man-at-Arms line upgrade (CLS-03). The first percentage patch shipped
 in the 2026-10-21/22 night run: Wheelbarrow's villager speed × 11/10,
-multiplying the layered row in `stats_for` (ECO-03). · *Status:*
-**MATCHES**.
+multiplying the layered row in `stats_for` (ECO-03). The Feudal
+completion set shipped 2026-10-22 (every value fetched from the Age
+of Empires wiki that run, per-tech pages): Forging (Blacksmith,
+150 F, 50 s — infantry and cavalry melee attack +1, applied as
+attack-table swaps in `stats_for`; bonus pairs unchanged), Scale
+Barding Armor (Blacksmith, 150 F, 45 s — cavalry +1/+1 armor),
+Bloodlines (Stable, 150 F / 100 G, 50 s — mounted units +20 max HP,
+with the completion sweep granting standing units the +20 current
+HP, Loom's rule), Double-Bit Axe (Lumber Camp, 100 F / 50 W, 25 s —
+wood gather ×120/100), Gold Mining (Mining Camp, 100 F / 75 W,
+30 s — gold gather ×115/100), Stone Mining (Mining Camp, 100 F /
+75 W, 30 s — stone gather ×115/100) and Horse Collar (Mill, 75 F /
+75 W, 20 s — ECO-14). The gather percentages are patches at the
+gather lookup (`tech::patched_gather_rate`); cavalry membership
+for Forging / Scale Barding / Bloodlines is read off each row's
+own class mask, so the patches stay row data, never kind lists.
+· *Status:* **MATCHES**.
 
 **TEC-07 — Techs chain by prerequisites.** Technologies require an age, a
 building, and often a prior tech (Wheelbarrow → Hand Cart; Devotion →
@@ -1818,8 +1844,11 @@ the *order* matters and is fixed here: percentages act on the pre-armor
 attack value, per class.
 *Source:* MECHANICS-STUDY §1.1 (post/pre-armor clarifications). · *Impl:*
 the layered lookup applies flat adds into the stat row before CMB-01
-ever sees it — true for every shipped technology (M6). No percentage
-technology exists yet to exercise the ordering's other half.
+ever sees it — true for every shipped technology (M6). Percentage
+patches exist since Wheelbarrow (speed, 2026-10-21/22) and the
+gather-rate set (Double-Bit Axe, Gold Mining, Stone Mining,
+2026-10-22), but none of them is an *attack* percentage, so the
+ordering's attack half remains unexercised.
 · *Status:* **DIFFERS**.
 
 **TEC-09 — Production-speed techs scale work rates.** Technologies like
@@ -2964,7 +2993,15 @@ age-keyed LoS) and PRJ-08's minimum range becomes
 observable and enforced, so §9 trades one DIFFERS for one
 MATCHES; CLS-01/CLS-02 and AI-04 record the new classes,
 the shipped counter tables and the AI gap with no status
-change, recounted mechanically below).
+change, recounted mechanically below; updated 2026-10-22
+for the Feudal technology completion — the seven missing Feudal
+researches (Forging, Scale Barding Armor, Bloodlines, Double-Bit
+Axe, Gold Mining, Stone Mining, Horse Collar) shipped through
+the TEC-06 patch machinery, with the TEC-06 / ECO-02 / TEC-08
+entries extended and ECO-14's Horse Collar clause corrected to
+update 169123's proportional top-up (independently amended the
+same day by the verification sweep above). No status moves:
+the totals stand.
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|

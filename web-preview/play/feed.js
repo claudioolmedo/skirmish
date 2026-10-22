@@ -23,6 +23,13 @@ const TECH_LINES = [
   ['padded', 'Padded Archer Armor'],
   ['maa', 'Man-at-Arms'],
   ['wheelbarrow', 'Wheelbarrow'],
+  ['forging', 'Forging'],
+  ['barding', 'Scale Barding Armor'],
+  ['bloodlines', 'Bloodlines'],
+  ['doublebit', 'Double-Bit Axe'],
+  ['goldmining', 'Gold Mining'],
+  ['stonemining', 'Stone Mining'],
+  ['horsecollar', 'Horse Collar'],
 ];
 
 // A single frame can legitimately complete several of a kind
@@ -39,7 +46,9 @@ const MAX_PER_KIND = 3;
  *   {
  *     built: { [buildingId]: kind },   // completed, own
  *     units: { [kind]: count },        // living, own, TC excluded
- *     techs: { loom, fletching, scalemail, padded, maa, wheelbarrow }: bool,
+ *     techs: { loom, fletching, scalemail, padded, maa, wheelbarrow,
+ *              forging, barding, bloodlines, doublebit, goldmining,
+ *              stonemining, horsecollar }: bool,
  *     age: 0 | 1,
  *     sheep: count,                    // living, own
  *   }
