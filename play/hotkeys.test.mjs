@@ -77,23 +77,27 @@ test('panel slot letters run a selected building\u2019s buttons', () => {
   assert.equal(at('blacksmith', 'KeyE'), null, 'E is not a Blacksmith letter');
 });
 
-test('Town Center letters are DE’s own: Villager Q, Loom A, Feudal W', () => {
+test('Town Center letters are DE’s own: Villager Q, Loom A, Feudal W, Wheelbarrow S', () => {
   // DE's grid letter is the button's panel position, and the TC
   // panel's arrangement is not our button order (Age of Empires
   // wiki, "Hotkey"; the study video's Loom tooltip reads
   // "(Hotkey: A)"). Scoped to the TC context only: E runs
   // nothing here, and the villager context keeps its own A.
+  // Wheelbarrow (2026-10-22) takes DE's second-row second slot,
+  // S, right of Loom; D stays empty — Hand Cart is a Castle Age
+  // technology and does not exist yet.
   const at = (code) => resolveHotkey({ context: 'tc', page: null, code });
   assert.equal(at('KeyQ').id, 'train', 'Create Villager — top-left of the TC panel');
   assert.equal(at('KeyA').id, 'research-loom', 'Loom — below Villager (study frame f_025)');
   assert.equal(at('KeyW').id, 'research-feudal', 'Feudal Age — top row, second slot');
   assert.equal(at('KeyE'), null, 'E is not a TC letter in DE');
-  assert.equal(at('KeyS'), null);
-  assert.equal(at('KeyD'), null);
+  assert.equal(at('KeyS').id, 'research-wheelbarrow', 'Wheelbarrow — below Feudal, right of Loom');
+  assert.equal(at('KeyD'), null, 'D would be Hand Cart — Castle Age, not shipped');
   // The badges painted on the buttons carry the same letters.
   assert.equal(badgeForButton({ context: 'tc', id: 'train', index: 0 }), 'Q');
   assert.equal(badgeForButton({ context: 'tc', id: 'research-loom', index: 1 }), 'A');
   assert.equal(badgeForButton({ context: 'tc', id: 'research-feudal', index: 2 }), 'W');
+  assert.equal(badgeForButton({ context: 'tc', id: 'research-wheelbarrow', index: 3 }), 'S');
   // Other panels keep their position badges.
   assert.equal(badgeForButton({ context: 'barracks', id: 'research-maa', index: 1 }), 'W');
 });

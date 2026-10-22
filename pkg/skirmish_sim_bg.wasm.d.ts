@@ -77,6 +77,7 @@ export const wasmsim_push_research_at: (a: number, b: number, c: number) => numb
 export const wasmsim_push_research_feudal: (a: number) => number;
 export const wasmsim_push_research_loom: (a: number) => number;
 export const wasmsim_push_research_tc_at: (a: number, b: number, c: number) => number;
+export const wasmsim_push_research_wheelbarrow: (a: number) => number;
 export const wasmsim_push_set_rally_building: (a: number, b: number, c: number, d: number) => number;
 export const wasmsim_push_set_rally_tc: (a: number, b: number, c: number) => number;
 export const wasmsim_push_set_rally_tc_of: (a: number, b: number, c: number, d: number) => number;

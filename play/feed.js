@@ -22,6 +22,7 @@ const TECH_LINES = [
   ['scalemail', 'Scale Mail Armor'],
   ['padded', 'Padded Archer Armor'],
   ['maa', 'Man-at-Arms'],
+  ['wheelbarrow', 'Wheelbarrow'],
 ];
 
 // A single frame can legitimately complete several of a kind
@@ -38,7 +39,7 @@ const MAX_PER_KIND = 3;
  *   {
  *     built: { [buildingId]: kind },   // completed, own
  *     units: { [kind]: count },        // living, own, TC excluded
- *     techs: { loom, fletching, scalemail, padded, maa }: bool,
+ *     techs: { loom, fletching, scalemail, padded, maa, wheelbarrow }: bool,
  *     age: 0 | 1,
  *     sheep: count,                    // living, own
  *   }

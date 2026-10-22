@@ -436,6 +436,11 @@ export class WasmSim {
      */
     push_research_tc_at(tc: number, tech_tag: number): boolean;
     /**
+     * Enqueue Wheelbarrow at the Town Center (175 food, 50 wood,
+     * 75 s; Feudal Age — ECO-03).
+     */
+    push_research_wheelbarrow(): boolean;
+    /**
      * Set a production building's rally point (M4: the Barracks).
      * Returns whether the building accepts a rally point.
      */
@@ -683,6 +688,7 @@ export interface InitOutput {
     readonly wasmsim_push_research_feudal: (a: number) => number;
     readonly wasmsim_push_research_loom: (a: number) => number;
     readonly wasmsim_push_research_tc_at: (a: number, b: number, c: number) => number;
+    readonly wasmsim_push_research_wheelbarrow: (a: number) => number;
     readonly wasmsim_push_set_rally_building: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_set_rally_tc: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_set_rally_tc_of: (a: number, b: number, c: number, d: number) => number;

@@ -888,6 +888,15 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Enqueue Wheelbarrow at the Town Center (175 food, 50 wood,
+     * 75 s; Feudal Age — ECO-03).
+     * @returns {boolean}
+     */
+    push_research_wheelbarrow() {
+        const ret = wasm.wasmsim_push_research_wheelbarrow(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * Set a production building's rally point (M4: the Barracks).
      * Returns whether the building accepts a rally point.
      * @param {number} building

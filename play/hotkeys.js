@@ -97,7 +97,7 @@ export const PAGE_BADGE = {
 
 /** Panel contexts whose buttons answer to position keys, in order. */
 export const PANEL_BUTTONS = {
-  tc: ['train', 'research-loom', 'research-feudal'],
+  tc: ['train', 'research-loom', 'research-feudal', 'research-wheelbarrow'],
   barracks: ['train-militia', 'research-maa'],
   range: ['train-archer'],
   stable: ['train-scout'],
@@ -124,6 +124,10 @@ export const PANEL_KEYS = {
     train: ['KeyQ', 'Q'],
     'research-loom': ['KeyA', 'A'],
     'research-feudal': ['KeyW', 'W'],
+    // Wheelbarrow (2026-10-22) sits right of Loom on the second
+    // row — DE's own Town Center arrangement (Loom A, Wheelbarrow
+    // S, Hand Cart D when that Age exists).
+    'research-wheelbarrow': ['KeyS', 'S'],
   },
   barracks: {
     'train-militia': ['KeyQ', 'Q'],
