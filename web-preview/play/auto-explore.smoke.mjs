@@ -350,7 +350,7 @@ const cmdButtons = () => tab.el('cmd-grid').children.filter((c) => c.tagName ===
 const cmdIds = () => cmdButtons().map((b) => b.id);
 const cmdBtn = (id) => cmdButtons().find((b) => b.id === id);
 
-const ROOT_IDS = ['page-eco', 'page-mil', 'repair']; // + Repair (BLD-17, third slot)
+const ROOT_IDS = ['page-eco', 'page-mil', 'repair', 'stop', 'delete']; // + Repair (BLD-17); Stop/Delete ride along (SEL-14)
 
 pump(3);
 
@@ -369,8 +369,8 @@ console.log('PASS (1) no selection: panel empty, G inert');
 // AutoExplore toggle: badged G, not pressed, off-state tooltip.
 key('Comma');
 pump(2);
-assert.deepEqual(cmdIds(), ['auto-explore'],
-  'starting scout selected: only the AutoExplore button');
+assert.deepEqual(cmdIds(), ['auto-explore', 'stop', 'delete'],
+  'starting scout selected: the AutoExplore button + Stop/Delete (SEL-14)');
 const btn = () => cmdBtn('auto-explore');
 assert.ok(btn().innerHTML.includes('<span class="cmd-key">G</span>'),
   'the AutoExplore button is badged G');

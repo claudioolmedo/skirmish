@@ -316,6 +316,43 @@ pub enum Command {
     /// The toggle replaces the scout's current order and queue,
     /// like any fresh direct order.
     SetAutoExplore { entity: u32, enabled: bool },
+    /// Stop (SEL-14): halt a unit's current order immediately —
+    /// move, work task, attack engagement, AutoExplore and the
+    /// whole queued-order chain all end; the unit stands idle
+    /// where it is. A villager keeps what it carries (the load is
+    /// only ever counted on deposit). Valid for any orderable
+    /// entity (the `orderable` rule: living, player-owned,
+    /// mobile) — buildings hold no orders to stop; their queue is
+    /// cancelled entry by entry instead (TEC-05, below).
+    Stop { entity: u32 },
+    /// Delete a unit deliberately (SEL-14): the entity dies this
+    /// tick through the ordinary death sweep (CMB-14) — orders
+    /// and carried resources vanish with it, population frees the
+    /// same tick, and an animal leaves its carcass exactly as if
+    /// killed (minus a killer: nobody starts harvesting it).
+    /// Valid for any living entity owned by a player, the Town
+    /// Center included (it is a building for this rule's
+    /// purposes). Gaia's wild animals are not yours to delete.
+    DeleteEntity { entity: u32 },
+    /// Delete a placed building deliberately (SEL-14): the
+    /// building is removed through the ordinary destruction path
+    /// (CMB-15) — footprint freed, queue dropped, support
+    /// withdrawn, its builders and repairers put back to idle.
+    /// A building still under construction is a *cancelled
+    /// foundation* and refunds 100% of its wood cost (BLD-02);
+    /// a completed building refunds nothing.
+    DeleteBuilding { building: u32 },
+    /// Cancel one entry of a Town Center's production queue
+    /// (TEC-05): the entry is removed and its full cost refunded
+    /// to the Town Center's owner — cancelling the head also
+    /// discards its progress (the next entry starts fresh).
+    /// Out-of-range indices and dead/unknown Town Centers are
+    /// ignored.
+    CancelQueueTc { tc: u32, index: u32 },
+    /// Cancel one entry of a placed building's production queue
+    /// (TEC-05): the same rule as the Town Center form, against
+    /// the building's owner.
+    CancelQueueBuilding { building: u32, index: u32 },
 }
 
 /// Why Town Center training cannot currently proceed (M2.5). The
@@ -1125,9 +1162,10 @@ impl Sim {
         }
     }
 
-    /// The match outcome from the human's seat (M5, VIC-01): in a
-    /// match, a player with no Town Center, no placed buildings
-    /// (under construction counts) and no living population units
+    /// The match outcome from the human's seat (VIC-01): in a
+    /// match, a player with no living population units and no
+    /// building capable of producing units (Town Center or a
+    /// placed production building, at any construction stage)
     /// has lost; if both fall on the same tick the human loses the
     /// tie (checked first — the same precedence beats even the
     /// AI's resignation). The AI also resigns earlier (AI-05):
@@ -1161,13 +1199,25 @@ impl Sim {
             })
     }
 
-    /// Conquest elimination (VIC-01, M5 form): no living Town Center,
-    /// no placed buildings at all, and no living population units.
+    /// Conquest elimination (VIC-01): no living population units
+    /// and no building capable of producing units — the Town
+    /// Center (an entity here) or a placed production building
+    /// (Barracks / Archery Range / Stable). A production building
+    /// counts at any construction stage: a foundation can still
+    /// become a producer, the same convention the M5 form applied
+    /// to buildings generally. Any other building — a House, a
+    /// camp, a Mill — does NOT keep a unit-less player alive:
+    /// the M5 form required razing every last building, which
+    /// was stricter than the rule's letter.
     fn eliminated(&self, owner: u8) -> bool {
         if self.tc_entity_of(owner).is_some() {
             return false;
         }
-        if self.buildings.iter().any(|b| b.owner == owner) {
+        if self
+            .buildings
+            .iter()
+            .any(|b| b.owner == owner && b.kind.produces_units())
+        {
             return false;
         }
         !self.entities.iter().any(|e| {
@@ -1729,6 +1779,185 @@ impl Sim {
     /// sends it back to that work on its own. Like every non-queued
     /// order it clears the villager's order queue and any combat
     /// engagement; the carry is untouched until the deposit lands.
+    /// Would a `Stop` command be accepted right now? (SEL-14.)
+    /// The entity must be able to take player orders at all (the
+    /// shared `orderable` rule). A pure query for UI affordances;
+    /// the command path re-validates at apply time.
+    pub fn can_stop(&self, entity: u32) -> bool {
+        match self.entity_index(entity) {
+            Some(idx) => self.orderable(idx),
+            None => false,
+        }
+    }
+
+    /// Apply a `Stop` command (SEL-14): end the entity's order,
+    /// work task, attack engagement, AutoExplore and queued chain
+    /// where it stands. The carry is kept (SEL-14's letter: a
+    /// stopped villager keeps what it carries).
+    fn issue_stop(&mut self, entity: u32) {
+        let idx = match self.entity_index(entity) {
+            Some(i) => i,
+            None => return,
+        };
+        if !self.orderable(idx) {
+            return;
+        }
+        self.entities[idx].order_queue.clear();
+        self.stop_task(idx);
+        let e = &mut self.entities[idx];
+        e.clear_combat();
+        e.auto_explore = false;
+        e.auto_target = None;
+    }
+
+    /// Would a `DeleteEntity` command be accepted right now?
+    /// (SEL-14: any living entity owned by a player — Gaia's wild
+    /// animals are not deletable.)
+    pub fn can_delete_entity(&self, entity: u32) -> bool {
+        match self.entity_index(entity) {
+            Some(idx) => {
+                let e = &self.entities[idx];
+                !e.dead && e.owner != entity::OWNER_GAIA
+            }
+            None => false,
+        }
+    }
+
+    /// Apply a `DeleteEntity` command (SEL-14): zero the HP and
+    /// let this tick's death sweep (CMB-14) do the rest — the one
+    /// death path frees population, orders and carry, and turns a
+    /// deleted animal into its carcass. `last_hit_by` is cleared
+    /// first: a deliberate delete has no killer, so no villager
+    /// starts harvesting the carcass on anyone's behalf.
+    fn issue_delete_entity(&mut self, entity: u32) {
+        if !self.can_delete_entity(entity) {
+            return;
+        }
+        let idx = self.entity_index(entity).expect("validated");
+        let e = &mut self.entities[idx];
+        e.last_hit_by = None;
+        e.hp = I16F16::ZERO;
+    }
+
+    /// Would a `DeleteBuilding` command be accepted right now?
+    /// (SEL-14: the building exists. Placed buildings are only
+    /// ever player-owned in this architecture.)
+    pub fn can_delete_building(&self, building: u32) -> bool {
+        self.building_index(building).is_some()
+    }
+
+    /// Apply a `DeleteBuilding` command (SEL-14 + BLD-02): a
+    /// foundation is a cancellation — refund its full wood cost
+    /// first — then remove the building through the ordinary
+    /// destruction path (CMB-15). A completed building refunds
+    /// nothing.
+    fn issue_delete_building(&mut self, building: u32) {
+        let bi = match self.building_index(building) {
+            Some(i) => i,
+            None => return,
+        };
+        let (complete, owner, wood) = {
+            let b = &self.buildings[bi];
+            (b.complete, b.owner, b.kind.wood_cost())
+        };
+        if !complete {
+            self.stockpile_mut(owner).add(ResourceKind::Wood, wood);
+        }
+        self.destroy_building(building);
+    }
+
+    /// Refund one queue entry's full cost to its owner (TEC-05):
+    /// the exact inverse of the enqueue spends (`spend_cost` /
+    /// `spend_tech`).
+    fn refund_entry(&mut self, owner: u8, entry: ProdEntry) {
+        match entry {
+            ProdEntry::Unit(kind) => {
+                let spec = units::spec(kind);
+                for (res, amount) in [
+                    (ResourceKind::Food, spec.food_cost),
+                    (ResourceKind::Wood, spec.wood_cost),
+                    (ResourceKind::Gold, spec.gold_cost),
+                ] {
+                    if amount > 0 {
+                        self.stockpile_mut(owner)
+                            .add(res, I16F16::from_num(amount));
+                    }
+                }
+            }
+            ProdEntry::Tech(tech) => {
+                let (food, wood, gold, stone) = tech.cost();
+                for (res, amount) in [
+                    (ResourceKind::Food, food),
+                    (ResourceKind::Wood, wood),
+                    (ResourceKind::Gold, gold),
+                    (ResourceKind::Stone, stone),
+                ] {
+                    if amount > 0 {
+                        self.stockpile_mut(owner)
+                            .add(res, I16F16::from_num(amount));
+                    }
+                }
+            }
+        }
+    }
+
+    /// Would a `CancelQueueTc` command be accepted right now?
+    /// (TEC-05: the Town Center stands and the index is in range.)
+    pub fn can_cancel_queue_tc(&self, tc: u32, index: u32) -> bool {
+        let alive = matches!(self.entity_index(tc), Some(i) if !self.entities[i].dead);
+        alive
+            && matches!(self.tc_state(tc), Some(s) if (index as usize) < s.queue.len())
+    }
+
+    /// Apply a `CancelQueueTc` command (TEC-05): remove the entry
+    /// and refund its full cost to the Town Center's owner;
+    /// cancelling the head discards its progress with it.
+    fn issue_cancel_queue_tc(&mut self, tc: u32, index: u32) {
+        if !self.can_cancel_queue_tc(tc, index) {
+            return;
+        }
+        let owner = self.entities[self.entity_index(tc).expect("validated")].owner;
+        let entry = {
+            let s = self
+                .tc_states
+                .iter_mut()
+                .find(|s| s.tc_id == tc)
+                .expect("validated");
+            let entry = s.queue.remove(index as usize);
+            if index == 0 {
+                s.progress = 0;
+            }
+            entry
+        };
+        self.refund_entry(owner, entry);
+    }
+
+    /// Would a `CancelQueueBuilding` command be accepted right
+    /// now? (TEC-05: the building stands and the index is in
+    /// range.)
+    pub fn can_cancel_queue_building(&self, building: u32, index: u32) -> bool {
+        matches!(self.building_index(building),
+            Some(bi) if (index as usize) < self.buildings[bi].queue.len())
+    }
+
+    /// Apply a `CancelQueueBuilding` command (TEC-05): the Town
+    /// Center rule against a placed building's queue and owner.
+    fn issue_cancel_queue_building(&mut self, building: u32, index: u32) {
+        if !self.can_cancel_queue_building(building, index) {
+            return;
+        }
+        let bi = self.building_index(building).expect("validated");
+        let (owner, entry) = {
+            let b = &mut self.buildings[bi];
+            let entry = b.queue.remove(index as usize);
+            if index == 0 {
+                b.train_progress = 0;
+            }
+            (b.owner, entry)
+        };
+        self.refund_entry(owner, entry);
+    }
+
     fn issue_force_deposit(&mut self, entity: u32) {
         let idx = match self.entity_index(entity) {
             Some(i) => i,
@@ -1942,7 +2171,9 @@ impl Sim {
             return false;
         }
         let b = &self.buildings[bi];
-        b.complete && b.owner == e.owner && b.hp < I16F16::from_num(b.kind.max_hp())
+        b.complete
+            && b.owner == e.owner
+            && b.hp < I16F16::from_num(b.kind.max_hp_at(self.age_of(b.owner)))
     }
 
     /// Would a `Queue` command be accepted right now? (M4, SEL-12.)
@@ -2188,6 +2419,17 @@ impl Sim {
                 Command::ResearchAt { building, tech } => self.issue_research_at(building, tech),
                 Command::Repair { entity, building } => self.issue_repair(entity, building),
                 Command::ForceDeposit { entity } => self.issue_force_deposit(entity),
+                Command::Stop { entity } => self.issue_stop(entity),
+                Command::DeleteEntity { entity } => self.issue_delete_entity(entity),
+                Command::DeleteBuilding { building } => {
+                    self.issue_delete_building(building)
+                }
+                Command::CancelQueueTc { tc, index } => {
+                    self.issue_cancel_queue_tc(tc, index)
+                }
+                Command::CancelQueueBuilding { building, index } => {
+                    self.issue_cancel_queue_building(building, index)
+                }
                 Command::SetAutoExplore { entity, enabled } => {
                     self.issue_auto_explore(entity, enabled)
                 }
@@ -2816,7 +3058,7 @@ impl Sim {
                     id,
                     kind,
                     owner: builder_owner,
-                    hp: I16F16::from_num(kind.max_hp()),
+                    hp: I16F16::from_num(kind.max_hp_at(self.age_of(builder_owner))),
                     cell_x,
                     cell_y,
                     pos_x,
@@ -3739,7 +3981,7 @@ impl Sim {
                     (
                         b.complete,
                         b.hp,
-                        I16F16::from_num(b.kind.max_hp()),
+                        I16F16::from_num(b.kind.max_hp_at(self.age_of(b.owner))),
                         b.pos_x,
                         b.pos_y,
                         b.cell_x,
@@ -3905,7 +4147,7 @@ impl Sim {
                 continue;
             }
             let (owner, kind) = (self.buildings[bi].owner, self.buildings[bi].kind);
-            let max_hp_bits = (kind.max_hp() as i64) << 16;
+            let max_hp_bits = (kind.max_hp_at(self.age_of(owner)) as i64) << 16;
             let hp_bits = self.buildings[bi].hp.to_bits() as i64;
             let missing = max_hp_bits - hp_bits;
             if missing <= 0 {
@@ -5017,16 +5259,15 @@ mod tests {
     }
 
     #[test]
-    fn a_lone_building_keeps_its_owner_alive() {
-        // The human has no resignation rule: with every unit gone
-        // but a House standing, Conquest has not eliminated them —
-        // the building must fall too. (Under construction counts:
-        // this record is incomplete.)
+    fn a_lone_non_production_building_no_longer_keeps_its_owner_alive() {
+        // VIC-01's letter: elimination is no units + no building
+        // capable of producing units. A lone House (even under
+        // construction) is not a producer — with every unit gone
+        // its owner is eliminated. (The M5 form required razing
+        // every last building; that was stricter than the rule.)
         let mut sim = Sim::new_match(11, MatchMode::AiNormal);
         sim.buildings.push(placed_house(entity::OWNER_PLAYER));
         wipe_units(&mut sim, entity::OWNER_PLAYER);
-        assert_eq!(sim.match_state(), MatchState::Ongoing);
-        sim.buildings.clear();
         assert_eq!(sim.match_state(), MatchState::Defeat);
         // The opponent mirror ends as Victory — there the AI-05
         // resignation (no Town Center, no villagers) fires before
@@ -5035,6 +5276,23 @@ mod tests {
         sim2.buildings.push(placed_house(entity::OWNER_OPPONENT));
         wipe_units(&mut sim2, entity::OWNER_OPPONENT);
         assert_eq!(sim2.match_state(), MatchState::Victory);
+    }
+
+    #[test]
+    fn a_lone_production_building_keeps_its_owner_alive() {
+        // The other half of VIC-01's letter: a standing production
+        // building — even a mere Barracks foundation — means the
+        // player can still produce, so no elimination while it
+        // stands; raze it and the elimination lands.
+        let mut sim = Sim::new_match(11, MatchMode::AiNormal);
+        let mut rax = placed_house(entity::OWNER_PLAYER);
+        rax.id = 900;
+        rax.kind = BuildingKind::Barracks;
+        sim.buildings.push(rax);
+        wipe_units(&mut sim, entity::OWNER_PLAYER);
+        assert_eq!(sim.match_state(), MatchState::Ongoing);
+        sim.buildings.clear();
+        assert_eq!(sim.match_state(), MatchState::Defeat);
     }
 
     #[test]

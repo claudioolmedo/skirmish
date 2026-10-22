@@ -1767,25 +1767,55 @@ function cycleIdle(kind, selectAll) {
 }
 
 function handleGameKey(e) {
-  // Control groups: Ctrl+1–9 assigns the selection, 1–9 recalls it,
-  // a double-tap centers the camera on it, Shift+number adds the
-  // group to the current selection (SEL-07).
-  const digit = /^Digit([1-9])$/.exec(e.code);
+  // Typing or picking in a form control is never a game key
+  // (the pause menu's locale select, the end-card textarea).
+  // (Guarded by capability, not DOM constructors: the headless
+  // smoke harness loads this file without a full DOM.)
+  if (e.target && typeof e.target.closest === 'function'
+    && e.target.closest('input, textarea, select, [contenteditable="true"]')) {
+    return false;
+  }
+  // Control groups (SEL-07, wiki Hotkey page — the full DE
+  // form): Ctrl+<Number> assigns groups 1–10 (Digit0 is group
+  // 10), Ctrl+Alt+<Number> assigns 11–20; <Number> alone (or
+  // with Alt for 11–20) selects, a double-tap centers;
+  // Shift+<Number> APPENDS the selection to the group;
+  // Ctrl+Shift+<Number> selects the group and snaps the view.
+  const digit = /^Digit([0-9])$/.exec(e.code);
   if (digit) {
-    const n = Number(digit[1]);
-    if (e.altKey) return false; // the Alt layer (groups 11–20) is not implemented
+    const base = Number(digit[1]) || 10; // Digit0 → group 10
+    const n = base + (e.altKey ? 10 : 0); // the Alt layer: 11–20
     e.preventDefault();
     if (e.repeat) return true;
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
+      const members = liveGroupMembers(n);
+      if (members.length) {
+        selectUnits(new Set(members));
+        const pos = sim.positions();
+        let sx = 0;
+        let sy = 0;
+        for (const id of members) {
+          sx += pos[id * 2];
+          sy += pos[id * 2 + 1];
+        }
+        centerOn(sx / members.length, sy / members.length);
+        playAudioCue('select');
+      }
+      return true;
+    }
     if (e.ctrlKey || e.metaKey) {
       const sel = selectedUnits();
       if (sel.length) controlGroups.assign(n, sel);
       return true;
     }
     if (e.shiftKey) {
-      const next = new Set(selection);
-      for (const id of liveGroupMembers(n)) next.add(id);
-      selectUnits(next);
-      playAudioCue('select');
+      // Append the SELECTION to the group (SEL-07's corrected
+      // reading — the group grows; the selection is unchanged).
+      const sel = selectedUnits();
+      if (sel.length) {
+        controlGroups.addToGroup(n, sel);
+        playAudioCue('select');
+      }
       return true;
     }
     const members = liveGroupMembers(n);
@@ -1823,6 +1853,51 @@ function handleGameKey(e) {
         const pos = sim.positions();
         centerOn(pos[tc * 2], pos[tc * 2 + 1]);
         playAudioCue('select');
+      }
+      return true;
+    }
+    case 'Delete': { // SEL-14 (wiki Hotkey page): Delete = one
+      // selected unit (or the selected own building);
+      // Shift+Delete = all selected units.
+      if (e.ctrlKey || e.metaKey || e.altKey) return false;
+      e.preventDefault();
+      if (e.repeat) return true;
+      if (selectedBuilding && selectedBuilding.owner === localOwner) {
+        deleteSelectedBuilding();
+      } else {
+        deleteSelectedUnits(e.shiftKey);
+      }
+      return true;
+    }
+    case 'Space': { // SEL-10: center the view on the selection
+      // (the classic binding the wiki's Hotkey page lists).
+      if (e.ctrlKey || e.metaKey || e.altKey) return false;
+      if (e.target && e.target.tagName === 'BUTTON') return false;
+      e.preventDefault();
+      if (e.repeat) return true;
+      const ids = selectedUnits();
+      const pos = sim.positions();
+      if (ids.length) {
+        let sx = 0;
+        let sy = 0;
+        for (const id of ids) {
+          sx += pos[id * 2];
+          sy += pos[id * 2 + 1];
+        }
+        centerOn(sx / ids.length, sy / ids.length);
+        playAudioCue('select');
+      } else if (selectedBuilding) {
+        if (selectedBuilding.type === 'tc') {
+          const tc = selectedBuilding.id;
+          centerOn(pos[tc * 2], pos[tc * 2 + 1]);
+          playAudioCue('select');
+        } else {
+          const bk = buildingList().find((b) => b.id === selectedBuilding.id);
+          if (bk) {
+            centerOn(bk.x, bk.y);
+            playAudioCue('select');
+          }
+        }
       }
       return true;
     }
@@ -1879,6 +1954,52 @@ function toggleAutoExplore() {
   if (!issued) return false;
   playAudioCue('orderMilitary');
   return true;
+}
+
+/// SEL-14 Stop (wiki Hotkey page): halt every selected unit
+/// where it stands — the sim clears its orders and task; a
+/// villager keeps its carry.
+function stopSelectedUnits() {
+  let any = false;
+  for (const id of selectedUnits()) {
+    if (issue({ t: 'stop', e: id })) any = true;
+  }
+  if (any) playAudioCue('click');
+  return any;
+}
+
+/// SEL-14 Delete (wiki Hotkey page): Delete destroys ONE
+/// selected unit; Shift+Delete (and the panel button) destroys
+/// ALL selected. The sim kills through its ordinary death
+/// path, so population frees and animals leave carcasses.
+function deleteSelectedUnits(all) {
+  const ids = selectedUnits();
+  if (!ids.length) return false;
+  const targets = all ? ids : [ids[0]];
+  let any = false;
+  for (const id of targets) {
+    if (issue({ t: 'delete', e: id })) any = true;
+  }
+  if (any) {
+    selectUnits(new Set(ids.filter((id) => !targets.includes(id))));
+    playAudioCue('click');
+  }
+  return any;
+}
+
+/// SEL-14 + BLD-02: delete the selected own building — a
+/// foundation refunds its full cost in the sim; a completed
+/// building refunds nothing.
+function deleteSelectedBuilding() {
+  if (!selectedBuilding || selectedBuilding.owner !== localOwner) return false;
+  const ok = selectedBuilding.type === 'tc'
+    ? issue({ t: 'delete', e: selectedBuilding.id })
+    : issue({ t: 'deleteb', b: selectedBuilding.id });
+  if (ok) {
+    selectBuilding(null);
+    playAudioCue('click');
+  }
+  return ok;
 }
 
 /// Force drop-off for the selection (DE's villager A; the M6
@@ -2141,6 +2262,9 @@ function applyLocalOrder(cmd) {
       ? sim.push_attack_queued(cmd.e, cmd.tg)
       : sim.push_attack(cmd.e, cmd.tg);
     case 'attackb': return sim.push_attack_building(cmd.e, cmd.b);
+    case 'repair': return cmd.q
+      ? sim.push_repair_queued(cmd.e, cmd.b)
+      : sim.push_repair(cmd.e, cmd.b);
     case 'build': return cmd.q
       ? sim[PUSH_BUILD_QUEUED[cmd.k]](cmd.e, cmd.x, cmd.y)
       : sim[PUSH_BUILD[cmd.k]](cmd.e, cmd.x, cmd.y);
@@ -2157,6 +2281,11 @@ function applyLocalOrder(cmd) {
     case 'rally_b': return sim.push_set_rally_building(cmd.b, cmd.x, cmd.y);
     case 'force_dep': return sim.push_force_deposit(cmd.e);
     case 'auto_explore': return sim.push_auto_explore(cmd.e, cmd.on);
+    case 'stop': return sim.push_stop(cmd.e);
+    case 'delete': return sim.push_delete(cmd.e);
+    case 'deleteb': return sim.push_delete_building(cmd.b);
+    case 'cancel_tc': return sim.push_cancel_queue_tc(cmd.tc, cmd.i);
+    case 'cancel_b': return sim.push_cancel_queue_building(cmd.b, cmd.i);
     default: return false;
   }
 }
@@ -7043,6 +7172,16 @@ function runCommandButton(id, times = 1) {
     // SEL-17: the selected scouts' AutoExplore toggle — the same
     // order the G key issues (toggleAutoExplore plays the cue).
     toggleAutoExplore();
+  } else if (id === 'stop') {
+    // SEL-14: halt every selected unit where it stands.
+    stopSelectedUnits();
+  } else if (id === 'delete') {
+    // SEL-14: the panel Delete is the Shift+Delete form —
+    // every selected unit.
+    deleteSelectedUnits(true);
+  } else if (id === 'delete-building') {
+    // SEL-14 + BLD-02: destroy the selected own building.
+    deleteSelectedBuilding();
   } else if (id === 'repair') {
     // BLD-17: arm (or disarm) Repair targeting — the click that
     // follows picks the building, exactly like build placement.
@@ -7379,6 +7518,30 @@ function renderCommands() {
       title: t(scoutAuto ? 'cmd.autoExploreOnTitle' : 'cmd.autoExploreTitle'),
     }));
   }
+  // SEL-14 (wiki Hotkey page): Stop and Delete ride along
+  // whenever UNITS are selected — Stop halts every selected
+  // unit where it stands; the panel Delete is the Shift+Delete
+  // form (all selected units). An own building's panel carries
+  // its own Delete (a foundation refunds in full — BLD-02;
+  // a finished building refunds nothing).
+  if (selUnits.length > 0) {
+    cmdGrid.append(
+      cmdButton({
+        id: 'stop', icon: 'i-stop', label: t('cmd.stop'),
+        title: t('cmd.stopTitle'),
+      }),
+      cmdButton({
+        id: 'delete', icon: 'i-delete', label: t('cmd.delete'),
+        title: t('cmd.deleteTitle'),
+      }),
+    );
+  }
+  if (selectedBuilding && selectedBuilding.owner === localOwner) {
+    cmdGrid.append(cmdButton({
+      id: 'delete-building', icon: 'i-delete', label: t('cmd.delete'),
+      title: t('cmd.deleteBuildingTitle'),
+    }));
+  }
   // 'foe' and no-selection contexts (and a units selection without
   // a scout) render nothing: DE's command panel carries
   // no explanatory text — with no command buttons to show, the
@@ -7391,6 +7554,26 @@ let selSig = ''; // signature of the last-rendered selection panel
 // HP + hint; group -> count + one cell per unit (capped at 12 +
 // "+k"); Town Center / Barracks -> portrait + queue state; nothing
 // -> guidance.
+/// TEC-05: one cancel chip per entry of the selected TC's or
+/// production building's queue, rendered into the selection
+/// grid. Clicking a chip cancels exactly that entry through the
+/// order channel; the sim refunds the entry's full cost.
+function queueCancelChips(kind, id, codes) {
+  codes.forEach((code, i) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'sel-cell qchip';
+    chip.textContent = queueEntryName(code);
+    chip.title = t('sel.cancelEntry', { name: queueEntryName(code) });
+    chip.addEventListener('click', () => {
+      if (kind === 'tc') issue({ t: 'cancel_tc', tc: id, i });
+      else issue({ t: 'cancel_b', b: id, i });
+      selSig = ''; // the queue changed under the panel: re-render
+    });
+    selGrid.append(chip);
+  });
+}
+
 function updateSelPanel() {
   // Info-selected animal bookkeeping, before anything reads the
   // selection: a dead animal drops the selection; one that
@@ -7493,6 +7676,8 @@ function updateSelPanel() {
     selName.textContent = t('unit.townCenter');
     const codes = myTcQueue();
     if (codes.length > 0) {
+      // TEC-05: one cancel chip per queue entry.
+      queueCancelChips('tc', myTcId, codes);
       // The queue line comes first (addendum, 2026-10-19): with
       // the button badge gone, this line is where the queue
       // count + progress live — including while housed, where
@@ -7521,6 +7706,8 @@ function updateSelPanel() {
     if (!bk.complete) {
       selInfo.textContent = t('sel.underConstruction');
     } else if (codes.length > 0) {
+      // TEC-05: one cancel chip per queue entry.
+      queueCancelChips('b', bk.id, codes);
       const head = codes[0];
       selInfo.textContent = (head >= 100
         ? t('sel.researchingB', { name: queueEntryName(head), n: codes.length })

@@ -301,6 +301,18 @@ impl BuildingKind {
         }
     }
 
+    /// Whether this kind can produce units (VIC-01's "building
+    /// capable of producing units"): the Barracks, Archery Range
+    /// and Stable. The Town Center also produces, but it is an
+    /// entity in this architecture, not a placed building — the
+    /// elimination predicate checks it separately.
+    pub fn produces_units(self) -> bool {
+        matches!(
+            self,
+            BuildingKind::Barracks | BuildingKind::ArcheryRange | BuildingKind::Stable
+        )
+    }
+
     /// Whether this kind counts toward the Feudal Age research
     /// requirement (TEC-01): any completed Dark-Age building other
     /// than Houses and Farms (and walls/Outposts, which do not
@@ -332,6 +344,27 @@ impl BuildingKind {
         }
     }
 
+    /// Hit points at the owner's current Age (BLD-11): a building's
+    /// HP follows its owner's Age column in the data table with no
+    /// research and no player action. Only the kinds whose per-age
+    /// rows the study (§5) pins have a step: the House (550 Dark →
+    /// 750 Feudal; 900/900 in the Castle/Imperial columns, ages the
+    /// `Age` enum does not reach yet) and the Barracks (1200 →
+    /// 1500; 1800/2100 later). The Archery Range and Stable are
+    /// Feudal-born at their first column (1500) — their step is a
+    /// Castle-Age value. Every other kind keeps its flat row at
+    /// every age (no per-age data is pinned for them; nothing is
+    /// invented). The maximum is a *lookup* (TEC-04): a standing
+    /// building's current HP is never rewritten by an age advance —
+    /// the max rises around the damage already taken.
+    pub fn max_hp_at(self, age: Age) -> i32 {
+        match (self, age) {
+            (BuildingKind::House, Age::Feudal) => 750,
+            (BuildingKind::Barracks, Age::Feudal) => 1500,
+            _ => self.max_hp(),
+        }
+    }
+
     /// Melee armor (study §5, Dark Age row; Feudal row for the
     /// M6 Feudal buildings). The House's is *negative* in the Dark
     /// Age — early houses are soft to melee, exactly as the
@@ -345,6 +378,18 @@ impl BuildingKind {
         }
     }
 
+    /// Melee armor at the owner's current Age (BLD-11, study §5):
+    /// House −2 Dark → −1 Feudal (the wiki House changelog, update
+    /// 56005: "−2/−1/1 melee armor in the Dark/Feudal/Castle Age");
+    /// Barracks 0 → 1. Other kinds keep their flat row.
+    pub fn armor_melee_at(self, age: Age) -> i32 {
+        match (self, age) {
+            (BuildingKind::House, Age::Feudal) => -1,
+            (BuildingKind::Barracks, Age::Feudal) => 1,
+            _ => self.armor_melee(),
+        }
+    }
+
     /// Pierce armor (study §5, Dark/Feudal rows as above).
     pub fn armor_pierce(self) -> i32 {
         match self {
@@ -352,6 +397,17 @@ impl BuildingKind {
             BuildingKind::Farm => 0,
             BuildingKind::ArcheryRange | BuildingKind::Stable => 8,
             _ => 7,
+        }
+    }
+
+    /// Pierce armor at the owner's current Age (BLD-11, study §5):
+    /// House 7 → 8 and Barracks 7 → 8 on reaching Feudal. Other
+    /// kinds keep their flat row.
+    pub fn armor_pierce_at(self, age: Age) -> i32 {
+        match (self, age) {
+            (BuildingKind::House, Age::Feudal) => 8,
+            (BuildingKind::Barracks, Age::Feudal) => 8,
+            _ => self.armor_pierce(),
         }
     }
 }
@@ -507,11 +563,12 @@ impl Building {
             .count() as u32
     }
 
-    /// Remaining HP as a fraction of the kind's maximum, in raw
-    /// fixed-point bits (0 … 65536). Presentation aid for the ABI
-    /// (the damaged-building HP bar).
-    pub fn hp_frac_bits(&self) -> i32 {
-        let total = self.kind.max_hp() as i64;
+    /// Remaining HP as a fraction of the kind's maximum at the
+    /// owner's current Age (BLD-11), in raw fixed-point bits
+    /// (0 … 65536). Presentation aid for the ABI (the
+    /// damaged-building HP bar).
+    pub fn hp_frac_bits(&self, owner_age: Age) -> i32 {
+        let total = self.kind.max_hp_at(owner_age) as i64;
         if total <= 0 {
             return 65536;
         }

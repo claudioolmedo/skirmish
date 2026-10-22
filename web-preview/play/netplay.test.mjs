@@ -38,6 +38,12 @@ test('validateCommand accepts the full vocabulary and rejects junk', () => {
     { t: 'force_dep', e: 7 },
     { t: 'auto_explore', e: 4, on: true },
     { t: 'auto_explore', e: 4, on: false },
+    { t: 'stop', e: 4 },
+    { t: 'delete', e: 4 },
+    { t: 'deleteb', b: 3 },
+    { t: 'cancel_tc', tc: 2, i: 0 },
+    { t: 'cancel_tc', tc: 2, i: 15 },
+    { t: 'cancel_b', b: 3, i: 2 },
   ];
   for (const c of ok) assert.equal(validateCommand(c), true, JSON.stringify(c));
   const bad = [
@@ -50,6 +56,12 @@ test('validateCommand accepts the full vocabulary and rejects junk', () => {
     { t: 'gather', e: 1 },
     { t: 'auto_explore', e: 4 },
     { t: 'auto_explore', e: 4, on: 1 },
+    { t: 'stop' },
+    { t: 'delete', e: -1 },
+    { t: 'deleteb' },
+    { t: 'cancel_tc', tc: 2, i: 16 },
+    { t: 'cancel_tc', tc: 2 },
+    { t: 'cancel_b', b: 3, i: -1 },
   ];
   for (const c of bad) assert.equal(validateCommand(c), false, JSON.stringify(c));
 });

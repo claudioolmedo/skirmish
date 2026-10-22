@@ -191,12 +191,12 @@ pub fn compute_damage_elev(
 /// Buildings (the same membership the Town Center entity carries in
 /// the unit tables). Everything else is inert — a building never
 /// moves, shoots, or trains through this view.
-pub(crate) fn building_spec(kind: BuildingKind) -> UnitSpec {
+pub(crate) fn building_spec(kind: BuildingKind, owner_age: crate::tech::Age) -> UnitSpec {
     UnitSpec {
-        max_hp: kind.max_hp(),
+        max_hp: kind.max_hp_at(owner_age),
         attacks: &[],
-        armor_melee: kind.armor_melee(),
-        armor_pierce: kind.armor_pierce(),
+        armor_melee: kind.armor_melee_at(owner_age),
+        armor_pierce: kind.armor_pierce_at(owner_age),
         classes: cls::mask(&[cls::ALL_BUILDINGS, cls::STANDARD_BUILDINGS]),
         range_max: I16F16::ZERO,
         reload_ticks: 0,
@@ -1032,7 +1032,10 @@ impl Sim {
             Some(bi) => bi,
             None => return,
         };
-        let spec = building_spec(self.buildings[bi].kind);
+        let spec = building_spec(
+            self.buildings[bi].kind,
+            self.age_of(self.buildings[bi].owner),
+        );
         // M7: the elevation factor reads the building's own ground
         // (its footprint-center cell) against the attacker's level.
         let b = &self.buildings[bi];
@@ -1050,7 +1053,7 @@ impl Sim {
     /// (a *completed* building's loss leaves its queue and rally
     /// moot — the record is gone), and clear every attacker aimed at
     /// it. Cost is not refunded (no rule grants one).
-    fn destroy_building(&mut self, bid: u32) {
+    pub(crate) fn destroy_building(&mut self, bid: u32) {
         let bi = match self.building_index(bid) {
             Some(bi) => bi,
             None => return,

@@ -7,15 +7,16 @@
 // through a caller-supplied predicate). Unit-tested headlessly —
 // see groups.test.mjs.
 //
-// The model is the genre standard (and the rulebook's SEL-07):
-// Ctrl+number assigns the current selection to a group, pressing
-// the number recalls it, pressing it twice in quick succession
-// centers the camera on it, and Shift+number adds the group to the
-// current selection. Groups 1–9 (the Alt layer for 11–20 is not
-// implemented).
+// The model is DE's, as the wiki's Hotkey page documents it
+// (SEL-07): Ctrl+<Number> assigns the selection to groups 1–10
+// (the 0 key is group 10) and Ctrl+Alt+<Number> to groups
+// 11–20; <Number> (or Alt+<Number> for the upper layer) recalls,
+// pressing it twice in quick succession centers the camera,
+// Shift+<Number> APPENDS the selection to the group, and
+// Ctrl+Shift+<Number> selects the group and snaps the view.
 
-/** How many control groups exist (number keys 1–9). */
-export const GROUP_COUNT = 9;
+/** How many control groups exist (1–10 plain layer, 11–20 Alt). */
+export const GROUP_COUNT = 20;
 
 /**
  * Create the group store. Membership is by entity id, kept in

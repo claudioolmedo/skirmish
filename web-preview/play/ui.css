@@ -420,6 +420,15 @@ body.in-match #event-feed { display: flex; }
   font: 700 10.5px/1 ui-monospace, Menlo, monospace;
   color: var(--ui-ink-dim);
 }
+/* TEC-05: queue-cancel chips — one per queued entry in the
+   selection panel; clicking cancels that entry (full refund). */
+.sel-cell.qchip {
+  width: auto;
+  padding: 0 7px;
+  font: 600 10.5px/1 ui-monospace, Menlo, monospace;
+  cursor: pointer;
+}
+.sel-cell.qchip:hover { background: rgba(176, 58, 46, 0.25); }
 
 /* minimap (bottom-right) */
 

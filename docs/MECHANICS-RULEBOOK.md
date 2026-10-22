@@ -430,11 +430,16 @@ provides groups 11–20 (20 groups total).
 client-only store (`play/groups.js`: assign / recall / double-tap
 tracking, unit-tested); groups store *ids*, dead ids filtered at recall
 time (the sim remains the truth); double-tap centers on the group's
-centroid. Divergences from the reference text: Shift+number adds the
-*group* to the current selection (the reference adds the *selection* to
-the group); Space-to-center is not bound (double-tap serves); the Alt
-layer (11–20) is not implemented. · *Status:* **DIFFERS** (core shipped;
-Shift semantics and the Alt layer differ).
+centroid. Completed to the reference's full form in the 2026-10-21/22
+night run, against the wiki's Hotkey page (fetched that night: "Assign
+a control group — Ctrl + <Number (0–9)>" for groups 1–10, Ctrl+Alt for
+11–20; "Append selected object to a control group — Shift + <Number>";
+Ctrl+Shift+<Number> selects and snaps the view): the store now spans
+20 groups, Digit0 is group 10, the Alt layer adds 10, Shift+number
+APPENDS the selection to the group (the M4 build had the direction
+reversed — it added the group to the selection), Ctrl+Shift+number
+recalls and centers, and Space centers on the current selection
+(SEL-10). · *Status:* **MATCHES**.
 
 **SEL-08 — Idle villager key.** A dedicated key cycles through idle
 villagers one by one (selecting each, camera following); its Shift variant
@@ -459,9 +464,18 @@ selection; Backspace jumps the camera to the location of the most recent
 alert (INF-01).
 *Source:* GAP 1.8; wiki, Hotkey. · *Impl:* H shipped (M4) — it selects
 and centers the Town Center through the existing building selection.
-Still open: Ctrl+letter cycling of production buildings, Space centering
-the selection, and the Backspace alert jump (waits on INF-01 alerts). ·
-*Status:* **DIFFERS** (H only).
+Ctrl+letter cycling shipped with the M13 go-to (every shipped kind:
+Ctrl+B Barracks, Ctrl+A Archery Range, Ctrl+S Blacksmith, Ctrl+G
+Mining Camp, Ctrl+Z Lumber Camp, Ctrl+I Mill — the wiki Hotkey page's
+table, fetched 2026-10-21); Space centering on the current selection
+shipped in the 2026-10-21/22 night run. Two pieces stay open: the
+alert jump — the sources conflict (GAP says Backspace; the wiki's
+Return-of-Rome table says Home) and INF-01 does not track alert
+locations client-side, so there is nothing to jump to yet; and
+Ctrl+L (Stable) is reserved by the browser for its address bar — the
+key never reaches the page, so it stays deliberately unbound
+(pinned by `hotkeys.test.mjs`). · *Status:* **DIFFERS** (the alert
+jump only, plus the platform-reserved Ctrl+L).
 
 **SEL-11 — Right-click is a smart order.** Right-clicking with a selection
 issues the context order implied by the target: resource node → gather;
@@ -515,9 +529,24 @@ creation stays open with GAR-09 (M6). · *Status:* **MATCHES**.
 current order immediately (they become idle; a villager keeps what it
 carries). Delete destroys a selected own unit or building deliberately
 (clients may gate it behind a confirmation setting).
-*Source:* GAP 2.7, 2.8; wiki, Unit (Safe Delete option). · *Impl:*
-`Command::Stop` clears task+order; `Command::Delete` needs the death/
-removal path (CMB-14). · *Status:* **MISSING** (neither command exists).
+*Source:* GAP 2.7, 2.8; wiki, Unit (Safe Delete option); wiki, Hotkey
+(fetched 2026-10-21: "Stop selected unit or building — G"; "Delete
+one selected unit or building — Delete"; "Delete all selected units
+or buildings — Shift + Delete"). · *Impl:* shipped in the 2026-10-21/22
+night run — `Command::Stop` (clears the order queue, the task and any
+combat state; the carry is kept), `Command::DeleteEntity` (kills
+through the ordinary death path: population frees the same tick, a
+deleted sheep leaves its carcass, no killer is credited),
+`Command::DeleteBuilding` (BLD-02's refund split lives there); WASM
+bindings, the lockstep vocabulary (`stop` / `delete` / `deleteb`),
+panel buttons, and the Delete key (plain = one selected unit or the
+selected own building; Shift = all selected; the panel button is the
+all form). One recorded divergence, on the KEY only: the reference
+binds Stop to G, which here is the Auto Scout toggle (SEL-17,
+Claudio's binding) — Stop is a panel button; the command set itself
+matches. Stop is units-only here; in the reference it also halts a
+building's queue, which here is the queue cancel (TEC-05). ·
+*Status:* **MATCHES**.
 
 **SEL-15 — Building selection is separate from unit selection.** Selecting
 a building replaces the unit selection (and vice versa); the command panel
@@ -594,10 +623,13 @@ product binding.
 tiles/sec (MECHANICS-STUDY §4.1: Villager 0.8, Knight line 1.35, Scout line
 1.2→1.55, …). Speed modifiers are percentage patches from technologies
 (TEC-06), never per-unit code.
-*Source:* MECHANICS-STUDY §4.1. · *Impl:* a `speed` column in the unit
-table replaces the single global `MAX_SPEED` (1.0 world units/tick) in
-`steer.rs`; steering consumes the per-entity value. · *Status:* **DIFFERS**
-(one global speed for all entities).
+*Source:* MECHANICS-STUDY §4.1. · *Impl:* shipped — re-audited against
+the code in the 2026-10-21/22 night run: the movement step consumes
+`current_speed` = the owner's effective unit row (`units.rs` carries
+the per-kind `speed` column; technology patches fold in at lookup —
+Loom's +0.1 villager speed, the Scout line's Feudal 1.55), and the old
+global survives only as an internal test constant of the steering
+module, not on any runtime path. · *Status:* **MATCHES**.
 
 **MOV-02 — Paths are grid A\* with dynamic obstacles.** Movement paths are
 computed on the tile grid and recomputed when the destination or the
@@ -639,10 +671,16 @@ separation currently applies to everyone always).
 for steering purposes; the documented typical radius is ≈0.2 tiles
 (Karambit Warrior 0.15 is the famous exception). Per-unit numbers are
 otherwise UNVERIFIED in public sources — 0.2 is the adopted default.
-*Source:* MECHANICS-STUDY §4.2. · *Impl:* `radius` column in the unit
-table, replacing the global SEPARATION_RADIUS (2.0 world units); the
-separation distance becomes r₁ + r₂. · *Status:* **DIFFERS** (one global
-separation radius, no per-unit data).
+*Source:* MECHANICS-STUDY §4.2. · *Impl:* the structure shipped
+(re-audited 2026-10-21/22): the snapshot carries a per-kind `radius`
+(1.0 wu standard, boar 1.2, Town Center 3.6) and the separation
+distance in `steer.rs` is r₁ + r₂. What still differs is the VALUE:
+the adopted standard radius is 1.0 wu = 0.25 tiles against the
+documented ≈0.2-tile typical, and per-unit numbers remain UNVERIFIED
+in public sources — closing the last 0.05 tiles is a feel/balance
+call, not a documented convergence, so it waits for evidence or
+Claudio's word. · *Status:* **DIFFERS** (structure matches; the
+standard radius value is 0.25 tiles vs the documented ≈0.2).
 
 **MOV-06 — Groups travel at their slowest member's speed.** Units sharing
 a move order form a temporary group: the group advances no faster than
@@ -910,9 +948,12 @@ evaluates the availability gates (BLD-15). · *Status:* **MATCHES**.
 Laying a foundation deducts the full cost immediately. Cancelling a
 foundation before completion refunds 100%; a completed building deleted
 later refunds nothing (SEL-14).
-*Source:* GAP 4.1. · *Impl:* payment shipped; cancellation refunds when
-the building-removal path lands with delete (M5/M6). · *Status:*
-**DIFFERS** (payment yes; no cancel/delete exists yet).
+*Source:* GAP 4.1. · *Impl:* payment shipped (M5/M6); the removal path
+landed with SEL-14 in the 2026-10-21/22 night run —
+`Command::DeleteBuilding` on a foundation refunds the full wood cost
+to its owner's stockpile before removal; on a completed building it
+refunds nothing, and the building's live effects (House population
+support) end with it. · *Status:* **MATCHES**.
 
 **BLD-03 — Construction needs a builder present.** A foundation makes
 progress only while at least one assigned villager is in work range of
@@ -1016,11 +1057,22 @@ opening house urgent (see OPENING-SPEC).
 (and, for later ages, armor) follows its owner's Age column in the data
 table with no research and no player action: e.g. House 550 HP (Dark) →
 750 (Feudal) → 900 (Castle/Imperial).
-*Source:* MECHANICS-STUDY §5 preamble. · *Impl:* ages are per-player
-state since M6 and building HP exists since M5 — but the step-up is
-not implemented: a building keeps its base row at every age (the
-Range/Stable rows are Feudal-keyed only in that the buildings
-themselves are Feudal). · *Status:* **DIFFERS**.
+*Source:* MECHANICS-STUDY §5 preamble; wiki, House (fetched
+2026-10-21: "House HP staggered: 550/750/900/900 in the Dark/Feudal/
+Castle/Imperial Age"; update 56005 gives Houses −2/−1/1 melee armor
+in Dark/Feudal/Castle). · *Impl:* shipped for the ages in scope in
+the 2026-10-21/22 night run — `build.rs` carries the age columns
+(`max_hp_at` / `armor_melee_at` / `armor_pierce_at`: House 550→750 HP,
+−2→−1 melee, 7→8 pierce; Barracks 1200→1500 HP, 0→1 melee, 7→8
+pierce), and every consumer (placement, combat damage, repair, the
+ABI HP fraction) reads the owner's CURRENT age, TEC-04's lookup
+semantics: a standing building keeps its current HP when the age
+turns — its maximum rises, and Repair (BLD-17) can heal it the rest
+of the way; a building placed in Feudal starts at the Feudal value.
+The Archery Range and Stable are Feudal-born at their first column
+(their step is Castle, not yet in scope); the Town Center is an
+entity with a single 2400 HP row in the study, not a placed building
+in this rule's table. · *Status:* **MATCHES** (for the shipped ages).
 
 **BLD-12 — Farms do not block; other buildings do.** A placed farm never
 enters the obstacle grid (its farmer walks and stands on it). Every other
@@ -1543,12 +1595,13 @@ tick research completes: building HP/armor columns step up (BLD-11),
 automatic unit bonuses apply (CLS-04), and the new age's buildings,
 units, and techs unlock (BLD-15) — all as lookups against the owner's new
 age, so there is no empire-wide state sweep to get wrong.
-*Source:* MECHANICS-STUDY §5 preamble, §7. · *Impl:* shipped in part
-(M6) — age is one field per player; the automatic unit bonuses
-(CLS-04) and the unlocks (BLD-15) apply as lookups against the new
-age at the completion tick, with no empire-wide sweep to get wrong.
-The building HP/armor step-up (BLD-11) does not happen. · *Status:*
-**DIFFERS**.
+*Source:* MECHANICS-STUDY §5 preamble, §7. · *Impl:* shipped (M6) —
+age is one field per player; the automatic unit bonuses (CLS-04) and
+the unlocks (BLD-15) apply as lookups against the new age at the
+completion tick, with no empire-wide sweep to get wrong. The last
+piece, the building HP/armor step-up (BLD-11), landed in the
+2026-10-21/22 night run on the same lookup model. · *Status:*
+**MATCHES**.
 
 **TEC-05 — Research is queued, paid up front, refunded on cancel.** A
 technology is researched by one building, one item at a time in its
@@ -1561,8 +1614,13 @@ with the building, CMB-15).
 *Impl:* one queue implementation reused by all production buildings —
 units and technologies, Town Center included — since M6; costs flow
 through the same atomic stockpile API as everything else (ECO-01).
-· *Status:* **DIFFERS** (queued + paid at enqueue shipped for units
-and techs; cancelling — and therefore refunds — does not exist yet).
+Cancelling landed in the 2026-10-21/22 night run:
+`Command::CancelQueueTc` / `Command::CancelQueueBuilding` remove one
+entry by index and refund its exact cost (the precise inverse of the
+enqueue spend, for units and technologies alike; cancelling the head
+also zeroes its progress); the client renders one cancel chip per
+queue entry in the selection panel. Destruction still loses the
+queue without refund (CMB-15). · *Status:* **MATCHES**.
 
 **TEC-06 — Tech effects are data patches applied at completion.** A
 technology's effect is a named patch: flat additions to attack/armor
@@ -2124,19 +2182,23 @@ when they have no units left and no building capable of producing units
 (in practice: all units dead and all production buildings destroyed or
 converted). The last surviving player — or team, under allied victory
 (VIC-12) — wins.
-*Source:* GAP 8.1; wiki, Victory. · *Impl:* an elimination predicate
-evaluated on the slow cadence after death sweeps; eliminated players'
-state follows VIC-11. · *Status:* **DIFFERS** (M5, 2026-10-16: Conquest
-ships with a stricter predicate than the rule's letter — a player is
-eliminated only when they have no buildings of any kind left
-(under-construction counts as a building) AND no population-counting
-units; the rule as written would also eliminate a player whose
-production buildings stand but who fields no units, where the shipped
-game keeps them alive on the building alone. Two match-ending details:
-if both players fall on the same tick the human loses (defeat is
-checked first), and AI resignation (AI-05) ends the match as a win.
-The match state is hash-covered and exposed as ongoing / victory /
-defeat; the sim keeps ticking harmlessly after the decision.)
+*Source:* GAP 8.1; wiki, Victory (fetched 2026-10-21: under Conquest,
+victory comes only by military conquest — one player, or one allied
+team, remaining). · *Impl:* an elimination predicate evaluated on
+the slow cadence after death sweeps; eliminated players' state
+follows VIC-11. M5 (2026-10-16) shipped a stricter predicate than
+the rule's letter (any building of any kind kept a unit-less player
+alive); the 2026-10-21/22 night run converged it to the letter: a
+player is eliminated when they have no living population-counting
+units AND no living Town Center AND no placed production building
+(Barracks / Archery Range / Stable — a production *foundation*
+counts, the same convention M5 applied to buildings generally);
+Houses, camps and Mills no longer keep a unit-less player alive.
+Two match-ending details stand: if both players fall on the same
+tick the human loses (defeat is checked first), and AI resignation
+(AI-05) ends the match as a win. The match state is hash-covered and
+exposed as ongoing / victory / defeat; the sim keeps ticking
+harmlessly after the decision. · *Status:* **MATCHES**.
 
 **VIC-02 — Wonder victory (standard games).** In Standard victory mode,
 holding a completed Wonder starts a countdown; if the Wonder still stands
@@ -2528,7 +2590,7 @@ side sampling of public data). · *Status:* **MISSING**.
 
 ## A. Rule counts
 
-216 rules total. Counts verified mechanically against the status tags in
+217 rules total. Counts verified mechanically against the status tags in
 this document (2026-10-18, M8 audit; re-verified for M9 the same day —
 the open-games lobby changed no status, see the M9 note in section B;
 updated 2026-10-19 for BLD-16, the Town Center footprint rule —
@@ -2547,29 +2609,35 @@ unchanged) and MAP-09's gold layout to 7+4+4 (status
 unchanged), and corrected the Militia cost to the current-DE
 50 F / 20 G (update 141935) — recorded at the unit table in
 `sim/src/units.rs`; the rulebook carries no per-unit cost
-entry).
+entry; updated 2026-10-21/22 for the rulebook gap batch —
+eight status moves to MATCHES (SEL-07, SEL-14, MOV-01, BLD-02,
+BLD-11, TEC-04, TEC-05, VIC-01), recounted mechanically below.
+The same recount corrected two pre-existing table drifts the
+per-entry tags expose: §4 counts 17 rules (SEL-17's entry was
+never added to the row) and §15's AI-06 has been MATCHES since
+its 2026-10-20 rework — the document holds 217 rules, not 216).
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
 | 1 | Simulation & time (SIM) | 12 | 10 | 1 | 1 |
 | 2 | Map, terrain & elevation (MAP) | 12 | 7 | 4 | 1 |
 | 3 | Visibility & exploration (VIS) | 10 | 8 | 1 | 1 |
-| 4 | Selection & orders (SEL) | 16 | 12 | 3 | 1 |
-| 5 | Movement, pathfinding & collision (MOV) | 12 | 3 | 4 | 5 |
+| 4 | Selection & orders (SEL) | 17 | 15 | 2 | 0 |
+| 5 | Movement, pathfinding & collision (MOV) | 12 | 4 | 3 | 5 |
 | 6 | Economy & drop-off (ECO) | 17 | 13 | 2 | 2 |
-| 7 | Buildings & placement (BLD) | 17 | 9 | 6 | 2 |
+| 7 | Buildings & placement (BLD) | 17 | 11 | 4 | 2 |
 | 8 | Combat & damage (CMB) | 16 | 10 | 3 | 3 |
 | 9 | Projectiles & ballistics (PRJ) | 10 | 4 | 4 | 2 |
 | 10 | Unit classes & counters (CLS) | 8 | 5 | 0 | 3 |
-| 11 | Technologies & age advancement (TEC) | 11 | 3 | 5 | 3 |
+| 11 | Technologies & age advancement (TEC) | 11 | 5 | 3 | 3 |
 | 12 | Monks, conversion & relics (MNK) | 13 | 0 | 0 | 13 |
 | 13 | Trade, market & tribute (TRD) | 8 | 0 | 0 | 8 |
 | 14 | Garrison, transport & repair (GAR) | 10 | 0 | 0 | 10 |
-| 15 | AI behavior & difficulty (AI) | 9 | 4 | 3 | 2 |
-| 16 | Victory, scoring & game modes (VIC) | 12 | 0 | 1 | 11 |
+| 15 | AI behavior & difficulty (AI) | 9 | 5 | 2 | 2 |
+| 16 | Victory, scoring & game modes (VIC) | 12 | 1 | 0 | 11 |
 | 17 | Multiplayer determinism (NET) | 11 | 4 | 5 | 2 |
 | 18 | Information rules (INF) | 12 | 4 | 3 | 5 |
-| | **Total** | **216** | **96** | **45** | **75** |
+| | **Total** | **217** | **106** | **37** | **74** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer
@@ -2693,6 +2761,31 @@ counts are updated for the one new rule and the one status move
 is unchanged — repair state is hashed only when a repair is in
 flight or a building stands. Town Center repair stays out of
 scope (the TC is an entity, not a placed building).
+
+**Rulebook gap batch (2026-10-21/22, night run).** Eight entries
+converged to documented current-DE behavior, each against public
+evidence fetched that night (the wiki's Hotkey, House and Victory
+pages, on top of the GAP analysis and the mechanics study):
+SEL-14 (Stop / Delete commands, MISSING → MATCHES), BLD-02
+(foundation cancel refunds fully, DIFFERS → MATCHES), TEC-05
+(queue cancelling with full refunds, DIFFERS → MATCHES), BLD-11 +
+TEC-04 (building HP/armor step up with the owner's Age as a
+lookup, DIFFERS → MATCHES), VIC-01 (the elimination predicate
+converged to the rule's letter — production buildings, the TC and
+units are what keep a player alive, DIFFERS → MATCHES), SEL-07
+(control groups completed: 20 groups, append-on-Shift,
+Ctrl+Shift snap, DIFFERS → MATCHES), MOV-01 (re-audited against
+the code: per-kind speeds with tech patches, DIFFERS → MATCHES).
+Two entries were narrowed without closing: SEL-10 (Space
+centering shipped; the alert jump stays open — conflicting
+sources and no alert-location substrate) and MOV-05 (the per-kind
+radius structure shipped; the adopted 0.25-tile standard radius
+vs the documented ≈0.2 typical stays, the per-unit values being
+UNVERIFIED publicly). Section A's counts are updated for the
+eight status moves, and the mechanical recount behind them also
+corrected two pre-existing table drifts (SEL-17's entry missing
+from §4's row; AI-06's MATCHES missing from §15's) — the document
+holds 217 rules.
 
 Cross-cutting at every milestone: NET-05/06 discipline (no local factor
 in the sim; RNG only in fixed iteration) and VIS-09 (fog hides

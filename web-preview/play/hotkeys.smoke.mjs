@@ -357,9 +357,9 @@ const cmdIds = () => cmdButtons().map((b) => b.id);
 const cmdBtn = (id) => cmdButtons().find((b) => b.id === id);
 // The DE page model (UI FIX 4 addendum): root = the two openers;
 // a page = its buildings + Back in the last slot.
-const ROOT_IDS = ['page-eco', 'page-mil', 'repair']; // + Repair (BLD-17, third slot)
-const ECO_IDS = ['build-0', 'build-4', 'build-1', 'build-3', 'build-5', 'page-back'];
-const MIL_IDS = ['build-2', 'build-6', 'build-7', 'build-8', 'page-back'];
+const ROOT_IDS = ['page-eco', 'page-mil', 'repair', 'stop', 'delete']; // + Repair (BLD-17); Stop/Delete ride along (SEL-14)
+const ECO_IDS = ['build-0', 'build-4', 'build-1', 'build-3', 'build-5', 'page-back', 'stop', 'delete']; // Stop/Delete ride along (SEL-14)
+const MIL_IDS = ['build-2', 'build-6', 'build-7', 'build-8', 'page-back', 'stop', 'delete']; // Stop/Delete ride along (SEL-14)
 
 pump(3);
 
