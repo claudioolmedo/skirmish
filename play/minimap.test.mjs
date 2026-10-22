@@ -14,6 +14,7 @@ import {
   cameraCenteredOn,
   renderMinimap,
   NODE_COLORS,
+  ALERT_COLOR,
 } from './minimap.js';
 
 // Sim constants (sim/src/grid.rs): world [-100, 100), 50x50 cells of 4.
@@ -176,4 +177,20 @@ test('fog base: per-cell terrain under fog states (M7)', () => {
   assert.equal(fills[5 * GW + 5].fill, '#2e6da8', 'visible water');
   assert.equal(fills[6 * GW + 6].fill, '#2f4a26', 'explored land at height 3 (dim)');
   assert.deepEqual([fills[6 * GW + 6].x, fills[6 * GW + 6].y], [6, 6]);
+});
+
+test('renderMinimap: the INF-01 alert X paints only while its blink is lit', () => {
+  const g = createMinimap({ worldHalf: H, ...MM });
+  const base = makeStubCtx();
+  renderMinimap(base, g, emptyState());
+  const lit = makeStubCtx();
+  renderMinimap(lit, g, emptyState({ alert: { x: 10, y: -20, on: true } }));
+  // The X is two crossed strokes: +1 stroke, +2 moveTo, +2 lineTo.
+  assert.equal(lit.calls.stroke, base.calls.stroke + 1);
+  assert.equal(lit.calls.moveTo, base.calls.moveTo + 2);
+  assert.equal(lit.calls.lineTo, base.calls.lineTo + 2);
+  const dark = makeStubCtx();
+  renderMinimap(dark, g, emptyState({ alert: { x: 10, y: -20, on: false } }));
+  assert.deepEqual(dark.calls, base.calls);
+  assert.equal(ALERT_COLOR, '#e8402f');
 });

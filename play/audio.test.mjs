@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   AUDIO_STORE_KEY, CUE_INTERVALS_MS, createAudioEngine, createCueGate,
-  cueForEvent, cuesForSnapshotDiff, loadAudioSettings,
+  cueForEvent, cuesForSnapshotDiff, distanceGain, loadAudioSettings,
 } from './audio.js';
 
 function makeStorage(seed = {}) {
@@ -201,4 +201,38 @@ test('every cue in the table synthesizes without throwing', () => {
     t += 30000; // outrun every interval, incl. the idle tick's 20s
     assert.equal(engine.play(cue), true, `cue ${cue} should sound`);
   }
+});
+
+test('INF-10 ambient cues: combat and work map, throttle and attenuate', () => {
+  assert.equal(cueForEvent({ type: 'combat' }), 'combat');
+  assert.equal(cueForEvent({ type: 'work' }), 'work');
+  assert.equal(cueForEvent('combat'), 'combat');
+  assert.equal(cueForEvent('work'), 'work');
+  // Distance curve: full at the near radius, silent at the far
+  // one, halfway between them half.
+  assert.equal(distanceGain(0), 1);
+  assert.equal(distanceGain(4), 1);
+  assert.equal(distanceGain(38), 0);
+  assert.equal(distanceGain(100), 0);
+  assert.ok(Math.abs(distanceGain(21) - 0.5) < 1e-9);
+  assert.equal(distanceGain(NaN), 0);
+  // The gate spaces combat strikes like a real skirmish, not a
+  // buzz: a second hit inside 450 ms is dropped, later ones play.
+  let t = 0;
+  const ctx = makeFakeContext();
+  const engine = createAudioEngine({
+    storage: makeStorage(), contextFactory: () => ctx, now: () => t,
+  });
+  engine.unlock();
+  t = 1000;
+  assert.equal(engine.play({ type: 'combat' }, { gain: 0.5 }), true);
+  assert.ok(ctx.oscillators.length > 0 && ctx.sources.length > 0);
+  t = 1200;
+  assert.equal(engine.play({ type: 'combat' }, { gain: 0.5 }), false);
+  t = 1500;
+  assert.equal(engine.play({ type: 'combat' }, { gain: 0.5 }), true);
+  // Work strikes ride the same plumbing on their own clock
+  // (past the 35 ms global spacing from the combat hit).
+  t = 1600;
+  assert.equal(engine.play({ type: 'work' }, { gain: 1 }), true);
 });

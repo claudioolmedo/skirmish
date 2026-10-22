@@ -113,6 +113,7 @@ export const MM_WATER_DIM = '#1d3a56';
 export const BUILDING_COLOR = '#e8e3d5'; // own buildings when no color is given
 export const VIEWPORT_COLOR = 'rgba(255, 255, 255, 0.9)';
 export const SELECTED_COLOR = '#ffcf4d'; // matches the main view's selection gold
+export const ALERT_COLOR = '#e8402f'; // INF-01 attack flash — the click-marker red family
 
 function drawDiamond(ctx, g, cxWorld, cyWorld, halfWorld, fill) {
   // A world-axis-aligned square (center + half extent) projected to
@@ -146,6 +147,9 @@ function drawDiamond(ctx, g, cxWorld, cyWorld, halfWorld, fill) {
  *                        // edge in cells (2 or 3); default 2 (M3)
  *   entities:  [{ x, y, kind, color, selected? }],  // kind: 0 villager, 1 TC,
  *                        // 2 scout, 3 militia, 4 archer, 5+ animals
+ *   alert:     { x, y, on } | null,  // INF-01: the latest attack
+ *                        // location; `on` is the blink phase the
+ *                        // caller computed (play/alerts.js)
  *   cam:       { s, ox, oy, viewW, viewH } | null,  // null = no viewport rect
  * }
  *
@@ -269,6 +273,22 @@ export function renderMinimap(ctx, g, state) {
       ctx.arc(mx, my, 1.9, 0, Math.PI * 2);
       ctx.fill();
     }
+  }
+
+  // INF-01: the attack alert — a flashing X at the location
+  // while its blink phase is lit (play/alerts.js owns the
+  // lifetime and cadence; this renderer only paints).
+  if (state.alert && state.alert.on) {
+    const [mx, my] = worldToMinimap(g, state.alert.x, state.alert.y);
+    const r = 5;
+    ctx.strokeStyle = ALERT_COLOR;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(mx - r, my - r);
+    ctx.lineTo(mx + r, my + r);
+    ctx.moveTo(mx + r, my - r);
+    ctx.lineTo(mx - r, my + r);
+    ctx.stroke();
   }
 
   // Camera viewport rectangle.
