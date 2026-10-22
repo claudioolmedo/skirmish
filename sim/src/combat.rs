@@ -1077,7 +1077,7 @@ impl Sim {
             let qy = (ay - by).clamp(-half, half) + by;
             if steer::vec_len(ax - qx, ay - qy) <= MELEE_REACH {
                 let atk_elev = self.entity_height(idx);
-                self.damage_building(bid, spec.attacks, atk_elev);
+                self.damage_building(bid, spec.attacks, atk_elev, owner);
             }
         }
         let e = &mut self.entities[idx];
@@ -1093,7 +1093,13 @@ impl Sim {
     /// armor and the All Buildings + Standard Buildings classes —
     /// so class bonuses (e.g. a future anti-building row) work
     /// against buildings with no special cases (CMB-01/03).
-    pub(crate) fn damage_building(&mut self, bid: u32, attacks: &[(u8, i32)], atk_elev: u8) {
+    pub(crate) fn damage_building(
+        &mut self,
+        bid: u32,
+        attacks: &[(u8, i32)],
+        atk_elev: u8,
+        attacker_owner: u8,
+    ) {
         let bi = match self.building_index(bid) {
             Some(bi) => bi,
             None => return,
@@ -1109,6 +1115,17 @@ impl Sim {
         let dmg = compute_damage_elev(attacks, &spec, atk_elev, tgt_elev);
         self.buildings[bi].hp -= dmg;
         if self.buildings[bi].hp < I16F16::from_num(1) {
+            // VIC-04: the lethal hit credits the attacker's owner
+            // with the building's resource cost (its wood cost —
+            // the only cost buildings carry here), foundation or
+            // complete. A Delete never reaches this path (it calls
+            // `destroy_building` directly), so self-demolition
+            // credits no one.
+            let (bowner, bvalue) = {
+                let b = &self.buildings[bi];
+                (b.owner, b.kind.wood_cost().to_num::<i32>() as i64)
+            };
+            self.credit_destruction(attacker_owner, bowner, bvalue);
             self.destroy_building(bid);
         }
     }
@@ -1191,7 +1208,7 @@ impl Sim {
                 if (p.impact_x - b.pos_x).abs() <= half
                     && (p.impact_y - b.pos_y).abs() <= half
                 {
-                    self.damage_building(bid, &p.attacks, p.attacker_elev);
+                    self.damage_building(bid, &p.attacks, p.attacker_elev, p.owner);
                 }
             }
             return;
@@ -1237,6 +1254,7 @@ impl Sim {
                 continue;
             }
             let (kind, px, py, killer) = (e.kind, e.pos_x, e.pos_y, e.last_hit_by);
+            let victim_owner = e.owner;
             {
                 let e = &mut self.entities[idx];
                 e.dead = true;
@@ -1252,6 +1270,24 @@ impl Sim {
                 e.clear_combat();
                 e.aggro_target = None;
                 e.returning_home = false;
+            }
+            // VIC-04: the last hitter is credited with the kill —
+            // the same attribution the carcass rule below uses.
+            // Cross-player kills only: `credit_destruction` sorts
+            // out Gaia killers (a boar earns nobody anything),
+            // same-owner kills (your own sheep on your own
+            // villager's knife) and cost-free victims; a Delete
+            // arrives here with `last_hit_by` already cleared, so
+            // it credits no one.
+            if let Some(kid) = killer {
+                if let Some(ki) = self.entity_index(kid) {
+                    let kowner = self.entities[ki].owner;
+                    self.credit_destruction(
+                        kowner,
+                        victim_owner,
+                        crate::unit_cost_value(kind),
+                    );
+                }
             }
             let spec = units::spec(kind);
             if spec.carcass_food > 0 {

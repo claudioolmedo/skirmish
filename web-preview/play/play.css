@@ -233,6 +233,29 @@ html, body {
   color: #4a3418;
   cursor: pointer;
 }
+/* Final score table (VIC-04): the DE statistics screen's four
+   categories per player, labels and numbers only. Sits between
+   the result line and the feedback block. */
+.end-score {
+  margin: 0 auto 18px;
+  border-collapse: collapse;
+  font: 14px/1.35 Georgia, 'Times New Roman', serif;
+  color: #43300f;
+}
+.end-score th, .end-score td {
+  padding: 2px 12px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.end-score tbody th, .end-score thead th:first-child {
+  text-align: left;
+  font-weight: 700;
+}
+.end-score thead th { font-weight: 700; }
+.end-score .end-score-total th, .end-score .end-score-total td {
+  border-top: 1px solid rgba(61, 42, 18, 0.35);
+  font-weight: 700;
+}
 /* End-of-match feedback block (2026-10-19): an inset parchment
    box inside the end card, in the .howto language — one question,
    tappable stars, a short text area, and the GitHub star line.

@@ -2268,13 +2268,45 @@ resource cost of every researched technology (free/auto-granted techs
 don't count) + 10 points per 1% of the map explored. **Society** = 20%
 of the cost of Castles and Wonders constructed. Team score = the
 arithmetic mean of members' scores.
-*Source:* wiki, Score (all four components pinned). · *Impl:* run
-counters (destroyed/converted value, tribute paid, researched-tech cost)
-are per-player hashed state incremented at event time — the formula must
-never be recomputed by scanning history. Map-explored % comes from
-VIS-01's per-player grid (a count maintained incrementally). · *Status:*
-**MISSING** (GAP 8.3 had "score exists" as a line; the formula itself was
-not in GAP-ANALYSIS).
+*Source:* wiki, Score (all four components pinned; re-fetched
+2026-10-22 — the AoE II section states the four formulas verbatim,
+plus "Each team has a shared team score, which is the arithmetic
+mean of the individual scores"). · *Impl (shipped 2026-10-22):*
+`Sim::score_for(owner)` computes the four categories from live
+state; the WASM `score_for` export feeds the end-of-match table
+(the DE statistics screen's shape: the four categories + total
+per player). Military's input is the one true run counter —
+`PlayerState::destroyed_value`, per-player hashed state (written
+only while nonzero, so kill-free streams hash byte-identically;
+the golden hash did not move), credited at event time: entity
+kills through the death sweep's `last_hit_by` attribution (the
+same crediting the carcass rule uses), building razings through
+`damage_building`'s lethal hit. Everything else derives from
+current state, not history: stockpile and the surviving-value
+scan (units at their `units::spec` cost sums; buildings at
+their wood cost, complete or under construction), researched-
+tech cost from the progression state via `has_tech` (the Feudal
+Age advancement counts — it is a researched technology; no
+auto-granted techs exist here), explored % counted off VIS-01's
+per-player fog grid. Recorded readings where the wiki is
+silent or the game's data is thinner than DE's: (1) each
+category is floored by integer division on its aggregate — the
+wiki pins the percentages, not a rounding rule; (2) the tribute
+term is 0 — no tribute system exists (see §13); (3) the
+conversion term rides the destruction counter in the formula,
+but the only conversion in this game is herdable capture
+(AI-06) and herdables carry no resource cost in the unit
+table, so it contributes 0 by data; (4) Society is 20% of
+Castles/Wonders constructed — no such kind exists yet, so the
+term is structurally 0; (5) the Town Center contributes 0 to
+surviving value — its table cost is 0 (it is never built here);
+(6) team score (the mean) has no surface yet — matches are
+1v1/1-seat affairs, so no team exists to average; the live
+in-game score display DE shows has no surface here either —
+the breakdown ships on the end-of-match screen only. ·
+*Status:* **MATCHES** (the formula as pinned; the six readings
+above are recorded, none changes a number the wiki's formula
+produces from this game's data).
 
 **VIC-05 — Time-limit and score-target victories.** If a match has a
 time limit, the highest score at expiry wins. In score-target mode, the
@@ -2724,7 +2756,10 @@ with no status change (INF-04 — alert flashes now yes, ally
 flares still no; SEL-10 — the alert jump shipped, only the
 platform-reserved Ctrl+L remains; INF-05 — the rally marker
 was already shipped, only attack/armor stats remain),
-recounted mechanically below).
+recounted mechanically below; updated 2026-10-22 for VIC-04,
+the score formula — VIC-04 moves MISSING → MATCHES, so §16
+trades one MISSING for one MATCHES with the rule count
+unchanged, recounted mechanically below).
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
@@ -2743,10 +2778,10 @@ recounted mechanically below).
 | 13 | Trade, market & tribute (TRD) | 8 | 0 | 0 | 8 |
 | 14 | Garrison, transport & repair (GAR) | 10 | 0 | 0 | 10 |
 | 15 | AI behavior & difficulty (AI) | 9 | 5 | 2 | 2 |
-| 16 | Victory, scoring & game modes (VIC) | 12 | 1 | 0 | 11 |
+| 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |
 | 17 | Multiplayer determinism (NET) | 11 | 4 | 5 | 2 |
 | 18 | Information rules (INF) | 12 | 7 | 3 | 2 |
-| | **Total** | **217** | **112** | **35** | **70** |
+| | **Total** | **217** | **113** | **35** | **69** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer

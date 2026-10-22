@@ -444,8 +444,27 @@ function showMatchEnd(ms) {
     durationTicks: sim.tick_count(),
   };
   playAudioCue(ms === 1 ? 'victory' : 'defeat');
+  renderEndScore();
   renderEndFeedback();
   endOverlay.style.display = 'flex';
+}
+
+/// Fill the end card's score table (VIC-04): the sim's four DE
+/// categories plus total for both seats, read at the decision
+/// tick. score_for answers [military, economy, technology,
+/// society, total] per owner tag — the local seat and the foe's,
+/// whichever chair this client sits in.
+function renderEndScore() {
+  if (!document.getElementById('end-score')) return;
+  const you = sim.score_for(localOwner);
+  const foe = sim.score_for(foeOwner());
+  const rows = ['military', 'economy', 'technology', 'society', 'total'];
+  rows.forEach((row, i) => {
+    const y = document.getElementById(`end-score-you-${row}`);
+    const f = document.getElementById(`end-score-foe-${row}`);
+    if (y) y.textContent = String(you[i]);
+    if (f) f.textContent = String(foe[i]);
+  });
 }
 
 /// Paint the feedback block for a freshly ended match: hidden
@@ -4125,6 +4144,13 @@ function applyStaticStrings() {
   setText('end-restart-btn', 'end.restart');
   setText('end-menu-btn', 'end.backToMenu');
   setText('end-replay-btn', 'end.downloadReplay');
+  setText('end-score-you', 'end.scoreYou');
+  setText('end-score-foe', 'end.scoreFoe');
+  setText('end-score-military-l', 'end.scoreMilitary');
+  setText('end-score-economy-l', 'end.scoreEconomy');
+  setText('end-score-technology-l', 'end.scoreTechnology');
+  setText('end-score-society-l', 'end.scoreSociety');
+  setText('end-score-total-l', 'end.scoreTotal');
   // End-of-match feedback block (its GitHub line is the anchor's
   // text; the stub DOMs have no querySelector hit and skip it).
   setText('feedback-q', 'feedback.question');

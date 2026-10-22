@@ -869,6 +869,21 @@ impl WasmSim {
             .collect()
     }
 
+    /// Any player's score by owner tag (VIC-04):
+    /// `[military, economy, technology, society, total]` for owner
+    /// 0 (human) or 2 (opponent); Gaia and unknown tags read the
+    /// zero breakdown. Behind the end-of-match score table.
+    pub fn score_for(&self, owner: u32) -> Vec<f64> {
+        let s = self.inner.score_for(owner as u8);
+        vec![
+            s.military as f64,
+            s.economy as f64,
+            s.technology as f64,
+            s.society as f64,
+            s.total as f64,
+        ]
+    }
+
     /// One stockpile resource by name: convenience getters for the HUD.
     pub fn food(&self) -> f64 {
         self.inner

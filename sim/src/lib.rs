@@ -519,6 +519,45 @@ struct PlayerState {
     /// Bitmask of researched `TechId`s (`TechId::bit`). The Feudal
     /// Age advancement is recorded by `age` itself, not a bit.
     techs: u64,
+    /// VIC-04 run counter: the summed resource cost of every enemy
+    /// unit and building this player has destroyed (kills credited
+    /// through `Entity::last_hit_by` at the death sweep; buildings
+    /// through `combat::damage_building`'s lethal hit). The
+    /// Military score is 20% of this value. Real hashed state —
+    /// see the conditional write in `hash_parts`.
+    destroyed_value: u64,
+}
+
+/// One player's score breakdown (VIC-04; wiki, Score): the four
+/// category scores and their sum, each an integer (the category
+/// terms are floored by integer division — the wiki pins the
+/// percentages, not a rounding rule).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Score {
+    /// 20% of the resource cost of all enemy units and buildings
+    /// the player destroyed or converted.
+    pub military: i64,
+    /// 10% of resources currently held (plus tribute paid — no
+    /// tribute exists in this game, so the term is 0) + 20% of the
+    /// resource cost of surviving units and standard buildings.
+    pub economy: i64,
+    /// 20% of the resource cost of every researched technology
+    /// + 10 points per 1% of the map explored.
+    pub technology: i64,
+    /// 20% of the cost of Castles and Wonders constructed. No
+    /// such building kind exists yet, so this is structurally 0.
+    pub society: i64,
+    /// Military + Economy + Technology + Society.
+    pub total: i64,
+}
+
+/// The resource value (cost) of a unit kind: the sum of its
+/// production cost components in `units::spec` (VIC-04's "resource
+/// value (cost)"). Kinds with no production cost — the Town
+/// Center, herdables, wild animals — are worth 0.
+fn unit_cost_value(kind: EntityKind) -> i64 {
+    let s = units::spec(kind);
+    s.food_cost as i64 + s.wood_cost as i64 + s.gold_cost as i64
 }
 
 /// SIM-06 subsystem checksums: the running values of the one
@@ -924,6 +963,107 @@ impl Sim {
     fn stockpile_mut(&mut self, owner: u8) -> &mut Stockpile {
         let slot = player_slot(owner).unwrap_or(0);
         &mut self.stockpiles[slot]
+    }
+
+    /// Credit a destruction to the player who inflicted it
+    /// (VIC-04, Military): `value` is the destroyed thing's
+    /// resource cost. Only cross-player kills count — a Gaia
+    /// killer earns nobody anything, and destroying your own
+    /// unit or building (the Delete commands) credits no one:
+    /// entity deletes reach the death sweep with `last_hit_by`
+    /// already cleared, and building deletes call
+    /// `destroy_building` directly, never this path.
+    pub(crate) fn credit_destruction(&mut self, creditor: u8, victim_owner: u8, value: i64) {
+        if value <= 0 {
+            return;
+        }
+        let (Some(cs), Some(vs)) = (player_slot(creditor), player_slot(victim_owner)) else {
+            return;
+        };
+        if cs == vs {
+            return;
+        }
+        self.players[cs].destroyed_value += value as u64;
+    }
+
+    /// The summed resource cost credited to a player for enemy
+    /// units and buildings destroyed (VIC-04's Military input).
+    /// Gaia and unknown tags read 0.
+    pub fn destroyed_value_of(&self, owner: u8) -> u64 {
+        match player_slot(owner) {
+            Some(slot) => self.players[slot].destroyed_value,
+            None => 0,
+        }
+    }
+
+    /// A player's score, computed from live state (VIC-04; wiki,
+    /// Score — the formula the rulebook entry pins). Pure read:
+    /// every term derives from current state plus the one run
+    /// counter (`PlayerState::destroyed_value`) — kills cannot be
+    /// recomputed from state, everything else can: stockpile and
+    /// surviving values are read off the world, researched-tech
+    /// cost off the progression state, explored share off the
+    /// fog grid. Conversion crediting rides the same destruction
+    /// counter in the reference formula; the only conversion in
+    /// this game is herdable capture (AI-06), and herdables
+    /// carry no resource cost in the unit table, so the term
+    /// contributes 0 by data.
+    pub fn score_for(&self, owner: u8) -> Score {
+        let Some(slot) = player_slot(owner) else {
+            return Score::default();
+        };
+        let p = &self.players[slot];
+        // Military: 20% of destroyed/converted enemy value.
+        let military = p.destroyed_value as i64 * 20 / 100;
+        // Economy: 10% of the current stockpile (tribute paid is
+        // the wiki's other 10% term — no tribute system exists,
+        // so it is 0) + 20% of surviving units and standard
+        // buildings. Every placed building counts, complete or
+        // under construction; the Town Center entity's table cost
+        // is 0, so it contributes nothing.
+        let stock: i64 = self.stockpiles[slot]
+            .amounts()
+            .iter()
+            .map(|a| a.to_num::<i32>() as i64)
+            .sum();
+        let mut surviving: i64 = 0;
+        for e in &self.entities {
+            if !e.dead && e.owner == owner {
+                surviving += unit_cost_value(e.kind);
+            }
+        }
+        for b in &self.buildings {
+            if b.owner == owner {
+                surviving += b.kind.wood_cost().to_num::<i32>() as i64;
+            }
+        }
+        let economy = stock * 10 / 100 + surviving * 20 / 100;
+        // Technology: 20% of researched-tech cost (the Feudal
+        // Age advancement is a researched technology — `has_tech`
+        // reads it off the age; auto-granted techs don't exist in
+        // this game) + 10 per 1% of the map explored (fog bytes
+        // >= 1 are explored-or-visible, VIS-01).
+        let mut tech_cost: i64 = 0;
+        for t in TechId::ALL {
+            if self.has_tech(owner, t) {
+                let (f, w, g, s) = t.cost();
+                tech_cost += f as i64 + w as i64 + g as i64 + s as i64;
+            }
+        }
+        let cells = self.fog[slot].len() as i64;
+        let explored = self.fog[slot].iter().filter(|&&c| c >= 1).count() as i64;
+        let explored_pct = if cells > 0 { explored * 100 / cells } else { 0 };
+        let technology = tech_cost * 20 / 100 + explored_pct * 10;
+        // Society: 20% of Castles and Wonders constructed — no
+        // such building kind exists in the table yet.
+        let society: i64 = 0;
+        Score {
+            military,
+            economy,
+            technology,
+            society,
+            total: military + economy + technology + society,
+        }
     }
 
     /// What kind of game this is (M5).
@@ -4701,6 +4841,14 @@ impl Sim {
         for p in &self.players {
             h.write_u8(p.age.tag());
             h.write_u64(p.techs);
+            // VIC-04: the destroyed-value counter is hashed state,
+            // written only while nonzero (the repair-assignment /
+            // pennant-bit precedent) so a kill-free stream — the
+            // golden scenario included — stays byte-identical to
+            // the pre-score stream.
+            if p.destroyed_value > 0 {
+                h.write_u64(p.destroyed_value);
+            }
         }
         // M2: stockpiles in canonical resource order. M5: both
         // players' stockpiles, in slot order (human, opponent).
