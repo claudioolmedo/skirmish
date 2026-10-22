@@ -244,12 +244,18 @@ impl BuildingKind {
     /// The unit kind this building trains, if any (M6): the
     /// per-building half of the trainable relation — the Barracks
     /// trains Militia, the Archery Range trains Archers, the
-    /// Stable trains Scout Cavalry.
+    /// Stable trains Scout Cavalry. The Spearman (Barracks) and
+    /// Skirmisher (Archery Range) join their buildings' rosters;
+    /// their Feudal availability is the unit-level half of the
+    /// rule (`EntityKind::train_age`) — the Barracks itself
+    /// stands from the Dark Age.
     pub fn trains(self, kind: EntityKind) -> bool {
         matches!(
             (self, kind),
             (BuildingKind::Barracks, EntityKind::Militia)
+                | (BuildingKind::Barracks, EntityKind::Spearman)
                 | (BuildingKind::ArcheryRange, EntityKind::Archer)
+                | (BuildingKind::ArcheryRange, EntityKind::Skirmisher)
                 | (BuildingKind::Stable, EntityKind::ScoutCavalry)
         )
     }
@@ -722,8 +728,11 @@ mod tests {
         assert_eq!(BuildingKind::Blacksmith.age_required(), Age::Feudal);
         // The trainable relation (M6): one home per unit kind.
         assert!(BuildingKind::Barracks.trains(EntityKind::Militia));
+        assert!(BuildingKind::Barracks.trains(EntityKind::Spearman));
         assert!(!BuildingKind::Barracks.trains(EntityKind::Archer));
         assert!(BuildingKind::ArcheryRange.trains(EntityKind::Archer));
+        assert!(BuildingKind::ArcheryRange.trains(EntityKind::Skirmisher));
+        assert!(!BuildingKind::ArcheryRange.trains(EntityKind::Spearman));
         assert!(BuildingKind::Stable.trains(EntityKind::ScoutCavalry));
     }
 

@@ -28,6 +28,19 @@ pub const BOAR_HUNTED: u8 = 9;
 pub const SHOCK_INFANTRY: u8 = 10;
 pub const CAMEL: u8 = 11;
 pub const HERDABLE: u8 = 12;
+/// Elephant units (the study's class 18 analog). No elephant unit
+/// ships yet; the class exists so the Spearman line's documented
+/// +15 bonus row is data, exactly like the Boar's CAMEL row was
+/// data before any camel existed.
+pub const ELEPHANT: u8 = 13;
+/// Ships (the study's class 16 analog) — same data-first rationale
+/// as ELEPHANT: the Spearman's +9 vs Ships row is documented DE
+/// data with no member kind in the game yet.
+pub const SHIP: u8 = 14;
+/// Skirmishers (the study's class 38 analog): the Skirmisher's own
+/// membership beside ARCHERY — the class future anti-skirmisher
+/// rows (e.g. the Genitour's) target.
+pub const SKIRMISHER: u8 = 15;
 
 /// Membership bit for one class id.
 pub const fn bit(class: u8) -> u64 {

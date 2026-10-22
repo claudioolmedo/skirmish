@@ -60,6 +60,8 @@ mod rng;
 mod steer;
 mod tech;
 mod units;
+#[cfg(test)]
+mod new_units_tests;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
@@ -1146,19 +1148,33 @@ impl Sim {
             s.speed = I16F16::from_bits(((s.speed.to_bits() as i64 * 11) / 10) as i32);
         }
         // Fletching (study §8): archers +1 attack, +1 tile of range.
+        // The Skirmisher shares the patch (the wiki's Fletching
+        // article names Skirmishers among the beneficiaries —
+        // "arrow/javelin-shooting units"), with its own table.
         if kind == EntityKind::Archer && p.techs & TechId::Fletching.bit() != 0 {
             s.attacks = units::ARCHER_FLETCHING_ATTACKS;
             s.range_max += I16F16::from_bits(262_144); // +4.0 (1 tile)
         }
-        // Scale Mail Armor (study §8): infantry +1/+1 armor.
-        if matches!(kind, EntityKind::Militia | EntityKind::ManAtArms)
-            && p.techs & TechId::ScaleMail.bit() != 0
+        if kind == EntityKind::Skirmisher && p.techs & TechId::Fletching.bit() != 0 {
+            s.attacks = units::SKIRMISHER_FLETCHING_ATTACKS;
+            s.range_max += I16F16::from_bits(262_144); // +4.0 (1 tile)
+        }
+        // Scale Mail Armor (study §8): infantry +1/+1 armor — the
+        // Spearman is infantry and takes the patch with the line.
+        if matches!(
+            kind,
+            EntityKind::Militia | EntityKind::ManAtArms | EntityKind::Spearman
+        ) && p.techs & TechId::ScaleMail.bit() != 0
         {
             s.armor_melee += 1;
             s.armor_pierce += 1;
         }
-        // Padded Archer Armor (study §8): archers +1/+1 armor.
-        if kind == EntityKind::Archer && p.techs & TechId::PaddedArcherArmor.bit() != 0 {
+        // Padded Archer Armor (study §8): archers +1/+1 armor —
+        // the Skirmisher is a foot archer of the Archery class
+        // and takes the patch with the line.
+        if matches!(kind, EntityKind::Archer | EntityKind::Skirmisher)
+            && p.techs & TechId::PaddedArcherArmor.bit() != 0
+        {
             s.armor_melee += 1;
             s.armor_pierce += 1;
         }
@@ -1621,6 +1637,14 @@ impl Sim {
         if !b.complete || !b.kind.is_production() || !b.kind.trains(kind) {
             return TrainBlock::QueueFull;
         }
+        // The unit-level age gate (BLD-15): a Feudal unit at a
+        // Dark-Age building (the Spearman at the Barracks) is not
+        // trainable yet. Reported as QueueFull — the panel greys
+        // the button on the age itself, so the flash text this
+        // tag feeds is never the player's only explanation.
+        if self.age_of(b.owner) < kind.train_age() {
+            return TrainBlock::QueueFull;
+        }
         if b.queue.len() as u32 >= TRAIN_QUEUE_CAP {
             return TrainBlock::QueueFull;
         }
@@ -1646,6 +1670,7 @@ impl Sim {
         b.complete
             && b.kind.is_production()
             && b.kind.trains(kind)
+            && self.age_of(b.owner) >= kind.train_age()
             && (b.queue.len() as u32) < TRAIN_QUEUE_CAP
             && self.can_afford(b.owner, kind)
     }

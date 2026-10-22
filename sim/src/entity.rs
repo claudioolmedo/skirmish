@@ -60,12 +60,20 @@ pub enum EntityKind {
     /// Barracks upgrade completes, and later Militia production
     /// spawns as Man-at-Arms while the upgrade stands.
     ManAtArms,
+    /// The anti-cavalry infantry (study §3.3): Barracks, Feudal
+    /// Age — the base of the Spearman → Pikeman → Halberdier line.
+    Spearman,
+    /// The anti-archer foot archer (study §3.5): Archery Range,
+    /// Feudal Age — the base of the Skirmisher line, and the
+    /// game's first minimum-range weapon (PRJ-08).
+    Skirmisher,
 }
 
 impl EntityKind {
     /// Stable tag for the state hash and the WASM kind array:
     /// 0 = villager, 1 = town center, 2 = scout cavalry, 3 = militia,
-    /// 4 = archer, 5 = sheep, 6 = boar, 7 = deer, 8 = man-at-arms (M6).
+    /// 4 = archer, 5 = sheep, 6 = boar, 7 = deer, 8 = man-at-arms (M6),
+    /// 9 = spearman, 10 = skirmisher.
     pub fn tag(self) -> u8 {
         match self {
             EntityKind::Villager => 0,
@@ -77,6 +85,8 @@ impl EntityKind {
             EntityKind::Boar => 6,
             EntityKind::Deer => 7,
             EntityKind::ManAtArms => 8,
+            EntityKind::Spearman => 9,
+            EntityKind::Skirmisher => 10,
         }
     }
 
@@ -92,7 +102,20 @@ impl EntityKind {
             6 => Some(EntityKind::Boar),
             7 => Some(EntityKind::Deer),
             8 => Some(EntityKind::ManAtArms),
+            9 => Some(EntityKind::Spearman),
+            10 => Some(EntityKind::Skirmisher),
             _ => None,
+        }
+    }
+
+    /// The earliest age at which this kind may be trained (the
+    /// unit-level half of BLD-15's availability rule — building
+    /// availability alone cannot express it: the Barracks stands
+    /// in the Dark Age but its Spearman is a Feudal unit).
+    pub fn train_age(self) -> crate::tech::Age {
+        match self {
+            EntityKind::Spearman | EntityKind::Skirmisher => crate::tech::Age::Feudal,
+            _ => crate::tech::Age::Dark,
         }
     }
 
@@ -113,6 +136,8 @@ impl EntityKind {
                 | EntityKind::Militia
                 | EntityKind::Archer
                 | EntityKind::ManAtArms
+                | EntityKind::Spearman
+                | EntityKind::Skirmisher
         )
     }
 
@@ -123,7 +148,11 @@ impl EntityKind {
     pub fn is_trainable(self) -> bool {
         matches!(
             self,
-            EntityKind::Militia | EntityKind::Archer | EntityKind::ScoutCavalry
+            EntityKind::Militia
+                | EntityKind::Archer
+                | EntityKind::ScoutCavalry
+                | EntityKind::Spearman
+                | EntityKind::Skirmisher
         )
     }
 
@@ -137,6 +166,8 @@ impl EntityKind {
                 | EntityKind::Militia
                 | EntityKind::Archer
                 | EntityKind::ManAtArms
+                | EntityKind::Spearman
+                | EntityKind::Skirmisher
         )
     }
 }

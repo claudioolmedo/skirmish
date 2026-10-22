@@ -199,6 +199,7 @@ pub(crate) fn building_spec(kind: BuildingKind, owner_age: crate::tech::Age) -> 
         armor_pierce: kind.armor_pierce_at(owner_age),
         classes: cls::mask(&[cls::ALL_BUILDINGS, cls::STANDARD_BUILDINGS]),
         range_max: I16F16::ZERO,
+        range_min: I16F16::ZERO,
         reload_ticks: 0,
         attack_delay_ticks: 0,
         accuracy: 0,
@@ -638,8 +639,13 @@ impl Sim {
         };
         let (tx, ty) = (self.entities[ti].pos_x, self.entities[ti].pos_y);
         let dist = self.distance_to(idx, tx, ty);
+        // PRJ-08: a ranged attacker's firing band is
+        // [range_min, range_max] — inside range_min is the dead
+        // zone, where it cannot fire at all (range_min is 0 for
+        // every row but the Skirmisher's, so the band is the old
+        // test for everything else).
         let in_range = if spec.range_max > I16F16::ZERO {
-            dist <= spec.range_max
+            dist <= spec.range_max && dist >= spec.range_min
         } else {
             dist <= MELEE_REACH
         };
@@ -673,6 +679,45 @@ impl Sim {
                 } else {
                     let at = tick + spec.attack_delay_ticks;
                     self.entities[idx].strike_tick = Some(at);
+                }
+            }
+        } else if spec.range_max > I16F16::ZERO && dist < spec.range_min {
+            // PRJ-08: the target stands inside the dead zone — the
+            // attacker backs away along the ray from the target
+            // through itself, to a stand point near its maximum
+            // range. (Near-max, not just past range_min: steering's
+            // arrival slowdown inside SLOW_RADIUS would otherwise
+            // leave the retreat creeping slower than a pursuer's
+            // chase — the observable sequence is DE's either way:
+            // no fire from inside the dead zone, fire from the
+            // band, repeat.) The order refreshes only when it no
+            // longer leads to a band point (the chase discipline
+            // below). If no stand point paths, the engagement
+            // cannot be fought from here — PRJ-08's "or not at all".
+            let need = match &self.entities[idx].order {
+                None => true,
+                Some(o) => {
+                    let d = steer::vec_len(o.target_x - tx, o.target_y - ty);
+                    d < spec.range_min || d > spec.range_max
+                }
+            };
+            if need {
+                let (px, py) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
+                let (dx, dy) = (px - tx, py - ty);
+                let len = steer::vec_len(dx, dy);
+                let (ux, uy) = if len == I16F16::ZERO {
+                    (I16F16::from_num(1), I16F16::ZERO)
+                } else {
+                    (dx / len, dy / len)
+                };
+                let near = spec.range_max - I16F16::from_bits(98_304); // max − 1.5
+                let stand = if near > spec.range_min {
+                    near
+                } else {
+                    spec.range_min + I16F16::from_bits(98_304)
+                };
+                if !self.set_move_order(idx, tx + ux * stand, ty + uy * stand) {
+                    self.entities[idx].clear_combat();
                 }
             }
         } else {
@@ -710,40 +755,48 @@ impl Sim {
         let (ax, ay) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
         let (tx, ty) = (self.entities[ti].pos_x, self.entities[ti].pos_y);
         if spec.range_max > I16F16::ZERO {
-            // Ranged release: the accuracy roll is drawn NOW, at
-            // release, in combat-phase id order (PRJ-03/SIM-04).
-            let roll = self.rng.below(100);
-            let mut impact = (tx, ty);
-            if roll >= spec.accuracy {
-                // Miss: scatter within the weapon's radius — two
-                // further draws, same fixed order (PRJ-04).
-                let sb = spec.scatter.to_bits();
-                let span = (2 * sb + 1) as u32;
-                let dx = self.rng.below(span) as i32 - sb;
-                let dy = self.rng.below(span) as i32 - sb;
-                impact = (tx + I16F16::from_bits(dx), ty + I16F16::from_bits(dy));
+            // PRJ-08: a shot whose target has closed inside the
+            // dead zone by the landing tick is never released —
+            // the ranged mirror of the melee whiff below, with no
+            // RNG draw (the release it would have fed never
+            // happens); the reload still restarts and attack_step
+            // repositions the shooter out of the dead zone.
+            if steer::vec_len(tx - ax, ty - ay) >= spec.range_min {
+                // Ranged release: the accuracy roll is drawn NOW, at
+                // release, in combat-phase id order (PRJ-03/SIM-04).
+                let roll = self.rng.below(100);
+                let mut impact = (tx, ty);
+                if roll >= spec.accuracy {
+                    // Miss: scatter within the weapon's radius — two
+                    // further draws, same fixed order (PRJ-04).
+                    let sb = spec.scatter.to_bits();
+                    let span = (2 * sb + 1) as u32;
+                    let dx = self.rng.below(span) as i32 - sb;
+                    let dy = self.rng.below(span) as i32 - sb;
+                    impact = (tx + I16F16::from_bits(dx), ty + I16F16::from_bits(dy));
+                }
+                // Flight time = distance ÷ speed at spawn (PRJ-02),
+                // integer ceiling, at least one tick.
+                let dist_bits = steer::vec_len(tx - ax, ty - ay).to_bits() as i64;
+                let speed_bits = spec.projectile_speed.to_bits() as i64;
+                let flight = ((dist_bits + speed_bits - 1) / speed_bits).max(1) as u64;
+                self.projectiles.push(Projectile {
+                    spawn_x: ax,
+                    spawn_y: ay,
+                    impact_x: impact.0,
+                    impact_y: impact.1,
+                    spawn_tick: self.tick,
+                    impact_tick: self.tick + flight,
+                    intended: Some(self.entities[ti].id),
+                    intended_building: None,
+                    attacker: attacker_id,
+                    owner,
+                    // PRJ-10 (M7): the shooter's elevation is captured
+                    // at release, like its attack table.
+                    attacker_elev: self.entity_height(idx),
+                    attacks: spec.attacks.to_vec(),
+                });
             }
-            // Flight time = distance ÷ speed at spawn (PRJ-02),
-            // integer ceiling, at least one tick.
-            let dist_bits = steer::vec_len(tx - ax, ty - ay).to_bits() as i64;
-            let speed_bits = spec.projectile_speed.to_bits() as i64;
-            let flight = ((dist_bits + speed_bits - 1) / speed_bits).max(1) as u64;
-            self.projectiles.push(Projectile {
-                spawn_x: ax,
-                spawn_y: ay,
-                impact_x: impact.0,
-                impact_y: impact.1,
-                spawn_tick: self.tick,
-                impact_tick: self.tick + flight,
-                intended: Some(self.entities[ti].id),
-                intended_building: None,
-                attacker: attacker_id,
-                owner,
-                // PRJ-10 (M7): the shooter's elevation is captured
-                // at release, like its attack table.
-                attacker_elev: self.entity_height(idx),
-                attacks: spec.attacks.to_vec(),
-            });
         } else {
             // Melee: lands only if the target is still in reach at
             // the landing tick (CMB-06); otherwise it whiffs.
@@ -871,8 +924,11 @@ impl Sim {
         let qx = (px - bx).clamp(-half, half) + bx;
         let qy = (py - by).clamp(-half, half) + by;
         let dist = steer::vec_len(px - qx, py - qy);
+        // PRJ-08: the firing band applies against buildings too —
+        // the distance here is to the footprint's edge, so a
+        // minimum-range attacker must stand off from the wall.
         let in_range = if spec.range_max > I16F16::ZERO {
-            dist <= spec.range_max
+            dist <= spec.range_max && dist >= spec.range_min
         } else {
             dist <= MELEE_REACH
         };
@@ -914,17 +970,31 @@ impl Sim {
         } else {
             // Chase the nearest standable ring cell; re-path when the
             // current order no longer leads beside the footprint.
+            // PRJ-08: a minimum-range attacker stands off at
+            // range_min + margin from the edge instead of the
+            // melee 1.0, and its order only still serves while the
+            // point it leads to sits inside the firing band.
+            let stand_off = if spec.range_min > I16F16::ZERO {
+                spec.range_min + I16F16::from_bits(98_304) // +1.5 margin
+            } else {
+                I16F16::from_bits(65_536) // 1.0 — the melee stand-off
+            };
             let need = match &self.entities[idx].order {
                 None => true,
                 Some(o) => {
                     let (ox, oy) = (o.target_x, o.target_y);
                     let qx2 = (ox - bx).clamp(-half, half) + bx;
                     let qy2 = (oy - by).clamp(-half, half) + by;
-                    steer::vec_len(ox - qx2, oy - qy2) > I16F16::from_num(6)
+                    let od = steer::vec_len(ox - qx2, oy - qy2);
+                    if spec.range_min > I16F16::ZERO {
+                        od < spec.range_min || od > spec.range_max
+                    } else {
+                        od > I16F16::from_num(6)
+                    }
                 }
             };
             if need {
-                match self.building_approach_point(idx, ax, ay, size) {
+                match self.building_approach_point(idx, ax, ay, size, stand_off) {
                     Some((gx, gy)) => {
                         self.set_move_order(idx, gx, gy);
                     }
@@ -940,7 +1010,9 @@ impl Sim {
     }
 
     /// The standing spot for attacking the footprint anchored at
-    /// `(ax, ay)`: a point STAND_OFF (1.0) outside the footprint's
+    /// `(ax, ay)`: a point `stand_off` (1.0 for melee and ordinary
+    /// ranged attackers; range_min + margin for a minimum-range
+    /// attacker, PRJ-08) outside the footprint's
     /// edge, on the edge-normal through a ring cell's center —
     /// never the ring cell's center itself. A ring *corner* cell's
     /// center sits ~2.83 from the edge on the diagonal, and
@@ -968,10 +1040,8 @@ impl Sim {
         ax: u32,
         ay: u32,
         size: u32,
+        stand_off: I16F16,
     ) -> Option<(I16F16, I16F16)> {
-        /// How far outside the footprint edge the attacker aims
-        /// to stand (see the doc above).
-        const STAND_OFF: I16F16 = I16F16::from_bits(65_536); // 1.0
         /// A stand point this close to another living unit's
         /// center counts as taken (units rest ~2.0 apart under
         /// separation): groups take the next spot along.
@@ -1001,7 +1071,7 @@ impl Sim {
             if len == I16F16::ZERO {
                 continue; // cannot happen: ring centers lie outside the rect
             }
-            let stand = (ex + dx / len * STAND_OFF, ey + dy / len * STAND_OFF);
+            let stand = (ex + dx / len * stand_off, ey + dy / len * stand_off);
             let cell = self.grid.world_to_cell(stand.0, stand.1);
             if self.grid.is_blocked(cell.0, cell.1) {
                 continue;
@@ -1045,32 +1115,41 @@ impl Sim {
         let b = &self.buildings[bi];
         let (bx, by, bid, size) = (b.pos_x, b.pos_y, b.id, b.kind.footprint_size());
         if spec.range_max > I16F16::ZERO {
-            let roll = self.rng.below(100);
-            let mut impact = (bx, by);
-            if roll >= spec.accuracy {
-                let sb = spec.scatter.to_bits();
-                let span = (2 * sb + 1) as u32;
-                let dx = self.rng.below(span) as i32 - sb;
-                let dy = self.rng.below(span) as i32 - sb;
-                impact = (bx + I16F16::from_bits(dx), by + I16F16::from_bits(dy));
+            // PRJ-08: no release from inside the dead zone (edge
+            // distance below range_min) — no projectile, no RNG
+            // draw, mirroring resolve_strike; attack_building_step
+            // repositions the shooter to its stand-off.
+            let half = I16F16::from_num(size as i32 * 2);
+            let qx = (ax - bx).clamp(-half, half) + bx;
+            let qy = (ay - by).clamp(-half, half) + by;
+            if steer::vec_len(ax - qx, ay - qy) >= spec.range_min {
+                let roll = self.rng.below(100);
+                let mut impact = (bx, by);
+                if roll >= spec.accuracy {
+                    let sb = spec.scatter.to_bits();
+                    let span = (2 * sb + 1) as u32;
+                    let dx = self.rng.below(span) as i32 - sb;
+                    let dy = self.rng.below(span) as i32 - sb;
+                    impact = (bx + I16F16::from_bits(dx), by + I16F16::from_bits(dy));
+                }
+                let dist_bits = steer::vec_len(bx - ax, by - ay).to_bits() as i64;
+                let speed_bits = spec.projectile_speed.to_bits() as i64;
+                let flight = ((dist_bits + speed_bits - 1) / speed_bits).max(1) as u64;
+                self.projectiles.push(Projectile {
+                    spawn_x: ax,
+                    spawn_y: ay,
+                    impact_x: impact.0,
+                    impact_y: impact.1,
+                    spawn_tick: self.tick,
+                    impact_tick: self.tick + flight,
+                    intended: None,
+                    intended_building: Some(bid),
+                    attacker: attacker_id,
+                    owner,
+                    attacker_elev: self.entity_height(idx),
+                    attacks: spec.attacks.to_vec(),
+                });
             }
-            let dist_bits = steer::vec_len(bx - ax, by - ay).to_bits() as i64;
-            let speed_bits = spec.projectile_speed.to_bits() as i64;
-            let flight = ((dist_bits + speed_bits - 1) / speed_bits).max(1) as u64;
-            self.projectiles.push(Projectile {
-                spawn_x: ax,
-                spawn_y: ay,
-                impact_x: impact.0,
-                impact_y: impact.1,
-                spawn_tick: self.tick,
-                impact_tick: self.tick + flight,
-                intended: None,
-                intended_building: Some(bid),
-                attacker: attacker_id,
-                owner,
-                attacker_elev: self.entity_height(idx),
-                attacks: spec.attacks.to_vec(),
-            });
         } else {
             let half = I16F16::from_num(size as i32 * 2);
             let qx = (ax - bx).clamp(-half, half) + bx;

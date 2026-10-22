@@ -1474,11 +1474,20 @@ Skirmisher 1, Scorpion 2, towers/Castle 1, archers 0 — MECHANICS-STUDY
 §2.3). The Murder Holes technology removes building minimum range.
 Targets inside the dead zone must be engaged by moving away (ranged
 units do so automatically when able) or not at all.
-*Source:* MECHANICS-STUDY §2.3. · *Impl:* the range band is data
-(`range_min` in the unit row) and every shipped ranged row has minimum
-0 — the Archer's 0 included — so the dead zone is observable only as
-its absence. No minimum-range weapon (and no Murder Holes) exists yet.
-· *Status:* **DIFFERS**.
+*Source:* MECHANICS-STUDY §2.3. · *Impl:* shipped for the first
+minimum-range weapon (2026-10-22, the Spearman/Skirmisher package):
+the range band is data (`range_min` in the unit row — the
+Skirmisher's 1 tile; every other shipped row keeps 0, the Archer's
+included) and the band is enforced at all three gates — attack_step
+fires only inside [range_min, range_max] and repositions a
+dead-zoned attacker to a stand point in its band (or clears the
+engagement when none paths), a pending shot whose target has
+closed inside the dead zone by its landing tick is never released
+(no projectile, no RNG draw), and building attacks measure the
+band from the footprint's edge, with the approach stand-off at
+range_min + margin. No ranged *building* ships yet, so building
+minimum range and Murder Holes remain unobservable rather than
+wrong. · *Status:* **MATCHES**.
 
 **PRJ-09 — Some projectiles pass through.** Scorpion bolts damage every
 unit along their path (friend and foe alike take pass-through damage,
@@ -1511,7 +1520,12 @@ ID table is MECHANICS-STUDY §1.3). Membership drives the damage formula
 (CMB-01/03), acquisition rules (CMB-08), and tech patching (TEC-06).
 *Source:* MECHANICS-STUDY §1.3. · *Impl:* shipped (M3) — membership as a
 bitset on the unit table row in `classes.rs` (13 classes); buildings
-carry their classes in the building table. · *Status:* **MATCHES**.
+carry their classes in the building table. The Spearman/Skirmisher
+package (2026-10-22) adds three classes for the new units'
+documented rows — Elephant and Ship (data ahead of any member
+kind, the same posture Camel held before it) and Skirmisher (the
+unit's own membership beside Archery) — 16 classes in all. ·
+*Status:* **MATCHES**.
 
 **CLS-02 — Counters are emergent from bonus rows.** There is no
 "Pikeman beats Knight" code anywhere: a counter exists exactly where a
@@ -1521,8 +1535,14 @@ edits tables; the engine never branches on unit *identity* for damage.
 *Source:* MECHANICS-STUDY §1.2, §3 (line tables carry the bonuses). ·
 *Impl:* shipped (M3) — CMB-01's shape enforces it: attack data is
 (class, value) pairs (the Archer's anti-spearman row, the Boar's
-anti-cavalry rows), so there is nothing else to branch on. · *Status:*
-**MATCHES**.
+anti-cavalry rows), so there is nothing else to branch on. The
+canonical counter itself shipped 2026-10-22: the Spearman's full
+documented table (+15 vs Cavalry, +15 vs Elephant, +12 vs Camel —
+the current-DE value; the study's +9 is the superseded pre-5.6
+one — +9 vs Ships, +1 vs Shock Infantry, +1 vs Standard
+Buildings) and the Skirmisher's (+3 vs Archers, +3 vs Spearmen,
+behind 0/3 armor) are rows in `units.rs`, measured in-sim by the
+`new_units_tests` suite. · *Status:* **MATCHES**.
 
 **CLS-03 — Line upgrades transform existing units in place.** When a unit-
 line upgrade research completes (Militia → Man-at-Arms, Archer →
@@ -2115,7 +2135,12 @@ script also raises a Mill by its berries and a Lumber Camp by its
 woodline — its Feudal pair — researches Loom once the economy rolls,
 advances to the Feudal Age when the food allows, and fields its
 Archers from an Archery Range; it does not use Farms, the Mining
-Camp, the Stable, the Blacksmith or Man-at-Arms yet.)
+Camp, the Stable, the Blacksmith or Man-at-Arms yet. 2026-10-22:
+nor the Spearman or Skirmisher — the two Feudal base units ship
+for the player, but the script's production is a hardcoded
+Militia/Archer alternation, not a walk over the trainable
+tables, so extending it is its own change; its match-pacing
+tests pin the current composition.)
 
 **AI-05 — The AI resigns when hopeless.** An AI with no Town Center, no
 villagers, and no path to rebuild resigns rather than playing to the
@@ -2759,7 +2784,20 @@ was already shipped, only attack/armor stats remain),
 recounted mechanically below; updated 2026-10-22 for VIC-04,
 the score formula — VIC-04 moves MISSING → MATCHES, so §16
 trades one MISSING for one MATCHES with the rule count
-unchanged, recounted mechanically below).
+unchanged, recounted mechanically below; updated 2026-10-22
+for the Spearman/Skirmisher package — the two missing Feudal
+base units ship with their documented tables (the
+Skirmisher's train time is the current-DE 26 s of update
+153015, not the study §3.5's resolved 22 s; the Spearman's
+anti-camel row is the current +12, not the study's
+superseded +9; the Spearman line's per-age LoS display on
+the wiki is recorded at the unit row — the study's flat 4
+stands, the Scout's CLS-04 patch remaining the only
+age-keyed LoS) and PRJ-08's minimum range becomes
+observable and enforced, so §9 trades one DIFFERS for one
+MATCHES; CLS-01/CLS-02 and AI-04 record the new classes,
+the shipped counter tables and the AI gap with no status
+change, recounted mechanically below).
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
@@ -2771,7 +2809,7 @@ unchanged, recounted mechanically below).
 | 6 | Economy & drop-off (ECO) | 17 | 13 | 2 | 2 |
 | 7 | Buildings & placement (BLD) | 17 | 12 | 3 | 2 |
 | 8 | Combat & damage (CMB) | 16 | 11 | 2 | 3 |
-| 9 | Projectiles & ballistics (PRJ) | 10 | 4 | 4 | 2 |
+| 9 | Projectiles & ballistics (PRJ) | 10 | 5 | 3 | 2 |
 | 10 | Unit classes & counters (CLS) | 8 | 5 | 0 | 3 |
 | 11 | Technologies & age advancement (TEC) | 11 | 5 | 3 | 3 |
 | 12 | Monks, conversion & relics (MNK) | 13 | 0 | 0 | 13 |
@@ -2781,7 +2819,7 @@ unchanged, recounted mechanically below).
 | 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |
 | 17 | Multiplayer determinism (NET) | 11 | 4 | 5 | 2 |
 | 18 | Information rules (INF) | 12 | 7 | 3 | 2 |
-| | **Total** | **217** | **113** | **35** | **69** |
+| | **Total** | **217** | **114** | **34** | **69** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer

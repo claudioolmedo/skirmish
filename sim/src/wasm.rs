@@ -208,6 +208,19 @@ impl WasmSim {
         self.push_train_at(building, EntityKind::ScoutCavalry)
     }
 
+    /// Enqueue a Spearman at a completed Barracks (Feudal Age —
+    /// `can_train_at` carries the unit-level age gate). See
+    /// `push_train_militia`.
+    pub fn push_train_spearman(&mut self, building: u32) -> bool {
+        self.push_train_at(building, EntityKind::Spearman)
+    }
+
+    /// Enqueue a Skirmisher at a completed Archery Range. See
+    /// `push_train_militia`.
+    pub fn push_train_skirmisher(&mut self, building: u32) -> bool {
+        self.push_train_at(building, EntityKind::Skirmisher)
+    }
+
     fn push_train_at(&mut self, building: u32, kind: EntityKind) -> bool {
         let ok = self.inner.can_train_at(building, kind);
         if ok {

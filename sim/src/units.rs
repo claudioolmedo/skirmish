@@ -50,9 +50,13 @@ pub struct UnitSpec {
     /// Armor-class membership mask (see `classes`).
     pub classes: u64,
     /// Maximum attack range in world units; 0 = melee (the melee
-    /// reach constant in `combat` governs instead). Minimum range is
-    /// 0 for every M3 unit (PRJ-08).
+    /// reach constant in `combat` governs instead).
     pub range_max: I16F16,
+    /// Minimum attack range in world units (PRJ-08's dead zone):
+    /// a ranged unit cannot fire at a target closer than this and
+    /// repositions away instead. 0 for every row except the
+    /// Skirmisher (1 tile), the game's first minimum-range weapon.
+    pub range_min: I16F16,
     /// Ticks between landed attacks (the study's RoF × 60).
     pub reload_ticks: u64,
     /// Ticks from starting an engagement to its first landed attack
@@ -105,6 +109,8 @@ pub fn spec(kind: EntityKind) -> &'static UnitSpec {
         EntityKind::Boar => &BOAR,
         EntityKind::Deer => &DEER,
         EntityKind::ManAtArms => &MAN_AT_ARMS,
+        EntityKind::Spearman => &SPEARMAN,
+        EntityKind::Skirmisher => &SKIRMISHER,
     }
 }
 
@@ -120,6 +126,14 @@ pub(crate) static ARCHER_FLETCHING_ATTACKS: &[(u8, i32)] =
 /// separately — see `Sim::stats_for`).
 pub(crate) static SCOUT_FEUDAL_ATTACKS: &[(u8, i32)] = &[(cls::MELEE, 5)];
 
+/// The Skirmisher's attack table with Fletching researched: the
+/// tech's +1 pierce (the wiki's Fletching article names Skirmishers
+/// explicitly among its beneficiaries — "arrow/javelin-shooting
+/// units"), the class bonuses unchanged. The +1 range is patched
+/// separately — see `Sim::stats_for`.
+pub(crate) static SKIRMISHER_FLETCHING_ATTACKS: &[(u8, i32)] =
+    &[(cls::PIERCE, 3), (cls::ARCHERY, 3), (cls::SPEARMAN, 3)];
+
 /// Villager (study §3.1): HP 25, attack 3 melee, armor 0/0, RoF 2.0 s,
 /// attack delay ≈0.64 s (community table), speed 0.8, LoS 4.
 /// Cost 50 F / 1500 ticks is the Town Center training contract (econ).
@@ -130,6 +144,7 @@ static VILLAGER: UnitSpec = UnitSpec {
     armor_pierce: 0,
     classes: cls::mask(&[cls::VILLAGER]),
     range_max: I16F16::ZERO,
+    range_min: I16F16::ZERO,
     reload_ticks: 120,
     attack_delay_ticks: 38,
     accuracy: 100,
@@ -156,6 +171,7 @@ static TOWN_CENTER: UnitSpec = UnitSpec {
     armor_pierce: 5,
     classes: cls::mask(&[cls::ALL_BUILDINGS, cls::STANDARD_BUILDINGS]),
     range_max: I16F16::ZERO,
+    range_min: I16F16::ZERO,
     reload_ticks: 0,
     attack_delay_ticks: 0,
     accuracy: 100,
@@ -184,6 +200,7 @@ static SCOUT_CAVALRY: UnitSpec = UnitSpec {
     armor_pierce: 2,
     classes: cls::mask(&[cls::CAVALRY]),
     range_max: I16F16::ZERO,
+    range_min: I16F16::ZERO,
     reload_ticks: 120,
     attack_delay_ticks: 41,
     accuracy: 100,
@@ -215,6 +232,7 @@ static MILITIA: UnitSpec = UnitSpec {
     armor_pierce: 1,
     classes: cls::mask(&[cls::INFANTRY]),
     range_max: I16F16::ZERO,
+    range_min: I16F16::ZERO,
     reload_ticks: 120,
     attack_delay_ticks: 30,
     accuracy: 100,
@@ -243,6 +261,7 @@ static ARCHER: UnitSpec = UnitSpec {
     armor_pierce: 0,
     classes: cls::mask(&[cls::ARCHERY]),
     range_max: I16F16::from_bits(1_048_576), // 16 (4 tiles)
+    range_min: I16F16::ZERO,
     reload_ticks: 120,
     attack_delay_ticks: 21,
     accuracy: 80,
@@ -280,6 +299,7 @@ static MAN_AT_ARMS: UnitSpec = UnitSpec {
     armor_pierce: 1,
     classes: cls::mask(&[cls::INFANTRY]),
     range_max: I16F16::ZERO,
+    range_min: I16F16::ZERO,
     reload_ticks: 120,
     attack_delay_ticks: 30,
     accuracy: 100,
@@ -294,6 +314,94 @@ static MAN_AT_ARMS: UnitSpec = UnitSpec {
     wood_cost: 0,
     gold_cost: 20,
     train_ticks: 1260, // inert (upgrade-only kind); mirrors Militia
+};
+
+/// Spearman (study §3.3; wiki "Spearman (Age of Empires II)"
+/// infobox, fetched 2026-10-22): HP 45, attack 3 melee, armor 0/0,
+/// RoF 3.0 s, attack delay ≈0.50 s (30 ticks — the study §2.2 melee
+/// table's Militia/Spearman row), speed 1.0, LoS 4. The identity is
+/// the bonus table: +15 vs Cavalry, +15 vs Elephant, +12 vs Camel,
+/// +9 vs Ships, +1 vs Shock Infantry, +1 vs Standard Buildings.
+/// One value supersedes the study: the study's per-class table
+/// prints +9 vs Camel, but the wiki infobox's changelog tooltip
+/// shows +9 was the value "from The Forgotten to patch 5.6" — the
+/// current DE value is +12, adopted per the standing rule that the
+/// fidelity reference is DE as it is today. Elephant and Ship have
+/// no member kinds yet; their rows are data, like the Boar's Camel
+/// row before them. LoS: the wiki infobox displays per-age values
+/// (Dark 4 / Feudal 6, the same display it gives the Militia); the
+/// study pins the line's LoS at 4 and only the Scout carries an
+/// age-patched LoS in this sim (CLS-04), so 4 stands and the
+/// per-age question is recorded in the rulebook. Cost 35 F / 25 W,
+/// train 22 s, Barracks, Feudal Age (`EntityKind::train_age`).
+static SPEARMAN: UnitSpec = UnitSpec {
+    max_hp: 45,
+    attacks: &[
+        (cls::MELEE, 3),
+        (cls::CAVALRY, 15),
+        (cls::ELEPHANT, 15),
+        (cls::CAMEL, 12),
+        (cls::SHIP, 9),
+        (cls::SHOCK_INFANTRY, 1),
+        (cls::STANDARD_BUILDINGS, 1),
+    ],
+    armor_melee: 0,
+    armor_pierce: 0,
+    classes: cls::mask(&[cls::INFANTRY, cls::SPEARMAN]),
+    range_max: I16F16::ZERO,
+    range_min: I16F16::ZERO,
+    reload_ticks: 180, // 3.0 s
+    attack_delay_ticks: 30,
+    accuracy: 100,
+    projectile_speed: I16F16::ZERO,
+    scatter: I16F16::ZERO,
+    speed: I16F16::from_bits(4_369), // 1.0 tiles/s (absolute scale, see header)
+    los: I16F16::from_bits(1_048_576), // 16 (4 tiles)
+    radius: I16F16::from_bits(65_536),
+    carcass_food: 0,
+    carcass_decay_bits: 0,
+    food_cost: 35,
+    wood_cost: 25,
+    gold_cost: 0,
+    train_ticks: 1320, // 22 s
+};
+
+/// Skirmisher (study §3.5; wiki "Skirmisher (Age of Empires II)"
+/// infobox, fetched 2026-10-22): HP 30, attack 2 pierce with
+/// +3 vs Archers and +3 vs Spearmen, armor 0/3, range 1–4 (the
+/// game's first minimum-range weapon, PRJ-08), RoF 3.0 s, frame
+/// delay 19 ≈ 0.51 s (31 ticks, study §2.2), accuracy 90%,
+/// speed 0.96, LoS 6. Cost 25 F / 35 W. Train time is the current
+/// DE value, 26 s: the wiki infobox reads "26 (22 before update
+/// 153015)", which supersedes the study §3.5 ambiguity resolution
+/// that had adopted the then-multi-source 22 s — recorded in the
+/// rulebook. The wiki also lists "+2 vs Mameluke" (a
+/// civilization-specific unit that does not exist here) and
+/// "0 vs Cavalry Archers" (a class with no member kinds); neither
+/// row is carried. Projectile speed and scatter reuse the Archer
+/// rows' recorded design constants (PRJ-02/PRJ-04).
+static SKIRMISHER: UnitSpec = UnitSpec {
+    max_hp: 30,
+    attacks: &[(cls::PIERCE, 2), (cls::ARCHERY, 3), (cls::SPEARMAN, 3)],
+    armor_melee: 0,
+    armor_pierce: 3,
+    classes: cls::mask(&[cls::ARCHERY, cls::SKIRMISHER]),
+    range_max: I16F16::from_bits(1_048_576), // 16 (4 tiles)
+    range_min: I16F16::from_bits(262_144),  // 4 (1 tile — PRJ-08)
+    reload_ticks: 180,                      // 3.0 s
+    attack_delay_ticks: 31,
+    accuracy: 90,
+    projectile_speed: I16F16::from_bits(32_768), // 0.5 — design constant (see Archer)
+    scatter: I16F16::from_bits(131_072),          // 2.0 — design constant (see Archer)
+    speed: I16F16::from_bits(4_194),             // 0.96 tiles/s (absolute scale, see header)
+    los: I16F16::from_bits(1_572_864),           // 24 (6 tiles)
+    radius: I16F16::from_bits(65_536),
+    carcass_food: 0,
+    carcass_decay_bits: 0,
+    food_cost: 25,
+    wood_cost: 35,
+    gold_cost: 0,
+    train_ticks: 1560, // 26 s (update 153015 — see above)
 };
 
 /// Sheep (OPENING-SPEC §2.2): 100 food, speed 0.7, worked at the
@@ -313,6 +421,7 @@ static SHEEP: UnitSpec = UnitSpec {
     armor_pierce: 0,
     classes: cls::mask(&[cls::HERDABLE]),
     range_max: I16F16::ZERO,
+    range_min: I16F16::ZERO,
     reload_ticks: 0,
     attack_delay_ticks: 0,
     accuracy: 100,
@@ -346,6 +455,7 @@ static BOAR: UnitSpec = UnitSpec {
     armor_pierce: 0,
     classes: cls::mask(&[cls::BOAR_HUNTED]),
     range_max: I16F16::ZERO,
+    range_min: I16F16::ZERO,
     reload_ticks: 120,
     attack_delay_ticks: 30, // UNVERIFIED (see above)
     accuracy: 100,
@@ -380,6 +490,7 @@ static DEER: UnitSpec = UnitSpec {
     armor_pierce: 0,
     classes: cls::mask(&[cls::BOAR_HUNTED]),
     range_max: I16F16::ZERO,
+    range_min: I16F16::ZERO,
     reload_ticks: 0,
     attack_delay_ticks: 0,
     accuracy: 100,
@@ -429,6 +540,48 @@ mod tests {
         assert_eq!((b.max_hp, b.carcass_food), (75, 340));
         assert_eq!(spec(EntityKind::Sheep).carcass_food, 100);
         assert_eq!(spec(EntityKind::Deer).carcass_food, 140);
+        // Spearman (study §3.3 + wiki infobox): HP 45, the full
+        // documented bonus table, train 22 s at 35 F / 25 W.
+        let sp = spec(EntityKind::Spearman);
+        assert_eq!((sp.max_hp, sp.armor_melee, sp.armor_pierce), (45, 0, 0));
+        assert_eq!(
+            sp.attacks,
+            &[
+                (cls::MELEE, 3),
+                (cls::CAVALRY, 15),
+                (cls::ELEPHANT, 15),
+                (cls::CAMEL, 12),
+                (cls::SHIP, 9),
+                (cls::SHOCK_INFANTRY, 1),
+                (cls::STANDARD_BUILDINGS, 1)
+            ]
+        );
+        assert_eq!((sp.reload_ticks, sp.train_ticks), (180, 1320));
+        assert_eq!((sp.food_cost, sp.wood_cost, sp.gold_cost), (35, 25, 0));
+        // Skirmisher (study §3.5 + wiki infobox): HP 30, armor 0/3,
+        // range band 1–4 tiles, accuracy 90, train 26 s (update
+        // 153015) at 25 F / 35 W.
+        let sk = spec(EntityKind::Skirmisher);
+        assert_eq!((sk.max_hp, sk.armor_melee, sk.armor_pierce), (30, 0, 3));
+        assert_eq!(
+            sk.attacks,
+            &[(cls::PIERCE, 2), (cls::ARCHERY, 3), (cls::SPEARMAN, 3)]
+        );
+        assert_eq!(sk.range_max, I16F16::from_bits(1_048_576));
+        assert_eq!(sk.range_min, I16F16::from_bits(262_144));
+        assert_eq!((sk.reload_ticks, sk.accuracy, sk.train_ticks), (180, 90, 1560));
+        assert_eq!((sk.food_cost, sk.wood_cost, sk.gold_cost), (25, 35, 0));
+        // Every other row keeps a zero dead zone (PRJ-08).
+        for k in [
+            EntityKind::Villager,
+            EntityKind::ScoutCavalry,
+            EntityKind::Militia,
+            EntityKind::Archer,
+            EntityKind::ManAtArms,
+            EntityKind::Spearman,
+        ] {
+            assert_eq!(spec(k).range_min, I16F16::ZERO);
+        }
     }
 
     #[test]
@@ -440,6 +593,8 @@ mod tests {
         let ratio = |k: EntityKind| spec(k).speed.to_num::<f64>() / v.to_num::<f64>();
         assert!((ratio(EntityKind::Militia) - 0.90 / 0.80).abs() < 0.001);
         assert!((ratio(EntityKind::Archer) - 0.96 / 0.80).abs() < 0.001);
+        assert!((ratio(EntityKind::Spearman) - 1.00 / 0.80).abs() < 0.001);
+        assert!((ratio(EntityKind::Skirmisher) - 0.96 / 0.80).abs() < 0.001);
         assert!((ratio(EntityKind::ScoutCavalry) - 1.20 / 0.80).abs() < 0.001);
         assert!((ratio(EntityKind::Sheep) - 0.70 / 0.80).abs() < 0.001);
         // The scout is the fastest unit on the field.
