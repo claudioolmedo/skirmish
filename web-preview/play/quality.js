@@ -39,16 +39,24 @@ export const LEVEL_SETTINGS = Object.freeze({
     tier: 8, tierDir: '', dprCap: 1,
     shadows: false, groundStrokes: false, pathLines: false,
     projTrail: false, idLabels: false,
+    // Corpses (the death fall + fading body decals) are the
+    // FIRST cosmetic shed as the level steps down — pure
+    // battlefield dressing, gone before any other effect is
+    // even considered. Information is never shed (doctrine
+    // above); a corpse carries none.
+    corpses: false,
   }),
   medium: Object.freeze({
     tier: 16, tierDir: 'tier16', dprCap: 1.5,
     shadows: true, groundStrokes: true, pathLines: true,
     projTrail: true, idLabels: true,
+    corpses: true,
   }),
   high: Object.freeze({
     tier: 32, tierDir: 'tier32', dprCap: 2,
     shadows: true, groundStrokes: true, pathLines: true,
     projTrail: true, idLabels: true,
+    corpses: true,
   }),
 });
 

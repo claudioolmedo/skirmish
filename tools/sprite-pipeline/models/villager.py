@@ -18,7 +18,13 @@ import render
 from render import rot_x, xform
 
 PC_MATS = {'tunic'}
-STATES = {'idle': 4, 'walk': 8, 'gather': 4, 'carry': 8, 'build': 4}
+STATES = {'idle': 4, 'walk': 12, 'gather': 8, 'carry': 12, 'build': 8,
+          'die': 6}
+# Death needs a bigger cell than the standing figure: the fallen
+# body lies a full height from the feet in model space. The client
+# mirrors this canvas in its corpse spec (app.js CORPSE_SPEC).
+STATE_CANVAS = {'die': (232, 208, 116, 152)}
+_FALL = (0.0, 10.0, 26.0, 48.0, 68.0, 80.0)
 
 _PARTS = render.build_villager()
 _PIVOTS = render.PIVOTS
@@ -56,11 +62,11 @@ def _apply(pose):
     return out
 
 
-def _pose_build(f, n=4):
+def _pose_build(f, n=8):
     # Hammer cycle against a wall/scaffold: both arms work together,
     # torso bent deeper than the gather chop, legs planted wide.
-    arm = (-58.0, 8.0, 44.0, -20.0)[f % n]
-    torso = (16.0, 30.0, 42.0, 26.0)[f % n]
+    arm = render.key((-58.0, 8.0, 44.0, -20.0), f, n)
+    torso = render.key((16.0, 30.0, 42.0, 26.0), f, n)
     return {'legL': 14.0, 'legR': -14.0,
             'armL': arm * 0.85, 'armR': arm,
             'torso': torso, 'bob': 0.0, 'load': False}
@@ -72,5 +78,12 @@ _POSES = {'idle': render.pose_idle, 'walk': render.pose_walk,
 
 
 def tris_for(state, frame):
+    if state == 'die':
+        # The idle figure tipped backward about its own feet
+        # (spin_x over the ground origin, easing in); the last
+        # frame is the corpse the client leaves fading on the
+        # field (client-only presentation, no sim contact).
+        base = _apply(render.pose_idle(0, STATES['idle']))
+        return render.spin_x(base, _FALL[frame % len(_FALL)])
     fn = _POSES[state]
     return _apply(fn(frame, STATES[state]))

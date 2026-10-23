@@ -19,7 +19,10 @@ from render import box_tris, hex2rgb, rot_x, rot_z, xform
 
 MATERIALS_ADD = {'leather': hex2rgb('#7a4a26')}
 PC_MATS = {'cloth'}
-STATES = {'idle': 4, 'walk': 8, 'shoot': 4}
+STATES = {'idle': 4, 'walk': 12, 'shoot': 8, 'die': 6}
+# Death cell: the fallen body lies a full height from the feet.
+STATE_CANVAS = {'die': (232, 208, 116, 152)}
+_FALL = (0.0, 10.0, 26.0, 48.0, 68.0, 80.0)
 
 _PIVOTS = render.PIVOTS
 _WAIST = render.WAIST
@@ -144,11 +147,11 @@ def _pose_walk(f, n=8):
     return p
 
 
-def _pose_shoot(f, n=4):
+def _pose_shoot(f, n=8):
     # armL holds the bow forward in every frame; armR draws.
-    arm_r = (70.0, -25.0, 85.0, 30.0)[f % n]     # aim, draw, release, lower
-    arm_l = (80.0, 80.0, 80.0, 30.0)[f % n]
-    torso = (4.0, 2.0, 6.0, 3.0)[f % n]
+    arm_r = render.key((70.0, -25.0, 85.0, 30.0), f, n)     # aim, draw, release, lower
+    arm_l = render.key((80.0, 80.0, 80.0, 30.0), f, n)
+    torso = render.key((4.0, 2.0, 6.0, 3.0), f, n)
     return {'legL': 8.0, 'legR': -8.0,
             'armL': arm_l, 'armR': arm_r,
             'torso': torso, 'bob': 0.0}
@@ -158,4 +161,9 @@ _POSES = {'idle': _pose_idle, 'walk': _pose_walk, 'shoot': _pose_shoot}
 
 
 def tris_for(state, frame):
+    if state == 'die':
+        # Idle figure tipped backward about its own feet; the
+        # last frame is the corpse (see models/villager.py).
+        base = _apply(_POSES['idle'](0, STATES['idle']))
+        return render.spin_x(base, _FALL[frame % len(_FALL)])
     return _apply(_POSES[state](frame, STATES[state]))

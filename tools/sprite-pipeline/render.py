@@ -88,6 +88,12 @@ def rot_z(deg):
     c, s = math.cos(a), math.sin(a)
     return np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]], dtype=np.float64)
 
+def rot_y(deg):
+    """Rotation matrix about the +Y axis (right-hand rule)."""
+    a = math.radians(deg)
+    c, s = math.cos(a), math.sin(a)
+    return np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]], dtype=np.float64)
+
 def xform(verts, mat, pivot):
     """Apply rotation `mat` about `pivot` to an (N,3) vertex array."""
     p = np.asarray(pivot, dtype=np.float64)
@@ -199,6 +205,24 @@ def pose_model(pose):
 # ----------------------------------------------------------------------
 # Poses. Walk/idle/gather/carry, frame counts per SPRITE-PIPELINE.md.
 # ----------------------------------------------------------------------
+def key(table, f, n):
+    """Sample a cyclic keyframe table at frame f of an n-frame cycle.
+
+    The table's keys sit at even phase intervals; the value wraps
+    from the last key back to the first. At n == len(table) this is
+    exactly table[f] (the pre-2026-10 behaviour); at a denser n it
+    linearly interpolates between keys — the animation-density
+    mechanism: pose functions stay authored as a handful of keys
+    and the renderer samples the same motion more finely. The
+    IMPACT key of a cycle (index 2 of the gather keys) therefore
+    stays at phase 1/2 at any density (frame n/2 of n)."""
+    m = len(table)
+    pos = (f % n) / n * m
+    i = int(math.floor(pos)) % m
+    frac = pos - math.floor(pos)
+    return table[i] * (1.0 - frac) + table[(i + 1) % m] * frac
+
+
 def pose_idle(f, n=4):
     t = f / n
     breathe = math.sin(2 * math.pi * t)
@@ -225,15 +249,15 @@ def pose_gather(f, n=4):
     # pass): at game zoom the old bare-arm bend read as a villager
     # merely standing by the tree. Both hands ride the haft —
     # armL tracks armR at 92% — so the swing reads two-handed.
-    arm = (-92.0, 0.0, 72.0, -26.0)[f % n]
-    torso = (2.0, 13.0, 34.0, 10.0)[f % n]
+    arm = key((-92.0, 0.0, 72.0, -26.0), f, n)
+    torso = key((2.0, 13.0, 34.0, 10.0), f, n)
     return {'legL': 12.0, 'legR': -10.0,
             'armL': arm * 0.92, 'armR': arm,
             'torso': torso, 'bob': 0.0, 'load': False,
             'tool': True}
 
-STATES = {'idle': (pose_idle, 4), 'walk': (pose_walk, 8),
-          'gather': (pose_gather, 4), 'carry': (pose_carry, 8)}
+STATES = {'idle': (pose_idle, 4), 'walk': (pose_walk, 12),
+          'gather': (pose_gather, 8), 'carry': (pose_carry, 12)}
 
 # ----------------------------------------------------------------------
 # Software renderer: orthographic 2:1 dimetric projection (identical to

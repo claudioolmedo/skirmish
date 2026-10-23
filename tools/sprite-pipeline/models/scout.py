@@ -31,8 +31,12 @@ from render import box_tris, hex2rgb, rot_x, rot_z, xform
 MATERIALS_ADD = {'horse': hex2rgb('#6e4f33'),
                  'horse_dark': hex2rgb('#4e3823')}
 PC_MATS = {'tunic', 'cloth'}
-STATES = {'idle': 4, 'gallop': 8}
+STATES = {'idle': 4, 'gallop': 12, 'die': 6}
 CANVAS = (160, 160, 80, 138)
+# Death cell: horse + rider tipped sideways lie a full body
+# length from the ground point — bigger than the standing cell.
+STATE_CANVAS = {'die': (256, 216, 128, 156)}
+_FALL_SIDE = (0.0, 9.0, 24.0, 46.0, 66.0, 78.0)
 
 LEG_X, LEG_Y, LEG_PIVOT_Z = 0.18, 0.48, 0.80
 BODY_PIVOT = (0.0, 0.0, 1.05)
@@ -189,8 +193,19 @@ def tris_for(state, frame):
                 tris += _leg(sx, sy, 1.5 * sy, bob)
         return tris
     if state == 'gallop':
-        front, hind, pitch, bob, stretch = _GALLOP[frame % 8]
-        off = 2.0 if frame % 2 == 0 else -2.0  # slight pair offset
+        # The 8 hand-tuned keys sampled at the state's frame
+        # count (render.key's mechanism, tuple-wise): at 8 frames
+        # this is exactly the old table; at 12 the cycle is the
+        # same motion, sampled finer.
+        n = STATES['gallop']
+        m = len(_GALLOP)
+        pos = (frame % n) / n * m
+        i0 = int(math.floor(pos)) % m
+        frac = pos - math.floor(pos)
+        ga, gb = _GALLOP[i0], _GALLOP[(i0 + 1) % m]
+        front, hind, pitch, bob, stretch = (
+            ga[k] + (gb[k] - ga[k]) * frac for k in range(5))
+        off = 2.0 if i0 % 2 == 0 else -2.0  # slight pair offset
         body = _body() + _rider() + _tail(0.0)
         body += _neck_assembly(stretch, 0.0)
         tris += _body_xform(body, pitch, bob)
@@ -198,4 +213,18 @@ def tris_for(state, frame):
             tris += _leg(sx, 1, front + off * sx, bob)
             tris += _leg(sx, -1, hind - off * sx, bob)
         return tris
+    if state == 'die':
+        # Horse and rider tip sideways as one mass — rotation
+        # about the forward (Y) axis through the ground origin,
+        # easing in; the last frame is the corpse the client
+        # leaves fading on the field. The base assembly is the
+        # idle frame-0 pose.
+        body = _body() + _rider() + _tail(5.0 * math.sin(0.7))
+        body += _neck_assembly(0.0, 0.0)
+        tris += _body_xform(body, 0.0, 0.0)
+        for sx in (-1, 1):
+            for sy in (-1, 1):
+                tris += _leg(sx, sy, 1.5 * sy, 0.0)
+        mat = render.rot_y(_FALL_SIDE[frame % len(_FALL_SIDE)])
+        return [(xform(v, mat, (0.0, 0.0, 0.0)), m) for v, m in tris]
     raise KeyError(state)
