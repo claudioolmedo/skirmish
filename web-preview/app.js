@@ -87,6 +87,7 @@ import {
 } from './play/alerts.js';
 import { ClickMarkers, markerHeads } from './play/clickmarker.js';
 import { pennantsForSelection, pennantShape } from './play/pennants.js';
+import { occlusionFor, intersectionRect } from './play/occlusion.js';
 import {
   t, getLocale, setLocale, costText, genderOf,
 } from './play/i18n.js';
@@ -8088,6 +8089,297 @@ function drawRallyFlag(from, rx, ry, nodeId) {
   ctx.restore();
 }
 
+// --- Occluded-unit outlines (INF-12) ---------------------------------
+// The canvas half of play/occlusion.js: while the painter's pass
+// runs, every drawImage call an item makes is recorded (image,
+// source rect, dest rect, transform). After the pass, a unit
+// whose alpha-tight rect is materially covered by items drawn
+// in front of it (buildings, the Town Center, trees) gets its
+// silhouette — its own sprite alpha, flattened to its owner's
+// colour — painted over the occluders, clipped to the
+// occluders' own alpha, so exactly the hidden part shows
+// through, as in DE. The decision (geometry + the fog fairness
+// gate) is occlusion.js's; nothing here touches the sim.
+//
+// The recorder is deliberately dumb: it patches ctx.drawImage
+// only for the duration of the sorted pass and normalizes every
+// call to the 9-argument form. Items opt in via `occ` on their
+// draw entry ({role:'unit', owner, fogVisible} or
+// {role:'occluder'}); unrecorded items simply never outline and
+// never occlude. Vector-fallback draws (art not yet loaded)
+// record no image calls, so they neither outline nor occlude
+// for those frames — the loading gate settles the art before a
+// match starts, so this is a first-frames transient only.
+// Known approximation: drawArtImage's construction clip (a
+// rising building reveals its bottom `frac`) is not replayed
+// into the occluder mask, so a unit behind a building under
+// construction can outline over the not-yet-raised part.
+
+function normalizeDrawImageCall(im, args) {
+  const iw = im.naturalWidth || im.width || 0;
+  const ih = im.naturalHeight || im.height || 0;
+  if (!iw || !ih) return null;
+  if (args.length === 2) {
+    return { im, sx: 0, sy: 0, sw: iw, sh: ih, dx: args[0], dy: args[1], dw: iw, dh: ih };
+  }
+  if (args.length === 4) {
+    return { im, sx: 0, sy: 0, sw: iw, sh: ih, dx: args[0], dy: args[1], dw: args[2], dh: args[3] };
+  }
+  if (args.length === 8) {
+    return {
+      im, sx: args[0], sy: args[1], sw: args[2], sh: args[3],
+      dx: args[4], dy: args[5], dw: args[6], dh: args[7],
+    };
+  }
+  return null;
+}
+
+// Run the sorted draw entries, recording each opted-in item's
+// drawImage calls. Returns [{occ, depth, calls}].
+function recordFrameSprites(draws) {
+  const items = [];
+  let current = null;
+  const orig = ctx.drawImage;
+  ctx.drawImage = function (im, ...rest) {
+    if (current) {
+      const call = normalizeDrawImageCall(im, rest);
+      if (call) {
+        const t = ctx.getTransform();
+        call.m = [t.a, t.b, t.c, t.d, t.e, t.f];
+        current.calls.push(call);
+      }
+    }
+    return orig.call(ctx, im, ...rest);
+  };
+  try {
+    for (const d of draws) {
+      current = d.occ ? { occ: d.occ, depth: d.key, calls: [] } : null;
+      if (current) items.push(current);
+      d.fn();
+    }
+  } finally {
+    ctx.drawImage = orig;
+    current = null;
+  }
+  return items;
+}
+
+// Alpha-tight bounding box of a call's source region, in source
+// pixels (cached per image + region; a scan happens once per
+// unique sprite cell). Null when the scan is unavailable — the
+// caller then falls back to the full source rect.
+const occAlphaBoxCache = new WeakMap();
+function alphaBoxOf(call) {
+  let per = occAlphaBoxCache.get(call.im);
+  if (!per) {
+    per = new Map();
+    occAlphaBoxCache.set(call.im, per);
+  }
+  const key = `${call.sx},${call.sy},${call.sw},${call.sh}`;
+  if (per.has(key)) return per.get(key);
+  let box = null;
+  try {
+    const w = Math.max(1, Math.round(call.sw));
+    const h = Math.max(1, Math.round(call.sh));
+    const cv = document.createElement('canvas');
+    cv.width = w;
+    cv.height = h;
+    const g = cv.getContext('2d', { willReadFrequently: true });
+    g.drawImage(call.im, call.sx, call.sy, call.sw, call.sh, 0, 0, w, h);
+    const data = g.getImageData(0, 0, w, h).data;
+    let x0 = w;
+    let y0 = h;
+    let x1 = -1;
+    let y1 = -1;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (data[(y * w + x) * 4 + 3] > 8) {
+          if (x < x0) x0 = x;
+          if (x > x1) x1 = x;
+          if (y < y0) y0 = y;
+          if (y > y1) y1 = y;
+        }
+      }
+    }
+    if (x1 >= 0) {
+      box = { x: call.sx + x0, y: call.sy + y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+    }
+  } catch {
+    box = null;
+  }
+  per.set(key, box);
+  return box;
+}
+
+// A recorded call's device-pixel rect: its alpha-tight source
+// box mapped into dest space, then through the recorded
+// transform (bounding box of the four corners). Cached on the
+// call object (calls are per-frame, so the cache dies with them).
+function callRectOf(call) {
+  if (call.rect) return call.rect;
+  const ab = alphaBoxOf(call);
+  const sx = ab ? ab.x : call.sx;
+  const sy = ab ? ab.y : call.sy;
+  const sw = ab ? ab.w : call.sw;
+  const sh = ab ? ab.h : call.sh;
+  const rx = call.sw ? call.dw / call.sw : 0;
+  const ry = call.sh ? call.dh / call.sh : 0;
+  const dx = call.dx + (sx - call.sx) * rx;
+  const dy = call.dy + (sy - call.sy) * ry;
+  const dw = sw * rx;
+  const dh = sh * ry;
+  const [a, b, c, d, e, f] = call.m;
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const [px, py] of [[dx, dy], [dx + dw, dy], [dx, dy + dh], [dx + dw, dy + dh]]) {
+    const X = a * px + c * py + e;
+    const Y = b * px + d * py + f;
+    if (X < x0) x0 = X;
+    if (X > x1) x1 = X;
+    if (Y < y0) y0 = Y;
+    if (Y > y1) y1 = Y;
+  }
+  call.rect = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  return call.rect;
+}
+
+function unionRectOf(a, b) {
+  const x = Math.min(a.x, b.x);
+  const y = Math.min(a.y, b.y);
+  return {
+    x, y,
+    w: Math.max(a.x + a.w, b.x + b.w) - x,
+    h: Math.max(a.y + a.h, b.y + b.h) - y,
+  };
+}
+
+// The unit's sprite region flattened to a flat colour (its own
+// alpha, the colour filled in) — cached per image + region +
+// colour. This is DE's "player-colored outline": the shape is
+// the unit's silhouette, the colour is the owner's.
+const occTintCache = new WeakMap();
+function tintedSpriteOf(call, color) {
+  let per = occTintCache.get(call.im);
+  if (!per) {
+    per = new Map();
+    occTintCache.set(call.im, per);
+  }
+  const key = `${call.sx},${call.sy},${call.sw},${call.sh},${color}`;
+  if (per.has(key)) return per.get(key);
+  let cv = null;
+  try {
+    cv = document.createElement('canvas');
+    cv.width = Math.max(1, Math.round(call.sw));
+    cv.height = Math.max(1, Math.round(call.sh));
+    const g = cv.getContext('2d');
+    g.drawImage(call.im, call.sx, call.sy, call.sw, call.sh, 0, 0, cv.width, cv.height);
+    g.globalCompositeOperation = 'source-in';
+    g.fillStyle = color;
+    g.fillRect(0, 0, cv.width, cv.height);
+  } catch {
+    cv = null;
+  }
+  per.set(key, cv);
+  return cv;
+}
+
+// The outline colour for an owner tag, mirroring drawSheep's
+// band logic (own = blue, foe = red); Gaia gets DE's Gaia
+// colour (white) — the wiki notes animals' colour shows
+// through their outline too (INF-12).
+const GAIA_OUTLINE_COLOR = '#dfe6ea';
+function outlineColorFor(owner) {
+  if (owner === 1) return GAIA_OUTLINE_COLOR;
+  return owner === foeOwner() ? ENEMY_COLOR : OWN_COLOR;
+}
+
+const occMaskCv = document.createElement('canvas');
+const occSilCv = document.createElement('canvas');
+
+// Paint one unit's silhouette over its occluders: the unit's own
+// tinted alpha, clipped to the union of the covering occluders'
+// alpha (their recorded images replayed into a mask the size of
+// the unit's rect). LOW quality keeps the aid but clips to the
+// occluders' rects instead of their pixel alpha — cheaper, and
+// per the governor's doctrine information is never shed, only
+// cosmetic fidelity is.
+function paintOccludedSilhouette(unitEntry, cover, color) {
+  const r = unitEntry.rect;
+  const bx = Math.floor(r.x);
+  const by = Math.floor(r.y);
+  const bw = Math.max(1, Math.ceil(r.x + r.w) - bx);
+  const bh = Math.max(1, Math.ceil(r.y + r.h) - by);
+  occMaskCv.width = bw;
+  occMaskCv.height = bh;
+  const mg = occMaskCv.getContext('2d');
+  if (governor.level === 'low') {
+    mg.fillStyle = '#ffffff';
+    for (const o of cover) {
+      const ir = intersectionRect(r, o.rect);
+      if (ir) mg.fillRect(ir.x - bx, ir.y - by, ir.w, ir.h);
+    }
+  } else {
+    for (const o of cover) {
+      for (const call of o.it.calls) {
+        mg.setTransform(call.m[0], call.m[1], call.m[2], call.m[3],
+          call.m[4] - bx, call.m[5] - by);
+        mg.drawImage(call.im, call.sx, call.sy, call.sw, call.sh,
+          call.dx, call.dy, call.dw, call.dh);
+      }
+    }
+    mg.setTransform(1, 0, 0, 1, 0, 0);
+  }
+  occSilCv.width = bw;
+  occSilCv.height = bh;
+  const sg = occSilCv.getContext('2d');
+  for (const call of unitEntry.it.calls) {
+    const tinted = tintedSpriteOf(call, color);
+    if (!tinted) continue;
+    sg.setTransform(call.m[0], call.m[1], call.m[2], call.m[3],
+      call.m[4] - bx, call.m[5] - by);
+    sg.drawImage(tinted, 0, 0, call.sw, call.sh,
+      call.dx, call.dy, call.dw, call.dh);
+  }
+  sg.setTransform(1, 0, 0, 1, 0, 0);
+  sg.globalCompositeOperation = 'destination-in';
+  sg.drawImage(occMaskCv, 0, 0);
+  sg.globalCompositeOperation = 'source-over';
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(occSilCv, bx, by);
+  ctx.restore();
+}
+
+// The occlusion pass itself: group the recorded items into
+// units and occluders (with their alpha-tight rects), ask
+// occlusion.js who is hidden, and paint those silhouettes.
+function drawOccludedOutlines(items) {
+  const units = [];
+  const occluders = [];
+  for (const it of items) {
+    if (!it.calls.length) continue;
+    let rect = null;
+    for (const call of it.calls) {
+      const cr = callRectOf(call);
+      rect = rect ? unionRectOf(rect, cr) : { ...cr };
+    }
+    if (!rect) continue;
+    const entry = { it, rect, depth: it.depth };
+    if (it.occ.role === 'unit') units.push(entry);
+    else occluders.push(entry);
+  }
+  if (!units.length || !occluders.length) return;
+  for (const u of units) {
+    const res = occlusionFor(
+      { rect: u.rect, depth: u.depth, fogVisible: u.it.occ.fogVisible },
+      occluders);
+    if (!res.occluded) continue;
+    paintOccludedSilhouette(u, res.cover, outlineColorFor(u.it.occ.owner));
+  }
+}
+
 function draw() {
   const W = canvas.width;
   const H = canvas.height;
@@ -8244,6 +8536,9 @@ function draw() {
     const known = n.amount > 0 ? n.amount / NODE_MAX[n.kind] : 1;
     draws.push({
       key: n.x + n.y,
+      // INF-12: trees are occluders (DE outlines units behind
+      // trees too); other node kinds are ground-hugging.
+      occ: n.kind === 0 ? { role: 'occluder' } : null,
       fn: () => {
         const [sx, sy] = worldToScreen(n.x, n.y);
         NODE_DRAW[n.kind](sx, sy, known, n.x, n.y);
@@ -8253,7 +8548,7 @@ function draw() {
   }
   for (const b of renderBuildings) {
     if (b.kind === 1 && b.complete) continue; // drawn as a farm node
-    draws.push({ key: b.x + b.y + CS, fn: () => drawBuilding(b) });
+    draws.push({ key: b.x + b.y + CS, occ: { role: 'occluder' }, fn: () => drawBuilding(b) });
   }
   // Tree depletion tracking (falling trees + stumps) — the same
   // per-frame bookkeeping pattern as rubble, over the node list.
@@ -8301,6 +8596,9 @@ function draw() {
       const maxHp = st.hp[i * 2 + 1];
       draws.push({
         key: wx + wy + TC_HALF,
+        // INF-12: the TC is an occluder like any building — the
+        // enemy scout hiding behind it is the case that counts.
+        occ: { role: 'occluder' },
         fn: () => {
           drawTC(wx, wy, owner);
           // M5: a Town Center under attack shows its HP like any
@@ -8323,6 +8621,14 @@ function draw() {
       const owner = st.owners[i];
       draws.push({
         key: wx + wy,
+        // INF-12: a unit may be outlined when a front item hides
+        // it. fogVisible restates this push's own draw condition
+        // (own units always draw; others only in visible cells),
+        // and occlusion.js enforces it as a hard gate.
+        occ: {
+          role: 'unit', owner,
+          fogVisible: owner === localOwner || cellVisibleW(wx, wy),
+        },
         fn: () => {
           drawOwner = owner; // player color for this draw (M5)
           drawFn(i, wx, wy);
@@ -8335,7 +8641,11 @@ function draw() {
     }
   }
   draws.sort((a, b) => a.key - b.key);
-  for (const d of draws) d.fn();
+  // INF-12: the pass runs recorded (see recordFrameSprites) so
+  // the occlusion outline pass below knows every sprite's exact
+  // pixels and painter order.
+  const frameSprites = recordFrameSprites(draws);
+  drawOccludedOutlines(frameSprites);
 
   // Arrows in flight (M3): interpolate along the sim's fixed
   // trajectory and draw an oriented arrow (drawArrowShape) rotated

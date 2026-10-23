@@ -625,7 +625,11 @@ order flows through the lockstep vocabulary (`auto_explore`).
 · *Status:* **MATCHES** (eligibility — all scouts, per current
 DE update 111772; frontier exploration; manual-order priority;
 toggle-off stop); DE's hotkey default **UNVERIFIED**, G is our
-product binding.
+product binding (re-checked 2026-10-22: wiki, Hotkey carries no
+Autoscout entry at all, wiki, Auto Scout names no key, and update
+169123's official notes confirm the hotkey exists — 'Normalized
+the "Stop" and "Autoscout" hotkeys behavior on scouts' — without
+naming a default letter; no public source pins one).
 
 ---
 
@@ -790,13 +794,23 @@ Hand Cart +50% capacity figures); wiki, Technology (Age of Empires II)
 and Wheelbarrow (Age of Empires II) (fetched 2026-10-22: Wheelbarrow —
 Feudal Age, Town Center, 175 food / 50 wood, 75 s; carry table 10 → 13
 ordinary, 35 → 44 hunted meat; speed +10%; Hand Cart is a Castle Age
-technology, 300 food / 200 wood, 55 s). · *Impl:* `CARRY_CAPACITY` per
+technology, 300 food / 200 wood, 55 s). Verification sweep
+2026-10-22: wiki, Villager (Age of Empires II) — the gathering-rates
+table pins the base carry **per source**: 10 for fish, herdables,
+farms, forage, trees (wood), gold mines, oysters and stone mines;
+**35 for huntables** — no other base exception exists. The same
+sweep pins Hand Cart's exact outcome from the carry-capacity
+comparison tables in wiki, Wheelbarrow and Hand Cart: generic
+villager 10 → 13 → **20**, hunter 35 → 44 → **66**. The documented
+integer is 20, not 13 × 1.5 = 19.5 — "+50%" is the technology's
+label; the tables give the result. · *Impl:* `CARRY_CAPACITY` per
 task source; the 35 case keys off the node kind (hunt carcass), not a
 villager state. Wheelbarrow shipped in the 2026-10-21/22 night run —
 carry 10 → 13 / hunt 35 → 44 via `NodeKind::carry_cap_for`, and the
 speed +10% as TEC-06's first *percentage* patch (the layered row ×
-11/10 in `stats_for`). Still open: Hand Cart (its 20-cap case and
-+10% speed) — it waits for the Castle Age, the tech's own Age.
+11/10 in `stats_for`). Still open: Hand Cart (its 20-cap case —
+numbers now pinned above — and +10% speed) — it waits for the
+Castle Age, the tech's own Age.
 · *Status:* **DIFFERS** (Wheelbarrow ships; Hand Cart waits for the
 Castle Age).
 
@@ -913,14 +927,36 @@ information selection for animals that are not yours). · *Status:*
 villager works a farm; the farm's own inherent work rate (0.4 food/s)
 caps how fast it can be harvested no matter who works it. Farm-food
 technologies (Horse Collar +75, Heavy Plow +125, Crop Rotation +175)
-raise the amount only for farms built — or merely started — after the
-research completes; a standing farm never gains retroactively. A depleted
+raise the amount in full for farms built after the research completes,
+and — since DE update 169123 — **proportionally for farms already
+standing**: a standing farm gains the bonus × (proportion of its food
+remaining)² (an untouched farm gains the whole bonus; a half-eaten
+farm gains 25% of it — Horse Collar +19, Heavy Plow +32, Crop
+Rotation +44 at 50% remaining; the articles' examples all round the
+result up, but no rounding rule is stated). A depleted
 farm's plot is reusable immediately. The Mill keeps a paid reseed queue
 and (DE) an auto-reseed toggle.
-*Source:* MECHANICS-STUDY §6.4 (amounts/timing pinned); GAP 3.9. · *Impl:*
+*Source:* MECHANICS-STUDY §6.4 (amounts/timing pinned); GAP 3.9.
+Amended 2026-10-22 (verification sweep; the never-retroactive rule
+this entry previously stated was correct only before update 169123):
+official patch notes, Update 169123 (2026-02-17), Balance Changes →
+General — "Existing Farms (and Pastures) are now proportionally
+affected by Farm upgrades."; wiki, Horse Collar / Heavy Plow /
+Crop Rotation (Age of Empires II), each stating verbatim that "Farms
+built before [the technology] are affected proportionally when the
+technology is researched, calculated using the square of the
+proportion of remaining food", with a per-article changelog line
+crediting update 169123. Costs/times (wiki, Technology): Horse
+Collar 75 food / 75 wood, 20 s, Mill, Feudal Age; Heavy Plow
+125 / 125, 40 s; Crop Rotation 250 / 250, 70 s. The
+under-construction case is not addressed by the current articles
+(the pre-169123 wording covered it; it is not carried forward here).
+· *Impl:*
 amount is stamped onto the node at farm creation from the owner's current
-tech state (a stored value, not a live lookup — that's what makes
-non-retroactivity natural); work-rate cap clamps the gather rate in the
+tech state (a stored value, not a live lookup); when a farm technology
+completes, the proportional top-up above must be applied to the
+owner's standing farms from their stored amounts. Work-rate cap
+clamps the gather rate in the
 farm case. Today: farm exists with 175 food and the retire-on-deplete
 flow; footprint is 2×2 cells (BLD-12 note) and there are no farm techs
 yet. · *Status:* **DIFFERS** (core farm loop matches; footprint, cap, and
@@ -1038,7 +1074,15 @@ of those rates. Town Center exception: a full TC repair costs 550 wood
 and no stone, whatever the formula says. Treadmill Crane does not speed
 repair.
 *Source:* wiki, Villager (Age of Empires II) — repair section (rates,
-cost model, TC exception). · *Impl:* shipped 2026-10-19 for placed
+cost model, TC exception; re-read 2026-10-22: the TC exception is
+stated verbatim — "The Town Center is an exception to the cost and
+discount rules: It costs 550 wood and no stone to repair fully" —
+and wiki, Town Center (Age of Empires II), "Repairing", corroborates:
+no stone, twice the wood of building a new one, 550 wood against
+275 wood / 100 stone new. No TC-specific repair *time* is documented
+anywhere: a Town Center repairs at the general building rate —
+750 HP/min for the first villager, +375 HP/min each additional — so
+its repair time is its missing HP divided by that rate). · *Impl:* shipped 2026-10-19 for placed
 buildings (see BLD-17 for the implementation rule): a villager task
 phase (`Task::Repair`) mirroring construction's assignment and
 approach; per-tick HP restore at 750 HP/min for the first repairer
@@ -1490,13 +1534,39 @@ minimum range and Murder Holes remain unobservable rather than
 wrong. · *Status:* **MATCHES**.
 
 **PRJ-09 — Some projectiles pass through.** Scorpion bolts damage every
-unit along their path (friend and foe alike take pass-through damage,
-but this is a path effect, not blast — CMB-12's flag list does not
-include Scorpions for *blast* friendly fire; their bolts do hit friends
-in the line). Ordinary arrows stop at the first unit at the impact point.
-*Source:* MECHANICS-STUDY §2.3 (scorpion pass-through; friendly-fire
-flag list). · *Impl:* a `pass_through` flag in the weapon row; resolution
-walks the segment in id order. · *Status:* **MISSING**.
+**enemy** unit along their path: the targeted unit takes full damage,
+every other enemy unit the bolt touches takes half. **Friendly units
+take nothing** — pass-through damage never causes friendly fire, for
+the owner's own units or allies'. That is the whole distinction from
+blast (CMB-12): Mangonel-line, Bombard Cannon and the other
+blast-flagged weapons hurt everyone in the area; the Scorpion's line
+hurts only enemies. The bolt's line is 0.1 tiles wide (projectile
+size) and the bolt keeps travelling up to 3 tiles past its maximum
+range. Ordinary arrows stop at the first unit at the impact point.
+*Source:* corrected 2026-10-22 (verification sweep) — this entry
+previously claimed friend and foe alike take pass-through damage,
+following MECHANICS-STUDY §2.3; that claim is false for current DE
+and is superseded. wiki, Pass-through damage: "Unlike Area of
+Effect attacks, pass-through damages do not cause friendly fire",
+and "The unit being targeted receives full damage as usual, whereas
+the units not being the targeted receives 50% damage"; wiki,
+Scorpion (Age of Empires II): bolts "cause damage to multiple units
+in a straight line, although only the targeted unit gets full
+damage; all other units hit only get half damage. Unlike Mangonels,
+they do not damage friendly units"; wiki, Heavy Scorpion states the
+same exemption; wiki, Area of Effect's friendly-fire list (Mangonels,
+Bombard Cannons, Cannon Galleons, Dromons, Turtle Ships, Warwolf
+Trebuchets) omits Scorpions. Projectile size 0.1 tile per the
+Scorpion article's changelog ("Scorpion projectile size increased:
+0.025 → 0.1 tile"); the 3-tiles-past-range travel is the Scorpion
+article's figure — the generic Pass-through damage article says 2
+tiles for projectiles in general, a recorded discrepancy; the
+Scorpion-specific value governs this entry. No DE patch note
+changes Scorpion friendly fire (the article's changelog through
+update 153015 lists none). · *Impl:* a `pass_through` flag in the weapon row; resolution
+walks the segment in id order, skipping friendly-owned units
+entirely (CMB-12's rule), full damage to the primary target and
+half to the rest. · *Status:* **MISSING**.
 
 **PRJ-10 — Projectiles ignore terrain height for targeting.** Height
 enters projectile combat only through the damage multiplier (CMB-01)
@@ -2179,7 +2249,14 @@ deterministic choice); an owned sheep transfers only when its owner
 has no unit in range and an enemy does. Conversion clears the sheep's
 orders — it stops and waits for its new owner. The capture radius is
 UNVERIFIED as a number in the sources (the rule is stated as proximity
-/ "next to it") — adopt **1 tile** as the tuned constant. A sheep's
+/ "next to it") — re-checked in the 2026-10-22 verification sweep
+across wiki, Sheep, Herdable animal, Turkey, Goat and Cow: no public
+source publishes a number anywhere in the herdable coverage — adopt
+**1 tile** as the tuned constant. A sheep's hit points are **7** —
+verified in the same sweep: wiki, Turkey and Goat state their
+statistics are the Sheep's and give "7 hit points, 100 food", and
+wiki, Cow contrasts its own 14 with "the other herdable animals have
+7 hit points". A sheep's
 Line of Sight is 2 tiles: the Herdable animal per-animal breakdown is
 adopted over the Sheep article's prose value of 3, and the conflict is
 recorded here. Wild sheep also wander: the animal AI gives Gaia sheep
@@ -2732,11 +2809,66 @@ gathered, technologies, and the map revealed.
 the VIC-04 run counters + a score history sampled per minute (client-
 side sampling of public data). · *Status:* **MISSING**.
 
+**INF-12 — Occluded units are outlined in their owner's colour.** When a
+unit is partially or completely hidden behind a taller object drawn
+in front of it — a building, the Town Center, a tree — the unit's
+silhouette shows through the occluder in the unit owner's colour, so
+the hidden part stays readable and the unit stays selectable. It
+applies to every unit the local seat can currently see — its own
+units and enemy units alike (an enemy scout parked behind the
+player's Town Center is the canonical case; Claudio's live report,
+2026-10-22) — and to animals, whose owner's colour shows through
+the outline even though the sprite carries none. It is a
+pixel-occlusion aid only: a unit outside the seat's current fog
+visibility shows nothing — explored memory is not visibility.
+*Source:* AoE wiki, "Player" (§ Colors): "If the unit is obscured
+or behind something, a player-colored outline of the unit will be
+visible"; of animals, the colour "can still be seen through its
+outline (if behind a building) or its health bar"; the same page's
+gallery captions an image "Outlines of units behind a Stone Wall
+in Age of Empires II: Definitive Edition". The Age of Kings manual
+lists among its interface improvements "Units behind buildings and
+trees are visible" — trees occlude too, not only buildings.
+Ensemble's Age of Empires II design document ("Unit Visibility"):
+the outline shows through the obscuring object for a unit
+"partially or completely hidden by a taller object in the
+foreground", through up to two levels of obscuring objects, the
+obscured unit remains selectable inside its outline area, and "All
+player controlled units will be visible, including owned units,
+allied units, and enemy units". A DE-forum report
+(forums.ageofempires.com, "Unit borders can't be seen behind
+palisade walls", 2019) shows players expecting "a blue silhouette
+(or whatever colour you are)" behind the Town Center, House, Mill,
+Barracks, Watch Tower, Stone Walls/Gates, Stable, Archery Range,
+Market, Blacksmith, Siege Workshop, Monastery, University and
+Castle, and reports its absence behind palisade walls/gates,
+Lumber Camps, Mining Camps, Docks and packed Trebuchets as a bug —
+the intended rule is every building; ours follows the intent (no
+walls in our roster; camps are full buildings). DE exposes no
+setting for this — it is always on (the adjustable "Obscured Unit
+Alpha" belongs to Age of Empires III/IV) — so ours has none either,
+and it is never shed at any quality level (information, not
+cosmetics; LOW only clips the silhouette to the occluders' rects
+instead of their pixel alpha). · *Impl:* client only (2026-10-22) —
+`web-preview/play/occlusion.js` holds the pure decision
+(alpha-tight screen rects; painter depth — an occluder must be
+drawn in front; the union covered-fraction, materially covered =
+≥ 15% of the unit's alpha-tight rect; and the hard fog gate:
+`fogVisible` must be literal current visibility) and is
+unit-tested, incl. the enemy-scout-behind-own-TC case; `app.js`
+records each draw item's sprite calls during the painter's pass
+and paints an occluded unit's own sprite alpha, flattened to its
+owner's colour, over the occluders, clipped to the occluders'
+alpha. The Town Center occludes as the entity it is; trees
+occlude as nodes; a foundation occludes at its full drawn height
+(the construction clip is not replayed into the mask — a transient
+of seconds). No sim, command or hash contact. · *Status:* **MATCHES**.
+
 ---
 
 ## A. Rule counts
 
-217 rules total. Counts verified mechanically against the status tags in
+218 rules total. Counts verified mechanically against the status tags in
 this document (2026-10-18, M8 audit; re-verified for M9 the same day —
 the open-games lobby changed no status, see the M9 note in section B;
 updated 2026-10-19 for BLD-16, the Town Center footprint rule —
@@ -2784,7 +2916,10 @@ was already shipped, only attack/armor stats remain),
 recounted mechanically below; updated 2026-10-22 for VIC-04,
 the score formula — VIC-04 moves MISSING → MATCHES, so §16
 trades one MISSING for one MATCHES with the rule count
-unchanged, recounted mechanically below; updated 2026-10-22
+unchanged, recounted mechanically below; updated 2026-10-22 for
+INF-12, the occluded-unit outline — §18 gains one rule, one
+MATCHES (Claudio's live report: the enemy scout parked behind his
+Town Center), recounted mechanically below; updated 2026-10-22
 for the Spearman/Skirmisher package — the two missing Feudal
 base units ship with their documented tables (the
 Skirmisher's train time is the current-DE 26 s of update
@@ -2818,8 +2953,8 @@ change, recounted mechanically below).
 | 15 | AI behavior & difficulty (AI) | 9 | 5 | 2 | 2 |
 | 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |
 | 17 | Multiplayer determinism (NET) | 11 | 4 | 5 | 2 |
-| 18 | Information rules (INF) | 12 | 7 | 3 | 2 |
-| | **Total** | **217** | **114** | **34** | **69** |
+| 18 | Information rules (INF) | 13 | 8 | 3 | 2 |
+| | **Total** | **218** | **115** | **34** | **69** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer
