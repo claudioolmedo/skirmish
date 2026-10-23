@@ -9,7 +9,7 @@
 //
 // Proves: '.' selects an idle villager → the panel root shows
 // ONLY the two build-page openers (badged Q / W) → Q arms the
-// economic page (its five buildings + Back, House badged Q) → Q
+// economic page (its six buildings + Back, House badged Q) → Q
 // enters House placement and the panel STAYS on the page; Esc
 // cancels the placement back onto the page, a second Esc returns
 // to the root; Q,W enters Mill placement; W arms the military
@@ -358,7 +358,7 @@ const cmdBtn = (id) => cmdButtons().find((b) => b.id === id);
 // The DE page model (UI FIX 4 addendum): root = the two openers;
 // a page = its buildings + Back in the last slot.
 const ROOT_IDS = ['page-eco', 'page-mil', 'repair', 'stop', 'delete']; // + Repair (BLD-17); Stop/Delete ride along (SEL-14)
-const ECO_IDS = ['build-0', 'build-4', 'build-1', 'build-3', 'build-5', 'page-back', 'stop', 'delete']; // Stop/Delete ride along (SEL-14)
+const ECO_IDS = ['build-0', 'build-4', 'build-1', 'build-3', 'build-5', 'build-12', 'page-back', 'stop', 'delete']; // Stop/Delete ride along (SEL-14)
 const MIL_IDS = ['build-2', 'build-6', 'build-7', 'build-8', 'build-9', 'page-back', 'stop', 'delete']; // Stop/Delete ride along (SEL-14)
 
 pump(3);
@@ -380,7 +380,7 @@ assert.ok(cmdBtn('repair').innerHTML.includes('<span class=\"cmd-key\">E</span>'
   'the Repair button is badged E (BLD-17)');
 
 key('KeyQ');
-assert.deepEqual(cmdIds(), ECO_IDS, 'Q arms the economic page — its five buildings + Back');
+assert.deepEqual(cmdIds(), ECO_IDS, 'Q arms the economic page — its six buildings + Back');
 assert.ok(cmdBtn('build-0').innerHTML.includes('<span class="cmd-key">Q</span>'),
   'the House button is badged Q (its grid slot)');
 assert.ok(cmdBtn('build-4').innerHTML.includes('<span class="cmd-key">W</span>'),

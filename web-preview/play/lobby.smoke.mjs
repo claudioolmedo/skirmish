@@ -463,15 +463,16 @@ await boot(tab);
   console.log('PASS (9) compact bottom strip + square icon-only command cells (DE page model) ship in ui.css (by construction; no layout engine here)');
 }
 
-// (10) The PNG command-icon set (2026-10-19): all twenty original
-//      icons ship under ui-art/icons/ and app.js maps every one
-//      of them into the command panel / selection portraits.
+// (10) The PNG command-icon set (2026-10-19): all twenty-one
+//      original icons ship under ui-art/icons/ and app.js maps
+//      every one of them into the command panel / selection
+//      portraits. ('market' joined with BLD-19, 2026-10-22.)
 {
   const { existsSync, statSync, readFileSync } = await import('node:fs');
   const ICONS = ['town-center', 'house', 'farm', 'barracks', 'lumber-camp',
     'mill', 'mining-camp', 'archery-range', 'stable', 'blacksmith',
     'villager', 'militia', 'man-at-arms', 'archer', 'scout',
-    'loom', 'feudal', 'fletching', 'scale-mail', 'padded-armor'];
+    'loom', 'feudal', 'fletching', 'scale-mail', 'padded-armor', 'market'];
   for (const name of ICONS) {
     const p = new URL(`./ui-art/icons/${name}.png`, import.meta.url);
     assert.ok(existsSync(p) && statSync(p).size > 1000,
@@ -482,7 +483,7 @@ await boot(tab);
     assert.ok(app.includes(`${name}.png`),
       `app.js maps the ${name} icon into a button or portrait`);
   }
-  console.log('PASS (10) all 20 PNG command icons ship and are mapped in app.js');
+  console.log('PASS (10) all 21 PNG command icons ship and are mapped in app.js');
 }
 
 // (11) The unit-animation set (2026-10-19): every generated action

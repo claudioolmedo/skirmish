@@ -3364,7 +3364,19 @@ updated 2026-10-22 for the Market package — §7 gains BLD-19
 (the Market building, MATCHES) and §13's TRD-01/02/03 move
 MISSING → MATCHES (the commodity exchange ships; tribute and
 trade units stay MISSING as TRD-04..08), recounted mechanically
-below.
+below. The same recount corrects a pre-existing §7 drift the
+table carried in from main: the §7 body holds 4 DIFFERS /
+1 MISSING (BLD-06, BLD-07, BLD-13, BLD-17 differ; BLD-14 is
+the only missing one), not the 3 / 2 the table said — the
+total row moves one count MISSING → DIFFERS accordingly. No
+rule's status changed in that correction; the table now
+equals the body. Rebased over the BLD-18 landing (the Market
+takes tag 12, after the Watch Tower's 10 and the Outpost's
+11), the mechanical recount over the combined body gives
+§7 = 19 rules, 13 / 5 / 1 and totals of 220 rules,
+124 / 34 / 62 — the same recount also repairs the total
+row's stale MISSING count (TRD-01..03's move was already
+reflected in §13's row but not in the total).
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
@@ -3374,7 +3386,7 @@ below.
 | 4 | Selection & orders (SEL) | 17 | 15 | 2 | 0 |
 | 5 | Movement, pathfinding & collision (MOV) | 12 | 4 | 3 | 5 |
 | 6 | Economy & drop-off (ECO) | 17 | 13 | 2 | 2 |
-| 7 | Buildings & placement (BLD) | 18 | 12 | 5 | 1 |
+| 7 | Buildings & placement (BLD) | 19 | 13 | 5 | 1 |
 | 8 | Combat & damage (CMB) | 16 | 14 | 1 | 1 |
 | 9 | Projectiles & ballistics (PRJ) | 10 | 5 | 3 | 2 |
 | 10 | Unit classes & counters (CLS) | 8 | 5 | 0 | 3 |
@@ -3386,7 +3398,7 @@ below.
 | 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |
 | 17 | Multiplayer determinism (NET) | 11 | 4 | 5 | 2 |
 | 18 | Information rules (INF) | 13 | 8 | 3 | 2 |
-| | **Total** | **219** | **120** | **34** | **65** |
+| | **Total** | **220** | **124** | **34** | **62** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer
