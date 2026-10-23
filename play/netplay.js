@@ -147,6 +147,9 @@ export function validateCommand(c) {
     case 'rally_b': return isInt(c.b) && isNum(c.x) && isNum(c.y);
     case 'force_dep': return isInt(c.e);
     case 'auto_explore': return isInt(c.e) && typeof c.on === 'boolean';
+    case 'attackmove': return isInt(c.e) && isNum(c.x) && isNum(c.y);
+    case 'patrol': return isInt(c.e) && isNum(c.x) && isNum(c.y);
+    case 'stance': return isInt(c.e) && isInt(c.s) && c.s <= 3;
     case 'stop': return isInt(c.e);
     case 'delete': return isInt(c.e);
     case 'deleteb': return isInt(c.b);
@@ -190,6 +193,13 @@ export function applyCommand(sim, cmd, owner, tcOf) {
     case 'rally_b': return sim.push_set_rally_building(cmd.b, cmd.x, cmd.y);
     case 'force_dep': return sim.push_force_deposit(cmd.e);
     case 'auto_explore': return sim.push_auto_explore(cmd.e, cmd.on);
+    case 'attackmove': return cmd.q
+      ? sim.push_attack_move_queued(cmd.e, cmd.x, cmd.y)
+      : sim.push_attack_move(cmd.e, cmd.x, cmd.y);
+    case 'patrol': return cmd.q
+      ? sim.push_patrol_queued(cmd.e, cmd.x, cmd.y)
+      : sim.push_patrol(cmd.e, cmd.x, cmd.y);
+    case 'stance': return sim.push_set_stance(cmd.e, cmd.s);
     case 'stop': return sim.push_stop(cmd.e);
     case 'delete': return sim.push_delete(cmd.e);
     case 'deleteb': return sim.push_delete_building(cmd.b);

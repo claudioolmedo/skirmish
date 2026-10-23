@@ -191,6 +191,18 @@ export class WasmSim {
         return v1;
     }
     /**
+     * Per-entity stance tags in entity-id order (CMB-09:
+     * 0 Aggressive, 1 Defensive, 2 Stand Ground, 3 No Attack) —
+     * the command panel's pressed state for the stance row.
+     * @returns {Uint8Array}
+     */
+    entity_stance() {
+        const ret = wasm.wasmsim_entity_stance(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
      * The LOCAL player's fog-of-war grid (M7, VIS-01): flat
      * row-major bytes, one per cell — 0 unexplored, 1 explored,
      * 2 currently visible. The client renders strictly from this:
@@ -459,6 +471,34 @@ export class WasmSim {
      */
     push_attack(entity, target) {
         const ret = wasm.wasmsim_push_attack(this.__wbg_ptr, entity, target);
+        return ret !== 0;
+    }
+    /**
+     * Attack-move (CMB-10): the unit walks to the point,
+     * engaging whatever enters its sight en route, then resumes
+     * and holds at the destination. Returns whether the order
+     * *would* be accepted (a living military unit owned by a
+     * player, with an attack row); the sim re-validates when the
+     * command is applied.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_attack_move(entity, x, y) {
+        const ret = wasm.wasmsim_push_attack_move(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Queue an attack-move behind the unit's current order
+     * (CMB-10): it executes when the unit goes idle.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_attack_move_queued(entity, x, y) {
+        const ret = wasm.wasmsim_push_attack_move_queued(this.__wbg_ptr, entity, x, y);
         return ret !== 0;
     }
     /**
@@ -861,6 +901,34 @@ export class WasmSim {
         wasm.wasmsim_push_noop(this.__wbg_ptr);
     }
     /**
+     * Patrol (CMB-11): the unit loops between where it stands and
+     * the point, engaging en route like an attack-move; on a unit
+     * that already patrols, the point is appended to its loop.
+     * Returns whether the order *would* be accepted (same rule as
+     * `push_attack_move`); the sim re-validates at apply time.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_patrol(entity, x, y) {
+        const ret = wasm.wasmsim_push_patrol(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Queue a patrol order behind the unit's current order
+     * (CMB-11). On a unit that already patrols, the point appends
+     * to its loop immediately instead (see `Sim::issue_queue`).
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_patrol_queued(entity, x, y) {
+        const ret = wasm.wasmsim_push_patrol_queued(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
      * Order a villager to repair one of its own player's placed
      * buildings (BLD-07): travel to the building's ring and
      * restore its HP at the documented flat rate (750 HP/min for
@@ -977,6 +1045,21 @@ export class WasmSim {
      */
     push_set_rally_tc_of(tc, x, y) {
         const ret = wasm.wasmsim_push_set_rally_tc_of(this.__wbg_ptr, tc, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Set a military unit's stance (CMB-09) by tag (0 Aggressive,
+     * 1 Defensive, 2 Stand Ground, 3 No Attack). A stance is a
+     * setting, not an order — nothing else about the unit
+     * changes. Returns whether the order *would* be accepted (a
+     * living military unit owned by a player, and a valid tag);
+     * the sim re-validates when the command is applied.
+     * @param {number} entity
+     * @param {number} stance
+     * @returns {boolean}
+     */
+    push_set_stance(entity, stance) {
+        const ret = wasm.wasmsim_push_set_stance(this.__wbg_ptr, entity, stance);
         return ret !== 0;
     }
     /**

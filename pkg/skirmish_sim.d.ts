@@ -99,6 +99,12 @@ export class WasmSim {
      */
     entity_path(entity: number): Float64Array;
     /**
+     * Per-entity stance tags in entity-id order (CMB-09:
+     * 0 Aggressive, 1 Defensive, 2 Stand Ground, 3 No Attack) —
+     * the command panel's pressed state for the stance row.
+     */
+    entity_stance(): Uint8Array;
+    /**
      * The LOCAL player's fog-of-war grid (M7, VIS-01): flat
      * row-major bytes, one per cell — 0 unexplored, 1 explored,
      * 2 currently visible. The client renders strictly from this:
@@ -230,6 +236,20 @@ export class WasmSim {
      * sim re-validates when the command is applied).
      */
     push_attack(entity: number, target: number): boolean;
+    /**
+     * Attack-move (CMB-10): the unit walks to the point,
+     * engaging whatever enters its sight en route, then resumes
+     * and holds at the destination. Returns whether the order
+     * *would* be accepted (a living military unit owned by a
+     * player, with an attack row); the sim re-validates when the
+     * command is applied.
+     */
+    push_attack_move(entity: number, x: number, y: number): boolean;
+    /**
+     * Queue an attack-move behind the unit's current order
+     * (CMB-10): it executes when the unit goes idle.
+     */
+    push_attack_move_queued(entity: number, x: number, y: number): boolean;
     /**
      * Queue an attack order behind the unit's current order.
      */
@@ -418,6 +438,20 @@ export class WasmSim {
      */
     push_noop(): void;
     /**
+     * Patrol (CMB-11): the unit loops between where it stands and
+     * the point, engaging en route like an attack-move; on a unit
+     * that already patrols, the point is appended to its loop.
+     * Returns whether the order *would* be accepted (same rule as
+     * `push_attack_move`); the sim re-validates at apply time.
+     */
+    push_patrol(entity: number, x: number, y: number): boolean;
+    /**
+     * Queue a patrol order behind the unit's current order
+     * (CMB-11). On a unit that already patrols, the point appends
+     * to its loop immediately instead (see `Sim::issue_queue`).
+     */
+    push_patrol_queued(entity: number, x: number, y: number): boolean;
+    /**
      * Order a villager to repair one of its own player's placed
      * buildings (BLD-07): travel to the building's ring and
      * restore its HP at the documented flat rate (750 HP/min for
@@ -480,6 +514,15 @@ export class WasmSim {
      * `push_set_rally_tc` for an explicit Town Center.
      */
     push_set_rally_tc_of(tc: number, x: number, y: number): boolean;
+    /**
+     * Set a military unit's stance (CMB-09) by tag (0 Aggressive,
+     * 1 Defensive, 2 Stand Ground, 3 No Attack). A stance is a
+     * setting, not an order — nothing else about the unit
+     * changes. Returns whether the order *would* be accepted (a
+     * living military unit owned by a player, and a valid tag);
+     * the sim re-validates when the command is applied.
+     */
+    push_set_stance(entity: number, stance: number): boolean;
     /**
      * Stop a unit's current order immediately (SEL-14): it
      * stands idle where it is; a villager keeps its carry.
@@ -668,6 +711,7 @@ export interface InitOutput {
     readonly wasmsim_entity_order_route: (a: number, b: number) => [number, number];
     readonly wasmsim_entity_owners: (a: number) => [number, number];
     readonly wasmsim_entity_path: (a: number, b: number) => [number, number];
+    readonly wasmsim_entity_stance: (a: number) => [number, number];
     readonly wasmsim_fog: (a: number) => [number, number];
     readonly wasmsim_fog_for: (a: number, b: number) => [number, number];
     readonly wasmsim_food: (a: number) => number;
@@ -693,6 +737,8 @@ export interface InitOutput {
     readonly wasmsim_projectiles: (a: number) => [number, number];
     readonly wasmsim_push_attack: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_attack_building: (a: number, b: number, c: number) => number;
+    readonly wasmsim_push_attack_move: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_attack_move_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_attack_queued: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_auto_explore: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_build_archery_range: (a: number, b: number, c: number, d: number) => number;
@@ -726,6 +772,8 @@ export interface InitOutput {
     readonly wasmsim_push_move: (a: number, b: number, c: number, d: number) => void;
     readonly wasmsim_push_move_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_noop: (a: number) => void;
+    readonly wasmsim_push_patrol: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_patrol_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_repair: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_repair_queued: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_research_at: (a: number, b: number, c: number) => number;
@@ -736,6 +784,7 @@ export interface InitOutput {
     readonly wasmsim_push_set_rally_building: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_set_rally_tc: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_set_rally_tc_of: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_set_stance: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_stop: (a: number, b: number) => number;
     readonly wasmsim_push_train_archer: (a: number, b: number) => number;
     readonly wasmsim_push_train_militia: (a: number, b: number) => number;
