@@ -35,7 +35,16 @@ STATES = {'idle': 4, 'gallop': 12, 'die': 6}
 CANVAS = (160, 160, 80, 138)
 # Death cell: horse + rider tipped sideways lie a full body
 # length from the ground point — bigger than the standing cell.
-STATE_CANVAS = {'die': (256, 216, 128, 156)}
+# Enlarged 2026-10-22 (landing fix): at 256x216 the tipped mass
+# clipped (margin 0). The fallen body lies OFF-CENTRE — under
+# rot_y the rider's head swings ~2.25 units out, so in the worst
+# directions the span runs from the anchor's own column to
+# +143 px one way and -144 px the other (measured per cell on
+# the rendered sheet, dirs 1/5, frame 5), and 59 px below the
+# anchor (dir 3). 304x232 with the anchor at (152, 162) leaves
+# >= 8 px on every side in every direction; the client mirrors
+# this canvas in its corpse spec (app.js CORPSE_SPEC).
+STATE_CANVAS = {'die': (304, 232, 152, 162)}
 _FALL_SIDE = (0.0, 9.0, 24.0, 46.0, 66.0, 78.0)
 
 LEG_X, LEG_Y, LEG_PIVOT_Z = 0.18, 0.48, 0.80

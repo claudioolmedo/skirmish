@@ -6371,7 +6371,7 @@ const CORPSE_SPEC = {
   maa: { cw: 232, ch: 208, ax: 116, ay: 152 },
   spearman: { cw: 232, ch: 208, ax: 116, ay: 152 },
   skirmisher: { cw: 232, ch: 208, ax: 116, ay: 152 },
-  scout: { cw: 256, ch: 216, ax: 128, ay: 156 },
+  scout: { cw: 304, ch: 232, ax: 152, ay: 162 },
 };
 const CORPSE_ART = { img: {}, mask: {}, red: {}, washed: {} };
 let corpseSim = null;
