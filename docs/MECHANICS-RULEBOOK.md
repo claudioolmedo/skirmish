@@ -1498,21 +1498,33 @@ building flows; its razed value scores via the generic
 ## 8. Combat & damage
 
 **CMB-01 — The damage formula.** When an attack lands, damage is computed
-per armor class and summed, then multiplied once by the elevation factor,
-then clamped to a minimum of 1:
+per armor class and summed, then multiplied by every applicable attack
+multiplier — the elevation factor and, for a mishit, the ½ of CMB-13 —
+and only then clamped to a minimum of 1:
 
-> damage = max(1, k_elev × Σ_classes max(0, attack_class − armor_class))
+> damage = max(1, k_elev × k_miss × Σ_classes max(0, attack_class − armor_class))
 
+where k_miss = 0.5 for a mishit and 1 otherwise. The minimum-damage rule
+applies **after all the attack multipliers** (wiki, *Armor class*,
+"Damage calculation" steps 5–6, fetched 2026-10-22; the same composition
+is the exact AoE2 formula on wiki, *Attack*, fetched 2026-10-22), so no
+multiplier can push a landed hit below 1.
 Only classes the attacker actually has an attack value in participate
 (CLS-02, CMB-03). Bonus attacks against classes the target belongs to are
 just more terms in the sum.
 *Source:* MECHANICS-STUDY §1.1, §1.2 (formula pinned, with worked
-examples). · *Impl:* shipped (M3) — `compute_damage` in `combat.rs` over
+examples); wiki, *Attack* and *Armor class* (2026-10-22) for the
+multiplier order. · *Impl:* shipped (M3) — `compute_damage` in `combat.rs` over
 (class → value) slices from the unit tables, exactly this shape; the
 elevation factor landed with M7 (`compute_damage_elev`): k = 1.25 /
 0.75 / 1 by the sign of the height difference, applied to the
 armor-subtracted sum before the minimum-1 clamp; a projectile carries
-its shooter's elevation from release (PRJ-10). · *Status:*
+its shooter's elevation from release (PRJ-10). The full composition —
+elevation × mishit inside the one clamp — is `compute_damage_hit`
+(2026-10-22: before it, `apply_hit` halved *after* the clamp, so a
+mishit whose full hit was 1 dealt 0.5; regression tests in `combat.rs`
+pin the documented order, incl. the Σ = 0 and fractional-HP boundary
+cases). · *Status:*
 **MATCHES**.
 
 **CMB-02 — HP is fractional; death at HP < 1.** Entities carry fractional
@@ -1708,10 +1720,21 @@ weapon exists yet. · *Status:* **MATCHES** (for the shipped weapon set).
 **CMB-13 — Mishits deal half.** A projectile that strikes a unit other
 than its intended target deals 50% damage to that unit (certain units are
 exempt by data flag — e.g. rams take structured reduced projectile damage
-via their armor row instead; see MECHANICS-STUDY §1.3 ram armor).
-*Source:* MECHANICS-STUDY §2.3. · *Impl:* shipped (M3) — projectile
-impact resolution (PRJ-01) passes a ½ damage multiplier into CMB-01 for
-non-intended targets; the exemption is a data flag. · *Status:*
+via their armor row instead; see MECHANICS-STUDY §1.3 ram armor). The 50%
+is the k_miss multiplier of CMB-01: it composes with elevation **before**
+the minimum-1 clamp (wiki, *Attack* — `Damage = max(1, k_ele × k_miss ×
+…)`; wiki, *Armor class* steps 5–6 — both fetched 2026-10-22), so a
+mishit whose pre-clamp value is 0.5 deals 1, never 0.5.
+*Source:* MECHANICS-STUDY §2.3; wiki, *Attack* and *Armor class*
+(2026-10-22) for the composition order. · *Impl:* shipped (M3) —
+projectile impact resolution (PRJ-01) flags non-intended targets;
+`apply_hit` composes the full hit in `compute_damage_hit` (elevation ×
+mishit × Σ, one clamp at the end). Before 2026-10-22 the halving was
+applied after `compute_damage_elev`'s clamp, so a mishit of a full-1 hit
+dealt 0.5 — fixed and pinned by regression tests in `combat.rs` (the
+mishit-at-full-1 case, the full-armor Σ = 0 case, elevation × mishit
+composition, and the fractional-HP death boundaries of CMB-02); the
+exemption is a data flag. · *Status:*
 **MATCHES**.
 
 **CMB-14 — Death frees everything.** On death, a unit's population is
@@ -3377,7 +3400,15 @@ specification), closing ECO-14's footprint clause and
 BLD-06's Farm divergence. No status moves: ECO-14 stays
 DIFFERS on the work-rate cap and reseed queue, BLD-06 stays
 DIFFERS on the Town Center divergence, and the totals stand;
-updated 2026-10-22 for
+counts corrected 2026-10-22 (Codex review follow-up) — a
+fresh mechanical recount of the per-entry status tags found
+§7's row stale by one: the four BLD DIFFERS are BLD-06,
+BLD-07, BLD-13 and BLD-17 and the only BLD MISSING is
+BLD-14, so §7 reads 12 MATCHES / 4 DIFFERS / 1 MISSING and
+the totals on that tree are 119 MATCHES / 33 DIFFERS / 66 MISSING. No
+status changed; the CMB-01 / CMB-13 entries gained the
+verified mishit-composition note the same day (statuses
+unchanged); updated 2026-10-22 for
 AI-08, the predator wolf — AI-08 moves MISSING → MATCHES, so §15
 trades one MISSING for one MATCHES with the rule count unchanged,
 recounted mechanically below. The same recount corrects one
@@ -3426,6 +3457,15 @@ including the Watch Tower and Market steps BLD-18/19 deferred
 to this package; buildable Town Centers). The Town Center
 takes tag 13, after the Market's 12 (append-only rule).
 Recounted mechanically below: totals 220 rules, 125 / 33 / 62.
+
+updated 2026-10-23 for the Codex follow-up landing — CMB-01,
+CMB-02 and CMB-13 move DIFFERS → MATCHES (the mishit
+composition: every multiplier applies before the minimum-1
+clamp, per the wiki's Attack and Armor class articles), so
+§8 counts 14 / 1 / 1; the mechanical recount over the
+combined body (this landing rebased over BLD-18 and the
+Market) stands at 220 rules, 124 / 34 / 62, and the table
+below equals the body.
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
