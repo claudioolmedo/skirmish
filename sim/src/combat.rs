@@ -2152,9 +2152,9 @@ mod tests {
     // after all the attack multipliers"), both fetched 2026-10-22.
     // Staged through `apply_hit` on a sandbox sim so the tests pin
     // the behavior end-to-end, not just the pure formula.
-    fn sandbox_pair(sim: &Sim) -> (u32, usize, usize) {
-        // (attacker id, a villager index, the scout index) from the
-        // standard sandbox start.
+    fn sandbox_pair(sim: &Sim) -> (u32, u8, usize, usize) {
+        // (attacker id, attacker owner, a villager index, the scout
+        // index) from the standard sandbox start.
         let mut vil = None;
         let mut scout = None;
         for (i, e) in sim.entities.iter().enumerate() {
@@ -2165,7 +2165,7 @@ mod tests {
             }
         }
         let scout = scout.expect("sandbox start has a scout");
-        (sim.entities[scout].id, vil.expect("sandbox start has villagers"), scout)
+        (sim.entities[scout].id, sim.entities[scout].owner, vil.expect("sandbox start has villagers"), scout)
     }
 
     #[test]
@@ -2175,23 +2175,23 @@ mod tests {
         // happens before the clamp, so it can never push a landed
         // hit below the minimum.
         let mut sim = Sim::new(5);
-        let (atk, vil, _) = sandbox_pair(&sim);
+        let (atk, atk_owner, vil, _) = sandbox_pair(&sim);
         let h = sim.entity_height(vil);
         let pos = (sim.entities[vil].pos_x, sim.entities[vil].pos_y);
         sim.entities[vil].hp = I16F16::from_num(10);
-        sim.apply_hit(atk, pos, &[(cls::PIERCE, 1)], vil, true, h);
+        sim.apply_hit(atk, atk_owner, pos, &[(cls::PIERCE, 1)], vil, true, h);
         assert_eq!(sim.entities[vil].hp, I16F16::from_num(9));
         // Control: the direct hit deals the same 1.
         sim.entities[vil].hp = I16F16::from_num(10);
-        sim.apply_hit(atk, pos, &[(cls::PIERCE, 1)], vil, false, h);
+        sim.apply_hit(atk, atk_owner, pos, &[(cls::PIERCE, 1)], vil, false, h);
         assert_eq!(sim.entities[vil].hp, I16F16::from_num(9));
         // Above the clamp band the halving is untouched: Σ = 4
         // mishit deals exactly 2, Σ = 3 exactly 1.5.
         sim.entities[vil].hp = I16F16::from_num(10);
-        sim.apply_hit(atk, pos, &[(cls::PIERCE, 4)], vil, true, h);
+        sim.apply_hit(atk, atk_owner, pos, &[(cls::PIERCE, 4)], vil, true, h);
         assert_eq!(sim.entities[vil].hp, I16F16::from_num(8));
         sim.entities[vil].hp = I16F16::from_num(10);
-        sim.apply_hit(atk, pos, &[(cls::PIERCE, 3)], vil, true, h);
+        sim.apply_hit(atk, atk_owner, pos, &[(cls::PIERCE, 3)], vil, true, h);
         assert_eq!(sim.entities[vil].hp, I16F16::from_bits(557_056)); // 8.5
     }
 
@@ -2201,16 +2201,16 @@ mod tests {
         // armor → Σ = 0 with a participating pair. DE: max(1, ½ × 0)
         // = 1 — a landed mishit never deals 0.5 (or 0).
         let mut sim = Sim::new(5);
-        let (atk, _, scout) = sandbox_pair(&sim);
+        let (atk, atk_owner, _, scout) = sandbox_pair(&sim);
         let h = sim.entity_height(scout);
         let pos = (sim.entities[scout].pos_x, sim.entities[scout].pos_y);
         sim.entities[scout].hp = I16F16::from_num(100);
-        sim.apply_hit(atk, pos, &[(cls::PIERCE, 2)], scout, true, h);
+        sim.apply_hit(atk, atk_owner, pos, &[(cls::PIERCE, 2)], scout, true, h);
         assert_eq!(sim.entities[scout].hp, I16F16::from_num(99));
         // Control: the direct hit against the same armor is the
         // clamped 1 as well.
         sim.entities[scout].hp = I16F16::from_num(100);
-        sim.apply_hit(atk, pos, &[(cls::PIERCE, 2)], scout, false, h);
+        sim.apply_hit(atk, atk_owner, pos, &[(cls::PIERCE, 2)], scout, false, h);
         assert_eq!(sim.entities[scout].hp, I16F16::from_num(99));
     }
 
@@ -2219,14 +2219,14 @@ mod tests {
         // Σ = 1 uphill: product 1.25, mishit 0.625 → clamped to 1.
         // Σ = 4 uphill: product 5, mishit exactly 2.5 (no clamp).
         let mut sim = Sim::new(5);
-        let (atk, vil, _) = sandbox_pair(&sim);
+        let (atk, atk_owner, vil, _) = sandbox_pair(&sim);
         let h = sim.entity_height(vil);
         let pos = (sim.entities[vil].pos_x, sim.entities[vil].pos_y);
         sim.entities[vil].hp = I16F16::from_num(10);
-        sim.apply_hit(atk, pos, &[(cls::PIERCE, 1)], vil, true, h + 1);
+        sim.apply_hit(atk, atk_owner, pos, &[(cls::PIERCE, 1)], vil, true, h + 1);
         assert_eq!(sim.entities[vil].hp, I16F16::from_num(9));
         sim.entities[vil].hp = I16F16::from_num(10);
-        sim.apply_hit(atk, pos, &[(cls::PIERCE, 4)], vil, true, h + 1);
+        sim.apply_hit(atk, atk_owner, pos, &[(cls::PIERCE, 4)], vil, true, h + 1);
         assert_eq!(sim.entities[vil].hp, I16F16::from_bits(491_520)); // 7.5
     }
 
@@ -2235,12 +2235,12 @@ mod tests {
         // CMB-02 interplay: death is HP < 1, and mishit damage is
         // fractional — the two must compose at the boundary.
         let mut sim = Sim::new(5);
-        let (atk, vil, _) = sandbox_pair(&sim);
+        let (atk, atk_owner, vil, _) = sandbox_pair(&sim);
         let h = sim.entity_height(vil);
         let pos = (sim.entities[vil].pos_x, sim.entities[vil].pos_y);
         // 2.5 HP − 1.5 (mishit of Σ = 3) = exactly 1.0 → survives.
         sim.entities[vil].hp = I16F16::from_bits(163_840); // 2.5
-        sim.apply_hit(atk, pos, &[(cls::PIERCE, 3)], vil, true, h);
+        sim.apply_hit(atk, atk_owner, pos, &[(cls::PIERCE, 3)], vil, true, h);
         assert_eq!(sim.entities[vil].hp, I16F16::from_num(1));
         for _ in 0..5 {
             sim.tick();
@@ -2249,7 +2249,7 @@ mod tests {
         // 1.5 HP − 1.5 = 0 → dies in the sweep (a hit that kills
         // below 1 HP, not at some rounded threshold).
         sim.entities[vil].hp = I16F16::from_bits(98_304); // 1.5
-        sim.apply_hit(atk, pos, &[(cls::PIERCE, 3)], vil, true, h);
+        sim.apply_hit(atk, atk_owner, pos, &[(cls::PIERCE, 3)], vil, true, h);
         assert_eq!(sim.entities[vil].hp, I16F16::ZERO);
         for _ in 0..5 {
             sim.tick();
@@ -2264,11 +2264,11 @@ mod tests {
         // the old order (clamp, then halve) the same hit dealt
         // 0.5 and the villager lived at 1.4 HP.
         let mut sim = Sim::new(5);
-        let (atk, vil, _) = sandbox_pair(&sim);
+        let (atk, atk_owner, vil, _) = sandbox_pair(&sim);
         let h = sim.entity_height(vil);
         let pos = (sim.entities[vil].pos_x, sim.entities[vil].pos_y);
         sim.entities[vil].hp = I16F16::from_bits(124_518); // ≈1.9
-        sim.apply_hit(atk, pos, &[(cls::PIERCE, 1)], vil, true, h);
+        sim.apply_hit(atk, atk_owner, pos, &[(cls::PIERCE, 1)], vil, true, h);
         for _ in 0..5 {
             sim.tick();
         }
