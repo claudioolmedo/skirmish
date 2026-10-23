@@ -720,6 +720,29 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * BLD-18: the Outpost (Dark Age, line-of-sight only).
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_outpost(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_outpost(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Queue an Outpost build (BLD-18) — see
+     * `push_build_house_queued`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_outpost_queued(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_outpost_queued(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
      * Order a villager to build one Palisade Wall segment
      * (3 wood, 1×1 — BLD-13) — see `push_build_house`. A dragged
      * line of segments goes through `push_build_wall_line`.
@@ -786,6 +809,29 @@ export class WasmSim {
      */
     push_build_wall_line(entity, x0, y0, x1, y1) {
         const ret = wasm.wasmsim_push_build_wall_line(this.__wbg_ptr, entity, x0, y0, x1, y1);
+        return ret !== 0;
+    }
+    /**
+     * BLD-18: the Watch Tower (Feudal, stone-cost, armed).
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_watch_tower(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_watch_tower(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Queue a Watch Tower build (BLD-18) — see
+     * `push_build_house_queued`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_watch_tower_queued(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_watch_tower_queued(this.__wbg_ptr, entity, x, y);
         return ret !== 0;
     }
     /**

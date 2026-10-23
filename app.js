@@ -247,43 +247,50 @@ function pngIcon(png, cls) {
 // Building kind tags (must match the sim's BuildingKind::tag):
 // 0 house, 1 farm, 2 barracks (M2.5/M3); 3 lumber camp, 4 mill,
 // 5 mining camp, 6 archery range, 7 stable, 8 blacksmith (M6);
-// 9 palisade wall (BLD-13).
+// 9 palisade wall (BLD-13); 10 watch tower, 11 outpost (BLD-18).
 // Costs and footprints mirror the sim (MECHANICS-STUDY §5; the
 // palisade row is the current DE wiki row — 3 wood per segment).
-const BUILD_COST = [25, 60, 175, 100, 100, 100, 175, 175, 150, 3];
+const BUILD_COST = [25, 60, 175, 100, 100, 100, 175, 175, 150, 3, 35, 25];
+// Stone paid at placement, by kind tag (BLD-18: only the two
+// defensive structures cost stone; every other entry is 0).
+const BUILD_COST_STONE = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 125, 5];
 const BUILD_I18N = ['house', 'farm', 'barracks', 'lumber', 'mill',
-  'mining', 'range', 'stable', 'blacksmith', 'palisade'];
+  'mining', 'range', 'stable', 'blacksmith', 'palisade', 'watchtower',
+  'outpost'];
 let BUILD_NAME = ['House', 'Farm', 'Barracks', 'Lumber Camp', 'Mill',
-  'Mining Camp', 'Archery Range', 'Stable', 'Blacksmith', 'Palisade Wall'];
+  'Mining Camp', 'Archery Range', 'Stable', 'Blacksmith', 'Palisade Wall',
+  'Watch Tower', 'Outpost'];
 // Farm footprint is 3 (DE-documented; Claudio's decision
 // 2026-10-22, superseding the earlier 2x2 specification).
-const BUILD_SIZE = [2, 3, 3, 2, 2, 2, 3, 3, 3, 1];
+const BUILD_SIZE = [2, 3, 3, 2, 2, 2, 3, 3, 3, 1, 1, 1];
 const BUILD_ICON = ['i-house', 'i-farm', 'i-tc', 'i-lumber', 'i-mill',
-  'i-mining', 'i-range', 'i-stable', 'i-blacksmith', 'i-palisade'];
+  'i-mining', 'i-range', 'i-stable', 'i-blacksmith', 'i-palisade',
+  'i-watchtower', 'i-outpost'];
 // The PNG set above, per building kind tag (same order as
 // BUILD_ICON): command buttons and building portraits.
 const BUILD_PNG = ['house.png', 'farm.png', 'barracks.png', 'lumber-camp.png',
   'mill.png', 'mining-camp.png', 'archery-range.png', 'stable.png',
-  'blacksmith.png', 'palisade-wall.png'];
+  'blacksmith.png', 'palisade-wall.png', 'watchtower.png', 'outpost.png'];
 // Building max HP by kind tag (the sim's building table, study
 // §5) — for the enemy-building info panel (M5). The palisade
 // entry is its Dark-Age value (150; 250 from Feudal, BLD-13 —
-// the same base-column convention the House's 550 follows here).
-const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200, 150];
+// the same base-column convention the House's 550 follows here);
+// the Watch Tower's 850 is its pre-Castle value (BLD-18).
+const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200, 150, 850, 500];
 // WASM build commands by kind tag (M6 completes the set; BLD-13
 // adds the palisade's single-segment form — dragged lines go
 // through sim.push_build_wall_line, see attemptPlaceWallLine).
 const PUSH_BUILD = ['push_build_house', 'push_build_farm', 'push_build_barracks',
   'push_build_lumber_camp', 'push_build_mill', 'push_build_mining_camp',
   'push_build_archery_range', 'push_build_stable', 'push_build_blacksmith',
-  'push_build_palisade_wall'];
+  'push_build_palisade_wall', 'push_build_watch_tower', 'push_build_outpost'];
 const PUSH_BUILD_QUEUED = PUSH_BUILD.map((n) => `${n}_queued`);
 // Own-building minimap colors by kind tag (M6); kinds without an
 // entry keep the minimap's parchment default, the enemy's
 // buildings are always ENEMY_COLOR.
 const BUILDING_MINIMAP_COLOR = {
   3: '#8a6b42', 4: '#e5d9a8', 5: '#b9a24a', 6: '#c98f4e', 7: '#9a6a44', 8: '#6f6f76',
-  9: '#7a5a34',
+  9: '#7a5a34', 10: '#7a7a72', 11: '#a8843f',
 };
 
 // Ages and technologies (M6). Age tags match the sim's Age::tag;
@@ -855,6 +862,11 @@ const BUILDING_ART_FILES = {
   palisadeStage1: 'palisade-wall-stage1.png',
   palisadeStage2: 'palisade-wall-stage2.png',
   palisadeStage3: 'palisade-wall-stage3.png',
+  // BLD-18: complete art only (the Town Center precedent) — no
+  // stage frames; construction uses the clip-reveal of the
+  // finished art over the foundation diamond.
+  watchtower: 'watch-tower.png',
+  outpost: 'outpost.png',
   farm: 'farm.png',
   farmState1: 'farm-state1.png',
   farmState2: 'farm-state2.png',
@@ -878,6 +890,7 @@ function buildingStageImage(kind, progress) {
 const BUILDING_ART_KEY = {
   0: 'house', 2: 'barracks', 3: 'lumber', 4: 'mill', 5: 'mining',
   6: 'range', 7: 'stable', 8: 'blacksmith', 9: 'palisade',
+  10: 'watchtower', 11: 'outpost',
 };
 // The settle cap: the loading gate waits for the art, but a hung
 // image (stalled connection) must never block a match longer
@@ -1749,6 +1762,7 @@ function mirrorValid(kind, cx, cy) {
     }
   }
   if (myStock()[1] < BUILD_COST[kind]) return false;
+  if (myStock()[3] < BUILD_COST_STONE[kind]) return false;
   return true;
 }
 
@@ -6793,6 +6807,12 @@ function drawCorpse(site, now) {
     sx - spec.ax * k, sy - spec.ay * k, spec.cw * k, spec.ch * k);
   ctx.globalAlpha = 1;
 }
+// BLD-18: flame and HP-bar heights for the two tall 1×1
+// structures, whose art rises well above the generic building
+// line (world units above the footprint center). Kinds absent
+// here use the size-based defaults at the call sites.
+const TALL_FIRE_Y = { 10: 10.2, 11: 6.2 };
+const TALL_BAR_Y = { 10: 11.8, 11: 8.0 };
 
 function drawBuilding(b) {
   if (b.kind === 1) {
@@ -6817,7 +6837,8 @@ function drawBuilding(b) {
   // non-farm buildings only — a foundation has nothing to burn.
   if (b.complete && b.kind !== 1) {
     const [fx, fy] = worldToScreen(b.x, b.y);
-    drawBuildingFireAt(fx, fy - (b.size === 3 ? 5.3 : b.size === 1 ? 2.4 : 4.2) * camS,
+    drawBuildingFireAt(fx, fy - (b.size === 3 ? 5.3
+      : TALL_FIRE_Y[b.kind] ?? (b.size === 1 ? 2.4 : 4.2)) * camS,
       b.size, b.hpFrac, b.id * 1.71);
   }
   // M5: a damaged building shows its HP above the roof — buildings
@@ -6825,7 +6846,8 @@ function drawBuilding(b) {
   // never stripped by the quality governor.
   if (b.hpFrac < 0.999) {
     const [sx, sy] = worldToScreen(b.x, b.y);
-    hpBar(sx, sy - (b.size === 3 ? 7.3 : b.size === 1 ? 3.6 : 5.8) * camS, b.hpFrac);
+    hpBar(sx, sy - (b.size === 3 ? 7.3
+      : TALL_BAR_Y[b.kind] ?? (b.size === 1 ? 3.6 : 5.8)) * camS, b.hpFrac);
   }
 }
 
@@ -6906,6 +6928,8 @@ const NEW_BUILDING_STYLE = {
   6: { wall: '#a3763f', wall2: '#82592c', roof: '#7a4a35' }, // Archery Range
   7: { wall: '#96684a', wall2: '#77503a', roof: '#5d4630' }, // Stable
   8: { wall: '#6f6f76', wall2: '#54545c', roof: '#3f3f45' }, // Blacksmith: dark stone
+  10: { wall: '#8d8578', wall2: '#6e675c', roof: '#5d4630' }, // Watch Tower: pale stone
+  11: { wall: '#8a6b42', wall2: '#6f5533', roof: '#7a4a35' }, // Outpost: timber
 };
 
 function drawNewBuilding(b) {
@@ -6944,7 +6968,7 @@ function drawNewBuilding(b) {
       }
     }
   }
-  if (!b.complete) progressBar(sx, sy - (b.size === 3 ? 6.4 : 4.9) * camS, b.progress);
+  if (!b.complete) progressBar(sx, sy - (b.size === 3 ? 6.4 : TALL_BAR_Y[b.kind] ?? 4.9) * camS, b.progress);
 }
 
 // One small identifying feature per M6 building kind, drawn on the
@@ -7005,6 +7029,20 @@ function drawBuildingFeature(kind, sx, sy, hgt) {
     ctx.fillStyle = '#ff9a3c';
     ctx.beginPath();
     ctx.arc(sx - 0.8 * u, top + 0.45 * u, 0.2 * u, 0, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (kind === 10) {
+    // The tower's arrow slit.
+    ctx.fillStyle = '#2e2a24';
+    ctx.fillRect(sx - 0.14 * u, top - 0.5 * u, 0.28 * u, 0.8 * u);
+  } else if (kind === 11) {
+    // The outpost's lookout flag.
+    ctx.fillStyle = '#3a2c1c';
+    ctx.fillRect(sx - 0.05 * u, top - 1.1 * u, 0.1 * u, 1.1 * u);
+    ctx.fillStyle = '#e8dcc0';
+    ctx.beginPath();
+    ctx.moveTo(sx, top - 1.1 * u);
+    ctx.lineTo(sx + 0.7 * u, top - 0.9 * u);
+    ctx.lineTo(sx, top - 0.7 * u);
     ctx.fill();
   }
 }
@@ -8205,6 +8243,7 @@ function renderCommands() {
   const tcQueueCodes = context === 'tc' ? myTcQueue().join('.') : '';
   const bkQueueCodes = bk ? sim.building_queue(bk.id).join('.') : '';
   const sig = [context, Math.floor(wood), Math.floor(myStock()[0]), Math.floor(myStock()[2]),
+    Math.floor(myStock()[3]),
     reason, queue, bk ? bk.id : -1, bk ? bk.queue : -1, bk && bk.complete ? 1 : 0,
     blockM, blockSp, blockA, blockSk, blockS, age, techMask, rbTc.join('.'), Object.values(rbB).join('.'),
     tcQueueCodes, bkQueueCodes, buildPage || '', repairArm ? 1 : 0,
@@ -8227,19 +8266,25 @@ function renderCommands() {
     const buildBtn = (kind) => {
       let gate = null;
       if (kind === 1 && !hasMill) gate = t('gate.mill');
-      else if ((kind === 6 || kind === 7 || kind === 8) && age < 1) gate = t('gate.feudal');
+      // The Feudal kinds (BLD-18: the Watch Tower joins them; the
+      // Outpost and the Palisade Wall are Dark-Age kinds and
+      // never age-gated).
+      else if ((kind === 6 || kind === 7 || kind === 8 || kind === 10) && age < 1) gate = t('gate.feudal');
       else if ((kind === 6 || kind === 7) && !hasBarracks) gate = t('gate.barracks');
       const lacksWood = wood < BUILD_COST[kind];
+      const lacksStone = myStock()[3] < BUILD_COST_STONE[kind];
+      const costParts = [[BUILD_COST[kind], 'wood']];
+      if (BUILD_COST_STONE[kind] > 0) costParts.push([BUILD_COST_STONE[kind], 'stone']);
       return cmdButton({
         id: `build-${kind}`, icon: BUILD_ICON[kind], img: BUILD_PNG[kind], label: BUILD_NAME[kind],
         costIcon: 'i-wood', cost: BUILD_COST[kind],
-        disabled: !!gate || lacksWood,
+        disabled: !!gate || lacksWood || lacksStone,
         active: !!placement && placement.kind === kind,
         key: badgeForButton({ context, page: buildPage, id: `build-${kind}` }),
         title: gate
           ? t('cmd.buildGate', { name: BUILD_NAME[kind], gate })
-          : t(lacksWood ? 'cmd.buildNeeds' : 'cmd.buildOk',
-            { name: BUILD_NAME[kind], cost: costText([[BUILD_COST[kind], 'wood']]) }),
+          : t(lacksWood || lacksStone ? 'cmd.buildNeeds' : 'cmd.buildOk',
+            { name: BUILD_NAME[kind], cost: costText(costParts) }),
       });
     };
     if (buildPage) {

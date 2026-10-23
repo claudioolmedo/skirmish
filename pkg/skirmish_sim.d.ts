@@ -345,6 +345,15 @@ export class WasmSim {
      */
     push_build_mining_camp_queued(entity: number, x: number, y: number): boolean;
     /**
+     * BLD-18: the Outpost (Dark Age, line-of-sight only).
+     */
+    push_build_outpost(entity: number, x: number, y: number): boolean;
+    /**
+     * Queue an Outpost build (BLD-18) — see
+     * `push_build_house_queued`.
+     */
+    push_build_outpost_queued(entity: number, x: number, y: number): boolean;
+    /**
      * Order a villager to build one Palisade Wall segment
      * (3 wood, 1×1 — BLD-13) — see `push_build_house`. A dragged
      * line of segments goes through `push_build_wall_line`.
@@ -376,6 +385,15 @@ export class WasmSim {
      * re-validates when the command is applied.
      */
     push_build_wall_line(entity: number, x0: number, y0: number, x1: number, y1: number): boolean;
+    /**
+     * BLD-18: the Watch Tower (Feudal, stone-cost, armed).
+     */
+    push_build_watch_tower(entity: number, x: number, y: number): boolean;
+    /**
+     * Queue a Watch Tower build (BLD-18) — see
+     * `push_build_house_queued`.
+     */
+    push_build_watch_tower_queued(entity: number, x: number, y: number): boolean;
     /**
      * Cancel one entry of a placed building's production queue
      * (TEC-05), refunding its full cost to the building's owner.
@@ -757,11 +775,15 @@ export interface InitOutput {
     readonly wasmsim_push_build_mill_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_mining_camp: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_mining_camp_queued: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_outpost: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_outpost_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_palisade_wall: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_palisade_wall_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_stable: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_stable_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_wall_line: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
+    readonly wasmsim_push_build_watch_tower: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_watch_tower_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_cancel_queue_building: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_cancel_queue_tc: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_delete: (a: number, b: number) => number;

@@ -45,6 +45,8 @@ const EN = {
   'building.stable': 'Stable',
   'building.blacksmith': 'Blacksmith',
   'building.palisade': 'Palisade Wall',
+  'building.watchtower': 'Watch Tower',
+  'building.outpost': 'Outpost',
   'building.fallback': 'Building',
   'wall.preview': '{n} segments · {cost} wood',
   'age.dark': 'Dark Age',
@@ -462,6 +464,8 @@ const PT_BR = {
   'building.stable': 'Estábulo',
   'building.blacksmith': 'Ferraria',
   'building.palisade': 'Paliçada',
+  'building.watchtower': 'Torre de Vigia',
+  'building.outpost': 'Posto Avançado',
   'building.fallback': 'Construção',
   'wall.preview': '{n} segmentos · {cost} de madeira',
   'age.dark': 'Idade das Trevas',
@@ -879,6 +883,8 @@ const ES = {
   'building.stable': 'Establo',
   'building.blacksmith': 'Herrería',
   'building.palisade': 'Empalizada',
+  'building.watchtower': 'Torre de Vigilancia',
+  'building.outpost': 'Puesto de Avanzada',
   'building.fallback': 'Edificio',
   'wall.preview': '{n} segmentos · {cost} de madera',
   'age.dark': 'Alta Edad Media',
@@ -1276,11 +1282,11 @@ const ES = {
 // es 'Granja construida'); English ignores it.
 const GENDERS = {
   'pt-BR': {
-    building: { house: 'f', farm: 'f', barracks: 'm', lumber: 'm', mill: 'm', mining: 'm', range: 'm', stable: 'm', blacksmith: 'f' },
+    building: { house: 'f', farm: 'f', barracks: 'm', lumber: 'm', mill: 'm', mining: 'm', range: 'm', stable: 'm', blacksmith: 'f', watchtower: 'f', outpost: 'm' },
     unit: { villager: 'm', townCenter: 'm', scout: 'f', militia: 'f', archer: 'm', sheep: 'f', boar: 'm', deer: 'm', manAtArms: 'm' },
   },
   es: {
-    building: { house: 'f', farm: 'f', barracks: 'm', lumber: 'm', mill: 'm', mining: 'm', range: 'f', stable: 'm', blacksmith: 'f' },
+    building: { house: 'f', farm: 'f', barracks: 'm', lumber: 'm', mill: 'm', mining: 'm', range: 'f', stable: 'm', blacksmith: 'f', watchtower: 'f', outpost: 'm' },
     unit: { villager: 'm', townCenter: 'm', scout: 'f', militia: 'f', archer: 'm', sheep: 'f', boar: 'm', deer: 'm', manAtArms: 'm' },
   },
 };
