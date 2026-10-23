@@ -1995,10 +1995,13 @@ impl Sim {
     ///   cavalry class mask.
     /// - Horse Collar (2026-10-22) tops up the owner's standing
     ///   farms: since DE update 169123 a farm standing at the
-    ///   research tick gains 75 × (remaining ⁄ full)² (wiki,
-    ///   Horse Collar — its worked example: a half-full farm
-    ///   gains a quarter of the 75). Farms raised afterwards are
-    ///   stamped at creation (see the farm completion path).
+    ///   research tick gains 75 × (remaining ⁄ full)², rounded up
+    ///   to whole food (wiki, Horse Collar — its worked example:
+    ///   a half-full farm gains 19, the quarter of 75 rounded up;
+    ///   the articles' examples all round up but no rule is
+    ///   stated — ECO-14, inferred and followed). Farms raised
+    ///   afterwards are stamped at creation (see the farm
+    ///   completion path).
     fn apply_research(&mut self, owner: u8, tech: TechId) {
         let Some(slot) = player_slot(owner) else {
             return;
@@ -2042,7 +2045,13 @@ impl Sim {
                 for nid in farm_nodes {
                     if let Some(node) = self.nodes.iter_mut().find(|n| n.id == nid) {
                         let frac = node.amount_left / full;
-                        node.amount_left += I16F16::from_num(75) * frac * frac;
+                        // ECO-14: the articles' worked examples all
+                        // round the result UP to whole food (a half
+                        // farm gains 19, not 18.75) — no rounding
+                        // rule is stated, so the round-up is
+                        // inferred; it is followed here.
+                        let top_up = (I16F16::from_num(75) * frac * frac).ceil();
+                        node.amount_left += top_up;
                     }
                 }
             }
@@ -6343,5 +6352,59 @@ mod tests {
             }
         }
         assert_eq!(sim.match_state(), MatchState::Victory);
+    }
+
+    #[test]
+    fn horse_collar_top_up_rounds_up() {
+        // ECO-14 (update 169123): the standing-farm top-up is
+        // 75 × (remaining ⁄ full)², rounded UP to whole food —
+        // the wiki's worked example: a half farm (87.5 of 175)
+        // gains 19, not the raw 18.75, landing at 106.5. The
+        // articles state no rounding rule; the round-up is
+        // inferred from their examples and followed (see
+        // `apply_research`). The integration scenario in
+        // tests/feudal_techs.rs pins the same rule end to end.
+        let mut sim = Sim::new(5);
+        let nid = 999_001u32;
+        let half = I16F16::from_num(175) / I16F16::from_num(2);
+        sim.nodes.push(ResourceNode {
+            id: nid,
+            kind: NodeKind::Farm,
+            pos_x: I16F16::from_num(0),
+            pos_y: I16F16::from_num(0),
+            amount_left: half,
+            decay_per_tick: I16F16::from_num(0),
+        });
+        sim.buildings.push(Building {
+            id: 999_002,
+            kind: BuildingKind::Farm,
+            owner: OWNER_PLAYER,
+            hp: I16F16::from_num(480),
+            cell_x: 0,
+            cell_y: 0,
+            pos_x: I16F16::from_num(0),
+            pos_y: I16F16::from_num(0),
+            progress_thirds: 0,
+            repair_hp_remainder: 0,
+            repair_cost_remainder: 0,
+            complete: true,
+            node_id: Some(nid),
+            queue: Vec::new(),
+            train_progress: 0,
+            rally: None,
+            rally_node: None,
+        });
+        sim.apply_research(OWNER_PLAYER, TechId::HorseCollar);
+        let after = sim
+            .nodes()
+            .iter()
+            .find(|n| n.id == nid)
+            .unwrap()
+            .amount_left;
+        assert_eq!(
+            after,
+            I16F16::from_num(213) / I16F16::from_num(2),
+            "half farm after Horse Collar: {after} (want 106.5 = 87.5 + 19)"
+        );
     }
 }

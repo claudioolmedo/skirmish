@@ -968,7 +968,10 @@ farm case. Today: farm exists with 175 food and the retire-on-deplete
 flow; footprint is 2×2 cells (BLD-12 note). Horse Collar shipped
 2026-10-22: farms raised by an owner holding the tech are stamped
 250 at creation, and the completion sweep tops up the owner's
-standing farms by 75 × (remaining ⁄ 175)² exactly. Heavy Plow and
+standing farms by 75 × (remaining ⁄ 175)², rounded up to whole
+food — the articles' examples all round the result up (+19 at
+half) though no rounding rule is stated; the inference flagged
+above is followed in the sim. Heavy Plow and
 Crop Rotation wait for their Ages. · *Status:* **DIFFERS** (core
 farm loop and Horse Collar match; footprint, work-rate cap, and
 the reseed queue pending M6/M7 conventions).
@@ -3159,7 +3162,11 @@ triggers deer flight (Study #3 §c.1, the study's top finding;
 wiki, Hunt, documents the approach-flee, the ~2-tile radius
 stays an UNVERIFIED tuning constant), so §15 trades one
 DIFFERS for one MATCHES with the rule count unchanged,
-recounted mechanically below).
+recounted mechanically below); updated 2026-10-22 for the
+ECO-14 round-up follow-up — the shipped Horse Collar sweep
+now rounds its proportional top-up up to whole food, per the
+inference flagged in the entry (a half farm gains 19, not
+18.75), with no status move.
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|

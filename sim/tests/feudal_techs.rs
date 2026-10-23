@@ -434,20 +434,39 @@ fn horse_collar_stamps_new_farms_and_tops_up_standing_ones() {
     let left = node_amount(&sim, farm_a).to_num::<f64>();
 
     research_at(&mut sim, mill, TechId::HorseCollar);
-    // Update 169123: the standing farm gains 75 × (left/175)².
+    // Update 169123: the standing farm gains 75 × (left/175)²,
+    // rounded UP to whole food — ECO-14: every worked example in
+    // the articles rounds the result up (Horse Collar +19 at
+    // half, from the raw 18.75), though no rounding rule is
+    // stated; the inference is followed. The raw share at this
+    // remainder is fractional (~70.6), so a non-rounding sweep
+    // lands visibly below the ceiled expectation.
     let gained = node_amount(&sim, farm_a).to_num::<f64>() - left;
-    let expected = 75.0 * (left / 175.0) * (left / 175.0);
-    // Tolerance: the sim's I16F16 division rounds the fraction
-    // to the nearest bit, which moves the square by ~0.002 —
-    // still far inside the distance to a flat +75 (off by ~4.2
-    // here) or a linear share (off by ~2.1).
+    let expected = (75.0 * (left / 175.0) * (left / 175.0)).ceil();
     assert!(
         (gained - expected).abs() < 0.01,
         "Horse Collar top-up: gained {gained}, expected {expected} (left was {left})"
     );
+    assert_eq!(
+        gained.fract(),
+        0.0,
+        "the top-up lands on whole food: gained {gained}"
+    );
 
-    // A farm raised AFTER the tech is stamped at 250.
-    raise(&mut sim, 3, BuildingKind::Farm, 23, 27);
+    // A farm raised AFTER the tech is stamped at 250. Two
+    // scenario details: villager 3 funds it first (the Horse
+    // Collar research at 75 wood plus Farm A at 60 leave the
+    // stockpile short of the 60 a second farm costs, and a Build
+    // order placed without the wood is refused); and the wait
+    // targets the farm NODE count — `raise`'s completion
+    // predicate is already satisfied by Farm A, so it would
+    // return before this farm exists.
+    wait_wood(&mut sim, 60);
+    build(&mut sim, 3, BuildingKind::Farm, 23, 27);
+    let up_b = run_until(&mut sim, 30_000, |s| {
+        s.nodes().iter().filter(|n| n.kind == NodeKind::Farm).count() == 2
+    });
+    assert!(up_b, "the post-tech farm never completed");
     let farms: Vec<u32> = sim
         .nodes()
         .iter()
