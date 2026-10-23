@@ -620,6 +620,8 @@ impl WasmSim {
             });
         }
         ok
+    }
+
     /// Order a villager to build a Market (175 wood, 4×4; Feudal
     /// Age, requires a completed Mill — TRD-01) — see
     /// `push_build_house`.
@@ -813,6 +815,8 @@ impl WasmSim {
     /// `push_build_house_queued`.
     pub fn push_build_palisade_wall_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
         self.push_build_queued(entity, BuildingKind::PalisadeWall, x, y)
+    }
+
     /// Queue a Market build — see `push_build_house_queued`.
     pub fn push_build_market_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
         self.push_build_queued(entity, BuildingKind::Market, x, y)
