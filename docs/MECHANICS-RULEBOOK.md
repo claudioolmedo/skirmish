@@ -2593,11 +2593,37 @@ woodline — its Feudal pair — researches Loom once the economy rolls,
 advances to the Feudal Age when the food allows, and fields its
 Archers from an Archery Range; it does not use Farms, the Mining
 Camp, the Stable, the Blacksmith or Man-at-Arms yet. 2026-10-22:
-nor the Spearman or Skirmisher — the two Feudal base units ship
-for the player, but the script's production is a hardcoded
-Militia/Archer alternation, not a walk over the trainable
-tables, so extending it is its own change; its match-pacing
-tests pin the current composition.)
+the hardcoded Militia/Archer alternation is replaced by a
+composition plan over all four trainable kinds — the gap the
+Spearman/Skirmisher package recorded is closed. Production now
+trains the kind furthest behind its weighted share of the army
+so far (living + queued counts; an apportionment walk in
+`plan_train_military`): Normal's weights are 3:2:3:2 over
+Militia / Spearman / Archer / Skirmisher, Easy's an even
+1:1:1:1. The mix is the counter table read as a standing army:
+the Militia/Archer core stays the largest share; the Spearman
+is the cheap gold-free front line and the answer-in-advance
+to cavalry (its +15 already tells against the enemy Scout);
+the Skirmisher is the gold-free anti-archer screen. Army size
+profile is unchanged — composition changed, not volume. On
+Normal the plan also adapts: an enemy archer mass the AI can
+currently *see* (≥3 visible Archers, the majority of the
+visible enemy military — the same fog-honest `cell_visible_to`
+reading the defense and wave steps aim with, VIS-01; no
+information access widened) promotes the Skirmisher to the
+head of the ranking while the mass stays visible; Easy does
+not adapt. Waves now march every trained kind, Spearmen and
+Skirmishers included. Pinned by staged live-sim decision
+tests (the exact 3:2:3:2 walk, Easy's even rotation, the
+archer-mass answer, Easy's non-adaptation — decisions taken
+on the natural cadence through the ordinary command path).
+Still owed: a full-match soak asserting both new kinds in
+unscripted games — on slow seeds the script's finite-food
+economy (the v1 limits above) delays the Archery Range so
+late that per-seed Range-kind assertions do not hold inside
+a 25-minute window (seed 3 fields Spearmen but no
+Skirmisher by then); that is an economy-pacing property of
+the shipped script, not a composition gate.)
 
 **AI-05 — The AI resigns when hopeless.** An AI with no Town Center, no
 villagers, and no path to rebuild resigns rather than playing to the
