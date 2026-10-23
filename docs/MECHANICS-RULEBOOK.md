@@ -1386,6 +1386,77 @@ flight and no buildings standing. · *Status:* **DIFFERS**
 documented values; scope is buildings-only, pending
 verification of the in-game feel against the reference).
 
+**BLD-18 — Defensive buildings & building weapons (the Watch
+Tower and the Outpost).** Buildings that see farther and, for the
+first time, buildings that shoot. **Watch Tower** (Feudal Age):
+35 W / 125 S, 80 s build, 1×1, 850 HP (the pre-Castle value of
+update 61321; the Castle step to 1020 lands with the Castle Age
+column), armor 1 melee / 7 pierce. **Outpost** (Dark Age): 25 W /
+5 S, 15 s, 1×1, 500 HP, no weapon — line of sight is its whole
+purpose. A completed armed building auto-acquires targets with
+the CMB-08 chain (closest enemy unit → enemy Town Center →
+closest other enemy building, Farms excluded), with one
+deviation: herdables and huntables are never auto-targeted
+(predators are); range is measured **from the footprint's edge**
+(PRJ-08's building band — the tower's band is 1–8 tiles, the
+1-tile minimum leaving a dead zone a hugging attacker is safe
+in); strikes follow CMB-04/05 (first shot after the attack
+delay, then every reload — the tower's reload is 2.0 s); shots
+are ordinary projectiles through the PRJ rules (travel time,
+release-time aim, elevation at release), so friendly fire
+follows the corrected PRJ-09 family behavior and kill credit
+(VIC-04) resolves to the tower's owner. Targeting is
+visibility-independent, exactly like unit acquisition — the sim
+invents no fog check for buildings that units do not have.
+**Tower weapon**: 5 pierce (+7 vs Ships, +2 vs Spearmen);
+Fletching applies to it (TEC-06's tower line: +1 attack, +1
+range). **Sight**: the generic placed building keeps its adopted
+4 tiles; the Watch Tower reads 10 and the Outpost 6 (Dark) → 8
+(Feudal) — ADOPTED, UNVERIFIED: the fetched tower article pins
+range 8 but no sight figure (10 follows the defensive pattern
+sight = range + 2), and the Outpost article states its sight
+"increases with each Age" without numbers. Neither structure
+counts toward any age-up building requirement (the Feudal rule
+already excluded the Outpost's family; the dossier's Castle rule
+excludes towers). Both are repairable and deletable through the
+generic systems — repair of a stone-cost building drips wood
+AND stone at BLD-07's fractions, charged atomically; a deleted
+foundation refunds wood and stone in full (BLD-02). Panel: both
+sit on the villager Military page (Watch Tower slot S, Outpost
+slot D, positional grid); PT Torre de Vigia / Posto Avançado,
+ES Torre de Vigilancia / Puesto de Avanzada. The scripted AI
+does not build towers in this package — recorded gap.
+*Source:* AoE wiki "Watch Tower" (statistics + changelog:
+35 W/125 S since update 111772; HP 850 pre-Castle per update
+61321; Fletching benefit), "Outpost" (cost, HP, build time,
+age-scaling sight), "Building" availability matrix;
+MECHANICS-STUDY §2 (building band table: tower minimum range 1;
+the generic article's "5–8" describes garrisoned Castle volleys
+and does not govern a 1×1 tower) and §5. Attack delay (21 ticks)
+adopts the Archer's arrow profile — UNVERIFIED for buildings;
+projectile speed/scatter are the PRJ-02/PRJ-04 design constants;
+accuracy 100 (a moving target dodges by travel time, PRJ-06).
+· *Impl:* shipped 2026-10-22 — `BuildingKind::WatchTower` /
+`Outpost` (tags 9/10), `BuildingWeapon` + the combat phase's
+building-weapon step (after every entity attacker, building-id
+order; RNG draws only there), `Projectile::attacker_building`
++ `Entity::last_hit_owner` for attribution (all hashed only
+while set, behind marker bytes; the building-side state leaves
+a tower-free stream byte-identical, while the entity
+attribution marker is written on any landed hit — the golden
+hash steps once for it, step-attributed in
+`sim/tests/determinism.rs`); per-kind sight in
+`recompute_visibility`; client panel/art/i18n in the same
+landing; towers register as occluders through the shared
+building draw path (INF-12). · *Status:* **DIFFERS** — base
+fire, band, costs, HP/armor, repair/delete and the panel match
+the documented values; the remainders are: garrison arrows
+(capacity 5 — the GAR family's package; a garrisoned tower
+fires more arrows in the reference), Murder Holes (removes the
+minimum range), the Guard Tower upgrade (100 F / 250 W → 1500
+HP, 7 attack), the Castle-Age HP step, and the two
+UNVERIFIED sight figures.
+
 ---
 
 ## 8. Combat & damage
@@ -3136,7 +3207,7 @@ of seconds). No sim, command or hash contact. · *Status:* **MATCHES**.
 
 ## A. Rule counts
 
-218 rules total. Counts verified mechanically against the status tags in
+219 rules total. Counts verified mechanically against the status tags in
 this document (2026-10-18, M8 audit; re-verified for M9 the same day —
 the open-games lobby changed no status, see the M9 note in section B;
 updated 2026-10-19 for BLD-16, the Town Center footprint rule —
@@ -3249,7 +3320,12 @@ recounted mechanically below. The same recount corrects one
 pre-existing table drift the per-entry tags expose: BLD-07's
 2026-10-19 move MISSING → DIFFERS never reached the §7 row —
 §7 counts 12 MATCHES / 4 DIFFERS / 1 MISSING, and the true
-totals are 120 / 33 / 65).
+totals are 120 / 33 / 65); updated 2026-10-22 for BLD-18,
+defensive buildings — §7 gains one rule, one DIFFERS (the
+Watch Tower's base fire and the Outpost ship; garrison
+arrows, Murder Holes, the Guard Tower upgrade and the Castle
+HP step are the recorded remainders), recounted mechanically
+below.
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
@@ -3259,7 +3335,7 @@ totals are 120 / 33 / 65).
 | 4 | Selection & orders (SEL) | 17 | 15 | 2 | 0 |
 | 5 | Movement, pathfinding & collision (MOV) | 12 | 4 | 3 | 5 |
 | 6 | Economy & drop-off (ECO) | 17 | 13 | 2 | 2 |
-| 7 | Buildings & placement (BLD) | 17 | 12 | 4 | 1 |
+| 7 | Buildings & placement (BLD) | 18 | 12 | 5 | 1 |
 | 8 | Combat & damage (CMB) | 16 | 14 | 1 | 1 |
 | 9 | Projectiles & ballistics (PRJ) | 10 | 5 | 3 | 2 |
 | 10 | Unit classes & counters (CLS) | 8 | 5 | 0 | 3 |
@@ -3271,7 +3347,7 @@ totals are 120 / 33 / 65).
 | 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |
 | 17 | Multiplayer determinism (NET) | 11 | 4 | 5 | 2 |
 | 18 | Information rules (INF) | 13 | 8 | 3 | 2 |
-| | **Total** | **218** | **120** | **33** | **65** |
+| | **Total** | **219** | **120** | **34** | **65** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer

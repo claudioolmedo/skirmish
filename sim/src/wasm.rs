@@ -622,6 +622,16 @@ impl WasmSim {
         ok
     }
 
+    /// BLD-18: the Watch Tower (Feudal, stone-cost, armed).
+    pub fn push_build_watch_tower(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build(entity, BuildingKind::WatchTower, x, y)
+    }
+
+    /// BLD-18: the Outpost (Dark Age, line-of-sight only).
+    pub fn push_build_outpost(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build(entity, BuildingKind::Outpost, x, y)
+    }
+
     fn push_build(&mut self, entity: u32, kind: BuildingKind, x: f64, y: f64) -> bool {
         let (fx, fy) = (I16F16::from_num(x), I16F16::from_num(y));
         let ok = self.inner.can_build(entity, kind, fx, fy);
@@ -746,6 +756,18 @@ impl WasmSim {
     /// `push_build_house_queued`.
     pub fn push_build_palisade_wall_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
         self.push_build_queued(entity, BuildingKind::PalisadeWall, x, y)
+    }
+
+    /// Queue a Watch Tower build (BLD-18) — see
+    /// `push_build_house_queued`.
+    pub fn push_build_watch_tower_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build_queued(entity, BuildingKind::WatchTower, x, y)
+    }
+
+    /// Queue an Outpost build (BLD-18) — see
+    /// `push_build_house_queued`.
+    pub fn push_build_outpost_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build_queued(entity, BuildingKind::Outpost, x, y)
     }
 
     fn push_build_queued(&mut self, entity: u32, kind: BuildingKind, x: f64, y: f64) -> bool {

@@ -117,6 +117,7 @@ const BUILD_FNS = [
   'push_build_lumber_camp', 'push_build_mill', 'push_build_mining_camp',
   'push_build_archery_range', 'push_build_stable', 'push_build_blacksmith',
   'push_build_palisade_wall',
+  'push_build_watch_tower', 'push_build_outpost',
 ];
 const BUILD_FNS_QUEUED = BUILD_FNS.map((n) => n + '_queued');
 const TRAIN_AT_FNS = {

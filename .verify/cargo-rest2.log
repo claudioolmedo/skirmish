@@ -1,0 +1,19 @@
+   Compiling skirmish-sim v0.1.0 (/home/hatch/workspace/skirmish-towers/sim)
+warning: variable does not need to be mutable
+  --> sim/tests/world.rs:85:13
+   |
+85 |         let mut count = |owner_cell: (u32, u32), kind: NodeKind| {
+   |             ----^^^^^
+   |             |
+   |             help: remove this `mut`
+   |
+   = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: `skirmish-sim` (test "world") generated 1 warning (run `cargo fix --test "world" -p skirmish-sim` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 35.79s
+     Running tests/tech.rs (/home/hatch/workspace/skirmish-towers/target/debug/deps/tech-e61828dd7384dca0)
+
+running 13 tests
+test a_builder_finishing_a_camp_deposits_its_carry_there ... ok
+test ai_match_replays_bit_identically_and_ages_up has been running for over 60 seconds
+test archer_production_moves_to_the_range_and_scout_to_the_stable has been running for over 60 seconds
