@@ -210,6 +210,29 @@ pub enum Command {
         x: I16F16,
         y: I16F16,
     },
+    /// Order a villager to raise a line of wall segments (BLD-13):
+    /// the dragged line from the cell containing `(x0, y0)` to the
+    /// cell containing `(x1, y1)`, expanded deterministically by
+    /// `build::wall_line_cells`. Each segment validates exactly
+    /// like a single `Build` of the same kind (same gates, same
+    /// Town Center reservation, same per-segment cost of 3 wood
+    /// paid at placement); a segment that fails validation — an
+    /// obstructed cell, the wood running out mid-line — is skipped
+    /// and leaves a gap, never a partial charge. The villager is
+    /// assigned to the first segment that takes effect and queues
+    /// plain `Build` orders for the rest, so it walks the line
+    /// raising segment after segment (later segments resume the
+    /// standing foundations, exactly as if ordered one by one).
+    /// If no segment takes effect the whole order is rejected and
+    /// nothing changes. Wall kinds only; any other kind rejects.
+    BuildLine {
+        entity: u32,
+        kind: BuildingKind,
+        x0: I16F16,
+        y0: I16F16,
+        x1: I16F16,
+        y1: I16F16,
+    },
     /// Order a unit to attack a target entity (M3). The attacker
     /// chases and strikes until the target dies or a new order lands.
     /// Valid attackers: any living player unit with an attack row
@@ -2674,6 +2697,14 @@ impl Sim {
                 Command::TrainVillager => self.issue_train_villager(),
                 Command::TrainVillagerAt { tc } => self.issue_train_villager_at(tc),
                 Command::Build { entity, kind, x, y } => self.issue_build(entity, kind, x, y),
+                Command::BuildLine {
+                    entity,
+                    kind,
+                    x0,
+                    y0,
+                    x1,
+                    y1,
+                } => self.issue_build_line(entity, kind, x0, y0, x1, y1),
                 Command::Attack { entity, target } => self.issue_attack(entity, target),
                 Command::AttackBuilding { entity, building } => {
                     self.issue_attack_building(entity, building)
@@ -3308,57 +3339,198 @@ impl Sim {
                 true
             }
             BuildVerdict::Place(cell_x, cell_y) => {
-                // Validation proved the builder's owner can pay; the
-                // spend re-checks anyway so a failure can never place
-                // a free building.
-                let builder_owner = self.entities[idx].owner;
-                if !self
-                    .stockpile_mut(builder_owner)
-                    .spend(ResourceKind::Wood, kind.wood_cost())
-                {
-                    return false;
-                }
-                let id = self.next_building_id;
-                self.next_building_id += 1;
-                let (pos_x, pos_y) =
-                    build::footprint_center(cell_x, cell_y, kind.footprint_size());
-                let building = Building {
-                    id,
-                    kind,
-                    owner: builder_owner,
-                    // BLD-05: a foundation starts at the foot of
-                    // the construction-HP line (1 HP), not at full
-                    // HP; the construction phase raises it with
-                    // progress from here.
-                    hp: build::construction_hp_ceiling(
-                        kind.max_hp_at(self.age_of(builder_owner)),
-                        0,
-                        kind.build_thirds(),
-                    ),
-                    cell_x,
-                    cell_y,
-                    pos_x,
-                    pos_y,
-                    progress_thirds: 0,
-                    repair_hp_remainder: 0,
-                    repair_cost_remainder: 0,
-                    complete: false,
-                    node_id: None,
-                    queue: Vec::new(),
-                    train_progress: 0,
-                    rally: None,
-                    rally_node: None,
-                };
-                if kind.blocks_footprint() {
-                    for (cx, cy) in building.footprint_cells() {
-                        self.grid.set_dynamic(cx, cy, true);
+                match self.place_building(idx, kind, cell_x, cell_y) {
+                    Some(id) => {
+                        self.assign_builder(idx, id);
+                        true
                     }
+                    None => false,
                 }
-                self.buildings.push(building);
-                self.assign_builder(idx, id);
-                true
             }
         }
+    }
+
+    /// Place one validated foundation for builder `idx`: charge
+    /// the builder's owner the kind's wood cost, register the
+    /// building (blocking its footprint cells when the kind is
+    /// solid), and return its id. The caller assigns the builder.
+    /// Shared by `apply_build` (single placement) and
+    /// `apply_build_line` (one call per segment). Validation is
+    /// the caller's job (`validate_build`); the spend re-checks
+    /// anyway so a failure can never place a free building.
+    fn place_building(
+        &mut self,
+        idx: usize,
+        kind: BuildingKind,
+        cell_x: u32,
+        cell_y: u32,
+    ) -> Option<u32> {
+        let builder_owner = self.entities[idx].owner;
+        if !self
+            .stockpile_mut(builder_owner)
+            .spend(ResourceKind::Wood, kind.wood_cost())
+        {
+            return None;
+        }
+        let id = self.next_building_id;
+        self.next_building_id += 1;
+        let (pos_x, pos_y) = build::footprint_center(cell_x, cell_y, kind.footprint_size());
+        let building = Building {
+            id,
+            kind,
+            owner: builder_owner,
+            // BLD-05: a foundation starts at the foot of
+            // the construction-HP line (1 HP), not at full
+            // HP; the construction phase raises it with
+            // progress from here.
+            hp: build::construction_hp_ceiling(
+                kind.max_hp_at(self.age_of(builder_owner)),
+                0,
+                kind.build_thirds(),
+            ),
+            cell_x,
+            cell_y,
+            pos_x,
+            pos_y,
+            progress_thirds: 0,
+            repair_hp_remainder: 0,
+            repair_cost_remainder: 0,
+            complete: false,
+            node_id: None,
+            queue: Vec::new(),
+            train_progress: 0,
+            rally: None,
+            rally_node: None,
+        };
+        if kind.blocks_footprint() {
+            for (cx, cy) in building.footprint_cells() {
+                self.grid.set_dynamic(cx, cy, true);
+            }
+        }
+        self.buildings.push(building);
+        Some(id)
+    }
+
+    /// Apply a `BuildLine` command (BLD-13): expand the dragged
+    /// line deterministically (`build::wall_line_cells`) and run
+    /// every segment through the ordinary build validation. The
+    /// first segment that takes effect gets the villager as its
+    /// builder; every later one becomes a queued `Build` order
+    /// behind it (the foundations already stand — execution
+    /// resumes them), so the villager walks the line raising
+    /// segment after segment. Segments that fail validation are
+    /// skipped — a dragged line over a tree, a node, a Town
+    /// Center's reserved ground or past the wood stockpile leaves
+    /// gaps, never partial charges. Like `issue_build`, a line
+    /// that takes effect replaces the villager's order queue; a
+    /// line where nothing takes effect changes nothing at all.
+    fn issue_build_line(
+        &mut self,
+        entity: u32,
+        kind: BuildingKind,
+        x0: I16F16,
+        y0: I16F16,
+        x1: I16F16,
+        y1: I16F16,
+    ) {
+        if !kind.is_wall() {
+            return;
+        }
+        let idx = match self.entity_index(entity) {
+            Some(i) => i,
+            None => return,
+        };
+        if self.entities[idx].kind != EntityKind::Villager || self.entities[idx].dead {
+            return;
+        }
+        let (ax, ay) = self.grid.world_to_cell(clamp_pos(x0), clamp_pos(y0));
+        let (bx, by) = self.grid.world_to_cell(clamp_pos(x1), clamp_pos(y1));
+        let mut assigned = false;
+        let mut acted = false;
+        let mut followups: Vec<QueuedOrder> = Vec::new();
+        for (cx, cy) in build::wall_line_cells(ax, ay, bx, by) {
+            // A point strictly inside the segment's cell — the
+            // same anchor convention the client's placement uses.
+            let (wx, wy) = build::footprint_center(cx, cy, 1);
+            match self.validate_build(entity, kind, wx, wy) {
+                BuildVerdict::Reject => {}
+                BuildVerdict::Resume(bid) => {
+                    acted = true;
+                    if !assigned {
+                        self.assign_builder(idx, bid);
+                        assigned = true;
+                    } else {
+                        followups.push(QueuedOrder::Build { kind, x: wx, y: wy });
+                    }
+                }
+                BuildVerdict::Place(px, py) => {
+                    if let Some(id) = self.place_building(idx, kind, px, py) {
+                        acted = true;
+                        if !assigned {
+                            self.assign_builder(idx, id);
+                            assigned = true;
+                        } else {
+                            followups.push(QueuedOrder::Build { kind, x: wx, y: wy });
+                        }
+                    }
+                }
+            }
+        }
+        if acted {
+            // Replace semantics (the `issue_build` contract): the
+            // line clears whatever the villager had queued, then
+            // the line's own remaining segments line up behind the
+            // segment under construction.
+            self.entities[idx].order_queue.clear();
+            self.entities[idx].order_queue.extend(followups);
+            self.entities[idx].order_from_queue = false;
+        }
+    }
+
+    /// Would a `BuildLine` command take effect right now — at
+    /// least one segment of the dragged line would be placed or
+    /// resumed? A pure query mirroring `issue_build_line`'s
+    /// per-segment validation (each segment's own verdict already
+    /// includes the stockpile check for one segment; a line the
+    /// stockpile cannot even start reports rejection, while
+    /// segments past the budget are the applier's truncation,
+    /// not a rejection).
+    pub fn can_build_line(
+        &self,
+        entity: u32,
+        kind: BuildingKind,
+        x0: I16F16,
+        y0: I16F16,
+        x1: I16F16,
+        y1: I16F16,
+    ) -> bool {
+        if !kind.is_wall() {
+            return false;
+        }
+        let idx = match self.entity_index(entity) {
+            Some(i) => i,
+            None => return false,
+        };
+        if self.entities[idx].kind != EntityKind::Villager || self.entities[idx].dead {
+            return false;
+        }
+        let owner = self.entities[idx].owner;
+        let budget = self.stockpile_of(owner).amount(ResourceKind::Wood);
+        let (ax, ay) = self.grid.world_to_cell(clamp_pos(x0), clamp_pos(y0));
+        let (bx, by) = self.grid.world_to_cell(clamp_pos(x1), clamp_pos(y1));
+        for (cx, cy) in build::wall_line_cells(ax, ay, bx, by) {
+            let (wx, wy) = build::footprint_center(cx, cy, 1);
+            match self.validate_build(entity, kind, wx, wy) {
+                BuildVerdict::Resume(_) => return true,
+                BuildVerdict::Place(_, _) => {
+                    if budget >= kind.wood_cost() {
+                        return true;
+                    }
+                }
+                BuildVerdict::Reject => {}
+            }
+        }
+        false
     }
 
     /// Apply a `Queue` command (M4, SEL-12): append the order to the

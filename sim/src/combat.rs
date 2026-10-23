@@ -192,12 +192,24 @@ pub fn compute_damage_elev(
 /// the unit tables). Everything else is inert — a building never
 /// moves, shoots, or trains through this view.
 pub(crate) fn building_spec(kind: BuildingKind, owner_age: crate::tech::Age) -> UnitSpec {
+    // BLD-13: wall segments additionally belong to the Walls and
+    // Gates class (the reference's membership for the Palisade
+    // Wall, on top of All/Standard Buildings).
+    let classes = if kind.is_wall() {
+        cls::mask(&[
+            cls::ALL_BUILDINGS,
+            cls::STANDARD_BUILDINGS,
+            cls::WALLS_AND_GATES,
+        ])
+    } else {
+        cls::mask(&[cls::ALL_BUILDINGS, cls::STANDARD_BUILDINGS])
+    };
     UnitSpec {
         max_hp: kind.max_hp_at(owner_age),
         attacks: &[],
         armor_melee: kind.armor_melee_at(owner_age),
         armor_pierce: kind.armor_pierce_at(owner_age),
-        classes: cls::mask(&[cls::ALL_BUILDINGS, cls::STANDARD_BUILDINGS]),
+        classes,
         range_max: I16F16::ZERO,
         range_min: I16F16::ZERO,
         reload_ticks: 0,

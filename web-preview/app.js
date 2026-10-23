@@ -89,6 +89,7 @@ import {
 import { ClickMarkers, markerHeads } from './play/clickmarker.js';
 import { pennantsForSelection, pennantShape } from './play/pennants.js';
 import { occlusionFor, intersectionRect } from './play/occlusion.js';
+import { wallLineCells } from './play/walls.js';
 import {
   t, getLocale, setLocale, costText, genderOf,
 } from './play/i18n.js';
@@ -245,34 +246,42 @@ function pngIcon(png, cls) {
 
 // Building kind tags (must match the sim's BuildingKind::tag):
 // 0 house, 1 farm, 2 barracks (M2.5/M3); 3 lumber camp, 4 mill,
-// 5 mining camp, 6 archery range, 7 stable, 8 blacksmith (M6).
-// Costs and footprints mirror the sim (MECHANICS-STUDY §5).
-const BUILD_COST = [25, 60, 175, 100, 100, 100, 175, 175, 150];
+// 5 mining camp, 6 archery range, 7 stable, 8 blacksmith (M6);
+// 9 palisade wall (BLD-13).
+// Costs and footprints mirror the sim (MECHANICS-STUDY §5; the
+// palisade row is the current DE wiki row — 3 wood per segment).
+const BUILD_COST = [25, 60, 175, 100, 100, 100, 175, 175, 150, 3];
 const BUILD_I18N = ['house', 'farm', 'barracks', 'lumber', 'mill',
-  'mining', 'range', 'stable', 'blacksmith'];
+  'mining', 'range', 'stable', 'blacksmith', 'palisade'];
 let BUILD_NAME = ['House', 'Farm', 'Barracks', 'Lumber Camp', 'Mill',
-  'Mining Camp', 'Archery Range', 'Stable', 'Blacksmith'];
-const BUILD_SIZE = [2, 2, 3, 2, 2, 2, 3, 3, 3];
+  'Mining Camp', 'Archery Range', 'Stable', 'Blacksmith', 'Palisade Wall'];
+const BUILD_SIZE = [2, 2, 3, 2, 2, 2, 3, 3, 3, 1];
 const BUILD_ICON = ['i-house', 'i-farm', 'i-tc', 'i-lumber', 'i-mill',
-  'i-mining', 'i-range', 'i-stable', 'i-blacksmith'];
+  'i-mining', 'i-range', 'i-stable', 'i-blacksmith', 'i-palisade'];
 // The PNG set above, per building kind tag (same order as
 // BUILD_ICON): command buttons and building portraits.
 const BUILD_PNG = ['house.png', 'farm.png', 'barracks.png', 'lumber-camp.png',
   'mill.png', 'mining-camp.png', 'archery-range.png', 'stable.png',
-  'blacksmith.png'];
+  'blacksmith.png', 'palisade-wall.png'];
 // Building max HP by kind tag (the sim's building table, study
-// §5) — for the enemy-building info panel (M5).
-const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200];
-// WASM build commands by kind tag (M6 completes the set).
+// §5) — for the enemy-building info panel (M5). The palisade
+// entry is its Dark-Age value (150; 250 from Feudal, BLD-13 —
+// the same base-column convention the House's 550 follows here).
+const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200, 150];
+// WASM build commands by kind tag (M6 completes the set; BLD-13
+// adds the palisade's single-segment form — dragged lines go
+// through sim.push_build_wall_line, see attemptPlaceWallLine).
 const PUSH_BUILD = ['push_build_house', 'push_build_farm', 'push_build_barracks',
   'push_build_lumber_camp', 'push_build_mill', 'push_build_mining_camp',
-  'push_build_archery_range', 'push_build_stable', 'push_build_blacksmith'];
+  'push_build_archery_range', 'push_build_stable', 'push_build_blacksmith',
+  'push_build_palisade_wall'];
 const PUSH_BUILD_QUEUED = PUSH_BUILD.map((n) => `${n}_queued`);
 // Own-building minimap colors by kind tag (M6); kinds without an
 // entry keep the minimap's parchment default, the enemy's
 // buildings are always ENEMY_COLOR.
 const BUILDING_MINIMAP_COLOR = {
   3: '#8a6b42', 4: '#e5d9a8', 5: '#b9a24a', 6: '#c98f4e', 7: '#9a6a44', 8: '#6f6f76',
+  9: '#7a5a34',
 };
 
 // Ages and technologies (M6). Age tags match the sim's Age::tag;
@@ -557,6 +566,12 @@ async function sendFeedback() {
 }
 let lDrag = null; // left-button drag state, canvas px: { x0, y0, x1, y1, moved }
 let placement = null; // { kind } while placing a building
+// BLD-13: while Palisade Wall placement is armed and the left
+// button is down, the wall line's anchor cell [cx, cy] (the drag
+// start). The drag's live end is the cursor's cell; on release a
+// moved drag commits the whole line (attemptPlaceWallLine), a
+// plain click places the single segment.
+let wallAnchor = null;
 let repairArm = false; // Repair targeting armed (villager root panel, E)
 // M13 hotkey state (client-only, like placement): the armed
 // villager build page ('eco' | 'mil' | null), the go-to cycle
@@ -833,6 +848,10 @@ const BUILDING_ART_FILES = {
   blacksmithStage1: 'blacksmith-stage1.png',
   blacksmithStage2: 'blacksmith-stage2.png',
   blacksmithStage3: 'blacksmith-stage3.png',
+  palisade: 'palisade-wall.png',
+  palisadeStage1: 'palisade-wall-stage1.png',
+  palisadeStage2: 'palisade-wall-stage2.png',
+  palisadeStage3: 'palisade-wall-stage3.png',
   farm: 'farm.png',
   farmState1: 'farm-state1.png',
   farmState2: 'farm-state2.png',
@@ -855,7 +874,7 @@ function buildingStageImage(kind, progress) {
 // drawn by drawBuilding / drawNewBuilding.
 const BUILDING_ART_KEY = {
   0: 'house', 2: 'barracks', 3: 'lumber', 4: 'mill', 5: 'mining',
-  6: 'range', 7: 'stable', 8: 'blacksmith',
+  6: 'range', 7: 'stable', 8: 'blacksmith', 9: 'palisade',
 };
 // The settle cap: the loading gate waits for the art, but a hung
 // image (stalled connection) must never block a match longer
@@ -1664,9 +1683,11 @@ function mirrorValid(kind, cx, cy) {
   // M6 gates (mirrors of the sim's validate_build): Farms need a
   // completed Mill of ours; the Feudal buildings need the Feudal
   // Age; the Range and the Stable need a completed Barracks.
+  // (The Feudal set is named explicitly — kind 9, the Palisade
+  // Wall, is a Dark Age building, BLD-13.)
   const ownDone = buildings.filter((b) => b.owner === localOwner && b.complete);
   if (kind === 1 && !ownDone.some((b) => b.kind === 4)) return false;
-  if (kind >= 6 && myAge() < 1) return false;
+  if ((kind === 6 || kind === 7 || kind === 8) && myAge() < 1) return false;
   if ((kind === 6 || kind === 7) && !ownDone.some((b) => b.kind === 2)) return false;
   // Any standing building's footprint (square range overlap).
   for (const b of buildings) {
@@ -2359,6 +2380,7 @@ function applyLocalOrder(cmd) {
     case 'build': return cmd.q
       ? sim[PUSH_BUILD_QUEUED[cmd.k]](cmd.e, cmd.x, cmd.y)
       : sim[PUSH_BUILD[cmd.k]](cmd.e, cmd.x, cmd.y);
+    case 'buildline': return sim.push_build_wall_line(cmd.e, cmd.x0, cmd.y0, cmd.x1, cmd.y1);
     case 'train_at':
       return cmd.k === 2 ? sim.push_train_scout(cmd.b)
         : cmd.k === 3 ? sim.push_train_militia(cmd.b)
@@ -5261,6 +5283,43 @@ async function main() {
     }
   }
 
+  // BLD-13: commit a dragged palisade line. A single semantic
+  // command carries both endpoints (as cell-center world points);
+  // the sim expands the line with the same Bresenham the ghost
+  // previewed, then validates and charges each segment itself —
+  // invalid or unaffordable cells are skipped (a gap, never a
+  // partial charge) and one builder walks the line raising the
+  // foundations in drag order. The builder is the selected
+  // villager nearest the line's start, attemptPlace's rule.
+  function attemptPlaceWallLine(ax, ay, bx, by) {
+    const st = entityState();
+    const pos = st.pos;
+    const wx = -HALF + (ax + 0.5) * CS;
+    const wy = -HALF + (ay + 0.5) * CS;
+    let builder = null;
+    let bestD2 = Infinity;
+    for (const id of selectedUnits()) {
+      if (st.kinds[id] !== 0) continue;
+      const d2 = (pos[id * 2] - wx) ** 2 + (pos[id * 2 + 1] - wy) ** 2;
+      if (d2 < bestD2) { bestD2 = d2; builder = id; }
+    }
+    if (builder == null) {
+      placement = null;
+      flash(t('flash.buildSelectVil'));
+      return;
+    }
+    const ok = issue({
+      t: 'buildline', e: builder, x0: wx, y0: wy,
+      x1: -HALF + (bx + 0.5) * CS, y1: -HALF + (by + 0.5) * CS,
+    });
+    if (ok) {
+      placement = null;
+      playAudioCue('buildingPlaced');
+    } else {
+      flash(t('flash.cannotBuildThere', { name: BUILD_NAME[9] }));
+    }
+  }
+
   canvas.addEventListener('mousemove', (ev) => {
     mouseWorld = eventWorld(ev);
   });
@@ -5291,6 +5350,10 @@ async function main() {
     if (ev.button !== 0) return;
     const [sx, sy] = eventScreen(ev);
     lDrag = { x0: sx, y0: sy, x1: sx, y1: sy, moved: false };
+    // BLD-13: with palisade placement armed, the press cell
+    // anchors the wall line; the release cell ends it.
+    wallAnchor = placement && placement.kind === 9
+      ? worldToCell(...eventWorld(ev)) : null;
   });
   window.addEventListener('mousemove', (ev) => {
     if (!lDrag) return;
@@ -5305,7 +5368,15 @@ async function main() {
     lDrag = null;
     const [wx, wy] = eventWorld(ev);
     if (placement) {
-      if (!d.moved) attemptPlace(wx, wy, ev.shiftKey); // a placement click, not a drag
+      if (placement.kind === 9 && d.moved && wallAnchor) {
+        // BLD-13: a dragged palisade placement commits the line
+        // from the press cell to the release cell.
+        const [ex, ey] = worldToCell(wx, wy);
+        attemptPlaceWallLine(wallAnchor[0], wallAnchor[1], ex, ey);
+      } else if (!d.moved) {
+        attemptPlace(wx, wy, ev.shiftKey); // a placement click, not a drag
+      }
+      wallAnchor = null;
       return;
     }
     if (repairArm) {
@@ -6439,6 +6510,8 @@ function drawBuilding(b) {
     progressBar(sx, sy - 3.4 * camS, b.progress);
   } else if (b.kind === 2) {
     drawBarracks(b);
+  } else if (b.kind === 9) {
+    drawPalisade(b);
   } else if (b.kind >= 3) {
     drawNewBuilding(b);
   } else {
@@ -6448,7 +6521,7 @@ function drawBuilding(b) {
   // non-farm buildings only — a foundation has nothing to burn.
   if (b.complete && b.kind !== 1) {
     const [fx, fy] = worldToScreen(b.x, b.y);
-    drawBuildingFireAt(fx, fy - (b.size === 3 ? 5.3 : 4.2) * camS,
+    drawBuildingFireAt(fx, fy - (b.size === 3 ? 5.3 : b.size === 1 ? 2.4 : 4.2) * camS,
       b.size, b.hpFrac, b.id * 1.71);
   }
   // M5: a damaged building shows its HP above the roof — buildings
@@ -6456,7 +6529,67 @@ function drawBuilding(b) {
   // never stripped by the quality governor.
   if (b.hpFrac < 0.999) {
     const [sx, sy] = worldToScreen(b.x, b.y);
-    hpBar(sx, sy - (b.size === 3 ? 7.3 : 5.8) * camS, b.hpFrac);
+    hpBar(sx, sy - (b.size === 3 ? 7.3 : b.size === 1 ? 3.6 : 5.8) * camS, b.hpFrac);
+  }
+}
+
+// The Palisade Wall segment (BLD-13): one cell of sharpened
+// timber stakes. Art follows the building contract — the
+// pipeline's palisade set (finished art + three construction
+// stages on the canonical diamond): the stage frame while
+// building, the finished art when complete, the clip-reveal as
+// the in-between fallback, sized footprint × 1.12 like every
+// other building. Last resort: the vector fence below, same
+// palette, so a segment never renders as a foreign block.
+function drawPalisade(b) {
+  const [sx, sy] = worldToScreen(b.x, b.y);
+  const half = CS / 2;
+  shadow(sx, sy, half * 1.3 * camS);
+  const t = worldToScreen(b.x - half, b.y - half);
+  const r = worldToScreen(b.x + half, b.y - half);
+  const bt = worldToScreen(b.x + half, b.y + half);
+  const l = worldToScreen(b.x - half, b.y + half);
+  poly([t, r, bt, l], b.complete ? 'rgba(0,0,0,0.12)' : '#8d8578');
+  let artDrawn = false;
+  if (!b.complete) {
+    artDrawn = drawArtImage(buildingStageImage(b.kind, b.progress), sx, sy,
+      CS * 1.12, half * 0.45, 1);
+  }
+  if (!artDrawn && !drawArtImage(BUILDING_ART.img[BUILDING_ART_KEY[b.kind]], sx, sy,
+    CS * 1.12, half * 0.45, b.complete ? 1 : b.progress)) {
+    drawPalisadeVector(sx, sy, b);
+  }
+  if (!b.complete) progressBar(sx, sy - 3.1 * camS, b.progress);
+}
+
+// Vector fallback for a palisade segment: five sharpened oak
+// stakes across the cell on two darker rails, growing with
+// construction progress.
+function drawPalisadeVector(sx, sy, b) {
+  const u = camS;
+  const hgt = 2.3 * u * (b.complete ? 1 : Math.max(0.15, b.progress));
+  const shades = ['#7a5230', '#8a5f36', '#6f4a2a', '#835831', '#75502e'];
+  ctx.strokeStyle = '#5d4030';
+  ctx.lineWidth = Math.max(1, 0.12 * u);
+  for (const f of [0.38, 0.68]) {
+    ctx.beginPath();
+    ctx.moveTo(sx - 1.8 * u, sy - hgt * f);
+    ctx.lineTo(sx + 1.8 * u, sy - hgt * f);
+    ctx.stroke();
+  }
+  for (let i = 0; i < 5; i++) {
+    const cx = sx + (i - 2) * 0.82 * u;
+    const w = 0.34 * u;
+    const tip = sy - hgt * (1 - Math.abs(i - 2) * 0.045);
+    ctx.fillStyle = shades[i];
+    ctx.beginPath();
+    ctx.moveTo(cx - w, sy);
+    ctx.lineTo(cx - w, tip + 0.34 * u);
+    ctx.lineTo(cx, tip);
+    ctx.lineTo(cx + w, tip + 0.34 * u);
+    ctx.lineTo(cx + w, sy);
+    ctx.closePath();
+    ctx.fill();
   }
 }
 
@@ -7703,7 +7836,7 @@ function renderCommands() {
     const buildBtn = (kind) => {
       let gate = null;
       if (kind === 1 && !hasMill) gate = t('gate.mill');
-      else if (kind >= 6 && age < 1) gate = t('gate.feudal');
+      else if ((kind === 6 || kind === 7 || kind === 8) && age < 1) gate = t('gate.feudal');
       else if ((kind === 6 || kind === 7) && !hasBarracks) gate = t('gate.barracks');
       const lacksWood = wood < BUILD_COST[kind];
       return cmdButton({
@@ -9023,26 +9156,66 @@ function draw() {
 
   // Placement ghost: the footprint under the cursor, green when the
   // mirrored sim rules allow building there, red when they don't.
+  // BLD-13: while a palisade drag is live the ghost is the whole
+  // line — one cell diamond per segment, green where the sim
+  // would place it and red where it would skip it. The green/red
+  // walk mirrors the sim's per-segment charging (a cell holding
+  // our own unfinished palisade resumes for free; each later
+  // green cell spends 3 wood from the remaining budget), so the
+  // preview shows the same gaps the release will leave.
   if (placement && mouseWorld) {
     const [cx, cy] = worldToCell(mouseWorld[0], mouseWorld[1]);
-    const ok = mirrorValid(placement.kind, cx, cy);
-    const size = BUILD_SIZE[placement.kind];
-    const x0 = -HALF + cx * CS;
-    const y0 = -HALF + cy * CS;
-    const pts = [
-      worldToScreen(x0, y0),
-      worldToScreen(x0 + size * CS, y0),
-      worldToScreen(x0 + size * CS, y0 + size * CS),
-      worldToScreen(x0, y0 + size * CS),
-    ];
-    poly(pts, ok ? 'rgba(90, 230, 120, 0.30)' : 'rgba(240, 70, 55, 0.30)');
-    ctx.strokeStyle = ok ? 'rgba(140, 255, 170, 0.9)' : 'rgba(255, 110, 95, 0.9)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(pts[0][0], pts[0][1]);
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
-    ctx.closePath();
-    ctx.stroke();
+    if (placement.kind === 9 && wallAnchor && lDrag && lDrag.moved) {
+      const cells = wallLineCells(wallAnchor[0], wallAnchor[1], cx, cy);
+      let budget = myStock()[1];
+      let placeable = 0;
+      for (const [wx2, wy2] of cells) {
+        const resume = buildings.some((b) => !b.complete && b.owner === localOwner
+          && b.kind === 9 && b.cellX === wx2 && b.cellY === wy2);
+        let ok = mirrorValid(9, wx2, wy2);
+        if (ok && !resume) {
+          if (budget >= BUILD_COST[9]) {
+            budget -= BUILD_COST[9];
+            placeable++;
+          } else ok = false;
+        } else if (ok) placeable++;
+        const x0 = -HALF + wx2 * CS;
+        const y0 = -HALF + wy2 * CS;
+        poly([
+          worldToScreen(x0, y0), worldToScreen(x0 + CS, y0),
+          worldToScreen(x0 + CS, y0 + CS), worldToScreen(x0, y0 + CS),
+        ], ok ? 'rgba(90, 230, 120, 0.30)' : 'rgba(240, 70, 55, 0.30)');
+      }
+      // Segment count + total cost at the drag's end cell.
+      const label = t('wall.preview', { n: placeable, cost: placeable * BUILD_COST[9] });
+      const [lx, ly] = worldToScreen(-HALF + (cx + 0.5) * CS, -HALF + cy * CS);
+      ctx.font = `bold ${Math.max(11, Math.round(1.15 * camS))}px sans-serif`;
+      ctx.textAlign = 'center';
+      const tw = ctx.measureText(label).width;
+      ctx.fillStyle = 'rgba(20,16,10,.72)';
+      ctx.fillRect(lx - tw / 2 - 5, ly - 2.7 * camS, tw + 10, 1.8 * camS);
+      ctx.fillStyle = '#ffe9c9';
+      ctx.fillText(label, lx, ly - 1.4 * camS);
+    } else {
+      const ok = mirrorValid(placement.kind, cx, cy);
+      const size = BUILD_SIZE[placement.kind];
+      const x0 = -HALF + cx * CS;
+      const y0 = -HALF + cy * CS;
+      const pts = [
+        worldToScreen(x0, y0),
+        worldToScreen(x0 + size * CS, y0),
+        worldToScreen(x0 + size * CS, y0 + size * CS),
+        worldToScreen(x0, y0 + size * CS),
+      ];
+      poly(pts, ok ? 'rgba(90, 230, 120, 0.30)' : 'rgba(240, 70, 55, 0.30)');
+      ctx.strokeStyle = ok ? 'rgba(140, 255, 170, 0.9)' : 'rgba(255, 110, 95, 0.9)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+      ctx.closePath();
+      ctx.stroke();
+    }
   }
 
   // Selection box while left-dragging: translucent gold rect.

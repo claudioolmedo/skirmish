@@ -29,6 +29,8 @@ test('validateCommand accepts the full vocabulary and rejects junk', () => {
     { t: 'attackb', e: 1, b: 4 },
     { t: 'build', e: 1, k: 0, x: 0, y: 0 },
     { t: 'build', e: 1, k: 8, x: 0, y: 0 },
+    { t: 'build', e: 1, k: 9, x: 0, y: 0 },
+    { t: 'buildline', e: 1, x0: 0, y0: 0, x1: 5, y1: 5 },
     { t: 'train_at', b: 3, k: 2 },
     { t: 'train_vil' },
     { t: 'research_tc', tech: 1 },
@@ -50,7 +52,10 @@ test('validateCommand accepts the full vocabulary and rejects junk', () => {
     null, 42, {}, { t: 'nope' },
     { t: 'move', e: -1, x: 0, y: 0 },
     { t: 'move', e: 1, x: NaN, y: 0 },
-    { t: 'build', e: 1, k: 9, x: 0, y: 0 },
+    { t: 'build', e: 1, k: 10, x: 0, y: 0 },
+    { t: 'buildline', e: 1, x0: 0, y0: 0, x1: 5 },
+    { t: 'buildline', e: -1, x0: 0, y0: 0, x1: 5, y1: 5 },
+    { t: 'buildline', e: 1, x0: NaN, y0: 0, x1: 5, y1: 5 },
     { t: 'train_at', b: 1, k: 5 },
     { t: 'research_tc', tech: 2 },
     { t: 'gather', e: 1 },
@@ -145,6 +150,8 @@ test('applyCommand maps semantic commands to the per-seat sim calls', () => {
   applyCommand(sim, { t: 'move', e: 5, x: 1, y: 2, q: true }, 0, tcOf);
   applyCommand(sim, { t: 'build', e: 5, k: 2, x: 1, y: 2 }, 0, tcOf);
   applyCommand(sim, { t: 'build', e: 5, k: 6, x: 1, y: 2, q: true }, 0, tcOf);
+  applyCommand(sim, { t: 'build', e: 5, k: 9, x: 1, y: 2 }, 0, tcOf);
+  applyCommand(sim, { t: 'buildline', e: 5, x0: 1, y0: 2, x1: 9, y1: 2 }, 0, tcOf);
   applyCommand(sim, { t: 'train_at', b: 9, k: 3 }, 0, tcOf);
   // Town Center orders resolve the ISSUER's Town Center:
   applyCommand(sim, { t: 'train_vil' }, 2, tcOf);
@@ -155,6 +162,8 @@ test('applyCommand maps semantic commands to the per-seat sim calls', () => {
     ['push_move_queued', 5, 1, 2],
     ['push_build_barracks', 5, 1, 2],
     ['push_build_archery_range_queued', 5, 1, 2],
+    ['push_build_palisade_wall', 5, 1, 2],
+    ['push_build_wall_line', 5, 1, 2, 9, 2],
     ['push_train_militia', 9],
     ['push_train_villager_at', 40],
     ['push_research_tc_at', 0, 0],

@@ -116,6 +116,7 @@ const BUILD_FNS = [
   'push_build_house', 'push_build_farm', 'push_build_barracks',
   'push_build_lumber_camp', 'push_build_mill', 'push_build_mining_camp',
   'push_build_archery_range', 'push_build_stable', 'push_build_blacksmith',
+  'push_build_palisade_wall',
 ];
 const BUILD_FNS_QUEUED = BUILD_FNS.map((n) => n + '_queued');
 const TRAIN_AT_FNS = {
@@ -136,7 +137,8 @@ export function validateCommand(c) {
     case 'attack': return isInt(c.e) && isInt(c.tg);
     case 'attackb': return isInt(c.e) && isInt(c.b);
     case 'repair': return isInt(c.e) && isInt(c.b);
-    case 'build': return isInt(c.e) && isInt(c.k) && c.k <= 8 && isNum(c.x) && isNum(c.y);
+    case 'build': return isInt(c.e) && isInt(c.k) && c.k <= 9 && isNum(c.x) && isNum(c.y);
+    case 'buildline': return isInt(c.e) && isNum(c.x0) && isNum(c.y0) && isNum(c.x1) && isNum(c.y1);
     case 'train_at': return isInt(c.b) && (c.k === 2 || c.k === 3 || c.k === 4 || c.k === 9 || c.k === 10);
     case 'train_vil': return true;
     case 'research_tc': return c.tech === 0 || c.tech === 1 || c.tech === 6;
@@ -179,6 +181,7 @@ export function applyCommand(sim, cmd, owner, tcOf) {
     case 'build': return cmd.q
       ? sim[BUILD_FNS_QUEUED[cmd.k]](cmd.e, cmd.x, cmd.y)
       : sim[BUILD_FNS[cmd.k]](cmd.e, cmd.x, cmd.y);
+    case 'buildline': return sim.push_build_wall_line(cmd.e, cmd.x0, cmd.y0, cmd.x1, cmd.y1);
     case 'train_at': return sim[TRAIN_AT_FNS[cmd.k]](cmd.b);
     case 'train_vil': return sim.push_train_villager_at(tcOf(owner));
     case 'research_tc': return sim.push_research_tc_at(tcOf(owner), cmd.tech);

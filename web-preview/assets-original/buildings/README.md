@@ -44,6 +44,17 @@ staging area (`~/workspace/skirmish-art/processed/`).
 | `blacksmith-stage1..3.png` | Blacksmith construction stages 1–3 |
 | `farm.png` | Farm (plot, drawn by the node renderer) — the ripe state |
 | `farm-state1..4.png` | Farm growth states: 1 planted, 2 shoots, 3 green, 4 ripe |
+| `palisade-wall.png` | Palisade Wall segment (finished) — procedural, see below |
+| `palisade-wall-stage1..3.png` | Palisade Wall construction stages 1–3 |
+
+The palisade set is **not** from the Base44 test set: it is
+procedurally drawn by our own script
+(`~/workspace/skirmish-art/palisade_gen.py`, PIL — a row of
+sharpened oak stakes on two rails, on the canonical contract
+canvas, stages at 35/65/90% stake height), in the same palette
+as the renderer's vector fallback so the two read as one
+object. Panel icon: `play/ui-art/icons/palisade-wall.png`
+(128×128, same generator).
 
 Status: **test set** — wired into the renderer (M13 + art test) so the
 look can be judged in a real match before more batches are generated.

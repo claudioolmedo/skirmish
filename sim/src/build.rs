@@ -2,7 +2,9 @@
 //! chosen patch of ground — Houses and Farms, the Barracks (M3), and
 //! (M6) the economy and Feudal buildings: Lumber Camp, Mill, Mining
 //! Camp, Archery Range, Stable, Blacksmith — plus the population
-//! they support.
+//! they support. BLD-13 adds the Palisade Wall: a 1×1 wall segment
+//! (3 wood, 7 s, 150/250 HP by Age, 2/5 armor — the current DE row,
+//! see `PALISADE_WALL_*`), placed in dragged lines.
 //!
 //! Numbers come from the public mechanics study
 //! (`MECHANICS-STUDY.md` §5 and §9.4) and the OPENING-SPEC camps
@@ -81,6 +83,14 @@ pub const STABLE_WOOD_COST: I16F16 = I16F16::from_bits(11_468_800); // 175
 pub const STABLE_BUILD_TICKS: u64 = 3000;
 /// Blacksmith construction cost: 150 wood (M6 brief).
 pub const BLACKSMITH_WOOD_COST: I16F16 = I16F16::from_bits(9_830_400); // 150
+/// Palisade Wall construction cost: 3 wood per segment (BLD-13;
+/// AoE wiki, Palisade Wall infobox — 2 wood before DE update
+/// 56005, 3 since; pinned CURRENT, 2026-10-22).
+pub const PALISADE_WALL_WOOD_COST: I16F16 = I16F16::from_bits(196_608); // 3
+/// Palisade Wall build time: 7 s per segment at 60 Hz (BLD-13;
+/// wiki infobox — 5 s in The Age of Kings, 6 s from The
+/// Forgotten, 7 s since DE update 42848).
+pub const PALISADE_WALL_BUILD_TICKS: u64 = 420;
 /// Blacksmith build time: 40 s at 60 Hz. UNVERIFIED — not in the
 /// project docs (see the module docs).
 pub const BLACKSMITH_BUILD_TICKS: u64 = 2400;
@@ -128,12 +138,19 @@ pub enum BuildingKind {
     /// M6: the generic technology host (Fletching and the armor
     /// lines); Feudal Age, 3×3.
     Blacksmith,
+    /// BLD-13: one Palisade Wall segment — a 1×1 solid timber
+    /// fence, Dark Age, placed in dragged lines (see
+    /// `wall_line_cells` and `Command::BuildLine`). Blocks every
+    /// player including its owner (only a gate passes, and gates
+    /// do not exist yet).
+    PalisadeWall,
 }
 
 impl BuildingKind {
     /// Stable tag for the state hash and the WASM building array:
     /// 0 = house, 1 = farm, 2 = barracks, 3 = lumber camp, 4 = mill,
-    /// 5 = mining camp, 6 = archery range, 7 = stable, 8 = blacksmith.
+    /// 5 = mining camp, 6 = archery range, 7 = stable, 8 = blacksmith,
+    /// 9 = palisade wall.
     pub fn tag(self) -> u8 {
         match self {
             BuildingKind::House => 0,
@@ -145,7 +162,15 @@ impl BuildingKind {
             BuildingKind::ArcheryRange => 6,
             BuildingKind::Stable => 7,
             BuildingKind::Blacksmith => 8,
+            BuildingKind::PalisadeWall => 9,
         }
+    }
+
+    /// Whether this kind is a wall segment (BLD-13): 1×1, solid to
+    /// everyone, placed by dragged lines. Today only the Palisade
+    /// Wall; the Stone Wall joins this predicate when it ships.
+    pub fn is_wall(self) -> bool {
+        matches!(self, BuildingKind::PalisadeWall)
     }
 
     /// Wood paid at placement time.
@@ -160,6 +185,7 @@ impl BuildingKind {
             BuildingKind::ArcheryRange => ARCHERY_RANGE_WOOD_COST,
             BuildingKind::Stable => STABLE_WOOD_COST,
             BuildingKind::Blacksmith => BLACKSMITH_WOOD_COST,
+            BuildingKind::PalisadeWall => PALISADE_WALL_WOOD_COST,
         }
     }
 
@@ -175,6 +201,7 @@ impl BuildingKind {
             BuildingKind::ArcheryRange => ARCHERY_RANGE_BUILD_TICKS,
             BuildingKind::Stable => STABLE_BUILD_TICKS,
             BuildingKind::Blacksmith => BLACKSMITH_BUILD_TICKS,
+            BuildingKind::PalisadeWall => PALISADE_WALL_BUILD_TICKS,
         }
     }
 
@@ -210,6 +237,7 @@ impl BuildingKind {
     /// is adopted — UNVERIFIED, see the module docs).
     pub fn footprint_size(self) -> u32 {
         match self {
+            BuildingKind::PalisadeWall => 1,
             BuildingKind::House
             | BuildingKind::Farm
             | BuildingKind::LumberCamp
@@ -321,8 +349,11 @@ impl BuildingKind {
 
     /// Whether this kind counts toward the Feudal Age research
     /// requirement (TEC-01): any completed Dark-Age building other
-    /// than Houses and Farms (and walls/Outposts, which do not
-    /// exist yet).
+    /// than Houses and Farms. Walls never count (BLD-13 — the
+    /// reference excludes walls and towers from age-up building
+    /// requirements, the same exclusion the Castle-Age dossier
+    /// records for the next rung), and neither do Outposts (not
+    /// yet in the game).
     pub fn counts_toward_feudal(self) -> bool {
         matches!(
             self,
@@ -347,6 +378,10 @@ impl BuildingKind {
             BuildingKind::LumberCamp | BuildingKind::Mill | BuildingKind::MiningCamp => 550,
             BuildingKind::ArcheryRange | BuildingKind::Stable => 1500,
             BuildingKind::Blacksmith => 1200,
+            // BLD-13: the Dark-Age column of the wiki row
+            // (150/250/250/250); the Feudal step lives in
+            // `max_hp_at`.
+            BuildingKind::PalisadeWall => 150,
         }
     }
 
@@ -367,6 +402,14 @@ impl BuildingKind {
         match (self, age) {
             (BuildingKind::House, Age::Feudal) => 750,
             (BuildingKind::Barracks, Age::Feudal) => 1500,
+            // BLD-13: 150 HP in the Dark Age, 250 from Feudal on
+            // (wiki Palisade Wall row 150/250/250/250 — the step
+            // is DE update 44725; BLD-11's lookup semantics apply:
+            // a standing segment's max rises with the age, its
+            // current HP is untouched). Written as "not Dark"
+            // rather than naming Feudal so the row stays right
+            // when the Castle Age lands (250 there too).
+            (BuildingKind::PalisadeWall, age) if age != Age::Dark => 250,
             _ => self.max_hp(),
         }
     }
@@ -380,6 +423,9 @@ impl BuildingKind {
         match self {
             BuildingKind::House => -2,
             BuildingKind::ArcheryRange | BuildingKind::Stable => 1,
+            // BLD-13: palisade melee armor 2 (wiki infobox; flat
+            // across ages).
+            BuildingKind::PalisadeWall => 2,
             _ => 0,
         }
     }
@@ -402,6 +448,9 @@ impl BuildingKind {
             BuildingKind::House => 7,
             BuildingKind::Farm => 0,
             BuildingKind::ArcheryRange | BuildingKind::Stable => 8,
+            // BLD-13: palisade pierce armor 5 (wiki infobox; 2 in
+            // The Age of Kings, 5 since The Conquerors patch 1.0b).
+            BuildingKind::PalisadeWall => 5,
             _ => 7,
         }
     }
@@ -649,6 +698,45 @@ pub fn ring_cells(cell_x: u32, cell_y: u32, size: u32) -> Vec<(u32, u32)> {
     out
 }
 
+/// The cells of a dragged wall line (BLD-13), from anchor cell
+/// `(ax, ay)` to anchor cell `(bx, by)`, both endpoints included,
+/// in drag order: the classic integer Bresenham line between the
+/// two cells. Consecutive cells are 8-connected — a diagonal drag
+/// lays a diagonal staircase of segments touching at the corners,
+/// which is how the reference game's wall drag behaves (segments
+/// never leave gaps along the dragged line, and a purely
+/// horizontal/vertical drag is exactly that row/column). Pure
+/// integer math: the expansion of a `Command::BuildLine` is a
+/// deterministic function of its two endpoints, and the client's
+/// preview (`web-preview/play/walls.js`) runs the identical
+/// algorithm so the ghost never promises a different line.
+pub fn wall_line_cells(ax: u32, ay: u32, bx: u32, by: u32) -> Vec<(u32, u32)> {
+    let (mut x, mut y) = (ax as i64, ay as i64);
+    let (tx, ty) = (bx as i64, by as i64);
+    let dx = (tx - x).abs();
+    let sx: i64 = if x < tx { 1 } else { -1 };
+    let dy = -(ty - y).abs();
+    let sy: i64 = if y < ty { 1 } else { -1 };
+    let mut err = dx + dy;
+    let mut out = Vec::new();
+    loop {
+        out.push((x as u32, y as u32));
+        if x == tx && y == ty {
+            break;
+        }
+        let e2 = 2 * err;
+        if e2 >= dy {
+            err += dy;
+            x += sx;
+        }
+        if e2 <= dx {
+            err += dx;
+            y += sy;
+        }
+    }
+    out
+}
+
 /// World coordinates of a footprint's center: `anchor + size/2 cells`
 /// along each axis from the grid origin — for a 2×2 footprint, the
 /// corner shared by its four cells.
@@ -818,6 +906,74 @@ mod tests {
         for c in ring3 {
             assert!(!cells3.contains(&c), "ring cell inside footprint");
         }
+    }
+
+    #[test]
+    fn palisade_wall_numbers_are_the_current_de_row() {
+        // BLD-13 (AoE wiki, Palisade Wall infobox + Building
+        // table, fetched 2026-10-22): Dark Age, 3 wood (update
+        // 56005), 7 s build (update 42848), 1×1, HP 150 Dark /
+        // 250 Feudal+ (update 44725), armor 2 melee / 5 pierce.
+        let w = BuildingKind::PalisadeWall;
+        assert_eq!(w.tag(), 9);
+        assert!(w.is_wall());
+        assert_eq!(w.wood_cost(), I16F16::from_num(3));
+        assert_eq!(w.build_ticks(), 7 * 60);
+        assert_eq!(w.footprint_size(), 1);
+        assert!(w.blocks_footprint());
+        assert_eq!(w.age_required(), Age::Dark);
+        assert_eq!(w.requires_building(), None);
+        assert_eq!(w.max_hp(), 150);
+        assert_eq!(w.max_hp_at(Age::Dark), 150);
+        assert_eq!(w.max_hp_at(Age::Feudal), 250);
+        assert_eq!(w.armor_melee(), 2);
+        assert_eq!(w.armor_pierce(), 5);
+        assert_eq!(w.armor_melee_at(Age::Feudal), 2);
+        assert_eq!(w.armor_pierce_at(Age::Feudal), 5);
+        // Walls never count toward age-up requirements, give no
+        // population room, train nothing and accept no drop-offs.
+        assert!(!w.counts_toward_feudal());
+        assert_eq!(w.pop_support(), 0);
+        assert!(!w.produces_units());
+        assert!(!w.is_dropoff());
+    }
+
+    #[test]
+    fn wall_line_cells_is_a_bresenham_line() {
+        // A click (no drag) is one segment.
+        assert_eq!(wall_line_cells(5, 5, 5, 5), vec![(5, 5)]);
+        // Horizontal and vertical drags are exact rows/columns.
+        assert_eq!(
+            wall_line_cells(2, 3, 6, 3),
+            vec![(2, 3), (3, 3), (4, 3), (5, 3), (6, 3)]
+        );
+        assert_eq!(
+            wall_line_cells(4, 1, 4, 4),
+            vec![(4, 1), (4, 2), (4, 3), (4, 4)]
+        );
+        // A 45° drag is a pure diagonal staircase (corner-touching
+        // segments, no gaps, no doubles).
+        assert_eq!(
+            wall_line_cells(1, 1, 4, 4),
+            vec![(1, 1), (2, 2), (3, 3), (4, 4)]
+        );
+        // A shallow slope hugs the ideal line: 8-connected steps,
+        // both endpoints included, one cell per column.
+        let line = wall_line_cells(0, 0, 7, 2);
+        assert_eq!(line.first(), Some(&(0, 0)));
+        assert_eq!(line.last(), Some(&(7, 2)));
+        assert_eq!(line.len(), 8);
+        for w in line.windows(2) {
+            let (dx, dy) = (
+                (w[1].0 as i64 - w[0].0 as i64).abs(),
+                (w[1].1 as i64 - w[0].1 as i64).abs(),
+            );
+            assert!(dx <= 1 && dy <= 1 && dx + dy >= 1, "8-connected step");
+        }
+        // A steep slope: one cell per row.
+        let line = wall_line_cells(0, 0, 2, 7);
+        assert_eq!(line.len(), 8);
+        assert_eq!(line.last(), Some(&(2, 7)));
     }
 
     #[test]

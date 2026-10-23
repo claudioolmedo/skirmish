@@ -1165,14 +1165,69 @@ already reserve from placement, which is the reference behavior.
 *Source:* GAP 4.1; Skirmish II M2.5. · *Impl:* shipped — houses write the
 dynamic grid layer, farms never do. · *Status:* **MATCHES**.
 
-**BLD-13 — Walls and gates.** Wall segments are solid to everyone. A gate
-opens automatically for its owner and their allies and never for enemies;
-units pass only while it is open. Walls are placed by dragging a line of
-segments (a client gesture producing many build orders).
-*Source:* GAP 4.12, 4.13. · *Impl:* gate state derives from (owner,
-proximity of passable units) at path time — the pathing grid treats gates
-as conditionally blocked per querying player's diplomacy (M8 diplomacy
-table). · *Status:* **MISSING**.
+**BLD-13 — Walls and gates.** Wall segments are solid to everyone —
+owner and enemies alike; there is no friendly pass-through (that is
+the gate's job). A gate opens automatically for its owner and their
+allies and never for enemies; units pass only while it is open.
+Walls are placed by dragging a line of segments.
+*The Palisade Wall row (current DE, Age of Empires II wiki,
+"Palisade Wall" + the "Building" master table, retrieved
+2026-10-22):* Dark Age; **3 wood per segment** (2 before DE update
+56005); **build 7 s** (5 s in The Age of Kings, 6 s from The
+Forgotten, 7 s since update 42848 — the Building table's stale
+"CT 6" loses to the infobox + changelog); **HP 150 Dark / 250
+Feudal / 250 Castle / 250 Imperial** (the Dark 150 came with
+update 44725; before it, 250 in all ages); **armor 2 melee /
+5 pierce** (pierce 2 in AoK, 5 since The Conquerors 1.0b);
+foundation armor in DE is 0/5 (update 42848); 1×1; LoS 2;
+classes All Buildings, Standard Buildings, Walls and Gates.
+Segments are individually selectable and deletable (generic
+building behavior, BLD-02 delete/refund applies). Walls do NOT
+count toward age-up building requirements (DE's requirement
+counts production/economic buildings; the Castle Age dossier
+records the same exclusion). Names: EN "Palisade Wall", ES
+"Empalizada" (wiki ES langlink), PT "Paliçada".
+*Impl:* shipped for walls (2026-10-22). A segment is a 1×1
+blocking building kind (tag 9) on the generic construction /
+repair / delete / refund systems — BLD-17 repair already
+iterates every building, so segments repair at the standard
+rate; the destroy path frees the cell; entombment displacement
+(BLD-05) applies on completion; VIC-04 scores its wood cost.
+Placement is one semantic command carrying the drag's two
+endpoints (`Command::BuildLine`); the sim expands the line with
+an integer Bresenham (both endpoints included, 8-connected
+steps — a diagonal drag lays the corner-touching staircase DE
+lays) and runs each segment through the ordinary
+`validate_build`: an invalid cell is skipped (a gap, never a
+partial charge), an unaffordable tail truncates the line, a
+cell holding our own unfinished segment resumes it, and the
+BLD-16 Town Center reserve rejects segments exactly like any
+placement. One builder is assigned to the first effective
+segment and walks the rest as queued Build orders in drag
+order. The client's ghost preview runs the identical Bresenham
+(`web-preview/play/walls.js`) with the same per-segment budget
+walk, and shows the placeable segment count + total cost.
+Panel: the villager military page's last slot (S) — DE keeps
+walls on the military page's defensive row after the production
+buildings; no authoritative text source fixes DE's exact
+five-wide slot, so the position follows that documented grouping
+in our three-wide compression. Diagonal segments touch only at
+corners: diagonal movement between two corner-touching blockers
+is governed by the movement system's corner rules, as with any
+buildings.
+*Divergence:* DE gives palisade foundations 0 melee armor; the
+sim applies the standing armor (2/5) during construction for
+every kind (BLD-05 models only the foundation HP line), so
+palisade foundations fight at 2/5 here.
+*Follow-on (out of scope, recorded):* the Palisade Gate exists
+in DE on the same line (240/400/400/400 HP, armor 2/4, 20 wood,
+30 s, 4×1 footprint, per the Building table); gate state would
+derive from (owner, proximity of passable units) at path time,
+the pathing grid treating gates as conditionally blocked per
+querying player's diplomacy (M8 diplomacy table).
+*Source:* GAP 4.12, 4.13; wiki pages above. · *Status:*
+**DIFFERS** — walls ship with the semantics above; gates are
+not yet present.
 
 **BLD-14 — Docks straddle the shoreline.** A Dock's footprint must cover
 both land and water tiles. It is the production building for ships and
