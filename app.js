@@ -62,6 +62,7 @@ import {
 } from './play/groups.js';
 import {
   TURN_TICKS as NET_TURN_TICKS, REJOIN_GRACE_MS, LOAD_TIMEOUT_MS,
+  PEER_STALL_TIMEOUT_MS,
   GAME_SPEED, TICK_MS, advanceTicks,
   applyCommand as netApplyCommand, tcIdOf as netTcIdOf,
   createSession, createRecorder, replayEvents, isReplay,
@@ -2569,6 +2570,7 @@ function makeNetSession() {
     },
     onTurn: (turn, c0, c1) => {
       if (!net) return;
+      net.lastTurnAt = Date.now();
       net.recorder.addTurn(turn, c0, c1);
       const ms = sim.match_state();
       if (ms !== 0 && net.phase === 'playing') {
@@ -2580,19 +2582,45 @@ function makeNetSession() {
 }
 
 let netWaitTimer = null;
+let netStallTimer = null;
 function onNetWaiting(waiting) {
   // Show the stall pill only for stalls that outlast a blink.
-  if (!netUi) return;
+  if (netUi) {
+    if (waiting) {
+      if (!netWaitTimer) {
+        netWaitTimer = setTimeout(() => {
+          if (netUi) netUi.netWait.hidden = false;
+        }, 500);
+      }
+    } else {
+      clearTimeout(netWaitTimer);
+      netWaitTimer = null;
+      netUi.netWait.hidden = true;
+    }
+  }
+  // Peer-loss fallback (rejoin fix F1): the relay's 'peer-left'
+  // frame is the primary drop signal, but a peer whose connection
+  // dies without a close ever reaching the relay sends no frame —
+  // all this client sees is an execution stall that never ends.
+  // A continuous stall of PEER_STALL_TIMEOUT_MS mid-match is
+  // therefore treated as the peer being gone, opening the same
+  // grace window. If the peer turns out to be alive (a tab
+  // backgrounded for a long while), its resumed traffic revives
+  // the match via onPeerBack — nothing is lost but the pause.
   if (waiting) {
-    if (!netWaitTimer) {
-      netWaitTimer = setTimeout(() => {
-        if (netUi) netUi.netWait.hidden = false;
-      }, 500);
+    if (!netStallTimer && net && net.phase === 'playing') {
+      netStallTimer = setTimeout(() => {
+        netStallTimer = null;
+        if (net && net.phase === 'playing' && net.session
+          && net.session.state().waiting) {
+          net.peerGone = true;
+          onPeerGone();
+        }
+      }, PEER_STALL_TIMEOUT_MS);
     }
   } else {
-    clearTimeout(netWaitTimer);
-    netWaitTimer = null;
-    netUi.netWait.hidden = true;
+    clearTimeout(netStallTimer);
+    netStallTimer = null;
   }
 }
 
@@ -3319,10 +3347,57 @@ function onPeerGone() {
   }
 }
 
+/// The peer was declared gone, but its turn traffic is flowing
+/// again — so it never actually left (the peer-left came from a
+/// zombie socket's late error, or the stall fallback fired on a
+/// long-backgrounded tab that has since resumed). Every message
+/// a dead socket ever sent precedes its close at the relay, so
+/// bundle/hash traffic arriving while this client is in
+/// 'peer-left' can only come from a live peer: cancel the grace
+/// and play on. (A peer that genuinely REJOINS arrives on a new
+/// socket and sends a hello first — that path goes through
+/// sendResync, not through here, because a rebuilding peer sends
+/// no turn traffic until it has resumed.)
+function onPeerBack() {
+  if (!net || net.phase !== 'peer-left') return;
+  net.phase = 'playing';
+  net.peerGone = false;
+  clearInterval(net.graceTimer);
+  clearTimeout(netStallTimer);
+  netStallTimer = null;
+  showOverlay(netUi.peerOverlay, false);
+  flash(t('flash.reconnectedPeer'));
+  updateNetStatus();
+}
+
 function onNetMessage(msg) {
   if (!net) return;
+  // Live peer traffic while we believe the peer is gone means it
+  // is back (see onPeerBack) — checked before the session eats
+  // the message, because the session consuming it is exactly the
+  // proof of life.
+  if (net.phase === 'peer-left'
+    && (msg.type === 'bundle' || msg.type === 'hash')) {
+    onPeerBack();
+  }
   if (net.session && net.session.receive(msg)) return;
   switch (msg.type) {
+    case 'peer-left':
+      // Relay v6: the room object tells the surviving socket that
+      // its peer's socket closed — THE drop signal (rejoin fix
+      // F1). Until this existed, peerGone was only ever set by
+      // this client's OWN socket closing, so the remaining
+      // player never learned of a drop, the grace window never
+      // opened, and the returning peer was answered room-full.
+      // Only the phases onPeerGone acts on: a stray notice in
+      // any other phase (a duplicate close+error pair landing
+      // during 'rebuilding', say) changes nothing.
+      if (net.phase === 'playing' || net.phase === 'starting'
+        || net.phase === 'lobby') {
+        net.peerGone = true;
+        onPeerGone();
+      }
+      break;
     case 'hello': {
       // M12: a sealed guest seat (AI / Closed) admits no human —
       // a late hello on a stale link is told the room is full,
@@ -3384,8 +3459,28 @@ function onNetMessage(msg) {
       } else if (net.phase === 'playing' && !wasGone && net.hellosSeen > 2) {
         // The real peer accounts for at most two hellos (its own
         // plus its reply to mine); a third hello is a third client
-        // opening the link mid-match.
-        net.client.send({ type: 'room-full' });
+        // opening the link mid-match — USUALLY. One exception
+        // (rejoin fix F1): the relay's peer-left notice can lag
+        // the drop by seconds (2.1 s and 6.6 s observed live,
+        // 2026-10-22), so the peer itself, returning fast on the
+        // same link, can arrive before its own departure notice.
+        // Its seat is provably silent then — the session is
+        // stalled waiting for its bundles and no turn has executed
+        // for over two seconds — so treat the hello as the peer
+        // reclaiming its seat: pass through the grace state and
+        // answer with the resync, exactly as if the notice had
+        // landed first. A genuinely live peer (turns still
+        // executing) keeps the room-full answer.
+        if (net.session && net.session.state().waiting
+          && net.lastTurnAt && Date.now() - net.lastTurnAt > 2000) {
+          net.peerGone = true;
+          onPeerGone();
+          showOverlay(netUi.peerOverlay, false);
+          net.phase = 'playing';
+          sendResync();
+        } else {
+          net.client.send({ type: 'room-full' });
+        }
       }
       updateNetStatus();
       break;
@@ -3514,8 +3609,12 @@ function onNetMessage(msg) {
       break;
     case 'resume':
       if (net.session && net.phase === 'rebuilding') {
+        // F2: hand startAt the rebuilt sim's real tick count — it
+        // ticks the empty gap turns itself, so this sim reaches
+        // atTurn * TURN_TICKS exactly like the rebased host's
+        // (see the invariant in netplay.js startAt).
         net.session.startAt(msg.atTurn, performance.now() + 700,
-          net.resyncDelay || undefined);
+          net.resyncDelay || undefined, sim.tick_count());
         net.phase = 'playing';
         showOverlay(netUi.onlineOverlay, false);
         setInMatch(true); // the resumed match is on screen again
@@ -3618,6 +3717,7 @@ function openLobby(join) {
     region: join ? (join.region || 'wnam') : null,
     client: null, session: null, phase: 'lobby',
     peerPresent: false, peerGone: false, helloReplied: false,
+    lastTurnAt: 0, // last executed turn's wall time (seat-silence test)
     seed: null, pendingSim: null, recorder: null,
     desyncs: 0, telemetryPosted: false, pingMs: null,
     selectedRegion: null,
