@@ -3413,9 +3413,10 @@ updated 2026-10-23 for the Codex follow-up landing — CMB-01,
 CMB-02 and CMB-13 move DIFFERS → MATCHES (the mishit
 composition: every multiplier applies before the minimum-1
 clamp, per the wiki's Attack and Armor class articles), so
-§4 trades three DIFFERS for three MATCHES and the totals
-stand at 220 rules, 127 / 31 / 62, recounted mechanically
-below.
+§8 counts 14 / 1 / 1; the mechanical recount over the
+combined body (this landing rebased over BLD-18 and the
+Market) stands at 220 rules, 124 / 34 / 62, and the table
+below equals the body.
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
