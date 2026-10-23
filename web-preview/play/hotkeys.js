@@ -38,7 +38,11 @@
 //    with DE's own two-row arrangements where
 //    the reference panel has them: the Town Center (Villager Q,
 //    Feudal Age W, Loom A below the Villager) and the Blacksmith
-//    (Fletching Q, Scale Mail W, Padded Archer Armor A).
+//    (Fletching Q, Scale Mail W, Padded Archer Armor A — plus,
+//    since the 2026-10-22 Feudal completion, Forging E and
+//    Scale Barding Armor S under Scale Mail). The Stable gained
+//    Bloodlines W; the Lumber Camp, Mill and Mining Camp panels
+//    are plain top-row runs (Q, then W).
 //
 // Go-to (jump to a building type) is Ctrl+letter with the
 // reference's letters: Lumber Camp Z, Mill I, Mining Camp G,
@@ -104,8 +108,12 @@ export const PANEL_BUTTONS = {
   tc: ['train', 'research-loom', 'research-age', 'research-wheelbarrow', 'research-handcart'],
   barracks: ['train-militia', 'train-spearman', 'research-maa'],
   range: ['train-archer', 'train-skirmisher'],
-  stable: ['train-scout'],
-  blacksmith: ['research-fletching', 'research-scalemail', 'research-padded'],
+  stable: ['train-scout', 'research-bloodlines'],
+  blacksmith: ['research-fletching', 'research-scalemail', 'research-padded',
+    'research-forging', 'research-barding'],
+  lumbercamp: ['research-doublebit'],
+  mill: ['research-horsecollar'],
+  miningcamp: ['research-goldmining', 'research-stonemining'],
 };
 
 // The slot letter of every button on every building panel
@@ -153,11 +161,35 @@ export const PANEL_KEYS = {
   },
   stable: {
     'train-scout': ['KeyQ', 'Q'],
+    // Bloodlines (2026-10-22) right of the Scout — the plain
+    // left-to-right grid, as the Barracks pair sits.
+    'research-bloodlines': ['KeyW', 'W'],
   },
   blacksmith: {
     'research-fletching': ['KeyQ', 'Q'],
     'research-scalemail': ['KeyW', 'W'],
     'research-padded': ['KeyA', 'A'],
+    // Forging / Scale Barding Armor (2026-10-22) complete DE's
+    // own arrangement: Forging takes the top row's last slot
+    // (E), Scale Barding Armor sits under Scale Mail Armor (S)
+    // — the barding column mirrors the infantry armor column
+    // (Scale Mail W over Padded A on the left).
+    'research-forging': ['KeyE', 'E'],
+    'research-barding': ['KeyS', 'S'],
+  },
+  // The economy camps and the Mill (2026-10-22): each panel's
+  // researches run left to right on the top row like every
+  // plain panel (Lumber Camp: Double-Bit Axe Q; Mill: Horse
+  // Collar Q; Mining Camp: Gold Mining Q, Stone Mining W).
+  lumbercamp: {
+    'research-doublebit': ['KeyQ', 'Q'],
+  },
+  mill: {
+    'research-horsecollar': ['KeyQ', 'Q'],
+  },
+  miningcamp: {
+    'research-goldmining': ['KeyQ', 'Q'],
+    'research-stonemining': ['KeyW', 'W'],
   },
 };
 export const POSITION_CODES = ['KeyQ', 'KeyW', 'KeyE'];

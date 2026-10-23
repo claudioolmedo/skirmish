@@ -134,6 +134,33 @@ pub(crate) static SCOUT_FEUDAL_ATTACKS: &[(u8, i32)] = &[(cls::MELEE, 5)];
 pub(crate) static SKIRMISHER_FLETCHING_ATTACKS: &[(u8, i32)] =
     &[(cls::PIERCE, 3), (cls::ARCHERY, 3), (cls::SPEARMAN, 3)];
 
+/// Forging attack tables (2026-10-22; wiki, Forging: infantry
+/// and cavalry melee attack +1). One static per affected row,
+/// the Fletching pattern — every attack table in the game stays
+/// `&'static` data, and `Sim::stats_for` picks the row. Only the
+/// base (melee) pair rises; bonus pairs are untouched, exactly
+/// the reference's arithmetic.
+pub(crate) static MILITIA_FORGING_ATTACKS: &[(u8, i32)] = &[(cls::MELEE, 5)];
+pub(crate) static MAN_AT_ARMS_FORGING_ATTACKS: &[(u8, i32)] = &[
+    (cls::MELEE, 7),
+    (cls::SHOCK_INFANTRY, 2),
+    (cls::STANDARD_BUILDINGS, 2),
+];
+pub(crate) static SCOUT_FORGING_ATTACKS: &[(u8, i32)] = &[(cls::MELEE, 4)];
+pub(crate) static SCOUT_FEUDAL_FORGING_ATTACKS: &[(u8, i32)] = &[(cls::MELEE, 6)];
+/// The Spearman's Forging table: base melee 3 → 4; the whole
+/// bonus ladder (cavalry 15, elephant 15, camel 12, ship 9,
+/// shock 1, buildings 1) is untouched, as Forging's rule states.
+pub(crate) static SPEARMAN_FORGING_ATTACKS: &[(u8, i32)] = &[
+    (cls::MELEE, 4),
+    (cls::CAVALRY, 15),
+    (cls::ELEPHANT, 15),
+    (cls::CAMEL, 12),
+    (cls::SHIP, 9),
+    (cls::SHOCK_INFANTRY, 1),
+    (cls::STANDARD_BUILDINGS, 1),
+];
+
 /// Villager (study §3.1): HP 25, attack 3 melee, armor 0/0, RoF 2.0 s,
 /// attack delay ≈0.64 s (community table), speed 0.8, LoS 4.
 /// Cost 50 F / 1500 ticks is the Town Center training contract (econ).

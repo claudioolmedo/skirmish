@@ -79,7 +79,18 @@ test('panel slot letters run a selected building\u2019s buttons', () => {
   // Padded Archer Armor sits under Fletching in DE's panel:
   // second row, first slot — A, not E.
   assert.equal(at('blacksmith', 'KeyA').id, 'research-padded');
-  assert.equal(at('blacksmith', 'KeyE'), null, 'E is not a Blacksmith letter');
+  // The Feudal completion set (2026-10-22): Forging completes
+  // the Blacksmith's top row (E); Scale Barding Armor sits
+  // under Scale Mail (S); Bloodlines runs right of the Scout
+  // at the Stable (W); the camps and the Mill are plain
+  // top-row panels.
+  assert.equal(at('blacksmith', 'KeyE').id, 'research-forging');
+  assert.equal(at('blacksmith', 'KeyS').id, 'research-barding');
+  assert.equal(at('stable', 'KeyW').id, 'research-bloodlines');
+  assert.equal(at('lumbercamp', 'KeyQ').id, 'research-doublebit');
+  assert.equal(at('mill', 'KeyQ').id, 'research-horsecollar');
+  assert.equal(at('miningcamp', 'KeyQ').id, 'research-goldmining');
+  assert.equal(at('miningcamp', 'KeyW').id, 'research-stonemining');
 });
 
 test('Town Center letters are DE’s own: Villager Q, Loom A, Feudal W, Wheelbarrow S, Hand Cart D', () => {

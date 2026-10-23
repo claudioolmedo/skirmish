@@ -46,6 +46,25 @@ test('research completions report "<Tech> Research Complete"', () => {
   assert.deepEqual(diffFeedEvents(next, next, NAMES), [], 'no repeat');
 });
 
+test('the Feudal completion set reports its lines too (2026-10-22)', () => {
+  const prev = snap({ techs: {} });
+  const next = snap({
+    techs: {
+      forging: true, barding: true, bloodlines: true, doublebit: true,
+      goldmining: true, stonemining: true, horsecollar: true,
+    },
+  });
+  assert.deepEqual(diffFeedEvents(prev, next, NAMES), [
+    'Forging Research Complete',
+    'Scale Barding Armor Research Complete',
+    'Bloodlines Research Complete',
+    'Double-Bit Axe Research Complete',
+    'Gold Mining Research Complete',
+    'Stone Mining Research Complete',
+    'Horse Collar Research Complete',
+  ]);
+});
+
 test('the Feudal advancement reports as the study observed it', () => {
   assert.deepEqual(diffFeedEvents(snap({ age: 0 }), snap({ age: 1 }), NAMES),
     ['Feudal Age Research Complete']);

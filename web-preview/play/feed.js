@@ -24,6 +24,13 @@ const TECH_LINES = [
   ['padded', 'Padded Archer Armor'],
   ['maa', 'Man-at-Arms'],
   ['wheelbarrow', 'Wheelbarrow'],
+  ['forging', 'Forging'],
+  ['barding', 'Scale Barding Armor'],
+  ['bloodlines', 'Bloodlines'],
+  ['doublebit', 'Double-Bit Axe'],
+  ['goldmining', 'Gold Mining'],
+  ['stonemining', 'Stone Mining'],
+  ['horsecollar', 'Horse Collar'],
   ['handcart', 'Hand Cart'],
 ];
 
@@ -41,7 +48,9 @@ const MAX_PER_KIND = 3;
  *   {
  *     built: { [buildingId]: kind },   // completed, own
  *     units: { [kind]: count },        // living, own, TC excluded
- *     techs: { loom, fletching, scalemail, padded, maa, wheelbarrow, handcart }: bool,
+ *     techs: { loom, fletching, scalemail, padded, maa, wheelbarrow,
+ *              forging, barding, bloodlines, doublebit, goldmining,
+ *              stonemining, horsecollar, handcart }: bool,
  *     age: 0 | 1 | 2,
  *     sheep: count,                    // living, own
  *   }

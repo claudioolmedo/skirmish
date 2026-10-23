@@ -922,15 +922,41 @@ dumb relay.
   sidebar is the first; see `web-preview/ADS.md`); both rotate
   fresh house creatives every 60 s while the player waits,
   pausing on a hidden tab and stopping the moment play begins.
-- **Disconnect & rejoin.** A dropped socket pauses the remaining
-  side ("Opponent disconnected") with a 90-second grace window.
-  Rejoin is by the same link: the remaining peer transfers the
-  setup plus the FULL recorded command stream; the rejoiner
-  rebuilds the sim from the seed, fast-forwards, and both sides
-  rebase to a common frontier turn and resume. Unexecuted bundles
-  from the dropped window are discarded on both sides — orders
-  issued into them are lost, the honest cost of a drop. After the
-  grace window the remaining player may claim victory.
+- **Disconnect & rejoin.** Detection first (rejoin fix,
+  2026-10-22): the relay (v6+) originates a `{"type":"peer-left"}`
+  frame to the surviving socket the moment a room socket closes,
+  and that frame — not the client's own socket dying — is what
+  opens the remaining side's 90-second grace window ("Opponent
+  disconnected"). Three client-side nets sit under it: a
+  continuous 20 s execution stall mid-match is treated as the
+  peer being gone (a connection that dies without a close ever
+  reaching the relay sends no frame); a hello arriving while the
+  seat is provably silent (session waiting, no turn executed for
+  over two seconds) is the peer reclaiming its seat even if the
+  notice itself lags — observed lagging 2–7 s live — instead of
+  the room-full answer a genuinely third client still gets; and
+  turn traffic arriving during the grace cancels it (the peer
+  demonstrably never left — a zombie socket's late error, a
+  long-backgrounded tab resumed). Rejoin is by the same link:
+  the remaining peer transfers the setup plus the FULL recorded
+  command stream; the rejoiner rebuilds the sim from the seed
+  and fast-forwards to the resync frontier. The resume then
+  obeys one accounting invariant: when the resume turn
+  (`frontier + delay + 2`) opens, EACH sim has executed exactly
+  `resumeTurn × TURN_TICKS` ticks — the remaining peer's
+  `rebase()` reaches it by executing the pre-filled empty gap
+  turns, and the rejoiner's `startAt()` by ticking the same
+  command-free gap from its rebuilt tick count. (Before the
+  fix, `startAt` skipped the gap: the rejoiner stayed
+  `delay + 2` turns behind and the first resumed hash exchange
+  desynced both sides.) Unexecuted bundles from the dropped
+  window are discarded on both sides — orders issued into them
+  are lost, the honest cost of a drop. After the grace window
+  the remaining player may claim victory. Verified live against
+  the production relay (two full cycles plus an opening-ramp
+  drop, 150 compared turns each, zero desyncs):
+  `~/workspace/skirmish-study/rejoin-exercise-2026-10-22.md`,
+  and pinned in-repo by `play/rejoin.integration.mjs`.
 - **Replay.** Every match — online or local — records (seed,
   mode, per-turn command bundles) client-side in one format. The
   end overlay offers a Download replay; the play page's Watch
@@ -948,7 +974,11 @@ dumb relay.
   counts sockets per room — it knows rooms, never who is in them),
   store anything per-match, or authenticate anyone — the link is
   the capability. Its only extras over the dumb pipe are the probe
-  echo, the telemetry counters and the room directory. Relay
+  echo, the telemetry counters, the room directory, the host's
+  listing control frame, and (v6) the `peer-left` notice it
+  originates when a room socket closes — presence loss is the one
+  fact a dumb pipe cannot leave to the clients, because the
+  surviving client has no other way to learn of it. Relay
   source lives outside this repository while the server-license
   decision is open.
 - **Sim/ABI additions (purely additive).** `MatchMode::TwoPlayer`

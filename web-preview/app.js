@@ -62,6 +62,7 @@ import {
 } from './play/groups.js';
 import {
   TURN_TICKS as NET_TURN_TICKS, REJOIN_GRACE_MS, LOAD_TIMEOUT_MS,
+  PEER_STALL_TIMEOUT_MS,
   GAME_SPEED, TICK_MS, advanceTicks,
   applyCommand as netApplyCommand, tcIdOf as netTcIdOf,
   createSession, createRecorder, replayEvents, isReplay,
@@ -288,7 +289,9 @@ let AGE_NAMES = ['Dark Age', 'Feudal Age', 'Castle Age'];
 let TECH_NAME = {
   0: 'Loom', 1: 'Feudal Age', 2: 'Fletching', 3: 'Scale Mail Armor',
   4: 'Padded Archer Armor', 5: 'Man-at-Arms', 6: 'Wheelbarrow',
-  7: 'Castle Age', 8: 'Hand Cart',
+  7: 'Forging', 8: 'Scale Barding Armor', 9: 'Bloodlines',
+  10: 'Double-Bit Axe', 11: 'Gold Mining', 12: 'Stone Mining',
+  13: 'Horse Collar', 14: 'Castle Age', 15: 'Hand Cart',
 };
 // Research-block explanations, indexed by the sim's ResearchBlock
 // tag (0 ok — unused, 1 funds, 2 queue full, 3 already done,
@@ -311,7 +314,10 @@ function refreshNames() {
   TECH_NAME = {
     0: t('tech.loom'), 1: t('age.feudal'), 2: t('tech.fletching'),
     3: t('tech.scalemail'), 4: t('tech.padded'), 5: t('tech.maa'),
-    6: t('tech.wheelbarrow'), 7: t('age.castle'), 8: t('tech.handcart'),
+    6: t('tech.wheelbarrow'), 7: t('tech.forging'), 8: t('tech.barding'),
+    9: t('tech.bloodlines'), 10: t('tech.doublebit'),
+    11: t('tech.goldmining'), 12: t('tech.stonemining'),
+    13: t('tech.horsecollar'), 14: t('age.castle'), 15: t('tech.handcart'),
   };
   RESEARCH_BLOCK_TITLES = [
     '', t('block.noResources'), t('block.queueFullTrain'),
@@ -626,7 +632,14 @@ function ownFeedSnapshot() {
       padded: (mask & 16) !== 0,
       maa: (mask & 32) !== 0,
       wheelbarrow: (mask & 64) !== 0,
-      handcart: (mask & 256) !== 0,
+      forging: (mask & 128) !== 0,
+      barding: (mask & 256) !== 0,
+      bloodlines: (mask & 512) !== 0,
+      doublebit: (mask & 1024) !== 0,
+      goldmining: (mask & 2048) !== 0,
+      stonemining: (mask & 4096) !== 0,
+      horsecollar: (mask & 8192) !== 0,
+      handcart: (mask & 32768) !== 0,
     },
   };
 }
@@ -674,7 +687,7 @@ function updateEventFeed() {
   const lines = diffFeedEvents(prev, snap, {
     buildingName: (k) => BUILD_NAME[k],
     unitName: (k) => KIND_NAME[k],
-    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, handcart: 8 }[key]],
+    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15 }[key]],
   }, feedFmt());
   feedPrev = snap;
   for (const text of lines) pushFeedLine(text);
@@ -2018,7 +2031,7 @@ function panelContext() {
   }
   if (selectedBuilding.type === 'tc') return 'tc';
   const bk = buildingList().find((b) => b.id === selectedBuilding.id);
-  return (bk && { 2: 'barracks', 6: 'range', 7: 'stable', 8: 'blacksmith' }[bk.kind]) || 'none';
+  return (bk && { 2: 'barracks', 3: 'lumbercamp', 4: 'mill', 5: 'miningcamp', 6: 'range', 7: 'stable', 8: 'blacksmith' }[bk.kind]) || 'none';
 }
 
 /// AutoExplore toggle (SEL-17): flips the mode on the LOCAL
@@ -2576,6 +2589,7 @@ function makeNetSession() {
     },
     onTurn: (turn, c0, c1) => {
       if (!net) return;
+      net.lastTurnAt = Date.now();
       net.recorder.addTurn(turn, c0, c1);
       const ms = sim.match_state();
       if (ms !== 0 && net.phase === 'playing') {
@@ -2587,19 +2601,45 @@ function makeNetSession() {
 }
 
 let netWaitTimer = null;
+let netStallTimer = null;
 function onNetWaiting(waiting) {
   // Show the stall pill only for stalls that outlast a blink.
-  if (!netUi) return;
+  if (netUi) {
+    if (waiting) {
+      if (!netWaitTimer) {
+        netWaitTimer = setTimeout(() => {
+          if (netUi) netUi.netWait.hidden = false;
+        }, 500);
+      }
+    } else {
+      clearTimeout(netWaitTimer);
+      netWaitTimer = null;
+      netUi.netWait.hidden = true;
+    }
+  }
+  // Peer-loss fallback (rejoin fix F1): the relay's 'peer-left'
+  // frame is the primary drop signal, but a peer whose connection
+  // dies without a close ever reaching the relay sends no frame —
+  // all this client sees is an execution stall that never ends.
+  // A continuous stall of PEER_STALL_TIMEOUT_MS mid-match is
+  // therefore treated as the peer being gone, opening the same
+  // grace window. If the peer turns out to be alive (a tab
+  // backgrounded for a long while), its resumed traffic revives
+  // the match via onPeerBack — nothing is lost but the pause.
   if (waiting) {
-    if (!netWaitTimer) {
-      netWaitTimer = setTimeout(() => {
-        if (netUi) netUi.netWait.hidden = false;
-      }, 500);
+    if (!netStallTimer && net && net.phase === 'playing') {
+      netStallTimer = setTimeout(() => {
+        netStallTimer = null;
+        if (net && net.phase === 'playing' && net.session
+          && net.session.state().waiting) {
+          net.peerGone = true;
+          onPeerGone();
+        }
+      }, PEER_STALL_TIMEOUT_MS);
     }
   } else {
-    clearTimeout(netWaitTimer);
-    netWaitTimer = null;
-    netUi.netWait.hidden = true;
+    clearTimeout(netStallTimer);
+    netStallTimer = null;
   }
 }
 
@@ -3326,10 +3366,57 @@ function onPeerGone() {
   }
 }
 
+/// The peer was declared gone, but its turn traffic is flowing
+/// again — so it never actually left (the peer-left came from a
+/// zombie socket's late error, or the stall fallback fired on a
+/// long-backgrounded tab that has since resumed). Every message
+/// a dead socket ever sent precedes its close at the relay, so
+/// bundle/hash traffic arriving while this client is in
+/// 'peer-left' can only come from a live peer: cancel the grace
+/// and play on. (A peer that genuinely REJOINS arrives on a new
+/// socket and sends a hello first — that path goes through
+/// sendResync, not through here, because a rebuilding peer sends
+/// no turn traffic until it has resumed.)
+function onPeerBack() {
+  if (!net || net.phase !== 'peer-left') return;
+  net.phase = 'playing';
+  net.peerGone = false;
+  clearInterval(net.graceTimer);
+  clearTimeout(netStallTimer);
+  netStallTimer = null;
+  showOverlay(netUi.peerOverlay, false);
+  flash(t('flash.reconnectedPeer'));
+  updateNetStatus();
+}
+
 function onNetMessage(msg) {
   if (!net) return;
+  // Live peer traffic while we believe the peer is gone means it
+  // is back (see onPeerBack) — checked before the session eats
+  // the message, because the session consuming it is exactly the
+  // proof of life.
+  if (net.phase === 'peer-left'
+    && (msg.type === 'bundle' || msg.type === 'hash')) {
+    onPeerBack();
+  }
   if (net.session && net.session.receive(msg)) return;
   switch (msg.type) {
+    case 'peer-left':
+      // Relay v6: the room object tells the surviving socket that
+      // its peer's socket closed — THE drop signal (rejoin fix
+      // F1). Until this existed, peerGone was only ever set by
+      // this client's OWN socket closing, so the remaining
+      // player never learned of a drop, the grace window never
+      // opened, and the returning peer was answered room-full.
+      // Only the phases onPeerGone acts on: a stray notice in
+      // any other phase (a duplicate close+error pair landing
+      // during 'rebuilding', say) changes nothing.
+      if (net.phase === 'playing' || net.phase === 'starting'
+        || net.phase === 'lobby') {
+        net.peerGone = true;
+        onPeerGone();
+      }
+      break;
     case 'hello': {
       // M12: a sealed guest seat (AI / Closed) admits no human —
       // a late hello on a stale link is told the room is full,
@@ -3391,8 +3478,28 @@ function onNetMessage(msg) {
       } else if (net.phase === 'playing' && !wasGone && net.hellosSeen > 2) {
         // The real peer accounts for at most two hellos (its own
         // plus its reply to mine); a third hello is a third client
-        // opening the link mid-match.
-        net.client.send({ type: 'room-full' });
+        // opening the link mid-match — USUALLY. One exception
+        // (rejoin fix F1): the relay's peer-left notice can lag
+        // the drop by seconds (2.1 s and 6.6 s observed live,
+        // 2026-10-22), so the peer itself, returning fast on the
+        // same link, can arrive before its own departure notice.
+        // Its seat is provably silent then — the session is
+        // stalled waiting for its bundles and no turn has executed
+        // for over two seconds — so treat the hello as the peer
+        // reclaiming its seat: pass through the grace state and
+        // answer with the resync, exactly as if the notice had
+        // landed first. A genuinely live peer (turns still
+        // executing) keeps the room-full answer.
+        if (net.session && net.session.state().waiting
+          && net.lastTurnAt && Date.now() - net.lastTurnAt > 2000) {
+          net.peerGone = true;
+          onPeerGone();
+          showOverlay(netUi.peerOverlay, false);
+          net.phase = 'playing';
+          sendResync();
+        } else {
+          net.client.send({ type: 'room-full' });
+        }
       }
       updateNetStatus();
       break;
@@ -3521,8 +3628,12 @@ function onNetMessage(msg) {
       break;
     case 'resume':
       if (net.session && net.phase === 'rebuilding') {
+        // F2: hand startAt the rebuilt sim's real tick count — it
+        // ticks the empty gap turns itself, so this sim reaches
+        // atTurn * TURN_TICKS exactly like the rebased host's
+        // (see the invariant in netplay.js startAt).
         net.session.startAt(msg.atTurn, performance.now() + 700,
-          net.resyncDelay || undefined);
+          net.resyncDelay || undefined, sim.tick_count());
         net.phase = 'playing';
         showOverlay(netUi.onlineOverlay, false);
         setInMatch(true); // the resumed match is on screen again
@@ -3625,6 +3736,7 @@ function openLobby(join) {
     region: join ? (join.region || 'wnam') : null,
     client: null, session: null, phase: 'lobby',
     peerPresent: false, peerGone: false, helloReplied: false,
+    lastTurnAt: 0, // last executed turn's wall time (seat-silence test)
     seed: null, pendingSim: null, recorder: null,
     desyncs: 0, telemetryPosted: false, pingMs: null,
     selectedRegion: null,
@@ -7454,24 +7566,30 @@ function runCommandButton(id, times = 1) {
     // Dark it researches Feudal (tag 1), from Feudal Castle (7).
     const tag = id === 'research-loom' ? 0
       : id === 'research-wheelbarrow' ? 6
-      : id === 'research-handcart' ? 8
-      : myAge() >= 1 ? 7 : 1;
+      : id === 'research-handcart' ? 15
+      : myAge() >= 1 ? 14 : 1;
     const ok = issue({ t: 'research_tc', tc: panelTcId(), tech: tag });
     if (!ok) {
       const rb = myResearchBlockTc(tag);
       flash(tag === 1 && rb === 4
         ? t('cmd.feudalNeeds')
-        : tag === 7 && rb === 4
+        : tag === 14 && rb === 4
           ? t('cmd.castleNeeds')
           : RESEARCH_BLOCK_TITLES[rb] || t('block.cannotResearch'));
     } else {
       playAudioCue('orderBuilding');
     }
   } else if (id.startsWith('research-')) {
-    // M6: building research — Blacksmith lines + Man-at-Arms.
+    // M6: building research — Blacksmith lines + Man-at-Arms,
+    // and the 2026-10-22 Feudal completion set (Forging, Scale
+    // Barding, Bloodlines, the camp economy techs, Horse Collar).
     const tag = {
       'research-fletching': 2, 'research-scalemail': 3,
       'research-padded': 4, 'research-maa': 5,
+      'research-forging': 7, 'research-barding': 8,
+      'research-bloodlines': 9, 'research-doublebit': 10,
+      'research-goldmining': 11, 'research-stonemining': 12,
+      'research-horsecollar': 13,
     }[id];
     if (tag != null && selectedBuilding && selectedBuilding.type === 'building') {
       if (!issue({ t: 'research_at', b: selectedBuilding.id, tech: tag })) {
@@ -7546,7 +7664,7 @@ function renderCommands() {
   // context renders nothing, never command buttons.
   const foeSel = !!selectedBuilding && selectedBuilding.owner === foeOwner();
   // M6: each production/research building gets its own context.
-  const BUILDING_CONTEXT = { 2: 'barracks', 6: 'range', 7: 'stable', 8: 'blacksmith' };
+  const BUILDING_CONTEXT = { 2: 'barracks', 3: 'lumbercamp', 4: 'mill', 5: 'miningcamp', 6: 'range', 7: 'stable', 8: 'blacksmith' };
   const context = selUnits.length > 0
     ? (hasVillager ? 'build' : 'units')
     : selectedBuilding
@@ -7574,18 +7692,26 @@ function renderCommands() {
   const blockSk = bk && context === 'range' ? sim.building_train_block(bk.id, 10) : -1;
   const blockS = bk && context === 'stable' ? sim.building_train_block(bk.id, 2) : -1;
   // Research blocks: the TC set (Loom 0, Feudal 1, Wheelbarrow 6,
-  // Castle 7, Hand Cart 8) and the building techs (Fletching 2,
-  // Scale Mail 3, Padded 4, MAA 5).
+  // Castle 14, Hand Cart 15) and the building techs, keyed by
+  // tag — Blacksmith (Fletching 2, Scale Mail 3, Padded 4,
+  // Forging 7, Scale Barding 8), Barracks (MAA 5), Stable
+  // (Bloodlines 9), Lumber Camp (Double-Bit Axe 10), Mining Camp
+  // (Gold 11, Stone 12), Mill (Horse Collar 13).
   const rbTc = context === 'tc'
     ? [myResearchBlockTc(0), myResearchBlockTc(1), myResearchBlockTc(6),
-      myResearchBlockTc(7), myResearchBlockTc(8)] : [-1, -1, -1, -1, -1];
-  const rbBk = bk && (context === 'blacksmith' || context === 'barracks')
-    ? [2, 3, 4, 5].map((t) => sim.research_block_at(bk.id, t)) : [];
+      myResearchBlockTc(14), myResearchBlockTc(15)] : [-1, -1, -1, -1, -1];
+  const RB_TAGS = {
+    blacksmith: [2, 3, 4, 7, 8], barracks: [5], stable: [9],
+    lumbercamp: [10], miningcamp: [11, 12], mill: [13],
+  };
+  const rbB = bk && RB_TAGS[context]
+    ? Object.fromEntries(RB_TAGS[context].map((t) => [t, sim.research_block_at(bk.id, t)]))
+    : {};
   const tcQueueCodes = context === 'tc' ? myTcQueue().join('.') : '';
   const bkQueueCodes = bk ? sim.building_queue(bk.id).join('.') : '';
   const sig = [context, Math.floor(wood), Math.floor(myStock()[0]), Math.floor(myStock()[2]),
     reason, queue, bk ? bk.id : -1, bk ? bk.queue : -1, bk && bk.complete ? 1 : 0,
-    blockM, blockSp, blockA, blockSk, blockS, age, techMask, rbTc.join('.'), rbBk.join('.'),
+    blockM, blockSp, blockA, blockSk, blockS, age, techMask, rbTc.join('.'), Object.values(rbB).join('.'),
     tcQueueCodes, bkQueueCodes, buildPage || '', repairArm ? 1 : 0,
     scoutSel ? selScouts.join('.') : -1, scoutAuto ? 1 : 0,
     placement ? placement.kind : -1].join('|');
@@ -7669,7 +7795,7 @@ function renderCommands() {
     const feudalDone = age >= 1;
     const castleDone = age >= 2;
     const wbDone = (techMask & 64) !== 0;
-    const hcDone = (techMask & 256) !== 0;
+    const hcDone = (techMask & 32768) !== 0;
     cmdGrid.append(
       cmdButton({
         id: 'train', icon: 'i-train', img: 'villager.png', label: 'Villager',
@@ -7743,8 +7869,8 @@ function renderCommands() {
         disabled: hcDone || rbTc[4] === 2 || rbTc[4] === 3,
         key: badgeForButton({ context, id: 'research-handcart', index: 4 }),
         title: hcDone
-          ? t('cmd.handcartDone', { name: TECH_NAME[8] })
-          : t('cmd.handcartTitle', { name: TECH_NAME[8], cost: costText([[300, 'food'], [200, 'wood']]), secs: 55 }) + (RESEARCH_BLOCK_TITLES[rbTc[4]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[4]] : ''),
+          ? t('cmd.handcartDone', { name: TECH_NAME[15] })
+          : t('cmd.handcartTitle', { name: TECH_NAME[15], cost: costText([[300, 'food'], [200, 'wood']]), secs: 55 }) + (RESEARCH_BLOCK_TITLES[rbTc[4]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[4]] : ''),
       }),
     );
   } else if (context === 'barracks') {
@@ -7778,13 +7904,13 @@ function renderCommands() {
       cmdButton({
         id: 'research-maa', icon: 'i-maa', img: 'man-at-arms.png', label: 'Man-at-Arms',
         costIcon: 'i-food', cost: 100, cost2Icon: 'i-gold', cost2: 40,
-        disabled: underConstruction || maaDone || rbBk[3] === 2 || rbBk[3] === 3,
+        disabled: underConstruction || maaDone || rbB[5] === 2 || rbB[5] === 3,
         key: badgeForButton({ context, id: 'research-maa', index: 2 }),
         title: underConstruction
           ? t('cmd.underConstruction', { name: TECH_NAME[5], building: BUILD_NAME[2] })
           : maaDone
             ? t('cmd.maaDone', { name: TECH_NAME[5], militia: KIND_NAME[3], name2: TECH_NAME[5] })
-            : t('cmd.maaTitle', { name: TECH_NAME[5], cost: costText([[100, 'food'], [40, 'gold']]), secs: 40, militia: KIND_NAME[3] }) + (RESEARCH_BLOCK_TITLES[rbBk[3]] ? ' ' + RESEARCH_BLOCK_TITLES[rbBk[3]] : ''),
+            : t('cmd.maaTitle', { name: TECH_NAME[5], cost: costText([[100, 'food'], [40, 'gold']]), secs: 40, militia: KIND_NAME[3] }) + (RESEARCH_BLOCK_TITLES[rbB[5]] ? ' ' + RESEARCH_BLOCK_TITLES[rbB[5]] : ''),
       }),
     );
   } else if (context === 'range') {
@@ -7812,25 +7938,43 @@ function renderCommands() {
     );
   } else if (context === 'stable') {
     const underConstruction = !bk.complete;
-    cmdGrid.append(cmdButton({
-      id: 'train-scout', icon: 'i-villager', img: 'scout.png', label: 'Scout Cavalry',
-      costIcon: 'i-food', cost: 80,
-      disabled: underConstruction || blockS === 2,
-      key: badgeForButton({ context, id: 'train-scout', index: 0 }),
-      title: underConstruction
-        ? t('cmd.underConstruction', { name: KIND_NAME[2], building: BUILD_NAME[7] })
-        : t('cmd.trainTitleTime', { name: KIND_NAME[2], cost: costText([[80, 'food']]), secs: 30 }) + (TRAIN_BLOCK_TITLES[blockS] ? ' ' + TRAIN_BLOCK_TITLES[blockS] : ''),
-    }));
+    const bloodDone = (techMask & 512) !== 0;
+    cmdGrid.append(
+      cmdButton({
+        id: 'train-scout', icon: 'i-villager', img: 'scout.png', label: 'Scout Cavalry',
+        costIcon: 'i-food', cost: 80,
+        disabled: underConstruction || blockS === 2,
+        key: badgeForButton({ context, id: 'train-scout', index: 0 }),
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: KIND_NAME[2], building: BUILD_NAME[7] })
+          : t('cmd.trainTitleTime', { name: KIND_NAME[2], cost: costText([[80, 'food']]), secs: 30 }) + (TRAIN_BLOCK_TITLES[blockS] ? ' ' + TRAIN_BLOCK_TITLES[blockS] : ''),
+      }),
+      // Bloodlines (2026-10-22): the Stable's Feudal research —
+      // mounted units +20 HP. Glyph-only button.
+      cmdButton({
+        id: 'research-bloodlines', icon: 'i-bloodlines', label: 'Bloodlines',
+        costIcon: 'i-food', cost: 150, cost2Icon: 'i-gold', cost2: 100,
+        disabled: underConstruction || bloodDone || rbB[9] === 2 || rbB[9] === 3,
+        key: badgeForButton({ context, id: 'research-bloodlines', index: 1 }),
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: TECH_NAME[9], building: BUILD_NAME[7] })
+          : bloodDone
+            ? t('cmd.researchDone', { name: TECH_NAME[9] })
+            : t('cmd.bloodlinesTitle', { name: TECH_NAME[9], cost: costText([[150, 'food'], [100, 'gold']]), secs: 50 }) + (RESEARCH_BLOCK_TITLES[rbB[9]] ? ' ' + RESEARCH_BLOCK_TITLES[rbB[9]] : ''),
+      }),
+    );
   } else if (context === 'blacksmith') {
-    // M6: the Blacksmith's three Feudal researches.
+    // M6: the Blacksmith's Feudal researches — the three armor /
+    // arrow lines, plus Forging and Scale Barding Armor from
+    // the 2026-10-22 Feudal completion set.
     const underConstruction = !bk.complete;
-    const techBtn = (id, tag, icon, img, label, title, cost2) => {
+    const techBtn = (id, tag, icon, img, label, title, cost = 100, cost2, index) => {
       const done = (techMask & (1 << tag)) !== 0;
-      const rb = rbBk[tag - 2];
+      const rb = rbB[tag];
       return cmdButton({
-        id, icon, img, label, costIcon: 'i-food', cost: 100,
+        id, icon, img, label, costIcon: 'i-food', cost,
         cost2Icon: cost2 ? 'i-gold' : undefined, cost2,
-        key: badgeForButton({ context, id, index: tag - 2 }),
+        key: badgeForButton({ context, id, index }),
         disabled: underConstruction || done || rb === 2 || rb === 3,
         title: underConstruction
           ? t('cmd.underConstruction', { name: TECH_NAME[tag], building: BUILD_NAME[8] })
@@ -7841,12 +7985,56 @@ function renderCommands() {
     };
     cmdGrid.append(
       techBtn('research-fletching', 2, 'i-fletching', 'fletching.png', 'Fletching',
-        t('cmd.fletchingTitle', { name: TECH_NAME[2], cost: costText([[100, 'food'], [50, 'gold']]), secs: 30 }), 50),
+        t('cmd.fletchingTitle', { name: TECH_NAME[2], cost: costText([[100, 'food'], [50, 'gold']]), secs: 30 }), 100, 50, 0),
       techBtn('research-scalemail', 3, 'i-scalemail', 'scale-mail.png', 'Scale Mail',
-        t('cmd.scalemailTitle', { name: TECH_NAME[3], cost: costText([[100, 'food']]), secs: 40 })),
+        t('cmd.scalemailTitle', { name: TECH_NAME[3], cost: costText([[100, 'food']]), secs: 40 }), 100, undefined, 1),
       techBtn('research-padded', 4, 'i-padded', 'padded-armor.png', 'Padded Armor',
-        t('cmd.paddedTitle', { name: TECH_NAME[4], cost: costText([[100, 'food']]), secs: 40 })),
+        t('cmd.paddedTitle', { name: TECH_NAME[4], cost: costText([[100, 'food']]), secs: 40 }), 100, undefined, 2),
+      // Glyph-only buttons (the stroke-symbol tier; no PNG icons
+      // exist in the art set for these two).
+      techBtn('research-forging', 7, 'i-forging', undefined, 'Forging',
+        t('cmd.forgingTitle', { name: TECH_NAME[7], cost: costText([[150, 'food']]), secs: 50 }), 150, undefined, 3),
+      techBtn('research-barding', 8, 'i-barding', undefined, 'Scale Barding Armor',
+        t('cmd.bardingTitle', { name: TECH_NAME[8], cost: costText([[150, 'food']]), secs: 45 }), 150, undefined, 4),
     );
+  } else if (context === 'lumbercamp' || context === 'mill' || context === 'miningcamp') {
+    // The economy researches (2026-10-22): Double-Bit Axe at the
+    // Lumber Camp, Horse Collar at the Mill, Gold / Stone Mining
+    // at the Mining Camp. Glyph-only buttons, like Wheelbarrow.
+    const underConstruction = !bk.complete;
+    const campBtn = (id, tag, icon, label, titleKey, titleParams, index) => {
+      const done = (techMask & (1 << tag)) !== 0;
+      const rb = rbB[tag];
+      const pairs = titleParams.cost;
+      return cmdButton({
+        id, icon, label,
+        costIcon: 'i-' + pairs[0][1], cost: pairs[0][0],
+        cost2Icon: pairs[1] ? 'i-' + pairs[1][1] : undefined,
+        cost2: pairs[1] ? pairs[1][0] : undefined,
+        key: badgeForButton({ context, id, index }),
+        disabled: underConstruction || done || rb === 2 || rb === 3,
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: TECH_NAME[tag], building: BUILD_NAME[bk.kind] })
+          : done
+            ? t('cmd.researchDone', { name: TECH_NAME[tag] })
+            : t(titleKey, { name: TECH_NAME[tag], cost: costText(pairs), secs: titleParams.secs })
+              + (RESEARCH_BLOCK_TITLES[rb] ? ' ' + RESEARCH_BLOCK_TITLES[rb] : ''),
+      });
+    };
+    if (context === 'lumbercamp') {
+      cmdGrid.append(campBtn('research-doublebit', 10, 'i-doublebit', 'Double-Bit Axe',
+        'cmd.doublebitTitle', { cost: [[100, 'food'], [50, 'wood']], secs: 25 }, 0));
+    } else if (context === 'mill') {
+      cmdGrid.append(campBtn('research-horsecollar', 13, 'i-horsecollar', 'Horse Collar',
+        'cmd.horsecollarTitle', { cost: [[75, 'food'], [75, 'wood']], secs: 20 }, 0));
+    } else {
+      cmdGrid.append(
+        campBtn('research-goldmining', 11, 'i-goldmining', 'Gold Mining',
+          'cmd.goldminingTitle', { cost: [[100, 'food'], [75, 'wood']], secs: 30 }, 0),
+        campBtn('research-stonemining', 12, 'i-stonemining', 'Stone Mining',
+          'cmd.stoneminingTitle', { cost: [[100, 'food'], [75, 'wood']], secs: 30 }, 1),
+      );
+    }
   }
   if (context === 'units' && scoutSel) {
     // SEL-17: the AutoExplore toggle (G) for the selected
@@ -7940,7 +8128,9 @@ function updateSelPanel() {
   // M5: enemy selections get their own info-only contexts.
   const foeSel = !!selectedBuilding && selectedBuilding.owner === foeOwner();
   // M6: the production/research buildings share one info shape.
-  const PROD_KINDS = [2, 6, 7, 8];
+  // The camps and the Mill joined with their researches
+  // (2026-10-22): their queues carry research entries only.
+  const PROD_KINDS = [2, 3, 4, 5, 6, 7, 8];
   const context = selUnits.length > 0 ? 'units'
     : selectedBuilding
       ? (selectedBuilding.type === 'tc'
@@ -8061,7 +8251,9 @@ function updateSelPanel() {
     } else {
       selInfo.textContent = bk.kind === 8
         ? t('sel.blacksmithIdle')
-        : t('sel.productionIdle');
+        : (bk.kind === 3 || bk.kind === 4 || bk.kind === 5)
+          ? t('sel.researchIdle')
+          : t('sel.productionIdle');
     }
   } else if (context === 'animal') {
     // An animal that is not ours: portrait, name, hit points, and
