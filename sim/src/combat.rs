@@ -192,11 +192,35 @@ pub fn compute_damage_elev(
     attacker_elev: u8,
     target_elev: u8,
 ) -> I16F16 {
+    compute_damage_hit(attacks, target, attacker_elev, target_elev, false)
+}
+
+/// CMB-01/CMB-13 in full: the documented DE composition composes
+/// **all** multipliers — the elevation factor and the mishit ½
+/// (k_miss) — and only then applies the minimum-damage rule:
+/// `damage = max(1, k_elev × k_miss × Σ max(0, atk − armor))`
+/// (wiki, *Attack*: the exact AoE2 formula; wiki, *Armor class*,
+/// "Damage calculation" steps 5–6: "the minimum damage rule is
+/// applied after all the attack multipliers" — both fetched
+/// 2026-10-22). So a mishit whose pre-clamp value is 0.5 still
+/// deals the minimum 1; the halving can never push a landed hit
+/// below the minimum. A hit with no participating attack class
+/// stays 0 — the minimum never *creates* damage.
+pub fn compute_damage_hit(
+    attacks: &[(u8, i32)],
+    target: &UnitSpec,
+    attacker_elev: u8,
+    target_elev: u8,
+    mishit: bool,
+) -> I16F16 {
     let (total, participated) = damage_sum(attacks, target);
     if !participated {
         return I16F16::ZERO;
     }
-    let dmg = I16F16::from_num(total) * elevation_factor(attacker_elev, target_elev);
+    let mut dmg = I16F16::from_num(total) * elevation_factor(attacker_elev, target_elev);
+    if mishit {
+        dmg /= 2;
+    }
     if dmg < I16F16::from_num(1) {
         I16F16::from_num(1)
     } else {
@@ -958,13 +982,11 @@ impl Sim {
         // the target's level where it stands now.
         let tspec = self.unit_stats(ti);
         let tgt_elev = self.entity_height(ti);
-        let full = compute_damage_elev(attacks, &tspec, atk_elev, tgt_elev);
-        let dmg = if mishit {
-            // CMB-13: a mishit deals 50% (fixed-point halving is exact).
-            full / I16F16::from_num(2)
-        } else {
-            full
-        };
+        // CMB-13 composition (verified 2026-10-22): the mishit ½ is
+        // one of the multipliers INSIDE the minimum-1 clamp, not a
+        // division after it — `compute_damage_hit` composes
+        // elevation × mishit × Σ and clamps once, at the end.
+        let dmg = compute_damage_hit(attacks, &tspec, atk_elev, tgt_elev, mishit);
         {
             let t = &mut self.entities[ti];
             t.hp -= dmg;
@@ -1648,6 +1670,138 @@ mod tests {
             compute_damage_elev(sheep.attacks, villager, 4, 0),
             I16F16::ZERO
         );
+    }
+
+    // CMB-01/02/13 regression (Codex review follow-up, 2026-10-22):
+    // the documented DE order composes ALL multipliers — elevation
+    // AND the mishit ½ (k_miss) — BEFORE the minimum-1 clamp:
+    // damage = max(1, k_elev × k_miss × Σ). Sources: wiki, Attack
+    // (the exact AoE2 formula) and wiki, Armor class (Damage
+    // calculation steps 5–6: "the minimum damage rule is applied
+    // after all the attack multipliers"), both fetched 2026-10-22.
+    // Staged through `apply_hit` on a sandbox sim so the tests pin
+    // the behavior end-to-end, not just the pure formula.
+    fn sandbox_pair(sim: &Sim) -> (u32, usize, usize) {
+        // (attacker id, a villager index, the scout index) from the
+        // standard sandbox start.
+        let mut vil = None;
+        let mut scout = None;
+        for (i, e) in sim.entities.iter().enumerate() {
+            match e.kind {
+                EntityKind::Villager if vil.is_none() => vil = Some(i),
+                EntityKind::ScoutCavalry if scout.is_none() => scout = Some(i),
+                _ => {}
+            }
+        }
+        let scout = scout.expect("sandbox start has a scout");
+        (sim.entities[scout].id, vil.expect("sandbox start has villagers"), scout)
+    }
+
+    #[test]
+    fn mishit_at_full_one_deals_one_not_a_half() {
+        // THE flagged case: Σ = 1 on flat ground. A direct hit deals
+        // 1 (the clamp); a mishit must also deal 1 — the halving
+        // happens before the clamp, so it can never push a landed
+        // hit below the minimum.
+        let mut sim = Sim::new(5);
+        let (atk, vil, _) = sandbox_pair(&sim);
+        let h = sim.entity_height(vil);
+        let pos = (sim.entities[vil].pos_x, sim.entities[vil].pos_y);
+        sim.entities[vil].hp = I16F16::from_num(10);
+        sim.apply_hit(atk, pos, &[(cls::PIERCE, 1)], vil, true, h);
+        assert_eq!(sim.entities[vil].hp, I16F16::from_num(9));
+        // Control: the direct hit deals the same 1.
+        sim.entities[vil].hp = I16F16::from_num(10);
+        sim.apply_hit(atk, pos, &[(cls::PIERCE, 1)], vil, false, h);
+        assert_eq!(sim.entities[vil].hp, I16F16::from_num(9));
+        // Above the clamp band the halving is untouched: Σ = 4
+        // mishit deals exactly 2, Σ = 3 exactly 1.5.
+        sim.entities[vil].hp = I16F16::from_num(10);
+        sim.apply_hit(atk, pos, &[(cls::PIERCE, 4)], vil, true, h);
+        assert_eq!(sim.entities[vil].hp, I16F16::from_num(8));
+        sim.entities[vil].hp = I16F16::from_num(10);
+        sim.apply_hit(atk, pos, &[(cls::PIERCE, 3)], vil, true, h);
+        assert_eq!(sim.entities[vil].hp, I16F16::from_bits(557_056)); // 8.5
+    }
+
+    #[test]
+    fn mishit_against_full_armor_still_deals_the_minimum() {
+        // High armor: pierce 2 into the Scout Cavalry's 2 pierce
+        // armor → Σ = 0 with a participating pair. DE: max(1, ½ × 0)
+        // = 1 — a landed mishit never deals 0.5 (or 0).
+        let mut sim = Sim::new(5);
+        let (atk, _, scout) = sandbox_pair(&sim);
+        let h = sim.entity_height(scout);
+        let pos = (sim.entities[scout].pos_x, sim.entities[scout].pos_y);
+        sim.entities[scout].hp = I16F16::from_num(100);
+        sim.apply_hit(atk, pos, &[(cls::PIERCE, 2)], scout, true, h);
+        assert_eq!(sim.entities[scout].hp, I16F16::from_num(99));
+        // Control: the direct hit against the same armor is the
+        // clamped 1 as well.
+        sim.entities[scout].hp = I16F16::from_num(100);
+        sim.apply_hit(atk, pos, &[(cls::PIERCE, 2)], scout, false, h);
+        assert_eq!(sim.entities[scout].hp, I16F16::from_num(99));
+    }
+
+    #[test]
+    fn mishit_composes_with_elevation_before_the_clamp() {
+        // Σ = 1 uphill: product 1.25, mishit 0.625 → clamped to 1.
+        // Σ = 4 uphill: product 5, mishit exactly 2.5 (no clamp).
+        let mut sim = Sim::new(5);
+        let (atk, vil, _) = sandbox_pair(&sim);
+        let h = sim.entity_height(vil);
+        let pos = (sim.entities[vil].pos_x, sim.entities[vil].pos_y);
+        sim.entities[vil].hp = I16F16::from_num(10);
+        sim.apply_hit(atk, pos, &[(cls::PIERCE, 1)], vil, true, h + 1);
+        assert_eq!(sim.entities[vil].hp, I16F16::from_num(9));
+        sim.entities[vil].hp = I16F16::from_num(10);
+        sim.apply_hit(atk, pos, &[(cls::PIERCE, 4)], vil, true, h + 1);
+        assert_eq!(sim.entities[vil].hp, I16F16::from_bits(491_520)); // 7.5
+    }
+
+    #[test]
+    fn fractional_hp_and_death_boundaries_under_mishits() {
+        // CMB-02 interplay: death is HP < 1, and mishit damage is
+        // fractional — the two must compose at the boundary.
+        let mut sim = Sim::new(5);
+        let (atk, vil, _) = sandbox_pair(&sim);
+        let h = sim.entity_height(vil);
+        let pos = (sim.entities[vil].pos_x, sim.entities[vil].pos_y);
+        // 2.5 HP − 1.5 (mishit of Σ = 3) = exactly 1.0 → survives.
+        sim.entities[vil].hp = I16F16::from_bits(163_840); // 2.5
+        sim.apply_hit(atk, pos, &[(cls::PIERCE, 3)], vil, true, h);
+        assert_eq!(sim.entities[vil].hp, I16F16::from_num(1));
+        for _ in 0..5 {
+            sim.tick();
+        }
+        assert!(!sim.entities[vil].dead);
+        // 1.5 HP − 1.5 = 0 → dies in the sweep (a hit that kills
+        // below 1 HP, not at some rounded threshold).
+        sim.entities[vil].hp = I16F16::from_bits(98_304); // 1.5
+        sim.apply_hit(atk, pos, &[(cls::PIERCE, 3)], vil, true, h);
+        assert_eq!(sim.entities[vil].hp, I16F16::ZERO);
+        for _ in 0..5 {
+            sim.tick();
+        }
+        assert!(sim.entities[vil].dead);
+    }
+
+    #[test]
+    fn mishit_minimum_kills_at_the_boundary() {
+        // 1.9 HP takes a mishit whose pre-clamp value is 0.5
+        // (Σ = 1): DE deals the minimum 1 → 0.9 HP → dead. Under
+        // the old order (clamp, then halve) the same hit dealt
+        // 0.5 and the villager lived at 1.4 HP.
+        let mut sim = Sim::new(5);
+        let (atk, vil, _) = sandbox_pair(&sim);
+        let h = sim.entity_height(vil);
+        let pos = (sim.entities[vil].pos_x, sim.entities[vil].pos_y);
+        sim.entities[vil].hp = I16F16::from_bits(124_518); // ≈1.9
+        sim.apply_hit(atk, pos, &[(cls::PIERCE, 1)], vil, true, h);
+        for _ in 0..5 {
+            sim.tick();
+        }
+        assert!(sim.entities[vil].dead);
     }
 
     #[test]
