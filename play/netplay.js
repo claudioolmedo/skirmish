@@ -108,9 +108,12 @@ export const REGIONS = [
 // shortest-round-trip number formatting reproduces the exact same
 // double on the far side, and the sim's fixed-point conversion is
 // deterministic, so both sims consume bit-identical input.
-// Town-Center orders carry NO Town Center id: the applier resolves
-// the issuing player's own Town Center from its sim (identical on
-// both clients by construction).
+// Town-Center orders may carry an explicit Town Center id
+// (cmd.tc): additional TCs are buildable from the Castle Age and
+// each carries its own queue, so the issuing client names the
+// one its panel acted on. When cmd.tc is absent the applier
+// resolves the issuing player's first Town Center from its sim
+// (identical on both clients by construction).
 
 const BUILD_FNS = [
   'push_build_house', 'push_build_farm', 'push_build_barracks',
@@ -118,6 +121,7 @@ const BUILD_FNS = [
   'push_build_archery_range', 'push_build_stable', 'push_build_blacksmith',
   'push_build_palisade_wall',
   'push_build_watch_tower', 'push_build_outpost', 'push_build_market',
+  'push_build_town_center',
 ];
 const BUILD_FNS_QUEUED = BUILD_FNS.map((n) => n + '_queued');
 const TRAIN_AT_FNS = {
@@ -145,10 +149,11 @@ export function validateCommand(c) {
       return isInt(c.b) && (c.r === 1 || c.r === 2 || c.r === 4);
     case 'buildline': return isInt(c.e) && isNum(c.x0) && isNum(c.y0) && isNum(c.x1) && isNum(c.y1);
     case 'train_at': return isInt(c.b) && (c.k === 2 || c.k === 3 || c.k === 4 || c.k === 9 || c.k === 10);
-    case 'train_vil': return true;
-    case 'research_tc': return c.tech === 0 || c.tech === 1 || c.tech === 6;
+    case 'train_vil': return c.tc === undefined || isInt(c.tc);
+    case 'research_tc': return (c.tech === 0 || c.tech === 1 || c.tech === 6
+      || c.tech === 14 || c.tech === 15) && (c.tc === undefined || isInt(c.tc));
     case 'research_at': return isInt(c.b) && isInt(c.tech) && c.tech <= 13;
-    case 'rally_tc': return isNum(c.x) && isNum(c.y);
+    case 'rally_tc': return isNum(c.x) && isNum(c.y) && (c.tc === undefined || isInt(c.tc));
     case 'rally_b': return isInt(c.b) && isNum(c.x) && isNum(c.y);
     case 'force_dep': return isInt(c.e);
     case 'auto_explore': return isInt(c.e) && typeof c.on === 'boolean';
@@ -191,10 +196,10 @@ export function applyCommand(sim, cmd, owner, tcOf) {
       : sim[BUILD_FNS[cmd.k]](cmd.e, cmd.x, cmd.y);
     case 'buildline': return sim.push_build_wall_line(cmd.e, cmd.x0, cmd.y0, cmd.x1, cmd.y1);
     case 'train_at': return sim[TRAIN_AT_FNS[cmd.k]](cmd.b);
-    case 'train_vil': return sim.push_train_villager_at(tcOf(owner));
-    case 'research_tc': return sim.push_research_tc_at(tcOf(owner), cmd.tech);
+    case 'train_vil': return sim.push_train_villager_at(cmd.tc != null ? cmd.tc : tcOf(owner));
+    case 'research_tc': return sim.push_research_tc_at(cmd.tc != null ? cmd.tc : tcOf(owner), cmd.tech);
     case 'research_at': return sim.push_research_at(cmd.b, cmd.tech);
-    case 'rally_tc': return sim.push_set_rally_tc_of(tcOf(owner), cmd.x, cmd.y);
+    case 'rally_tc': return sim.push_set_rally_tc_of(cmd.tc != null ? cmd.tc : tcOf(owner), cmd.x, cmd.y);
     case 'rally_b': return sim.push_set_rally_building(cmd.b, cmd.x, cmd.y);
     case 'force_dep': return sim.push_force_deposit(cmd.e);
     case 'auto_explore': return sim.push_auto_explore(cmd.e, cmd.on);

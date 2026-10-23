@@ -840,6 +840,32 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Order a villager to build an additional Town Center
+     * (275 wood + 100 stone, 4×4 — Castle Age; the foundation
+     * converts into a Town Center entity on completion) — see
+     * `push_build_house`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_town_center(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_town_center(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Queue a Town Center build (Castle Age) — see
+     * `push_build_house_queued`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_town_center_queued(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_town_center_queued(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
      * Order a villager to raise a dragged line of Palisade Wall
      * segments (BLD-13) from the cell containing `(x0, y0)` to
      * the cell containing `(x1, y1)`: the sim expands the line
@@ -1094,12 +1120,31 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Enqueue the Castle Age advancement at the Town Center
+     * (800 food, 200 gold, 160 s; needs 2 completed Feudal-Age
+     * buildings — TEC-01 Castle rung).
+     * @returns {boolean}
+     */
+    push_research_castle_age() {
+        const ret = wasm.wasmsim_push_research_castle_age(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * Enqueue the Feudal Age advancement at the Town Center
      * (500 food, 130 s; needs 2 completed Dark-Age buildings).
      * @returns {boolean}
      */
     push_research_feudal() {
         const ret = wasm.wasmsim_push_research_feudal(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * Enqueue Hand Cart at the Town Center (300 food, 200 wood,
+     * 55 s; Castle Age, requires Wheelbarrow — ECO-03).
+     * @returns {boolean}
+     */
+    push_research_hand_cart() {
+        const ret = wasm.wasmsim_push_research_hand_cart(this.__wbg_ptr);
         return ret !== 0;
     }
     /**

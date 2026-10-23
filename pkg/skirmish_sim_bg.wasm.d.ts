@@ -72,6 +72,8 @@ export const wasmsim_push_build_palisade_wall: (a: number, b: number, c: number,
 export const wasmsim_push_build_palisade_wall_queued: (a: number, b: number, c: number, d: number) => number;
 export const wasmsim_push_build_stable: (a: number, b: number, c: number, d: number) => number;
 export const wasmsim_push_build_stable_queued: (a: number, b: number, c: number, d: number) => number;
+export const wasmsim_push_build_town_center: (a: number, b: number, c: number, d: number) => number;
+export const wasmsim_push_build_town_center_queued: (a: number, b: number, c: number, d: number) => number;
 export const wasmsim_push_build_wall_line: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
 export const wasmsim_push_build_watch_tower: (a: number, b: number, c: number, d: number) => number;
 export const wasmsim_push_build_watch_tower_queued: (a: number, b: number, c: number, d: number) => number;
@@ -92,7 +94,9 @@ export const wasmsim_push_patrol_queued: (a: number, b: number, c: number, d: nu
 export const wasmsim_push_repair: (a: number, b: number, c: number) => number;
 export const wasmsim_push_repair_queued: (a: number, b: number, c: number) => number;
 export const wasmsim_push_research_at: (a: number, b: number, c: number) => number;
+export const wasmsim_push_research_castle_age: (a: number) => number;
 export const wasmsim_push_research_feudal: (a: number) => number;
+export const wasmsim_push_research_hand_cart: (a: number) => number;
 export const wasmsim_push_research_loom: (a: number) => number;
 export const wasmsim_push_research_tc_at: (a: number, b: number, c: number) => number;
 export const wasmsim_push_research_wheelbarrow: (a: number) => number;

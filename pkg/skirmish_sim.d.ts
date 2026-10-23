@@ -397,6 +397,18 @@ export class WasmSim {
      */
     push_build_stable_queued(entity: number, x: number, y: number): boolean;
     /**
+     * Order a villager to build an additional Town Center
+     * (275 wood + 100 stone, 4×4 — Castle Age; the foundation
+     * converts into a Town Center entity on completion) — see
+     * `push_build_house`.
+     */
+    push_build_town_center(entity: number, x: number, y: number): boolean;
+    /**
+     * Queue a Town Center build (Castle Age) — see
+     * `push_build_house_queued`.
+     */
+    push_build_town_center_queued(entity: number, x: number, y: number): boolean;
+    /**
      * Order a villager to raise a dragged line of Palisade Wall
      * segments (BLD-13) from the cell containing `(x0, y0)` to
      * the cell containing `(x1, y1)`: the sim expands the line
@@ -533,10 +545,21 @@ export class WasmSim {
      */
     push_research_at(building: number, tech_tag: number): boolean;
     /**
+     * Enqueue the Castle Age advancement at the Town Center
+     * (800 food, 200 gold, 160 s; needs 2 completed Feudal-Age
+     * buildings — TEC-01 Castle rung).
+     */
+    push_research_castle_age(): boolean;
+    /**
      * Enqueue the Feudal Age advancement at the Town Center
      * (500 food, 130 s; needs 2 completed Dark-Age buildings).
      */
     push_research_feudal(): boolean;
+    /**
+     * Enqueue Hand Cart at the Town Center (300 food, 200 wood,
+     * 55 s; Castle Age, requires Wheelbarrow — ECO-03).
+     */
+    push_research_hand_cart(): boolean;
     /**
      * Enqueue Loom at the Town Center (50 gold, 25 s). Returns
      * whether the order *would* be accepted against current state.
@@ -823,6 +846,8 @@ export interface InitOutput {
     readonly wasmsim_push_build_palisade_wall_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_stable: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_stable_queued: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_town_center: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_town_center_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_wall_line: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
     readonly wasmsim_push_build_watch_tower: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_watch_tower_queued: (a: number, b: number, c: number, d: number) => number;
@@ -843,7 +868,9 @@ export interface InitOutput {
     readonly wasmsim_push_repair: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_repair_queued: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_research_at: (a: number, b: number, c: number) => number;
+    readonly wasmsim_push_research_castle_age: (a: number) => number;
     readonly wasmsim_push_research_feudal: (a: number) => number;
+    readonly wasmsim_push_research_hand_cart: (a: number) => number;
     readonly wasmsim_push_research_loom: (a: number) => number;
     readonly wasmsim_push_research_tc_at: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_research_wheelbarrow: (a: number) => number;
