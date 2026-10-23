@@ -152,6 +152,19 @@ export class WasmSim {
      */
     idle_villagers_for(owner: number): Uint32Array;
     /**
+     * The live trade prices as a flat array in canonical
+     * commodity order, sell then buy per commodity:
+     * [sell_food, buy_food, sell_wood, buy_wood, sell_stone,
+     * buy_stone]. The client displays these verbatim — the fee
+     * math lives only in the sim (TRD-02).
+     */
+    market_prices(): Int32Array;
+    /**
+     * The match's global exchange rates (gold per 100) in
+     * canonical commodity order: [food, wood, stone] (TRD-02).
+     */
+    market_rates(): Int32Array;
+    /**
      * The match outcome (M5, Conquest): 0 ongoing, 1 victory,
      * 2 defeat — from the human player's seat. Always 0 in
      * Sandbox. The client polls this; the sim keeps ticking
@@ -326,6 +339,16 @@ export class WasmSim {
      */
     push_build_lumber_camp_queued(entity: number, x: number, y: number): boolean;
     /**
+     * Order a villager to build a Market (175 wood, 4×4; Feudal
+     * Age, requires a completed Mill — TRD-01) — see
+     * `push_build_house`.
+     */
+    push_build_market(entity: number, x: number, y: number): boolean;
+    /**
+     * Queue a Market build — see `push_build_house_queued`.
+     */
+    push_build_market_queued(entity: number, x: number, y: number): boolean;
+    /**
      * Order a villager to build a Mill (100 wood, 2×2 — M6; the
      * food drop-off, and the Farm prerequisite) — see
      * `push_build_house`.
@@ -440,6 +463,21 @@ export class WasmSim {
      * Queue a gather order behind the villager's current order.
      */
     push_gather_queued(entity: number, node: number): boolean;
+    /**
+     * Buy one lot (100) of a commodity at a completed Market
+     * (TRD-01..03): `resource_tag` is the `ResourceKind` tag
+     * (food 1, wood 2, stone 4 — gold is never a commodity).
+     * Returns false (and queues nothing) when the sim would
+     * reject the trade: wrong building, unfinished, or the
+     * owner's gold short of the current buy price.
+     */
+    push_market_buy(building: number, resource_tag: number): boolean;
+    /**
+     * Sell one lot (100) of a commodity at a completed Market
+     * (TRD-01..03) — the mirror of `push_market_buy`; false when
+     * the owner holds less than a full lot.
+     */
+    push_market_sell(building: number, resource_tag: number): boolean;
     /**
      * Order one entity to move to a world point.
      *
@@ -741,6 +779,8 @@ export interface InitOutput {
     readonly wasmsim_idle_military_for: (a: number, b: number) => [number, number];
     readonly wasmsim_idle_villagers: (a: number) => [number, number];
     readonly wasmsim_idle_villagers_for: (a: number, b: number) => [number, number];
+    readonly wasmsim_market_prices: (a: number) => [number, number];
+    readonly wasmsim_market_rates: (a: number) => [number, number];
     readonly wasmsim_match_state: (a: number) => number;
     readonly wasmsim_mode: (a: number) => number;
     readonly wasmsim_new: (a: number) => number;
@@ -771,6 +811,8 @@ export interface InitOutput {
     readonly wasmsim_push_build_house_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_lumber_camp: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_lumber_camp_queued: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_market: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_market_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_mill: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_mill_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_mining_camp: (a: number, b: number, c: number, d: number) => number;
@@ -791,6 +833,8 @@ export interface InitOutput {
     readonly wasmsim_push_force_deposit: (a: number, b: number) => number;
     readonly wasmsim_push_gather: (a: number, b: number, c: number) => void;
     readonly wasmsim_push_gather_queued: (a: number, b: number, c: number) => number;
+    readonly wasmsim_push_market_buy: (a: number, b: number, c: number) => number;
+    readonly wasmsim_push_market_sell: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_move: (a: number, b: number, c: number, d: number) => void;
     readonly wasmsim_push_move_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_noop: (a: number) => void;

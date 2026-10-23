@@ -315,6 +315,31 @@ export class WasmSim {
         return v1;
     }
     /**
+     * The live trade prices as a flat array in canonical
+     * commodity order, sell then buy per commodity:
+     * [sell_food, buy_food, sell_wood, buy_wood, sell_stone,
+     * buy_stone]. The client displays these verbatim — the fee
+     * math lives only in the sim (TRD-02).
+     * @returns {Int32Array}
+     */
+    market_prices() {
+        const ret = wasm.wasmsim_market_prices(this.__wbg_ptr);
+        var v1 = getArrayI32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * The match's global exchange rates (gold per 100) in
+     * canonical commodity order: [food, wood, stone] (TRD-02).
+     * @returns {Int32Array}
+     */
+    market_rates() {
+        const ret = wasm.wasmsim_market_rates(this.__wbg_ptr);
+        var v1 = getArrayI32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
      * The match outcome (M5, Conquest): 0 ongoing, 1 victory,
      * 2 defeat — from the human player's seat. Always 0 in
      * Sandbox. The client polls this; the sim keeps ticking
@@ -673,6 +698,30 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Order a villager to build a Market (175 wood, 4×4; Feudal
+     * Age, requires a completed Mill — TRD-01) — see
+     * `push_build_house`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_market(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_market(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Queue a Market build — see `push_build_house_queued`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_market_queued(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_market_queued(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
      * Order a villager to build a Mill (100 wood, 2×2 — M6; the
      * food drop-off, and the Farm prerequisite) — see
      * `push_build_house`.
@@ -915,6 +964,33 @@ export class WasmSim {
      */
     push_gather_queued(entity, node) {
         const ret = wasm.wasmsim_push_gather_queued(this.__wbg_ptr, entity, node);
+        return ret !== 0;
+    }
+    /**
+     * Buy one lot (100) of a commodity at a completed Market
+     * (TRD-01..03): `resource_tag` is the `ResourceKind` tag
+     * (food 1, wood 2, stone 4 — gold is never a commodity).
+     * Returns false (and queues nothing) when the sim would
+     * reject the trade: wrong building, unfinished, or the
+     * owner's gold short of the current buy price.
+     * @param {number} building
+     * @param {number} resource_tag
+     * @returns {boolean}
+     */
+    push_market_buy(building, resource_tag) {
+        const ret = wasm.wasmsim_push_market_buy(this.__wbg_ptr, building, resource_tag);
+        return ret !== 0;
+    }
+    /**
+     * Sell one lot (100) of a commodity at a completed Market
+     * (TRD-01..03) — the mirror of `push_market_buy`; false when
+     * the owner holds less than a full lot.
+     * @param {number} building
+     * @param {number} resource_tag
+     * @returns {boolean}
+     */
+    push_market_sell(building, resource_tag) {
+        const ret = wasm.wasmsim_push_market_sell(this.__wbg_ptr, building, resource_tag);
         return ret !== 0;
     }
     /**
@@ -1495,6 +1571,11 @@ function getArrayF64FromWasm0(ptr, len) {
     return getFloat64ArrayMemory0().subarray(ptr / 8, ptr / 8 + len);
 }
 
+function getArrayI32FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getInt32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
+}
+
 function getArrayU32FromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     return getUint32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
@@ -1511,6 +1592,14 @@ function getFloat64ArrayMemory0() {
         cachedFloat64ArrayMemory0 = new Float64Array(wasm.memory.buffer);
     }
     return cachedFloat64ArrayMemory0;
+}
+
+let cachedInt32ArrayMemory0 = null;
+function getInt32ArrayMemory0() {
+    if (cachedInt32ArrayMemory0 === null || cachedInt32ArrayMemory0.byteLength === 0) {
+        cachedInt32ArrayMemory0 = new Int32Array(wasm.memory.buffer);
+    }
+    return cachedInt32ArrayMemory0;
 }
 
 function getStringFromWasm0(ptr, len) {
@@ -1553,6 +1642,7 @@ function __wbg_finalize_init(instance, module) {
     wasm = instance.exports;
     wasmModule = module;
     cachedFloat64ArrayMemory0 = null;
+    cachedInt32ArrayMemory0 = null;
     cachedUint32ArrayMemory0 = null;
     cachedUint8ArrayMemory0 = null;
     wasm.__wbindgen_start();
