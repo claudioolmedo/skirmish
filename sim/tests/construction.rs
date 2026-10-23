@@ -23,13 +23,37 @@ fn villager(sim: &Sim, id: u32) -> &skirmish_sim::Entity {
 fn open_anchor_near_tc(sim: &Sim, entity: u32, kind: BuildingKind) -> (u32, u32) {
     let tc = sim.town_center();
     let (tcx, tcy) = sim.grid().world_to_cell(tc.pos_x, tc.pos_y);
-    for r in 2..=12i32 {
+    open_anchor_near_from(sim, entity, kind, tcx, tcy, 2)
+}
+
+/// The first anchor cell near an arbitrary center cell where `kind`
+/// may be built by `entity` right now, scanning rings outward from
+/// the center itself — the general form of the M7 ring scan above.
+fn open_anchor_near(
+    sim: &Sim,
+    entity: u32,
+    kind: BuildingKind,
+    cx: u32,
+    cy: u32,
+) -> (u32, u32) {
+    open_anchor_near_from(sim, entity, kind, cx, cy, 0)
+}
+
+fn open_anchor_near_from(
+    sim: &Sim,
+    entity: u32,
+    kind: BuildingKind,
+    cx: u32,
+    cy: u32,
+    r0: i32,
+) -> (u32, u32) {
+    for r in r0..=12i32 {
         for dy in -r..=r {
             for dx in -r..=r {
                 if dx.abs() != r && dy.abs() != r {
                     continue;
                 }
-                let (ax, ay) = (tcx as i32 + dx, tcy as i32 + dy);
+                let (ax, ay) = (cx as i32 + dx, cy as i32 + dy);
                 if ax < 0 || ay < 0 {
                     continue;
                 }
@@ -41,7 +65,7 @@ fn open_anchor_near_tc(sim: &Sim, entity: u32, kind: BuildingKind) -> (u32, u32)
             }
         }
     }
-    panic!("no buildable ground near the Town Center");
+    panic!("no buildable ground near ({cx}, {cy})");
 }
 
 /// A world point inside anchor cell `(cx, cy)` (its center), the way a
@@ -432,7 +456,25 @@ fn build_script_replays_bit_identically() {
                 }
                 20 => sim.push_command(Command::TrainVillager),
                 5000 if extra_build => {
-                    let (x, y) = anchor_point(&sim, 27, 33);
+                    // 2026-10-23 adaptation (AI-07, e7082d3): deer now
+                    // flee *approaches* as the reference game
+                    // documents, not only wounds — and in this seed's
+                    // world a deer legitimately settles on the old
+                    // hard-coded anchor (27, 33) before tick 5000.
+                    // Placement validation rejects any footprint a
+                    // living unit stands on (Gaia included — the M6
+                    // anti-entombment rule), so the order was
+                    // silently refused and the extra run replayed
+                    // the base run bit for bit, tripping the
+                    // assert_ne below. The script now derives its
+                    // ground by ring scan around the intended spot,
+                    // the way the rest of this suite has since M7;
+                    // the replay properties under test (identical
+                    // scripts bit-identical, an extra order changes
+                    // the stream) are unchanged.
+                    let (ax, ay) =
+                        open_anchor_near(&sim, 3, BuildingKind::House, 27, 33);
+                    let (x, y) = anchor_point(&sim, ax, ay);
                     sim.push_command(Command::Build {
                         entity: 3,
                         kind: BuildingKind::House,
