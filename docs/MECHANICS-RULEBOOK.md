@@ -1443,8 +1443,13 @@ in line of sight, then other enemy buildings there, Farms
 expressly excluded (this rule's never-auto-targeted clause).
 Walls, gates, rams and trebuchets do not exist in this roster.
 Acquisition is idle-only: an explicit order always wins, and
-villagers and scouts never auto-acquire. Tests: `combat::cmb08_*`.
-· *Status:* **MATCHES**.
+villagers never auto-acquire. Since the orders & stances package
+(2026-10-22, CMB-09/10/11) acquisition is stance-gated and also
+runs under attack-move and patrol orders — a Stand Ground unit
+(the starting Scout's default) acquires only inside its attack
+range, a No Attack unit never acquires, and Scouts acquire like
+any military unit within their stance. Tests: `combat::cmb08_*`,
+`orders_stances::*`. · *Status:* **MATCHES**.
 
 **CMB-09 — Stances govern pursuit, not damage.** Four stances:
 *Aggressive* — pursue targets indefinitely. *Defensive* — engage nearby
@@ -1455,25 +1460,93 @@ nothing; just stands). Defaults: military units Aggressive; the starting
 Scout is Stand Ground. (Exact leash distances are UNVERIFIED anywhere
 public — they are adopted tuning constants, recorded in the data table as
 design decisions, not reference facts.)
-*Source:* MECHANICS-STUDY §9.1; GAP 2.6. · *Impl:* no stance state
-exists yet. Two defaults are observable today: the starting Scout never
-auto-acquires (its Stand-Ground default), and other military
-auto-acquire only boars (a narrow Aggressive). · *Status:* **DIFFERS**.
+*Source:* MECHANICS-STUDY §9.1; GAP 2.6; wiki, "Unit stance" (Age of
+Empires II), fetched 2026-10-22 — Aggressive: "units move without
+limitation and will follow enemy targets in LOS and range until they
+are killed"; Defensive: "units attack any unit in their range, and
+will follow for a certain number of tiles before returning to their
+original position"; Stand Ground: "units do not move to attack but
+will attack any enemy in their range"; No Attack: "units do not
+automatically attack unless ordered" — and the same page's default:
+military units are created Aggressive. · *Impl:* shipped 2026-10-22
+(the orders & stances package). Per-unit stance state
+(`entity::Stance`, set by the `SetStance` command — military kinds
+only, either seat; a setting, never an order: it cancels nothing).
+Both starting Scouts spawn at Stand Ground; every other military
+unit defaults to Aggressive. The stance gates *automatic*
+engagement only: the acquisition chain (CMB-08) skips No Attack
+units outright and shrinks a Stand Ground unit's acquisition radius
+from LoS to its attack range; acquisition under attack-move/patrol
+orders runs through the same gates. Every auto-acquired or
+retaliation target is marked with its provenance (`attack_auto`),
+and the chase steps apply the stance to marked targets only —
+Stand Ground drops an out-of-range target instead of chasing,
+Defensive breaks off at the leash and walks back to its post,
+Aggressive chases without limit; an explicit order's target is
+followed to the death in every stance. Retaliation is gated the
+same way (No Attack never answers; Stand Ground answers only an
+in-range attacker). The Defensive post is set when the stance is
+issued and moves to the destination of each explicit move order;
+when a fight ends (target dead, gone, or leash-dropped) the
+standing-order step walks the unit back to its post. The leash is `combat::DEFENSIVE_LEASH` = 12 world units
+(3 tiles) — **tuned, UNVERIFIED**, per this rule's own note above:
+no public source pins the number, and it is recorded here as a
+design decision, not a reference fact (the same disclosure as the
+sheep capture radius, AI-06). One wiki clause is NOT modelled: a
+Defensive unit "will retreat a few tiles if a ranged unit outside
+their LOS attacks them" — no stance in this game flees an attacker
+(retaliation answers it instead); recorded as the entry's one
+unmodelled remainder. Tests: `orders_stances::*` (the stance
+matrix against a lured boar, the leash-and-return pair against an
+Aggressive control, the starting Scouts' point-blank fight).
+· *Status:* **MATCHES** (from DIFFERS).
 
 **CMB-10 — Attack-move.** Ordered to a point, units move there engaging
 every enemy encountered on the way (per stance acquisition, CMB-08),
 then hold at the destination.
-*Source:* GAP 2.4. Its exact reference semantics are UNVERIFIED in public
-documentation (MECHANICS-STUDY §9.1) — Skirmish II adopts the conventional
-definition stated here as a design decision. · *Impl:* an order-queue
-entry (SEL-12) flagging the move as engage-en-route; combat state handles
-the rest. · *Status:* **MISSING**.
+*Source:* GAP 2.4; the semantics are now evidenced — the official Age
+of Empires forums ("Wonky Attack Move", fetched 2026-10-22) state the
+expected behaviour: an enemy unit and/or building entering the unit's
+LoS is attacked, then the unit resumes toward its destination; the
+wiki's "Hotkey" page (fetched 2026-10-22) gives DE's dedicated
+attack-move key as R. The conventional definition this rule stated
+is the documented one. · *Impl:* shipped 2026-10-22. A standing
+order on the entity (`Command::AttackMove`, military units with an
+attack row only): the destination resolves exactly like a move
+(clamp + blocked-cell snap), the unit walks it while the CMB-08
+chain — stance-gated per CMB-09 — acquires en route; after each
+fight the standing-order step re-aims the walk, and on arrival the
+order completes and the unit holds. Any other order (Move, Attack,
+Gather, Stop, AutoExplore, patrol) ends it, and it ends any of
+theirs; it cancels AutoExplore like every manual order (SEL-17).
+Shift-queueable (SEL-12); a queued chain waits behind an active
+attack-move until it completes. Client: panel button + the R key
+(DE's binding) arm targeting; the destination click drops the
+ground click marker (INF-09a). Tests: `orders_stances::*`,
+`orders.smoke.mjs`. · *Status:* **MATCHES** (from MISSING).
 
 **CMB-11 — Patrol.** A patrol order loops the unit between two (or a
 chain of) points indefinitely, engaging enemies it encounters like
 attack-move, and returns to the patrol path after each engagement.
-*Source:* MECHANICS-STUDY §9.1; GAP 2.5. · *Impl:* a cycling waypoint list
-in the order record. · *Status:* **MISSING**.
+*Source:* MECHANICS-STUDY §9.1; GAP 2.5; GameFAQs, Age of Kings
+strategy guide (fetched 2026-10-22): the unit "moves back and
+forth between its current position and the designated point",
+attacking hostiles it detects, and "way points also work with
+patrols — hold down shift and designate few points". · *Impl:*
+shipped 2026-10-22. `Command::Patrol` installs the loop
+[current position, resolved destination] on the entity; the
+standing-order step advances legs (an unreachable leg is skipped,
+one A* attempt per tick — the combat chase's failure discipline),
+and the CMB-08 chain engages en route exactly as attack-move.
+A further patrol order on a patrolling unit APPENDS its point to
+the loop — directly, or through the queue (a patrol point queued
+behind an endless loop could never execute, so queueing one
+appends at once instead). The loop's legs render as waypoint
+pennants (INF-09) and a patrolling unit is never idle (SEL-09).
+Any other order ends the patrol; Stop ends it too. Client: panel
+button arms targeting; Shift keeps the arm so legs chain click by
+click. Tests: `orders_stances::*`, `orders.smoke.mjs`.
+· *Status:* **MATCHES** (from MISSING).
 
 **CMB-12 — Friendly fire only where flagged.** Ordinary attacks never
 damage friendly units. Attacks flagged as blast in the data (Mangonel
@@ -3056,7 +3129,17 @@ the TEC-06 patch machinery, with the TEC-06 / ECO-02 / TEC-08
 entries extended and ECO-14's Horse Collar clause corrected to
 update 169123's proportional top-up (independently amended the
 same day by the verification sweep above). No status moves:
-the totals stand.
+the totals stand.; updated 2026-10-22 (day run)
+for the orders & stances package: CMB-09 moves DIFFERS →
+MATCHES (the four stances shipped, stance-gated acquisition
+and chase; the Defensive leash stays recorded as a tuned
+constant, and the wiki's defensive-retreat clause is recorded
+in the entry as unmodelled) and CMB-10/CMB-11 move MISSING →
+MATCHES (attack-move and patrol shipped as standing orders;
+their semantics are now evidenced — the official forums'
+attack-move thread, the wiki's Hotkey page, the GameFAQs
+patrol guide, all fetched 2026-10-22 — superseding CMB-10's
+earlier UNVERIFIED note), recounted mechanically below).
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
@@ -3067,7 +3150,7 @@ the totals stand.
 | 5 | Movement, pathfinding & collision (MOV) | 12 | 4 | 3 | 5 |
 | 6 | Economy & drop-off (ECO) | 17 | 13 | 2 | 2 |
 | 7 | Buildings & placement (BLD) | 17 | 12 | 3 | 2 |
-| 8 | Combat & damage (CMB) | 16 | 11 | 2 | 3 |
+| 8 | Combat & damage (CMB) | 16 | 14 | 1 | 1 |
 | 9 | Projectiles & ballistics (PRJ) | 10 | 5 | 3 | 2 |
 | 10 | Unit classes & counters (CLS) | 8 | 5 | 0 | 3 |
 | 11 | Technologies & age advancement (TEC) | 11 | 5 | 3 | 3 |
@@ -3078,7 +3161,7 @@ the totals stand.
 | 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |
 | 17 | Multiplayer determinism (NET) | 11 | 4 | 5 | 2 |
 | 18 | Information rules (INF) | 13 | 8 | 3 | 2 |
-| | **Total** | **218** | **115** | **34** | **69** |
+| | **Total** | **218** | **118** | **33** | **67** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer
