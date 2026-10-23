@@ -229,7 +229,19 @@ fn reach_castle_ready(sim: &mut Sim) {
     raise_scan(sim, vils[2], BuildingKind::ArcheryRange);
     assert_eq!(sim.castle_building_count(OWNER_PLAYER), 2);
     // Farms: the builders start farming their own fields.
-    for i in 0..4 {
+    //
+    // Scenario repair (2026-10-22, the P1 landing diagnosis):
+    // this loop originally laid FOUR farms and the food bank
+    // below starved at 1300 — measured on the state dump, the
+    // berry bushes are fully eaten by the trio phase (the berry
+    // crew is never pulled off; it simply runs out, berry_left
+    // = 0 with farm_left = 0 and the stock frozen ~1090), so
+    // the bank had to come from farm food alone and 4 × 175 =
+    // 700 could not carry it. Six farms is the DE boom answer:
+    // 6 × 175 = 1050 of farm food behind the same waits, with
+    // the berry deposits made during the build phases (~400)
+    // as headroom. The waits themselves are unchanged.
+    for i in 0..6 {
         wait_stock(sim, ResourceKind::Wood, 85);
         raise_scan(sim, vils[i % vils.len()], BuildingKind::Farm);
     }
@@ -238,12 +250,22 @@ fn reach_castle_ready(sim: &mut Sim) {
     gather(sim, vils[4], gold);
     gather(sim, vils[5], gold);
     wait_stock(sim, ResourceKind::Gold, 210);
-    // Food past the click: farms + the berry tail. The miners go
-    // back to the woodline for the wood bank.
+    // Food past the click: the farms alone (the berries are
+    // gone — see above). The miners go back to THEIR farms —
+    // the 5th and 6th laid, in creation order — for the food
+    // bank, then to the woodline for the wood bank.
+    let farm_nodes: Vec<u32> = sim
+        .nodes()
+        .iter()
+        .filter(|n| n.kind == NodeKind::Farm)
+        .map(|n| n.id)
+        .collect();
+    gather(sim, vils[4], farm_nodes[4]);
+    gather(sim, vils[5], farm_nodes[5]);
+    wait_stock(sim, ResourceKind::Food, 1300);
     let tree = woodline_tree(sim);
     gather(sim, vils[4], tree);
     gather(sim, vils[5], tree);
-    wait_stock(sim, ResourceKind::Food, 1300);
     wait_stock(sim, ResourceKind::Wood, 500);
 }
 
@@ -339,7 +361,25 @@ fn castle_age_gates_cost_timing_and_the_bld11_step() {
 
     // Stock the click: farms for food, two hands on gold, then
     // everyone back to food (one on the berry tail, two farming).
+    //
+    // Scenario repair (2026-10-22, the P1 landing diagnosis): the
+    // serial builder (vils[2]) has been Idle since the Archery
+    // Range — a Build order clears the builder's gather
+    // assignment, and nothing re-tasked him. The farm loop then
+    // pulls BOTH woodcutters onto farms 1 and 2, so the third
+    // wait_stock(85) has zero wood income and starves forever
+    // (proven by state dump: wood frozen at 25, all three
+    // villagers Idle, farms 1–2 depleted at exactly 2 × 175
+    // food). A DE player never lets the woodline hit zero while
+    // banking farm wood: the builder goes back to the trees
+    // first, and chops through every wait below. The woodline
+    // is re-picked, not reused: the original `tree` handle is
+    // depleted by now, and a Gather order on a depleted node
+    // is rejected whole (econ.rs) — the player clicks the
+    // standing forest the crew has chained to, not the stump.
     let vils = my_villagers(&sim);
+    let live_tree = woodline_tree(&sim);
+    gather(&mut sim, vils[2], live_tree);
     for i in 0..3 {
         wait_stock(&mut sim, ResourceKind::Wood, 85);
         raise_scan(&mut sim, vils[i], BuildingKind::Farm);
@@ -537,8 +577,32 @@ fn town_center_buildable_in_castle_age() {
 
     // BLD-16: the standing foundation's ground is spoken for —
     // a second Town Center cannot anchor on the same cells.
+    //
+    // Assertion repair (2026-10-22, the P1 landing diagnosis —
+    // this line was unreachable while the scenario starved
+    // upstream, and as written it misreads the API): an order
+    // by the SAME owner at the foundation's own anchor is not
+    // a placement but a resume (SEL-11) — `can_build` rightly
+    // accepts it, the villager is sent to work the standing
+    // foundation. Pin that first so the refusal below cannot
+    // be a resume in disguise.
     let (x, y) = anchor_point(&sim, ax, ay);
-    assert!(!sim.can_build(2, BuildingKind::TownCenter, x, y));
+    assert!(
+        sim.can_build(2, BuildingKind::TownCenter, x, y),
+        "the same-owner order at the anchor is a resume (SEL-11)"
+    );
+    // The refusal itself: a FRESH placement whose 4x4 overlaps
+    // the foundation, anchored one cell off the footprint (so
+    // no resume applies), is rejected whole — a TC foundation
+    // blocks its cells like any building under construction
+    // (blocks_footprint), even though the converted TC entity
+    // never will (BLD-16 pass-through).
+    let (ox, oy) = if ax >= 1 { (ax - 1, ay) } else { (ax, ay - 1) };
+    let (x, y) = anchor_point(&sim, ox, oy);
+    assert!(
+        !sim.can_build(2, BuildingKind::TownCenter, x, y),
+        "a fresh Town Center cannot overlap the standing foundation"
+    );
 
     // Completion converts the record into a second TC entity.
     let two = run_until(&mut sim, 180_000, |s| {
@@ -553,7 +617,12 @@ fn town_center_buildable_in_castle_age() {
         .buildings()
         .iter()
         .all(|b| b.kind != BuildingKind::TownCenter));
-    assert_eq!(sim.population_cap_of(OWNER_PLAYER), 10);
+    // Population room follows living Town Centers: 5 (the
+    // starting TC) + 5 (the House raised on the way up) + 5
+    // (the new TC) = 15. (Expectation repair, 2026-10-22: as
+    // committed this read 10 — the Town Centers alone — and
+    // never ran; the scenario's own House counts too.)
+    assert_eq!(sim.population_cap_of(OWNER_PLAYER), 15);
 
     // The new Town Center works: it trains and researches.
     let first_tc = sim.town_center().id;
