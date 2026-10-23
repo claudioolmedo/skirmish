@@ -2474,13 +2474,27 @@ the boar disengages. (Whether a disengaged boar returns to its exact
 start point is UNVERIFIED; wandering near the disengage point is the
 adopted default.)
 *Source:* wiki, Early Economy (boar lure described step by step); Hunt
-(animal behavior classes). · *Impl:* animals get a minimal state machine
-in the combat phase (idle / flee / chase-attacker) driven by the same
-damage events as CMB-01; no separate animal engine. · *Status:*
-**DIFFERS** (M3, 2026-10-16: deer flee and boars charge their attacker,
-disengaging when it dies or escapes. One deliberate divergence from the
-adopted default above: a disengaged boar returns to its original post
-and heals there, instead of wandering near the disengage point.)
+(animal behavior classes — regular huntables "flee when approached by
+any non-Gaia unit and continue to do so if pursued", and Scout Cavalry
+herds them "in the direction of Town Centers and Mills"). · *Impl:*
+animals get a minimal state machine in the combat phase (idle / flee /
+chase-attacker) driven by the same damage events as CMB-01; no separate
+animal engine. Deer flight is triggered by damage AND by proximity
+(2026-10-22, Study #3 §c.1 — Hera pushes deer with his scout for
+minutes without firing a shot): the nearest mobile non-Gaia unit
+within ~2 tiles restarts the flee window from its current position,
+using the existing flee state only. The radius (8 wu) is a tuning
+constant — the wiki documents the behaviour but gives no number
+(UNVERIFIED numerically). Buildings never trigger it (the Town Center
+is an entity, excluded by kind — deer are pushed TOWARD it), and the
+boar half is unchanged: proximity neither scares nor aggros a boar. ·
+*Status:* **MATCHES** (2026-10-22: the "or approaches" half landed —
+deer flee approaches as well as wounds, pinned by
+sim/tests/deer_push.rs incl. the settles-beside-an-idle-unit and
+boar-ignores-proximity cases. One deliberate divergence remains on
+the boar half, against the UNVERIFIED adopted default above: a
+disengaged boar returns to its original post and heals there,
+instead of wandering near the disengage point.)
 
 **AI-08 — Predators hunt villagers.** Wolves and similar predators are
 Gaia combat units: idle until a unit (typically a villager) enters their
@@ -3139,7 +3153,13 @@ MATCHES (attack-move and patrol shipped as standing orders;
 their semantics are now evidenced — the official forums'
 attack-move thread, the wiki's Hotkey page, the GameFAQs
 patrol guide, all fetched 2026-10-22 — superseding CMB-10's
-earlier UNVERIFIED note), recounted mechanically below).
+earlier UNVERIFIED note), recounted mechanically below;
+updated 2026-10-22 for AI-07, deer pushing — proximity now
+triggers deer flight (Study #3 §c.1, the study's top finding;
+wiki, Hunt, documents the approach-flee, the ~2-tile radius
+stays an UNVERIFIED tuning constant), so §15 trades one
+DIFFERS for one MATCHES with the rule count unchanged,
+recounted mechanically below).
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
@@ -3157,11 +3177,11 @@ earlier UNVERIFIED note), recounted mechanically below).
 | 12 | Monks, conversion & relics (MNK) | 13 | 0 | 0 | 13 |
 | 13 | Trade, market & tribute (TRD) | 8 | 0 | 0 | 8 |
 | 14 | Garrison, transport & repair (GAR) | 10 | 0 | 0 | 10 |
-| 15 | AI behavior & difficulty (AI) | 9 | 5 | 2 | 2 |
+| 15 | AI behavior & difficulty (AI) | 9 | 6 | 1 | 2 |
 | 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |
 | 17 | Multiplayer determinism (NET) | 11 | 4 | 5 | 2 |
 | 18 | Information rules (INF) | 13 | 8 | 3 | 2 |
-| | **Total** | **218** | **118** | **33** | **67** |
+| | **Total** | **218** | **119** | **32** | **67** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer

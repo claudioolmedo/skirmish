@@ -85,6 +85,13 @@ const HIT_SLACK: I16F16 = I16F16::from_bits(49_152); // 0.75
 const CHASE_REPATH: I16F16 = I16F16::from_bits(196_608); // 3.0
 /// How long a deer keeps fleeing after a hit.
 const DEER_FLEE_TICKS: u64 = 90;
+/// How close a non-Gaia unit must come to restart a deer's flee
+/// window without touching it — AI-07's "or approaches" half, the
+/// deer push (Study #3 §c.1). ~2 tiles. The wiki documents the
+/// behaviour but gives no number (Hunt: "They flee when approached
+/// by any non-Gaia unit and continue to do so if pursued"), so the
+/// radius is a tuning constant (UNVERIFIED numerically).
+const DEER_PUSH_RANGE: I16F16 = I16F16::from_bits(524_288); // 8.0
 
 /// One projectile in flight (PRJ-01): spawn point, impact point,
 /// spawn/impact ticks, the intended target, and a snapshot of the
@@ -497,6 +504,7 @@ impl Sim {
     /// Deer flight: while the flee timer runs, keep a move order away
     /// from where the attack came from (re-issued when it completes).
     fn deer_ai(&mut self, idx: usize) {
+        self.deer_proximity_flee(idx);
         if self.tick >= self.entities[idx].flee_until || self.entities[idx].order.is_some() {
             return;
         }
@@ -512,6 +520,44 @@ impl Sim {
         let dest_x = crate::clamp_pos(px + ux * I16F16::from_num(10));
         let dest_y = crate::clamp_pos(py + uy * I16F16::from_num(10));
         self.set_move_order(idx, dest_x, dest_y);
+    }
+
+    /// Proximity flight (AI-07, 2026-10-22 — Study #3's top finding):
+    /// a deer also flees a unit that merely APPROACHES it, which is
+    /// what makes pushing deer toward the Town Center with a scout
+    /// work in DE (wiki, Hunt: regular huntables "flee when
+    /// approached by any non-Gaia unit and continue to do so if
+    /// pursued"; "units such as Scout Cavalry" herd them "in the
+    /// direction of Town Centers and Mills"). The nearest mobile
+    /// non-Gaia unit inside DEER_PUSH_RANGE restarts the same flee
+    /// window the damage path sets, away from that unit's current
+    /// position — no new state, no new pathing. Runs before the
+    /// flee check so a pursuer staying on the deer's tail keeps
+    /// refreshing the window (the push), while a unit that stops
+    /// nearby lets the deer settle once it has stepped out of
+    /// range. Buildings never scare deer (the Town Center is an
+    /// entity, excluded by kind — deer are pushed TOWARD it), and
+    /// Gaia animals never do (owner check), so boars and sheep are
+    /// untouched by construction.
+    fn deer_proximity_flee(&mut self, idx: usize) {
+        let e = &self.entities[idx];
+        let (px, py) = (e.pos_x, e.pos_y);
+        let mut best: Option<(I16F16, I16F16, I16F16)> = None; // (dist, x, y)
+        for u in &self.entities {
+            if u.dead || u.owner == OWNER_GAIA || u.kind == EntityKind::TownCenter {
+                continue;
+            }
+            let d = steer::vec_len(u.pos_x - px, u.pos_y - py);
+            if d <= DEER_PUSH_RANGE && best.map_or(true, |(bd, _, _)| d < bd) {
+                best = Some((d, u.pos_x, u.pos_y));
+            }
+        }
+        if let Some((_, tx, ty)) = best {
+            let e = &mut self.entities[idx];
+            e.flee_until = self.tick + DEER_FLEE_TICKS;
+            e.flee_from_x = tx;
+            e.flee_from_y = ty;
+        }
     }
 
     /// Auto-acquisition (CMB-08): idle military units of *any*
