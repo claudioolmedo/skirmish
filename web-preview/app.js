@@ -5384,7 +5384,7 @@ async function main() {
 
   // BLD-13: commit a dragged palisade line. A single semantic
   // command carries both endpoints (as cell-center world points);
-  // the sim expands the line with the same Bresenham the ghost
+  // the sim expands the line with the same supercover the ghost
   // previewed, then validates and charges each segment itself —
   // invalid or unaffordable cells are skipped (a gap, never a
   // partial charge) and one builder walks the line raising the

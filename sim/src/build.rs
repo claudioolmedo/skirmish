@@ -700,38 +700,84 @@ pub fn ring_cells(cell_x: u32, cell_y: u32, size: u32) -> Vec<(u32, u32)> {
 
 /// The cells of a dragged wall line (BLD-13), from anchor cell
 /// `(ax, ay)` to anchor cell `(bx, by)`, both endpoints included,
-/// in drag order: the classic integer Bresenham line between the
-/// two cells. Consecutive cells are 8-connected — a diagonal drag
-/// lays a diagonal staircase of segments touching at the corners,
-/// which is how the reference game's wall drag behaves (segments
-/// never leave gaps along the dragged line, and a purely
-/// horizontal/vertical drag is exactly that row/column). Pure
-/// integer math: the expansion of a `Command::BuildLine` is a
-/// deterministic function of its two endpoints, and the client's
-/// preview (`web-preview/play/walls.js`) runs the identical
-/// algorithm so the ghost never promises a different line.
+/// in drag order: the SUPERCOVER of the straight segment between
+/// the two cells' centers — every cell the segment passes
+/// through, walked with an exact-integer grid traversal
+/// (Amanatides–Woo). Consecutive cells are always edge-adjacent
+/// (4-connected), so the fence is one continuous line with no
+/// gaps and no corner-only joints; a purely horizontal/vertical
+/// drag is exactly that row/column, and the line always has
+/// `1 + |dx| + |dy|` cells. Where the segment passes exactly
+/// through a grid corner, the walk first fills the side cell
+/// with the smaller x (a function of the corner's unordered
+/// cell pair) and then takes the diagonal cell, so the cell
+/// SET is identical whichever end the player drags from.
+///
+/// This replaced the classic integer Bresenham on 2026-10-22
+/// (Claudio's live report: dragged segments did not follow one
+/// line — a shallow drag rendered as disjoint horizontal runs
+/// on different rows). Bresenham advances one cell per
+/// major-axis step (corner-only joints on any slope) and its
+/// tie-breaking is direction-dependent: a 13×13 endpoint scan
+/// found 9,096 of 28,392 drags producing a different set when
+/// reversed. DE's own rasterization is not published (see the
+/// rulebook's BLD-13 study); the supercover reproduces the
+/// documented observable properties — one straight line of
+/// 1×1 segments, pieces joined in line, diagonal corners
+/// blocked. Pure integer math: the expansion of a
+/// `Command::BuildLine` is a deterministic function of its two
+/// endpoints, and the client's preview
+/// (`web-preview/play/walls.js`) runs the identical algorithm
+/// so the ghost never promises a different line.
 pub fn wall_line_cells(ax: u32, ay: u32, bx: u32, by: u32) -> Vec<(u32, u32)> {
-    let (mut x, mut y) = (ax as i64, ay as i64);
     let (tx, ty) = (bx as i64, by as i64);
-    let dx = (tx - x).abs();
-    let sx: i64 = if x < tx { 1 } else { -1 };
-    let dy = -(ty - y).abs();
-    let sy: i64 = if y < ty { 1 } else { -1 };
-    let mut err = dx + dy;
-    let mut out = Vec::new();
-    loop {
-        out.push((x as u32, y as u32));
-        if x == tx && y == ty {
-            break;
-        }
-        let e2 = 2 * err;
-        if e2 >= dy {
-            err += dy;
+    let (mut x, mut y) = (ax as i64, ay as i64);
+    let adx = (tx - x).abs();
+    let ady = (ty - y).abs();
+    let sx: i64 = if tx > x { 1 } else { -1 };
+    let sy: i64 = if ty > y { 1 } else { -1 };
+    let mut i = 0i64; // x-steps taken
+    let mut j = 0i64; // y-steps taken
+    let mut out = vec![(x as u32, y as u32)];
+    while i < adx || j < ady {
+        if j >= ady {
             x += sx;
+            i += 1;
+            out.push((x as u32, y as u32));
+            continue;
         }
-        if e2 <= dx {
-            err += dx;
+        if i >= adx {
             y += sy;
+            j += 1;
+            out.push((x as u32, y as u32));
+            continue;
+        }
+        // The segment crosses the next vertical grid edge at a
+        // parameter proportional to (2i+1)/(2*adx) and the next
+        // horizontal edge at (2j+1)/(2*ady); compare exactly:
+        // (2i+1)*ady vs (2j+1)*adx.
+        let lhs = (2 * i + 1) * ady;
+        let rhs = (2 * j + 1) * adx;
+        if lhs < rhs {
+            x += sx;
+            i += 1;
+            out.push((x as u32, y as u32));
+        } else if lhs > rhs {
+            y += sy;
+            j += 1;
+            out.push((x as u32, y as u32));
+        } else {
+            // Exact corner: fill the canonical side cell (the
+            // candidate with the smaller x), then take the
+            // diagonal cell.
+            let fill_x = (x + sx).min(x);
+            let fill_y = if fill_x == x { y + sy } else { y };
+            out.push((fill_x as u32, fill_y as u32));
+            x += sx;
+            y += sy;
+            i += 1;
+            j += 1;
+            out.push((x as u32, y as u32));
         }
     }
     out
@@ -939,7 +985,10 @@ mod tests {
     }
 
     #[test]
-    fn wall_line_cells_is_a_bresenham_line() {
+    fn wall_line_cells_is_a_supercover_line() {
+        // The same golden vectors pin the client's expansion in
+        // web-preview/play/walls.test.mjs — ghost and sim expand
+        // identically, cell for cell.
         // A click (no drag) is one segment.
         assert_eq!(wall_line_cells(5, 5, 5, 5), vec![(5, 5)]);
         // Horizontal and vertical drags are exact rows/columns.
@@ -951,29 +1000,82 @@ mod tests {
             wall_line_cells(4, 1, 4, 4),
             vec![(4, 1), (4, 2), (4, 3), (4, 4)]
         );
-        // A 45° drag is a pure diagonal staircase (corner-touching
-        // segments, no gaps, no doubles).
+        // A 45° drag is an edge-connected staircase hugging the
+        // diagonal: each exact corner is filled on the canonical
+        // (smaller-x) side, so no two segments touch only at a
+        // corner.
         assert_eq!(
             wall_line_cells(1, 1, 4, 4),
-            vec![(1, 1), (2, 2), (3, 3), (4, 4)]
+            vec![(1, 1), (1, 2), (2, 2), (2, 3), (3, 3), (3, 4), (4, 4)]
         );
-        // A shallow slope hugs the ideal line: 8-connected steps,
-        // both endpoints included, one cell per column.
-        let line = wall_line_cells(0, 0, 7, 2);
-        assert_eq!(line.first(), Some(&(0, 0)));
-        assert_eq!(line.last(), Some(&(7, 2)));
-        assert_eq!(line.len(), 8);
-        for w in line.windows(2) {
-            let (dx, dy) = (
-                (w[1].0 as i64 - w[0].0 as i64).abs(),
-                (w[1].1 as i64 - w[0].1 as i64).abs(),
-            );
-            assert!(dx <= 1 && dy <= 1 && dx + dy >= 1, "8-connected step");
+        // A shallow slope: one continuous chain — each row run
+        // overlaps the next at the step column.
+        assert_eq!(
+            wall_line_cells(0, 0, 7, 2),
+            vec![
+                (0, 0),
+                (1, 0),
+                (2, 0),
+                (2, 1),
+                (3, 1),
+                (4, 1),
+                (5, 1),
+                (5, 2),
+                (6, 2),
+                (7, 2)
+            ]
+        );
+        // A steep slope: the transposed chain.
+        assert_eq!(
+            wall_line_cells(0, 0, 2, 7),
+            vec![
+                (0, 0),
+                (0, 1),
+                (0, 2),
+                (1, 2),
+                (1, 3),
+                (1, 4),
+                (1, 5),
+                (2, 5),
+                (2, 6),
+                (2, 7)
+            ]
+        );
+        // Claudio's reported drag shape (18, 2): the old
+        // Bresenham laid 19 segments in three disjoint row runs;
+        // the supercover lays 21 in one chain whose runs overlap
+        // at the corner fills (columns 4 and 13).
+        let line = wall_line_cells(0, 0, 18, 2);
+        assert_eq!(line.len(), 21);
+        assert!(line.contains(&(4, 1)) && line.contains(&(13, 2)));
+        // Properties over every drag in a 13×13 field: exact
+        // count 1 + |dx| + |dy|, every consecutive pair
+        // edge-adjacent (no gaps, no corner-only joints), and
+        // the reversed drag yields the identical SET.
+        for ax in 0..=12u32 {
+            for ay in 0..=12u32 {
+                for bx in 0..=12u32 {
+                    for by in 0..=12u32 {
+                        let cells = wall_line_cells(ax, ay, bx, by);
+                        assert_eq!(
+                            cells.len(),
+                            1 + (bx as i64 - ax as i64).unsigned_abs() as usize
+                                + (by as i64 - ay as i64).unsigned_abs() as usize
+                        );
+                        for w in cells.windows(2) {
+                            let step = (w[1].0 as i64 - w[0].0 as i64).abs()
+                                + (w[1].1 as i64 - w[0].1 as i64).abs();
+                            assert_eq!(step, 1, "edge-adjacent step");
+                        }
+                        let mut fwd = cells.clone();
+                        let mut rev = wall_line_cells(bx, by, ax, ay);
+                        fwd.sort();
+                        rev.sort();
+                        assert_eq!(fwd, rev, "reversed drag, same set");
+                    }
+                }
+            }
         }
-        // A steep slope: one cell per row.
-        let line = wall_line_cells(0, 0, 2, 7);
-        assert_eq!(line.len(), 8);
-        assert_eq!(line.last(), Some(&(2, 7)));
     }
 
     #[test]

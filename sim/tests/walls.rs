@@ -12,7 +12,7 @@
 
 use fixed::types::I16F16;
 use skirmish_sim::{
-    BuildingKind, Command, Entity, EntityKind, MatchMode, ResourceKind, Sim,
+    wall_line_cells, BuildingKind, Command, Entity, EntityKind, MatchMode, ResourceKind, Sim,
     OWNER_OPPONENT, OWNER_PLAYER,
 };
 
@@ -157,10 +157,14 @@ fn villager_walks_the_line_and_raises_every_segment() {
 }
 
 #[test]
-fn diagonal_line_lays_a_corner_touching_staircase() {
+fn diagonal_line_lays_an_edge_connected_staircase() {
     let mut sim = Sim::new(31);
     let vil = villagers_of(&sim, OWNER_PLAYER)[0];
-    // Find a diagonal run whose four cells all validate.
+    // The supercover of a (0,0)->(3,3) drag: seven cells, each
+    // exact corner filled on the canonical side. Find a start
+    // where all seven validate.
+    let want = wall_line_cells(0, 0, 3, 3);
+    assert_eq!(want.len(), 7);
     let tc = ent(&sim, find_id(&sim, OWNER_PLAYER, EntityKind::TownCenter));
     let (tcx, tcy) = sim.grid().world_to_cell(tc.pos_x, tc.pos_y);
     let mut start = None;
@@ -172,8 +176,8 @@ fn diagonal_line_lays_a_corner_touching_staircase() {
                     continue;
                 }
                 let (ax, ay) = (ax as u32, ay as u32);
-                let ok = (0..4).all(|i| {
-                    let (x, y) = cell_point(&sim, ax + i, ay + i);
+                let ok = want.iter().all(|&(cx, cy)| {
+                    let (x, y) = cell_point(&sim, ax + cx, ay + cy);
                     sim.can_build(vil, WALL, x, y)
                 });
                 if ok {
@@ -190,10 +194,16 @@ fn diagonal_line_lays_a_corner_touching_staircase() {
         .iter()
         .map(|b| (b.cell_x, b.cell_y))
         .collect();
-    assert_eq!(
-        cells,
-        vec![(ax, ay), (ax + 1, ay + 1), (ax + 2, ay + 2), (ax + 3, ay + 3)]
-    );
+    // The committed buildings are exactly the shared expansion
+    // (ghost == committed, end to end), in drag order.
+    let want_abs: Vec<(u32, u32)> = want.iter().map(|&(cx, cy)| (ax + cx, ay + cy)).collect();
+    assert_eq!(cells, want_abs);
+    // And the chain has no corner-only joints: every consecutive
+    // pair of segments is edge-adjacent — one continuous fence.
+    for w in cells.windows(2) {
+        let step = (w[1].0 as i64 - w[0].0 as i64).abs() + (w[1].1 as i64 - w[0].1 as i64).abs();
+        assert_eq!(step, 1, "edge-adjacent step");
+    }
 }
 
 #[test]

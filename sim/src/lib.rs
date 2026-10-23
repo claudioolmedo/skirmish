@@ -67,7 +67,7 @@ mod new_units_tests;
 mod wasm;
 
 pub use build::{
-    build_rate_thirds, repair_rate_hp_per_min, Building, BuildingKind,
+    build_rate_thirds, repair_rate_hp_per_min, wall_line_cells, Building, BuildingKind,
     ARCHERY_RANGE_BUILD_TICKS, ARCHERY_RANGE_WOOD_COST, BARRACKS_BUILD_TICKS,
     BARRACKS_WOOD_COST, BLACKSMITH_BUILD_TICKS, BLACKSMITH_WOOD_COST, BUILD_RANGE,
     CAMP_BUILD_TICKS, CAMP_WOOD_COST, FARM_BUILD_TICKS, FARM_WOOD_COST, FOOTPRINT_CELLS,

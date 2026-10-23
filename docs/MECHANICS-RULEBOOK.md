@@ -1197,27 +1197,61 @@ iterates every building, so segments repair at the standard
 rate; the destroy path frees the cell; entombment displacement
 (BLD-05) applies on completion; VIC-04 scores its wood cost.
 Placement is one semantic command carrying the drag's two
-endpoints (`Command::BuildLine`); the sim expands the line with
-an integer Bresenham (both endpoints included, 8-connected
-steps — a diagonal drag lays the corner-touching staircase DE
-lays) and runs each segment through the ordinary
-`validate_build`: an invalid cell is skipped (a gap, never a
-partial charge), an unaffordable tail truncates the line, a
-cell holding our own unfinished segment resumes it, and the
-BLD-16 Town Center reserve rejects segments exactly like any
-placement. One builder is assigned to the first effective
-segment and walks the rest as queued Build orders in drag
-order. The client's ghost preview runs the identical Bresenham
-(`web-preview/play/walls.js`) with the same per-segment budget
-walk, and shows the placeable segment count + total cost.
+endpoints (`Command::BuildLine`); the sim expands the line and
+runs each segment through the ordinary `validate_build`: an
+invalid cell is skipped (a gap, never a partial charge), an
+unaffordable tail truncates the line, a cell holding our own
+unfinished segment resumes it, and the BLD-16 Town Center
+reserve rejects segments exactly like any placement. One
+builder is assigned to the first effective segment and walks
+the rest as queued Build orders in drag order. The client's
+ghost preview runs the identical expansion
+(`web-preview/play/walls.js`, pinned to the sim's by shared
+golden vectors in both test suites) with the same per-segment
+budget walk, and shows the placeable segment count + total
+cost, so preview and committed line are cell-identical.
+*The line rule (studied 2026-10-22, Claudio's live report —
+dragged segments landed scattered across different rows
+instead of following one line):* DE walls are 1×1 grid
+segments laid by dragging (wiki, "Building (Age of Empires
+II)" master table, retrieved 2026-10-22), and DE's pieces
+visually join into one fence when connected in line — a
+piece's appearance "changes to a middle section wall piece if
+that piece is joined by another Palisade Wall piece/Palisade
+Gate on the opposite sides" (wiki, "Palisade Wall (Age of
+Empires II)", Trivia, retrieved 2026-10-22). Completed
+diagonal connections block passage: the Siege Engineers'
+Aoe2Sheet knowledge base (community documentation, retrieved
+2026-10-22) records that units can pass through a diagonal
+gate's corners only "while they are being constructed" —
+the exception is the construction phase, not the finished
+line. DE's exact drag rasterization (which cells a given
+non-axis drag commits, and its tie-breaking) is published in
+no source found — **UNVERIFIED**; the expansion shipped
+first (integer Bresenham, one cell per major-axis step) was
+therefore an unsourced guess, and it failed the observable
+properties above: on a shallow drag its segments formed
+disjoint horizontal runs on different rows joined only at
+corner points (a 13×13 endpoint scan also found 9,096 of
+28,392 drags producing a different set when reversed). The
+expansion is now the SUPERCOVER of the segment between the
+two anchor cells' centers — every cell the segment passes
+through, walked by an exact-integer grid traversal: consecutive
+segments are always edge-adjacent (one continuous fence on one
+line, no gaps, no corner-only joints), an exact corner
+crossing fills the canonically-chosen side cell (smaller x —
+a function of the corner's unordered cell pair), so a
+reversed drag commits the identical SET, and the line always
+has 1 + |dx| + |dy| segments. Diagonal movement between two
+corner-touching blockers placed as separate clicks remains
+governed by the movement system's corner rules, as with any
+buildings — a dragged line itself no longer contains
+corner-only joints.
 Panel: the villager military page's last slot (S) — DE keeps
 walls on the military page's defensive row after the production
 buildings; no authoritative text source fixes DE's exact
 five-wide slot, so the position follows that documented grouping
-in our three-wide compression. Diagonal segments touch only at
-corners: diagonal movement between two corner-touching blockers
-is governed by the movement system's corner rules, as with any
-buildings.
+in our three-wide compression.
 *Divergence:* DE gives palisade foundations 0 melee armor; the
 sim applies the standing armor (2/5) during construction for
 every kind (BLD-05 models only the foundation HP line), so
@@ -3162,11 +3196,18 @@ triggers deer flight (Study #3 §c.1, the study's top finding;
 wiki, Hunt, documents the approach-flee, the ~2-tile radius
 stays an UNVERIFIED tuning constant), so §15 trades one
 DIFFERS for one MATCHES with the rule count unchanged,
-recounted mechanically below); updated 2026-10-22 for the
+recounted mechanically below; updated 2026-10-22 for the
 ECO-14 round-up follow-up — the shipped Horse Collar sweep
 now rounds its proportional top-up up to whole food, per the
 inference flagged in the entry (a half farm gains 19, not
-18.75), with no status move.
+18.75), with no status move; updated 2026-10-22 for the
+BLD-13 wall-line correction — the drag expansion moved from
+integer Bresenham to the supercover line (Claudio's live
+report: segments scattered across rows instead of following
+one line; the studied rule and sources are recorded in the
+entry, DE's exact rasterization marked UNVERIFIED). No
+status change: BLD-13 stays DIFFERS on the missing gates,
+and the totals stand).
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
