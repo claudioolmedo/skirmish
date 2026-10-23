@@ -633,6 +633,8 @@ impl WasmSim {
             });
         }
         ok
+    }
+
     /// Order a villager to build an additional Town Center
     /// (275 wood + 100 stone, 4×4 — Castle Age; the foundation
     /// converts into a Town Center entity on completion) — see
@@ -765,6 +767,8 @@ impl WasmSim {
     /// `push_build_house_queued`.
     pub fn push_build_palisade_wall_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
         self.push_build_queued(entity, BuildingKind::PalisadeWall, x, y)
+    }
+
     /// Queue a Town Center build (Castle Age) — see
     /// `push_build_house_queued`.
     pub fn push_build_town_center_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
