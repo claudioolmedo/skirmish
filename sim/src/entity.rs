@@ -67,13 +67,27 @@ pub enum EntityKind {
     /// Feudal Age — the base of the Skirmisher line, and the
     /// game's first minimum-range weapon (PRJ-08).
     Skirmisher,
+    /// Castle Age heavy cavalry (Castle P2): the Stable's shock
+    /// unit — the Knight line's base tier.
+    Knight,
+    /// The Scout Cavalry line's Castle tier (Castle P2): never
+    /// trained directly — existing Scout Cavalry become Light
+    /// Cavalry when the Stable upgrade completes, and later Scout
+    /// production spawns as Light Cavalry while the upgrade
+    /// stands (the CLS-03 pattern, one line over).
+    LightCavalry,
+    /// Castle Age mounted archer (Castle P2): Archery Range —
+    /// carries both the ARCHERY and CAVALRY classes, so foot
+    /// counters and cavalry counters both apply to it.
+    CavalryArcher,
 }
 
 impl EntityKind {
     /// Stable tag for the state hash and the WASM kind array:
     /// 0 = villager, 1 = town center, 2 = scout cavalry, 3 = militia,
     /// 4 = archer, 5 = sheep, 6 = boar, 7 = deer, 8 = man-at-arms (M6),
-    /// 9 = spearman, 10 = skirmisher.
+    /// 9 = spearman, 10 = skirmisher, 11 = knight, 12 = light cavalry,
+    /// 13 = cavalry archer (Castle P2).
     pub fn tag(self) -> u8 {
         match self {
             EntityKind::Villager => 0,
@@ -87,6 +101,9 @@ impl EntityKind {
             EntityKind::ManAtArms => 8,
             EntityKind::Spearman => 9,
             EntityKind::Skirmisher => 10,
+            EntityKind::Knight => 11,
+            EntityKind::LightCavalry => 12,
+            EntityKind::CavalryArcher => 13,
         }
     }
 
@@ -104,6 +121,9 @@ impl EntityKind {
             8 => Some(EntityKind::ManAtArms),
             9 => Some(EntityKind::Spearman),
             10 => Some(EntityKind::Skirmisher),
+            11 => Some(EntityKind::Knight),
+            12 => Some(EntityKind::LightCavalry),
+            13 => Some(EntityKind::CavalryArcher),
             _ => None,
         }
     }
@@ -115,6 +135,7 @@ impl EntityKind {
     pub fn train_age(self) -> crate::tech::Age {
         match self {
             EntityKind::Spearman | EntityKind::Skirmisher => crate::tech::Age::Feudal,
+            EntityKind::Knight | EntityKind::CavalryArcher => crate::tech::Age::Castle,
             _ => crate::tech::Age::Dark,
         }
     }
@@ -138,13 +159,17 @@ impl EntityKind {
                 | EntityKind::ManAtArms
                 | EntityKind::Spearman
                 | EntityKind::Skirmisher
+                | EntityKind::Knight
+                | EntityKind::LightCavalry
+                | EntityKind::CavalryArcher
         )
     }
 
     /// Kinds a production building can train *somewhere* (M6: the
     /// per-building relation is `BuildingKind::trains` — Militia at
     /// the Barracks, Archers at the Archery Range since M6, Scout
-    /// Cavalry at the Stable).
+    /// Cavalry at the Stable). Light Cavalry is absent on purpose:
+    /// like Man-at-Arms it is an upgrade-only kind (Castle P2).
     pub fn is_trainable(self) -> bool {
         matches!(
             self,
@@ -153,6 +178,8 @@ impl EntityKind {
                 | EntityKind::ScoutCavalry
                 | EntityKind::Spearman
                 | EntityKind::Skirmisher
+                | EntityKind::Knight
+                | EntityKind::CavalryArcher
         )
     }
 
@@ -168,6 +195,9 @@ impl EntityKind {
                 | EntityKind::ManAtArms
                 | EntityKind::Spearman
                 | EntityKind::Skirmisher
+                | EntityKind::Knight
+                | EntityKind::LightCavalry
+                | EntityKind::CavalryArcher
         )
     }
 }

@@ -38,6 +38,17 @@
 //!   exactly as it resolved Wheelbarrow's 10 → 13 / 35 → 44) and
 //!   villager speed +10%, a second percentage layer on the
 //!   Wheelbarrow scalar in `Sim::stats_for` (TEC-06).
+//! - Light Cavalry (Castle P2): 150 food / 50 gold, 45 s, Stable,
+//!   Castle Age (wiki, "Light Cavalry (Age of Empires II)"
+//!   infobox). Effect: the CLS-03 pattern on the scout line —
+//!   living Scout Cavalry convert in place (HP kept), later Scout
+//!   production spawns as Light Cavalry.
+//! - Husbandry (Castle P2): 150 food, 40 s, Stable, Castle Age
+//!   (wiki, "Husbandry (Age of Empires II)" — cost/time per its
+//!   changelog: patch 4.8 set 150 F / 40 s). Effect: mounted units
+//!   +10% speed — a class-keyed percentage patch in
+//!   `Sim::stats_for` (any row carrying the CAVALRY class), the
+//!   same scalar shape as Wheelbarrow's.
 //! - Fletching: 100 food / 50 gold, 30 s — archers +1 attack and
 //!   +1 range (study §8; the study's Castle/Tower/Town Center lines
 //!   have no targets in M6 — no such attacks exist yet).
@@ -114,11 +125,16 @@ pub enum TechId {
     /// Town Center, Castle: villager carry + speed, the second
     /// link of the ECO-03 chain (requires Wheelbarrow, TEC-07).
     HandCart,
+    /// Stable, Castle: the Scout Cavalry line upgrades to Light
+    /// Cavalry (Castle P2 — the CLS-03 pattern on the scout line).
+    LightCavalry,
+    /// Stable, Castle: mounted units +10% speed (Castle P2).
+    Husbandry,
 }
 
 impl TechId {
     /// All technologies, in tag order.
-    pub const ALL: [TechId; 9] = [
+    pub const ALL: [TechId; 11] = [
         TechId::Loom,
         TechId::FeudalAge,
         TechId::Fletching,
@@ -128,11 +144,13 @@ impl TechId {
         TechId::Wheelbarrow,
         TechId::CastleAge,
         TechId::HandCart,
+        TechId::LightCavalry,
+        TechId::Husbandry,
     ];
 
     /// Stable tag: 0 loom, 1 feudal age, 2 fletching, 3 scale mail,
     /// 4 padded archer armor, 5 man-at-arms, 6 wheelbarrow,
-    /// 7 castle age, 8 hand cart.
+    /// 7 castle age, 8 hand cart, 9 light cavalry, 10 husbandry.
     pub fn tag(self) -> u8 {
         match self {
             TechId::Loom => 0,
@@ -144,6 +162,8 @@ impl TechId {
             TechId::Wheelbarrow => 6,
             TechId::CastleAge => 7,
             TechId::HandCart => 8,
+            TechId::LightCavalry => 9,
+            TechId::Husbandry => 10,
         }
     }
 
@@ -170,6 +190,7 @@ impl TechId {
                 TechHost::Building(BuildingKind::Blacksmith)
             }
             TechId::ManAtArms => TechHost::Building(BuildingKind::Barracks),
+            TechId::LightCavalry | TechId::Husbandry => TechHost::Building(BuildingKind::Stable),
         }
     }
 
@@ -180,7 +201,7 @@ impl TechId {
         match self {
             TechId::Loom | TechId::FeudalAge => Age::Dark,
             TechId::CastleAge => Age::Feudal,
-            TechId::HandCart => Age::Castle,
+            TechId::HandCart | TechId::LightCavalry | TechId::Husbandry => Age::Castle,
             _ => Age::Feudal,
         }
     }
@@ -213,6 +234,8 @@ impl TechId {
             TechId::Wheelbarrow => 4500,
             TechId::CastleAge => 9600,
             TechId::HandCart => 3300,
+            TechId::LightCavalry => 2700,
+            TechId::Husbandry => 2400,
         }
     }
 
@@ -229,6 +252,8 @@ impl TechId {
             TechId::Wheelbarrow => (175, 50, 0, 0),
             TechId::CastleAge => (800, 0, 200, 0),
             TechId::HandCart => (300, 200, 0, 0),
+            TechId::LightCavalry => (150, 0, 50, 0),
+            TechId::Husbandry => (150, 0, 0, 0),
         }
     }
 }
@@ -342,6 +367,25 @@ mod tests {
         assert_eq!(TechId::HandCart.age_required(), Age::Castle);
         assert_eq!(TechId::HandCart.requires_tech(), Some(TechId::Wheelbarrow));
         assert_eq!(TechId::Wheelbarrow.requires_tech(), None);
+        // Light Cavalry upgrade: 150 F / 50 G, 45 s, Stable,
+        // Castle Age (Castle P2; wiki, "Light Cavalry").
+        assert_eq!(TechId::LightCavalry.cost(), (150, 0, 50, 0));
+        assert_eq!(TechId::LightCavalry.ticks(), 45 * 60);
+        assert_eq!(
+            TechId::LightCavalry.host(),
+            TechHost::Building(BuildingKind::Stable)
+        );
+        assert_eq!(TechId::LightCavalry.age_required(), Age::Castle);
+        assert_eq!(TechId::LightCavalry.requires_tech(), None);
+        // Husbandry: 150 F, 40 s, Stable, Castle Age (Castle P2;
+        // wiki, "Husbandry" — patch 4.8 values).
+        assert_eq!(TechId::Husbandry.cost(), (150, 0, 0, 0));
+        assert_eq!(TechId::Husbandry.ticks(), 40 * 60);
+        assert_eq!(
+            TechId::Husbandry.host(),
+            TechHost::Building(BuildingKind::Stable)
+        );
+        assert_eq!(TechId::Husbandry.age_required(), Age::Castle);
         // Age tags: 0 Dark, 1 Feudal, 2 Castle.
         assert_eq!(Age::Dark.tag(), 0);
         assert_eq!(Age::Feudal.tag(), 1);
@@ -351,7 +395,7 @@ mod tests {
         for t in TechId::ALL {
             assert_eq!(TechId::from_tag(t.tag()), Some(t));
         }
-        assert_eq!(TechId::from_tag(9), None);
+        assert_eq!(TechId::from_tag(11), None);
     }
 
     #[test]

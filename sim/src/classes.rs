@@ -41,6 +41,12 @@ pub const SHIP: u8 = 14;
 /// membership beside ARCHERY — the class future anti-skirmisher
 /// rows (e.g. the Genitour's) target.
 pub const SKIRMISHER: u8 = 15;
+/// Monks / missionaries: the target class of the scout line's
+/// documented anti-Monk attack bonuses (Scout Cavalry +6, Light
+/// Cavalry +10 — Castle P2). No monk unit exists until the
+/// Monastery slice (Castle P5); the class ships now so those
+/// bonuses are data, exactly like ELEPHANT and SHIP before it.
+pub const MONK: u8 = 16;
 
 /// Membership bit for one class id.
 pub const fn bit(class: u8) -> u64 {

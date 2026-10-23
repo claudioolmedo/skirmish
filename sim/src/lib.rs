@@ -1139,6 +1139,17 @@ impl Sim {
             s.speed = I16F16::from_bits(6_772); // 1.55 tiles/s (absolute tile scale)
             s.los = I16F16::from_bits(1_572_864); // 24 (6 tiles)
         }
+        // CLS-04's Castle step (Castle P2): the scout line gains
+        // +2 LoS per Age advance (wiki, "Light Cavalry": "The
+        // entire Scout Cavalry line has the same Line of Sight.
+        // They all receive a +2 bonus to their Line of Sight upon
+        // every Age advance") — a Scout Cavalry still unupgraded
+        // in the Castle Age sees 8, matching its Light Cavalry
+        // successor's base row. Attack and speed do not step
+        // again (the Feudal row carries over).
+        if kind == EntityKind::ScoutCavalry && p.age >= Age::Castle {
+            s.los = I16F16::from_bits(2_097_152); // 32 (8 tiles)
+        }
         // BLD-11 for the Town Center entity: its armor follows
         // the owner's Age column (study §5: melee 3/4/5, pierce
         // 5/6/7 in Dark/Feudal/Castle; HP is 2400 at every Age).
@@ -1194,6 +1205,13 @@ impl Sim {
             s.attacks = units::SKIRMISHER_FLETCHING_ATTACKS;
             s.range_max += I16F16::from_bits(262_144); // +4.0 (1 tile)
         }
+        // The Cavalry Archer takes Fletching with the archer line
+        // (Castle P2 — the wiki's Cavalry Archer article lists
+        // Fletching among its attack technologies), own table.
+        if kind == EntityKind::CavalryArcher && p.techs & TechId::Fletching.bit() != 0 {
+            s.attacks = units::CAVALRY_ARCHER_FLETCHING_ATTACKS;
+            s.range_max += I16F16::from_bits(262_144); // +4.0 (1 tile)
+        }
         // Scale Mail Armor (study §8): infantry +1/+1 armor — the
         // Spearman is infantry and takes the patch with the line.
         if matches!(
@@ -1206,12 +1224,32 @@ impl Sim {
         }
         // Padded Archer Armor (study §8): archers +1/+1 armor —
         // the Skirmisher is a foot archer of the Archery class
-        // and takes the patch with the line.
-        if matches!(kind, EntityKind::Archer | EntityKind::Skirmisher)
-            && p.techs & TechId::PaddedArcherArmor.bit() != 0
+        // and takes the patch with the line. The Cavalry Archer
+        // joins them (Castle P2 — its wiki article lists Padded
+        // Archer Armor among its armor technologies).
+        if matches!(
+            kind,
+            EntityKind::Archer | EntityKind::Skirmisher | EntityKind::CavalryArcher
+        ) && p.techs & TechId::PaddedArcherArmor.bit() != 0
         {
             s.armor_melee += 1;
             s.armor_pierce += 1;
+        }
+        // Husbandry (Castle P2): mounted units +10% speed (wiki,
+        // "Husbandry (Age of Empires II)"). A class-keyed
+        // percentage patch in the Wheelbarrow scalar's shape: any
+        // row carrying the CAVALRY class takes it — Scout Cavalry,
+        // Light Cavalry, Knight, Cavalry Archer today; camels and
+        // elephants when they exist (TEC-06: effects key on class
+        // membership, never on unit identity). It multiplies the
+        // layered row, so a Feudal scout's CLS-04 speed is scaled
+        // too, and it lands exactly once per unit (the reference's
+        // own double-application to Light Cavalry was removed in
+        // The Conquerors — wiki, "Light Cavalry", Changelog).
+        if s.classes & crate::classes::bit(crate::classes::CAVALRY) != 0
+            && p.techs & TechId::Husbandry.bit() != 0
+        {
+            s.speed = I16F16::from_bits(((s.speed.to_bits() as i64 * 11) / 10) as i32);
         }
         s
     }
@@ -1988,6 +2026,14 @@ impl Sim {
                 for e in &mut self.entities {
                     if e.owner == owner && e.kind == EntityKind::Militia && !e.dead {
                         e.kind = EntityKind::ManAtArms;
+                    }
+                }
+            }
+            TechId::LightCavalry => {
+                self.players[slot].techs |= tech.bit();
+                for e in &mut self.entities {
+                    if e.owner == owner && e.kind == EntityKind::ScoutCavalry && !e.dead {
+                        e.kind = EntityKind::LightCavalry;
                     }
                 }
             }
@@ -4002,6 +4048,17 @@ impl Sim {
         // entry still says Militia; the spawn is a Man-at-Arms.
         let kind = if kind == EntityKind::Militia && self.has_tech(owner, TechId::ManAtArms) {
             EntityKind::ManAtArms
+        } else {
+            kind
+        };
+        // The same pattern on the scout line (Castle P2): with
+        // the Light Cavalry upgrade researched, new Scout Cavalry
+        // production spawns as Light Cavalry — the queue entry
+        // still says Scout Cavalry.
+        let kind = if kind == EntityKind::ScoutCavalry
+            && self.has_tech(owner, TechId::LightCavalry)
+        {
+            EntityKind::LightCavalry
         } else {
             kind
         };

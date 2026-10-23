@@ -111,6 +111,9 @@ pub fn spec(kind: EntityKind) -> &'static UnitSpec {
         EntityKind::ManAtArms => &MAN_AT_ARMS,
         EntityKind::Spearman => &SPEARMAN,
         EntityKind::Skirmisher => &SKIRMISHER,
+        EntityKind::Knight => &KNIGHT,
+        EntityKind::LightCavalry => &LIGHT_CAVALRY,
+        EntityKind::CavalryArcher => &CAVALRY_ARCHER,
     }
 }
 
@@ -123,8 +126,18 @@ pub(crate) static ARCHER_FLETCHING_ATTACKS: &[(u8, i32)] =
 
 /// The Scout Cavalry's Feudal attack table (M6, CLS-04: attack
 /// 3 → 5 on reaching the Feudal Age; speed and LoS are patched
-/// separately — see `Sim::stats_for`).
-pub(crate) static SCOUT_FEUDAL_ATTACKS: &[(u8, i32)] = &[(cls::MELEE, 5)];
+/// separately — see `Sim::stats_for`). The +6 vs Monks bonus rides
+/// along unchanged — it is age-independent in the reference (the
+/// Light Cavalry upgrade later adds +4 more on top of it; wiki,
+/// "Light Cavalry (Age of Empires II)", Changelog).
+pub(crate) static SCOUT_FEUDAL_ATTACKS: &[(u8, i32)] = &[(cls::MELEE, 5), (cls::MONK, 6)];
+
+/// The Cavalry Archer's attack table with Fletching researched
+/// (Castle P2): the tech's +1 pierce; the wiki's Cavalry Archer
+/// article lists Fletching among the unit's attack technologies.
+/// The +1 range is patched separately — see `Sim::stats_for`.
+pub(crate) static CAVALRY_ARCHER_FLETCHING_ATTACKS: &[(u8, i32)] =
+    &[(cls::PIERCE, 7), (cls::SPEARMAN, 2)];
 
 /// The Skirmisher's attack table with Fletching researched: the
 /// tech's +1 pierce (the wiki's Fletching article names Skirmishers
@@ -193,9 +206,14 @@ static TOWN_CENTER: UnitSpec = UnitSpec {
 /// LoS 4. (Feudal row — attack 5, speed 1.55, LoS 6 — arrives with
 /// ages, as age-keyed row patches per CLS-04.) Cost 80 F is documented
 /// but the Scout is not trainable in M3: one spawns with the start.
+/// The +6 vs Monks bonus (Castle P2) is the line's documented
+/// anti-Monk row — the Light Cavalry article's changelog records
+/// the Castle upgrade granting "+4 anti-Monk attack" over the
+/// Scout's existing bonus on the way to the Light Cavalry's +10;
+/// no monk kind exists yet, so the row is data (see cls::MONK).
 static SCOUT_CAVALRY: UnitSpec = UnitSpec {
     max_hp: 45,
-    attacks: &[(cls::MELEE, 3)],
+    attacks: &[(cls::MELEE, 3), (cls::MONK, 6)],
     armor_melee: 0,
     armor_pierce: 2,
     classes: cls::mask(&[cls::CAVALRY]),
@@ -404,6 +422,114 @@ static SKIRMISHER: UnitSpec = UnitSpec {
     train_ticks: 1560, // 26 s (update 153015 — see above)
 };
 
+/// Knight (Castle P2; wiki "Knight (Age of Empires II)" infobox,
+/// fetched 2026-10-22): HP 100, attack 10 melee with NO bonus rows
+/// (the Knight's identity is raw stats), armor 2/2, RoF 1.8 s,
+/// speed 1.35, LoS 4. Cost 60 F / 75 G, train 30 s, Stable,
+/// Castle Age (`EntityKind::train_age`). Attack delay adopts the
+/// Scout Cavalry's 41 ticks — the sim's only other cavalry row;
+/// the wiki article pins no separate Knight frame value in its
+/// text, so the adoption is recorded here as a design constant.
+static KNIGHT: UnitSpec = UnitSpec {
+    max_hp: 100,
+    attacks: &[(cls::MELEE, 10)],
+    armor_melee: 2,
+    armor_pierce: 2,
+    classes: cls::mask(&[cls::CAVALRY]),
+    range_max: I16F16::ZERO,
+    range_min: I16F16::ZERO,
+    reload_ticks: 108, // 1.8 s
+    attack_delay_ticks: 41, // adopted from the Scout row (see above)
+    accuracy: 100,
+    projectile_speed: I16F16::ZERO,
+    scatter: I16F16::ZERO,
+    speed: I16F16::from_bits(5_898), // 1.35 tiles/s (absolute scale, see header)
+    los: I16F16::from_bits(1_048_576), // 16 (4 tiles)
+    radius: I16F16::from_bits(65_536),
+    carcass_food: 0,
+    carcass_decay_bits: 0,
+    food_cost: 60,
+    wood_cost: 0,
+    gold_cost: 75,
+    train_ticks: 1800, // 30 s
+};
+
+/// Light Cavalry (Castle P2; wiki "Light Cavalry (Age of Empires
+/// II)" infobox, fetched 2026-10-22): HP 60, attack 7 melee with
+/// +10 vs Monks, armor 0/2, RoF 2.0 s, speed 1.5, LoS 8 — the
+/// scout line's Castle-Age sight (the whole line gains +2 LoS per
+/// Age advance; the Scout's Castle step is patched in
+/// `Sim::stats_for` beside CLS-04). The row's cost fields carry
+/// the documented train cost (80 F, 30 s) but are inert: Light
+/// Cavalry is never trained directly — it is produced by the
+/// Stable upgrade (TechId::LightCavalry), and post-upgrade Scout
+/// production spawns this row instead. Attack delay adopts the
+/// Scout row's 41 ticks, like the Knight's. The documented
+/// conversion resistance has no system to attach to yet (no
+/// conversion exists in the sim — Monastery slice, Castle P5)
+/// and is recorded in the rulebook, not faked here.
+static LIGHT_CAVALRY: UnitSpec = UnitSpec {
+    max_hp: 60,
+    attacks: &[(cls::MELEE, 7), (cls::MONK, 10)],
+    armor_melee: 0,
+    armor_pierce: 2,
+    classes: cls::mask(&[cls::CAVALRY]),
+    range_max: I16F16::ZERO,
+    range_min: I16F16::ZERO,
+    reload_ticks: 120, // 2.0 s
+    attack_delay_ticks: 41, // adopted from the Scout row (see above)
+    accuracy: 100,
+    projectile_speed: I16F16::ZERO,
+    scatter: I16F16::ZERO,
+    speed: I16F16::from_bits(6_554), // 1.5 tiles/s (absolute scale, see header)
+    los: I16F16::from_bits(2_097_152), // 32 (8 tiles, Castle Age)
+    radius: I16F16::from_bits(65_536),
+    carcass_food: 0,
+    carcass_decay_bits: 0,
+    food_cost: 80,
+    wood_cost: 0,
+    gold_cost: 0,
+    train_ticks: 1800, // inert (upgrade-only kind); mirrors Scout Cavalry
+};
+
+/// Cavalry Archer (Castle P2; wiki "Cavalry Archer (Age of
+/// Empires II)" infobox, fetched 2026-10-22): HP 50, attack
+/// 6 pierce with +2 vs Spearmen, armor 0/0, range 4 (min 0),
+/// RoF 2.0 s, accuracy 50%, speed 1.4, LoS 5. Cost 40 W / 60 G,
+/// train 37 s, Archery Range, Castle Age. Membership is ARCHERY
+/// + CAVALRY — the wiki: "in terms of attack bonus against them
+/// they count as Cavalry Archers, Archers, and Cavalry" (the
+/// Cavalry-Archer membership class itself has no consumer yet).
+/// Attack delay is a recorded design constant: the wiki article
+/// calls the unit "hindered somewhat by their high attack delay"
+/// without pinning a number in its text, so 30 ticks (0.5 s —
+/// above the foot Archer's 21) stands in, marked UNVERIFIED.
+/// Projectile speed and scatter reuse the Archer rows' recorded
+/// design constants (PRJ-02/PRJ-04).
+static CAVALRY_ARCHER: UnitSpec = UnitSpec {
+    max_hp: 50,
+    attacks: &[(cls::PIERCE, 6), (cls::SPEARMAN, 2)],
+    armor_melee: 0,
+    armor_pierce: 0,
+    classes: cls::mask(&[cls::ARCHERY, cls::CAVALRY]),
+    range_max: I16F16::from_bits(1_048_576), // 16 (4 tiles)
+    range_min: I16F16::ZERO,
+    reload_ticks: 120, // 2.0 s
+    attack_delay_ticks: 30, // UNVERIFIED design constant (see above)
+    accuracy: 50,
+    projectile_speed: I16F16::from_bits(32_768), // 0.5 — design constant (see Archer)
+    scatter: I16F16::from_bits(131_072),          // 2.0 — design constant (see Archer)
+    speed: I16F16::from_bits(6_117),             // 1.4 tiles/s (absolute scale, see header)
+    los: I16F16::from_bits(1_310_720),            // 20 (5 tiles)
+    radius: I16F16::from_bits(65_536),
+    carcass_food: 0,
+    carcass_decay_bits: 0,
+    food_cost: 0,
+    wood_cost: 40,
+    gold_cost: 60,
+    train_ticks: 2220, // 37 s
+};
+
 /// Sheep (OPENING-SPEC §2.2): 100 food, speed 0.7, worked at the
 /// shepherd rate once dead. Line of Sight 2 tiles: the wiki's
 /// Herdable animal article gives the per-animal breakdown ("Cows,
@@ -572,6 +698,35 @@ mod tests {
         assert_eq!(sk.range_min, I16F16::from_bits(262_144));
         assert_eq!((sk.reload_ticks, sk.accuracy, sk.train_ticks), (180, 90, 1560));
         assert_eq!((sk.food_cost, sk.wood_cost, sk.gold_cost), (25, 35, 0));
+        // Knight (Castle P2, wiki infobox): HP 100, attack 10 with
+        // no bonus rows, armor 2/2, RoF 1.8 s, train 30 s at
+        // 60 F / 75 G.
+        let kn = spec(EntityKind::Knight);
+        assert_eq!((kn.max_hp, kn.armor_melee, kn.armor_pierce), (100, 2, 2));
+        assert_eq!(kn.attacks, &[(cls::MELEE, 10)]);
+        assert_eq!((kn.reload_ticks, kn.train_ticks), (108, 1800));
+        assert_eq!((kn.food_cost, kn.wood_cost, kn.gold_cost), (60, 0, 75));
+        // Light Cavalry (Castle P2, wiki infobox): HP 60, attack 7
+        // +10 vs Monks, armor 0/2, LoS 8 tiles (Castle).
+        let lc = spec(EntityKind::LightCavalry);
+        assert_eq!((lc.max_hp, lc.armor_melee, lc.armor_pierce), (60, 0, 2));
+        assert_eq!(lc.attacks, &[(cls::MELEE, 7), (cls::MONK, 10)]);
+        assert_eq!(lc.los, I16F16::from_bits(2_097_152));
+        // The Scout's documented anti-Monk row (+6 — the Light
+        // Cavalry changelog's "+4 on upgrade" lands on +10).
+        let sc = spec(EntityKind::ScoutCavalry);
+        assert_eq!(sc.attacks, &[(cls::MELEE, 3), (cls::MONK, 6)]);
+        // Cavalry Archer (Castle P2, wiki infobox): HP 50, attack
+        // 6 +2 vs Spearmen, range 4, accuracy 50, train 37 s at
+        // 40 W / 60 G; membership ARCHERY + CAVALRY.
+        let ca = spec(EntityKind::CavalryArcher);
+        assert_eq!((ca.max_hp, ca.armor_melee, ca.armor_pierce), (50, 0, 0));
+        assert_eq!(ca.attacks, &[(cls::PIERCE, 6), (cls::SPEARMAN, 2)]);
+        assert_eq!(ca.range_max, I16F16::from_bits(1_048_576));
+        assert_eq!((ca.reload_ticks, ca.accuracy, ca.train_ticks), (120, 50, 2220));
+        assert_eq!((ca.food_cost, ca.wood_cost, ca.gold_cost), (0, 40, 60));
+        assert_ne!(ca.classes & cls::bit(cls::ARCHERY), 0);
+        assert_ne!(ca.classes & cls::bit(cls::CAVALRY), 0);
         // Every other row keeps a zero dead zone (PRJ-08).
         for k in [
             EntityKind::Villager,
@@ -580,6 +735,9 @@ mod tests {
             EntityKind::Archer,
             EntityKind::ManAtArms,
             EntityKind::Spearman,
+            EntityKind::Knight,
+            EntityKind::LightCavalry,
+            EntityKind::CavalryArcher,
         ] {
             assert_eq!(spec(k).range_min, I16F16::ZERO);
         }
@@ -597,6 +755,9 @@ mod tests {
         assert!((ratio(EntityKind::Spearman) - 1.00 / 0.80).abs() < 0.001);
         assert!((ratio(EntityKind::Skirmisher) - 0.96 / 0.80).abs() < 0.001);
         assert!((ratio(EntityKind::ScoutCavalry) - 1.20 / 0.80).abs() < 0.001);
+        assert!((ratio(EntityKind::Knight) - 1.35 / 0.80).abs() < 0.001);
+        assert!((ratio(EntityKind::LightCavalry) - 1.50 / 0.80).abs() < 0.001);
+        assert!((ratio(EntityKind::CavalryArcher) - 1.40 / 0.80).abs() < 0.001);
         assert!((ratio(EntityKind::Sheep) - 0.70 / 0.80).abs() < 0.001);
         // The scout is the fastest unit on the field.
         assert!(spec(EntityKind::ScoutCavalry).speed > spec(EntityKind::Archer).speed);

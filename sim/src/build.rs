@@ -292,7 +292,9 @@ impl BuildingKind {
     /// Skirmisher (Archery Range) join their buildings' rosters;
     /// their Feudal availability is the unit-level half of the
     /// rule (`EntityKind::train_age`) — the Barracks itself
-    /// stands from the Dark Age.
+    /// stands from the Dark Age. Castle P2 adds the Knight
+    /// (Stable) and the Cavalry Archer (Archery Range) the same
+    /// way, gated by their Castle `train_age`.
     pub fn trains(self, kind: EntityKind) -> bool {
         matches!(
             (self, kind),
@@ -300,7 +302,9 @@ impl BuildingKind {
                 | (BuildingKind::Barracks, EntityKind::Spearman)
                 | (BuildingKind::ArcheryRange, EntityKind::Archer)
                 | (BuildingKind::ArcheryRange, EntityKind::Skirmisher)
+                | (BuildingKind::ArcheryRange, EntityKind::CavalryArcher)
                 | (BuildingKind::Stable, EntityKind::ScoutCavalry)
+                | (BuildingKind::Stable, EntityKind::Knight)
         )
     }
 
