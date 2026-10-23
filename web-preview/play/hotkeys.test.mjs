@@ -49,7 +49,7 @@ test('military page: slot letters Q W E / A, Back on C, silent aliases', () => {
 });
 
 test('an armed page swallows its letters; other letters fall through', () => {
-  assert.equal(build({ page: 'eco', code: 'KeyD' }).id, 'build-9', 'D places the Town Center (Castle P1)');
+  assert.equal(build({ page: 'eco', code: 'KeyD' }).id, 'build-10', 'D places the Town Center (Castle P1)');
   assert.equal(build({ page: 'mil', code: 'KeyR' }), null);
   assert.deepEqual(build({ code: 'KeyE' }), { type: 'button', id: 'repair' }, 'unarmed E is Repair (BLD-17, the root panel’s third slot)');
   assert.equal(build({ code: 'KeyS' }), null, 'unarmed S still pans');
@@ -170,7 +170,7 @@ test('go-to: Ctrl+letter jumps to a building type, in any context', () => {
 
 test('every building sits on exactly one page, in grid order, with a working badge', () => {
   assert.deepEqual([...PAGE_KINDS.eco, ...PAGE_KINDS.mil].sort((a, b) => a - b),
-    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], 'the two pages partition the ten buildings');
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 'the two pages partition the eleven buildings');
   // Grid (render) order: the slots run Q W E / A S / ... in order.
   assert.deepEqual(PAGE_KINDS.eco, [0, 4, 1, 3, 5, 10], 'economic: House, Mill, Farm, Lumber, Mining, Town Center');
   assert.deepEqual(PAGE_KINDS.mil, [2, 6, 7, 8, 9], 'military: Barracks, Range, Stable, Blacksmith, Palisade Wall');

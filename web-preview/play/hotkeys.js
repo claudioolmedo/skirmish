@@ -90,7 +90,7 @@ export const PAGE_KEYS = {
     KeyE: 1, KeyF: 1, // Farm — slot 2 (alias F)
     KeyA: 3, KeyR: 3, KeyZ: 3, // Lumber Camp — slot 3 (aliases R, Z)
     KeyS: 5, KeyG: 5, // Mining Camp — slot 4 (alias: its go-to G)
-    KeyD: 9, // Town Center — slot 5 (Castle Age)
+    KeyD: 10, // Town Center — slot 5 (Castle Age)
     KeyC: 'back', // Back — the last slot
   },
   mil: {
