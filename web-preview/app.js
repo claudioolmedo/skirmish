@@ -5089,7 +5089,7 @@ async function main() {
     // The order acknowledgement's voice: military if any soldier
     // is among the ordered, else the villager's — one cue per
     // order, however many units it names (generated audio).
-    const orderCue = () => (targets.some((id) => [2, 3, 4, 8].includes(st.kinds[id]))
+    const orderCue = () => (targets.some((id) => [2, 3, 4, 8, 9, 10].includes(st.kinds[id]))
       ? 'orderMilitary'
       : targets.some((id) => st.kinds[id] === 0) ? 'orderVillager' : null);
     // The enemy Town Center (M5): entityAt skips Town Centers, so
@@ -5261,7 +5261,7 @@ async function main() {
     const kind = orderArm;
     if (!kind) return;
     const st = entityState();
-    const targets = selectedUnits().filter((id) => [2, 3, 4, 8].includes(st.kinds[id]));
+    const targets = selectedUnits().filter((id) => [2, 3, 4, 8, 9, 10].includes(st.kinds[id]));
     if (!targets.length) {
       orderArm = null;
       flash(t('flash.orderSelectMil'));
@@ -7627,7 +7627,7 @@ function runCommandButton(id, times = 1) {
     const st = entityState();
     let any = false;
     for (const uid of selectedUnits()) {
-      if (![2, 3, 4, 8].includes(st.kinds[uid])) continue;
+      if (![2, 3, 4, 8, 9, 10].includes(st.kinds[uid])) continue;
       if (issue({ t: 'stance', e: uid, s: tag })) any = true;
     }
     if (any) playAudioCue('click');
@@ -7783,7 +7783,7 @@ function renderCommands() {
   // selected military unit shares, read from the sim's
   // per-entity tags (-1 when the selection is mixed).
   const selMil = context === 'units'
-    ? selUnits.filter((id) => [2, 3, 4, 8].includes(st.kinds[id])) : [];
+    ? selUnits.filter((id) => [2, 3, 4, 8, 9, 10].includes(st.kinds[id])) : [];
   const milStanceTags = selMil.length ? sim.entity_stance() : null;
   const milStance = selMil.length
     ? (selMil.every((id) => milStanceTags[id] === milStanceTags[selMil[0]])
