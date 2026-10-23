@@ -1,0 +1,7 @@
+=== determinism ===
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 44.41s
+--- determinism exit 0
+=== castle_age ===
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8879.32s
+--- castle_age exit 0
+LANE_DONE

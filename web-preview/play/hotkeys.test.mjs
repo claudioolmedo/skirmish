@@ -21,7 +21,7 @@ test('pure grid: Q then Q raises a House — the letter is the slot', () => {
   assert.deepEqual(build({ page: 'eco', code: 'KeyE' }), { type: 'button', id: 'build-1' });
 });
 
-test('economic page: slot letters Q W E / A S, Back on C, silent aliases', () => {
+test('economic page: slot letters Q W E / A S D, Back on C, silent aliases', () => {
   const eco = (code) => build({ page: 'eco', code });
   assert.equal(eco('KeyQ').id, 'build-0', 'House on Q (slot 0)');
   assert.equal(eco('KeyW').id, 'build-4', 'Mill on W (slot 1)');
@@ -33,6 +33,8 @@ test('economic page: slot letters Q W E / A S, Back on C, silent aliases', () =>
   assert.equal(eco('KeyZ').id, 'build-3', 'Lumber Camp alias Z');
   assert.equal(eco('KeyS').id, 'build-5', 'Mining Camp on S (slot 4)');
   assert.equal(eco('KeyG').id, 'build-5', 'Mining Camp alias G (its go-to)');
+  assert.equal(eco('KeyD').id, 'build-12', 'Market on D (slot 5 — DE\u2019s own build letter for it)');
+  assert.equal(eco('KeyM').id, 'build-12', 'Market alias M (its go-to)');
   assert.deepEqual(eco('KeyC'), { type: 'button', id: 'page-back' }, 'Back on C (last slot)');
 });
 
@@ -49,7 +51,9 @@ test('military page: slot letters Q W E / A, Back on C, silent aliases', () => {
 });
 
 test('an armed page swallows its letters; other letters fall through', () => {
-  assert.equal(build({ page: 'eco', code: 'KeyD' }).id, 'build-10', 'D places the Town Center (Castle P1)');
+  assert.equal(build({ page: 'eco', code: 'KeyD' }).id, 'build-12', 'D places the Market');
+  assert.equal(build({ page: 'eco', code: 'KeyT' }).id, 'build-13', 'T places the Town Center (Castle P1)');
+  assert.equal(build({ page: 'eco', code: 'KeyU' }), null, 'U still pans');
   assert.equal(build({ page: 'mil', code: 'KeyR' }), null);
   assert.deepEqual(build({ code: 'KeyE' }), { type: 'button', id: 'repair' }, 'unarmed E is Repair (BLD-17, the root panel’s third slot)');
   assert.equal(build({ code: 'KeyS' }), null, 'unarmed S still pans');
@@ -122,6 +126,19 @@ test('Town Center letters are DE’s own: Villager Q, Loom A, Feudal W, Wheelbar
   assert.equal(badgeForButton({ context: 'range', id: 'train-skirmisher', index: 1 }), 'W');
 });
 
+test('market panel: sells on Q W E, buys on A S D (TRD-01..03)', () => {
+  const at = (code) => resolveHotkey({ context: 'market', page: null, code });
+  assert.deepEqual(at('KeyQ'), { type: 'button', id: 'trade-sell-food' });
+  assert.deepEqual(at('KeyW'), { type: 'button', id: 'trade-sell-wood' });
+  assert.deepEqual(at('KeyE'), { type: 'button', id: 'trade-sell-stone' });
+  assert.deepEqual(at('KeyA'), { type: 'button', id: 'trade-buy-food' });
+  assert.deepEqual(at('KeyS'), { type: 'button', id: 'trade-buy-wood' });
+  assert.deepEqual(at('KeyD'), { type: 'button', id: 'trade-buy-stone' });
+  assert.equal(at('KeyZ'), null, 'no third row on the market panel');
+  assert.equal(badgeForButton({ context: 'market', id: 'trade-sell-food' }), 'Q');
+  assert.equal(badgeForButton({ context: 'market', id: 'trade-buy-stone' }), 'D');
+});
+
 test('no hotkeys in empty / enemy contexts — WASD keeps panning', () => {
   for (const context of ['none', 'foe']) {
     assert.equal(resolveHotkey({ context, page: null, code: 'KeyQ' }), null, context);
@@ -160,6 +177,7 @@ test('go-to: Ctrl+letter jumps to a building type, in any context', () => {
   assert.deepEqual(go('KeyS'), { type: 'goto', kind: 8, all: false }, 'Blacksmith');
   assert.deepEqual(go('KeyB'), { type: 'goto', kind: 2, all: false }, 'Barracks');
   assert.deepEqual(go('KeyA'), { type: 'goto', kind: 6, all: false }, 'Archery Range');
+  assert.deepEqual(go('KeyM'), { type: 'goto', kind: 12, all: false }, 'Market');
   assert.deepEqual(go('KeyZ', { shift: true }), { type: 'goto', kind: 3, all: true },
     'Ctrl+Shift selects all of the type');
   assert.equal(go('KeyL'), null, 'Ctrl+L (Stable) is the browser\u2019s — never bound');
@@ -170,10 +188,11 @@ test('go-to: Ctrl+letter jumps to a building type, in any context', () => {
 
 test('every building sits on exactly one page, in grid order, with a working badge', () => {
   assert.deepEqual([...PAGE_KINDS.eco, ...PAGE_KINDS.mil].sort((a, b) => a - b),
-    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 'the two pages partition the eleven buildings');
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], 'the two pages partition the fourteen buildings');
   // Grid (render) order: the slots run Q W E / A S / ... in order.
-  assert.deepEqual(PAGE_KINDS.eco, [0, 4, 1, 3, 5, 10], 'economic: House, Mill, Farm, Lumber, Mining, Town Center');
-  assert.deepEqual(PAGE_KINDS.mil, [2, 6, 7, 8, 9], 'military: Barracks, Range, Stable, Blacksmith, Palisade Wall');
+  assert.deepEqual(PAGE_KINDS.eco, [0, 4, 1, 3, 5, 12, 13], 'economic: House, Mill, Farm, Lumber, Mining, Market, Town Center');
+  assert.deepEqual(PAGE_KINDS.mil, [2, 6, 7, 8, 9, 10, 11],
+    'military: Barracks, Range, Stable, Blacksmith, Palisade Wall, Watch Tower, Outpost');
   for (const [page, kinds] of Object.entries(PAGE_KINDS)) {
     for (const kind of kinds) {
       assert.equal(PAGE_FOR_KIND[kind], page);

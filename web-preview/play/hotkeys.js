@@ -22,12 +22,15 @@
 //    arms repair targeting, run through the same button handler
 //    as its panel click. On an armed page the buttons sit in grid order —
 //    economic: House Q, Mill W, Farm E, Lumber Camp A, Mining
-//    Camp S, Back C; military: Barracks Q, Archery Range W,
-//    Stable E, Blacksmith A, Palisade Wall S, Back C. (The
-//    Palisade Wall sits where DE puts it: the military page's
-//    defensive row, after the production buildings and the
-//    Blacksmith — in our three-wide compression that is the
-//    next free slot, S.) A building may ALSO answer
+//    Camp S, Market D, Back C; military: Barracks Q, Archery
+//    Range W, Stable E, Blacksmith A, Palisade Wall S, Back C.
+//    (The Palisade Wall sits where DE puts it: the military
+//    page's defensive row, after the production buildings and
+//    the Blacksmith — in our three-wide compression that is the
+//    next free slot, S. The Market's D is DE's own build letter
+//    for it — the wiki's DE build table — and in our compressed
+//    grid it is also simply the next free slot, after the
+//    Mining Camp.) A building may ALSO answer
 //    to a silent alias (its go-to letter, mostly) — but ONLY
 //    where the alias collides with no button's slot letter in
 //    the same context. Two historical aliases died by that rule
@@ -62,19 +65,20 @@
 
 // kind: 0 House, 1 Farm, 2 Barracks, 3 Lumber Camp, 4 Mill,
 //       5 Mining Camp, 6 Archery Range, 7 Stable, 8 Blacksmith,
-//       9 Palisade Wall.
+//       9 Palisade Wall, 10 Watch Tower, 11 Outpost (BLD-18),
+//       12 Market (BLD-19; the tags are the sim's — append only).
 // PAGE_KINDS is the pages' GRID (render) order: slot 0 first.
 // Kind 9 (Town Center, Castle Age) closes the economic page —
 // DE's villager panel keeps the TC with the economic buildings.
 export const PAGE_KINDS = {
-  eco: [0, 4, 1, 3, 5, 10],
-  mil: [2, 6, 7, 8, 9],
+  eco: [0, 4, 1, 3, 5, 12, 13],
+  mil: [2, 6, 7, 8, 9, 10, 11],
 };
 
 /** Which build page a building kind belongs to ('eco' | 'mil'). */
 export const PAGE_FOR_KIND = {
-  0: 'eco', 1: 'eco', 3: 'eco', 4: 'eco', 5: 'eco', 10: 'eco',
-  2: 'mil', 6: 'mil', 7: 'mil', 8: 'mil', 9: 'mil',
+  0: 'eco', 1: 'eco', 3: 'eco', 4: 'eco', 5: 'eco', 12: 'eco', 13: 'eco',
+  2: 'mil', 6: 'mil', 7: 'mil', 8: 'mil', 9: 'mil', 10: 'mil', 11: 'mil',
 };
 
 /**
@@ -90,7 +94,8 @@ export const PAGE_KEYS = {
     KeyE: 1, KeyF: 1, // Farm — slot 2 (alias F)
     KeyA: 3, KeyR: 3, KeyZ: 3, // Lumber Camp — slot 3 (aliases R, Z)
     KeyS: 5, KeyG: 5, // Mining Camp — slot 4 (alias: its go-to G)
-    KeyD: 10, // Town Center — slot 5 (Castle Age)
+    KeyD: 12, KeyM: 12, // Market — slot 5 (D is DE's build letter; alias M, its go-to)
+    KeyT: 13, // Town Center — slot 6 (Castle Age; T, its initial — D is the Market's)
     KeyC: 'back', // Back — the last slot
   },
   mil: {
@@ -99,14 +104,16 @@ export const PAGE_KEYS = {
     KeyE: 7, KeyL: 7, // Stable — slot 2 (alias L)
     KeyA: 8, // Blacksmith — slot 3
     KeyS: 9, // Palisade Wall — slot 4 (the defensive row, after the Blacksmith)
+    KeyD: 10, // Watch Tower — slot 5 (BLD-18; next free slot — S is the wall's)
+    KeyZ: 11, // Outpost — slot 6 (BLD-18)
     KeyC: 'back', // Back — the last slot
   },
 };
 
 /** The one letter shown as a button's key badge on an armed page. */
 export const PAGE_BADGE = {
-  eco: { 0: 'Q', 4: 'W', 1: 'E', 3: 'A', 5: 'S', 10: 'D' },
-  mil: { 2: 'Q', 6: 'W', 7: 'E', 8: 'A', 9: 'S' },
+  eco: { 0: 'Q', 4: 'W', 1: 'E', 3: 'A', 5: 'S', 12: 'D', 13: 'T' },
+  mil: { 2: 'Q', 6: 'W', 7: 'E', 8: 'A', 9: 'S', 10: 'D', 11: 'Z' },
 };
 
 /** Panel contexts whose buttons answer to position keys, in order. */
@@ -129,6 +136,10 @@ export const PANEL_BUTTONS = {
   lumbercamp: ['research-doublebit'],
   mill: ['research-horsecollar'],
   miningcamp: ['research-goldmining', 'research-stonemining'],
+  // TRD-01..03: the Market's exchange, in render order — the
+  // sell row over the buy row, food / wood / stone across.
+  market: ['trade-sell-food', 'trade-sell-wood', 'trade-sell-stone',
+    'trade-buy-food', 'trade-buy-wood', 'trade-buy-stone'],
 };
 
 // The slot letter of every button on every building panel
@@ -223,6 +234,16 @@ export const PANEL_KEYS = {
     'research-goldmining': ['KeyQ', 'Q'],
     'research-stonemining': ['KeyW', 'W'],
   },
+  // The Market (TRD-01..03): the plain positional grid over the
+  // two rendered rows — sells Q W E, buys A S D.
+  market: {
+    'trade-sell-food': ['KeyQ', 'Q'],
+    'trade-sell-wood': ['KeyW', 'W'],
+    'trade-sell-stone': ['KeyE', 'E'],
+    'trade-buy-food': ['KeyA', 'A'],
+    'trade-buy-wood': ['KeyS', 'S'],
+    'trade-buy-stone': ['KeyD', 'D'],
+  },
 };
 export const POSITION_CODES = ['KeyQ', 'KeyW', 'KeyE'];
 export const POSITION_LETTERS = ['Q', 'W', 'E'];
@@ -235,6 +256,7 @@ export const GOTO_KEYS = {
   KeyS: 8, // Blacksmith
   KeyB: 2, // Barracks
   KeyA: 6, // Archery Range
+  KeyM: 12, // Market (the wiki's DE go-to table)
   // Ctrl+L (Stable on the wiki's table) stays unbound: the
   // browser reserves Ctrl+L for its address bar and the key
   // never reaches the page (hotkeys.test.mjs pins this).

@@ -1,0 +1,16 @@
+=== melee_building ===
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 144.10s
+--- melee_building exit 0
+=== movement ===
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 21.41s
+--- movement exit 0
+=== ord_stances ===
+error: no test target named `ord_stances` in `skirmish-sim` package
+--- ord_stances exit 101
+=== pace ===
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 24.34s
+--- pace exit 0
+=== repair ===
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 411.45s
+--- repair exit 0
+=== score ===

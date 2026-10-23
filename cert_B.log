@@ -1,0 +1,17 @@
+=== lib ===
+test result: ok. 72 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 438.49s
+--- lib exit 0
+=== ai_repair ===
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 495.62s
+--- ai_repair exit 0
+=== construction ===
+test result: FAILED. 11 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1081.19s
+error: test failed, to rerun pass `-p skirmish-sim --test construction`
+--- construction exit 101
+=== tc_footprint ===
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 32.47s
+--- tc_footprint exit 0
+=== walls ===
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 328.75s
+--- walls exit 0
+LANE_DONE

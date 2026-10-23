@@ -56,10 +56,13 @@ mod entity;
 mod grid;
 mod hash;
 mod mapgen;
+mod market;
 mod rng;
 mod steer;
 mod tech;
 mod units;
+#[cfg(test)]
+mod market_tests;
 #[cfg(test)]
 mod new_units_tests;
 
@@ -323,6 +326,21 @@ pub enum Command {
     /// stockpile cannot cover a tick's drip, the repairer stops
     /// and goes idle (the documented DE behavior).
     Repair { entity: u32, building: u32 },
+    /// Buy one lot (100) of a commodity at a completed Market
+    /// (TRD-01..03): the building's owner pays the current buy
+    /// price in gold and receives 100 of the commodity; the global
+    /// rate then rises by 2 for everyone. The whole transaction is
+    /// rejected (nothing moves) when the building is missing, not
+    /// a Market, unfinished, the resource is gold, or the owner's
+    /// gold is short (see `Sim::can_market_buy`).
+    MarketBuy { building: u32, resource: ResourceKind },
+    /// Sell one lot (100) of a commodity at a completed Market
+    /// (TRD-01..03): the building's owner gives 100 of the
+    /// commodity and receives the current sell price in gold; the
+    /// global rate then falls by 2 for everyone. Rejected whole
+    /// under the same discipline as `MarketBuy` (see
+    /// `Sim::can_market_sell`).
+    MarketSell { building: u32, resource: ResourceKind },
     /// Force drop-off (M6, ECO-07): a villager carrying resources is
     /// ordered to haul them to the nearest valid drop-off for what
     /// it carries *now* — and, the deposit made, to return to its
@@ -644,6 +662,11 @@ pub struct Sim {
     /// human, slot 1 the opponent. In Sandbox slot 1 simply sits at
     /// its starting values, unused.
     stockpiles: [Stockpile; 2],
+    /// The match's global commodity exchange rates (TRD-02): one
+    /// rate per commodity, shared by both players, moved only by
+    /// executed Market commands — deterministic sim state, hashed
+    /// once any rate has moved (see `hash_parts`).
+    market: crate::market::Market,
     /// The players' progression state (M6): age + researched
     /// technologies, indexed by player slot like the stockpiles.
     players: [PlayerState; 2],
@@ -782,6 +805,7 @@ impl Sim {
             entities,
             commands: Vec::new(),
             stockpiles: [Stockpile::starting(), Stockpile::starting()],
+            market: crate::market::Market::new(),
             players: [PlayerState::default(), PlayerState::default()],
             nodes,
             tc_states: vec![TcState {
@@ -914,8 +938,12 @@ impl Sim {
                 if b.owner != owner {
                     continue;
                 }
+                // BLD-18: the sight radius is the kind's own —
+                // the generic 4 for ordinary buildings (unchanged),
+                // the tower's and outpost's larger discs for the
+                // two structures that exist to see.
                 let (cx, cy) = self.grid.world_to_cell(b.pos_x, b.pos_y);
-                self.stamp_sight(slot, cx, cy, BUILDING_SIGHT_TILES);
+                self.stamp_sight(slot, cx, cy, b.kind.sight_tiles_at(self.age_of(owner)));
             }
         }
     }
@@ -1019,6 +1047,108 @@ impl Sim {
     fn stockpile_mut(&mut self, owner: u8) -> &mut Stockpile {
         let slot = player_slot(owner).unwrap_or(0);
         &mut self.stockpiles[slot]
+    }
+
+    /// The match's global exchange rates in canonical commodity
+    /// order (food, wood, stone) — TRD-02's shared state, read by
+    /// the client so prices are never recomputed outside the sim.
+    pub fn market_rates(&self) -> [i32; 3] {
+        self.market.rates()
+    }
+
+    /// The gold a seller receives for one lot of `resource` now.
+    pub fn market_sell_price(&self, resource: ResourceKind) -> i32 {
+        self.market.sell_price(resource)
+    }
+
+    /// The gold a buyer pays for one lot of `resource` now.
+    pub fn market_buy_price(&self, resource: ResourceKind) -> i32 {
+        self.market.buy_price(resource)
+    }
+
+    /// The owner of a standing, completed Market at `building`, if
+    /// the id names one (the trade commands' validity half).
+    fn market_owner(&self, building: u32) -> Option<u8> {
+        let b = &self.buildings[self.building_index(building)?];
+        if b.kind == BuildingKind::Market && b.complete {
+            Some(b.owner)
+        } else {
+            None
+        }
+    }
+
+    /// Whether a `MarketBuy` command would execute right now: a
+    /// completed Market, a real commodity (never gold), and the
+    /// owner's gold covering the current buy price (TRD-01..03).
+    pub fn can_market_buy(&self, building: u32, resource: ResourceKind) -> bool {
+        if !crate::market::is_commodity(resource) {
+            return false;
+        }
+        match self.market_owner(building) {
+            Some(owner) => {
+                self.stockpile_of(owner).amount(ResourceKind::Gold)
+                    >= I16F16::from_num(self.market.buy_price(resource))
+            }
+            None => false,
+        }
+    }
+
+    /// Whether a `MarketSell` command would execute right now:
+    /// the same building discipline, and the owner holding a full
+    /// lot (100) of the commodity.
+    pub fn can_market_sell(&self, building: u32, resource: ResourceKind) -> bool {
+        if !crate::market::is_commodity(resource) {
+            return false;
+        }
+        match self.market_owner(building) {
+            Some(owner) => {
+                self.stockpile_of(owner).amount(resource)
+                    >= I16F16::from_num(crate::market::TRADE_LOT)
+            }
+            None => false,
+        }
+    }
+
+    /// Apply a `MarketBuy` command: atomic — gold out, lot in,
+    /// rate up — or nothing at all (TRD-01..03).
+    fn issue_market_buy(&mut self, building: u32, resource: ResourceKind) {
+        if !self.can_market_buy(building, resource) {
+            return;
+        }
+        let Some(owner) = self.market_owner(building) else {
+            return;
+        };
+        let price = self.market.buy_price(resource);
+        let paid = self
+            .stockpile_mut(owner)
+            .spend(ResourceKind::Gold, I16F16::from_num(price));
+        debug_assert!(paid);
+        if paid {
+            self.stockpile_mut(owner)
+                .add(resource, I16F16::from_num(crate::market::TRADE_LOT));
+            self.market.apply_buy(resource);
+        }
+    }
+
+    /// Apply a `MarketSell` command: atomic — lot out, gold in,
+    /// rate down — or nothing at all (TRD-01..03).
+    fn issue_market_sell(&mut self, building: u32, resource: ResourceKind) {
+        if !self.can_market_sell(building, resource) {
+            return;
+        }
+        let Some(owner) = self.market_owner(building) else {
+            return;
+        };
+        let price = self.market.sell_price(resource);
+        let paid = self
+            .stockpile_mut(owner)
+            .spend(resource, I16F16::from_num(crate::market::TRADE_LOT));
+        debug_assert!(paid);
+        if paid {
+            self.stockpile_mut(owner)
+                .add(ResourceKind::Gold, I16F16::from_num(price));
+            self.market.apply_sell(resource);
+        }
     }
 
     /// Credit a destruction to the player who inflicted it
@@ -1313,6 +1443,26 @@ impl Sim {
     pub(crate) fn unit_stats(&self, idx: usize) -> UnitSpec {
         let e = &self.entities[idx];
         self.stats_for(e.owner, e.kind)
+    }
+
+    /// The effective weapon of a placed building kind for `owner`
+    /// (BLD-18): the kind's base profile (`BuildingKind::weapon`)
+    /// with the owner's researched patches layered on — the TEC-06
+    /// lookup form, mirroring `stats_for`. Fletching's documented
+    /// tower line applies here (+1 attack, +1 range; the tech's own
+    /// table in tech.rs names Towers since M6, waiting for a tower
+    /// attack to exist). `None` for unarmed kinds.
+    pub(crate) fn building_weapon(
+        &self,
+        owner: u8,
+        kind: BuildingKind,
+    ) -> Option<crate::build::BuildingWeapon> {
+        let mut w = kind.weapon()?;
+        if kind == BuildingKind::WatchTower && self.has_tech(owner, TechId::Fletching) {
+            w.attacks = crate::build::WATCH_TOWER_FLETCHING_ATTACKS;
+            w.range_max += I16F16::from_num(4); // +1 tile (TEC-06)
+        }
+        Some(w)
     }
 
     /// How many completed buildings of `kind` a player owns (M6) —
@@ -2238,6 +2388,7 @@ impl Sim {
         let idx = self.entity_index(entity).expect("validated");
         let e = &mut self.entities[idx];
         e.last_hit_by = None;
+        e.last_hit_owner = None;
         e.hp = I16F16::ZERO;
     }
 
@@ -2263,6 +2414,9 @@ impl Sim {
             (b.complete, b.owner, b.kind.wood_cost(), b.kind.stone_cost())
         };
         if !complete {
+            // BLD-02: a foundation refunds its FULL cost — wood
+            // and, for BLD-18's stone-cost kinds, stone (every
+            // earlier kind's stone reads 0).
             self.stockpile_mut(owner).add(ResourceKind::Wood, wood);
             if stone > I16F16::ZERO {
                 self.stockpile_mut(owner).add(ResourceKind::Stone, stone);
@@ -3146,6 +3300,12 @@ impl Sim {
                 Command::ResearchTcAt { tc, tech } => self.issue_research_tc_at(tc, tech),
                 Command::ResearchAt { building, tech } => self.issue_research_at(building, tech),
                 Command::Repair { entity, building } => self.issue_repair(entity, building),
+                Command::MarketBuy { building, resource } => {
+                    self.issue_market_buy(building, resource)
+                }
+                Command::MarketSell { building, resource } => {
+                    self.issue_market_sell(building, resource)
+                }
                 Command::ForceDeposit { entity } => self.issue_force_deposit(entity),
                 Command::Stop { entity } => self.issue_stop(entity),
                 Command::DeleteEntity { entity } => self.issue_delete_entity(entity),
@@ -3837,7 +3997,7 @@ impl Sim {
 
     /// Place one validated foundation for builder `idx`: charge
     /// the builder's owner the kind's wood cost (and its stone
-    /// cost, for the one two-resource kind), register the
+    /// cost, for the stone-cost kinds), register the
     /// building (blocking its footprint cells when the kind is
     /// solid), and return its id. The caller assigns the builder.
     /// Shared by `apply_build` (single placement) and
@@ -3852,11 +4012,12 @@ impl Sim {
         cell_y: u32,
     ) -> Option<u32> {
         let builder_owner = self.entities[idx].owner;
-        // The Town Center is the one kind with a second cost
-        // (100 stone, Castle Age P1): the stone is re-checked
-        // BEFORE either spend lands, so a failure can never
-        // take the wood and refuse the building (the P1 inline
-        // placement's guarantee, carried into the shared path).
+        // Stone-cost kinds (BLD-18's tower and outpost; the Town
+        // Center's 100 stone, Castle Age P1): the stone is
+        // re-checked BEFORE either spend lands, so a failure can
+        // never take the wood and refuse the building (the P1
+        // inline placement's guarantee, carried into the shared
+        // path).
         if self.stockpile_of(builder_owner).amount(ResourceKind::Stone) < kind.stone_cost() {
             return None;
         }
@@ -3866,11 +4027,21 @@ impl Sim {
         {
             return None;
         }
-        if kind.stone_cost() > I16F16::ZERO {
-            let paid = self
+        // Stone-cost kinds spend their stone too (BLD-18's tower
+        // and outpost; the Town Center's 100, Castle P1) — if the
+        // stone spend ever failed after the wood went through, the
+        // wood is refunded (the re-check above and validation both
+        // proved the stone, so this is belt-and-braces; kinds
+        // without a stone cost skip it and behave exactly as
+        // before).
+        if kind.stone_cost() > I16F16::ZERO
+            && !self
                 .stockpile_mut(builder_owner)
-                .spend(ResourceKind::Stone, kind.stone_cost());
-            debug_assert!(paid, "stone spend re-checked above");
+                .spend(ResourceKind::Stone, kind.stone_cost())
+        {
+            self.stockpile_mut(builder_owner)
+                .add(ResourceKind::Wood, kind.wood_cost());
+            return None;
         }
         let id = self.next_building_id;
         self.next_building_id += 1;
@@ -3895,12 +4066,18 @@ impl Sim {
             progress_thirds: 0,
             repair_hp_remainder: 0,
             repair_cost_remainder: 0,
+            repair_stone_remainder: 0,
             complete: false,
             node_id: None,
             queue: Vec::new(),
             train_progress: 0,
             rally: None,
             rally_node: None,
+            weapon_target: None,
+            weapon_target_building: None,
+            weapon_strike_tick: None,
+            weapon_next_tick: 0,
+            weapon_engaged: false,
         };
         if kind.blocks_footprint() {
             for (cx, cy) in building.footprint_cells() {
@@ -4415,9 +4592,10 @@ impl Sim {
                 return BuildVerdict::Reject;
             }
         }
-        // The wood must be payable at placement — by the *builder's*
+        // The cost must be payable at placement — by the *builder's*
         // owner (M5: each player builds from their own stockpile).
-        // The Town Center's stone likewise (its two-resource cost).
+        // The stone half likewise, for the stone-cost kinds
+        // (BLD-18's tower and outpost; the Town Center, Castle P1).
         if self.stockpile_of(builder_owner).amount(ResourceKind::Wood) < kind.wood_cost() {
             return BuildVerdict::Reject;
         }
@@ -5206,10 +5384,14 @@ impl Sim {
                 self.buildings[bi].repair_hp_remainder = hp_rem;
                 continue;
             }
-            // Wood drip for exactly the HP about to be restored:
-            // wood_cost × REPAIR_COST_FRACTION × restored / max_hp,
-            // in numerator form so the total over a full repair is
-            // the fraction of the build cost to < 1 bit.
+            // Resource drip for exactly the HP about to be
+            // restored: cost × REPAIR_COST_FRACTION × restored /
+            // max_hp, in numerator form so the total over a full
+            // repair is the fraction of the build cost to < 1 bit.
+            // Wood for every kind; stone too for BLD-18's
+            // stone-cost kinds (their stone accumulator rides
+            // alongside — for wood-only kinds it stays 0 and the
+            // stone spend is a no-op of 0).
             let cost_den = max_hp_bits * 65_536;
             let cost_acc = self.buildings[bi].repair_cost_remainder
                 + kind.wood_cost().to_bits() as i64
@@ -5217,6 +5399,12 @@ impl Sim {
                     * build::REPAIR_COST_FRACTION.to_bits() as i64;
             let drip = cost_acc / cost_den;
             let cost_rem = cost_acc % cost_den;
+            let stone_acc = self.buildings[bi].repair_stone_remainder
+                + kind.stone_cost().to_bits() as i64
+                    * restored
+                    * build::REPAIR_COST_FRACTION.to_bits() as i64;
+            let stone_drip = stone_acc / cost_den;
+            let stone_rem = stone_acc % cost_den;
             if !self
                 .stockpile_mut(owner)
                 .spend(ResourceKind::Wood, I16F16::from_bits(drip as i32))
@@ -5227,11 +5415,24 @@ impl Sim {
                 unfunded.push(self.buildings[bi].id);
                 continue;
             }
+            if !self
+                .stockpile_mut(owner)
+                .spend(ResourceKind::Stone, I16F16::from_bits(stone_drip as i32))
+            {
+                // The wood went through but the stone did not:
+                // refund the wood so the tick is atomic — nothing
+                // restored, no accumulator moves (BLD-07's letter).
+                self.stockpile_mut(owner)
+                    .add(ResourceKind::Wood, I16F16::from_bits(drip as i32));
+                unfunded.push(self.buildings[bi].id);
+                continue;
+            }
             let done = restored == missing;
             let b = &mut self.buildings[bi];
             b.hp = I16F16::from_bits((hp_bits + restored) as i32);
             b.repair_hp_remainder = if done { 0 } else { hp_rem };
             b.repair_cost_remainder = if done { 0 } else { cost_rem };
+            b.repair_stone_remainder = if done { 0 } else { stone_rem };
             if done {
                 finished.push(b.id);
             }
@@ -5746,6 +5947,17 @@ impl Sim {
                 h.write_u64(p.destroyed_value);
             }
         }
+        // TRD-02: the global exchange rates join the hash once any
+        // rate has moved off its start value (the VIC-04
+        // conditional-write precedent above), so a trade-free
+        // stream — the golden scenario included — stays
+        // byte-identical to the pre-Market stream, and a traded
+        // stream can never silently agree with an untraded one.
+        if !self.market.is_default() {
+            for rate in self.market.rates() {
+                h.write_i32(rate);
+            }
+        }
         // M2: stockpiles in canonical resource order. M5: both
         // players' stockpiles, in slot order (human, opponent).
         for slot in &self.stockpiles {
@@ -5842,6 +6054,47 @@ impl Sim {
                     h.write_u8(1);
                     h.write_u32(n);
                 }
+            }
+            // BLD-18: the building-weapon state and the repair
+            // stone accumulator — written ONLY while non-default,
+            // behind a marker byte (the destroyed_value /
+            // AutoExplore precedents), so a match with no armed
+            // building engaged and no tower under repair stays
+            // byte-identical to the pre-towers stream.
+            if b.repair_stone_remainder != 0 {
+                h.write_u8(0xB7);
+                h.write_u64(b.repair_stone_remainder as u64);
+            }
+            if b.weapon_target.is_some()
+                || b.weapon_target_building.is_some()
+                || b.weapon_strike_tick.is_some()
+                || b.weapon_next_tick != 0
+                || b.weapon_engaged
+            {
+                h.write_u8(0xB6);
+                match b.weapon_target {
+                    None => h.write_u8(0),
+                    Some(t) => {
+                        h.write_u8(1);
+                        h.write_u32(t);
+                    }
+                }
+                match b.weapon_target_building {
+                    None => h.write_u8(0),
+                    Some(t) => {
+                        h.write_u8(1);
+                        h.write_u32(t);
+                    }
+                }
+                match b.weapon_strike_tick {
+                    None => h.write_u8(0),
+                    Some(t) => {
+                        h.write_u8(1);
+                        h.write_u64(t);
+                    }
+                }
+                h.write_u64(b.weapon_next_tick);
+                h.write_u8(u8::from(b.weapon_engaged));
             }
         }
         // SIM-06 boundary: progression, stockpiles, nodes, queues
@@ -5984,6 +6237,20 @@ impl Sim {
                     h.write_u32(t);
                 }
             }
+            // BLD-18: the last hitter's OWNER — written only while
+            // set, behind a marker byte (the AutoExplore
+            // precedent), so a hit-free stream stays byte-identical
+            // to the pre-towers stream. (Any landed hit sets it, so
+            // a combat stream's hash moves the tick the first
+            // pre-BLD-18 hit lands — deliberate, step-attributed:
+            // the attribution is real state the death sweep reads.)
+            if let Some(o) = e.last_hit_owner {
+                // Marker 0xB4 on the merged tree: the entity
+                // section's 0xB0–0xB3 belong to CMB-09/10/11
+                // (stance / attack_auto / attack-move / patrol).
+                h.write_u8(0xB4);
+                h.write_u8(o);
+            }
             h.write_u8(u8::from(e.suppress_separation));
             // M3: animal state — post, aggro, lure bookkeeping, flight.
             h.write_i32(e.home_x.to_bits());
@@ -6082,6 +6349,15 @@ impl Sim {
                 }
             }
             h.write_u32(p.attacker);
+            // BLD-18: the shooting building, when the shot came
+            // from one — written only while set, behind a marker
+            // byte, so entity-loosed streams stay byte-identical.
+            if let Some(bid) = p.attacker_building {
+                // Marker 0xB5 on the merged tree (0xB1 in the
+                // entity section belongs to CMB-09 attack_auto).
+                h.write_u8(0xB5);
+                h.write_u32(bid);
+            }
             h.write_u8(p.owner);
             // M7: the attacker's release-time elevation (PRJ-10) —
             // a shot's hill factor is fixed at release.
@@ -6430,12 +6706,18 @@ mod tests {
             progress_thirds: 0,
             repair_hp_remainder: 0,
             repair_cost_remainder: 0,
+            repair_stone_remainder: 0,
             complete: false,
             node_id: None,
             queue: Vec::new(),
             train_progress: 0,
             rally: None,
             rally_node: None,
+            weapon_target: None,
+            weapon_target_building: None,
+            weapon_strike_tick: None,
+            weapon_next_tick: 0,
+            weapon_engaged: false,
         }
     }
 
@@ -6531,12 +6813,18 @@ mod tests {
             progress_thirds: 0,
             repair_hp_remainder: 0,
             repair_cost_remainder: 0,
+            repair_stone_remainder: 0,
             complete: true,
             node_id: Some(nid),
             queue: Vec::new(),
             train_progress: 0,
             rally: None,
             rally_node: None,
+            weapon_target: None,
+            weapon_target_building: None,
+            weapon_strike_tick: None,
+            weapon_next_tick: 0,
+            weapon_engaged: false,
         });
         sim.apply_research(OWNER_PLAYER, TechId::HorseCollar);
         let after = sim

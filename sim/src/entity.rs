@@ -489,6 +489,15 @@ pub struct Entity {
     /// The last entity that damaged this one — kill credit: a villager
     /// credited with killing an animal starts harvesting its carcass.
     pub last_hit_by: Option<u32>,
+    /// The last *player* whose attack damaged this one (BLD-18):
+    /// `last_hit_by` names an entity, but a building's arrows have
+    /// no entity to name (their `last_hit_by` reads the
+    /// `BUILDING_ATTACKER_ID` sentinel), so the death sweep's
+    /// VIC-04 destruction credit resolves through this owner
+    /// instead. Written by `apply_hit` alongside `last_hit_by` on
+    /// every hit; cleared by the Delete command with it. Part of
+    /// the hashed state (written only while set).
+    pub last_hit_owner: Option<u8>,
     /// Set by the combat phase, read by the next tick's movement
     /// phase: a melee unit actively attacking is not pushed by
     /// separation (MOV-04).
@@ -606,6 +615,7 @@ impl Entity {
             next_attack_tick: 0,
             attack_engaged: false,
             last_hit_by: None,
+            last_hit_owner: None,
             suppress_separation: false,
             home_x: pos_x,
             home_y: pos_y,

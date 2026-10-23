@@ -120,6 +120,7 @@ const BUILD_FNS = [
   'push_build_lumber_camp', 'push_build_mill', 'push_build_mining_camp',
   'push_build_archery_range', 'push_build_stable', 'push_build_blacksmith',
   'push_build_palisade_wall',
+  'push_build_watch_tower', 'push_build_outpost', 'push_build_market',
   'push_build_town_center',
 ];
 const BUILD_FNS_QUEUED = BUILD_FNS.map((n) => n + '_queued');
@@ -141,7 +142,11 @@ export function validateCommand(c) {
     case 'attack': return isInt(c.e) && isInt(c.tg);
     case 'attackb': return isInt(c.e) && isInt(c.b);
     case 'repair': return isInt(c.e) && isInt(c.b);
-    case 'build': return isInt(c.e) && isInt(c.k) && c.k <= 9 && isNum(c.x) && isNum(c.y);
+    case 'build': return isInt(c.e) && isInt(c.k) && c.k <= 12 && isNum(c.x) && isNum(c.y);
+    // TRD-01..03: Market trades — a building id and a commodity
+    // tag (food 1, wood 2, stone 4; gold is never a commodity).
+    case 'mbuy': case 'msell':
+      return isInt(c.b) && (c.r === 1 || c.r === 2 || c.r === 4);
     case 'buildline': return isInt(c.e) && isNum(c.x0) && isNum(c.y0) && isNum(c.x1) && isNum(c.y1);
     case 'train_at': return isInt(c.b) && (c.k === 2 || c.k === 3 || c.k === 4 || c.k === 9 || c.k === 10);
     case 'train_vil': return c.tc === undefined || isInt(c.tc);
@@ -210,6 +215,10 @@ export function applyCommand(sim, cmd, owner, tcOf) {
     case 'deleteb': return sim.push_delete_building(cmd.b);
     case 'cancel_tc': return sim.push_cancel_queue_tc(cmd.tc, cmd.i);
     case 'cancel_b': return sim.push_cancel_queue_building(cmd.b, cmd.i);
+    // TRD-01..03: Market trades — the sim derives the owner from
+    // the building, so one form serves both seats (as research_at).
+    case 'mbuy': return sim.push_market_buy(cmd.b, cmd.r);
+    case 'msell': return sim.push_market_sell(cmd.b, cmd.r);
     default: return false;
   }
 }

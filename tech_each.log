@@ -1,0 +1,15 @@
+a_builder_finishing_a_camp_deposits_its_carry_there: exit 0 1 passed
+feudal_research_gates_cost_and_exact_timing: exit 0 test result: ok
+loom_charges_gold_and_patches_villager_stats: exit 0 test result: ok
+research_shares_the_tc_queue_with_training: exit 0 test result: ok
+deposits_route_to_the_nearest_valid_camp: exit 0 test result: ok
+deposits_fall_back_to_the_tc_without_a_camp: exit 0 test result: ok
+force_drop_off_deposits_and_returns_to_work: exit 0 test result: ok
+farm_placement_requires_a_completed_mill: exit 0 test result: ok
+archer_production_moves_to_the_range_and_scout_to_the_stable: exit 0 test result: ok
+ai_match_replays_bit_identically_and_ages_up: exit 0 1 passed
+blacksmith_technologies_patch_the_combat_rows: exit 0 test result: ok
+blacksmith_technologies_patch_the_combat_rows: exit 0 1 passed
+man_at_arms_upgrades_existing_and_future_militia: exit 0 test result: ok
+wheelbarrow_gates_costs_and_patches_carry_and_speed: exit 0 1 passed
+TECH_EACH_DONE

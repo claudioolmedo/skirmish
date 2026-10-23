@@ -1,0 +1,12 @@
+[INFO]: Checking for the Wasm target...
+[INFO]: Compiling to Wasm...
+   Compiling skirmish-sim v0.1.0 (/home/hatch/workspace/skirmish-castle1-rebase/sim)
+    Finished `release` profile [optimized] target(s) in 2m 04s
+[INFO]: Installing wasm-bindgen...
+[INFO]: Optional fields missing from Cargo.toml: 'repository', 'license'. These are not necessary, but recommended
+[INFO]: :-) Done in 2m 10s
+[INFO]: :-) Your wasm pkg is ready to publish at /home/hatch/workspace/skirmish-castle1-rebase/web-preview/pkg.
+OK: web-preview/pkg/ ready.
+Serve with: cd web-preview && python3 -m http.server 8080
+Then open:  http://localhost:8080/
+PKG2_DONE_0

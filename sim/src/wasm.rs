@@ -643,6 +643,75 @@ impl WasmSim {
         self.push_build(entity, BuildingKind::TownCenter, x, y)
     }
 
+    /// Order a villager to build a Market (175 wood, 4×4; Feudal
+    /// Age, requires a completed Mill — TRD-01) — see
+    /// `push_build_house`.
+    pub fn push_build_market(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build(entity, BuildingKind::Market, x, y)
+    }
+
+    /// Buy one lot (100) of a commodity at a completed Market
+    /// (TRD-01..03): `resource_tag` is the `ResourceKind` tag
+    /// (food 1, wood 2, stone 4 — gold is never a commodity).
+    /// Returns false (and queues nothing) when the sim would
+    /// reject the trade: wrong building, unfinished, or the
+    /// owner's gold short of the current buy price.
+    pub fn push_market_buy(&mut self, building: u32, resource_tag: u32) -> bool {
+        let Some(resource) = ResourceKind::from_tag(resource_tag as u8) else {
+            return false;
+        };
+        if !self.inner.can_market_buy(building, resource) {
+            return false;
+        }
+        self.inner.push_command(Command::MarketBuy { building, resource });
+        true
+    }
+
+    /// Sell one lot (100) of a commodity at a completed Market
+    /// (TRD-01..03) — the mirror of `push_market_buy`; false when
+    /// the owner holds less than a full lot.
+    pub fn push_market_sell(&mut self, building: u32, resource_tag: u32) -> bool {
+        let Some(resource) = ResourceKind::from_tag(resource_tag as u8) else {
+            return false;
+        };
+        if !self.inner.can_market_sell(building, resource) {
+            return false;
+        }
+        self.inner
+            .push_command(Command::MarketSell { building, resource });
+        true
+    }
+
+    /// The match's global exchange rates (gold per 100) in
+    /// canonical commodity order: [food, wood, stone] (TRD-02).
+    pub fn market_rates(&self) -> Vec<i32> {
+        self.inner.market_rates().to_vec()
+    }
+
+    /// The live trade prices as a flat array in canonical
+    /// commodity order, sell then buy per commodity:
+    /// [sell_food, buy_food, sell_wood, buy_wood, sell_stone,
+    /// buy_stone]. The client displays these verbatim — the fee
+    /// math lives only in the sim (TRD-02).
+    pub fn market_prices(&self) -> Vec<i32> {
+        let mut out = Vec::with_capacity(6);
+        for resource in crate::market::COMMODITIES {
+            out.push(self.inner.market_sell_price(resource));
+            out.push(self.inner.market_buy_price(resource));
+        }
+        out
+    }
+
+    /// BLD-18: the Watch Tower (Feudal, stone-cost, armed).
+    pub fn push_build_watch_tower(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build(entity, BuildingKind::WatchTower, x, y)
+    }
+
+    /// BLD-18: the Outpost (Dark Age, line-of-sight only).
+    pub fn push_build_outpost(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build(entity, BuildingKind::Outpost, x, y)
+    }
+
     fn push_build(&mut self, entity: u32, kind: BuildingKind, x: f64, y: f64) -> bool {
         let (fx, fy) = (I16F16::from_num(x), I16F16::from_num(y));
         let ok = self.inner.can_build(entity, kind, fx, fy);
@@ -773,6 +842,23 @@ impl WasmSim {
     /// `push_build_house_queued`.
     pub fn push_build_town_center_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
         self.push_build_queued(entity, BuildingKind::TownCenter, x, y)
+    }
+
+    /// Queue a Market build — see `push_build_house_queued`.
+    pub fn push_build_market_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build_queued(entity, BuildingKind::Market, x, y)
+    }
+
+    /// Queue a Watch Tower build (BLD-18) — see
+    /// `push_build_house_queued`.
+    pub fn push_build_watch_tower_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build_queued(entity, BuildingKind::WatchTower, x, y)
+    }
+
+    /// Queue an Outpost build (BLD-18) — see
+    /// `push_build_house_queued`.
+    pub fn push_build_outpost_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build_queued(entity, BuildingKind::Outpost, x, y)
     }
 
     fn push_build_queued(&mut self, entity: u32, kind: BuildingKind, x: f64, y: f64) -> bool {

@@ -1406,7 +1406,94 @@ flight and no buildings standing. · *Status:* **DIFFERS**
 documented values; scope is buildings-only, pending
 verification of the in-game feel against the reference).
 
+**BLD-18 — Defensive buildings & building weapons (the Watch
+Tower and the Outpost).** Buildings that see farther and, for the
+first time, buildings that shoot. **Watch Tower** (Feudal Age):
+35 W / 125 S, 80 s build, 1×1, 850 HP (the pre-Castle value of
+update 61321; the Castle step to 1020 landed with the Castle
+Age P1 merge), armor 1 melee / 7 pierce. **Outpost** (Dark Age): 25 W /
+5 S, 15 s, 1×1, 500 HP, no weapon — line of sight is its whole
+purpose. A completed armed building auto-acquires targets with
+the CMB-08 chain (closest enemy unit → enemy Town Center →
+closest other enemy building, Farms excluded), with one
+deviation: herdables and huntables are never auto-targeted
+(predators are); range is measured **from the footprint's edge**
+(PRJ-08's building band — the tower's band is 1–8 tiles, the
+1-tile minimum leaving a dead zone a hugging attacker is safe
+in); strikes follow CMB-04/05 (first shot after the attack
+delay, then every reload — the tower's reload is 2.0 s); shots
+are ordinary projectiles through the PRJ rules (travel time,
+release-time aim, elevation at release), so friendly fire
+follows the corrected PRJ-09 family behavior and kill credit
+(VIC-04) resolves to the tower's owner. Targeting is
+visibility-independent, exactly like unit acquisition — the sim
+invents no fog check for buildings that units do not have.
+**Tower weapon**: 5 pierce (+7 vs Ships, +2 vs Spearmen);
+Fletching applies to it (TEC-06's tower line: +1 attack, +1
+range). **Sight**: the generic placed building keeps its adopted
+4 tiles; the Watch Tower reads 10 and the Outpost 6 (Dark) → 8
+(Feudal) — ADOPTED, UNVERIFIED: the fetched tower article pins
+range 8 but no sight figure (10 follows the defensive pattern
+sight = range + 2), and the Outpost article states its sight
+"increases with each Age" without numbers. Neither structure
+counts toward any age-up building requirement (the Feudal rule
+already excluded the Outpost's family; the dossier's Castle rule
+excludes towers). Both are repairable and deletable through the
+generic systems — repair of a stone-cost building drips wood
+AND stone at BLD-07's fractions, charged atomically; a deleted
+foundation refunds wood and stone in full (BLD-02). Panel: both
+sit on the villager Military page (positional grid — on the
+merged tree the Watch Tower takes slot D and the Outpost slot
+Z, the Palisade Wall having taken S first); PT Torre de Vigia / Posto Avançado,
+ES Torre de Vigilancia / Puesto de Avanzada. The scripted AI
+does not build towers in this package — recorded gap.
+*Source:* AoE wiki "Watch Tower" (statistics + changelog:
+35 W/125 S since update 111772; HP 850 pre-Castle per update
+61321; Fletching benefit), "Outpost" (cost, HP, build time,
+age-scaling sight), "Building" availability matrix;
+MECHANICS-STUDY §2 (building band table: tower minimum range 1;
+the generic article's "5–8" describes garrisoned Castle volleys
+and does not govern a 1×1 tower) and §5. Attack delay (21 ticks)
+adopts the Archer's arrow profile — UNVERIFIED for buildings;
+projectile speed/scatter are the PRJ-02/PRJ-04 design constants;
+accuracy 100 (a moving target dodges by travel time, PRJ-06).
+· *Impl:* shipped 2026-10-22 — `BuildingKind::WatchTower` /
+`Outpost` (tags 10/11 on the merged tree — the Palisade Wall
+took 9 first), `BuildingWeapon` + the combat phase's
+building-weapon step (after every entity attacker, building-id
+order; RNG draws only there), `Projectile::attacker_building`
++ `Entity::last_hit_owner` for attribution (all hashed only
+while set, behind marker bytes; the golden hash is unchanged
+— verified on the landing tree: the golden scenario lands no
+hits, so the attribution marker never enters its stream, and
+no tower stands in it); per-kind sight in
+`recompute_visibility`; client panel/art/i18n in the same
+landing; towers register as occluders through the shared
+building draw path (INF-12). · *Status:* **DIFFERS** — base
+fire, band, costs, HP/armor, repair/delete and the panel match
+the documented values; the remainders are: garrison arrows
+(capacity 5 — the GAR family's package; a garrisoned tower
+fires more arrows in the reference), Murder Holes (removes the
+minimum range), the Guard Tower upgrade (100 F / 250 W → 1500
+HP, 7 attack), the Castle-Age HP step, and the two
+UNVERIFIED sight figures.
+
 ---
+
+**BLD-19 — The Market building.** The Market is a Feudal Age
+building requiring a completed Mill (BLD-15's chain): 175 wood,
+4×4 footprint, 60 s build time, 1800 HP and 1 melee / 8 pierce
+armor in its Feudal column. It hosts the commodity exchange
+(TRD-01..03) — no production queue, no research in the generic
+game. The Castle table step (2100 HP, 2/9 armor) landed with
+the Castle Age P1 merge; the Imperial step (3/10) waits for
+the Imperial Age. (BLD-18 is reserved for
+the Castle dossier's building-weapons rule.)
+*Source:* AoE wiki, Market infobox (fetched 2026-10-22). ·
+*Impl:* shipped 2026-10-22 — `BuildingKind::Market` (tag 9) in
+`sim/src/build.rs`, placed/repaired/deleted through the generic
+building flows; its razed value scores via the generic
+`wood_cost()` path (VIC-04). · *Status:* **MATCHES**.
 
 ## 8. Combat & damage
 
@@ -2235,9 +2322,14 @@ outcome distribution from the CI model. · *Status:* **MISSING**.
 into 100 units of a commodity; selling converts 100 units into gold.
 Prices come from the shared exchange rate (TRD-02), not from a per-player
 book.
-*Source:* wiki, Market (Age of Empires II); GAP 3.11. · *Impl:* a Market
-command carrying (commodity, buy|sell); stockpile and rate updates are
-atomic in the economy phase. · *Status:* **MISSING**.
+*Source:* wiki, Market (Age of Empires II); GAP 3.11. · *Impl:*
+shipped 2026-10-22 — `Command::MarketBuy` / `MarketSell` carrying
+(building, commodity), applied atomically in the command phase by
+`issue_market_buy` / `issue_market_sell` (`sim/src/market.rs`,
+`sim/src/lib.rs`): gold/lot exchange and the rate step land in the
+same step or not at all, gated by the `can_market_buy` /
+`can_market_sell` queries the WASM boundary prechecks with. ·
+*Status:* **MATCHES**.
 
 **TRD-02 — One global price per commodity, with a fee spread.** Each
 commodity has a single exchange rate in gold per 100 units, shared by
@@ -2246,18 +2338,28 @@ price is rate × (1 − fee) and the buy price is rate × (1 + fee); the
 default fee is 30% (Guilds reduces it to 15% for that player — the
 *rate* is still shared, the *spread* is personal).
 *Source:* wiki, Market (starting prices, fee structure, worked numbers:
-wood starts 70 to sell / 130 to buy). · *Impl:* rates are per-match
-global state (hashed); the fee is a per-player patch (TEC-06). ·
-*Status:* **MISSING** (GAP 3.11 had the components but not the
-shared-rate model).
+wood starts 70 to sell / 130 to buy). · *Impl:* shipped 2026-10-22 —
+rates are per-match global state in `sim/src/market.rs`, written
+into the state hash once any rate has moved off its start value
+(the VIC-04 conditional-write precedent), so a trade-free stream
+stays byte-identical to the pre-Market stream. Prices are integer
+math — sell = (rate × 70 + 50) / 100, buy = (rate × 130 + 50) / 100
+— reproducing every wiki anchor (70/130 wood, 81/150 food,
+91/169 stone at the start; 14/26 at the floor; 6999/12999 at the
+ceiling). The generic 30% fee is flat for now; per-player fee
+patches (Guilds, civilization fees) arrive with their content. ·
+*Status:* **MATCHES**.
 
 **TRD-03 — Every transaction moves the world price.** Each buy raises
 that commodity's rate by 2; each sell lowers it by 2 — for everyone,
 immediately. Rates are clamped to [20, 9999]. The floor (sell 14 / buy 26
 at default fee) is the intended "doomsday economy" backstop.
-*Source:* wiki, Market (rate movement and clamps). · *Impl:* integer rate
-updates in the same atomic step as TRD-01; nothing else in the game reads
-or writes rates. · *Status:* **MISSING**.
+*Source:* wiki, Market (rate movement and clamps). · *Impl:* shipped
+2026-10-22 — integer rate updates in the same atomic step as
+TRD-01 (`Market::apply_buy` / `apply_sell`, clamped to [20, 9999]);
+nothing else in the game reads or writes rates, and rates move
+only when a trade command executes — never on a timer. ·
+*Status:* **MATCHES**.
 
 **TRD-04 — Tribute costs the sender a fee.** A player may tribute any
 amount of any resource to any player (allies, and in DE even enemies).
@@ -3169,7 +3271,7 @@ of seconds). No sim, command or hash contact. · *Status:* **MATCHES**.
 
 ## A. Rule counts
 
-218 rules total. Counts verified mechanically against the status tags in
+219 rules total. Counts verified mechanically against the status tags in
 this document (2026-10-18, M8 audit; re-verified for M9 the same day —
 the open-games lobby changed no status, see the M9 note in section B;
 updated 2026-10-19 for BLD-16, the Town Center footprint rule —
@@ -3268,7 +3370,62 @@ report: segments scattered across rows instead of following
 one line; the studied rule and sources are recorded in the
 entry, DE's exact rasterization marked UNVERIFIED). No
 status change: BLD-13 stays DIFFERS on the missing gates,
-and the totals stand; updated 2026-10-22 for Castle Age P1 (the age-up and boom slice): ECO-03 moves DIFFERS → MATCHES (Hand Cart ships at the pinned carry 20 / hunt 66, with its Wheelbarrow prerequisite and second speed layer), so §6 trades one DIFFERS for one MATCHES; TEC-01 and TEC-07 narrow with no status change (the Castle rung lands — only Imperial still waits; the first tech-to-tech prerequisite link lands — the INF-06 tree UI is still the gap), and TEC-02, BLD-11 and BLD-15 extend to the Castle step with no status change (the two-Feudal-born-buildings predicate, the Castle HP/armor columns, buildable Town Centers), recounted mechanically below; updated 2026-10-22 for the Farm footprint — the Farm is 3×3 (Claudio's decision, adopting the DE-documented footprint over his earlier 2×2 specification), closing ECO-14's footprint clause and BLD-06's Farm divergence, with no status moves (ECO-14 stays DIFFERS on the work-rate cap and reseed queue, BLD-06 stays DIFFERS on the Town Center divergence); updated 2026-10-22 for AI-08, the predator wolf — AI-08 moves MISSING → MATCHES, so §15 trades one MISSING for one MATCHES with the rule count unchanged, recounted mechanically below. The same recount corrects one pre-existing table drift the per-entry tags expose: BLD-07's 2026-10-19 move MISSING → DIFFERS never reached the §7 row — §7 counts 12 MATCHES / 4 DIFFERS / 1 MISSING.
+and the totals stand); updated 2026-10-22 for the Farm
+footprint — the Farm is 3×3 (Claudio's decision, adopting
+the DE-documented footprint over his earlier 2×2
+specification), closing ECO-14's footprint clause and
+BLD-06's Farm divergence. No status moves: ECO-14 stays
+DIFFERS on the work-rate cap and reseed queue, BLD-06 stays
+DIFFERS on the Town Center divergence, and the totals stand;
+updated 2026-10-22 for
+AI-08, the predator wolf — AI-08 moves MISSING → MATCHES, so §15
+trades one MISSING for one MATCHES with the rule count unchanged,
+recounted mechanically below. The same recount corrects one
+pre-existing table drift the per-entry tags expose: BLD-07's
+2026-10-19 move MISSING → DIFFERS never reached the §7 row —
+§7 counts 12 MATCHES / 4 DIFFERS / 1 MISSING, and the true
+totals are 120 / 33 / 65); updated 2026-10-22 for BLD-18,
+defensive buildings — §7 gains one rule, one DIFFERS (the
+Watch Tower's base fire and the Outpost ship; garrison
+arrows, Murder Holes, the Guard Tower upgrade and the Castle
+HP step are the recorded remainders), recounted mechanically
+below. (the recount
+also corrects §7's printed DIFFERS/MISSING split, stale by
+one since before this package: the entries themselves
+recount to 12/4/1 on the pre-BLD-18 file).
+
+updated 2026-10-22 for the Market package — §7 gains BLD-19
+(the Market building, MATCHES) and §13's TRD-01/02/03 move
+MISSING → MATCHES (the commodity exchange ships; tribute and
+trade units stay MISSING as TRD-04..08), recounted mechanically
+below. The same recount corrects a pre-existing §7 drift the
+table carried in from main: the §7 body holds 4 DIFFERS /
+1 MISSING (BLD-06, BLD-07, BLD-13, BLD-17 differ; BLD-14 is
+the only missing one), not the 3 / 2 the table said — the
+total row moves one count MISSING → DIFFERS accordingly. No
+rule's status changed in that correction; the table now
+equals the body. Rebased over the BLD-18 landing (the Market
+takes tag 12, after the Watch Tower's 10 and the Outpost's
+11), the mechanical recount over the combined body gives
+§7 = 19 rules, 13 / 5 / 1 and totals of 220 rules,
+124 / 34 / 62 — the same recount also repairs the total
+row's stale MISSING count (TRD-01..03's move was already
+reflected in §13's row but not in the total).
+updated 2026-10-22 for Castle Age P1 (the age-up and boom
+slice): ECO-03 moves DIFFERS → MATCHES (Hand Cart ships at the
+pinned carry 20 / hunt 66, with its Wheelbarrow prerequisite
+and second speed layer), so §6 trades one DIFFERS for one
+MATCHES; TEC-01 and TEC-07 narrow with no status change (the
+Castle rung lands — only Imperial still waits; the first
+tech-to-tech prerequisite link lands — the INF-06 tree UI is
+still the gap), and TEC-02, BLD-11 and BLD-15 extend to the
+Castle step with no status change (the two-Feudal-born-
+buildings predicate — the Market joining the qualifying set
+now that BLD-19 has landed it; the Castle HP/armor columns —
+including the Watch Tower and Market steps BLD-18/19 deferred
+to this package; buildable Town Centers). The Town Center
+takes tag 13, after the Market's 12 (append-only rule).
+Recounted mechanically below: totals 220 rules, 125 / 33 / 62.
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
@@ -3278,19 +3435,19 @@ and the totals stand; updated 2026-10-22 for Castle Age P1 (the age-up and boom 
 | 4 | Selection & orders (SEL) | 17 | 15 | 2 | 0 |
 | 5 | Movement, pathfinding & collision (MOV) | 12 | 4 | 3 | 5 |
 | 6 | Economy & drop-off (ECO) | 17 | 14 | 1 | 2 |
-| 7 | Buildings & placement (BLD) | 17 | 12 | 4 | 1 |
+| 7 | Buildings & placement (BLD) | 19 | 13 | 5 | 1 |
 | 8 | Combat & damage (CMB) | 16 | 14 | 1 | 1 |
 | 9 | Projectiles & ballistics (PRJ) | 10 | 5 | 3 | 2 |
 | 10 | Unit classes & counters (CLS) | 8 | 5 | 0 | 3 |
 | 11 | Technologies & age advancement (TEC) | 11 | 5 | 3 | 3 |
 | 12 | Monks, conversion & relics (MNK) | 13 | 0 | 0 | 13 |
-| 13 | Trade, market & tribute (TRD) | 8 | 0 | 0 | 8 |
+| 13 | Trade, market & tribute (TRD) | 8 | 3 | 0 | 5 |
 | 14 | Garrison, transport & repair (GAR) | 10 | 0 | 0 | 10 |
 | 15 | AI behavior & difficulty (AI) | 9 | 7 | 1 | 1 |
 | 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |
 | 17 | Multiplayer determinism (NET) | 11 | 4 | 5 | 2 |
 | 18 | Information rules (INF) | 13 | 8 | 3 | 2 |
-| | **Total** | **218** | **121** | **32** | **65** |
+| | **Total** | **220** | **125** | **33** | **62** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer

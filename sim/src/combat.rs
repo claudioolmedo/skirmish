@@ -131,6 +131,13 @@ pub struct Projectile {
     pub intended_building: Option<u32>,
     /// Attacker entity id (kill credit).
     pub attacker: u32,
+    /// The placed building that loosed this shot, when it came from
+    /// a building weapon (BLD-18): `attacker` then reads the
+    /// `BUILDING_ATTACKER_ID` sentinel (no entity loosed it) and
+    /// this field names the shooter — used for nothing but
+    /// provenance today; the kill credit rides `owner` into
+    /// `Entity::last_hit_owner`.
+    pub attacker_building: Option<u32>,
     /// Attacker owner (friendly-fire exclusion).
     pub owner: u8,
     /// The attacker's elevation level at release (M7, PRJ-10):
@@ -304,6 +311,11 @@ impl Sim {
         for idx in 0..self.entities.len() {
             self.attack_building_step(idx);
         }
+        // BLD-18: buildings that shoot run after every entity
+        // attacker, in building-id order (the buildings vec's
+        // order) — RNG draws for accuracy happen here, after all
+        // entity draws, keeping the phase's draw discipline total.
+        self.building_weapon_step_all();
         self.projectile_step();
         self.death_sweep();
     }
@@ -1040,6 +1052,7 @@ impl Sim {
                     intended: Some(self.entities[ti].id),
                     intended_building: None,
                     attacker: attacker_id,
+                    attacker_building: None,
                     owner,
                     // PRJ-10 (M7): the shooter's elevation is captured
                     // at release, like its attack table.
@@ -1053,7 +1066,7 @@ impl Sim {
             let dist = steer::vec_len(tx - ax, ty - ay);
             if dist <= MELEE_REACH {
                 let atk_elev = self.entity_height(idx);
-                self.apply_hit(attacker_id, (ax, ay), spec.attacks, ti, false, atk_elev);
+                self.apply_hit(attacker_id, owner, (ax, ay), spec.attacks, ti, false, atk_elev);
             }
         }
         let e = &mut self.entities[idx];
@@ -1068,9 +1081,11 @@ impl Sim {
     /// flees, an idle military unit retaliates. `threat` is where
     /// the hit came from (the melee attacker's position, or a
     /// projectile's spawn point).
+    #[allow(clippy::too_many_arguments)]
     fn apply_hit(
         &mut self,
         attacker_id: u32,
+        attacker_owner: u8,
         threat: (I16F16, I16F16),
         attacks: &[(u8, i32)],
         ti: usize,
@@ -1096,6 +1111,11 @@ impl Sim {
             let t = &mut self.entities[ti];
             t.hp -= dmg;
             t.last_hit_by = Some(attacker_id);
+            // BLD-18: the owner-level attribution the death sweep
+            // credits — for entity attackers this is simply the
+            // attacker's owner; for a building's arrow it is the
+            // only attribution there is.
+            t.last_hit_owner = Some(attacker_owner);
         }
         match self.entities[ti].kind {
             EntityKind::Boar => {
@@ -1149,8 +1169,18 @@ impl Sim {
                 // already inside its attack range (it will not ride
                 // out to one). The target is marked auto-acquired:
                 // the chase gates apply to it like any other.
+                // A building's arrow has no entity to answer
+                // (BLD-18): its `attacker_id` is the sentinel, no
+                // entity index resolves, and the victim does not
+                // retaliate — it has no building-attack order to
+                // give itself here; the player (or AI) answers for
+                // it, as in the reference.
                 let t = &self.entities[ti];
-                if is_player_owner(t.owner) && t.attack_target.is_none() && t.order.is_none() {
+                if is_player_owner(t.owner)
+                    && t.attack_target.is_none()
+                    && t.order.is_none()
+                    && self.entity_index(attacker_id).is_some()
+                {
                     let answers = match t.stance {
                         crate::Stance::NoAttack => false,
                         crate::Stance::StandGround => {
@@ -1458,6 +1488,7 @@ impl Sim {
                     intended: None,
                     intended_building: Some(bid),
                     attacker: attacker_id,
+                    attacker_building: None,
                     owner,
                     attacker_elev: self.entity_height(idx),
                     attacks: spec.attacks.to_vec(),
@@ -1476,6 +1507,303 @@ impl Sim {
         e.strike_tick = None;
         e.next_attack_tick = self.tick + spec.reload_ticks;
         e.attack_engaged = true;
+    }
+
+    /// BLD-18: every armed building's tick, in building-id order.
+    fn building_weapon_step_all(&mut self) {
+        for bi in 0..self.buildings.len() {
+            self.building_weapon_step(bi);
+        }
+    }
+
+    /// Distance from a building's footprint edge to a point: the
+    /// nearest point of the footprint's rectangle clamped against
+    /// the point (PRJ-08's building geometry — the same math
+    /// `attack_building_step` uses against a building target).
+    fn footprint_edge_dist(bx: I16F16, by: I16F16, half: I16F16, px: I16F16, py: I16F16) -> I16F16 {
+        let qx = (px - bx).clamp(-half, half) + bx;
+        let qy = (py - by).clamp(-half, half) + by;
+        steer::vec_len(px - qx, py - qy)
+    }
+
+    /// BLD-18: one armed building's tick — target validation,
+    /// acquisition, and the CMB-04/05 delay/reload discipline,
+    /// mirroring `attack_step`'s shape with three building-shaped
+    /// differences, all deliberate:
+    ///
+    /// - RANGE IS MEASURED FROM THE FOOTPRINT'S EDGE (PRJ-08's
+    ///   building band), for units and buildings alike; the target
+    ///   building's own extent comes out of the measurement the
+    ///   same way (rect-to-rect).
+    /// - ACQUISITION follows the CMB-08 chain (closest enemy unit,
+    ///   then the enemy Town Center, then the closest other enemy
+    ///   building, Farms excluded) with ONE deviation: herdables
+    ///   and huntables are never auto-targeted — a tower does not
+    ///   spend arrows on sheep or deer; predators (boars) qualify,
+    ///   as they do for units.
+    /// - TARGETING IS VISIBILITY-INDEPENDENT, exactly like unit
+    ///   acquisition (SIM-04's determinism): the sim has no fog
+    ///   check for any attacker, and buildings invent none.
+    ///
+    /// Only a COMPLETED building fires — a foundation is inert
+    /// timber and stone.
+    fn building_weapon_step(&mut self, bi: usize) {
+        let tick = self.tick;
+        let b = &self.buildings[bi];
+        if !b.complete {
+            return;
+        }
+        let (owner, bx, by, size) = (b.owner, b.pos_x, b.pos_y, b.kind.footprint_size());
+        let Some(w) = self.building_weapon(owner, b.kind) else {
+            return;
+        };
+        let half = I16F16::from_num(size as i32 * 2);
+
+        // --- validate the standing target -------------------------
+        let mut target_unit = self.buildings[bi].weapon_target;
+        let mut target_bld = self.buildings[bi].weapon_target_building;
+        let mut edge_dist: Option<I16F16> = None;
+        if let Some(tid) = target_unit {
+            match self.entity_index(tid) {
+                Some(ti) if !self.entities[ti].dead => {
+                    let t = &self.entities[ti];
+                    let d = Self::footprint_edge_dist(bx, by, half, t.pos_x, t.pos_y);
+                    if d > w.range_max {
+                        target_unit = None;
+                    } else {
+                        edge_dist = Some(d);
+                    }
+                }
+                _ => target_unit = None,
+            }
+        }
+        if target_unit.is_none() {
+            if let Some(tbid) = target_bld {
+                match self.building_index(tbid) {
+                    Some(tbi) => {
+                        let tb = &self.buildings[tbi];
+                        let thalf =
+                            I16F16::from_num(tb.kind.footprint_size() as i32 * 2);
+                        let dx = ((tb.pos_x - bx).abs() - (half + thalf)).max(I16F16::ZERO);
+                        let dy = ((tb.pos_y - by).abs() - (half + thalf)).max(I16F16::ZERO);
+                        let d = steer::vec_len(dx, dy);
+                        if d > w.range_max {
+                            target_bld = None;
+                        } else {
+                            edge_dist = Some(d);
+                        }
+                    }
+                    None => target_bld = None,
+                }
+            }
+        }
+        if target_unit.is_none() && target_bld.is_none() {
+            // The engagement ended (target died, left the band, or
+            // the building was razed): the weapon resets, as an
+            // entity's `clear_combat` does.
+            if self.buildings[bi].weapon_target.is_some()
+                || self.buildings[bi].weapon_target_building.is_some()
+            {
+                let b = &mut self.buildings[bi];
+                b.weapon_target = None;
+                b.weapon_target_building = None;
+                b.weapon_strike_tick = None;
+                b.weapon_engaged = false;
+            }
+            // --- acquire (the CMB-08 chain) ----------------------
+            // 1. The closest enemy unit in the band — player units
+            // of the other side, and predators. Herdables and
+            // huntables never qualify (see the step docs).
+            let mut best: Option<(i64, u32, I16F16)> = None;
+            for e in &self.entities {
+                if e.dead || e.kind == EntityKind::TownCenter {
+                    continue;
+                }
+                let hostile_unit = is_player_owner(e.owner) && e.owner != owner;
+                if !hostile_unit && e.kind != EntityKind::Boar {
+                    continue;
+                }
+                if e.kind == EntityKind::Sheep || e.kind == EntityKind::Deer {
+                    continue;
+                }
+                let d = Self::footprint_edge_dist(bx, by, half, e.pos_x, e.pos_y);
+                if d > w.range_max {
+                    continue;
+                }
+                let key = d.to_bits() as i64 * (d.to_bits() as i64);
+                let better = match best {
+                    None => true,
+                    Some((bd, bid2, _)) => (key, e.id) < (bd, bid2),
+                };
+                if better {
+                    best = Some((key, e.id, d));
+                }
+            }
+            if let Some((_, id, d)) = best {
+                target_unit = Some(id);
+                edge_dist = Some(d);
+            } else {
+                // 2. The enemy Town Center in the band.
+                for e in &self.entities {
+                    if e.dead || e.kind != EntityKind::TownCenter {
+                        continue;
+                    }
+                    if !is_player_owner(e.owner) || e.owner == owner {
+                        continue;
+                    }
+                    let d = Self::footprint_edge_dist(bx, by, half, e.pos_x, e.pos_y);
+                    if d <= w.range_max {
+                        target_unit = Some(e.id);
+                        edge_dist = Some(d);
+                        break;
+                    }
+                }
+            }
+            if target_unit.is_none() {
+                // 3. The closest other enemy building in the band
+                // (Farms excluded, as in CMB-08).
+                let mut bestb: Option<(i64, u32, I16F16)> = None;
+                for ob in &self.buildings {
+                    if ob.owner == owner || ob.kind == BuildingKind::Farm {
+                        continue;
+                    }
+                    let thalf = I16F16::from_num(ob.kind.footprint_size() as i32 * 2);
+                    let dx = ((ob.pos_x - bx).abs() - (half + thalf)).max(I16F16::ZERO);
+                    let dy = ((ob.pos_y - by).abs() - (half + thalf)).max(I16F16::ZERO);
+                    let d = steer::vec_len(dx, dy);
+                    if d > w.range_max {
+                        continue;
+                    }
+                    let key = d.to_bits() as i64 * (d.to_bits() as i64);
+                    let better = match bestb {
+                        None => true,
+                        Some((bd, bid2, _)) => (key, ob.id) < (bd, bid2),
+                    };
+                    if better {
+                        bestb = Some((key, ob.id, d));
+                    }
+                }
+                if let Some((_, id, d)) = bestb {
+                    target_bld = Some(id);
+                    edge_dist = Some(d);
+                }
+            }
+            if target_unit.is_some() || target_bld.is_some() {
+                let b = &mut self.buildings[bi];
+                b.weapon_target = target_unit;
+                b.weapon_target_building = target_bld;
+            }
+        }
+
+        // --- the firing discipline (CMB-04/05, building form) ----
+        let Some(d) = edge_dist else { return };
+        if d < w.range_min {
+            // The dead zone (PRJ-08): the target is held but cannot
+            // be shot — the tower waits, exactly as a ranged unit
+            // whose strike lands inside its minimum range.
+            return;
+        }
+        let b = &self.buildings[bi];
+        if let Some(st) = b.weapon_strike_tick {
+            if tick >= st {
+                self.building_weapon_release(bi, &w);
+            }
+        } else if tick >= b.weapon_next_tick {
+            if b.weapon_engaged {
+                self.building_weapon_release(bi, &w);
+            } else {
+                self.buildings[bi].weapon_strike_tick = Some(tick + w.attack_delay_ticks);
+            }
+        }
+    }
+
+    /// Loose one arrow from building `bi` at its standing target
+    /// (BLD-18): the release mirrors `resolve_strike`'s ranged
+    /// branch — the accuracy roll happens now (a miss still flies
+    /// and lands scattered, PRJ-05), the flight time is
+    /// distance/speed rounded up, and the reload restarts from this
+    /// tick even when the shot is skipped because the target has
+    /// slipped inside the minimum range (PRJ-08's resolve rule).
+    fn building_weapon_release(&mut self, bi: usize, w: &crate::build::BuildingWeapon) {
+        let tick = self.tick;
+        let b = &self.buildings[bi];
+        let (bid, owner, bx, by, size) = (b.id, b.owner, b.pos_x, b.pos_y, b.kind.footprint_size());
+        let half = I16F16::from_num(size as i32 * 2);
+        // Aim + band from the target as it stands NOW.
+        let resolved = if let Some(tid) = b.weapon_target {
+            self.entity_index(tid).and_then(|ti| {
+                let t = &self.entities[ti];
+                if t.dead {
+                    None
+                } else {
+                    Some((
+                        (t.pos_x, t.pos_y),
+                        Some(tid),
+                        None,
+                        Self::footprint_edge_dist(bx, by, half, t.pos_x, t.pos_y),
+                    ))
+                }
+            })
+        } else if let Some(tbid) = b.weapon_target_building {
+            self.building_index(tbid).map(|tbi| {
+                let tb = &self.buildings[tbi];
+                let thalf = I16F16::from_num(tb.kind.footprint_size() as i32 * 2);
+                let dx = ((tb.pos_x - bx).abs() - (half + thalf)).max(I16F16::ZERO);
+                let dy = ((tb.pos_y - by).abs() - (half + thalf)).max(I16F16::ZERO);
+                (
+                    (tb.pos_x, tb.pos_y),
+                    None,
+                    Some(tbid),
+                    steer::vec_len(dx, dy),
+                )
+            })
+        } else {
+            None
+        };
+        let Some((aim, intended, intended_building, edge_d)) = resolved else {
+            return;
+        };
+        {
+            let b = &mut self.buildings[bi];
+            b.weapon_strike_tick = None;
+            b.weapon_next_tick = tick + w.reload_ticks;
+            b.weapon_engaged = true;
+        }
+        if edge_d < w.range_min {
+            return; // PRJ-08: inside the band — no shot at all.
+        }
+        // The accuracy roll (SIM-04: RNG draws happen only here, in
+        // the combat phase, in attacker order — buildings draw
+        // after every entity). Accuracy 100 draws nothing.
+        let mut impact = aim;
+        if w.accuracy < 100 {
+            let roll = self.rng.below(100);
+            if roll >= w.accuracy {
+                let sb = w.scatter.to_bits();
+                let span = (2 * sb + 1) as u32;
+                let dx = self.rng.below(span) as i32 - sb;
+                let dy = self.rng.below(span) as i32 - sb;
+                impact = (aim.0 + I16F16::from_bits(dx), aim.1 + I16F16::from_bits(dy));
+            }
+        }
+        let dist_bits = steer::vec_len(aim.0 - bx, aim.1 - by).to_bits() as i64;
+        let speed_bits = w.projectile_speed.to_bits() as i64;
+        let flight = ((dist_bits + speed_bits - 1) / speed_bits).max(1) as u64;
+        self.projectiles.push(Projectile {
+            spawn_x: bx,
+            spawn_y: by,
+            impact_x: impact.0,
+            impact_y: impact.1,
+            spawn_tick: tick,
+            impact_tick: tick + flight,
+            intended,
+            intended_building,
+            attacker: crate::build::BUILDING_ATTACKER_ID,
+            attacker_building: Some(bid),
+            owner,
+            attacker_elev: self.height_at_world(bx, by),
+            attacks: w.attacks.to_vec(),
+        });
     }
 
     /// Apply one landed hit's damage to a placed building (M5) and
@@ -1508,18 +1836,15 @@ impl Sim {
         self.buildings[bi].hp -= dmg;
         if self.buildings[bi].hp < I16F16::from_num(1) {
             // VIC-04: the lethal hit credits the attacker's owner
-            // with the building's resource cost (its wood cost,
-            // plus the Town Center foundation's stone — the one
-            // two-resource cost), foundation or complete. A Delete
-            // never reaches this path (it calls `destroy_building`
+            // with the building's resource cost (wood + stone —
+            // BLD-18's kinds are the first to carry a stone cost;
+            // every earlier kind's stone reads 0, so their credit
+            // is unchanged), foundation or complete. A Delete never
+            // reaches this path (it calls `destroy_building`
             // directly), so self-demolition credits no one.
             let (bowner, bvalue) = {
                 let b = &self.buildings[bi];
-                (
-                    b.owner,
-                    b.kind.wood_cost().to_num::<i32>() as i64
-                        + b.kind.stone_cost().to_num::<i32>() as i64,
-                )
+                (b.owner, b.kind.total_cost().to_num::<i32>() as i64)
             };
             self.credit_destruction(attacker_owner, bowner, bvalue);
             self.destroy_building(bid);
@@ -1618,7 +1943,7 @@ impl Sim {
                         self.entities[ti].pos_y - p.impact_y,
                     );
                     if d <= tspec.radius + HIT_SLACK {
-                        self.apply_hit(p.attacker, (p.spawn_x, p.spawn_y), &p.attacks, ti, false, p.attacker_elev);
+                        self.apply_hit(p.attacker, p.owner, (p.spawn_x, p.spawn_y), &p.attacks, ti, false, p.attacker_elev);
                         return;
                     }
                 }
@@ -1633,7 +1958,7 @@ impl Sim {
             let tspec = units::spec(e.kind);
             let d = steer::vec_len(e.pos_x - p.impact_x, e.pos_y - p.impact_y);
             if d <= tspec.radius + HIT_SLACK {
-                self.apply_hit(p.attacker, (p.spawn_x, p.spawn_y), &p.attacks, ti, true, p.attacker_elev);
+                self.apply_hit(p.attacker, p.owner, (p.spawn_x, p.spawn_y), &p.attacks, ti, true, p.attacker_elev);
                 return;
             }
         }
@@ -1650,6 +1975,7 @@ impl Sim {
                 continue;
             }
             let (kind, px, py, killer) = (e.kind, e.pos_x, e.pos_y, e.last_hit_by);
+            let killer_owner = e.last_hit_owner;
             let victim_owner = e.owner;
             {
                 let e = &mut self.entities[idx];
@@ -1675,15 +2001,14 @@ impl Sim {
             // villager's knife) and cost-free victims; a Delete
             // arrives here with `last_hit_by` already cleared, so
             // it credits no one.
-            if let Some(kid) = killer {
-                if let Some(ki) = self.entity_index(kid) {
-                    let kowner = self.entities[ki].owner;
-                    self.credit_destruction(
-                        kowner,
-                        victim_owner,
-                        crate::unit_cost_value(kind),
-                    );
-                }
+            // BLD-18: the credit resolves through the hit's owner —
+            // for entity attackers that is exactly the killer-entity
+            // lookup this replaces; for a building's arrow there is
+            // no killer entity (the sentinel), and the tower's owner
+            // is credited. The carcass rule below still resolves the
+            // killer *entity* — a building never harvests.
+            if let Some(kowner) = killer_owner {
+                self.credit_destruction(kowner, victim_owner, crate::unit_cost_value(kind));
             }
             let spec = units::spec(kind);
             if spec.carcass_food > 0 {

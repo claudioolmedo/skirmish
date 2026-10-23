@@ -97,6 +97,29 @@ pub const PALISADE_WALL_BUILD_TICKS: u64 = 420;
 /// Blacksmith build time: 40 s at 60 Hz. UNVERIFIED — not in the
 /// project docs (see the module docs).
 pub const BLACKSMITH_BUILD_TICKS: u64 = 2400;
+/// Watch Tower wood cost: 35 (BLD-18; the tower article's current
+/// DE line — 125 stone / 35 wood since update 111772).
+pub const WATCH_TOWER_WOOD_COST: I16F16 = I16F16::from_bits(2_293_760); // 35
+/// Watch Tower stone cost: 125 (BLD-18; same source).
+pub const WATCH_TOWER_STONE_COST: I16F16 = I16F16::from_bits(8_192_000); // 125
+/// Watch Tower build time: 80 s at 60 Hz (BLD-18; tower article).
+pub const WATCH_TOWER_BUILD_TICKS: u64 = 4800;
+/// Outpost wood cost: 25 (BLD-18; Outpost article).
+pub const OUTPOST_WOOD_COST: I16F16 = I16F16::from_bits(1_638_400); // 25
+/// Outpost stone cost: 5 (BLD-18; Outpost article).
+pub const OUTPOST_STONE_COST: I16F16 = I16F16::from_bits(327_680); // 5
+/// Outpost build time: 15 s at 60 Hz (BLD-18; Outpost article).
+pub const OUTPOST_BUILD_TICKS: u64 = 900;
+/// Market construction cost: 175 wood (AoE wiki, Market infobox,
+/// fetched 2026-10-22).
+pub const MARKET_WOOD_COST: I16F16 = I16F16::from_bits(11_468_800); // 175
+/// Market build time: 60 s at 60 Hz (AoE wiki, Market infobox).
+pub const MARKET_BUILD_TICKS: u64 = 3600;
+/// The Market's build range: its 4×4 footprint is 16 units wide, so
+/// a builder on a ring cell can stand ~14.14 units from the center
+/// (corner ring cell) — 15.5 covers the whole ring, in the geometry
+/// of the two ranges below.
+pub const MARKET_BUILD_RANGE: I16F16 = I16F16::from_bits(1_015_808); // 15.5
 /// Population room from one completed House: +5 (study §5, §9.4).
 pub const HOUSE_POP_SUPPORT: u32 = 5;
 /// Population room from the Town Center: +5 (study §5, §9.4).
@@ -161,6 +184,21 @@ pub enum BuildingKind {
     /// player including its owner (only a gate passes, and gates
     /// do not exist yet).
     PalisadeWall,
+    /// BLD-18: the first building that fights — Feudal Age, 1×1,
+    /// stone-heavy, base arrow fire (garrison arrows are a recorded
+    /// remainder; see `BuildingWeapon`).
+    WatchTower,
+    /// BLD-18: a pure line-of-sight structure — Dark Age, 1×1, no
+    /// weapon; its sight radius is its whole reason to exist.
+    Outpost,
+    /// The Market: the commodity exchange (TRD-01..03). Feudal Age,
+    /// requires a completed Mill, 4×4 footprint, 175 wood, 60 s
+    /// build, 1800 HP and 1/8 armor in the Feudal column (AoE wiki,
+    /// Market infobox, fetched 2026-10-22). The Castle/Imperial
+    /// steps (2100 HP, 2/9 then 3/10 armor) land with the Castle
+    /// Age package — the `Age` enum does not reach them yet, and
+    /// the flat Feudal row is the only one this table can hold.
+    Market,
     /// Castle Age P1: an additional Town Center. The kind exists
     /// only as a *construction record*: the Town Center is an
     /// entity in this architecture (BLD-16), so the tick the
@@ -176,8 +214,10 @@ impl BuildingKind {
     /// Stable tag for the state hash and the WASM building array:
     /// 0 = house, 1 = farm, 2 = barracks, 3 = lumber camp, 4 = mill,
     /// 5 = mining camp, 6 = archery range, 7 = stable, 8 = blacksmith,
-    /// 9 = palisade wall.
-    /// 10 = town center (construction record only — see the variant).
+    /// 9 = palisade wall, 10 = watch tower, 11 = outpost,
+    /// 12 = market, 13 = town center (construction record only —
+    /// see the variant). Tags are an ABI contract — append only,
+    /// never renumber.
     pub fn tag(self) -> u8 {
         match self {
             BuildingKind::House => 0,
@@ -190,7 +230,31 @@ impl BuildingKind {
             BuildingKind::Stable => 7,
             BuildingKind::Blacksmith => 8,
             BuildingKind::PalisadeWall => 9,
-            BuildingKind::TownCenter => 10,
+            BuildingKind::WatchTower => 10,
+            BuildingKind::Outpost => 11,
+            BuildingKind::Market => 12,
+            BuildingKind::TownCenter => 13,
+        }
+    }
+
+    /// Inverse of `tag` (the AI and tests name kinds by tag).
+    pub fn from_tag(tag: u8) -> Option<BuildingKind> {
+        match tag {
+            0 => Some(BuildingKind::House),
+            1 => Some(BuildingKind::Farm),
+            2 => Some(BuildingKind::Barracks),
+            3 => Some(BuildingKind::LumberCamp),
+            4 => Some(BuildingKind::Mill),
+            5 => Some(BuildingKind::MiningCamp),
+            6 => Some(BuildingKind::ArcheryRange),
+            7 => Some(BuildingKind::Stable),
+            8 => Some(BuildingKind::Blacksmith),
+            9 => Some(BuildingKind::PalisadeWall),
+            10 => Some(BuildingKind::WatchTower),
+            11 => Some(BuildingKind::Outpost),
+            12 => Some(BuildingKind::Market),
+            13 => Some(BuildingKind::TownCenter),
+            _ => None,
         }
     }
 
@@ -214,18 +278,32 @@ impl BuildingKind {
             BuildingKind::Stable => STABLE_WOOD_COST,
             BuildingKind::Blacksmith => BLACKSMITH_WOOD_COST,
             BuildingKind::PalisadeWall => PALISADE_WALL_WOOD_COST,
+            BuildingKind::WatchTower => WATCH_TOWER_WOOD_COST,
+            BuildingKind::Outpost => OUTPOST_WOOD_COST,
+            BuildingKind::Market => MARKET_WOOD_COST,
             BuildingKind::TownCenter => TOWN_CENTER_WOOD_COST,
         }
     }
 
-    /// Stone paid at placement time: zero for every kind except
-    /// the Town Center (100) — the one two-resource build cost in
-    /// the roster so far, and what makes mined stone spendable.
+    /// Stone paid at placement time (BLD-18: the first kinds that
+    /// cost stone at all — the Watch Tower's 125 is the reason stone
+    /// exists in the Feudal economy; the Town Center's 100 (Castle
+    /// P1) joins them as the third stone-cost kind; every other
+    /// kind reads 0, so the placement/repair/refund paths that sum
+    /// both resources are behavior-identical for them).
     pub fn stone_cost(self) -> I16F16 {
         match self {
+            BuildingKind::WatchTower => WATCH_TOWER_STONE_COST,
+            BuildingKind::Outpost => OUTPOST_STONE_COST,
             BuildingKind::TownCenter => TOWN_CENTER_STONE_COST,
             _ => I16F16::ZERO,
         }
+    }
+
+    /// Total placement cost across resources (VIC-04's razing
+    /// credit unit: resources, summed).
+    pub fn total_cost(self) -> I16F16 {
+        self.wood_cost() + self.stone_cost()
     }
 
     /// Ticks of active building needed to complete.
@@ -241,6 +319,9 @@ impl BuildingKind {
             BuildingKind::Stable => STABLE_BUILD_TICKS,
             BuildingKind::Blacksmith => BLACKSMITH_BUILD_TICKS,
             BuildingKind::PalisadeWall => PALISADE_WALL_BUILD_TICKS,
+            BuildingKind::WatchTower => WATCH_TOWER_BUILD_TICKS,
+            BuildingKind::Outpost => OUTPOST_BUILD_TICKS,
+            BuildingKind::Market => MARKET_BUILD_TICKS,
             BuildingKind::TownCenter => TOWN_CENTER_BUILD_TICKS,
         }
     }
@@ -283,7 +364,7 @@ impl BuildingKind {
     /// and 4 for the Town Center (study §5).
     pub fn footprint_size(self) -> u32 {
         match self {
-            BuildingKind::PalisadeWall => 1,
+            BuildingKind::PalisadeWall | BuildingKind::WatchTower | BuildingKind::Outpost => 1,
             BuildingKind::House
             | BuildingKind::LumberCamp
             | BuildingKind::Mill
@@ -293,14 +374,21 @@ impl BuildingKind {
             | BuildingKind::ArcheryRange
             | BuildingKind::Stable
             | BuildingKind::Blacksmith => 3,
-            BuildingKind::TownCenter => 4,
+            // The two placed 4×4 kinds: the Market, and the Town
+            // Center construction record (the standing Town Center
+            // is an entity, not a kind — BLD-16).
+            BuildingKind::Market | BuildingKind::TownCenter => 4,
         }
     }
 
     /// A builder this close to the building's center is actively
     /// building (see the range constants for the geometry).
     pub fn build_range(self) -> I16F16 {
-        if self.footprint_size() == 4 {
+        if self == BuildingKind::Market {
+            // The two 4×4 kinds keep their own ranges (Market 15.5,
+            // Town Center 15.0 — see the constants' geometry notes).
+            MARKET_BUILD_RANGE
+        } else if self == BuildingKind::TownCenter {
             TOWN_CENTER_BUILD_RANGE
         } else if self.footprint_size() == 3 {
             BARRACKS_BUILD_RANGE
@@ -341,11 +429,55 @@ impl BuildingKind {
     /// (BLD-15: availability keys on the owner's age and built set).
     pub fn age_required(self) -> Age {
         match self {
-            BuildingKind::ArcheryRange | BuildingKind::Stable | BuildingKind::Blacksmith => {
-                Age::Feudal
-            }
+            BuildingKind::ArcheryRange
+            | BuildingKind::Stable
+            | BuildingKind::Blacksmith
+            | BuildingKind::WatchTower
+            | BuildingKind::Market => Age::Feudal,
             BuildingKind::TownCenter => Age::Castle,
             _ => Age::Dark,
+        }
+    }
+
+    /// Line of sight in tiles, keyed on the OWNER's age (VIS-01's
+    /// building stamp): the generic placed building reads the
+    /// study-adopted `BUILDING_SIGHT_TILES` (4); the two BLD-18
+    /// structures are the exceptions their designs call for.
+    ///
+    /// - Watch Tower 10: ADOPTED — UNVERIFIED. The fetched tower
+    ///   sources pin range 8 but no sight figure; 10 follows the
+    ///   defensive-building pattern of sight = range + 2 (the
+    ///   Castle's documented 8 range pairs with double-digit sight
+    ///   in every secondary account).
+    /// - Outpost 6 in the Dark Age, 8 from Feudal: the Outpost
+    ///   article states its line of sight "increases with each
+    ///   Age" without numbers in the fetched text; the step values
+    ///   are ADOPTED — UNVERIFIED, chosen so the Dark-Age outpost
+    ///   already out-sees every ordinary building (its whole
+    ///   purpose) and the Feudal step matches the Town Center's
+    ///   documented 8.
+    pub fn sight_tiles_at(self, age: Age) -> u32 {
+        match self {
+            BuildingKind::WatchTower => 10,
+            BuildingKind::Outpost => match age {
+                Age::Dark => 6,
+                // Castle holds the Feudal step (ADOPTED — the
+                // article's per-Age numbers stay UNVERIFIED; the
+                // Castle rung exists since Castle Age P1).
+                Age::Feudal | Age::Castle => 8,
+            },
+            _ => crate::BUILDING_SIGHT_TILES,
+        }
+    }
+
+    /// The building weapon this kind carries, if any (BLD-18):
+    /// only the Watch Tower fires. The returned spec is the BASE
+    /// profile; researched patches (Fletching, TEC-06-style) layer
+    /// on top in `Sim::building_weapon`.
+    pub fn weapon(self) -> Option<BuildingWeapon> {
+        match self {
+            BuildingKind::WatchTower => Some(WATCH_TOWER_WEAPON),
+            _ => None,
         }
     }
 
@@ -355,6 +487,8 @@ impl BuildingKind {
     pub fn requires_building(self) -> Option<BuildingKind> {
         match self {
             BuildingKind::ArcheryRange | BuildingKind::Stable => Some(BuildingKind::Barracks),
+            // BLD-15's chain: the Mill gates the Market.
+            BuildingKind::Market => Some(BuildingKind::Mill),
             _ => None,
         }
     }
@@ -409,8 +543,9 @@ impl BuildingKind {
     /// than Houses and Farms. Walls never count (BLD-13 — the
     /// reference excludes walls and towers from age-up building
     /// requirements, the same exclusion the Castle-Age dossier
-    /// records for the next rung), and neither do Outposts (not
-    /// yet in the game).
+    /// records for the next rung), and neither do the Watch Tower
+    /// or the Outpost (BLD-18 — defensive structures are not
+    /// age-up buildings).
     pub fn counts_toward_feudal(self) -> bool {
         matches!(
             self,
@@ -424,17 +559,21 @@ impl BuildingKind {
     /// Whether this kind counts toward the Castle Age research
     /// requirement (TEC-01 Castle rung; study §7): any completed
     /// building *of the Feudal Age* — the kinds whose availability
-    /// begins in Feudal (walls and towers excluded; neither exists
-    /// yet). The reading mirrors `counts_toward_feudal` one rung
-    /// up: the Barracks counted toward Feudal because it is a
-    /// Dark-Age building; being Dark-Age-born, it does NOT count
-    /// toward Castle — the qualifying set is the Feudal-born
-    /// kinds (Range, Stable, Blacksmith; the Market and Dock are
-    /// Feudal-born too but do not exist in this roster).
+    /// begins in Feudal (walls and towers excluded, the same
+    /// exclusion `counts_toward_feudal` records). The reading
+    /// mirrors `counts_toward_feudal` one rung up: the Barracks
+    /// counted toward Feudal because it is a Dark-Age building;
+    /// being Dark-Age-born, it does NOT count toward Castle — the
+    /// qualifying set is the Feudal-born kinds (Range, Stable,
+    /// Blacksmith, and the Market since BLD-19 landed it; the
+    /// Dock is Feudal-born too but does not exist in this roster).
     pub fn counts_toward_castle(self) -> bool {
         matches!(
             self,
-            BuildingKind::ArcheryRange | BuildingKind::Stable | BuildingKind::Blacksmith
+            BuildingKind::ArcheryRange
+                | BuildingKind::Stable
+                | BuildingKind::Blacksmith
+                | BuildingKind::Market
         )
     }
 
@@ -456,6 +595,16 @@ impl BuildingKind {
             // (150/250/250/250); the Feudal step lives in
             // `max_hp_at`.
             BuildingKind::PalisadeWall => 150,
+            // BLD-18: the Watch Tower's Feudal row — 850 HP before
+            // the Castle Age (update 61321 raised the pre-Castle
+            // value to 850; the Castle step to 1020 lands with the
+            // Castle Age column, when the `Age` enum reaches it).
+            BuildingKind::WatchTower => 850,
+            // BLD-18: the Outpost's flat 500 (Outpost article).
+            BuildingKind::Outpost => 500,
+            // Feudal column of the wiki's Market table (Castle and
+            // Imperial both read 2100 — see the kind's doc).
+            BuildingKind::Market => 1800,
             // The Town Center entity's own row (study §5): 2400 at
             // every Age — the construction record shares it.
             BuildingKind::TownCenter => 2400,
@@ -490,6 +639,11 @@ impl BuildingKind {
             (BuildingKind::Barracks, Age::Castle) => 1800,
             (BuildingKind::ArcheryRange, Age::Castle) => 1800,
             (BuildingKind::Stable, Age::Castle) => 1800,
+            // The Castle steps BLD-18/BLD-19 deferred to this
+            // package: Watch Tower 850 → 1020 (tower article,
+            // update 61321), Market 1800 → 2100 (Market infobox).
+            (BuildingKind::WatchTower, Age::Castle) => 1020,
+            (BuildingKind::Market, Age::Castle) => 2100,
             _ => self.max_hp(),
         }
     }
@@ -504,7 +658,12 @@ impl BuildingKind {
     pub fn armor_melee(self) -> i32 {
         match self {
             BuildingKind::House => -2,
-            BuildingKind::ArcheryRange | BuildingKind::Stable => 1,
+            // The Watch Tower's 1 melee is its documented row
+            // (BLD-18; tower article statistics).
+            BuildingKind::ArcheryRange
+            | BuildingKind::Stable
+            | BuildingKind::WatchTower
+            | BuildingKind::Market => 1,
             // BLD-13: palisade melee armor 2 (wiki infobox; flat
             // across ages).
             BuildingKind::PalisadeWall => 2,
@@ -527,6 +686,8 @@ impl BuildingKind {
             (BuildingKind::Barracks, Age::Castle) => 2,
             (BuildingKind::ArcheryRange, Age::Castle) => 2,
             (BuildingKind::Stable, Age::Castle) => 2,
+            // Market Castle step (BLD-19's deferred column: 2/9).
+            (BuildingKind::Market, Age::Castle) => 2,
             (BuildingKind::TownCenter, Age::Feudal) => 4,
             (BuildingKind::TownCenter, Age::Castle) => 5,
             _ => self.armor_melee(),
@@ -540,7 +701,7 @@ impl BuildingKind {
         match self {
             BuildingKind::House => 7,
             BuildingKind::Farm => 0,
-            BuildingKind::ArcheryRange | BuildingKind::Stable => 8,
+            BuildingKind::ArcheryRange | BuildingKind::Stable | BuildingKind::Market => 8,
             // BLD-13: palisade pierce armor 5 (wiki infobox; 2 in
             // The Age of Kings, 5 since The Conquerors patch 1.0b).
             BuildingKind::PalisadeWall => 5,
@@ -561,6 +722,8 @@ impl BuildingKind {
             (BuildingKind::Barracks, Age::Castle) => 9,
             (BuildingKind::ArcheryRange, Age::Castle) => 9,
             (BuildingKind::Stable, Age::Castle) => 9,
+            // Market Castle step (BLD-19's deferred column: 2/9).
+            (BuildingKind::Market, Age::Castle) => 9,
             (BuildingKind::TownCenter, Age::Feudal) => 6,
             (BuildingKind::TownCenter, Age::Castle) => 7,
             _ => self.armor_pierce(),
@@ -633,6 +796,90 @@ pub fn repair_rate_hp_per_min(repairers: u32) -> i64 {
     REPAIR_HP_PER_MIN_FIRST + REPAIR_HP_PER_MIN_EXTRA * (repairers as i64 - 1)
 }
 
+/// A building weapon (BLD-18): the static firing profile of a
+/// completed defensive building. Only the Watch Tower carries one
+/// today; the Castle (Castle Age dossier) is the designed second
+/// user — its volley adds garrison projectiles (GAR-05) on top of
+/// the same base machinery.
+///
+/// The Watch Tower's numbers, from the AoE wiki's tower article
+/// and the project study (§2's band table, §5): 5 pierce attack
+/// (+7 vs Ships, +2 vs Spearmen — the tower article's bonus rows),
+/// range 1–8 (the minimum range is the study's documented
+/// building band; the generic building-attack article's "5–8"
+/// describes garrisoned volleys inside a Castle's own footprint
+/// and does not govern a 1×1 tower), one shot every 2.0 s.
+///
+/// The flight profile reuses the Archer's arrow constants: the
+/// projectile speed 0.5 wu/tick and the scattered-landing spread
+/// 2.0 are PRJ-02/PRJ-04 design constants (the reference publishes
+/// no numbers for either), and the attack delay takes the
+/// Archer's documented 21 ticks as the arrow-weapon precedent —
+/// ADOPTED for buildings, UNVERIFIED (no fetched source pins a
+/// tower frame delay). Accuracy 100: the study's §2.2 profiles
+/// foot archers at 80/90, but a defensive building's arrows are
+/// the always-on-target case in every account of tower rushes —
+/// a moving target still dodges by travel time (PRJ-06), which
+/// is where tower "inaccuracy" lives in the reference.
+///
+/// GARRISON REMAINDER (recorded, not shipped): a tower with
+/// villagers or archers inside fires extra arrows in the
+/// reference (up to its garrison capacity of 5). Garrisoning
+/// itself is the GAR rule family's own package; BLD-18 ships the
+/// tower's BASE fire only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BuildingWeapon {
+    /// (class, value) attack pairs, CMB-03 form.
+    pub attacks: &'static [(u8, i32)],
+    /// Firing band, world units, measured from the footprint's
+    /// edge (PRJ-08's building form).
+    pub range_max: I16F16,
+    pub range_min: I16F16,
+    /// Ticks between strikes (CMB-05: counted from the previous
+    /// strike's landing).
+    pub reload_ticks: u64,
+    /// First-strike delay of an engagement (CMB-04).
+    pub attack_delay_ticks: u64,
+    /// Percent chance the shot flies true; a miss still flies and
+    /// lands scattered (PRJ-05).
+    pub accuracy: u32,
+    /// Arrow speed (PRJ-02 design constant, shared with archers).
+    pub projectile_speed: I16F16,
+    /// Scattered-landing spread on a miss (PRJ-04 design constant).
+    pub scatter: I16F16,
+}
+
+/// The Watch Tower's base profile (BLD-18; sources in the
+/// `BuildingWeapon` docs).
+pub const WATCH_TOWER_WEAPON: BuildingWeapon = BuildingWeapon {
+    attacks: &[(crate::classes::PIERCE, 5), (crate::classes::SHIP, 7), (crate::classes::SPEARMAN, 2)],
+    range_max: I16F16::from_bits(2_097_152), // 32.0 = 8 tiles
+    range_min: I16F16::from_bits(262_144),   // 4.0 = 1 tile
+    reload_ticks: 120,                       // 2.0 s
+    attack_delay_ticks: 21,
+    accuracy: 100,
+    projectile_speed: I16F16::from_bits(32_768), // 0.5
+    scatter: I16F16::from_bits(131_072),         // 2.0
+};
+
+/// The Watch Tower's attack table with Fletching researched
+/// (TEC-06's tower line: +1 attack — the pierce component; the
+/// +1 range layers in `Sim::building_weapon`).
+pub const WATCH_TOWER_FLETCHING_ATTACKS: &[(u8, i32)] = &[
+    (crate::classes::PIERCE, 6),
+    (crate::classes::SHIP, 7),
+    (crate::classes::SPEARMAN, 2),
+];
+
+/// `Projectile::attacker` value for a shot loosed by a building:
+/// no entity bears this id (entity ids are sequential from 1 and
+/// the match never fields billions of them), so every consumer
+/// that resolves the attacker as an entity finds none — exactly
+/// the semantics a building shot needs (no carcass harvester, no
+/// retaliation target; the kill credit rides
+/// `Projectile::attacker_building` and `Entity::last_hit_owner`).
+pub const BUILDING_ATTACKER_ID: u32 = u32::MAX;
+
 /// One placed building, under construction or complete. Position is the
 /// footprint's center in world coordinates; `cell_x`/`cell_y` are the
 /// anchor (minimum) cell of the footprint.
@@ -680,6 +927,12 @@ pub struct Building {
     /// this field holds the numerator remainder. Reset to 0 when
     /// the building reaches full HP. Part of the hashed state.
     pub repair_cost_remainder: i64,
+    /// Repair stone-drip accumulator (BLD-07 × BLD-18): the stone
+    /// half of the repair drip for stone-cost buildings, in the
+    /// same numerator form as `repair_cost_remainder`. Zero for
+    /// every wood-only kind. Reset to 0 at full HP. Part of the
+    /// hashed state (written only while nonzero).
+    pub repair_stone_remainder: i64,
     pub complete: bool,
     /// For a completed Farm: the resource node it became. The building
     /// record stays as the footprint registry until the node depletes,
@@ -707,6 +960,25 @@ pub struct Building {
     /// of merely walking to the point. Resolved when the rally is
     /// set; re-checked (still live?) when a unit spawns.
     pub rally_node: Option<u32>,
+    // --- BLD-18: building-weapon state (inert unless the kind
+    // carries a weapon; only the Watch Tower does today) ---
+    /// The entity this building's weapon is engaged with — a unit
+    /// or the enemy Town Center entity (the TC is an entity, so it
+    /// shares this slot; the building-target slot below is for
+    /// placed buildings). Re-validated every tick by the weapon
+    /// step, exactly like an entity's `attack_target`.
+    pub weapon_target: Option<u32>,
+    /// The placed building this building's weapon is engaged with.
+    pub weapon_target_building: Option<u32>,
+    /// Tick at which a pending first strike is loosed (the attack
+    /// delay window — CMB-04's building form).
+    pub weapon_strike_tick: Option<u64>,
+    /// Earliest tick the next shot may begin (reload — CMB-05).
+    pub weapon_next_tick: u64,
+    /// Whether the weapon has already loosed a shot at its current
+    /// target (the attack delay applies only to an engagement's
+    /// first shot).
+    pub weapon_engaged: bool,
 }
 
 impl Building {
@@ -963,8 +1235,53 @@ mod tests {
         }
         assert_eq!(BuildingKind::Blacksmith.wood_cost(), I16F16::from_num(150));
         assert_eq!(BuildingKind::Blacksmith.age_required(), Age::Feudal);
+        // BLD-18 numbers (tower + Outpost articles, fetched
+        // 2026-10-22): Watch Tower 35W/125S, 80 s, 1×1, Feudal,
+        // 850 HP, 1/7 armor; Outpost 25W/5S, 15 s, 1×1, Dark,
+        // 500 HP. Neither counts toward an age-up requirement.
+        let wt = BuildingKind::WatchTower;
+        // Tags 10/11 since the merge with BLD-13: the Palisade
+        // Wall took 9 on main first (ABI append-only rule).
+        assert_eq!(wt.tag(), 10);
+        assert_eq!(wt.wood_cost(), I16F16::from_num(35));
+        assert_eq!(wt.stone_cost(), I16F16::from_num(125));
+        assert_eq!(wt.total_cost(), I16F16::from_num(160));
+        assert_eq!(wt.build_ticks(), 80 * 60);
+        assert_eq!(wt.footprint_size(), 1);
+        assert_eq!(wt.age_required(), Age::Feudal);
+        assert_eq!(wt.max_hp(), 850);
+        assert_eq!(wt.armor_melee(), 1);
+        assert_eq!(wt.armor_pierce(), 7);
+        assert!(!wt.counts_toward_feudal());
+        assert!(!wt.produces_units());
+        assert!(wt.weapon().is_some());
+        let op = BuildingKind::Outpost;
+        assert_eq!(op.tag(), 11);
+        assert_eq!(op.wood_cost(), I16F16::from_num(25));
+        assert_eq!(op.stone_cost(), I16F16::from_num(5));
+        assert_eq!(op.build_ticks(), 15 * 60);
+        assert_eq!(op.footprint_size(), 1);
+        assert_eq!(op.age_required(), Age::Dark);
+        assert_eq!(op.max_hp(), 500);
+        assert!(!op.counts_toward_feudal());
+        assert!(op.weapon().is_none());
+        // Sight (VIS-01): the generic building reads 4; the two
+        // BLD-18 structures carry their adopted discs.
+        assert_eq!(BuildingKind::House.sight_tiles_at(Age::Dark), 4);
+        assert_eq!(wt.sight_tiles_at(Age::Feudal), 10);
+        assert_eq!(op.sight_tiles_at(Age::Dark), 6);
+        assert_eq!(op.sight_tiles_at(Age::Feudal), 8);
+        // The weapon profile: 5 pierce +7 Ship +2 Spearman,
+        // band 1–8 tiles, 2.0 s reload.
+        let w = wt.weapon().unwrap();
+        assert_eq!(w.attacks, &[(crate::classes::PIERCE, 5), (crate::classes::SHIP, 7), (crate::classes::SPEARMAN, 2)]);
+        assert_eq!(w.range_max, I16F16::from_num(32));
+        assert_eq!(w.range_min, I16F16::from_num(4));
+        assert_eq!(w.reload_ticks, 120);
         // Town Center (Castle P1; study §5): 275 W + 100 S, 150 s,
-        // 4×4, Castle Age, 2400 HP; the only stone-cost kind.
+        // 4×4, Castle Age, 2400 HP; tag 13 (10–12 went to the
+        // BLD-18/19 kinds on main first — append-only rule).
+        assert_eq!(BuildingKind::TownCenter.tag(), 13);
         assert_eq!(BuildingKind::TownCenter.wood_cost(), I16F16::from_num(275));
         assert_eq!(BuildingKind::TownCenter.stone_cost(), I16F16::from_num(100));
         assert_eq!(BuildingKind::TownCenter.build_ticks(), 150 * 60);
@@ -973,16 +1290,23 @@ mod tests {
         assert_eq!(BuildingKind::TownCenter.max_hp(), 2400);
         assert_eq!(BuildingKind::House.stone_cost(), I16F16::ZERO);
         // Castle qualifying set (TEC-01): the Feudal-born kinds
-        // only — the Dark-born Barracks does not count.
+        // only — the Dark-born Barracks does not count, and
+        // neither do walls or towers (BLD-18's exclusion); the
+        // Market counts (Feudal-born, BLD-19).
         assert!(BuildingKind::ArcheryRange.counts_toward_castle());
         assert!(BuildingKind::Stable.counts_toward_castle());
         assert!(BuildingKind::Blacksmith.counts_toward_castle());
+        assert!(BuildingKind::Market.counts_toward_castle());
         assert!(!BuildingKind::Barracks.counts_toward_castle());
         assert!(!BuildingKind::Mill.counts_toward_castle());
+        assert!(!BuildingKind::WatchTower.counts_toward_castle());
+        assert!(!BuildingKind::Outpost.counts_toward_castle());
         // BLD-11 Castle steps (study §5): House 900 HP, −1→1
         // melee, 8→9 pierce; Barracks 1800, 1→2, 8→9; Range and
         // Stable 1800, 1→2, 8→9; Town Center armor 4/6 Feudal →
-        // 5/7 Castle at a flat 2400 HP; camps stay flat.
+        // 5/7 Castle at a flat 2400 HP; camps stay flat. Plus the
+        // steps BLD-18/19 deferred to this package: Watch Tower
+        // 850 → 1020 HP; Market 1800 → 2100 HP, armor 1/8 → 2/9.
         assert_eq!(BuildingKind::House.max_hp_at(Age::Castle), 900);
         assert_eq!(BuildingKind::House.armor_melee_at(Age::Castle), 1);
         assert_eq!(BuildingKind::House.armor_pierce_at(Age::Castle), 9);
@@ -996,6 +1320,11 @@ mod tests {
         assert_eq!(BuildingKind::TownCenter.armor_melee_at(Age::Feudal), 4);
         assert_eq!(BuildingKind::TownCenter.armor_pierce_at(Age::Castle), 7);
         assert_eq!(BuildingKind::Mill.max_hp_at(Age::Castle), 550);
+        assert_eq!(BuildingKind::WatchTower.max_hp_at(Age::Castle), 1020);
+        assert_eq!(BuildingKind::Market.max_hp_at(Age::Castle), 2100);
+        assert_eq!(BuildingKind::Market.armor_melee_at(Age::Castle), 2);
+        assert_eq!(BuildingKind::Market.armor_pierce_at(Age::Castle), 9);
+        assert_eq!(BuildingKind::Outpost.sight_tiles_at(Age::Castle), 8);
         // The trainable relation (M6): one home per unit kind.
         assert!(BuildingKind::Barracks.trains(EntityKind::Militia));
         assert!(BuildingKind::Barracks.trains(EntityKind::Spearman));
@@ -1048,12 +1377,18 @@ mod tests {
             progress_thirds: 0,
             repair_hp_remainder: 0,
             repair_cost_remainder: 0,
+            repair_stone_remainder: 0,
             complete: false,
             node_id: None,
             queue: Vec::new(),
             train_progress: 0,
             rally: None,
             rally_node: None,
+            weapon_target: None,
+            weapon_target_building: None,
+            weapon_strike_tick: None,
+            weapon_next_tick: 0,
+            weapon_engaged: false,
         };
         assert_eq!(b.progress_frac_bits(), 0);
         b.progress_thirds = 2250; // half of 4500

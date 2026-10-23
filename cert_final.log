@@ -1,0 +1,342 @@
+=== lib ===
+   Compiling skirmish-sim v0.1.0 (/home/hatch/workspace/skirmish-castle1-rebase/sim)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 33.63s
+     Running unittests src/lib.rs (target/debug/deps/skirmish_sim-8cdca41beba9de26)
+
+running 72 tests
+test ai::tests::ai_easy_repairs_too_but_capped_lower has been running for over 60 seconds
+test ai::tests::ai_normal_repairs_and_respects_the_wood_floor has been running for over 60 seconds
+test ai::tests::ai_normal_repairs_and_respects_the_wood_floor ... ok
+test build::tests::footprint_and_ring_are_the_right_shape ... ok
+test build::tests::footprint_center_is_the_shared_corner ... ok
+test build::tests::multi_builder_rate_is_the_aoe2_formula ... ok
+test build::tests::numbers_match_the_study ... ok
+test build::tests::palisade_wall_numbers_are_the_current_de_row ... ok
+test build::tests::progress_fraction_is_measured_in_thirds ... ok
+test build::tests::repair_numbers_are_the_documented_de_values ... ok
+test build::tests::wall_line_cells_is_a_supercover_line ... ok
+test combat::tests::bonus_damage_requires_class_membership ... ok
+test combat::tests::damage_formula_matches_cmb_01 ... ok
+test combat::tests::elevation_factor_matches_cmb_01 ... ok
+test econ::tests::node_kind_numbers ... ok
+test econ::tests::resource_tags_round_trip ... ok
+test econ::tests::spend_requires_funds_and_is_atomic ... ok
+test econ::tests::starting_stockpile_is_standard ... ok
+test grid::tests::astar_is_deterministic ... ok
+test grid::tests::astar_rejects_blocked_target ... ok
+test grid::tests::astar_routes_around_water ... ok
+test grid::tests::terrain_layers_block_as_designed ... ok
+test grid::tests::world_to_cell_mapping ... ok
+test hash::tests::byte_order_is_canonical ... ok
+test hash::tests::empty_hash_is_offset_basis ... ok
+test hash::tests::known_vector ... ok
+test mapgen::tests::fallback_template_validates ... ok
+test mapgen::tests::forests_are_contiguous_masses ... ok
+test mapgen::tests::generated_maps_validate_and_are_fair ... ok
+test mapgen::tests::generation_is_deterministic_and_seed_varied ... ok
+test new_units_tests::bonus_tables_are_the_documented_values ... ok
+test new_units_tests::fletching_and_armor_patches_cover_spearman_and_skirmisher ... ok
+test ai::tests::ai_easy_repairs_too_but_capped_lower ... ok
+test new_units_tests::skirmisher_never_fires_from_inside_its_dead_zone_and_backs_out ... ok
+test new_units_tests::skirmisher_trains_at_the_archery_range_for_25_food_35_wood ... ok
+test new_units_tests::skirmisher_wins_the_archer_duel_it_exists_to_win ... ok
+test new_units_tests::spearman_bonus_is_measured_in_sim_not_just_tabulated ... ok
+test new_units_tests::skirmisher_stands_off_from_buildings_and_still_damages_them has been running for over 60 seconds
+test new_units_tests::spearman_trains_at_the_barracks_only_from_the_feudal_age ... ok
+test rng::tests::below_stays_in_range ... ok
+test rng::tests::different_seeds_differ ... ok
+test rng::tests::same_seed_same_stream ... ok
+test steer::tests::isqrt_matches_known_values ... ok
+test steer::tests::separation_can_be_suppressed_for_an_engaged_attacker ... ok
+test steer::tests::separation_cannot_cancel_an_order ... ok
+test steer::tests::separation_pushes_apart ... ok
+test steer::tests::shove_moves_half_the_overlap ... ok
+test steer::tests::steer_heads_for_waypoint ... ok
+test steer::tests::steer_respects_the_units_own_speed ... ok
+test steer::tests::steer_slows_near_final_waypoint ... ok
+test steer::tests::vec_len_pythagorean ... ok
+test tech::tests::entry_ticks_and_codes ... ok
+test tech::tests::feudal_completion_table_matches_the_wiki ... ok
+test tech::tests::gather_rate_patches_scale_exactly_the_documented_percentages ... ok
+test tech::tests::tech_table_matches_the_docs ... ok
+test tests::a_lone_non_production_building_no_longer_keeps_its_owner_alive ... ok
+test tests::a_lone_production_building_keeps_its_owner_alive ... ok
+test tests::ai_resignation_needs_no_villagers_either ... ok
+test tests::eliminating_the_human_is_defeat_even_on_a_tie ... ok
+test tests::eliminating_the_opponent_is_victory ... ok
+test new_units_tests::skirmisher_stands_off_from_buildings_and_still_damages_them ... ok
+test tests::fresh_match_is_ongoing_for_both_profiles ... ok
+test tests::horse_collar_top_up_rounds_up ... ok
+test tests::move_override_keeps_carry_undeposited ... ok
+test tests::entities_stay_id_sorted ... ok
+test tests::move_unknown_entity_is_ignored ... ok
+test tests::noop_command_keeps_hash_stable ... ok
+test tests::sandbox_never_decides ... ok
+test tests::spawn_is_deterministic ... ok
+test tests::starting_layout_is_on_open_ground ... ok
+test tests::tick_increments_clock ... ok
+test tests::town_center_ignores_move_and_gather ... ok
+test units::tests::speed_ratios_match_the_study ... ok
+test units::tests::table_matches_the_study_rows ... ok
+test tests::move_to_blocked_target_walks_up_to_it has been running for over 60 seconds
+test tests::move_to_blocked_target_walks_up_to_it ... ok
+
+test result: ok. 72 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 447.31s
+
+DONE lib exit 0
+=== determinism ===
+   Compiling skirmish-sim v0.1.0 (/home/hatch/workspace/skirmish-castle1-rebase/sim)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 40.55s
+     Running tests/determinism.rs (target/debug/deps/determinism-a445f04d79ea5be1)
+
+running 7 tests
+test different_seeds_diverge ... ok
+test hash_covers_rng_state ... ok
+test hash_parts_localize_a_divergence ... ok
+test golden_hash_regression ... ok
+test same_seed_produces_bit_identical_hashes ... ok
+test headless_replay_matches_live_run ... ok
+test same_seed_with_same_commands_stays_identical ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 50.55s
+
+DONE determinism exit 0
+=== castle_age ===
+   Compiling skirmish-sim v0.1.0 (/home/hatch/workspace/skirmish-castle1-rebase/sim)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.08s
+     Running tests/castle_age.rs (target/debug/deps/castle_age-1ec452cdcf1a417e)
+
+running 3 tests
+test castle_age_gates_cost_timing_and_the_bld11_step has been running for over 60 seconds
+test hand_cart_chain_carry_and_speed has been running for over 60 seconds
+=== castle_age ===
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.68s
+     Running tests/castle_age.rs (target/debug/deps/castle_age-1ec452cdcf1a417e)
+
+running 3 tests
+test castle_age_gates_cost_timing_and_the_bld11_step has been running for over 60 seconds
+test hand_cart_chain_carry_and_speed has been running for over 60 seconds
+test castle_age_gates_cost_timing_and_the_bld11_step ... ok
+test town_center_buildable_in_castle_age has been running for over 60 seconds
+test hand_cart_chain_carry_and_speed ... ok
+test town_center_buildable_in_castle_age ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4109.58s
+
+DONE castle_age exit 0
+=== construction ===
+   Compiling skirmish-sim v0.1.0 (/home/hatch/workspace/skirmish-castle1-rebase/sim)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.00s
+     Running tests/construction.rs (target/debug/deps/construction-6506132ca03ba1cf)
+
+running 12 tests
+test a_builder_joining_mid_build_changes_the_pace ... ok
+test build_resume_accepts_an_order_on_any_foundation_cell ... ok
+test a_second_builder_resumes_an_unfinished_building ... ok
+test build_script_replays_bit_identically has been running for over 60 seconds
+test farm_completes_is_gatherable_depletes_and_frees_the_ground has been running for over 60 seconds
+test build_script_replays_bit_identically ... ok
+test foundation_hp_grows_with_construction_bld05 ... ok
+test house_completes_raises_cap_and_blocks_its_footprint ... ok
+test invalid_placements_are_rejected_whole ... ok
+test solo_house_takes_exactly_1500_ticks_of_work ... ok
+test training_stalls_at_cap_and_resumes_after_a_house ... ok
+test two_builders_finish_a_house_in_about_1125_ticks ... ok
+test unaffordable_placement_is_rejected ... ok
+test farm_completes_is_gatherable_depletes_and_frees_the_ground ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 391.61s
+
+DONE construction exit 0
+=== wolf ===
+   Compiling skirmish-sim v0.1.0 (/home/hatch/workspace/skirmish-castle1-rebase/sim)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.99s
+     Running tests/wolf.rs (target/debug/deps/wolf-0e8bb3e9acf23769)
+
+running 7 tests
+test idle_wolves_hold_their_posts ... ok
+test packs_stand_far_from_every_town_center ... ok
+test villagers_can_kill_a_wolf_and_it_drops_nothing ... ok
+test wolf_hunts_down_a_villager_and_leaves_nothing ... ok
+test chased_prey_escapes_the_leash_and_the_wolf_comes_home ... ok
+test wolf_ignores_a_scout_on_sight ... ok
+test wolf_match_is_deterministic ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 87.69s
+
+DONE wolf exit 0
+=== tech ===
+   Compiling skirmish-sim v0.1.0 (/home/hatch/workspace/skirmish-castle1-rebase/sim)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.15s
+     Running tests/tech.rs (target/debug/deps/tech-e61828dd7384dca0)
+
+running 13 tests
+test a_builder_finishing_a_camp_deposits_its_carry_there ... ok
+test ai_match_replays_bit_identically_and_ages_up has been running for over 60 seconds
+test archer_production_moves_to_the_range_and_scout_to_the_stable has been running for over 60 seconds
+test archer_production_moves_to_the_range_and_scout_to_the_stable ... ok
+test blacksmith_technologies_patch_the_combat_rows has been running for over 60 seconds
+test blacksmith_technologies_patch_the_combat_rows ... ok
+test deposits_fall_back_to_the_tc_without_a_camp ... ok
+test ai_match_replays_bit_identically_and_ages_up ... ok
+test farm_placement_requires_a_completed_mill ... ok
+test deposits_route_to_the_nearest_valid_camp has been running for over 60 seconds
+test deposits_route_to_the_nearest_valid_camp ... ok
+test force_drop_off_deposits_and_returns_to_work ... ok
+test loom_charges_gold_and_patches_villager_stats ... ok
+test feudal_research_gates_cost_and_exact_timing has been running for over 60 seconds
+test man_at_arms_upgrades_existing_and_future_militia has been running for over 60 seconds
+=== tech ===
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.52s
+     Running tests/tech.rs (target/debug/deps/tech-e61828dd7384dca0)
+
+running 13 tests
+test a_builder_finishing_a_camp_deposits_its_carry_there ... ok
+test ai_match_replays_bit_identically_and_ages_up has been running for over 60 seconds
+test archer_production_moves_to_the_range_and_scout_to_the_stable has been running for over 60 seconds
+test archer_production_moves_to_the_range_and_scout_to_the_stable ... ok
+test blacksmith_technologies_patch_the_combat_rows has been running for over 60 seconds
+test ai_match_replays_bit_identically_and_ages_up ... ok
+test deposits_fall_back_to_the_tc_without_a_camp ... ok
+test blacksmith_technologies_patch_the_combat_rows ... ok
+test deposits_route_to_the_nearest_valid_camp has been running for over 60 seconds
+test deposits_route_to_the_nearest_valid_camp ... ok
+test farm_placement_requires_a_completed_mill ... ok
+test force_drop_off_deposits_and_returns_to_work ... ok
+test loom_charges_gold_and_patches_villager_stats ... ok
+test feudal_research_gates_cost_and_exact_timing has been running for over 60 seconds
+test man_at_arms_upgrades_existing_and_future_militia has been running for over 60 seconds
+test feudal_research_gates_cost_and_exact_timing ... ok
+test research_shares_the_tc_queue_with_training ... ok
+test wheelbarrow_gates_costs_and_patches_carry_and_speed has been running for over 60 seconds
+=== orders_stances ===
+   Compiling skirmish-sim v0.1.0 (/home/hatch/workspace/skirmish-castle1-rebase/sim)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.54s
+     Running tests/orders_stances.rs (target/debug/deps/orders_stances-6916636c6d2d7738)
+
+running 12 tests
+test attack_move_and_patrol_cancel_auto_explore_and_each_other ... ok
+test attack_move_engages_en_route_then_resumes_and_holds has been running for over 60 seconds
+test defensive_leashes_and_returns_aggressive_does_not has been running for over 60 seconds
+test attack_move_engages_en_route_then_resumes_and_holds ... ok
+test no_attack_never_engages_but_explicit_orders_still_work has been running for over 60 seconds
+test no_attack_never_engages_but_explicit_orders_still_work ... ok
+test orders_and_stances_replay_bit_identically has been running for over 60 seconds
+test orders_and_stances_replay_bit_identically ... ok
+test patrol_loops_engages_and_appends has been running for over 60 seconds
+test patrol_loops_engages_and_appends ... ok
+test queued_attack_move_runs_after_the_current_order has been running for over 60 seconds
+test queued_attack_move_runs_after_the_current_order ... ok
+test queued_patrol_point_appends_to_an_active_patrol_at_once ... ok
+test set_stance_validates_and_persists_through_orders ... ok
+test stance_defaults_starting_scout_stand_ground_militia_aggressive ... ok
+test stand_ground_holds_post_while_boar_passes has been running for over 60 seconds
+test defensive_leashes_and_returns_aggressive_does_not ... ok
+test starting_scouts_fight_at_point_blank_and_hold_position ... ok
+test stand_ground_holds_post_while_boar_passes ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1167.52s
+
+DONE orders_stances exit 0
+=== score ===
+   Compiling skirmish-sim v0.1.0 (/home/hatch/workspace/skirmish-castle1-rebase/sim)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.18s
+     Running tests/score.rs (target/debug/deps/score-fb8b71d164b96378)
+
+running 5 tests
+test a_deleted_unit_credits_no_one_even_after_being_hit ... ok
+test loom_research_adds_its_cost_share_to_technology ... ok
+test opening_scores_match_the_formula ... ok
+test a_scripted_kill_credits_the_killers_military has been running for over 60 seconds
+test a_scripted_kill_credits_the_killers_military ... ok
+test razing_a_building_credits_its_wood_cost has been running for over 60 seconds
+test razing_a_building_credits_its_wood_cost ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 218.34s
+
+DONE score exit 0
+=== sheep_boar ===
+   Compiling skirmish-sim v0.1.0 (/home/hatch/workspace/skirmish-castle1-rebase/sim)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.20s
+     Running tests/sheep_boar.rs (target/debug/deps/sheep_boar-47934ca9fbf2259c)
+
+running 6 tests
+test boars_placed_on_dry_open_ground_in_band ... ok
+test captured_sheep_takes_move_orders ... ok
+test owned_sheep_grants_two_tiles_of_sight ... ok
+test gaia_sheep_wander_on_their_own_deterministically has been running for over 60 seconds
+test owned_sheep_hold_position_until_ordered ... ok
+test gaia_sheep_wander_on_their_own_deterministically ... ok
+test owned_sheep_left_alone_can_be_stolen ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 102.89s
+
+DONE sheep_boar exit 0
+=== world ===
+   Compiling skirmish-sim v0.1.0 (/home/hatch/workspace/skirmish-castle1-rebase/sim)
+warning: variable does not need to be mutable
+  --> sim/tests/world.rs:85:13
+   |
+85 |         let mut count = |owner_cell: (u32, u32), kind: NodeKind| {
+   |             ----^^^^^
+   |             |
+   |             help: remove this `mut`
+   |
+   = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: `skirmish-sim` (test "world") generated 1 warning (run `cargo fix --test "world" -p skirmish-sim` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.02s
+     Running tests/world.rs (target/debug/deps/world-57014c827daba2b4)
+
+running 9 tests
+test enemy_units_are_known_only_while_visible ... ok
+test fog_never_exceeds_the_los_cap ... ok
+test fog_starts_blind_and_transitions_with_the_scout ... ok
+test generated_maps_are_deterministic_and_seed_varied ... ok
+test starts_are_flat_and_hills_exist ... ok
+test starts_are_mirrored_fair_and_complete ... ok
+test starts_connect_and_every_resource_is_reachable ... ok
+test water_blocks_land_pathing_and_placement ... ok
+test ai_match_on_a_generated_map_replays_bit_identically has been running for over 60 seconds
+test ai_match_on_a_generated_map_replays_bit_identically ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 160.28s
+
+DONE world exit 0
+=== two_player ===
+   Compiling skirmish-sim v0.1.0 (/home/hatch/workspace/skirmish-castle1-rebase/sim)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.44s
+     Running tests/two_player.rs (target/debug/deps/two_player-acd9d07c66c14557)
+
+running 4 tests
+test interleaved_command_streams_stay_bit_identical ... ok
+test the_second_seat_plays_through_per_seat_commands ... ok
+test two_player_mode_is_tag_3_and_spawns_the_mirror_start ... ok
+test no_script_drives_the_second_seat has been running for over 60 seconds
+test no_script_drives_the_second_seat ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 250.33s
+
+DONE two_player exit 0
+=== auto_explore ===
+   Compiling skirmish-sim v0.1.0 (/home/hatch/workspace/skirmish-castle1-rebase/sim)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.26s
+     Running tests/auto_explore.rs (target/debug/deps/auto_explore-100b1f616768d10e)
+
+running 7 tests
+test a_queued_order_cancels_auto_explore ... ok
+test a_manual_move_cancels_auto_explore has been running for over 60 seconds
+test a_trained_scout_is_eligible_and_explores has been running for over 60 seconds
+test a_manual_move_cancels_auto_explore ... ok
+test auto_explore_is_bit_deterministic has been running for over 60 seconds
+test auto_explore_is_bit_deterministic ... ok
+test auto_explore_rides_and_the_frontier_grows has been running for over 60 seconds
+test auto_explore_rides_and_the_frontier_grows ... ok
+test every_scout_is_eligible_other_kinds_are_not ... ok
+test toggling_off_stops_the_scout_where_it_stands ... ok
+test a_trained_scout_is_eligible_and_explores ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 557.97s
+
+DONE auto_explore exit 0
+ALL_CERT_DONE

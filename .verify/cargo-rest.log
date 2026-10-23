@@ -1,0 +1,150 @@
+warning: variable does not need to be mutable
+  --> sim/tests/world.rs:85:13
+   |
+85 |         let mut count = |owner_cell: (u32, u32), kind: NodeKind| {
+   |             ----^^^^^
+   |             |
+   |             help: remove this `mut`
+   |
+   = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: `skirmish-sim` (test "world") generated 1 warning (run `cargo fix --test "world" -p skirmish-sim` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.42s
+     Running tests/economy.rs (/home/hatch/workspace/skirmish-towers/target/debug/deps/economy-fb379a45730abf5f)
+
+running 7 tests
+test full_gather_cycle_deposits_exact_carry ... ok
+test gather_to_wrong_kind_first_deposits_carry ... ok
+test gather_and_train_replay_bit_identically ... ok
+test nodes_are_reachable_from_town_center ... ok
+test train_villager_costs_food_and_spawns_after_1500_ticks ... ok
+test train_villager_rejected_without_food ... ok
+test node_depletion_is_bit_exact_and_node_goes_inert has been running for over 60 seconds
+test node_depletion_is_bit_exact_and_node_goes_inert ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 92.44s
+
+     Running tests/input.rs (/home/hatch/workspace/skirmish-towers/target/debug/deps/input-f39106b4cb97f5f7)
+
+running 17 tests
+test idle_queries_track_who_is_free ... ok
+test order_route_flags_the_whole_queued_chain ... ok
+test order_route_keeps_the_last_leg_flagged ... ok
+test order_route_resolves_object_orders_to_target_positions ... ok
+test barracks_rally_walks_the_new_unit_there ... ok
+test queue_validation_and_cap ... ok
+test plain_command_replaces_the_whole_queue ... ok
+test queued_build_executes_after_the_current_move ... ok
+test queued_attack_executes_after_the_current_move ... ok
+test queued_gather_runs_after_the_current_move ... ok
+test queued_order_for_an_idle_unit_starts_immediately ... ok
+test queued_moves_execute_in_fifo_order ... ok
+test queued_script_replays_bit_identically ... ok
+test retarget_continues_at_the_same_resource_neighbor has been running for over 60 seconds
+test retarget_continues_at_the_same_resource_neighbor ... ok
+test retarget_goes_idle_when_no_neighbor_is_in_reach ... ok
+test tc_rally_point_walks_the_new_villager_there ... ok
+test tc_rally_on_a_node_sends_the_new_villager_to_work ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 171.33s
+
+     Running tests/match.rs (/home/hatch/workspace/skirmish-towers/target/debug/deps/match-34c4202f0f844408)
+
+running 6 tests
+test ai_match_replays_bit_identically ... ok
+test ai_economy_grows_without_human_commands has been running for over 60 seconds
+test ai_raises_army_and_wave_engages_the_human has been running for over 60 seconds
+test ai_economy_grows_without_human_commands ... ok
+test opponent_start_is_mirrored_and_complete ... ok
+test passive_human_loses_the_match has been running for over 60 seconds
+test ai_raises_army_and_wave_engages_the_human ... ok
+test scripted_siege_wins_the_match has been running for over 60 seconds
+test passive_human_loses_the_match ... ok
+test scripted_siege_wins_the_match ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1299.90s
+
+     Running tests/melee_building.rs (/home/hatch/workspace/skirmish-towers/target/debug/deps/melee_building-054106b1ea60aa47)
+
+running 4 tests
+test foundation_damage_persists_through_completion_bld05 ... ok
+test melee_damages_barracks_approaching_from_the_south ... ok
+test melee_damages_house_approaching_the_nw_corner ... ok
+test melee_group_arriving_together_razes_a_barracks ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 42.48s
+
+     Running tests/movement.rs (/home/hatch/workspace/skirmish-towers/target/debug/deps/movement-a1784e832fb57498)
+
+running 5 tests
+test move_commands_replay_bit_identically ... ok
+test move_orders_keep_different_seeds_diverged ... ok
+test order_survives_serialization_shape ... ok
+test separation_keeps_entities_from_stacking ... ok
+test move_order_arrives_at_target ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.81s
+
+     Running tests/pace.rs (/home/hatch/workspace/skirmish-towers/target/debug/deps/pace-8349d026817696bd)
+
+running 4 tests
+test scout_cruise_is_one_point_two_tiles_per_sec ... ok
+test villager_cruise_is_point_eight_tiles_per_sec ... ok
+test villager_ten_tile_leg_takes_about_twelve_and_a_half_seconds ... ok
+test militia_cruise_is_point_nine_tiles_per_sec ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.01s
+
+     Running tests/repair.rs (/home/hatch/workspace/skirmish-towers/target/debug/deps/repair-d3cd3c32d093eddb)
+
+running 5 tests
+test repair_rejects_enemy_undamaged_and_unfinished_buildings ... ok
+test queued_repair_executes_when_the_villager_goes_idle ... ok
+test repair_restores_hp_at_the_documented_rate_and_stops_at_full ... ok
+test two_repairers_stack_at_the_documented_rate has been running for over 60 seconds
+test wood_exhaustion_stops_repair_and_the_repairer_goes_idle ... ok
+test two_repairers_stack_at_the_documented_rate ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 128.32s
+
+     Running tests/score.rs (/home/hatch/workspace/skirmish-towers/target/debug/deps/score-fb8b71d164b96378)
+
+running 5 tests
+test a_deleted_unit_credits_no_one_even_after_being_hit ... ok
+test loom_research_adds_its_cost_share_to_technology ... ok
+test opening_scores_match_the_formula ... ok
+test a_scripted_kill_credits_the_killers_military ... ok
+test razing_a_building_credits_its_wood_cost ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 39.88s
+
+     Running tests/sheep_boar.rs (/home/hatch/workspace/skirmish-towers/target/debug/deps/sheep_boar-47934ca9fbf2259c)
+
+running 6 tests
+test boars_placed_on_dry_open_ground_in_band ... ok
+test captured_sheep_takes_move_orders ... ok
+test owned_sheep_grants_two_tiles_of_sight ... ok
+test owned_sheep_hold_position_until_ordered ... ok
+test gaia_sheep_wander_on_their_own_deterministically ... ok
+test owned_sheep_left_alone_can_be_stolen ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 22.65s
+
+     Running tests/tc_footprint.rs (/home/hatch/workspace/skirmish-towers/target/debug/deps/tc_footprint-416cca87de9a69dc)
+
+running 4 tests
+test a_unit_ordered_across_the_tc_walks_straight_through ... ok
+test placement_overlapping_the_tc_footprint_is_rejected_adjacent_accepted ... ok
+test the_opponents_tc_footprint_is_reserved_too ... ok
+test a_villager_deposits_at_the_tc_as_before ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.06s
+
+     Running tests/tech.rs (/home/hatch/workspace/skirmish-towers/target/debug/deps/tech-e61828dd7384dca0)
+
+running 13 tests
+test a_builder_finishing_a_camp_deposits_its_carry_there ... ok
+test ai_match_replays_bit_identically_and_ages_up has been running for over 60 seconds
+test archer_production_moves_to_the_range_and_scout_to_the_stable has been running for over 60 seconds
+test archer_production_moves_to_the_range_and_scout_to_the_stable ... ok
+test blacksmith_technologies_patch_the_combat_rows has been running for over 60 seconds

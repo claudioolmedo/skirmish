@@ -259,7 +259,22 @@ fn golden_hash_regression() {
     // cost correction shipped in the same run (60 F -> 50 F,
     // update 141935) does NOT move this value: the scenario
     // issues no commands and trains nothing — costs never enter
-    // it. New value verified stable across independent runs
+    // it. (3) BLD-18 (2026-10-22): Entity::last_hit_owner — the
+    // owner-level kill attribution a building's arrows need —
+    // is hashed (marker byte 0xB4 on the merged tree; 0xB0–0xB3
+    // in the entity section belong to CMB-09/10/11) whenever a
+    // hit has landed. No hit lands in this scenario (nothing
+    // fights in 360 ticks — the boars stay unprovoked), so the
+    // field never enters the stream; every BLD-18 building-side
+    // state (weapon fields, attacker_building, the repair stone
+    // accumulator) is likewise conditional and adds nothing
+    // here — no tower stands in this scenario. The value below
+    // does NOT move for BLD-18: the package's own correction
+    // commit established the same on its pre-merge tree (its
+    // real value there was 042e33a17a6192ae, unchanged — an
+    // earlier landing draft had re-pinned from a mislabeled
+    // tool result).
+    // New value verified stable across independent runs
     // (run-to-run determinism test in this file).
     //
     // Orders & stances (2026-10-22, deliberate update): the hash

@@ -1,0 +1,7 @@
+opponent_start_is_mirrored_and_complete: exit 0 test result: ok
+ai_economy_grows_without_human_commands: exit 0 test result: ok
+passive_human_loses_the_match: exit 0 test result: ok
+ai_raises_army_and_wave_engages_the_human: exit 0 test result: ok
+ai_match_replays_bit_identically: exit 0 test result: ok
+scripted_siege_wins_the_match: exit 124 
+MATCH_EACH_DONE

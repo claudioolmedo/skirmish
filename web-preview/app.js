@@ -247,49 +247,57 @@ function pngIcon(png, cls) {
 // Building kind tags (must match the sim's BuildingKind::tag):
 // 0 house, 1 farm, 2 barracks (M2.5/M3); 3 lumber camp, 4 mill,
 // 5 mining camp, 6 archery range, 7 stable, 8 blacksmith (M6);
-// 9 palisade wall (BLD-13).
-// 10 town center (Castle P1 — a construction record that converts
-// into the TC entity on completion; its cost is 275 wood PLUS
-// 100 stone, the one two-resource cost: BUILD_COST holds the
-// wood, the stone rides BUILD_STONE_COST).
+// 9 palisade wall (BLD-13); 10 watch tower, 11 outpost (BLD-18);
+// 12 market (BLD-19); 13 town center (Castle P1 — a construction
+// record that converts into the TC entity on completion; its cost
+// is 275 wood PLUS 100 stone: BUILD_COST holds the wood, the
+// stone rides BUILD_COST_STONE).
 // Costs and footprints mirror the sim (MECHANICS-STUDY §5; the
 // palisade row is the current DE wiki row — 3 wood per segment).
-const BUILD_COST = [25, 60, 175, 100, 100, 100, 175, 175, 150, 3, 275];
-const BUILD_STONE_COST = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100];
+const BUILD_COST = [25, 60, 175, 100, 100, 100, 175, 175, 150, 3, 35, 25, 175, 275];
+// Stone paid at placement, by kind tag (BLD-18's two defensive
+// structures and the Town Center cost stone; every other entry 0).
+const BUILD_COST_STONE = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 125, 5, 0, 100];
 const BUILD_I18N = ['house', 'farm', 'barracks', 'lumber', 'mill',
-  'mining', 'range', 'stable', 'blacksmith', 'palisade', 'towncenter'];
+  'mining', 'range', 'stable', 'blacksmith', 'palisade', 'watchtower',
+  'outpost', 'market', 'towncenter'];
 let BUILD_NAME = ['House', 'Farm', 'Barracks', 'Lumber Camp', 'Mill',
-  'Mining Camp', 'Archery Range', 'Stable', 'Blacksmith', 'Palisade Wall', 'Town Center'];
-// Farm footprint is 3 (DE-documented; Claudio’s decision
+  'Mining Camp', 'Archery Range', 'Stable', 'Blacksmith', 'Palisade Wall',
+  'Watch Tower', 'Outpost', 'Market', 'Town Center'];
+// Farm footprint is 3 (DE-documented; Claudio's decision
 // 2026-10-22, superseding the earlier 2x2 specification).
-const BUILD_SIZE = [2, 3, 3, 2, 2, 2, 3, 3, 3, 1, 4];
+const BUILD_SIZE = [2, 3, 3, 2, 2, 2, 3, 3, 3, 1, 1, 1, 4, 4];
 const BUILD_ICON = ['i-house', 'i-farm', 'i-tc', 'i-lumber', 'i-mill',
-  'i-mining', 'i-range', 'i-stable', 'i-blacksmith', 'i-palisade', 'i-tc'];
+  'i-mining', 'i-range', 'i-stable', 'i-blacksmith', 'i-palisade',
+  'i-watchtower', 'i-outpost', 'i-market', 'i-tc'];
 // The PNG set above, per building kind tag (same order as
 // BUILD_ICON): command buttons and building portraits.
 const BUILD_PNG = ['house.png', 'farm.png', 'barracks.png', 'lumber-camp.png',
   'mill.png', 'mining-camp.png', 'archery-range.png', 'stable.png',
-  'blacksmith.png', 'palisade-wall.png', 'town-center.png'];
+  'blacksmith.png', 'palisade-wall.png', 'watchtower.png', 'outpost.png',
+  'market.png', 'town-center.png'];
 // Building max HP by kind tag (the sim's building table, study
 // §5) — for the enemy-building info panel (M5). The palisade
 // entry is its Dark-Age value (150; 250 from Feudal, BLD-13 —
-// the same base-column convention the House's 550 follows here).
-const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200, 150, 2400];
+// the same base-column convention the House's 550 follows here);
+// the Watch Tower's 850 is its pre-Castle value (BLD-18).
+const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200, 150, 850, 500, 1800, 2400];
 // WASM build commands by kind tag (M6 completes the set; BLD-13
 // adds the palisade's single-segment form — dragged lines go
 // through sim.push_build_wall_line, see attemptPlaceWallLine).
 const PUSH_BUILD = ['push_build_house', 'push_build_farm', 'push_build_barracks',
   'push_build_lumber_camp', 'push_build_mill', 'push_build_mining_camp',
   'push_build_archery_range', 'push_build_stable', 'push_build_blacksmith',
-  'push_build_palisade_wall', 'push_build_town_center'];
+  'push_build_palisade_wall', 'push_build_watch_tower', 'push_build_outpost',
+  'push_build_market', 'push_build_town_center'];
 const PUSH_BUILD_QUEUED = PUSH_BUILD.map((n) => `${n}_queued`);
 // Own-building minimap colors by kind tag (M6); kinds without an
 // entry keep the minimap's parchment default, the enemy's
 // buildings are always ENEMY_COLOR.
 const BUILDING_MINIMAP_COLOR = {
   3: '#8a6b42', 4: '#e5d9a8', 5: '#b9a24a', 6: '#c98f4e', 7: '#9a6a44', 8: '#6f6f76',
-  9: '#7a5a34',
-  10: '#d8cf9f',
+  9: '#7a5a34', 10: '#7a7a72', 11: '#a8843f', 12: '#b03a2e',
+  13: '#d8cf9f',
 };
 
 // Ages and technologies (M6). Age tags match the sim's Age::tag;
@@ -860,10 +868,19 @@ const BUILDING_ART_FILES = {
   blacksmithStage1: 'blacksmith-stage1.png',
   blacksmithStage2: 'blacksmith-stage2.png',
   blacksmithStage3: 'blacksmith-stage3.png',
+  market: 'market.png',
+  marketStage1: 'market-stage1.png',
+  marketStage2: 'market-stage2.png',
+  marketStage3: 'market-stage3.png',
   palisade: 'palisade-wall.png',
   palisadeStage1: 'palisade-wall-stage1.png',
   palisadeStage2: 'palisade-wall-stage2.png',
   palisadeStage3: 'palisade-wall-stage3.png',
+  // BLD-18: complete art only (the Town Center precedent) — no
+  // stage frames; construction uses the clip-reveal of the
+  // finished art over the foundation diamond.
+  watchtower: 'watch-tower.png',
+  outpost: 'outpost.png',
   farm: 'farm.png',
   farmState1: 'farm-state1.png',
   farmState2: 'farm-state2.png',
@@ -887,10 +904,11 @@ function buildingStageImage(kind, progress) {
 const BUILDING_ART_KEY = {
   0: 'house', 2: 'barracks', 3: 'lumber', 4: 'mill', 5: 'mining',
   6: 'range', 7: 'stable', 8: 'blacksmith', 9: 'palisade',
+  10: 'watchtower', 11: 'outpost', 12: 'market',
   // A Town Center foundation clip-reveals the finished TC art as
   // it rises (no 'tcStage' frames exist, so buildingStageImage
   // falls through to exactly this reveal).
-  10: 'tc',
+  13: 'tc',
 };
 // The settle cap: the loading gate waits for the art, but a hung
 // image (stalled connection) must never block a match longer
@@ -1762,7 +1780,7 @@ function mirrorValid(kind, cx, cy) {
     }
   }
   if (myStock()[1] < BUILD_COST[kind]) return false;
-  if (BUILD_STONE_COST[kind] > 0 && myStock()[3] < BUILD_STONE_COST[kind]) return false;
+  if (myStock()[3] < BUILD_COST_STONE[kind]) return false;
   return true;
 }
 
@@ -2472,6 +2490,11 @@ function applyLocalOrder(cmd) {
     case 'deleteb': return sim.push_delete_building(cmd.b);
     case 'cancel_tc': return sim.push_cancel_queue_tc(cmd.tc, cmd.i);
     case 'cancel_b': return sim.push_cancel_queue_building(cmd.b, cmd.i);
+    // TRD-01..03: Market trades (owner derived from the building
+    // in the sim; the price is the sim's live rate, never the
+    // client's).
+    case 'mbuy': return sim.push_market_buy(cmd.b, cmd.r);
+    case 'msell': return sim.push_market_sell(cmd.b, cmd.r);
     default: return false;
   }
 }
@@ -6811,6 +6834,12 @@ function drawCorpse(site, now) {
     sx - spec.ax * k, sy - spec.ay * k, spec.cw * k, spec.ch * k);
   ctx.globalAlpha = 1;
 }
+// BLD-18: flame and HP-bar heights for the two tall 1×1
+// structures, whose art rises well above the generic building
+// line (world units above the footprint center). Kinds absent
+// here use the size-based defaults at the call sites.
+const TALL_FIRE_Y = { 10: 10.2, 11: 6.2 };
+const TALL_BAR_Y = { 10: 11.8, 11: 8.0 };
 
 function drawBuilding(b) {
   if (b.kind === 1) {
@@ -6835,7 +6864,8 @@ function drawBuilding(b) {
   // non-farm buildings only — a foundation has nothing to burn.
   if (b.complete && b.kind !== 1) {
     const [fx, fy] = worldToScreen(b.x, b.y);
-    drawBuildingFireAt(fx, fy - (b.size === 3 ? 5.3 : b.size === 1 ? 2.4 : 4.2) * camS,
+    drawBuildingFireAt(fx, fy - (b.size === 3 ? 5.3
+      : TALL_FIRE_Y[b.kind] ?? (b.size === 1 ? 2.4 : 4.2)) * camS,
       b.size, b.hpFrac, b.id * 1.71);
   }
   // M5: a damaged building shows its HP above the roof — buildings
@@ -6843,7 +6873,8 @@ function drawBuilding(b) {
   // never stripped by the quality governor.
   if (b.hpFrac < 0.999) {
     const [sx, sy] = worldToScreen(b.x, b.y);
-    hpBar(sx, sy - (b.size === 3 ? 7.3 : b.size === 1 ? 3.6 : 5.8) * camS, b.hpFrac);
+    hpBar(sx, sy - (b.size === 3 ? 7.3
+      : TALL_BAR_Y[b.kind] ?? (b.size === 1 ? 3.6 : 5.8)) * camS, b.hpFrac);
   }
 }
 
@@ -6924,7 +6955,10 @@ const NEW_BUILDING_STYLE = {
   6: { wall: '#a3763f', wall2: '#82592c', roof: '#7a4a35' }, // Archery Range
   7: { wall: '#96684a', wall2: '#77503a', roof: '#5d4630' }, // Stable
   8: { wall: '#6f6f76', wall2: '#54545c', roof: '#3f3f45' }, // Blacksmith: dark stone
-  9: { wall: '#a08b62', wall2: '#7d6a48', roof: '#5d4630' }, // Town Center: heavy timber + stone
+  10: { wall: '#8d8578', wall2: '#6e675c', roof: '#5d4630' }, // Watch Tower: pale stone
+  11: { wall: '#8a6b42', wall2: '#6f5533', roof: '#7a4a35' }, // Outpost: timber
+  12: { wall: '#a3763f', wall2: '#82592c', roof: '#b03a2e' }, // Market: timber + red canvas
+  13: { wall: '#a08b62', wall2: '#7d6a48', roof: '#5d4630' }, // Town Center: heavy timber + stone
 };
 
 function drawNewBuilding(b) {
@@ -6963,7 +6997,7 @@ function drawNewBuilding(b) {
       }
     }
   }
-  if (!b.complete) progressBar(sx, sy - (b.size === 3 ? 6.4 : 4.9) * camS, b.progress);
+  if (!b.complete) progressBar(sx, sy - (b.size === 3 ? 6.4 : TALL_BAR_Y[b.kind] ?? 4.9) * camS, b.progress);
 }
 
 // One small identifying feature per M6 building kind, drawn on the
@@ -7024,6 +7058,20 @@ function drawBuildingFeature(kind, sx, sy, hgt) {
     ctx.fillStyle = '#ff9a3c';
     ctx.beginPath();
     ctx.arc(sx - 0.8 * u, top + 0.45 * u, 0.2 * u, 0, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (kind === 10) {
+    // The tower's arrow slit.
+    ctx.fillStyle = '#2e2a24';
+    ctx.fillRect(sx - 0.14 * u, top - 0.5 * u, 0.28 * u, 0.8 * u);
+  } else if (kind === 11) {
+    // The outpost's lookout flag.
+    ctx.fillStyle = '#3a2c1c';
+    ctx.fillRect(sx - 0.05 * u, top - 1.1 * u, 0.1 * u, 1.1 * u);
+    ctx.fillStyle = '#e8dcc0';
+    ctx.beginPath();
+    ctx.moveTo(sx, top - 1.1 * u);
+    ctx.lineTo(sx + 0.7 * u, top - 0.9 * u);
+    ctx.lineTo(sx, top - 0.7 * u);
     ctx.fill();
   }
 }
@@ -8109,6 +8157,24 @@ function runCommandButton(id, times = 1) {
         playAudioCue('orderBuilding');
       }
     }
+  } else if (id.startsWith('trade-')) {
+    // TRD-01..03: Market trades through the order choke point —
+    // one lot per click, five on Shift+click (the delegated
+    // listener passes the count, as for training). Each trade
+    // re-reads the sim's live price: every executed trade moves
+    // the global rate, so a held Shift buys five lots at five
+    // successive prices, never five at the first.
+    const [, side, res] = id.split('-');
+    const tag = { food: 1, wood: 2, stone: 4 }[res];
+    if (tag != null && selectedBuilding && selectedBuilding.type === 'building') {
+      let done = 0;
+      while (done < times
+        && issue({ t: side === 'buy' ? 'mbuy' : 'msell', b: selectedBuilding.id, r: tag })) {
+        done++;
+      }
+      if (done === 0) flash(t('block.cannotTrade'));
+      else playAudioCue('click');
+    }
   }
 }
 
@@ -8174,7 +8240,7 @@ function renderCommands() {
   // context renders nothing, never command buttons.
   const foeSel = !!selectedBuilding && selectedBuilding.owner === foeOwner();
   // M6: each production/research building gets its own context.
-  const BUILDING_CONTEXT = { 2: 'barracks', 3: 'lumbercamp', 4: 'mill', 5: 'miningcamp', 6: 'range', 7: 'stable', 8: 'blacksmith' };
+  const BUILDING_CONTEXT = { 2: 'barracks', 3: 'lumbercamp', 4: 'mill', 5: 'miningcamp', 6: 'range', 7: 'stable', 8: 'blacksmith', 12: 'market' };
   const context = selUnits.length > 0
     ? (hasVillager ? 'build' : 'units')
     : selectedBuilding
@@ -8232,12 +8298,19 @@ function renderCommands() {
   const tcQueueCodes = context === 'tc' ? myTcQueue().join('.') : '';
   const bkQueueCodes = bk ? sim.building_queue(bk.id).join('.') : '';
   const sig = [context, Math.floor(wood), Math.floor(myStock()[0]), Math.floor(myStock()[2]),
+    Math.floor(myStock()[3]),
     reason, queue, bk ? bk.id : -1, bk ? bk.queue : -1, bk && bk.complete ? 1 : 0,
     blockM, blockSp, blockA, blockSk, blockS, age, techMask, rbTc.join('.'), Object.values(rbB).join('.'),
     tcQueueCodes, bkQueueCodes, buildPage || '', repairArm ? 1 : 0,
     scoutSel ? selScouts.join('.') : -1, scoutAuto ? 1 : 0,
     selMil.length ? selMil.join('.') : -1, milStance, orderArm || '',
-    placement ? placement.kind : -1].join('|');
+    placement ? placement.kind : -1,
+    // TRD-01..03: on the Market panel the prices ARE the state —
+    // any player's trade moves them, so they join the signature
+    // (plus our stone stock, the one trade input the stock terms
+    // above do not already cover).
+    context === 'market'
+      ? sim.market_prices().join('.') + ':' + Math.floor(myStock()[3]) : ''].join('|');
   if (sig === cmdSig) return;
   cmdSig = sig;
   cmdGrid.innerHTML = '';
@@ -8253,27 +8326,31 @@ function renderCommands() {
     const hasBarracks = all.some((b) => b.owner === localOwner && b.kind === 2 && b.complete);
     const buildBtn = (kind) => {
       let gate = null;
-      if (kind === 10 && age < 2) gate = t('gate.castle');
+      if (kind === 13 && age < 2) gate = t('gate.castle');
       else if (kind === 1 && !hasMill) gate = t('gate.mill');
-      else if ((kind === 6 || kind === 7 || kind === 8) && age < 1) gate = t('gate.feudal');
+      // The Feudal kinds (BLD-18: the Watch Tower joins them; the
+      // Outpost and the Palisade Wall are Dark-Age kinds and
+      // never age-gated).
+      else if ((kind === 6 || kind === 7 || kind === 8 || kind === 10) && age < 1) gate = t('gate.feudal');
       else if ((kind === 6 || kind === 7) && !hasBarracks) gate = t('gate.barracks');
-      // The Town Center is the one two-resource cost (275 wood +
-      // 100 stone); every other kind is wood alone.
-      const lacks = wood < BUILD_COST[kind]
-        || (BUILD_STONE_COST[kind] > 0 && myStock()[3] < BUILD_STONE_COST[kind]);
-      const costPairs = BUILD_STONE_COST[kind] > 0
-        ? [[BUILD_COST[kind], 'wood'], [BUILD_STONE_COST[kind], 'stone']]
-        : [[BUILD_COST[kind], 'wood']];
+      // BLD-19: the Market is Feudal AND needs a completed Mill
+      // (the wiki's requirement row) — age gate first, then Mill.
+      else if (kind === 12 && age < 1) gate = t('gate.feudal');
+      else if (kind === 12 && !hasMill) gate = t('gate.mill');
+      const lacksWood = wood < BUILD_COST[kind];
+      const lacksStone = myStock()[3] < BUILD_COST_STONE[kind];
+      const costParts = [[BUILD_COST[kind], 'wood']];
+      if (BUILD_COST_STONE[kind] > 0) costParts.push([BUILD_COST_STONE[kind], 'stone']);
       return cmdButton({
         id: `build-${kind}`, icon: BUILD_ICON[kind], img: BUILD_PNG[kind], label: BUILD_NAME[kind],
         costIcon: 'i-wood', cost: BUILD_COST[kind],
-        disabled: !!gate || lacks,
+        disabled: !!gate || lacksWood || lacksStone,
         active: !!placement && placement.kind === kind,
         key: badgeForButton({ context, page: buildPage, id: `build-${kind}` }),
         title: gate
           ? t('cmd.buildGate', { name: BUILD_NAME[kind], gate })
-          : t(lacks ? 'cmd.buildNeeds' : 'cmd.buildOk',
-            { name: BUILD_NAME[kind], cost: costText(costPairs) }),
+          : t(lacksWood || lacksStone ? 'cmd.buildNeeds' : 'cmd.buildOk',
+            { name: BUILD_NAME[kind], cost: costText(costParts) }),
       });
     };
     if (buildPage) {
@@ -8520,6 +8597,39 @@ function renderCommands() {
       techBtn('research-barding', 8, 'i-barding', undefined, 'Scale Barding Armor',
         t('cmd.bardingTitle', { name: TECH_NAME[8], cost: costText([[150, 'food']]), secs: 45 }), 150, undefined, 4),
     );
+  } else if (context === 'market') {
+    // TRD-01..03: the Market's exchange — six trade buttons in
+    // the plain two-row grid (sell row over buy row; food, wood,
+    // stone left to right). Every price on a tooltip is the SIM's
+    // own (market_prices(): sell then buy per commodity) — the
+    // client never computes one. One lot (100) per click, five
+    // on Shift+click through the same count the train buttons
+    // get. The disabled face mirrors the sim's can-trade checks
+    // (display only; the push is the real gate).
+    const underConstruction = !bk.complete;
+    const prices = sim.market_prices();
+    const stock = myStock(); // [food, wood, gold, stone]
+    const tradeBtn = (side, res, stockIdx, priceIdx, icon, index) => {
+      const price = prices[priceIdx];
+      const afford = side === 'buy' ? stock[2] >= price : stock[stockIdx] >= 100;
+      return cmdButton({
+        id: `trade-${side}-${res}`, icon,
+        key: badgeForButton({ context, id: `trade-${side}-${res}`, index }),
+        disabled: underConstruction || !afford,
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: BUILD_NAME[10], building: BUILD_NAME[10] })
+          : t(side === 'buy' ? 'cmd.buyTitle' : 'cmd.sellTitle',
+            { res: t('res.' + res), price }),
+      });
+    };
+    cmdGrid.append(
+      tradeBtn('sell', 'food', 0, 0, 'i-sell-food', 0),
+      tradeBtn('sell', 'wood', 1, 2, 'i-sell-wood', 1),
+      tradeBtn('sell', 'stone', 3, 4, 'i-sell-stone', 2),
+      tradeBtn('buy', 'food', 0, 1, 'i-buy-food', 3),
+      tradeBtn('buy', 'wood', 1, 3, 'i-buy-wood', 4),
+      tradeBtn('buy', 'stone', 3, 5, 'i-buy-stone', 5),
+    );
   } else if (context === 'lumbercamp' || context === 'mill' || context === 'miningcamp') {
     // The economy researches (2026-10-22): Double-Bit Axe at the
     // Lumber Camp, Horse Collar at the Mill, Gold / Stone Mining
@@ -8714,7 +8824,11 @@ function updateSelPanel() {
     queue, reason, singleHp, bk ? bk.queue : -1, bkBlock,
     bk && bk.complete ? 1 : 0, selTcHp, tcQueueCodes, bkQueueCodes, tcProgBucket,
     myAge(), myTechMask(), (buildingGroup || []).join(','),
-    bk ? Math.round(bk.hpFrac * 40) : -1].join('|');
+    bk ? Math.round(bk.hpFrac * 40) : -1,
+    // TRD-01..03: a selected Market's info line carries the live
+    // global prices — they move on ANY player's trade, so they
+    // join the signature while a Market is selected.
+    bk && bk.kind === 12 ? sim.market_prices().join('.') : ''].join('|');
   if (sig === selSig) return;
   selSig = sig;
 
@@ -8851,7 +8965,15 @@ function updateSelPanel() {
         ? `${BUILD_NAME[bk.kind]} ×${buildingGroup.length}`
         : BUILD_NAME[bk.kind])
       : t('building.fallback');
-    selInfo.textContent = bk && !bk.complete ? t('sel.underConstruction') : '';
+    selInfo.textContent = bk && !bk.complete
+      ? t('sel.underConstruction')
+      : bk && bk.kind === 12
+        ? t('sel.marketRates', {
+          sf: sim.market_prices()[0], bf: sim.market_prices()[1],
+          sw: sim.market_prices()[2], bw: sim.market_prices()[3],
+          ss: sim.market_prices()[4], bs: sim.market_prices()[5],
+        })
+        : '';
   } else {
     selPortrait.classList.add('empty');
     selPortrait.innerHTML = pngIcon('villager.png', 'ui-icon');

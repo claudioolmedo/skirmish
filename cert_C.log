@@ -1,0 +1,22 @@
+=== auto_explore ===
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2180.57s
+--- auto_explore exit 0
+=== cancel_delete ===
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1225.55s
+--- cancel_delete exit 0
+=== combat ===
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2127.18s
+--- combat exit 0
+=== deer_push ===
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 92.65s
+--- deer_push exit 0
+=== economy ===
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 303.72s
+--- economy exit 0
+=== feudal_techs ===
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4979.63s
+--- feudal_techs exit 0
+=== input ===
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 452.17s
+--- input exit 0
+=== match ===

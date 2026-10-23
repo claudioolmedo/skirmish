@@ -1,0 +1,111 @@
+   Compiling skirmish-sim v0.1.0 (/home/hatch/workspace/skirmish-castle1-rebase/sim)
+warning: variable does not need to be mutable
+  --> sim/tests/world.rs:85:13
+   |
+85 |         let mut count = |owner_cell: (u32, u32), kind: NodeKind| {
+   |             ----^^^^^
+   |             |
+   |             help: remove this `mut`
+   |
+   = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: `skirmish-sim` (test "world") generated 1 warning (run `cargo fix --test "world" -p skirmish-sim` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 05s
+     Running unittests src/lib.rs (target/debug/deps/skirmish_sim-8cdca41beba9de26)
+
+running 72 tests
+test ai::tests::ai_easy_repairs_too_but_capped_lower has been running for over 60 seconds
+test ai::tests::ai_normal_repairs_and_respects_the_wood_floor has been running for over 60 seconds
+test ai::tests::ai_normal_repairs_and_respects_the_wood_floor ... ok
+test build::tests::footprint_and_ring_are_the_right_shape ... ok
+test build::tests::footprint_center_is_the_shared_corner ... ok
+test build::tests::multi_builder_rate_is_the_aoe2_formula ... ok
+test build::tests::numbers_match_the_study ... ok
+test build::tests::palisade_wall_numbers_are_the_current_de_row ... ok
+test build::tests::progress_fraction_is_measured_in_thirds ... ok
+test build::tests::repair_numbers_are_the_documented_de_values ... ok
+test build::tests::wall_line_cells_is_a_supercover_line ... ok
+test combat::tests::bonus_damage_requires_class_membership ... ok
+test combat::tests::damage_formula_matches_cmb_01 ... ok
+test combat::tests::elevation_factor_matches_cmb_01 ... ok
+test econ::tests::node_kind_numbers ... ok
+test econ::tests::resource_tags_round_trip ... ok
+test econ::tests::spend_requires_funds_and_is_atomic ... ok
+test econ::tests::starting_stockpile_is_standard ... ok
+test grid::tests::astar_is_deterministic ... ok
+test grid::tests::astar_rejects_blocked_target ... ok
+test grid::tests::astar_routes_around_water ... ok
+test grid::tests::terrain_layers_block_as_designed ... ok
+test grid::tests::world_to_cell_mapping ... ok
+test hash::tests::byte_order_is_canonical ... ok
+test hash::tests::empty_hash_is_offset_basis ... ok
+test hash::tests::known_vector ... ok
+test mapgen::tests::fallback_template_validates ... ok
+test mapgen::tests::forests_are_contiguous_masses ... ok
+test mapgen::tests::generated_maps_validate_and_are_fair ... ok
+test mapgen::tests::generation_is_deterministic_and_seed_varied ... ok
+test new_units_tests::bonus_tables_are_the_documented_values ... ok
+test new_units_tests::fletching_and_armor_patches_cover_spearman_and_skirmisher ... ok
+test ai::tests::ai_easy_repairs_too_but_capped_lower ... ok
+test new_units_tests::skirmisher_never_fires_from_inside_its_dead_zone_and_backs_out ... ok
+test new_units_tests::skirmisher_stands_off_from_buildings_and_still_damages_them has been running for over 60 seconds
+test new_units_tests::skirmisher_stands_off_from_buildings_and_still_damages_them ... ok
+test new_units_tests::skirmisher_trains_at_the_archery_range_for_25_food_35_wood ... ok
+test new_units_tests::spearman_bonus_is_measured_in_sim_not_just_tabulated ... ok
+test new_units_tests::skirmisher_wins_the_archer_duel_it_exists_to_win ... ok
+test rng::tests::below_stays_in_range ... ok
+test rng::tests::different_seeds_differ ... ok
+test rng::tests::same_seed_same_stream ... ok
+test steer::tests::isqrt_matches_known_values ... ok
+test steer::tests::separation_can_be_suppressed_for_an_engaged_attacker ... ok
+test steer::tests::separation_cannot_cancel_an_order ... ok
+test steer::tests::separation_pushes_apart ... ok
+test steer::tests::shove_moves_half_the_overlap ... ok
+test steer::tests::steer_heads_for_waypoint ... ok
+test steer::tests::steer_respects_the_units_own_speed ... ok
+test steer::tests::steer_slows_near_final_waypoint ... ok
+test steer::tests::vec_len_pythagorean ... ok
+test tech::tests::entry_ticks_and_codes ... ok
+test tech::tests::feudal_completion_table_matches_the_wiki ... ok
+test tech::tests::gather_rate_patches_scale_exactly_the_documented_percentages ... ok
+test tech::tests::tech_table_matches_the_docs ... ok
+test tests::a_lone_non_production_building_no_longer_keeps_its_owner_alive ... ok
+test tests::a_lone_production_building_keeps_its_owner_alive ... ok
+test tests::ai_resignation_needs_no_villagers_either ... ok
+test tests::eliminating_the_human_is_defeat_even_on_a_tie ... ok
+test tests::eliminating_the_opponent_is_victory ... ok
+test new_units_tests::spearman_trains_at_the_barracks_only_from_the_feudal_age ... ok
+test tests::fresh_match_is_ongoing_for_both_profiles ... ok
+test tests::horse_collar_top_up_rounds_up ... ok
+test tests::move_override_keeps_carry_undeposited ... ok
+test tests::entities_stay_id_sorted ... ok
+test tests::move_unknown_entity_is_ignored ... ok
+test tests::noop_command_keeps_hash_stable ... ok
+test tests::sandbox_never_decides ... ok
+test tests::spawn_is_deterministic ... ok
+test tests::starting_layout_is_on_open_ground ... ok
+test tests::tick_increments_clock ... ok
+test tests::town_center_ignores_move_and_gather ... ok
+test units::tests::speed_ratios_match_the_study ... ok
+test units::tests::table_matches_the_study_rows ... ok
+test tests::move_to_blocked_target_walks_up_to_it ... ok
+
+test result: ok. 72 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 354.83s
+
+     Running tests/ai_repair.rs (target/debug/deps/ai_repair-51ecd0a8f2888002)
+
+running 1 test
+test ai_repairs_its_barracks_under_attack has been running for over 60 seconds
+test ai_repairs_its_barracks_under_attack ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 511.94s
+
+     Running tests/auto_explore.rs (target/debug/deps/auto_explore-100b1f616768d10e)
+
+running 7 tests
+test a_queued_order_cancels_auto_explore ... ok
+error: test failed, to rerun pass `-p skirmish-sim --test auto_explore`
+
+Caused by:
+  process didn't exit successfully: `/home/hatch/workspace/skirmish-castle1-rebase/target/debug/deps/auto_explore-100b1f616768d10e` (signal: 15, SIGTERM: termination signal)
+CARGO_ALL_101
