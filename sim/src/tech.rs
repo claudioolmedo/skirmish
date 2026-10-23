@@ -26,6 +26,29 @@
 //!   in the M6 report).
 //! - Feudal Age: 500 food, 130 s, requires any 2 completed Dark-Age
 //!   buildings besides Houses/Farms (TEC-01; study §7).
+//! - Castle Age: 800 food / 200 gold, 160 s, requires any 2
+//!   completed Feudal-Age buildings (walls/towers excluded — none
+//!   exist yet) (TEC-01 Castle rung; study §7; wiki, Castle Age
+//!   (Age of Empires II)).
+//! - Hand Cart: 300 food / 200 wood, 55 s, Town Center, Castle
+//!   Age, requires Wheelbarrow (wiki, Hand Cart; wiki, Technology
+//!   (Age of Empires II), economy table). Effects: villager carry
+//!   capacity per the wiki's comparison table (generic 13 → 20,
+//!   hunted meat 44 → 66 — the table resolves the nominal +50%,
+//!   exactly as it resolved Wheelbarrow's 10 → 13 / 35 → 44) and
+//!   villager speed +10%, a second percentage layer on the
+//!   Wheelbarrow scalar in `Sim::stats_for` (TEC-06).
+//! - Light Cavalry (Castle P2): 150 food / 50 gold, 45 s, Stable,
+//!   Castle Age (wiki, "Light Cavalry (Age of Empires II)"
+//!   infobox). Effect: the CLS-03 pattern on the scout line —
+//!   living Scout Cavalry convert in place (HP kept), later Scout
+//!   production spawns as Light Cavalry.
+//! - Husbandry (Castle P2): 150 food, 40 s, Stable, Castle Age
+//!   (wiki, "Husbandry (Age of Empires II)" — cost/time per its
+//!   changelog: patch 4.8 set 150 F / 40 s). Effect: mounted units
+//!   +10% speed — a class-keyed percentage patch in
+//!   `Sim::stats_for` (any row carrying the CAVALRY class), the
+//!   same scalar shape as Wheelbarrow's.
 //! - Fletching: 100 food / 50 gold, 30 s — archers +1 attack and
 //!   +1 range (study §8; the study's Castle/Tower/Town Center lines
 //!   have no targets in M6 — no such attacks exist yet).
@@ -140,11 +163,16 @@ pub enum TechId {
     /// Town Center, Castle: villager carry + speed, the second
     /// link of the ECO-03 chain (requires Wheelbarrow, TEC-07).
     HandCart,
+    /// Stable, Castle: the Scout Cavalry line upgrades to Light
+    /// Cavalry (Castle P2 — the CLS-03 pattern on the scout line).
+    LightCavalry,
+    /// Stable, Castle: mounted units +10% speed (Castle P2).
+    Husbandry,
 }
 
 impl TechId {
     /// All technologies, in tag order.
-    pub const ALL: [TechId; 16] = [
+    pub const ALL: [TechId; 18] = [
         TechId::Loom,
         TechId::FeudalAge,
         TechId::Fletching,
@@ -161,6 +189,8 @@ impl TechId {
         TechId::HorseCollar,
         TechId::CastleAge,
         TechId::HandCart,
+        TechId::LightCavalry,
+        TechId::Husbandry,
     ];
 
     /// Stable tag: 0 loom, 1 feudal age, 2 fletching, 3 scale mail,
@@ -169,6 +199,8 @@ impl TechId {
     /// axe, 11 gold mining, 12 stone mining, 13 horse collar,
     /// 14 castle age, 15 hand cart (Castle P1 — appended after the
     /// Feudal-completion package took 7–13, so no tag moved).
+    /// 16 light cavalry, 17 husbandry (Castle P2 — appended
+    /// after P1 took 14/15, so no tag moved either).
     pub fn tag(self) -> u8 {
         match self {
             TechId::Loom => 0,
@@ -187,6 +219,8 @@ impl TechId {
             TechId::HorseCollar => 13,
             TechId::CastleAge => 14,
             TechId::HandCart => 15,
+            TechId::LightCavalry => 16,
+            TechId::Husbandry => 17,
         }
     }
 
@@ -221,6 +255,7 @@ impl TechId {
                 TechHost::Building(BuildingKind::MiningCamp)
             }
             TechId::HorseCollar => TechHost::Building(BuildingKind::Mill),
+            TechId::LightCavalry | TechId::Husbandry => TechHost::Building(BuildingKind::Stable),
         }
     }
 
@@ -230,7 +265,7 @@ impl TechId {
         match self {
             TechId::Loom | TechId::FeudalAge => Age::Dark,
             TechId::CastleAge => Age::Feudal,
-            TechId::HandCart => Age::Castle,
+            TechId::HandCart | TechId::LightCavalry | TechId::Husbandry => Age::Castle,
             _ => Age::Feudal,
         }
     }
@@ -270,6 +305,8 @@ impl TechId {
             TechId::HorseCollar => 1200,    // 20 s (wiki, Horse Collar)
             TechId::CastleAge => 9600,      // 160 s (study §7)
             TechId::HandCart => 3300,       // 55 s (wiki, Hand Cart)
+            TechId::LightCavalry => 2700,
+            TechId::Husbandry => 2400,
         }
     }
 
@@ -293,6 +330,8 @@ impl TechId {
             TechId::HorseCollar => (75, 75, 0, 0),   // wiki, Horse Collar
             TechId::CastleAge => (800, 0, 200, 0),   // study §7
             TechId::HandCart => (300, 200, 0, 0),    // wiki, Hand Cart
+            TechId::LightCavalry => (150, 0, 50, 0),
+            TechId::Husbandry => (150, 0, 0, 0),
         }
     }
 }
@@ -427,6 +466,25 @@ mod tests {
         assert_eq!(TechId::HandCart.age_required(), Age::Castle);
         assert_eq!(TechId::HandCart.requires_tech(), Some(TechId::Wheelbarrow));
         assert_eq!(TechId::Wheelbarrow.requires_tech(), None);
+        // Light Cavalry upgrade: 150 F / 50 G, 45 s, Stable,
+        // Castle Age (Castle P2; wiki, "Light Cavalry").
+        assert_eq!(TechId::LightCavalry.cost(), (150, 0, 50, 0));
+        assert_eq!(TechId::LightCavalry.ticks(), 45 * 60);
+        assert_eq!(
+            TechId::LightCavalry.host(),
+            TechHost::Building(BuildingKind::Stable)
+        );
+        assert_eq!(TechId::LightCavalry.age_required(), Age::Castle);
+        assert_eq!(TechId::LightCavalry.requires_tech(), None);
+        // Husbandry: 150 F, 40 s, Stable, Castle Age (Castle P2;
+        // wiki, "Husbandry" — patch 4.8 values).
+        assert_eq!(TechId::Husbandry.cost(), (150, 0, 0, 0));
+        assert_eq!(TechId::Husbandry.ticks(), 40 * 60);
+        assert_eq!(
+            TechId::Husbandry.host(),
+            TechHost::Building(BuildingKind::Stable)
+        );
+        assert_eq!(TechId::Husbandry.age_required(), Age::Castle);
         // Age tags: 0 Dark, 1 Feudal, 2 Castle.
         assert_eq!(Age::Dark.tag(), 0);
         assert_eq!(Age::Feudal.tag(), 1);
@@ -436,7 +494,7 @@ mod tests {
         for t in TechId::ALL {
             assert_eq!(TechId::from_tag(t.tag()), Some(t));
         }
-        assert_eq!(TechId::from_tag(16), None);
+        assert_eq!(TechId::from_tag(18), None);
     }
 
     #[test]

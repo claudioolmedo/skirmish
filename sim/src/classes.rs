@@ -53,6 +53,12 @@ pub const WALLS_AND_GATES: u8 = 16;
 /// on landing: 13–16 were taken on main by ELEPHANT, SHIP,
 /// SKIRMISHER and WALLS_AND_GATES while the wolf branch waited.)
 pub const PREDATOR: u8 = 17;
+/// Monks / missionaries: the target class of the scout line's
+/// documented anti-Monk attack bonuses (Scout Cavalry +6, Light
+/// Cavalry +10 — Castle P2). No monk unit exists until the
+/// Monastery slice (Castle P5); the class ships now so those
+/// bonuses are data, exactly like ELEPHANT and SHIP before it.
+pub const MONK: u8 = 18;
 
 /// Membership bit for one class id.
 pub const fn bit(class: u8) -> u64 {
