@@ -25,7 +25,9 @@
 //! one at a split anchor — §2.3's "Back golds: 2 × 4"); 5 main
 //! stone at 10–16 with 4 behind; 2
 //! boars at 15–24 in split directions; deer herds of 3 at 12–18 and
-//! 3 more at 20–28. Heights are gentle value-noise hills, flattened
+//! 3 more at 20–28; one wolf pack of 3 at 26–34 (AI-08 — outside
+//! every starting band, so no pack ever spawns beside a Town
+//! Center). Heights are gentle value-noise hills, flattened
 //! around each start and its packages (disc + per-node flattening),
 //! so openings play identically on every seed. Water exists in the
 //! vocabulary as small ponds (0–2 mirrored pairs), always ≥ 22
@@ -59,8 +61,9 @@ const WATER_START_CLEARANCE: i32 = 22;
 /// One player's start package: its Town Center cell and the
 /// resources/animals generated for it, in deterministic order
 /// (nodes: stragglers, forests, berries, gold, stone; animals:
-/// sheep, boars, deer — `Sim` spawns the human's animals in this
-/// order, preserving the historical entity-id layout).
+/// sheep, boars, deer, wolves — `Sim` spawns the human's animals in
+/// this order, preserving the historical entity-id layout; the
+/// wolf pack appends after the deer, so pre-AI-08 ids are stable).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StartPackage {
     pub tc_cell: (u32, u32),
@@ -422,6 +425,11 @@ fn fallback() -> GeneratedMap {
         (EntityKind::Deer, 24, -4),
         (EntityKind::Deer, 25, -3),
         (EntityKind::Deer, 24, -2),
+        // Wolf pack (3) at ~28–30 (AI-08): the template Town
+        // Center sits at (26, 60), so the pack stays on the map.
+        (EntityKind::Wolf, 28, 12),
+        (EntityKind::Wolf, 29, 13),
+        (EntityKind::Wolf, 28, 14),
     ];
     let animals_a: Vec<(EntityKind, u32, u32)> = animal_offsets
         .iter()
@@ -949,6 +957,21 @@ impl Gen {
         if !self.herd(far, EntityKind::Deer, 3, 2) {
             return None;
         }
+        // Wolves (AI-08): one pack of 3 at 26–34 — outside every
+        // starting band (the far deer end at 28) and beyond the
+        // resource-exclusion distances the map references document
+        // (objects keep ~7 tiles from earlier spawns; cliffs keep
+        // 22 from Town Centers, Aoe2Sheet knowledge base), so a
+        // pack never spawns next to a starting Town Center. The
+        // wiki documents wolves "often found in groups" without an
+        // Arabia per-player count (they are neutral dressing in
+        // the reference, not a per-start guarantee); the pack of 3
+        // per start is this generator's symmetry-preserving
+        // adoption — both starts get exactly one, mirrored.
+        let pack = self.pick_in_band(tc, 26, 34)?;
+        if !self.herd(pack, EntityKind::Wolf, 3, 2) {
+            return None;
+        }
         Some(())
     }
 
@@ -1016,7 +1039,12 @@ mod tests {
                     "seed {seed}: {kind:?} counts differ per start"
                 );
             }
-            for kind in [EntityKind::Sheep, EntityKind::Boar, EntityKind::Deer] {
+            for kind in [
+                EntityKind::Sheep,
+                EntityKind::Boar,
+                EntityKind::Deer,
+                EntityKind::Wolf,
+            ] {
                 let count = |pkg: &StartPackage| {
                     pkg.animals.iter().filter(|n| n.0 == kind).count()
                 };
@@ -1062,6 +1090,27 @@ mod tests {
             assert_eq!(an(EntityKind::Sheep), 8);
             assert_eq!(an(EntityKind::Boar), 2);
             assert_eq!(an(EntityKind::Deer), 6);
+            // AI-08: exactly one wolf pack of 3 per start, and no
+            // wolf inside 24 tiles of the Town Center (the pack
+            // anchor is picked at 26–34; herd spread can pull a
+            // member ~2 tiles in — 24 leaves the margin while
+            // keeping every wolf far outside the starting bands).
+            assert_eq!(an(EntityKind::Wolf), 3);
+            let wolf_min_d2 = a
+                .animals
+                .iter()
+                .filter(|x| x.0 == EntityKind::Wolf)
+                .map(|x| {
+                    let dx = x.1 as i32 - tcx;
+                    let dy = x.2 as i32 - tcy;
+                    dx * dx + dy * dy
+                })
+                .min()
+                .unwrap_or(0);
+            assert!(
+                wolf_min_d2 >= 24 * 24,
+                "seed {seed}: wolf pack too close to the Town Center (d2 {wolf_min_d2})"
+            );
         }
         // The fixed fallback template has exactly one Town Center
         // cell; a spread of distinct cells across seeds proves the

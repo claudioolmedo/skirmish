@@ -329,10 +329,36 @@ fn woodline_tree(sim: &Sim) -> u32 {
             })
         })
     };
-    trees
+    // AI-08 (2026-10-22): wolves hunt lumberjacks — DE behaviour,
+    // and on seed 101 the densest woodline stands inside a wolf
+    // pack's range, so the pack kills the choppers before any
+    // long gather finishes. A DE player picks the forest the
+    // wolves are not watching; do the same: among workable
+    // woodlines prefer one outside every wolf's sight (48 wu)
+    // plus a margin, falling back to the plain pick if none is.
+    let wolf_posts: Vec<(f64, f64)> = sim
+        .entities()
+        .iter()
+        .filter(|e| e.kind == EntityKind::Wolf)
+        .map(|e| (e.pos_x.to_num::<f64>(), e.pos_y.to_num::<f64>()))
+        .collect();
+    let wolf_safe = |t: &skirmish_sim::ResourceNode| {
+        wolf_posts.iter().all(|(wx, wy)| {
+            let dx = t.pos_x.to_num::<f64>() - wx;
+            let dy = t.pos_y.to_num::<f64>() - wy;
+            dx * dx + dy * dy >= 60.0 * 60.0
+        })
+    };
+    let candidates: Vec<_> = trees
         .iter()
         .filter(|t| workable(t) && neighbors(t) >= 3)
+        .copied()
+        .collect();
+    candidates
+        .iter()
+        .filter(|t| wolf_safe(t))
         .max_by_key(|t| neighbors(t))
+        .or_else(|| candidates.iter().max_by_key(|t| neighbors(t)))
         .expect("no workable woodline tree")
         .id
 }

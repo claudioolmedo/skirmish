@@ -60,12 +60,18 @@ pub enum EntityKind {
     /// Barracks upgrade completes, and later Militia production
     /// spawns as Man-at-Arms while the upgrade stands.
     ManAtArms,
+    /// AI-08: the predator — a Gaia combat animal that holds its
+    /// post until a player unit enters its line of sight, then
+    /// hunts it (the wolf that threatens early villagers). Kills
+    /// leave no carcass: it holds no food.
+    Wolf,
 }
 
 impl EntityKind {
     /// Stable tag for the state hash and the WASM kind array:
     /// 0 = villager, 1 = town center, 2 = scout cavalry, 3 = militia,
-    /// 4 = archer, 5 = sheep, 6 = boar, 7 = deer, 8 = man-at-arms (M6).
+    /// 4 = archer, 5 = sheep, 6 = boar, 7 = deer, 8 = man-at-arms (M6),
+    /// 9 = wolf (AI-08).
     pub fn tag(self) -> u8 {
         match self {
             EntityKind::Villager => 0,
@@ -77,6 +83,7 @@ impl EntityKind {
             EntityKind::Boar => 6,
             EntityKind::Deer => 7,
             EntityKind::ManAtArms => 8,
+            EntityKind::Wolf => 9,
         }
     }
 
@@ -92,6 +99,7 @@ impl EntityKind {
             6 => Some(EntityKind::Boar),
             7 => Some(EntityKind::Deer),
             8 => Some(EntityKind::ManAtArms),
+            9 => Some(EntityKind::Wolf),
             _ => None,
         }
     }
@@ -395,11 +403,14 @@ pub struct Entity {
     pub suppress_separation: bool,
 
     // --- M3: animal state (Gaia kinds; inert zeros elsewhere) ---
-    /// The post a boar returns to after it gives up a chase.
+    /// The post a boar returns to after it gives up a chase; a
+    /// wolf's spawn post — the ground it holds, hunts from, and
+    /// walks back to when a chase ends.
     pub home_x: I16F16,
     pub home_y: I16F16,
-    /// The boar's current victim (whoever hit it last). The combat
-    /// phase mirrors this into `attack_target`.
+    /// The animal's current victim: for the boar, whoever hit it
+    /// last; for the wolf, the prey it acquired (or whoever hit
+    /// it). The combat phase mirrors this into `attack_target`.
     pub aggro_target: Option<u32>,
     /// Damage hits the boar has taken since it last rested at its
     /// post. Two hits (or one villager hit) lock the aggro — the
@@ -410,8 +421,9 @@ pub struct Entity {
     /// ignores the give-up distances and pursues until its target
     /// dies or it does.
     pub aggro_locked: bool,
-    /// The boar is walking back to its post; it heals to full on
-    /// arrival and resets its hit count.
+    /// The animal is walking back to its post. A boar heals to
+    /// full on arrival and resets its hit count; a wolf does not
+    /// heal — it just holds its post again.
     pub returning_home: bool,
     /// Deer: flee until this tick, away from (`flee_from_x`,
     /// `flee_from_y`) — the point the attack came from.

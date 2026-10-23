@@ -261,11 +261,24 @@ fn golden_hash_regression() {
     // issues no commands and trains nothing — costs never enter
     // it. New value verified stable across independent runs
     // (run-to-run determinism test in this file).
+    //
+    // Predator wolves (2026-10-22, deliberate update, AI-08):
+    // 042e33a17a6192ae -> 3e6361a3d06dbb8f. Step attribution: the
+    // ONLY change entering this scenario is the map generator's
+    // new wolf pack (3 wolves per start at 26–34 tiles; the
+    // sandbox spawns the human's pack — 3 new Gaia entities in
+    // the hashed entity stream). No commands are issued, the pack
+    // stands 24+ tiles from the nearest unit (far outside every
+    // LoS in the scenario, the wolf's own 12 included), so no
+    // wolf moves, hunts, or fights in 360 ticks — the stream
+    // moves on the placement alone. New value verified stable
+    // across independent runs (run-to-run determinism test in
+    // this file).
     let mut sim = Sim::new(42);
     let mut hash = 0;
     for _ in 0..360 {
         hash = sim.tick();
     }
     assert_eq!(sim.tick_count(), 360);
-    assert_eq!(format!("{:016x}", hash), "042e33a17a6192ae");
+    assert_eq!(format!("{:016x}", hash), "3e6361a3d06dbb8f");
 }

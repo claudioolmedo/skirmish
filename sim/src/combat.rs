@@ -31,17 +31,22 @@
 //!
 //! Gaia behavior lives here too: sheep capture by proximity, the
 //! boar's aggro → chase → give-up → return → heal loop (OPENING-SPEC
-//! §2.2), and deer flight. Villagers never auto-attack and do not
+//! §2.2), deer flight, and the wolf's hold → acquire → chase →
+//! leash-return hunt (AI-08). Villagers never auto-attack and do not
 //! flee (M5 AI polish); idle Militia/Archers auto-acquire boars in
-//! LoS (CMB-08 — herdables and deer are never auto-targeted, and the
-//! starting Scout's Stand Ground default means it does not acquire).
+//! LoS (CMB-08 — herdables and deer are never auto-targeted, and
+//! wolves join them in that exclusion per AI-08's letter: a wolf is
+//! Gaia, not an enemy, until combat starts; the starting Scout's
+//! Stand Ground default means it does not acquire either).
 
 use fixed::types::I16F16;
 
 use crate::build::BuildingKind;
 use crate::classes as cls;
 use crate::econ::{NodeKind, ResourceNode};
-use crate::entity::{is_player_owner, EntityKind, Task, OWNER_GAIA, OWNER_OPPONENT, OWNER_PLAYER};
+use crate::entity::{
+    is_player_owner, Entity, EntityKind, Task, OWNER_GAIA, OWNER_OPPONENT, OWNER_PLAYER,
+};
 use crate::units::{self, UnitSpec};
 use crate::{steer, Sim};
 
@@ -73,6 +78,18 @@ const HIT_SLACK: I16F16 = I16F16::from_bits(49_152); // 0.75
 const CHASE_REPATH: I16F16 = I16F16::from_bits(196_608); // 3.0
 /// How long a deer keeps fleeing after a hit.
 const DEER_FLEE_TICKS: u64 = 90;
+/// AI-08: a wolf breaks off the hunt when its prey is this far from
+/// the wolf itself — half again its 12-tile line of sight, so prey
+/// that has genuinely escaped its sight ends the chase (the AoM
+/// predator rule the Predator article documents: predators stop
+/// pursuing once the target is out of sight long enough and return
+/// home). Adopted constant — the AoE II sources describe the lure
+/// (a wolf follows a fleeing unit a long way) without a number.
+const WOLF_GIVE_UP_CHASE: I16F16 = I16F16::from_bits(4_718_592); // 72.0 (18 tiles)
+/// AI-08: …or when the prey is this far from the wolf's post —
+/// the leash that keeps a hunt from crossing the map, twice its
+/// line of sight. Adopted constant, same provenance as above.
+const WOLF_LEASH: I16F16 = I16F16::from_bits(6_291_456); // 96.0 (24 tiles)
 
 /// One projectile in flight (PRJ-01): spawn point, impact point,
 /// spawn/impact ticks, the intended target, and a snapshot of the
@@ -183,6 +200,23 @@ pub fn compute_damage_elev(
     } else {
         dmg
     }
+}
+
+/// AI-08's prey test: the living player-owned mobile units a
+/// wolf hunts on sight. The wiki's exception list (Wolf article):
+/// Scout Cavalry, Monks, Trade Carts, and siege weapons are never
+/// attacked on sight — of those, only the Scout exists here yet;
+/// the rest join this test when their kinds land. Gaia's own are
+/// never prey (wolves hunting wild animals was a cut feature, per
+/// the same article's trivia), and herdables are not "units" for
+/// this rule (a captured sheep is livestock — the CMB-08
+/// exclusion's same reasoning). Being *attacked* overrides the
+/// exceptions: retaliation is `apply_hit`'s Wolf arm, not this
+/// test.
+fn wolf_prey(t: &Entity) -> bool {
+    is_player_owner(t.owner)
+        && t.kind.is_mobile()
+        && !matches!(t.kind, EntityKind::ScoutCavalry | EntityKind::Sheep)
 }
 
 /// The damage-table view of a placed building kind (M5): HP and
@@ -309,9 +343,10 @@ impl Sim {
         }
     }
 
-    /// Gaia behavior: the boar's lure loop, deer flight, and sheep
-    /// wander. Runs before the attack machines so a boar's aggro
-    /// becomes its attack target on the same tick.
+    /// Gaia behavior: the boar's lure loop, deer flight, sheep
+    /// wander, and the wolf's hunt. Runs before the attack machines
+    /// so an animal's aggro becomes its attack target on the same
+    /// tick.
     fn animal_ai(&mut self) {
         for idx in 0..self.entities.len() {
             let (kind, dead) = (self.entities[idx].kind, self.entities[idx].dead);
@@ -322,6 +357,7 @@ impl Sim {
                 EntityKind::Boar => self.boar_ai(idx),
                 EntityKind::Deer => self.deer_ai(idx),
                 EntityKind::Sheep => self.sheep_wander(idx),
+                EntityKind::Wolf => self.wolf_ai(idx),
                 _ => {}
             }
         }
@@ -466,6 +502,96 @@ impl Sim {
                 e.vel_x = I16F16::ZERO;
                 e.vel_y = I16F16::ZERO;
             }
+        }
+    }
+
+    /// The wolf's hunt (AI-08; wiki, Wolf + Predator): unlike the
+    /// boar — which only retaliates — the wolf INITIATES. It holds
+    /// its post until a prey unit enters its line of sight, then
+    /// acquires the nearest one ("Wolves automatically attempt to
+    /// attack the nearest unit"), chases, and attacks; when the
+    /// prey dies it scans again from where it stands. A chase ends
+    /// when the prey escapes the wolf's sight or drags it past its
+    /// leash — then the wolf walks back to its post and holds
+    /// again. It does not heal at the post (the wiki's regeneration
+    /// notes belong to Scenario-Editor-only wolf variants).
+    fn wolf_ai(&mut self, idx: usize) {
+        // Validate the current prey.
+        if let Some(a) = self.entities[idx].aggro_target {
+            let valid = self
+                .entity_index(a)
+                .map(|ai| !self.entities[ai].dead)
+                .unwrap_or(false);
+            if !valid {
+                let e = &mut self.entities[idx];
+                e.aggro_target = None;
+                e.clear_combat();
+                e.returning_home = true;
+            }
+        }
+        if let Some(a) = self.entities[idx].aggro_target {
+            let ai = self.entity_index(a).expect("validated above");
+            let (ax, ay) = (self.entities[ai].pos_x, self.entities[ai].pos_y);
+            let (hx, hy) = (self.entities[idx].home_x, self.entities[idx].home_y);
+            let d_chase = self.distance_to(idx, ax, ay);
+            let d_home = steer::vec_len(ax - hx, ay - hy);
+            if d_chase > WOLF_GIVE_UP_CHASE || d_home > WOLF_LEASH {
+                let e = &mut self.entities[idx];
+                e.aggro_target = None;
+                e.clear_combat();
+                e.returning_home = true;
+                return;
+            }
+            let e = &mut self.entities[idx];
+            e.attack_target = Some(a);
+            e.returning_home = false;
+            return;
+        }
+        // No prey: walk back to the post if a hunt dragged the
+        // wolf away from it, then hold (and scan) there.
+        if self.entities[idx].returning_home {
+            let (hx, hy) = (self.entities[idx].home_x, self.entities[idx].home_y);
+            if self.distance_to(idx, hx, hy) > HOME_ARRIVE {
+                if self.entities[idx].order.is_none()
+                    && !self.set_move_order(idx, hx, hy)
+                {
+                    // The post is unreachable (a building completed
+                    // over it): hold here instead of re-pathing
+                    // every tick (the boar's M6 perf fix, mirrored).
+                    self.entities[idx].returning_home = false;
+                }
+                return;
+            }
+            let e = &mut self.entities[idx];
+            e.returning_home = false;
+            e.order = None;
+            e.vel_x = I16F16::ZERO;
+            e.vel_y = I16F16::ZERO;
+        }
+        // Acquire: the nearest prey inside the line of sight
+        // (ties to the lowest id — the acquisition scan's rule).
+        let (wx, wy) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
+        let los = units::spec(EntityKind::Wolf).los;
+        let mut best: Option<(i64, u32)> = None; // (distance² bits, id)
+        for t in &self.entities {
+            if t.dead || !wolf_prey(t) {
+                continue;
+            }
+            let d = steer::vec_len(t.pos_x - wx, t.pos_y - wy);
+            if d > los {
+                continue;
+            }
+            let db = d.to_bits() as i64;
+            let key = (db * db, t.id);
+            if best.map(|b| key < b).unwrap_or(true) {
+                best = Some(key);
+            }
+        }
+        if let Some((_, tid)) = best {
+            let e = &mut self.entities[idx];
+            e.aggro_target = Some(tid);
+            e.attack_target = Some(tid);
+            e.returning_home = false;
         }
     }
 
@@ -761,9 +887,10 @@ impl Sim {
 
     /// Apply one landed hit to entity `ti`: damage, kill credit, and
     /// the victim's reactions — a boar aggros its attacker (with the
-    /// two-hit/villager lock), a deer flees, an idle military unit
-    /// retaliates. `threat` is where the hit came from (the melee
-    /// attacker's position, or a projectile's spawn point).
+    /// two-hit/villager lock), a wolf aggros any attacker, a deer
+    /// flees, an idle military unit retaliates. `threat` is where
+    /// the hit came from (the melee attacker's position, or a
+    /// projectile's spawn point).
     fn apply_hit(
         &mut self,
         attacker_id: u32,
@@ -812,6 +939,21 @@ impl Sim {
                         if akind == EntityKind::Villager || b.hits_taken >= 2 {
                             b.aggro_locked = true;
                         }
+                    }
+                }
+            }
+            EntityKind::Wolf => {
+                // Retaliation (AI-08): a wolf answers ANY non-Gaia
+                // attacker — the on-sight exception list (Scouts
+                // and kin) governs who it hunts unprovoked, not
+                // who it fights back against.
+                let ai = self.entity_index(attacker_id);
+                if let Some(ai) = ai {
+                    let (aowner, adead) = (self.entities[ai].owner, self.entities[ai].dead);
+                    if aowner != OWNER_GAIA && !adead {
+                        let w = &mut self.entities[ti];
+                        w.aggro_target = Some(attacker_id);
+                        w.returning_home = false;
                     }
                 }
             }

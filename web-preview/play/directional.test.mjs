@@ -30,6 +30,7 @@ const SHEETS = {
   sheep: { idle: 4, walk: 8, graze: 4 },
   boar: { idle: 4, walk: 8, graze: 4 },
   deer: { idle: 4, walk: 8, graze: 4 },
+  wolf: { idle: 4, walk: 8, attack: 4 },
 };
 const MASKED = ['villager', 'archer', 'militia', 'maa', 'scout'];
 

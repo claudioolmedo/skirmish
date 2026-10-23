@@ -28,6 +28,11 @@ pub const BOAR_HUNTED: u8 = 9;
 pub const SHOCK_INFANTRY: u8 = 10;
 pub const CAMEL: u8 = 11;
 pub const HERDABLE: u8 = 12;
+/// Predator animals (wolves and kin — the study's class 21 analog,
+/// "Predator Animals"): carried by the Wolf kind so future
+/// anti-predator bonuses (e.g. the Magyar villager rule) have a
+/// class to key on; no current attack row uses it.
+pub const PREDATOR: u8 = 13;
 
 /// Membership bit for one class id.
 pub const fn bit(class: u8) -> u64 {
