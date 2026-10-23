@@ -261,11 +261,26 @@ fn golden_hash_regression() {
     // issues no commands and trains nothing — costs never enter
     // it. New value verified stable across independent runs
     // (run-to-run determinism test in this file).
+    //
+    // Orders & stances (2026-10-22, deliberate update): the hash
+    // now also serializes unit stances and standing orders
+    // (CMB-09/10/11), conditionally — written only when a stance
+    // differs from Aggressive, a target was auto-acquired, or an
+    // attack-move/patrol is active. This scenario issues no
+    // commands and nothing fights in 360 ticks, so the sole
+    // contributor is the starting Scout Cavalry's Stand Ground
+    // default stance (CMB-09), serialized from spawn. Attribution
+    // verified directly: with only the two spawn stance
+    // assignments disabled (both seats), the stream returns to
+    // exactly 042e33a17a6192ae — no other byte of this package
+    // enters this scenario. 042e33a17a6192ae -> 3c2febd6b29076a4.
+    // New value verified stable across independent runs
+    // (run-to-run determinism test in this file).
     let mut sim = Sim::new(42);
     let mut hash = 0;
     for _ in 0..360 {
         hash = sim.tick();
     }
     assert_eq!(sim.tick_count(), 360);
-    assert_eq!(format!("{:016x}", hash), "042e33a17a6192ae");
+    assert_eq!(format!("{:016x}", hash), "3c2febd6b29076a4");
 }

@@ -50,7 +50,7 @@ use crate::econ::ResourceKind;
 use crate::entity::EntityKind;
 use crate::grid;
 use crate::tech::TechId;
-use crate::{Command, MatchMode, QueuedOrder, Sim};
+use crate::{Command, MatchMode, QueuedOrder, Sim, Stance};
 
 /// A `Sim` owned by JavaScript. One instance per match.
 #[wasm_bindgen]
@@ -368,6 +368,59 @@ impl WasmSim {
         ok
     }
 
+    /// Attack-move (CMB-10): the unit walks to the point,
+    /// engaging whatever enters its sight en route, then resumes
+    /// and holds at the destination. Returns whether the order
+    /// *would* be accepted (a living military unit owned by a
+    /// player, with an attack row); the sim re-validates when the
+    /// command is applied.
+    pub fn push_attack_move(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        let ok = self.inner.can_attack_move(entity);
+        if ok {
+            self.inner.push_command(Command::AttackMove {
+                entity,
+                x: I16F16::from_num(x),
+                y: I16F16::from_num(y),
+            });
+        }
+        ok
+    }
+
+    /// Patrol (CMB-11): the unit loops between where it stands and
+    /// the point, engaging en route like an attack-move; on a unit
+    /// that already patrols, the point is appended to its loop.
+    /// Returns whether the order *would* be accepted (same rule as
+    /// `push_attack_move`); the sim re-validates at apply time.
+    pub fn push_patrol(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        let ok = self.inner.can_attack_move(entity);
+        if ok {
+            self.inner.push_command(Command::Patrol {
+                entity,
+                x: I16F16::from_num(x),
+                y: I16F16::from_num(y),
+            });
+        }
+        ok
+    }
+
+    /// Set a military unit's stance (CMB-09) by tag (0 Aggressive,
+    /// 1 Defensive, 2 Stand Ground, 3 No Attack). A stance is a
+    /// setting, not an order — nothing else about the unit
+    /// changes. Returns whether the order *would* be accepted (a
+    /// living military unit owned by a player, and a valid tag);
+    /// the sim re-validates when the command is applied.
+    pub fn push_set_stance(&mut self, entity: u32, stance: u8) -> bool {
+        let Some(stance) = Stance::from_tag(stance) else {
+            return false;
+        };
+        let ok = self.inner.can_set_stance(entity);
+        if ok {
+            self.inner
+                .push_command(Command::SetStance { entity, stance });
+        }
+        ok
+    }
+
     /// Stop a unit's current order immediately (SEL-14): it
     /// stands idle where it is; a villager keeps its carry.
     /// Returns whether the order *would* be accepted (any living,
@@ -435,6 +488,17 @@ impl WasmSim {
             });
         }
         ok
+    }
+
+    /// Per-entity stance tags in entity-id order (CMB-09:
+    /// 0 Aggressive, 1 Defensive, 2 Stand Ground, 3 No Attack) —
+    /// the command panel's pressed state for the stance row.
+    pub fn entity_stance(&self) -> Vec<u8> {
+        self.inner
+            .entities()
+            .iter()
+            .map(|e| e.stance.tag())
+            .collect()
     }
 
     /// Per-entity AutoExplore flags (0/1) in entity-id order — the
@@ -562,6 +626,31 @@ impl WasmSim {
     /// and re-validates fully at execution — see `push_repair`.
     pub fn push_repair_queued(&mut self, entity: u32, building: u32) -> bool {
         self.push_queued(entity, QueuedOrder::Repair { building })
+    }
+
+    /// Queue an attack-move behind the unit's current order
+    /// (CMB-10): it executes when the unit goes idle.
+    pub fn push_attack_move_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_queued(
+            entity,
+            QueuedOrder::AttackMove {
+                x: I16F16::from_num(x),
+                y: I16F16::from_num(y),
+            },
+        )
+    }
+
+    /// Queue a patrol order behind the unit's current order
+    /// (CMB-11). On a unit that already patrols, the point appends
+    /// to its loop immediately instead (see `Sim::issue_queue`).
+    pub fn push_patrol_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_queued(
+            entity,
+            QueuedOrder::Patrol {
+                x: I16F16::from_num(x),
+                y: I16F16::from_num(y),
+            },
+        )
     }
 
     /// Queue a House build behind the villager's current order. The

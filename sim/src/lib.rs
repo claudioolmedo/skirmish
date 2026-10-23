@@ -75,15 +75,18 @@ pub use build::{
     REPAIR_HP_PER_MIN_EXTRA, REPAIR_HP_PER_MIN_FIRST, STABLE_BUILD_TICKS, STABLE_WOOD_COST,
     TOWN_CENTER_POP_SUPPORT,
 };
-pub use combat::{compute_damage, compute_damage_elev, elevation_factor, Projectile, MELEE_REACH};
+pub use combat::{
+    compute_damage, compute_damage_elev, elevation_factor, Projectile, DEFENSIVE_LEASH,
+    MELEE_REACH,
+};
 pub use econ::{
     NodeKind, ResourceKind, ResourceNode, Stockpile, CARRY_CAPACITY, DEPOSIT_RANGE, GATHER_RANGE,
     HUNT_CARRY_CAPACITY, RALLY_NODE_SNAP_RADIUS, RETARGET_RADIUS, TRAIN_QUEUE_CAP,
     VILLAGER_FOOD_COST, VILLAGER_TRAIN_TICKS,
 };
 pub use entity::{
-    is_player_owner, Dropoff, Entity, EntityKind, MoveOrder, QueuedOrder, Task, OWNER_GAIA,
-    OWNER_OPPONENT, OWNER_PLAYER,
+    is_player_owner, Dropoff, Entity, EntityKind, MoveOrder, QueuedOrder, Stance, Task,
+    OWNER_GAIA, OWNER_OPPONENT, OWNER_PLAYER,
 };
 pub use grid::{Grid, CELL_SIZE, GRID_DIM, TERRAIN_LAND, TERRAIN_WATER, WORLD_HALF};
 pub use mapgen::GeneratedMap;
@@ -318,6 +321,23 @@ pub enum Command {
     /// The toggle replaces the scout's current order and queue,
     /// like any fresh direct order.
     SetAutoExplore { entity: u32, enabled: bool },
+    /// Attack-move (CMB-10): the unit walks to the point, engaging
+    /// whatever enters its sight en route (the CMB-08 chain), then
+    /// resumes the walk and holds at the destination. Military
+    /// units only — a unit that can be ordered to attack (the
+    /// `can_attack_move` rule). Replaces the unit's current order
+    /// and queue, like any fresh direct order.
+    AttackMove { entity: u32, x: I16F16, y: I16F16 },
+    /// Patrol (CMB-11): the unit loops between its current position
+    /// and the point, engaging en route like an attack-move. On a
+    /// unit that already patrols, the point is appended to the
+    /// loop instead of restarting it. Military units only.
+    Patrol { entity: u32, x: I16F16, y: I16F16 },
+    /// Set a military unit's stance (CMB-09): a persistent setting
+    /// governing automatic engagement only — it never cancels the
+    /// unit's current order, queue, or target. Setting Defensive
+    /// anchors the leash post where the unit stands now.
+    SetStance { entity: u32, stance: Stance },
     /// Stop (SEL-14): halt a unit's current order immediately —
     /// move, work task, attack engagement, AutoExplore and the
     /// whole queued-order chain all end; the unit stands idle
@@ -685,14 +705,20 @@ impl Sim {
             ));
         }
         // The starting Scout Cavalry (M3, OPENING-SPEC §2.1).
+        // CMB-09: the starting scout's Dark Age default stance is
+        // Stand Ground — it never rides out to engage on its own
+        // (MECHANICS-STUDY §9.1); trained scouts default to
+        // Aggressive like every other military unit.
         let mut next_id = TOWN_CENTER_ID + 1 + START_VILLAGER_COUNT;
-        entities.push(Entity::spawned(
+        let mut starting_scout = Entity::spawned(
             next_id,
             EntityKind::ScoutCavalry,
             entity::OWNER_PLAYER,
             tc_x + I16F16::from_num(START_SCOUT_OFFSET.0),
             tc_y + I16F16::from_num(START_SCOUT_OFFSET.1),
-        ));
+        );
+        starting_scout.stance = Stance::StandGround;
+        entities.push(starting_scout);
         next_id += 1;
         // Gaia animals at their generated cells, in the package's
         // fixed order (sheep, boars, deer) — the historical id
@@ -796,13 +822,17 @@ impl Sim {
             ));
             next_id += 1;
         }
-        self.entities.push(Entity::spawned(
+        // The opponent's starting scout stands at Stand Ground
+        // too (CMB-09 — the same default as the human's).
+        let mut foe_scout = Entity::spawned(
             next_id,
             EntityKind::ScoutCavalry,
             entity::OWNER_OPPONENT,
             tc_x - I16F16::from_num(START_SCOUT_OFFSET.0),
             tc_y - I16F16::from_num(START_SCOUT_OFFSET.1),
-        ));
+        );
+        foe_scout.stance = Stance::StandGround;
+        self.entities.push(foe_scout);
         next_id += 1;
         // The opponent's own animals at their generated cells.
         for &(kind, cx, cy) in &pkg.animals {
@@ -2076,6 +2106,10 @@ impl Sim {
         e.clear_combat();
         e.auto_explore = false;
         e.auto_target = None;
+        // CMB-10/11: Stop also ends any standing order.
+        e.attack_move = None;
+        e.patrol.clear();
+        e.patrol_next = 0;
     }
 
     /// Would a `DeleteEntity` command be accepted right now?
@@ -2309,6 +2343,11 @@ impl Sim {
         e.order = None;
         e.order_queue.clear();
         e.order_from_queue = false;
+        // CMB-10/11: the toggle is a fresh order — it also ends
+        // any standing order (a scout can hold a patrol).
+        e.attack_move = None;
+        e.patrol.clear();
+        e.patrol_next = 0;
         e.vel_x = I16F16::ZERO;
         e.vel_y = I16F16::ZERO;
         e.clear_combat();
@@ -2318,12 +2357,303 @@ impl Sim {
         e.task_dropoff = None;
     }
 
+    // -- Orders & stances (CMB-09/10/11) --------------------------------
+    //
+    // Attack-move, patrol, and the four unit stances. Evidence
+    // (fetched 2026-10-22): the AoE wiki's "Unit stance" page for
+    // the stance behaviours and the Aggressive default; the
+    // official Age of Empires forums' attack-move thread ("Wonky
+    // Attack Move" — the expected behaviour: enemy units and/or
+    // buildings entering the unit's LoS are attacked, then the
+    // unit resumes toward its destination) and the wiki's
+    // "Hotkey" page (DE's dedicated attack-move key is R; patrol
+    // is a panel command) for attack-move; the GameFAQs Age of
+    // Kings strategy guide for patrol ("the unit moves back and
+    // forth between its current position and the designated
+    // point... Way points also work with patrols"). The one
+    // number no source pins — how far a Defensive unit chases —
+    // is a tuned constant: see combat::DEFENSIVE_LEASH.
+
+    /// Would an `AttackMove` or `Patrol` command be accepted
+    /// right now? The entity must be a living military unit owned
+    /// by a player, with an attack row — DE gives these orders
+    /// (and the stance row) to military units only; villagers
+    /// engage through the explicit `Attack` command alone.
+    pub fn can_attack_move(&self, entity: u32) -> bool {
+        match self.entity_index(entity) {
+            Some(idx) => self.combat_orderable(idx),
+            None => false,
+        }
+    }
+
+    /// The index form of `can_attack_move`, shared by the queued
+    /// execution paths.
+    fn combat_orderable(&self, idx: usize) -> bool {
+        let e = &self.entities[idx];
+        !e.dead
+            && is_player_owner(e.owner)
+            && e.kind.is_military()
+            && !units::spec(e.kind).attacks.is_empty()
+    }
+
+    /// Would a `SetStance` command be accepted right now? A living
+    /// military unit owned by a player (CMB-09).
+    pub fn can_set_stance(&self, entity: u32) -> bool {
+        match self.entity_index(entity) {
+            Some(idx) => {
+                let e = &self.entities[idx];
+                !e.dead && is_player_owner(e.owner) && e.kind.is_military()
+            }
+            None => false,
+        }
+    }
+
+    /// The entity's current stance, if it exists (the client's
+    /// stance-row state; tests pin the defaults through this).
+    pub fn stance_of(&self, entity: u32) -> Option<Stance> {
+        self.entity_index(entity).map(|idx| self.entities[idx].stance)
+    }
+
+    /// Whether the entity is currently patrolling (CMB-11).
+    pub fn patrolling(&self, entity: u32) -> bool {
+        match self.entity_index(entity) {
+            Some(idx) => !self.entities[idx].patrol.is_empty(),
+            None => false,
+        }
+    }
+
+    /// Whether the entity is currently walking an attack-move
+    /// (CMB-10).
+    pub fn attack_moving(&self, entity: u32) -> bool {
+        match self.entity_index(entity) {
+            Some(idx) => self.entities[idx].attack_move.is_some(),
+            None => false,
+        }
+    }
+
+    /// Apply an `AttackMove` command (CMB-10): validate, replace
+    /// the unit's order and queue (SEL-12), and install the
+    /// standing order.
+    fn issue_attack_move(&mut self, entity: u32, x: I16F16, y: I16F16) {
+        if !self.can_attack_move(entity) {
+            return;
+        }
+        let idx = self.entity_index(entity).expect("validated");
+        self.entities[idx].order_queue.clear();
+        self.entities[idx].order_from_queue = false;
+        self.apply_attack_move(idx, x, y);
+    }
+
+    /// The mechanics of an attack-move order, shared by the
+    /// `AttackMove` command and queued-order execution: cancel the
+    /// unit's work, combat, AutoExplore and any patrol, walk to
+    /// the resolved destination, and remember the destination as
+    /// the standing order — the acquisition chain (CMB-08, under
+    /// the stance gates of CMB-09) fights whatever enters sight
+    /// on the way, and the standing-order step resumes the walk
+    /// after each fight. If no move order can be installed the
+    /// attack-move is rejected wholesale (no standing order).
+    fn apply_attack_move(&mut self, idx: usize, x: I16F16, y: I16F16) {
+        if !self.combat_orderable(idx) {
+            return;
+        }
+        {
+            let e = &mut self.entities[idx];
+            e.task = Task::Idle;
+            e.task_node = None;
+            e.task_building = None;
+            e.task_dropoff = None;
+            e.clear_combat();
+            e.auto_explore = false;
+            e.auto_target = None;
+            e.attack_move = None;
+            e.patrol.clear();
+            e.patrol_next = 0;
+        }
+        if let Some(dest) = self.install_move_destination(idx, x, y) {
+            self.entities[idx].attack_move = Some(dest);
+        }
+    }
+
+    /// Apply a `Patrol` command (CMB-11): on a unit that already
+    /// patrols, the point is APPENDED to its loop — patrol legs
+    /// are chained one order at a time, and the current leg is
+    /// never disturbed. Otherwise the command replaces the unit's
+    /// order and queue (SEL-12) and starts a fresh loop.
+    fn issue_patrol(&mut self, entity: u32, x: I16F16, y: I16F16) {
+        if !self.can_attack_move(entity) {
+            return;
+        }
+        let idx = self.entity_index(entity).expect("validated");
+        if !self.entities[idx].patrol.is_empty() {
+            self.patrol_append(idx, x, y);
+            return;
+        }
+        self.entities[idx].order_queue.clear();
+        self.entities[idx].order_from_queue = false;
+        self.apply_patrol(idx, x, y);
+    }
+
+    /// Append a point to the unit's active patrol loop (clamped
+    /// into the world). The point is raw, not snapped: a leg the
+    /// steering cannot reach is skipped by the standing-order
+    /// step, like a chase target that cannot be reached.
+    fn patrol_append(&mut self, idx: usize, x: I16F16, y: I16F16) {
+        let p = (clamp_pos(x), clamp_pos(y));
+        self.entities[idx].patrol.push(p);
+    }
+
+    /// The mechanics of starting a patrol, shared by the `Patrol`
+    /// command and queued-order execution: the loop is [where the
+    /// unit stands now, the resolved destination], and the unit
+    /// walks the destination leg at once. If no move order can be
+    /// installed the patrol is rejected wholesale.
+    fn apply_patrol(&mut self, idx: usize, x: I16F16, y: I16F16) {
+        if !self.combat_orderable(idx) {
+            return;
+        }
+        let start = {
+            let e = &self.entities[idx];
+            (e.pos_x, e.pos_y)
+        };
+        {
+            let e = &mut self.entities[idx];
+            e.task = Task::Idle;
+            e.task_node = None;
+            e.task_building = None;
+            e.task_dropoff = None;
+            e.clear_combat();
+            e.auto_explore = false;
+            e.auto_target = None;
+            e.attack_move = None;
+            e.patrol.clear();
+            e.patrol_next = 0;
+        }
+        if let Some(dest) = self.install_move_destination(idx, x, y) {
+            let e = &mut self.entities[idx];
+            e.patrol = vec![start, dest];
+            e.patrol_next = 1;
+        }
+    }
+
+    /// Apply a `SetStance` command (CMB-09): validate and set.
+    /// A stance is a setting, not an order — the unit's order,
+    /// queue, target and standing orders all survive it. Setting
+    /// Defensive anchors the leash post where the unit stands now;
+    /// afterwards the standing-order step moves the post to
+    /// wherever the unit last stood idle.
+    fn issue_set_stance(&mut self, entity: u32, stance: Stance) {
+        if !self.can_set_stance(entity) {
+            return;
+        }
+        let idx = self.entity_index(entity).expect("validated");
+        let e = &mut self.entities[idx];
+        e.stance = stance;
+        if stance == Stance::Defensive {
+            e.stance_anchor_x = e.pos_x;
+            e.stance_anchor_y = e.pos_y;
+        }
+    }
+
+    /// The standing-order step (tick phase 5.6, after AutoExplore,
+    /// before the AI): attack-move arrival and resume, patrol leg
+    /// advance, and the Defensive return-to-post (CMB-09).
+    ///
+    /// Combat owns the unit while it has a target — the
+    /// acquisition chain keeps acquiring under an attack-move or
+    /// patrol (the unit fights what it meets), and this step only
+    /// resumes the walk once the fight is over. A fight that ended
+    /// mid-walk can leave the chase's move order behind (headed at
+    /// the dead target's last position); when it does not head at
+    /// the standing destination, the walk is re-aimed here.
+    fn unit_orders_tick(&mut self) {
+        for idx in 0..self.entities.len() {
+            // Everything the step needs, copied out — the actions
+            // below borrow `self` mutably.
+            let (eligible, fighting, order_target, attack_move, patrol_point, patrol_len, stance) = {
+                let e = &self.entities[idx];
+                let n = e.patrol.len();
+                (
+                    !e.dead && is_player_owner(e.owner) && e.kind.is_military(),
+                    e.attack_target.is_some() || e.attack_building.is_some(),
+                    e.order.as_ref().map(|o| (o.target_x, o.target_y)),
+                    e.attack_move,
+                    if n > 0 {
+                        Some(e.patrol[e.patrol_next % n])
+                    } else {
+                        None
+                    },
+                    n,
+                    e.stance,
+                )
+            };
+            if !eligible {
+                continue;
+            }
+            if let Some((ax, ay)) = attack_move {
+                if fighting {
+                    continue;
+                }
+                match order_target {
+                    None => {
+                        let d = self.distance_to(idx, ax, ay);
+                        if d <= I16F16::from_num(1) {
+                            // Arrived: the attack-move completes —
+                            // the unit holds at its destination.
+                            self.entities[idx].attack_move = None;
+                        } else if !self.set_move_order(idx, ax, ay) {
+                            // Unreachable from here: the standing
+                            // order ends, like a failed chase.
+                            self.entities[idx].attack_move = None;
+                        }
+                    }
+                    Some(t) => {
+                        if t != (ax, ay) {
+                            self.set_move_order(idx, ax, ay);
+                        }
+                    }
+                }
+                continue;
+            }
+            if let Some((px, py)) = patrol_point {
+                if fighting || order_target.is_some() {
+                    continue;
+                }
+                let d = self.distance_to(idx, px, py);
+                if d > I16F16::from_num(1) {
+                    // An unreachable leg is skipped, not retried
+                    // forever: one A* attempt per tick at most,
+                    // mirroring the combat chase's failure rule.
+                    self.set_move_order(idx, px, py);
+                }
+                let e = &mut self.entities[idx];
+                e.patrol_next = (e.patrol_next + 1) % patrol_len.max(1);
+                continue;
+            }
+            // Defensive return-to-post (CMB-09): a Defensive unit
+            // standing idle away from its post walks back to it —
+            // the documented "returning to their original
+            // position". The post itself is set when the stance is
+            // issued and moves to the destination of each explicit
+            // move order (see apply_move); it never drifts to
+            // wherever a fight happened to end.
+            if stance == Stance::Defensive && order_target.is_none() && !fighting {
+                let (ax, ay) = {
+                    let e = &self.entities[idx];
+                    (e.stance_anchor_x, e.stance_anchor_y)
+                };
+                if self.distance_to(idx, ax, ay) > I16F16::from_num(2) {
+                    self.set_move_order(idx, ax, ay);
+                }
+            }
+        }
+    }
+
     /// The per-tick AutoExplore step (tick phase 5.5): every scout
     /// with the mode on and no ride in progress picks its next
     /// frontier cell. A scout with a combat target is left to the
-    /// combat phase (it cannot gain one on its own — the Scout's
-    /// stance never auto-acquires, CMB-09 — but a stale engagement
-    /// must not fight the walker).
+    /// combat phase — an engagement (however it arose) must not
+    /// fight the walker.
     fn auto_explore_tick(&mut self) {
         for idx in 0..self.entities.len() {
             {
@@ -2468,6 +2798,8 @@ impl Sim {
             QueuedOrder::Attack { target } => self.can_attack(entity, target),
             QueuedOrder::Build { .. } => self.entities[idx].kind == EntityKind::Villager,
             QueuedOrder::Repair { building } => self.can_repair(entity, building),
+            QueuedOrder::AttackMove { .. } => self.can_attack_move(entity),
+            QueuedOrder::Patrol { .. } => self.can_attack_move(entity),
         }
     }
 
@@ -2515,7 +2847,8 @@ impl Sim {
     /// matching the reference, where a plain order shows no
     /// persistent flag and a queued chain flags every point
     /// including the leg in progress and the last leg — followed
-    /// by each queued order's target in FIFO order. Object
+    /// by each queued order's target in FIFO order, and finally
+    /// by the legs of an active patrol (CMB-11). Object
     /// orders resolve to their target's current position (node,
     /// entity, or building). Render-only: read-only; the route
     /// itself is never hashed (its inputs are).
@@ -2536,6 +2869,15 @@ impl Sim {
         for q in &e.order_queue {
             if let Some(p) = self.queued_order_target(q) {
                 out.push(p);
+            }
+        }
+        // CMB-11: a patrol's legs are the unit's standing route —
+        // they flag like a queued chain's points, from the leg it
+        // heads to next, all the way around the loop.
+        if !e.patrol.is_empty() {
+            let n = e.patrol.len();
+            for k in 0..n {
+                out.push(e.patrol[(e.patrol_next + k) % n]);
             }
         }
         out
@@ -2579,6 +2921,8 @@ impl Sim {
             QueuedOrder::Gather { node } => self.node_pos(node),
             QueuedOrder::Attack { target } => self.entity_pos(target),
             QueuedOrder::Repair { building } => self.building_pos(building),
+            QueuedOrder::AttackMove { x, y } => Some((x, y)),
+            QueuedOrder::Patrol { x, y } => Some((x, y)),
         }
     }
 
@@ -2637,7 +2981,10 @@ impl Sim {
     }
 
     /// Idle military of a specific player (M8): the per-player form
-    /// of `idle_military`, same definition, any seat.
+    /// of `idle_military`, same definition, any seat. A unit under
+    /// a standing order (attack-move or patrol, CMB-10/11) is at
+    /// work, not idle — between legs it has no move order, so the
+    /// standing-order state is part of the test.
     pub fn idle_military_of(&self, owner: u8) -> Vec<u32> {
         self.entities
             .iter()
@@ -2648,6 +2995,8 @@ impl Sim {
                     && e.order.is_none()
                     && e.attack_target.is_none()
                     && e.attack_building.is_none()
+                    && e.attack_move.is_none()
+                    && e.patrol.is_empty()
             })
             .map(|e| e.id)
             .collect()
@@ -2701,6 +3050,9 @@ impl Sim {
                 Command::SetAutoExplore { entity, enabled } => {
                     self.issue_auto_explore(entity, enabled)
                 }
+                Command::AttackMove { entity, x, y } => self.issue_attack_move(entity, x, y),
+                Command::Patrol { entity, x, y } => self.issue_patrol(entity, x, y),
+                Command::SetStance { entity, stance } => self.issue_set_stance(entity, stance),
             }
         }
 
@@ -2843,6 +3195,14 @@ impl Sim {
         //    any other.
         self.auto_explore_tick();
 
+        // 5.6. Standing orders (CMB-10/11): an attack-move walk
+        //    resumes after each fight and completes at its
+        //    destination, patrol legs advance, and Defensive units
+        //    walk back to their post (CMB-09). After the queues
+        //    and AutoExplore, before the AI step, like the phase
+        //    above.
+        self.unit_orders_tick();
+
         // 6. The scripted opponent decides (M5): on its cadence the
         //    AI reads live state and enqueues ordinary commands into
         //    the same FIFO the human uses (AI-01) — they apply at the
@@ -2926,11 +3286,11 @@ impl Sim {
     /// "my sheep won't walk" play-test break (Claudio,
     /// 2026-10-19) — a plain move is a captured sheep's ONLY
     /// order, and its clicks land around the TC, houses and
-    /// trees. The snap lives HERE, not in `set_move_order`: the
-    /// sim's internal steering (hauler drop-off approaches,
-    /// gather standing cells, combat chases) calls that directly
-    /// and its fail-then-fallback logic depends on the honest
-    /// answer.
+    /// trees. The snap lives in `install_move_destination`, not in
+    /// `set_move_order`: the sim's internal steering (hauler
+    /// drop-off approaches, gather standing cells, combat chases)
+    /// calls that directly and its fail-then-fallback logic
+    /// depends on the honest answer.
     fn apply_move(&mut self, idx: usize, x: I16F16, y: I16F16) {
         {
             let e = &mut self.entities[idx];
@@ -2943,17 +3303,50 @@ impl Sim {
             // AutoExplore walker never survives one.
             e.auto_explore = false;
             e.auto_target = None;
+            // CMB-10/11: a plain move also ends any standing order.
+            e.attack_move = None;
+            e.patrol.clear();
+            e.patrol_next = 0;
         }
+        // CMB-09: a Defensive unit's post follows its explicit
+        // move orders — the post is the resolved destination.
+        let installed = self.install_move_destination(idx, x, y);
+        if self.entities[idx].stance == Stance::Defensive {
+            if let Some((tx, ty)) = installed {
+                let e = &mut self.entities[idx];
+                e.stance_anchor_x = tx;
+                e.stance_anchor_y = ty;
+            }
+        }
+    }
+
+    /// Install a move order toward a player-given destination,
+    /// with the blocked-cell snap of `apply_move` (shared by the
+    /// attack-move and patrol applies, CMB-10/11, whose stored
+    /// destinations must be the RESOLVED points). Returns the
+    /// installed order's final target, or `None` when no order
+    /// could be installed (the destination is unreachable and not
+    /// on a blocked cell).
+    fn install_move_destination(
+        &mut self,
+        idx: usize,
+        x: I16F16,
+        y: I16F16,
+    ) -> Option<(I16F16, I16F16)> {
         let (tx, ty) = (clamp_pos(x), clamp_pos(y));
-        if !self.set_move_order(idx, tx, ty) {
-            let (gx, gy) = self.grid.world_to_cell(tx, ty);
-            if self.grid.is_blocked(gx, gy) {
-                if let Some(cell) = self.grid.nearest_free_cell(gx, gy, 4) {
-                    let (cx, cy) = self.grid.cell_center(cell.0, cell.1);
-                    self.set_move_order(idx, cx, cy);
+        if self.set_move_order(idx, tx, ty) {
+            return Some((tx, ty));
+        }
+        let (gx, gy) = self.grid.world_to_cell(tx, ty);
+        if self.grid.is_blocked(gx, gy) {
+            if let Some(cell) = self.grid.nearest_free_cell(gx, gy, 4) {
+                let (cx, cy) = self.grid.cell_center(cell.0, cell.1);
+                if self.set_move_order(idx, cx, cy) {
+                    return Some((cx, cy));
                 }
             }
         }
+        None
     }
 
     /// Apply an `Attack` command (M3): validate (same rules as
@@ -2987,6 +3380,13 @@ impl Sim {
         e.strike_tick = None;
         e.attack_engaged = false;
         e.next_attack_tick = 0;
+        // CMB-09: an explicit order's provenance — the stance
+        // chase gates never apply to it. CMB-10/11: it also ends
+        // any standing order.
+        e.attack_auto = false;
+        e.attack_move = None;
+        e.patrol.clear();
+        e.patrol_next = 0;
     }
 
     /// Apply an `AttackBuilding` command (M5): the building
@@ -3015,6 +3415,11 @@ impl Sim {
         e.strike_tick = None;
         e.attack_engaged = false;
         e.next_attack_tick = 0;
+        // CMB-09/10/11: explicit-order provenance (see apply_attack).
+        e.attack_auto = false;
+        e.attack_move = None;
+        e.patrol.clear();
+        e.patrol_next = 0;
     }
 
     /// Apply a `Repair` command (BLD-07): validate (same rules as
@@ -3366,6 +3771,25 @@ impl Sim {
     /// later this same tick starts it — a queued order for an idle
     /// unit behaves like a plain order with no visible delay.
     fn issue_queue(&mut self, entity: u32, order: QueuedOrder) {
+        // CMB-11: a patrol point for a unit that already patrols
+        // appends to its loop NOW — the loop never ends, so a
+        // patrol point queued behind it could never execute. (The
+        // append validates on its own: combat-orderable, not the
+        // queue cap — nothing is being queued.)
+        if let QueuedOrder::Patrol { x, y } = order {
+            if self.can_attack_move(entity)
+                && self
+                    .entity_index(entity)
+                    .map(|idx| !self.entities[idx].patrol.is_empty())
+                    .unwrap_or(false)
+            {
+                let idx = self.entity_index(entity).expect("validated");
+                self.entities[idx].auto_explore = false;
+                self.entities[idx].auto_target = None;
+                self.patrol_append(idx, x, y);
+                return;
+            }
+        }
         if !self.can_queue(entity, order) {
             return;
         }
@@ -3396,6 +3820,12 @@ impl Sim {
                     || e.order.is_some()
                     || e.attack_target.is_some()
                     || e.attack_building.is_some()
+                    // CMB-10/11: a standing order owns the unit —
+                    // its queue waits behind the attack-move (which
+                    // completes) and behind a patrol (which never
+                    // does, by design).
+                    || e.attack_move.is_some()
+                    || !e.patrol.is_empty()
                 {
                     continue;
                 }
@@ -3447,6 +3877,27 @@ impl Sim {
             }
             QueuedOrder::Build { kind, x, y } => self.apply_build(entity, kind, x, y),
             QueuedOrder::Repair { building } => self.apply_repair(idx, building),
+            QueuedOrder::AttackMove { x, y } => {
+                if !self.combat_orderable(idx) {
+                    return false;
+                }
+                self.apply_attack_move(idx, x, y);
+                true
+            }
+            QueuedOrder::Patrol { x, y } => {
+                if !self.combat_orderable(idx) {
+                    return false;
+                }
+                // Defensive twin of the issue_queue rule: a patrol
+                // that started since the order was queued takes the
+                // point as a new leg instead of restarting.
+                if !self.entities[idx].patrol.is_empty() {
+                    self.patrol_append(idx, x, y);
+                } else {
+                    self.apply_patrol(idx, x, y);
+                }
+                true
+            }
         }
     }
 
@@ -5111,6 +5562,14 @@ impl Sim {
                         h.write_i32(y.to_bits());
                     }
                     QueuedOrder::Repair { building } => h.write_u32(building),
+                    QueuedOrder::AttackMove { x, y } => {
+                        h.write_i32(x.to_bits());
+                        h.write_i32(y.to_bits());
+                    }
+                    QueuedOrder::Patrol { x, y } => {
+                        h.write_i32(x.to_bits());
+                        h.write_i32(y.to_bits());
+                    }
                 }
             }
             // INF-09: the current order's queue provenance
@@ -5239,6 +5698,39 @@ impl Sim {
             // but hashed like every other entity field so a wander
             // divergence can never hide.
             h.write_u64(e.wander_until);
+            // CMB-09/10/11: stance and standing orders — written
+            // conditionally, on the SEL-17/INF-09 pattern above, so
+            // a state where none of them is in play hashes exactly
+            // as before. Two default-state writers exist: each
+            // seat's starting Scout Cavalry stands at Stand Ground
+            // from spawn (CMB-09 — attributed in determinism.rs,
+            // the one intended golden mover), and a Defensive post
+            // is anchored state whenever the stance is set.
+            if e.stance != Stance::Aggressive {
+                h.write_u8(0xB0);
+                h.write_u8(e.stance.tag());
+                if e.stance == Stance::Defensive {
+                    h.write_i32(e.stance_anchor_x.to_bits());
+                    h.write_i32(e.stance_anchor_y.to_bits());
+                }
+            }
+            if e.attack_auto {
+                h.write_u8(0xB1);
+            }
+            if let Some((ax, ay)) = e.attack_move {
+                h.write_u8(0xB2);
+                h.write_i32(ax.to_bits());
+                h.write_i32(ay.to_bits());
+            }
+            if !e.patrol.is_empty() {
+                h.write_u8(0xB3);
+                h.write_u32(e.patrol.len() as u32);
+                h.write_u32(e.patrol_next as u32);
+                for &(px, py) in &e.patrol {
+                    h.write_i32(px.to_bits());
+                    h.write_i32(py.to_bits());
+                }
+            }
         }
         // M3: projectiles in flight, in spawn order.
         h.write_u32(self.projectiles.len() as u32);
