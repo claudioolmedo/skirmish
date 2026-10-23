@@ -14,8 +14,9 @@
 // (all observed in the 2026-10-19 player study; the Feudal line
 // is the study's "Feudal Age Research Complete").
 
-// Research lines by snapshot key, in display order. Feudal is
-// not here: it arrives as the age transition, not a tech flag.
+// Research lines by snapshot key, in display order. The age
+// advancements are not here: they arrive as age transitions,
+// not tech flags.
 const TECH_LINES = [
   ['loom', 'Loom'],
   ['fletching', 'Fletching'],
@@ -23,6 +24,7 @@ const TECH_LINES = [
   ['padded', 'Padded Archer Armor'],
   ['maa', 'Man-at-Arms'],
   ['wheelbarrow', 'Wheelbarrow'],
+  ['handcart', 'Hand Cart'],
 ];
 
 // A single frame can legitimately complete several of a kind
@@ -39,8 +41,8 @@ const MAX_PER_KIND = 3;
  *   {
  *     built: { [buildingId]: kind },   // completed, own
  *     units: { [kind]: count },        // living, own, TC excluded
- *     techs: { loom, fletching, scalemail, padded, maa, wheelbarrow }: bool,
- *     age: 0 | 1,
+ *     techs: { loom, fletching, scalemail, padded, maa, wheelbarrow, handcart }: bool,
+ *     age: 0 | 1 | 2,
  *     sheep: count,                    // living, own
  *   }
  * `names` supplies the display tables app.js mirrors from the
@@ -56,6 +58,7 @@ const EN_FEED_FMT = {
   created: (name) => `${name} Created`,
   research: (name) => `${name} Research Complete`,
   feudal: 'Feudal Age Research Complete',
+  castle: 'Castle Age Research Complete',
   sheep: 'Sheep Found',
 };
 
@@ -73,7 +76,9 @@ export function diffFeedEvents(prev, next, names, fmt = EN_FEED_FMT) {
       out.push(fmt.created(names.unitName(Number(kind)), Number(kind)));
     }
   }
-  if ((next.age ?? 0) > (prev.age ?? 0)) out.push(fmt.feudal);
+  if ((next.age ?? 0) > (prev.age ?? 0)) {
+    out.push(next.age >= 2 ? (fmt.castle || EN_FEED_FMT.castle) : fmt.feudal);
+  }
   for (const [key, label] of TECH_LINES) {
     if (next.techs && next.techs[key] && !(prev.techs && prev.techs[key])) {
       out.push(fmt.research(names.techName ? names.techName(key) : label));

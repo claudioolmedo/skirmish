@@ -244,43 +244,51 @@ function pngIcon(png, cls) {
 
 // Building kind tags (must match the sim's BuildingKind::tag):
 // 0 house, 1 farm, 2 barracks (M2.5/M3); 3 lumber camp, 4 mill,
-// 5 mining camp, 6 archery range, 7 stable, 8 blacksmith (M6).
+// 5 mining camp, 6 archery range, 7 stable, 8 blacksmith (M6);
+// 9 town center (Castle P1 — a construction record that converts
+// into the TC entity on completion; its cost is 275 wood PLUS
+// 100 stone, the one two-resource cost: BUILD_COST holds the
+// wood, the stone rides BUILD_STONE_COST).
 // Costs and footprints mirror the sim (MECHANICS-STUDY §5).
-const BUILD_COST = [25, 60, 175, 100, 100, 100, 175, 175, 150];
+const BUILD_COST = [25, 60, 175, 100, 100, 100, 175, 175, 150, 275];
+const BUILD_STONE_COST = [0, 0, 0, 0, 0, 0, 0, 0, 0, 100];
 const BUILD_I18N = ['house', 'farm', 'barracks', 'lumber', 'mill',
-  'mining', 'range', 'stable', 'blacksmith'];
+  'mining', 'range', 'stable', 'blacksmith', 'towncenter'];
 let BUILD_NAME = ['House', 'Farm', 'Barracks', 'Lumber Camp', 'Mill',
-  'Mining Camp', 'Archery Range', 'Stable', 'Blacksmith'];
-const BUILD_SIZE = [2, 2, 3, 2, 2, 2, 3, 3, 3];
+  'Mining Camp', 'Archery Range', 'Stable', 'Blacksmith', 'Town Center'];
+const BUILD_SIZE = [2, 2, 3, 2, 2, 2, 3, 3, 3, 4];
 const BUILD_ICON = ['i-house', 'i-farm', 'i-tc', 'i-lumber', 'i-mill',
-  'i-mining', 'i-range', 'i-stable', 'i-blacksmith'];
+  'i-mining', 'i-range', 'i-stable', 'i-blacksmith', 'i-tc'];
 // The PNG set above, per building kind tag (same order as
 // BUILD_ICON): command buttons and building portraits.
 const BUILD_PNG = ['house.png', 'farm.png', 'barracks.png', 'lumber-camp.png',
   'mill.png', 'mining-camp.png', 'archery-range.png', 'stable.png',
-  'blacksmith.png'];
+  'blacksmith.png', 'town-center.png'];
 // Building max HP by kind tag (the sim's building table, study
 // §5) — for the enemy-building info panel (M5).
-const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200];
+const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200, 2400];
 // WASM build commands by kind tag (M6 completes the set).
 const PUSH_BUILD = ['push_build_house', 'push_build_farm', 'push_build_barracks',
   'push_build_lumber_camp', 'push_build_mill', 'push_build_mining_camp',
-  'push_build_archery_range', 'push_build_stable', 'push_build_blacksmith'];
+  'push_build_archery_range', 'push_build_stable', 'push_build_blacksmith',
+  'push_build_town_center'];
 const PUSH_BUILD_QUEUED = PUSH_BUILD.map((n) => `${n}_queued`);
 // Own-building minimap colors by kind tag (M6); kinds without an
 // entry keep the minimap's parchment default, the enemy's
 // buildings are always ENEMY_COLOR.
 const BUILDING_MINIMAP_COLOR = {
   3: '#8a6b42', 4: '#e5d9a8', 5: '#b9a24a', 6: '#c98f4e', 7: '#9a6a44', 8: '#6f6f76',
+  9: '#d8cf9f',
 };
 
 // Ages and technologies (M6). Age tags match the sim's Age::tag;
 // tech tags match TechId::tag. Costs/times mirror the sim's table
 // (study §8, OPENING-SPEC §2.6–2.7).
-let AGE_NAMES = ['Dark Age', 'Feudal Age'];
+let AGE_NAMES = ['Dark Age', 'Feudal Age', 'Castle Age'];
 let TECH_NAME = {
   0: 'Loom', 1: 'Feudal Age', 2: 'Fletching', 3: 'Scale Mail Armor',
   4: 'Padded Archer Armor', 5: 'Man-at-Arms', 6: 'Wheelbarrow',
+  7: 'Castle Age', 8: 'Hand Cart',
 };
 // Research-block explanations, indexed by the sim's ResearchBlock
 // tag (0 ok — unused, 1 funds, 2 queue full, 3 already done,
@@ -299,11 +307,11 @@ function refreshNames() {
   KIND_I18N.forEach((id, tag) => { kn[tag] = t('unit.' + id); });
   KIND_NAME = kn;
   BUILD_NAME = BUILD_I18N.map((id) => t('building.' + id));
-  AGE_NAMES = [t('age.dark'), t('age.feudal')];
+  AGE_NAMES = [t('age.dark'), t('age.feudal'), t('age.castle')];
   TECH_NAME = {
     0: t('tech.loom'), 1: t('age.feudal'), 2: t('tech.fletching'),
     3: t('tech.scalemail'), 4: t('tech.padded'), 5: t('tech.maa'),
-    6: t('tech.wheelbarrow'),
+    6: t('tech.wheelbarrow'), 7: t('age.castle'), 8: t('tech.handcart'),
   };
   RESEARCH_BLOCK_TITLES = [
     '', t('block.noResources'), t('block.queueFullTrain'),
@@ -618,6 +626,7 @@ function ownFeedSnapshot() {
       padded: (mask & 16) !== 0,
       maa: (mask & 32) !== 0,
       wheelbarrow: (mask & 64) !== 0,
+      handcart: (mask & 256) !== 0,
     },
   };
 }
@@ -648,6 +657,7 @@ function feedFmt() {
     created: (name, kind) => t('feed.created.' + genderOf(loc, 'unit', KIND_I18N[kind]), { name }),
     research: (name) => t('feed.research', { name }),
     feudal: t('feed.feudal'),
+    castle: t('feed.castle'),
     sheep: t('feed.sheep'),
   };
 }
@@ -664,18 +674,19 @@ function updateEventFeed() {
   const lines = diffFeedEvents(prev, snap, {
     buildingName: (k) => BUILD_NAME[k],
     unitName: (k) => KIND_NAME[k],
-    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6 }[key]],
+    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, handcart: 8 }[key]],
   }, feedFmt());
   feedPrev = snap;
   for (const text of lines) pushFeedLine(text);
   // INF-02: the opponent's age advance is a global event and
   // age is public (INF-07) — announce it like DE does, with
   // the same milestone stinger. Seeded silently alongside the
-  // own snapshot; only Feudal exists in the current scope.
+  // own snapshot; the line names the Age just reached (Feudal,
+  // then Castle).
   if (seatAware()) {
     const foeAge = sim.age_for(foeOwner());
     if (feedFoeAge >= 0 && foeAge > feedFoeAge) {
-      pushFeedLine(t('feed.foeFeudal'));
+      pushFeedLine(t(foeAge >= 2 ? 'feed.foeCastle' : 'feed.foeFeudal'));
       playAudioCue('ageAdvance');
     }
     feedFoeAge = foeAge;
@@ -842,6 +853,10 @@ function buildingStageImage(kind, progress) {
 const BUILDING_ART_KEY = {
   0: 'house', 2: 'barracks', 3: 'lumber', 4: 'mill', 5: 'mining',
   6: 'range', 7: 'stable', 8: 'blacksmith',
+  // A Town Center foundation clip-reveals the finished TC art as
+  // it rises (no 'tcStage' frames exist, so buildingStageImage
+  // falls through to exactly this reveal).
+  9: 'tc',
 };
 // The settle cap: the loading gate waits for the art, but a hung
 // image (stalled connection) must never block a match longer
@@ -1686,6 +1701,7 @@ function mirrorValid(kind, cx, cy) {
     }
   }
   if (myStock()[1] < BUILD_COST[kind]) return false;
+  if (BUILD_STONE_COST[kind] > 0 && myStock()[3] < BUILD_STONE_COST[kind]) return false;
   return true;
 }
 
@@ -2299,10 +2315,18 @@ const myAge = () => (seatAware() ? sim.age_for(localOwner) : sim.age());
 const myTechMask = () => (seatAware() ? sim.tech_mask_for(localOwner) : sim.tech_mask());
 const myPop = () => (seatAware() ? sim.population_for(localOwner) : sim.population());
 const myPopCap = () => (seatAware() ? sim.population_cap_for(localOwner) : sim.population_cap());
-const myTrainBlock = () => (seatAware() ? sim.train_block_reason_at(myTcId) : sim.train_block_reason());
-const myResearchBlockTc = (t) => (seatAware() ? sim.research_block_tc_at(myTcId, t) : sim.research_block_tc(t));
-const myTcQueue = () => (seatAware() ? sim.tc_queue_for(myTcId) : sim.tc_queue());
-const myTcProgress = () => (seatAware() ? sim.tc_progress_for(myTcId) : sim.tc_progress());
+/// The Town Center the command panel acts on: the selected own
+/// Town Center when one is selected (additional TCs are buildable
+/// from the Castle Age and each carries its own queue), else the
+/// seat's first Town Center (`myTcId`). Orders name this id
+/// explicitly (cmd.tc), so both netplay clients apply them to the
+/// same TC — the selection itself stays local UI state.
+const panelTcId = () => (selectedBuilding && selectedBuilding.type === 'tc'
+  && selectedBuilding.owner === localOwner ? selectedBuilding.id : myTcId);
+const myTrainBlock = () => sim.train_block_reason_at(panelTcId());
+const myResearchBlockTc = (t) => sim.research_block_tc_at(panelTcId(), t);
+const myTcQueue = () => sim.tc_queue_for(panelTcId());
+const myTcProgress = () => sim.tc_progress_for(panelTcId());
 const myTrainQueueLen = () => myTcQueue().length;
 const myIdleVillagers = () => (seatAware() ? sim.idle_villagers_for(localOwner) : sim.idle_villagers());
 const myIdleMilitary = () => (seatAware() ? sim.idle_military_for(localOwner) : sim.idle_military());
@@ -2351,14 +2375,10 @@ function applyLocalOrder(cmd) {
         : cmd.k === 9 ? sim.push_train_spearman(cmd.b)
         : cmd.k === 10 ? sim.push_train_skirmisher(cmd.b)
         : sim.push_train_archer(cmd.b);
-    case 'train_vil': return sim.push_train_villager();
-    case 'research_tc': return cmd.tech === 0
-      ? sim.push_research_loom()
-      : cmd.tech === 6
-        ? sim.push_research_wheelbarrow()
-        : sim.push_research_feudal();
+    case 'train_vil': return sim.push_train_villager_at(cmd.tc != null ? cmd.tc : myTcId);
+    case 'research_tc': return sim.push_research_tc_at(cmd.tc != null ? cmd.tc : myTcId, cmd.tech);
     case 'research_at': return sim.push_research_at(cmd.b, cmd.tech);
-    case 'rally_tc': return sim.push_set_rally_tc(cmd.x, cmd.y);
+    case 'rally_tc': return sim.push_set_rally_tc_of(cmd.tc != null ? cmd.tc : myTcId, cmd.x, cmd.y);
     case 'rally_b': return sim.push_set_rally_building(cmd.b, cmd.x, cmd.y);
     case 'force_dep': return sim.push_force_deposit(cmd.e);
     case 'auto_explore': return sim.push_auto_explore(cmd.e, cmd.on);
@@ -4869,7 +4889,7 @@ async function main() {
       // selection is empty, so it just flashes the hint).
       const foe = selectedBuilding.owner === foeOwner();
       if (!foe && selectedBuilding.type === 'tc') {
-        if (issue({ t: 'rally_tc', x: wx, y: wy })) {
+        if (issue({ t: 'rally_tc', tc: selectedBuilding.id, x: wx, y: wy })) {
           playAudioCue('orderBuilding');
           clickMarkers.add('ground', wx, wy, performance.now());
         }
@@ -6364,6 +6384,7 @@ const NEW_BUILDING_STYLE = {
   6: { wall: '#a3763f', wall2: '#82592c', roof: '#7a4a35' }, // Archery Range
   7: { wall: '#96684a', wall2: '#77503a', roof: '#5d4630' }, // Stable
   8: { wall: '#6f6f76', wall2: '#54545c', roof: '#3f3f45' }, // Blacksmith: dark stone
+  9: { wall: '#a08b62', wall2: '#7d6a48', roof: '#5d4630' }, // Town Center: heavy timber + stone
 };
 
 function drawNewBuilding(b) {
@@ -7326,7 +7347,7 @@ function updateAudioWorldState(housedNow) {
 /// runCommandButton so the Shift repeat below runs the identical
 /// order a plain click runs — never a parallel path.
 function attemptTrain(id) {
-  if (id === 'train') return issue({ t: 'train_vil' });
+  if (id === 'train') return issue({ t: 'train_vil', tc: panelTcId() });
   const kindTag = {
     'train-scout': 2, 'train-militia': 3, 'train-archer': 4,
     'train-spearman': 9, 'train-skirmisher': 10,
@@ -7427,15 +7448,22 @@ function runCommandButton(id, times = 1) {
     // right-click, re-clicking the building — lands back on the
     // page the building came from; only a further Esc, a
     // right-click on the open page, or Back returns to the root.
-  } else if (id === 'research-loom' || id === 'research-feudal' || id === 'research-wheelbarrow') {
+  } else if (id === 'research-loom' || id === 'research-age' || id === 'research-wheelbarrow' || id === 'research-handcart') {
     // M6: Town Center research (shared queue with training).
-    const tag = id === 'research-loom' ? 0 : id === 'research-wheelbarrow' ? 6 : 1;
-    const ok = issue({ t: 'research_tc', tech: tag });
+    // The age button is dynamic (DE's single advance slot): from
+    // Dark it researches Feudal (tag 1), from Feudal Castle (7).
+    const tag = id === 'research-loom' ? 0
+      : id === 'research-wheelbarrow' ? 6
+      : id === 'research-handcart' ? 8
+      : myAge() >= 1 ? 7 : 1;
+    const ok = issue({ t: 'research_tc', tc: panelTcId(), tech: tag });
     if (!ok) {
       const rb = myResearchBlockTc(tag);
       flash(tag === 1 && rb === 4
         ? t('cmd.feudalNeeds')
-        : RESEARCH_BLOCK_TITLES[rb] || t('block.cannotResearch'));
+        : tag === 7 && rb === 4
+          ? t('cmd.castleNeeds')
+          : RESEARCH_BLOCK_TITLES[rb] || t('block.cannotResearch'));
     } else {
       playAudioCue('orderBuilding');
     }
@@ -7545,11 +7573,12 @@ function renderCommands() {
   const blockA = bk && context === 'range' ? sim.building_train_block(bk.id, 4) : -1;
   const blockSk = bk && context === 'range' ? sim.building_train_block(bk.id, 10) : -1;
   const blockS = bk && context === 'stable' ? sim.building_train_block(bk.id, 2) : -1;
-  // Research blocks: the TC trio (Loom 0, Feudal 1, Wheelbarrow 6)
-  // and the building techs (Fletching 2, Scale Mail 3, Padded 4,
-  // MAA 5).
+  // Research blocks: the TC set (Loom 0, Feudal 1, Wheelbarrow 6,
+  // Castle 7, Hand Cart 8) and the building techs (Fletching 2,
+  // Scale Mail 3, Padded 4, MAA 5).
   const rbTc = context === 'tc'
-    ? [myResearchBlockTc(0), myResearchBlockTc(1), myResearchBlockTc(6)] : [-1, -1, -1];
+    ? [myResearchBlockTc(0), myResearchBlockTc(1), myResearchBlockTc(6),
+      myResearchBlockTc(7), myResearchBlockTc(8)] : [-1, -1, -1, -1, -1];
   const rbBk = bk && (context === 'blacksmith' || context === 'barracks')
     ? [2, 3, 4, 5].map((t) => sim.research_block_at(bk.id, t)) : [];
   const tcQueueCodes = context === 'tc' ? myTcQueue().join('.') : '';
@@ -7575,20 +7604,27 @@ function renderCommands() {
     const hasBarracks = all.some((b) => b.owner === localOwner && b.kind === 2 && b.complete);
     const buildBtn = (kind) => {
       let gate = null;
-      if (kind === 1 && !hasMill) gate = t('gate.mill');
+      if (kind === 9 && age < 2) gate = t('gate.castle');
+      else if (kind === 1 && !hasMill) gate = t('gate.mill');
       else if (kind >= 6 && age < 1) gate = t('gate.feudal');
       else if ((kind === 6 || kind === 7) && !hasBarracks) gate = t('gate.barracks');
-      const lacksWood = wood < BUILD_COST[kind];
+      // The Town Center is the one two-resource cost (275 wood +
+      // 100 stone); every other kind is wood alone.
+      const lacks = wood < BUILD_COST[kind]
+        || (BUILD_STONE_COST[kind] > 0 && myStock()[3] < BUILD_STONE_COST[kind]);
+      const costPairs = BUILD_STONE_COST[kind] > 0
+        ? [[BUILD_COST[kind], 'wood'], [BUILD_STONE_COST[kind], 'stone']]
+        : [[BUILD_COST[kind], 'wood']];
       return cmdButton({
         id: `build-${kind}`, icon: BUILD_ICON[kind], img: BUILD_PNG[kind], label: BUILD_NAME[kind],
         costIcon: 'i-wood', cost: BUILD_COST[kind],
-        disabled: !!gate || lacksWood,
+        disabled: !!gate || lacks,
         active: !!placement && placement.kind === kind,
         key: badgeForButton({ context, page: buildPage, id: `build-${kind}` }),
         title: gate
           ? t('cmd.buildGate', { name: BUILD_NAME[kind], gate })
-          : t(lacksWood ? 'cmd.buildNeeds' : 'cmd.buildOk',
-            { name: BUILD_NAME[kind], cost: costText([[BUILD_COST[kind], 'wood']]) }),
+          : t(lacks ? 'cmd.buildNeeds' : 'cmd.buildOk',
+            { name: BUILD_NAME[kind], cost: costText(costPairs) }),
       });
     };
     if (buildPage) {
@@ -7631,7 +7667,9 @@ function renderCommands() {
     // advancement share its queue with villager training (TEC-03).
     const loomDone = (techMask & 1) !== 0;
     const feudalDone = age >= 1;
+    const castleDone = age >= 2;
     const wbDone = (techMask & 64) !== 0;
+    const hcDone = (techMask & 256) !== 0;
     cmdGrid.append(
       cmdButton({
         id: 'train', icon: 'i-train', img: 'villager.png', label: 'Villager',
@@ -7651,17 +7689,38 @@ function renderCommands() {
           ? t('cmd.loomDone', { name: TECH_NAME[0] })
           : t('cmd.loomTitle', { name: TECH_NAME[0], cost: costText([[50, 'gold']]), secs: 25 }) + (RESEARCH_BLOCK_TITLES[rbTc[0]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[0]] : ''),
       }),
-      cmdButton({
-        id: 'research-feudal', icon: 'i-feudal', img: 'feudal.png', label: 'Feudal Age',
-        costIcon: 'i-food', cost: 500,
-        disabled: feudalDone || rbTc[1] === 2 || rbTc[1] === 3,
-        key: badgeForButton({ context, id: 'research-feudal', index: 2 }),
-        title: feudalDone
-          ? t('cmd.feudalDone', { age: AGE_NAMES[1] })
-          : rbTc[1] === 4
-            ? t('cmd.feudalGate', { age: AGE_NAMES[1] })
-            : t('cmd.feudalTitle', { age: AGE_NAMES[1], cost: costText([[500, 'food']]), secs: 130 }) + (RESEARCH_BLOCK_TITLES[rbTc[1]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[1]] : ''),
-      }),
+      // The age-advance button (DE's single slot): it offers
+      // the NEXT Age — Feudal from Dark, Castle from Feudal —
+      // and settles into the done state at Castle (Imperial is
+      // not in the game yet).
+      age >= 2
+        ? cmdButton({
+          id: 'research-age', icon: 'i-feudal', img: 'feudal.png', label: AGE_NAMES[2],
+          disabled: true,
+          key: badgeForButton({ context, id: 'research-age', index: 2 }),
+          title: t('cmd.feudalDone', { age: AGE_NAMES[2] }),
+        })
+        : age >= 1
+          ? cmdButton({
+            id: 'research-age', icon: 'i-feudal', img: 'feudal.png', label: AGE_NAMES[2],
+            costIcon: 'i-food', cost: 800, cost2Icon: 'i-gold', cost2: 200,
+            disabled: rbTc[3] === 2 || rbTc[3] === 3,
+            key: badgeForButton({ context, id: 'research-age', index: 2 }),
+            title: rbTc[3] === 4
+              ? t('cmd.castleGate', { age: AGE_NAMES[2] })
+              : t('cmd.castleTitle', { age: AGE_NAMES[2], cost: costText([[800, 'food'], [200, 'gold']]), secs: 160 }) + (RESEARCH_BLOCK_TITLES[rbTc[3]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[3]] : ''),
+          })
+          : cmdButton({
+            id: 'research-age', icon: 'i-feudal', img: 'feudal.png', label: AGE_NAMES[1],
+            costIcon: 'i-food', cost: 500,
+            disabled: feudalDone || rbTc[1] === 2 || rbTc[1] === 3,
+            key: badgeForButton({ context, id: 'research-age', index: 2 }),
+            title: feudalDone
+              ? t('cmd.feudalDone', { age: AGE_NAMES[1] })
+              : rbTc[1] === 4
+                ? t('cmd.feudalGate', { age: AGE_NAMES[1] })
+                : t('cmd.feudalTitle', { age: AGE_NAMES[1], cost: costText([[500, 'food']]), secs: 130 }) + (RESEARCH_BLOCK_TITLES[rbTc[1]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[1]] : ''),
+          }),
       // Wheelbarrow (2026-10-22, ECO-03): Feudal Age Town Center
       // research — villagers carry +25% and move +10% faster.
       // Glyph-only button (the stroke-symbol tier; no PNG icon
@@ -7674,6 +7733,18 @@ function renderCommands() {
         title: wbDone
           ? t('cmd.wheelbarrowDone', { name: TECH_NAME[6] })
           : t('cmd.wheelbarrowTitle', { name: TECH_NAME[6], cost: costText([[175, 'food'], [50, 'wood']]), secs: 75 }) + (RESEARCH_BLOCK_TITLES[rbTc[2]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[2]] : ''),
+      }),
+      // Hand Cart (Castle P1, ECO-03): the Wheelbarrow chain's
+      // Castle Age rung — carry +50% (to 20), +10% speed. Glyph
+      // shared with Wheelbarrow until dedicated art exists.
+      cmdButton({
+        id: 'research-handcart', icon: 'i-wheelbarrow', label: 'Hand Cart',
+        costIcon: 'i-food', cost: 300, cost2Icon: 'i-wood', cost2: 200,
+        disabled: hcDone || rbTc[4] === 2 || rbTc[4] === 3,
+        key: badgeForButton({ context, id: 'research-handcart', index: 4 }),
+        title: hcDone
+          ? t('cmd.handcartDone', { name: TECH_NAME[8] })
+          : t('cmd.handcartTitle', { name: TECH_NAME[8], cost: costText([[300, 'food'], [200, 'wood']]), secs: 55 }) + (RESEARCH_BLOCK_TITLES[rbTc[4]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[4]] : ''),
       }),
     );
   } else if (context === 'barracks') {
@@ -7947,7 +8018,7 @@ function updateSelPanel() {
     const codes = myTcQueue();
     if (codes.length > 0) {
       // TEC-05: one cancel chip per queue entry.
-      queueCancelChips('tc', myTcId, codes);
+      queueCancelChips('tc', panelTcId(), codes);
       // The queue line comes first (addendum, 2026-10-19): with
       // the button badge gone, this line is where the queue
       // count + progress live — including while housed, where
