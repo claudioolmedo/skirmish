@@ -1460,6 +1460,20 @@ UNVERIFIED sight figures.
 
 ---
 
+**BLD-19 — The Market building.** The Market is a Feudal Age
+building requiring a completed Mill (BLD-15's chain): 175 wood,
+4×4 footprint, 60 s build time, 1800 HP and 1 melee / 8 pierce
+armor in its Feudal column. It hosts the commodity exchange
+(TRD-01..03) — no production queue, no research in the generic
+game. The Castle/Imperial table steps (2100 HP, 2/9 then 3/10
+armor) land with the Castle Age package. (BLD-18 is reserved for
+the Castle dossier's building-weapons rule.)
+*Source:* AoE wiki, Market infobox (fetched 2026-10-22). ·
+*Impl:* shipped 2026-10-22 — `BuildingKind::Market` (tag 9) in
+`sim/src/build.rs`, placed/repaired/deleted through the generic
+building flows; its razed value scores via the generic
+`wood_cost()` path (VIC-04). · *Status:* **MATCHES**.
+
 ## 8. Combat & damage
 
 **CMB-01 — The damage formula.** When an attack lands, damage is computed
@@ -2274,9 +2288,14 @@ outcome distribution from the CI model. · *Status:* **MISSING**.
 into 100 units of a commodity; selling converts 100 units into gold.
 Prices come from the shared exchange rate (TRD-02), not from a per-player
 book.
-*Source:* wiki, Market (Age of Empires II); GAP 3.11. · *Impl:* a Market
-command carrying (commodity, buy|sell); stockpile and rate updates are
-atomic in the economy phase. · *Status:* **MISSING**.
+*Source:* wiki, Market (Age of Empires II); GAP 3.11. · *Impl:*
+shipped 2026-10-22 — `Command::MarketBuy` / `MarketSell` carrying
+(building, commodity), applied atomically in the command phase by
+`issue_market_buy` / `issue_market_sell` (`sim/src/market.rs`,
+`sim/src/lib.rs`): gold/lot exchange and the rate step land in the
+same step or not at all, gated by the `can_market_buy` /
+`can_market_sell` queries the WASM boundary prechecks with. ·
+*Status:* **MATCHES**.
 
 **TRD-02 — One global price per commodity, with a fee spread.** Each
 commodity has a single exchange rate in gold per 100 units, shared by
@@ -2285,18 +2304,28 @@ price is rate × (1 − fee) and the buy price is rate × (1 + fee); the
 default fee is 30% (Guilds reduces it to 15% for that player — the
 *rate* is still shared, the *spread* is personal).
 *Source:* wiki, Market (starting prices, fee structure, worked numbers:
-wood starts 70 to sell / 130 to buy). · *Impl:* rates are per-match
-global state (hashed); the fee is a per-player patch (TEC-06). ·
-*Status:* **MISSING** (GAP 3.11 had the components but not the
-shared-rate model).
+wood starts 70 to sell / 130 to buy). · *Impl:* shipped 2026-10-22 —
+rates are per-match global state in `sim/src/market.rs`, written
+into the state hash once any rate has moved off its start value
+(the VIC-04 conditional-write precedent), so a trade-free stream
+stays byte-identical to the pre-Market stream. Prices are integer
+math — sell = (rate × 70 + 50) / 100, buy = (rate × 130 + 50) / 100
+— reproducing every wiki anchor (70/130 wood, 81/150 food,
+91/169 stone at the start; 14/26 at the floor; 6999/12999 at the
+ceiling). The generic 30% fee is flat for now; per-player fee
+patches (Guilds, civilization fees) arrive with their content. ·
+*Status:* **MATCHES**.
 
 **TRD-03 — Every transaction moves the world price.** Each buy raises
 that commodity's rate by 2; each sell lowers it by 2 — for everyone,
 immediately. Rates are clamped to [20, 9999]. The floor (sell 14 / buy 26
 at default fee) is the intended "doomsday economy" backstop.
-*Source:* wiki, Market (rate movement and clamps). · *Impl:* integer rate
-updates in the same atomic step as TRD-01; nothing else in the game reads
-or writes rates. · *Status:* **MISSING**.
+*Source:* wiki, Market (rate movement and clamps). · *Impl:* shipped
+2026-10-22 — integer rate updates in the same atomic step as
+TRD-01 (`Market::apply_buy` / `apply_sell`, clamped to [20, 9999]);
+nothing else in the game reads or writes rates, and rates move
+only when a trade command executes — never on a timer. ·
+*Status:* **MATCHES**.
 
 **TRD-04 — Tribute costs the sender a fee.** A player may tribute any
 amount of any resource to any player (allies, and in DE even enemies).
@@ -3331,6 +3360,12 @@ also corrects §7's printed DIFFERS/MISSING split, stale by
 one since before this package: the entries themselves
 recount to 12/4/1 on the pre-BLD-18 file).
 
+updated 2026-10-22 for the Market package — §7 gains BLD-19
+(the Market building, MATCHES) and §13's TRD-01/02/03 move
+MISSING → MATCHES (the commodity exchange ships; tribute and
+trade units stay MISSING as TRD-04..08), recounted mechanically
+below.
+
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
 | 1 | Simulation & time (SIM) | 12 | 11 | 1 | 0 |
@@ -3345,7 +3380,7 @@ recount to 12/4/1 on the pre-BLD-18 file).
 | 10 | Unit classes & counters (CLS) | 8 | 5 | 0 | 3 |
 | 11 | Technologies & age advancement (TEC) | 11 | 5 | 3 | 3 |
 | 12 | Monks, conversion & relics (MNK) | 13 | 0 | 0 | 13 |
-| 13 | Trade, market & tribute (TRD) | 8 | 0 | 0 | 8 |
+| 13 | Trade, market & tribute (TRD) | 8 | 3 | 0 | 5 |
 | 14 | Garrison, transport & repair (GAR) | 10 | 0 | 0 | 10 |
 | 15 | AI behavior & difficulty (AI) | 9 | 7 | 1 | 1 |
 | 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |

@@ -110,6 +110,16 @@ pub const OUTPOST_WOOD_COST: I16F16 = I16F16::from_bits(1_638_400); // 25
 pub const OUTPOST_STONE_COST: I16F16 = I16F16::from_bits(327_680); // 5
 /// Outpost build time: 15 s at 60 Hz (BLD-18; Outpost article).
 pub const OUTPOST_BUILD_TICKS: u64 = 900;
+/// Market construction cost: 175 wood (AoE wiki, Market infobox,
+/// fetched 2026-10-22).
+pub const MARKET_WOOD_COST: I16F16 = I16F16::from_bits(11_468_800); // 175
+/// Market build time: 60 s at 60 Hz (AoE wiki, Market infobox).
+pub const MARKET_BUILD_TICKS: u64 = 3600;
+/// The Market's build range: its 4×4 footprint is 16 units wide, so
+/// a builder on a ring cell can stand ~14.14 units from the center
+/// (corner ring cell) — 15.5 covers the whole ring, in the geometry
+/// of the two ranges below.
+pub const MARKET_BUILD_RANGE: I16F16 = I16F16::from_bits(1_015_808); // 15.5
 /// Population room from one completed House: +5 (study §5, §9.4).
 pub const HOUSE_POP_SUPPORT: u32 = 5;
 /// Population room from the Town Center: +5 (study §5, §9.4).
@@ -167,14 +177,23 @@ pub enum BuildingKind {
     /// BLD-18: a pure line-of-sight structure — Dark Age, 1×1, no
     /// weapon; its sight radius is its whole reason to exist.
     Outpost,
+    /// The Market: the commodity exchange (TRD-01..03). Feudal Age,
+    /// requires a completed Mill, 4×4 footprint, 175 wood, 60 s
+    /// build, 1800 HP and 1/8 armor in the Feudal column (AoE wiki,
+    /// Market infobox, fetched 2026-10-22). The Castle/Imperial
+    /// steps (2100 HP, 2/9 then 3/10 armor) land with the Castle
+    /// Age package — the `Age` enum does not reach them yet, and
+    /// the flat Feudal row is the only one this table can hold.
+    Market,
 }
 
 impl BuildingKind {
     /// Stable tag for the state hash and the WASM building array:
     /// 0 = house, 1 = farm, 2 = barracks, 3 = lumber camp, 4 = mill,
     /// 5 = mining camp, 6 = archery range, 7 = stable, 8 = blacksmith,
-    /// 9 = palisade wall, 10 = watch tower, 11 = outpost. Tags are
-    /// an ABI contract — append only, never renumber.
+    /// 9 = palisade wall, 10 = watch tower, 11 = outpost,
+    /// 12 = market. Tags are an ABI contract — append only, never
+    /// renumber.
     pub fn tag(self) -> u8 {
         match self {
             BuildingKind::House => 0,
@@ -189,6 +208,7 @@ impl BuildingKind {
             BuildingKind::PalisadeWall => 9,
             BuildingKind::WatchTower => 10,
             BuildingKind::Outpost => 11,
+            BuildingKind::Market => 12,
         }
     }
 
@@ -207,6 +227,7 @@ impl BuildingKind {
             9 => Some(BuildingKind::PalisadeWall),
             10 => Some(BuildingKind::WatchTower),
             11 => Some(BuildingKind::Outpost),
+            12 => Some(BuildingKind::Market),
             _ => None,
         }
     }
@@ -233,6 +254,7 @@ impl BuildingKind {
             BuildingKind::PalisadeWall => PALISADE_WALL_WOOD_COST,
             BuildingKind::WatchTower => WATCH_TOWER_WOOD_COST,
             BuildingKind::Outpost => OUTPOST_WOOD_COST,
+            BuildingKind::Market => MARKET_WOOD_COST,
         }
     }
 
@@ -270,6 +292,7 @@ impl BuildingKind {
             BuildingKind::PalisadeWall => PALISADE_WALL_BUILD_TICKS,
             BuildingKind::WatchTower => WATCH_TOWER_BUILD_TICKS,
             BuildingKind::Outpost => OUTPOST_BUILD_TICKS,
+            BuildingKind::Market => MARKET_BUILD_TICKS,
         }
     }
 
@@ -317,13 +340,18 @@ impl BuildingKind {
             | BuildingKind::ArcheryRange
             | BuildingKind::Stable
             | BuildingKind::Blacksmith => 3,
+            // The Market is the only placed 4×4 building (the Town
+            // Center shares the size but is an entity, not a kind).
+            BuildingKind::Market => 4,
         }
     }
 
     /// A builder this close to the building's center is actively
     /// building (see the range constants for the geometry).
     pub fn build_range(self) -> I16F16 {
-        if self.footprint_size() == 3 {
+        if self.footprint_size() == 4 {
+            MARKET_BUILD_RANGE
+        } else if self.footprint_size() == 3 {
             BARRACKS_BUILD_RANGE
         } else {
             BUILD_RANGE
@@ -365,7 +393,8 @@ impl BuildingKind {
             BuildingKind::ArcheryRange
             | BuildingKind::Stable
             | BuildingKind::Blacksmith
-            | BuildingKind::WatchTower => Age::Feudal,
+            | BuildingKind::WatchTower
+            | BuildingKind::Market => Age::Feudal,
             _ => Age::Dark,
         }
     }
@@ -415,6 +444,8 @@ impl BuildingKind {
     pub fn requires_building(self) -> Option<BuildingKind> {
         match self {
             BuildingKind::ArcheryRange | BuildingKind::Stable => Some(BuildingKind::Barracks),
+            // BLD-15's chain: the Mill gates the Market.
+            BuildingKind::Market => Some(BuildingKind::Mill),
             _ => None,
         }
     }
@@ -500,6 +531,9 @@ impl BuildingKind {
             BuildingKind::WatchTower => 850,
             // BLD-18: the Outpost's flat 500 (Outpost article).
             BuildingKind::Outpost => 500,
+            // Feudal column of the wiki's Market table (Castle and
+            // Imperial both read 2100 — see the kind's doc).
+            BuildingKind::Market => 1800,
         }
     }
 
@@ -542,7 +576,10 @@ impl BuildingKind {
             BuildingKind::House => -2,
             // The Watch Tower's 1 melee is its documented row
             // (BLD-18; tower article statistics).
-            BuildingKind::ArcheryRange | BuildingKind::Stable | BuildingKind::WatchTower => 1,
+            BuildingKind::ArcheryRange
+            | BuildingKind::Stable
+            | BuildingKind::WatchTower
+            | BuildingKind::Market => 1,
             // BLD-13: palisade melee armor 2 (wiki infobox; flat
             // across ages).
             BuildingKind::PalisadeWall => 2,
@@ -567,7 +604,7 @@ impl BuildingKind {
         match self {
             BuildingKind::House => 7,
             BuildingKind::Farm => 0,
-            BuildingKind::ArcheryRange | BuildingKind::Stable => 8,
+            BuildingKind::ArcheryRange | BuildingKind::Stable | BuildingKind::Market => 8,
             // BLD-13: palisade pierce armor 5 (wiki infobox; 2 in
             // The Age of Kings, 5 since The Conquerors patch 1.0b).
             BuildingKind::PalisadeWall => 5,

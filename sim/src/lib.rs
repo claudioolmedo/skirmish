@@ -56,10 +56,13 @@ mod entity;
 mod grid;
 mod hash;
 mod mapgen;
+mod market;
 mod rng;
 mod steer;
 mod tech;
 mod units;
+#[cfg(test)]
+mod market_tests;
 #[cfg(test)]
 mod new_units_tests;
 
@@ -323,6 +326,21 @@ pub enum Command {
     /// stockpile cannot cover a tick's drip, the repairer stops
     /// and goes idle (the documented DE behavior).
     Repair { entity: u32, building: u32 },
+    /// Buy one lot (100) of a commodity at a completed Market
+    /// (TRD-01..03): the building's owner pays the current buy
+    /// price in gold and receives 100 of the commodity; the global
+    /// rate then rises by 2 for everyone. The whole transaction is
+    /// rejected (nothing moves) when the building is missing, not
+    /// a Market, unfinished, the resource is gold, or the owner's
+    /// gold is short (see `Sim::can_market_buy`).
+    MarketBuy { building: u32, resource: ResourceKind },
+    /// Sell one lot (100) of a commodity at a completed Market
+    /// (TRD-01..03): the building's owner gives 100 of the
+    /// commodity and receives the current sell price in gold; the
+    /// global rate then falls by 2 for everyone. Rejected whole
+    /// under the same discipline as `MarketBuy` (see
+    /// `Sim::can_market_sell`).
+    MarketSell { building: u32, resource: ResourceKind },
     /// Force drop-off (M6, ECO-07): a villager carrying resources is
     /// ordered to haul them to the nearest valid drop-off for what
     /// it carries *now* — and, the deposit made, to return to its
@@ -644,6 +662,11 @@ pub struct Sim {
     /// human, slot 1 the opponent. In Sandbox slot 1 simply sits at
     /// its starting values, unused.
     stockpiles: [Stockpile; 2],
+    /// The match's global commodity exchange rates (TRD-02): one
+    /// rate per commodity, shared by both players, moved only by
+    /// executed Market commands — deterministic sim state, hashed
+    /// once any rate has moved (see `hash_parts`).
+    market: crate::market::Market,
     /// The players' progression state (M6): age + researched
     /// technologies, indexed by player slot like the stockpiles.
     players: [PlayerState; 2],
@@ -782,6 +805,7 @@ impl Sim {
             entities,
             commands: Vec::new(),
             stockpiles: [Stockpile::starting(), Stockpile::starting()],
+            market: crate::market::Market::new(),
             players: [PlayerState::default(), PlayerState::default()],
             nodes,
             tc_states: vec![TcState {
@@ -1023,6 +1047,108 @@ impl Sim {
     fn stockpile_mut(&mut self, owner: u8) -> &mut Stockpile {
         let slot = player_slot(owner).unwrap_or(0);
         &mut self.stockpiles[slot]
+    }
+
+    /// The match's global exchange rates in canonical commodity
+    /// order (food, wood, stone) — TRD-02's shared state, read by
+    /// the client so prices are never recomputed outside the sim.
+    pub fn market_rates(&self) -> [i32; 3] {
+        self.market.rates()
+    }
+
+    /// The gold a seller receives for one lot of `resource` now.
+    pub fn market_sell_price(&self, resource: ResourceKind) -> i32 {
+        self.market.sell_price(resource)
+    }
+
+    /// The gold a buyer pays for one lot of `resource` now.
+    pub fn market_buy_price(&self, resource: ResourceKind) -> i32 {
+        self.market.buy_price(resource)
+    }
+
+    /// The owner of a standing, completed Market at `building`, if
+    /// the id names one (the trade commands' validity half).
+    fn market_owner(&self, building: u32) -> Option<u8> {
+        let b = &self.buildings[self.building_index(building)?];
+        if b.kind == BuildingKind::Market && b.complete {
+            Some(b.owner)
+        } else {
+            None
+        }
+    }
+
+    /// Whether a `MarketBuy` command would execute right now: a
+    /// completed Market, a real commodity (never gold), and the
+    /// owner's gold covering the current buy price (TRD-01..03).
+    pub fn can_market_buy(&self, building: u32, resource: ResourceKind) -> bool {
+        if !crate::market::is_commodity(resource) {
+            return false;
+        }
+        match self.market_owner(building) {
+            Some(owner) => {
+                self.stockpile_of(owner).amount(ResourceKind::Gold)
+                    >= I16F16::from_num(self.market.buy_price(resource))
+            }
+            None => false,
+        }
+    }
+
+    /// Whether a `MarketSell` command would execute right now:
+    /// the same building discipline, and the owner holding a full
+    /// lot (100) of the commodity.
+    pub fn can_market_sell(&self, building: u32, resource: ResourceKind) -> bool {
+        if !crate::market::is_commodity(resource) {
+            return false;
+        }
+        match self.market_owner(building) {
+            Some(owner) => {
+                self.stockpile_of(owner).amount(resource)
+                    >= I16F16::from_num(crate::market::TRADE_LOT)
+            }
+            None => false,
+        }
+    }
+
+    /// Apply a `MarketBuy` command: atomic — gold out, lot in,
+    /// rate up — or nothing at all (TRD-01..03).
+    fn issue_market_buy(&mut self, building: u32, resource: ResourceKind) {
+        if !self.can_market_buy(building, resource) {
+            return;
+        }
+        let Some(owner) = self.market_owner(building) else {
+            return;
+        };
+        let price = self.market.buy_price(resource);
+        let paid = self
+            .stockpile_mut(owner)
+            .spend(ResourceKind::Gold, I16F16::from_num(price));
+        debug_assert!(paid);
+        if paid {
+            self.stockpile_mut(owner)
+                .add(resource, I16F16::from_num(crate::market::TRADE_LOT));
+            self.market.apply_buy(resource);
+        }
+    }
+
+    /// Apply a `MarketSell` command: atomic — lot out, gold in,
+    /// rate down — or nothing at all (TRD-01..03).
+    fn issue_market_sell(&mut self, building: u32, resource: ResourceKind) {
+        if !self.can_market_sell(building, resource) {
+            return;
+        }
+        let Some(owner) = self.market_owner(building) else {
+            return;
+        };
+        let price = self.market.sell_price(resource);
+        let paid = self
+            .stockpile_mut(owner)
+            .spend(resource, I16F16::from_num(crate::market::TRADE_LOT));
+        debug_assert!(paid);
+        if paid {
+            self.stockpile_mut(owner)
+                .add(ResourceKind::Gold, I16F16::from_num(price));
+            self.market.apply_sell(resource);
+        }
     }
 
     /// Credit a destruction to the player who inflicted it
@@ -3107,6 +3233,12 @@ impl Sim {
                 Command::ResearchTcAt { tc, tech } => self.issue_research_tc_at(tc, tech),
                 Command::ResearchAt { building, tech } => self.issue_research_at(building, tech),
                 Command::Repair { entity, building } => self.issue_repair(entity, building),
+                Command::MarketBuy { building, resource } => {
+                    self.issue_market_buy(building, resource)
+                }
+                Command::MarketSell { building, resource } => {
+                    self.issue_market_sell(building, resource)
+                }
                 Command::ForceDeposit { entity } => self.issue_force_deposit(entity),
                 Command::Stop { entity } => self.issue_stop(entity),
                 Command::DeleteEntity { entity } => self.issue_delete_entity(entity),
@@ -5679,6 +5811,17 @@ impl Sim {
             // the pre-score stream.
             if p.destroyed_value > 0 {
                 h.write_u64(p.destroyed_value);
+            }
+        }
+        // TRD-02: the global exchange rates join the hash once any
+        // rate has moved off its start value (the VIC-04
+        // conditional-write precedent above), so a trade-free
+        // stream — the golden scenario included — stays
+        // byte-identical to the pre-Market stream, and a traded
+        // stream can never silently agree with an untraded one.
+        if !self.market.is_default() {
+            for rate in self.market.rates() {
+                h.write_i32(rate);
             }
         }
         // M2: stockpiles in canonical resource order. M5: both
