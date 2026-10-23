@@ -558,6 +558,7 @@ async function sendFeedback() {
 let lDrag = null; // left-button drag state, canvas px: { x0, y0, x1, y1, moved }
 let placement = null; // { kind } while placing a building
 let repairArm = false; // Repair targeting armed (villager root panel, E)
+let orderArm = null; // CMB-10/11 order targeting armed: 'attackmove' | 'patrol' | null
 // M13 hotkey state (client-only, like placement): the armed
 // villager build page ('eco' | 'mil' | null), the go-to cycle
 // memory (building kind -> last id handed out), and the building
@@ -1786,6 +1787,8 @@ addEventListener('keydown', (e) => {
       placement = null;
     } else if (repairArm) {
       repairArm = false;
+    } else if (orderArm) {
+      orderArm = null; // CMB-10/11: Esc disarms order targeting
     } else if (buildPage) {
       buildPage = null; // M13: Esc backs out of an armed build page
     } else if (playing) {
@@ -2166,6 +2169,20 @@ function handleHotkey(e) {
       }
       return true;
     }
+    // CMB-10: R is DE's dedicated attack-move key (wiki Hotkey
+    // page) — the same fall-through discipline as G above: only
+    // in the units context, only unmodified, only after every
+    // grid binding had its say (no grid slot claims R). It arms
+    // the very targeting the panel button arms.
+    if (e.code === 'KeyR' && !e.ctrlKey && !e.metaKey && !e.altKey
+        && ctx === 'units') {
+      e.preventDefault();
+      if (!e.repeat) {
+        runCommandButton('attack-move');
+        renderCommands();
+      }
+      return true;
+    }
     return false;
   }
   e.preventDefault();
@@ -2376,6 +2393,13 @@ function applyLocalOrder(cmd) {
     case 'rally_b': return sim.push_set_rally_building(cmd.b, cmd.x, cmd.y);
     case 'force_dep': return sim.push_force_deposit(cmd.e);
     case 'auto_explore': return sim.push_auto_explore(cmd.e, cmd.on);
+    case 'attackmove': return cmd.q
+      ? sim.push_attack_move_queued(cmd.e, cmd.x, cmd.y)
+      : sim.push_attack_move(cmd.e, cmd.x, cmd.y);
+    case 'patrol': return cmd.q
+      ? sim.push_patrol_queued(cmd.e, cmd.x, cmd.y)
+      : sim.push_patrol(cmd.e, cmd.x, cmd.y);
+    case 'stance': return sim.push_set_stance(cmd.e, cmd.s);
     case 'stop': return sim.push_stop(cmd.e);
     case 'delete': return sim.push_delete(cmd.e);
     case 'deleteb': return sim.push_delete_building(cmd.b);
@@ -4975,6 +4999,13 @@ async function main() {
   // Shift form (SEL-12): the order lines up behind each unit's
   // current one instead of replacing it.
   function smartOrderAt(wx, wy, queued = false) {
+    // CMB-10/11: with order targeting armed, a right-click HERE
+    // (the minimap — the canvas right-click disarms instead)
+    // issues the armed order at this point.
+    if (orderArm) {
+      attemptOrderGround(wx, wy, queued);
+      return;
+    }
     if (selectedBuilding) {
       // M5: rally points belong to OUR buildings only — an enemy
       // building selected for information takes no orders at all;
@@ -5217,6 +5248,63 @@ async function main() {
     playAudioCue('orderVillager');
   }
 
+  // Attack-move / patrol targeting (CMB-10/11): the armed click
+  // names the destination for every selected military unit. Group
+  // destinations keep the orderAt group-move shape (each unit's
+  // offset from the centroid, clamped, with the shared point as
+  // the obstacle fallback). A successful order drops the ground
+  // click marker (INF-09a: a ground order) and disarms — Shift
+  // keeps the arm, like repair targeting, so a patrol's legs can
+  // be chained click by click (each later patrol order appends a
+  // leg in the sim).
+  function attemptOrderGround(wx, wy, queued = false) {
+    const kind = orderArm;
+    if (!kind) return;
+    const st = entityState();
+    const targets = selectedUnits().filter((id) => [2, 3, 4, 8].includes(st.kinds[id]));
+    if (!targets.length) {
+      orderArm = null;
+      flash(t('flash.orderSelectMil'));
+      renderCommands();
+      return;
+    }
+    let moveDest = null;
+    if (targets.length >= 2) {
+      let cx = 0;
+      let cy = 0;
+      for (const id of targets) {
+        cx += st.pos[id * 2];
+        cy += st.pos[id * 2 + 1];
+      }
+      cx /= targets.length;
+      cy /= targets.length;
+      moveDest = (id) => {
+        let dx = st.pos[id * 2] - cx;
+        let dy = st.pos[id * 2 + 1] - cy;
+        const len = Math.hypot(dx, dy);
+        if (len > 6) {
+          dx *= 6 / len;
+          dy *= 6 / len;
+        }
+        const tx = wx + dx;
+        const ty = wy + dy;
+        const [ccx, ccy] = worldToCell(tx, ty);
+        return OBST[ccy * GW + ccx] ? [wx, wy] : [tx, ty];
+      };
+    }
+    let any = false;
+    for (const id of targets) {
+      const [mx, my] = moveDest ? moveDest(id) : [wx, wy];
+      if (issue({ t: kind, e: id, x: mx, y: my, q: queued || undefined })) any = true;
+    }
+    if (any) {
+      clickMarkers.add('ground', wx, wy, performance.now());
+      playAudioCue('orderMilitary');
+    }
+    if (!queued) orderArm = null;
+    renderCommands();
+  }
+
   function attemptPlace(wx, wy, queued = false) {
     // The builder is the selected VILLAGER nearest the placement
     // point: with a group selected, the closest pair of hands does
@@ -5310,6 +5398,10 @@ async function main() {
     }
     if (repairArm) {
       if (!d.moved) attemptRepair(wx, wy, ev.shiftKey); // a targeting click, not a drag
+      return;
+    }
+    if (orderArm) {
+      if (!d.moved) attemptOrderGround(wx, wy, ev.shiftKey); // a targeting click, not a drag
       return;
     }
     if (d.moved) {
@@ -5472,6 +5564,11 @@ async function main() {
     }
     if (repairArm) {
       repairArm = false;
+      return;
+    }
+    if (orderArm) {
+      orderArm = null; // CMB-10/11: a right-click cancels order targeting
+      renderCommands();
       return;
     }
     if (buildPage) {
@@ -7511,6 +7608,29 @@ function runCommandButton(id, times = 1) {
     // SEL-17: the selected scouts' AutoExplore toggle — the same
     // order the G key issues (toggleAutoExplore plays the cue).
     toggleAutoExplore();
+  } else if (id === 'attack-move' || id === 'patrol') {
+    // CMB-10/11: arm (or disarm) order targeting — the click
+    // that follows names the destination, exactly like build
+    // placement. Re-clicking the armed button disarms it.
+    const kind = id === 'attack-move' ? 'attackmove' : 'patrol';
+    orderArm = orderArm === kind ? null : kind;
+    if (orderArm) {
+      placement = null;
+      repairArm = false;
+      flash(t(kind === 'attackmove' ? 'flash.attackMoveArm' : 'flash.patrolArm'));
+    }
+    playAudioCue('click');
+  } else if (id.startsWith('stance-')) {
+    // CMB-09: set the stance of every selected military unit —
+    // a setting, applied at once, no targeting.
+    const tag = Number(id.slice(7));
+    const st = entityState();
+    let any = false;
+    for (const uid of selectedUnits()) {
+      if (![2, 3, 4, 8].includes(st.kinds[uid])) continue;
+      if (issue({ t: 'stance', e: uid, s: tag })) any = true;
+    }
+    if (any) playAudioCue('click');
   } else if (id === 'stop') {
     // SEL-14: halt every selected unit where it stands.
     stopSelectedUnits();
@@ -7657,6 +7777,18 @@ function renderCommands() {
   const scoutSel = selScouts.length > 0;
   const scoutAuto = scoutSel
     && selScouts.some((id) => sim.entity_auto_explore()[id] === 1);
+  // CMB-09/10/11: the military orders (Attack Move, Patrol) and
+  // the stance row show in the units context whenever a military
+  // unit is selected. The pressed stance face is the stance every
+  // selected military unit shares, read from the sim's
+  // per-entity tags (-1 when the selection is mixed).
+  const selMil = context === 'units'
+    ? selUnits.filter((id) => [2, 3, 4, 8].includes(st.kinds[id])) : [];
+  const milStanceTags = selMil.length ? sim.entity_stance() : null;
+  const milStance = selMil.length
+    ? (selMil.every((id) => milStanceTags[id] === milStanceTags[selMil[0]])
+      ? milStanceTags[selMil[0]] : -1)
+    : -1;
   const age = myAge();
   const techMask = myTechMask();
   const blockM = bk && context === 'barracks' ? sim.building_train_block(bk.id, 3) : -1;
@@ -7686,6 +7818,7 @@ function renderCommands() {
     blockM, blockSp, blockA, blockSk, blockS, age, techMask, rbTc.join('.'), Object.values(rbB).join('.'),
     tcQueueCodes, bkQueueCodes, buildPage || '', repairArm ? 1 : 0,
     scoutSel ? selScouts.join('.') : -1, scoutAuto ? 1 : 0,
+    selMil.length ? selMil.join('.') : -1, milStance, orderArm || '',
     placement ? placement.kind : -1].join('|');
   if (sig === cmdSig) return;
   cmdSig = sig;
@@ -7966,6 +8099,37 @@ function renderCommands() {
       );
     }
   }
+  if (context === 'units' && selMil.length) {
+    // CMB-10/11: Attack Move (R — DE's dedicated key) and Patrol
+    // arm order targeting; the click that follows names the
+    // destination. CMB-09: the stance row — four faces, the
+    // shared stance of the selected military units pressed.
+    const STANCE_BTN = [
+      ['stance-0', 'i-stance-aggressive', 'cmd.stanceAggressive', 'cmd.stanceAggressiveTitle'],
+      ['stance-1', 'i-stance-defensive', 'cmd.stanceDefensive', 'cmd.stanceDefensiveTitle'],
+      ['stance-2', 'i-stance-standground', 'cmd.stanceStandGround', 'cmd.stanceStandGroundTitle'],
+      ['stance-3', 'i-stance-noattack', 'cmd.stanceNoAttack', 'cmd.stanceNoAttackTitle'],
+    ];
+    cmdGrid.append(
+      cmdButton({
+        id: 'attack-move', icon: 'i-attackmove', label: t('cmd.attackMove'),
+        active: orderArm === 'attackmove', key: 'R',
+        title: t('cmd.attackMoveTitle'),
+      }),
+      cmdButton({
+        id: 'patrol', icon: 'i-patrol', label: t('cmd.patrol'),
+        active: orderArm === 'patrol',
+        key: badgeForButton({ context, id: 'patrol' }),
+        title: t('cmd.patrolTitle'),
+      }),
+      ...STANCE_BTN.map(([bid, icon, labelKey, titleKey], tag) => cmdButton({
+        id: bid, icon, label: t(labelKey),
+        active: milStance === tag,
+        key: badgeForButton({ context, id: bid }),
+        title: t(titleKey),
+      })),
+    );
+  }
   if (context === 'units' && scoutSel) {
     // SEL-17: the AutoExplore toggle (G) for the selected
     // scout(s). The pressed face mirrors the sim's flag; the
@@ -7987,10 +8151,12 @@ function renderCommands() {
     cmdGrid.append(
       cmdButton({
         id: 'stop', icon: 'i-stop', label: t('cmd.stop'),
+        key: context === 'units' ? badgeForButton({ context, id: 'stop' }) : null,
         title: t('cmd.stopTitle'),
       }),
       cmdButton({
         id: 'delete', icon: 'i-delete', label: t('cmd.delete'),
+        key: context === 'units' ? badgeForButton({ context, id: 'delete' }) : null,
         title: t('cmd.deleteTitle'),
       }),
     );

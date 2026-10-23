@@ -102,6 +102,14 @@ export const PAGE_BADGE = {
 
 /** Panel contexts whose buttons answer to position keys, in order. */
 export const PANEL_BUTTONS = {
+  // The military selection's panel (CMB-09/10/11), in render
+  // order: Attack Move, Patrol, the four stances, Stop, Delete.
+  // AutoExplore renders between the stances and Stop for scouts,
+  // but is not listed: it carries no slot letter (its key is the
+  // dedicated G, app.js's fall-through) — the same treatment the
+  // build context's special buttons get outside these tables.
+  units: ['attack-move', 'patrol', 'stance-0', 'stance-1', 'stance-2', 'stance-3',
+    'stop', 'delete'],
   tc: ['train', 'research-loom', 'research-feudal', 'research-wheelbarrow'],
   barracks: ['train-militia', 'train-spearman', 'research-maa'],
   range: ['train-archer', 'train-skirmisher'],
@@ -129,6 +137,23 @@ export const PANEL_BUTTONS = {
 // is not in this table, so a villager's A still means force
 // drop-off, resolved by context exactly as DE resolves it.
 export const PANEL_KEYS = {
+  // The units panel's slot letters, by render order: Attack
+  // Move Q, Patrol W, the stances E / A / S / D, Stop X, Delete
+  // C. Two buttons ALSO carry DE's dedicated keys, badged
+  // instead of their slot letter and handled in app.js's
+  // fall-through like AutoExplore's G: Attack Move answers to R
+  // (the wiki Hotkey page's dedicated attack-move key), and
+  // AutoExplore keeps its G (it has no slot entry here at all).
+  units: {
+    'attack-move': ['KeyQ', 'Q'],
+    patrol: ['KeyW', 'W'],
+    'stance-0': ['KeyE', 'E'],
+    'stance-1': ['KeyA', 'A'],
+    'stance-2': ['KeyS', 'S'],
+    'stance-3': ['KeyD', 'D'],
+    stop: ['KeyX', 'X'],
+    delete: ['KeyC', 'C'],
+  },
   tc: {
     train: ['KeyQ', 'Q'],
     'research-loom': ['KeyA', 'A'],
