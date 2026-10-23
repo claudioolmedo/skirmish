@@ -6536,12 +6536,18 @@ mod tests {
             progress_thirds: 0,
             repair_hp_remainder: 0,
             repair_cost_remainder: 0,
+            repair_stone_remainder: 0,
             complete: true,
             node_id: Some(nid),
             queue: Vec::new(),
             train_progress: 0,
             rally: None,
             rally_node: None,
+            weapon_target: None,
+            weapon_target_building: None,
+            weapon_strike_tick: None,
+            weapon_next_tick: 0,
+            weapon_engaged: false,
         });
         sim.apply_research(OWNER_PLAYER, TechId::HorseCollar);
         let after = sim

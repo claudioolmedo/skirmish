@@ -1422,8 +1422,9 @@ excludes towers). Both are repairable and deletable through the
 generic systems — repair of a stone-cost building drips wood
 AND stone at BLD-07's fractions, charged atomically; a deleted
 foundation refunds wood and stone in full (BLD-02). Panel: both
-sit on the villager Military page (Watch Tower slot S, Outpost
-slot D, positional grid); PT Torre de Vigia / Posto Avançado,
+sit on the villager Military page (positional grid — on the
+merged tree the Watch Tower takes slot D and the Outpost slot
+Z, the Palisade Wall having taken S first); PT Torre de Vigia / Posto Avançado,
 ES Torre de Vigilancia / Puesto de Avanzada. The scripted AI
 does not build towers in this package — recorded gap.
 *Source:* AoE wiki "Watch Tower" (statistics + changelog:
@@ -1437,7 +1438,8 @@ adopts the Archer's arrow profile — UNVERIFIED for buildings;
 projectile speed/scatter are the PRJ-02/PRJ-04 design constants;
 accuracy 100 (a moving target dodges by travel time, PRJ-06).
 · *Impl:* shipped 2026-10-22 — `BuildingKind::WatchTower` /
-`Outpost` (tags 9/10), `BuildingWeapon` + the combat phase's
+`Outpost` (tags 10/11 on the merged tree — the Palisade Wall
+took 9 first), `BuildingWeapon` + the combat phase's
 building-weapon step (after every entity attacker, building-id
 order; RNG draws only there), `Projectile::attacker_building`
 + `Entity::last_hit_owner` for attribution (all hashed only
@@ -3324,7 +3326,10 @@ defensive buildings — §7 gains one rule, one DIFFERS (the
 Watch Tower's base fire and the Outpost ship; garrison
 arrows, Murder Holes, the Guard Tower upgrade and the Castle
 HP step are the recorded remainders), recounted mechanically
-below.
+below. (the recount
+also corrects §7's printed DIFFERS/MISSING split, stale by
+one since before this package: the entries themselves
+recount to 12/4/1 on the pre-BLD-18 file).
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|

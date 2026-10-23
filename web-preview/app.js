@@ -6928,8 +6928,8 @@ const NEW_BUILDING_STYLE = {
   6: { wall: '#a3763f', wall2: '#82592c', roof: '#7a4a35' }, // Archery Range
   7: { wall: '#96684a', wall2: '#77503a', roof: '#5d4630' }, // Stable
   8: { wall: '#6f6f76', wall2: '#54545c', roof: '#3f3f45' }, // Blacksmith: dark stone
-  9: { wall: '#8d8578', wall2: '#6e675c', roof: '#5d4630' }, // Watch Tower: pale stone
-  10: { wall: '#8a6b42', wall2: '#6f5533', roof: '#7a4a35' }, // Outpost: timber
+  10: { wall: '#8d8578', wall2: '#6e675c', roof: '#5d4630' }, // Watch Tower: pale stone
+  11: { wall: '#8a6b42', wall2: '#6f5533', roof: '#7a4a35' }, // Outpost: timber
 };
 
 function drawNewBuilding(b) {
@@ -7030,11 +7030,11 @@ function drawBuildingFeature(kind, sx, sy, hgt) {
     ctx.beginPath();
     ctx.arc(sx - 0.8 * u, top + 0.45 * u, 0.2 * u, 0, 0, Math.PI * 2);
     ctx.fill();
-  } else if (kind === 9) {
+  } else if (kind === 10) {
     // The tower's arrow slit.
     ctx.fillStyle = '#2e2a24';
     ctx.fillRect(sx - 0.14 * u, top - 0.5 * u, 0.28 * u, 0.8 * u);
-  } else if (kind === 10) {
+  } else if (kind === 11) {
     // The outpost's lookout flag.
     ctx.fillStyle = '#3a2c1c';
     ctx.fillRect(sx - 0.05 * u, top - 1.1 * u, 0.1 * u, 1.1 * u);
