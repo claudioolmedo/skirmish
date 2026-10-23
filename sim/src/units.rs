@@ -410,12 +410,13 @@ static SKIRMISHER: UnitSpec = UnitSpec {
 /// Sheep, and Turkeys have 2 Line of Sight, while the rest have
 /// 3"); the Sheep article's prose says 3 — the per-animal table is
 /// adopted and the conflict is recorded in the rulebook (AI-06).
-/// HP is UNVERIFIED — no provided doc
-/// pins sheep HP; 7 is adopted as a tuning constant (a villager's
-/// 3-damage strikes kill in 3 hits, matching the reference feel that
-/// sheep fall quickly but not to a single poke).
+/// HP 7 VERIFIED (AI-06): the wiki's Turkey and Goat articles
+/// give their stats as the Sheep's — 7 HP, 100 food — and the
+/// Cow article corroborates; a villager's 3-damage strikes kill
+/// in 3 hits, matching the reference feel that sheep fall quickly
+/// but not to a single poke.
 static SHEEP: UnitSpec = UnitSpec {
-    max_hp: 7, // UNVERIFIED (see above)
+    max_hp: 7, // VERIFIED (AI-06, see above)
     attacks: NO_ATTACKS,
     armor_melee: 0,
     armor_pierce: 0,
