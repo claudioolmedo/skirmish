@@ -65,9 +65,14 @@ test('A with villagers and no page armed is the DE drop-off', () => {
 test('panel slot letters run a selected building\u2019s buttons', () => {
   const at = (context, code) => resolveHotkey({ context, page: null, code });
   assert.equal(at('barracks', 'KeyQ').id, 'train-militia');
-  assert.equal(at('barracks', 'KeyW').id, 'research-maa');
-  assert.equal(at('barracks', 'KeyE'), null, 'no third button');
+  // The Spearman takes DE's second Barracks slot (W); the
+  // Man-at-Arms upgrade drops to the second row (A, under the
+  // Militia) — the TC/Blacksmith two-row convention.
+  assert.equal(at('barracks', 'KeyW').id, 'train-spearman');
+  assert.equal(at('barracks', 'KeyA').id, 'research-maa');
+  assert.equal(at('barracks', 'KeyE'), null, 'no third first-row button');
   assert.equal(at('range', 'KeyQ').id, 'train-archer');
+  assert.equal(at('range', 'KeyW').id, 'train-skirmisher');
   assert.equal(at('stable', 'KeyQ').id, 'train-scout');
   assert.equal(at('blacksmith', 'KeyQ').id, 'research-fletching');
   assert.equal(at('blacksmith', 'KeyW').id, 'research-scalemail');
@@ -99,7 +104,9 @@ test('Town Center letters are DE’s own: Villager Q, Loom A, Feudal W, Wheelbar
   assert.equal(badgeForButton({ context: 'tc', id: 'research-feudal', index: 2 }), 'W');
   assert.equal(badgeForButton({ context: 'tc', id: 'research-wheelbarrow', index: 3 }), 'S');
   // Other panels keep their position badges.
-  assert.equal(badgeForButton({ context: 'barracks', id: 'research-maa', index: 1 }), 'W');
+  assert.equal(badgeForButton({ context: 'barracks', id: 'research-maa', index: 2 }), 'A');
+  assert.equal(badgeForButton({ context: 'barracks', id: 'train-spearman', index: 1 }), 'W');
+  assert.equal(badgeForButton({ context: 'range', id: 'train-skirmisher', index: 1 }), 'W');
 });
 
 test('no hotkeys in unit / empty / enemy contexts — WASD keeps panning', () => {
@@ -160,7 +167,8 @@ test('badges in train/research contexts are the slot letters', () => {
   // Blacksmith's third research on A (second row), the TC's
   // DE arrangement Q / A / W.
   assert.equal(badgeForButton({ context: 'barracks', id: 'train-militia', index: 0 }), 'Q');
-  assert.equal(badgeForButton({ context: 'barracks', id: 'research-maa', index: 1 }), 'W');
+  assert.equal(badgeForButton({ context: 'barracks', id: 'train-spearman', index: 1 }), 'W');
+  assert.equal(badgeForButton({ context: 'barracks', id: 'research-maa', index: 2 }), 'A');
   assert.equal(badgeForButton({ context: 'blacksmith', id: 'research-padded', index: 2 }), 'A');
   assert.equal(badgeForButton({ context: 'tc', id: 'train', index: 0 }), 'Q');
   assert.equal(badgeForButton({ context: 'tc', id: 'research-loom', index: 1 }), 'A');

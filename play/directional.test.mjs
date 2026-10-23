@@ -27,11 +27,13 @@ const SHEETS = {
   archer: { idle: 4, walk: 8, shoot: 4 },
   militia: { idle: 4, walk: 8, attack: 4 },
   maa: { idle: 4, walk: 8, attack: 4 },
+  spearman: { idle: 4, walk: 8, attack: 4 },
+  skirmisher: { idle: 4, walk: 8, shoot: 4 },
   sheep: { idle: 4, walk: 8, graze: 4 },
   boar: { idle: 4, walk: 8, graze: 4 },
   deer: { idle: 4, walk: 8, graze: 4 },
 };
-const MASKED = ['villager', 'archer', 'militia', 'maa', 'scout'];
+const MASKED = ['villager', 'archer', 'militia', 'maa', 'scout', 'spearman', 'skirmisher'];
 
 for (const [unit, states] of Object.entries(SHEETS)) {
   for (const [state, frames] of Object.entries(states)) {

@@ -979,6 +979,27 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Enqueue a Skirmisher at a completed Archery Range. See
+     * `push_train_militia`.
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_train_skirmisher(building) {
+        const ret = wasm.wasmsim_push_train_skirmisher(this.__wbg_ptr, building);
+        return ret !== 0;
+    }
+    /**
+     * Enqueue a Spearman at a completed Barracks (Feudal Age —
+     * `can_train_at` carries the unit-level age gate). See
+     * `push_train_militia`.
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_train_spearman(building) {
+        const ret = wasm.wasmsim_push_train_spearman(this.__wbg_ptr, building);
+        return ret !== 0;
+    }
+    /**
      * Enqueue a villager at a SPECIFIC Town Center (any seat):
      * `push_train_villager` for an explicit Town Center.
      * @param {number} tc

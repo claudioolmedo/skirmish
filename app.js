@@ -210,16 +210,17 @@ const KIND_SHEEP = 5;
 // play/i18n.js on every locale switch (refreshNames) — the
 // semantic ids index the string table (unit.<id>, building.<id>).
 const KIND_I18N = ['villager', 'townCenter', 'scout', 'militia', 'archer',
-  'sheep', 'boar', 'deer', 'manAtArms'];
+  'sheep', 'boar', 'deer', 'manAtArms', 'spearman', 'skirmisher'];
 let KIND_NAME = {
   0: 'Villager', 1: 'Town Center', 2: 'Scout Cavalry', 3: 'Militia',
   4: 'Archer', 5: 'Sheep', 6: 'Boar', 7: 'Deer', 8: 'Man-at-Arms',
+  9: 'Spearman', 10: 'Skirmisher',
 };
 // Selection-panel portraits per unit kind (SVG symbol ids in
 // play/index.html).
 const KIND_ICON = {
   0: 'i-villager', 2: 'i-villager', 3: 'i-militia', 4: 'i-archer', 5: 'i-pop',
-  8: 'i-militia',
+  8: 'i-militia', 9: 'i-spearman', 10: 'i-skirmisher',
 };
 
 // Original PNG icon set (2026-10-19, AI generations via Base44 on
@@ -1011,6 +1012,8 @@ function whenUnitArtSettled() {
 const DIR_ART_SPEC = {
   archer: { states: ['idle', 'walk', 'shoot'], cell: 128, ax: 64, ay: 110, mask: true },
   militia: { states: ['idle', 'walk', 'attack'], cell: 128, ax: 64, ay: 110, mask: true },
+  spearman: { states: ['idle', 'walk', 'attack'], cell: 128, ax: 64, ay: 110, mask: true },
+  skirmisher: { states: ['idle', 'walk', 'shoot'], cell: 128, ax: 64, ay: 110, mask: true },
   maa: { states: ['idle', 'walk', 'attack'], cell: 128, ax: 64, ay: 110, mask: true },
   scout: { states: ['idle', 'gallop'], cell: 160, ax: 80, ay: 138, mask: true },
   sheep: { states: ['idle', 'walk', 'graze'], cell: 128, ax: 64, ay: 110, mask: false },
@@ -2345,6 +2348,8 @@ function applyLocalOrder(cmd) {
     case 'train_at':
       return cmd.k === 2 ? sim.push_train_scout(cmd.b)
         : cmd.k === 3 ? sim.push_train_militia(cmd.b)
+        : cmd.k === 9 ? sim.push_train_spearman(cmd.b)
+        : cmd.k === 10 ? sim.push_train_skirmisher(cmd.b)
         : sim.push_train_archer(cmd.b);
     case 'train_vil': return sim.push_train_villager();
     case 'research_tc': return cmd.tech === 0
@@ -6594,6 +6599,90 @@ function drawMilitia(i, wx, wy) {
 function drawManAtArms(i, wx, wy) {
   drawFootman(i, wx, wy, 'maa');
 }
+function drawSpearman(i, wx, wy) {
+  const [sx, sy] = worldToScreen(wx, wy);
+  const u = camS;
+  shadow(sx, sy, 0.95 * u);
+  if (selection.has(i)) drawSelRing(sx, sy, 1.25);
+  const act = unitActionFor('spearman', i, wx, wy);
+  if (drawDirUnit('spearman', act, sx, sy)) return;
+  const ua = unitArtImage('spearman', i, wx, wy, act);
+  if (ua && drawUnitPose(ua.im, sx, sy, UNIT_ART_H.spearman, ua.flip)) return;
+  // Vector fallback (the footman body, spearman's props): the
+  // long spear upright in the right hand, the big round shield.
+  ctx.fillStyle = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e'; // tunic (player color)
+  ctx.beginPath();
+  ctx.ellipse(sx, sy - 0.85 * u, 0.62 * u, 0.8 * u, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#e8c39a'; // head
+  ctx.beginPath();
+  ctx.arc(sx, sy - 1.95 * u, 0.34 * u, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e'; // shield panel (player color)
+  ctx.beginPath();
+  ctx.arc(sx - 0.8 * u, sy - 1.05 * u, 0.5 * u, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#7a4a21'; // shield rim
+  ctx.lineWidth = Math.max(1, 0.1 * u);
+  ctx.beginPath();
+  ctx.arc(sx - 0.8 * u, sy - 1.05 * u, 0.5 * u, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = '#8a6844'; // spear shaft
+  ctx.lineWidth = Math.max(1, 0.13 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx + 0.55 * u, sy - 0.35 * u);
+  ctx.lineTo(sx + 0.55 * u, sy - 2.75 * u);
+  ctx.stroke();
+  ctx.fillStyle = '#d8d8d8'; // spear tip
+  ctx.beginPath();
+  ctx.moveTo(sx + 0.47 * u, sy - 2.75 * u);
+  ctx.lineTo(sx + 0.63 * u, sy - 2.75 * u);
+  ctx.lineTo(sx + 0.55 * u, sy - 3.05 * u);
+  ctx.closePath();
+  ctx.fill();
+}
+function drawSkirmisher(i, wx, wy) {
+  const [sx, sy] = worldToScreen(wx, wy);
+  const u = camS;
+  shadow(sx, sy, 0.95 * u);
+  if (selection.has(i)) drawSelRing(sx, sy, 1.25);
+  const act = unitActionFor('skirmisher', i, wx, wy);
+  if (drawDirUnit('skirmisher', act, sx, sy)) return;
+  const ua = unitArtImage('skirmisher', i, wx, wy, act);
+  if (ua && drawUnitPose(ua.im, sx, sy, UNIT_ART_H.skirmisher, ua.flip)) return;
+  // Vector fallback (the archer body, skirmisher's props): the
+  // large shield on the left arm, a javelin upright in the right.
+  ctx.fillStyle = drawOwner === foeOwner() ? ENEMY_ARCHER_CLOTH : '#4a6e46'; // tunic (archer green / enemy red)
+  ctx.beginPath();
+  ctx.ellipse(sx, sy - 0.85 * u, 0.58 * u, 0.8 * u, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#e8c39a'; // head
+  ctx.beginPath();
+  ctx.arc(sx, sy - 1.95 * u, 0.34 * u, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = drawOwner === foeOwner() ? ENEMY_ARCHER_CLOTH : '#4a6e46'; // shield panel
+  ctx.beginPath();
+  ctx.arc(sx - 0.85 * u, sy - 1.05 * u, 0.58 * u, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#7a4a21'; // shield rim
+  ctx.lineWidth = Math.max(1, 0.1 * u);
+  ctx.beginPath();
+  ctx.arc(sx - 0.85 * u, sy - 1.05 * u, 0.58 * u, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = '#8a6844'; // javelin shaft
+  ctx.lineWidth = Math.max(1, 0.12 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx + 0.55 * u, sy - 0.7 * u);
+  ctx.lineTo(sx + 0.55 * u, sy - 2.45 * u);
+  ctx.stroke();
+  ctx.fillStyle = '#d8d8d8'; // javelin tip
+  ctx.beginPath();
+  ctx.moveTo(sx + 0.48 * u, sy - 2.45 * u);
+  ctx.lineTo(sx + 0.62 * u, sy - 2.45 * u);
+  ctx.lineTo(sx + 0.55 * u, sy - 2.7 * u);
+  ctx.closePath();
+  ctx.fill();
+}
 // Shared draw for the two sword footmen; `unit` picks the art set
 // (the Man-at-Arms wears the heavier armor in his own frames; the
 // vector fallback below is the same body for both, as before).
@@ -6856,7 +6945,7 @@ function drawDeer(i, wx, wy) {
 // just seen spawning). Melee attack is inferred by adjacency: a
 // footman standing beside a living non-owned entity is mid-fight.
 // Presentation only, never sim input.
-const UNIT_ART_H = { villager: 2.55, archer: 2.55, militia: 2.6, maa: 2.65, scout: 3.1 };
+const UNIT_ART_H = { villager: 2.55, archer: 2.55, militia: 2.6, maa: 2.65, scout: 3.1, spearman: 2.6, skirmisher: 2.55 };
 const UNIT_POSE_STATE = {};
 // Incremented once per draw() pass: the pose helpers memoize on it
 // so the directional draw and the side-view fallback read ONE
@@ -6915,9 +7004,10 @@ function updateUnitAnimState(buildings, st) {
       }
     }
   }
-  // Archer releases: a projectile whose spawn key was not in the
+  // Ranged releases: a projectile whose spawn key was not in the
   // previous draw is new; its start point is the shooter's position
-  // at release (the sim's only ranged unit is the Archer).
+  // at release (the sim's ranged units are the Archer and the
+  // Skirmisher — both play the shoot pose off this projection).
   const proj = sim.projectiles();
   const now = sim.tick_count();
   const live = new Set();
@@ -6930,7 +7020,7 @@ function updateUnitAnimState(buildings, st) {
     let best = -1;
     let bestD2 = 2.0 * 2.0;
     for (let i = 0; i < st.count; i++) {
-      if (st.kinds[i] !== 4 || st.hp[i * 2] < 1) continue;
+      if ((st.kinds[i] !== 4 && st.kinds[i] !== 10) || st.hp[i * 2] < 1) continue;
       const dx = pos[i * 2] - proj[p];
       const dy = pos[i * 2 + 1] - proj[p + 1];
       const d2 = dx * dx + dy * dy;
@@ -7021,7 +7111,7 @@ function unitActionFor(unit, i, wx, wy) {
       action = 'gallop';
       n = (Math.floor(tick / 6) + i) % 4 + 1;
     }
-  } else if (unit === 'archer') {
+  } else if (unit === 'archer' || unit === 'skirmisher') {
     if (pose.moving) {
       action = 'walk';
       n = (Math.floor(tick / 7) + i) % 4 + 1;
@@ -7035,7 +7125,7 @@ function unitActionFor(unit, i, wx, wy) {
         shotTick = shot.tick;
       }
     }
-  } else { // militia | maa
+  } else { // militia | maa | spearman
     if (pose.moving) {
       action = 'walk';
       n = (Math.floor(tick / 7) + i) % 4 + 1;
@@ -7237,7 +7327,10 @@ function updateAudioWorldState(housedNow) {
 /// order a plain click runs — never a parallel path.
 function attemptTrain(id) {
   if (id === 'train') return issue({ t: 'train_vil' });
-  const kindTag = { 'train-scout': 2, 'train-militia': 3, 'train-archer': 4 }[id];
+  const kindTag = {
+    'train-scout': 2, 'train-militia': 3, 'train-archer': 4,
+    'train-spearman': 9, 'train-skirmisher': 10,
+  }[id];
   if (kindTag == null) return false;
   return selectedBuilding && selectedBuilding.type === 'building'
     ? issue({ t: 'train_at', b: selectedBuilding.id, k: kindTag })
@@ -7254,7 +7347,10 @@ function flashTrainRefusal(id) {
     return;
   }
   if (selectedBuilding) {
-    const kindTag = { 'train-scout': 2, 'train-militia': 3, 'train-archer': 4 }[id];
+    const kindTag = {
+      'train-scout': 2, 'train-militia': 3, 'train-archer': 4,
+      'train-spearman': 9, 'train-skirmisher': 10,
+    }[id];
     const reason = sim.building_train_block(selectedBuilding.id, kindTag);
     flash(['', t('train.noResourcesUnit'),
       t('block.queueFull'), t('train.housedShort')][reason] || t('block.cannotTrain'));
@@ -7278,7 +7374,8 @@ const SHIFT_TRAIN_COUNT = 5;
 /// held, 1 otherwise); only train buttons honor it.
 function runCommandButton(id, times = 1) {
   if (id === 'train' || id === 'train-scout'
-    || id === 'train-militia' || id === 'train-archer') {
+    || id === 'train-militia' || id === 'train-archer'
+    || id === 'train-spearman' || id === 'train-skirmisher') {
     let done = 0;
     while (done < times && attemptTrain(id)) done++;
     if (done === 0) flashTrainRefusal(id);
@@ -7444,7 +7541,9 @@ function renderCommands() {
   const age = myAge();
   const techMask = myTechMask();
   const blockM = bk && context === 'barracks' ? sim.building_train_block(bk.id, 3) : -1;
+  const blockSp = bk && context === 'barracks' ? sim.building_train_block(bk.id, 9) : -1;
   const blockA = bk && context === 'range' ? sim.building_train_block(bk.id, 4) : -1;
+  const blockSk = bk && context === 'range' ? sim.building_train_block(bk.id, 10) : -1;
   const blockS = bk && context === 'stable' ? sim.building_train_block(bk.id, 2) : -1;
   // Research blocks: the TC trio (Loom 0, Feudal 1, Wheelbarrow 6)
   // and the building techs (Fletching 2, Scale Mail 3, Padded 4,
@@ -7457,7 +7556,7 @@ function renderCommands() {
   const bkQueueCodes = bk ? sim.building_queue(bk.id).join('.') : '';
   const sig = [context, Math.floor(wood), Math.floor(myStock()[0]), Math.floor(myStock()[2]),
     reason, queue, bk ? bk.id : -1, bk ? bk.queue : -1, bk && bk.complete ? 1 : 0,
-    blockM, blockA, blockS, age, techMask, rbTc.join('.'), rbBk.join('.'),
+    blockM, blockSp, blockA, blockSk, blockS, age, techMask, rbTc.join('.'), rbBk.join('.'),
     tcQueueCodes, bkQueueCodes, buildPage || '', repairArm ? 1 : 0,
     scoutSel ? selScouts.join('.') : -1, scoutAuto ? 1 : 0,
     placement ? placement.kind : -1].join('|');
@@ -7590,11 +7689,26 @@ function renderCommands() {
           ? t('cmd.underConstruction', { name: KIND_NAME[3], building: BUILD_NAME[2] })
           : t('cmd.trainTitle', { name: KIND_NAME[3], cost: costText([[50, 'food'], [20, 'gold']]) }) + (TRAIN_BLOCK_TITLES[blockM] ? ' ' + TRAIN_BLOCK_TITLES[blockM] : ''),
       }),
+      // The Spearman: DE's second Barracks slot (W). A Feudal
+      // unit at a Dark-Age building — the sim's train block
+      // greys it (train_age), and the title carries the age
+      // requirement until then, like the build gates do.
+      cmdButton({
+        id: 'train-spearman', icon: 'i-spearman', label: 'Spearman',
+        costIcon: 'i-food', cost: 35, cost2Icon: 'i-wood', cost2: 25,
+        disabled: underConstruction || blockSp === 2,
+        key: badgeForButton({ context, id: 'train-spearman', index: 1 }),
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: KIND_NAME[9], building: BUILD_NAME[2] })
+          : age < 1
+            ? t('cmd.buildGate', { name: KIND_NAME[9], gate: t('gate.feudal') })
+            : t('cmd.trainTitle', { name: KIND_NAME[9], cost: costText([[35, 'food'], [25, 'wood']]) }) + (TRAIN_BLOCK_TITLES[blockSp] ? ' ' + TRAIN_BLOCK_TITLES[blockSp] : ''),
+      }),
       cmdButton({
         id: 'research-maa', icon: 'i-maa', img: 'man-at-arms.png', label: 'Man-at-Arms',
         costIcon: 'i-food', cost: 100, cost2Icon: 'i-gold', cost2: 40,
         disabled: underConstruction || maaDone || rbBk[3] === 2 || rbBk[3] === 3,
-        key: badgeForButton({ context, id: 'research-maa', index: 1 }),
+        key: badgeForButton({ context, id: 'research-maa', index: 2 }),
         title: underConstruction
           ? t('cmd.underConstruction', { name: TECH_NAME[5], building: BUILD_NAME[2] })
           : maaDone
@@ -7604,15 +7718,27 @@ function renderCommands() {
     );
   } else if (context === 'range') {
     const underConstruction = !bk.complete;
-    cmdGrid.append(cmdButton({
-      id: 'train-archer', icon: 'i-archer', img: 'archer.png', label: 'Archer',
-      costIcon: 'i-wood', cost: 25, cost2Icon: 'i-gold', cost2: 45,
-      disabled: underConstruction || blockA === 2,
-      key: badgeForButton({ context, id: 'train-archer', index: 0 }),
-      title: underConstruction
-        ? t('cmd.underConstruction', { name: KIND_NAME[4], building: BUILD_NAME[6] })
-        : t('cmd.trainTitle', { name: KIND_NAME[4], cost: costText([[25, 'wood'], [45, 'gold']]) }) + (TRAIN_BLOCK_TITLES[blockA] ? ' ' + TRAIN_BLOCK_TITLES[blockA] : ''),
-    }));
+    cmdGrid.append(
+      cmdButton({
+        id: 'train-archer', icon: 'i-archer', img: 'archer.png', label: 'Archer',
+        costIcon: 'i-wood', cost: 25, cost2Icon: 'i-gold', cost2: 45,
+        disabled: underConstruction || blockA === 2,
+        key: badgeForButton({ context, id: 'train-archer', index: 0 }),
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: KIND_NAME[4], building: BUILD_NAME[6] })
+          : t('cmd.trainTitle', { name: KIND_NAME[4], cost: costText([[25, 'wood'], [45, 'gold']]) }) + (TRAIN_BLOCK_TITLES[blockA] ? ' ' + TRAIN_BLOCK_TITLES[blockA] : ''),
+      }),
+      // The Skirmisher: DE's second Archery Range slot (W).
+      cmdButton({
+        id: 'train-skirmisher', icon: 'i-skirmisher', label: 'Skirmisher',
+        costIcon: 'i-food', cost: 25, cost2Icon: 'i-wood', cost2: 35,
+        disabled: underConstruction || blockSk === 2,
+        key: badgeForButton({ context, id: 'train-skirmisher', index: 1 }),
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: KIND_NAME[10], building: BUILD_NAME[6] })
+          : t('cmd.trainTitle', { name: KIND_NAME[10], cost: costText([[25, 'food'], [35, 'wood']]) }) + (TRAIN_BLOCK_TITLES[blockSk] ? ' ' + TRAIN_BLOCK_TITLES[blockSk] : ''),
+      }),
+    );
   } else if (context === 'stable') {
     const underConstruction = !bk.complete;
     cmdGrid.append(cmdButton({
@@ -8453,7 +8579,8 @@ function draw() {
   // are tombstones in the sim, invisible here). A damaged unit gets
   // an HP bar above it.
   const UNIT_DRAW = [drawVillager, null, drawScout, drawMilitia, drawArcher,
-    drawSheep, drawBoar, drawDeer, drawManAtArms]; // 8: Man-at-Arms (M6)
+    drawSheep, drawBoar, drawDeer, drawManAtArms, // 8: Man-at-Arms (M6)
+    drawSpearman, drawSkirmisher]; // 9/10: the Feudal base units
   for (let i = 0; i < count; i++) {
     const wx = pos[i * 2];
     const wy = pos[i * 2 + 1];

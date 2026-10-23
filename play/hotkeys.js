@@ -33,8 +33,9 @@
 //    the Archery Range (A is the Blacksmith's slot).
 // 2. Panel keys. A selected building's buttons take their slot
 //    letters too — see PANEL_KEYS: mostly plain left-to-right
-//    (Barracks: Militia Q, Man-at-Arms W; Range: Archer Q;
-//    Stable: Scout Q), with DE's own two-row arrangements where
+//    (Barracks: Militia Q, Spearman W, Man-at-Arms A below the
+//    Militia; Range: Archer Q, Skirmisher W; Stable: Scout Q),
+//    with DE's own two-row arrangements where
 //    the reference panel has them: the Town Center (Villager Q,
 //    Feudal Age W, Loom A below the Villager) and the Blacksmith
 //    (Fletching Q, Scale Mail W, Padded Archer Armor A).
@@ -98,8 +99,8 @@ export const PAGE_BADGE = {
 /** Panel contexts whose buttons answer to position keys, in order. */
 export const PANEL_BUTTONS = {
   tc: ['train', 'research-loom', 'research-feudal', 'research-wheelbarrow'],
-  barracks: ['train-militia', 'research-maa'],
-  range: ['train-archer'],
+  barracks: ['train-militia', 'train-spearman', 'research-maa'],
+  range: ['train-archer', 'train-skirmisher'],
   stable: ['train-scout'],
   blacksmith: ['research-fletching', 'research-scalemail', 'research-padded'],
 };
@@ -131,10 +132,17 @@ export const PANEL_KEYS = {
   },
   barracks: {
     'train-militia': ['KeyQ', 'Q'],
-    'research-maa': ['KeyW', 'W'],
+    'train-spearman': ['KeyW', 'W'],
+    // The Man-at-Arms upgrade drops to the second row (A, under
+    // the Militia) now that the Spearman takes DE's second
+    // Barracks slot — the same two-row arrangement the Town
+    // Center (Loom A) and Blacksmith (Padded A) already use for
+    // their non-unit entries.
+    'research-maa': ['KeyA', 'A'],
   },
   range: {
     'train-archer': ['KeyQ', 'Q'],
+    'train-skirmisher': ['KeyW', 'W'],
   },
   stable: {
     'train-scout': ['KeyQ', 'Q'],

@@ -105,7 +105,10 @@ const BUILD_FNS = [
   'push_build_archery_range', 'push_build_stable', 'push_build_blacksmith',
 ];
 const BUILD_FNS_QUEUED = BUILD_FNS.map((n) => n + '_queued');
-const TRAIN_AT_FNS = { 2: 'push_train_scout', 3: 'push_train_militia', 4: 'push_train_archer' };
+const TRAIN_AT_FNS = {
+  2: 'push_train_scout', 3: 'push_train_militia', 4: 'push_train_archer',
+  9: 'push_train_spearman', 10: 'push_train_skirmisher',
+};
 
 const isInt = (v) => Number.isInteger(v) && v >= 0;
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
@@ -121,7 +124,7 @@ export function validateCommand(c) {
     case 'attackb': return isInt(c.e) && isInt(c.b);
     case 'repair': return isInt(c.e) && isInt(c.b);
     case 'build': return isInt(c.e) && isInt(c.k) && c.k <= 8 && isNum(c.x) && isNum(c.y);
-    case 'train_at': return isInt(c.b) && (c.k === 2 || c.k === 3 || c.k === 4);
+    case 'train_at': return isInt(c.b) && (c.k === 2 || c.k === 3 || c.k === 4 || c.k === 9 || c.k === 10);
     case 'train_vil': return true;
     case 'research_tc': return c.tech === 0 || c.tech === 1 || c.tech === 6;
     case 'research_at': return isInt(c.b) && isInt(c.tech) && c.tech <= 5;

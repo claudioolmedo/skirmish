@@ -483,6 +483,17 @@ export class WasmSim {
      */
     push_train_scout(building: number): boolean;
     /**
+     * Enqueue a Skirmisher at a completed Archery Range. See
+     * `push_train_militia`.
+     */
+    push_train_skirmisher(building: number): boolean;
+    /**
+     * Enqueue a Spearman at a completed Barracks (Feudal Age —
+     * `can_train_at` carries the unit-level age gate). See
+     * `push_train_militia`.
+     */
+    push_train_spearman(building: number): boolean;
+    /**
      * Enqueue a villager at a SPECIFIC Town Center (any seat):
      * `push_train_villager` for an explicit Town Center.
      */
@@ -703,6 +714,8 @@ export interface InitOutput {
     readonly wasmsim_push_train_archer: (a: number, b: number) => number;
     readonly wasmsim_push_train_militia: (a: number, b: number) => number;
     readonly wasmsim_push_train_scout: (a: number, b: number) => number;
+    readonly wasmsim_push_train_skirmisher: (a: number, b: number) => number;
+    readonly wasmsim_push_train_spearman: (a: number, b: number) => number;
     readonly wasmsim_push_train_villager: (a: number) => number;
     readonly wasmsim_push_train_villager_at: (a: number, b: number) => number;
     readonly wasmsim_rally_points: (a: number) => [number, number];
