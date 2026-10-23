@@ -12,7 +12,8 @@
 //!
 //! - House: 25 wood, 25 s build time (1500 ticks), +5 population room.
 //! - Farm: 60 wood, 15 s build time (900 ticks), holds 175 food
-//!   (§6.3 — the base amount; 250 is post-Horse-Collar). M6 gates
+//!   (§6.3 — the base amount; 250 is post-Horse-Collar), 3×3
+//!   footprint (study §5; Claudio's decision 2026-10-22). M6 gates
 //!   Farms on owning a completed Mill (OPENING-SPEC §2.4).
 //! - Barracks (M3): 175 wood, 50 s build time (3000 ticks), 3×3
 //!   footprint — the study's footprint, honored for this kind.
@@ -38,9 +39,10 @@
 //!
 //! Placement is defined on the coarse grid: a building occupies a
 //! square footprint anchored at its minimum cell — 2×2 cells for the
-//! House and Farm (the study gives the farm as 3×3; Skirmish's uniform
-//! 2×2 for those two kinds is a recorded divergence from M2.5) and
-//! 3×3 for the Barracks. Houses and Barracks block their footprint
+//! House and 3×3 for the Farm and the Barracks. (The Farm shipped
+//! 2×2 through M6, a recorded divergence from the study's 3×3;
+//! Claudio's decision of 2026-10-22 adopts the documented 3×3,
+//! superseding the earlier 2×2 specification.) Houses and Barracks block their footprint
 //! cells in the grid's dynamic layer (they are solid); farms do not
 //! block — a farmer must be able to stand on the field to work it,
 //! exactly as in the reference game.
@@ -52,8 +54,9 @@ use crate::entity::EntityKind;
 use crate::grid::{CELL_SIZE, WORLD_HALF};
 use crate::tech::{Age, ProdEntry};
 
-/// Footprint edge length, in grid cells, of the original M2.5 kinds
-/// (House and Farm). The Barracks is 3 (`BuildingKind::footprint_size`).
+/// Footprint edge length, in grid cells, of the 2×2 kinds
+/// (House and the drop-off camps). The Farm and the Barracks are 3
+/// (`BuildingKind::footprint_size`).
 pub const FOOTPRINT_CELLS: u32 = 2;
 
 /// House construction cost: 25 wood (study §5).
@@ -231,19 +234,21 @@ impl BuildingKind {
         }
     }
 
-    /// Footprint edge length in grid cells: 2 for House/Farm and the
-    /// camps, 3 for the Barracks and the Feudal buildings (the
-    /// study's footprints where it gives them; the Blacksmith's 3×3
-    /// is adopted — UNVERIFIED, see the module docs).
+    /// Footprint edge length in grid cells: 2 for the House and the
+    /// camps, 3 for the Farm, the Barracks and the Feudal buildings
+    /// (the study's footprints where it gives them; the Blacksmith's
+    /// 3×3 is adopted — UNVERIFIED, see the module docs). The Farm's
+    /// 3×3 is Claudio's decision of 2026-10-22, adopting the
+    /// DE-documented footprint over the earlier 2×2 specification.
     pub fn footprint_size(self) -> u32 {
         match self {
             BuildingKind::PalisadeWall => 1,
             BuildingKind::House
-            | BuildingKind::Farm
             | BuildingKind::LumberCamp
             | BuildingKind::Mill
             | BuildingKind::MiningCamp => FOOTPRINT_CELLS,
-            BuildingKind::Barracks
+            BuildingKind::Farm
+            | BuildingKind::Barracks
             | BuildingKind::ArcheryRange
             | BuildingKind::Stable
             | BuildingKind::Blacksmith => 3,
@@ -810,9 +815,11 @@ mod tests {
         // Build totals in thirds: house 4500, farm 2700.
         assert_eq!(BuildingKind::House.build_thirds(), 4500);
         assert_eq!(BuildingKind::Farm.build_thirds(), 2700);
-        // Footprints: 2×2 for House/Farm, 3×3 for the Barracks.
+        // Footprints: 2×2 for the House, 3×3 for the Farm and the
+        // Barracks. Farm 3×3: Claudio's decision 2026-10-22 (the
+        // DE-documented footprint, superseding the 2×2 spec).
         assert_eq!(BuildingKind::House.footprint_size(), 2);
-        assert_eq!(BuildingKind::Farm.footprint_size(), 2);
+        assert_eq!(BuildingKind::Farm.footprint_size(), 3);
         assert_eq!(BuildingKind::Barracks.footprint_size(), 3);
         assert!(BuildingKind::Barracks.blocks_footprint());
         assert!(BuildingKind::Barracks.is_production());

@@ -255,7 +255,9 @@ const BUILD_I18N = ['house', 'farm', 'barracks', 'lumber', 'mill',
   'mining', 'range', 'stable', 'blacksmith', 'palisade'];
 let BUILD_NAME = ['House', 'Farm', 'Barracks', 'Lumber Camp', 'Mill',
   'Mining Camp', 'Archery Range', 'Stable', 'Blacksmith', 'Palisade Wall'];
-const BUILD_SIZE = [2, 2, 3, 2, 2, 2, 3, 3, 3, 1];
+// Farm footprint is 3 (DE-documented; Claudio's decision
+// 2026-10-22, superseding the earlier 2x2 specification).
+const BUILD_SIZE = [2, 3, 3, 2, 2, 2, 3, 3, 3, 1];
 const BUILD_ICON = ['i-house', 'i-farm', 'i-tc', 'i-lumber', 'i-mill',
   'i-mining', 'i-range', 'i-stable', 'i-blacksmith', 'i-palisade'];
 // The PNG set above, per building kind tag (same order as
@@ -6176,16 +6178,19 @@ function drawStone(sx, sy) {
   ], '#c3c8cd');
 }
 
-// A farm field: a tilled-soil diamond spanning the farm's 2x2 cells
-// around its center point, with furrow lines and a crop tint whose
-// strength follows the food remaining (full field = lush, nearly
-// depleted = mostly bare soil). `cropFrac` null draws bare soil
-// (under construction).
+// A farm field: a tilled-soil diamond spanning the farm's 3x3 cells
+// around its center point (half-extent 1.5 cells; the 3x3 footprint
+// is Claudio's decision of 2026-10-22), with furrow lines and a crop
+// tint whose strength follows the food remaining (full field = lush,
+// nearly depleted = mostly bare soil). `cropFrac` null draws bare
+// soil (under construction).
+function farmHalf() { return 1.5 * CS; } // CS is set when the sim loads
 function drawFarmPlot(wx, wy, cropFrac) {
-  const t = worldToScreen(wx - CS, wy - CS);
-  const r = worldToScreen(wx + CS, wy - CS);
-  const b = worldToScreen(wx + CS, wy + CS);
-  const l = worldToScreen(wx - CS, wy + CS);
+  const fh = farmHalf();
+  const t = worldToScreen(wx - fh, wy - fh);
+  const r = worldToScreen(wx + fh, wy - fh);
+  const b = worldToScreen(wx + fh, wy + fh);
+  const l = worldToScreen(wx - fh, wy + fh);
   poly([t, r, b, l], '#6b4a2c'); // tilled soil
   // Furrows: three lines running one way across the field.
   ctx.strokeStyle = 'rgba(0,0,0,0.28)';
@@ -6207,7 +6212,7 @@ function drawFarmPlot(wx, wy, cropFrac) {
 }
 
 function drawFarm(sx, sy, frac, wx, wy) {
-  shadow(sx, sy, 3.4 * camS);
+  shadow(sx, sy, 5.1 * camS); // 3x3 field: 3.4 * 1.5 (Claudio 2026-10-22)
   // Base44 art: the farm plot image fitted to the field's
   // footprint diamond (width matched to the diamond, aspect kept,
   // centered on it). The image is one of four growth states picked
@@ -6224,10 +6229,11 @@ function drawFarm(sx, sy, frac, wx, wy) {
     : BUILDING_ART.img.farmState1;
   const im = spriteReady(stateIm) ? stateIm : BUILDING_ART.img.farm;
   if (spriteReady(im)) {
-    const t = worldToScreen(wx - CS, wy - CS);
-    const r = worldToScreen(wx + CS, wy - CS);
-    const b = worldToScreen(wx + CS, wy + CS);
-    const l = worldToScreen(wx - CS, wy + CS);
+    const fh = farmHalf();
+    const t = worldToScreen(wx - fh, wy - fh);
+    const r = worldToScreen(wx + fh, wy - fh);
+    const b = worldToScreen(wx + fh, wy + fh);
+    const l = worldToScreen(wx - fh, wy + fh);
     const w = r[0] - l[0];
     const h = w * (im.naturalHeight / im.naturalWidth);
     const cx = (t[0] + b[0]) / 2;
@@ -6791,10 +6797,12 @@ function drawBuilding(b) {
   if (b.kind === 1) {
     // Farm under construction: bare tilled plot + progress bar.
     // (A completed farm is drawn by the node renderer instead.)
+    // Shadow/bar offsets scale with the 3x3 field (Claudio
+    // 2026-10-22): 3.4 * 1.5 = 5.1.
     const [sx, sy] = worldToScreen(b.x, b.y);
-    shadow(sx, sy, 3.4 * camS);
+    shadow(sx, sy, 5.1 * camS);
     drawFarmPlot(b.x, b.y, null);
-    progressBar(sx, sy - 3.4 * camS, b.progress);
+    progressBar(sx, sy - 5.1 * camS, b.progress);
   } else if (b.kind === 2) {
     drawBarracks(b);
   } else if (b.kind === 9) {

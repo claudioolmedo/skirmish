@@ -229,7 +229,8 @@ fn scripted_siege_wins_the_match() {
     let mut sim = Sim::new_match(21, MatchMode::AiEasy);
     let mut driver = HumanScript::default();
     let mut won_at = None;
-    // Window: 480,000 ticks. BLD-16 (2026-10-19) — the Town
+    // Window: 600,000 ticks (see the farm 3×3 note below).
+    // BLD-16 (2026-10-19) — the Town
     // Center's footprint is placement-reserved — moved the plots
     // this script's base grows on; its siege now lands later and
     // wins on a re-massed second push (see the script's unlatch
@@ -242,7 +243,13 @@ fn scripted_siege_wins_the_match() {
     // tick 355,686 on the pre-forest Arabia, and at 424,130 with
     // the forest-contiguity generator merged — the script's full
     // arc (Feudal, massed army, second push) intact both times.
-    for _ in 0..480_000 {
+    // Farm 3×3 (2026-10-22, Claudio's decision — the
+    // DE-documented footprint, superseding the 2×2 spec): the
+    // script's six farms now take 3×3 plots, so its fields sit
+    // farther out and the farmer's trips lengthen; the arc is
+    // unchanged and the human never loses, but the win re-paces
+    // to tick 518,618 (measured). Window grows to 600,000.
+    for _ in 0..600_000 {
         driver.drive(&mut sim);
         sim.tick();
         if sim.match_state() == MatchState::Victory {
@@ -775,3 +782,4 @@ fn find_anchor(sim: &Sim, builder: u32, kind: BuildingKind) -> Option<(I16F16, I
     }
     None
 }
+
