@@ -15,10 +15,11 @@ import math
 import numpy as np
 
 import render
-from render import rot_x, xform
+from render import box_tris, rot_x, xform
 
 PC_MATS = {'tunic'}
-STATES = {'idle': 4, 'walk': 8, 'gather': 4, 'carry': 8, 'build': 4}
+STATES = {'idle': 4, 'walk': 8, 'gather': 4, 'carry': 8, 'build': 4,
+          'attack': 4}
 
 _PARTS = render.build_villager()
 _PIVOTS = render.PIVOTS
@@ -53,7 +54,36 @@ def _apply(pose):
             v = xform(v, torso_mat, _WAIST)
             v = v + np.array([0.0, 0.0, pose.get('bob', 0.0)])
             out.append((v, mat))
+    if pose.get('knife'):
+        # The fighting knife (attack readability pass, 2026-10-22):
+        # same glue as the axe — armR pivot, waist pitch, bob.
+        for verts, mat in KNIFE_TRIS:
+            v = xform(verts, rot_x(pose.get('armR', 0.0)), _PIVOTS['armR'])
+            v = xform(v, torso_mat, _WAIST)
+            v = v + np.array([0.0, 0.0, pose.get('bob', 0.0)])
+            out.append((v, mat))
     return out
+
+
+def _knife_tris():
+    """Short dagger in the right hand, built unposed like the axe
+    (arm hanging straight down): belt-leather grip in the fist, a
+    steel crossguard, and a bright steel blade running ~0.36 units
+    below the guard to a stepped point. Steel is the palette's
+    highest-value material on purpose — at game zoom the blade must
+    read as a silhouette against grass and bodies, and it is NOT a
+    player-color material (the mask keeps only the tunic)."""
+    t = []
+    t += box_tris(0.30, 0.005, 0.78, 0.94, 0.055, 0.06, mat='belt')
+    t += box_tris(0.30, 0.01, 0.74, 0.79, 0.15, 0.05, mat='steel')
+    t += box_tris(0.30, 0.02, 0.50, 0.75, 0.085, 0.035, 0.10, 0.04,
+                  'steel')                                    # blade
+    t += box_tris(0.30, 0.03, 0.38, 0.51, 0.045, 0.028, 0.085, 0.035,
+                  'steel')                                    # point
+    return t
+
+
+KNIFE_TRIS = _knife_tris()
 
 
 def _pose_build(f, n=4):
@@ -66,9 +96,25 @@ def _pose_build(f, n=4):
             'torso': torso, 'bob': 0.0, 'load': False}
 
 
+def _pose_attack(f, n=4):
+    # Knife fight (attack readability pass, 2026-10-22): the same
+    # four-beat arc as the Militia's sword swing — windup back,
+    # STRIKE (frame 1: arm whipped forward, blade extended away
+    # from the body), follow-through, recover — so a fighting
+    # villager reads at game zoom instead of standing still next
+    # to its opponent. The left arm rises as a guard/counterweight.
+    arm_r = (-65.0, 66.0, 32.0, 5.0)[f % n]
+    torso = (-6.0, 10.0, 14.0, 4.0)[f % n]
+    arm_l = (18.0, -14.0, -6.0, 4.0)[f % n]
+    return {'legL': 12.0, 'legR': -10.0,
+            'armL': arm_l, 'armR': arm_r,
+            'torso': torso, 'bob': 0.0, 'load': False,
+            'knife': True}
+
+
 _POSES = {'idle': render.pose_idle, 'walk': render.pose_walk,
           'gather': render.pose_gather, 'carry': render.pose_carry,
-          'build': _pose_build}
+          'build': _pose_build, 'attack': _pose_attack}
 
 
 def tris_for(state, frame):

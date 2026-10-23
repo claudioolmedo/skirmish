@@ -23,7 +23,7 @@ function pngSize(path) {
 
 // unit -> { state: frames } — the §10.1 sheet contract.
 const SHEETS = {
-  villager: { idle: 4, walk: 8, gather: 4, carry: 8, build: 4 },
+  villager: { idle: 4, walk: 8, gather: 4, carry: 8, build: 4, attack: 4 },
   archer: { idle: 4, walk: 8, shoot: 4 },
   militia: { idle: 4, walk: 8, attack: 4 },
   maa: { idle: 4, walk: 8, attack: 4 },
@@ -52,11 +52,13 @@ for (const [unit, states] of Object.entries(SHEETS)) {
   }
 }
 
-test('scout sheets: 160px cells (idle 4, gallop 8) + masks', () => {
+test('scout sheets: 160px cells (idle 4, gallop 8, attack 4) + masks', () => {
   assert.deepEqual(pngSize(join(sheetsDir, 'scout-idle.png')), [4 * 160, 8 * 160]);
   assert.deepEqual(pngSize(join(sheetsDir, 'scout-gallop.png')), [8 * 160, 8 * 160]);
+  assert.deepEqual(pngSize(join(sheetsDir, 'scout-attack.png')), [4 * 160, 8 * 160]);
   assert.ok(existsSync(join(sheetsDir, 'scout-idle-pcmask.png')));
   assert.ok(existsSync(join(sheetsDir, 'scout-gallop-pcmask.png')));
+  assert.ok(existsSync(join(sheetsDir, 'scout-attack-pcmask.png')));
 });
 
 test('E on the villager root panel resolves to the Repair button', () => {

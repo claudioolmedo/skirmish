@@ -1049,7 +1049,7 @@ const DIR_ART_SPEC = {
   spearman: { states: ['idle', 'walk', 'attack'], cell: 128, ax: 64, ay: 110, mask: true },
   skirmisher: { states: ['idle', 'walk', 'shoot'], cell: 128, ax: 64, ay: 110, mask: true },
   maa: { states: ['idle', 'walk', 'attack'], cell: 128, ax: 64, ay: 110, mask: true },
-  scout: { states: ['idle', 'gallop'], cell: 160, ax: 80, ay: 138, mask: true },
+  scout: { states: ['idle', 'gallop', 'attack'], cell: 160, ax: 80, ay: 138, mask: true },
   sheep: { states: ['idle', 'walk', 'graze'], cell: 128, ax: 64, ay: 110, mask: false },
   boar: { states: ['idle', 'walk', 'graze'], cell: 128, ax: 64, ay: 110, mask: false },
   deer: { states: ['idle', 'walk', 'graze'], cell: 128, ax: 64, ay: 110, mask: false },
@@ -1200,7 +1200,7 @@ function drawArtImage(im, sx, sy, wWorld, dyWorld, frac) {
 // -> CC0 placeholder -> vector circle (all in drawVillager).
 const VIL_ORIGINAL = {
   cell: 128, ax: 64, ay: 110, pxPerUnit: 46, drawScale: 1.35,
-  frames: { idle: 4, walk: 8, gather: 4, carry: 8, build: 4 },
+  frames: { idle: 4, walk: 8, gather: 4, carry: 8, build: 4, attack: 4 },
   dirs: 8, // rows in the currently loaded sheets (the active tier)
   img: {},
   imgRed: {}, // M5: red palette-swap variants, built per sheet load
@@ -1269,6 +1269,13 @@ function updateVilAnim(i, wx, wy, now) {
   if (moving) state = carryKind.has(i) ? 'carry' : 'walk';
   else if (atNodeNow.has(i)) state = 'gather';
   else if (atBuildNow.has(i)) state = 'build';
+  // Attack readability pass (2026-10-22): a stationary villager
+  // with a foe in melee reach fights with its knife — the same
+  // foeNearUnit trigger the footmen use for their attack state,
+  // so a villager battling a boar or an enemy no longer reads as
+  // merely standing next to it. Work states win: a harvester
+  // being bitten keeps chopping, as in the reference.
+  else if (foeNearUnit(i, wx, wy)) state = 'attack';
   // Facing (forest readability pass): a stationary gatherer turns
   // to FACE its node for the whole harvest — movement facing used
   // to strand it sideways to the tree, one of the reasons the chop
@@ -1284,6 +1291,10 @@ function updateVilAnim(i, wx, wy, now) {
     frame = Math.floor((a.phase % 1) * VIL_ORIGINAL.frames[state]);
   } else if (state === 'gather' || state === 'build') {
     frame = Math.floor(now / 140) % VIL_ORIGINAL.frames[state];
+  } else if (state === 'attack') {
+    // The footmen's attack cadence (dirSheetFrame): 7 sim ticks
+    // per frame over the 4-frame windup/strike/follow/recover arc.
+    frame = Math.floor(sim.tick_count() / 7) % VIL_ORIGINAL.frames.attack;
   } else {
     frame = Math.floor(now / 400) % VIL_ORIGINAL.frames.idle;
   }
@@ -7448,11 +7459,19 @@ function unitActionFor(unit, i, wx, wy) {
     } else if (atBuildNow.has(i)) {
       action = 'build';
       n = Math.floor(tick / 6) % 2 + 1;
+    } else if (foeNearUnit(i, wx, wy)) {
+      action = 'attack';
+      n = Math.floor(tick / 7) % 3 + 1;
     }
   } else if (unit === 'scout') {
     if (pose.moving) {
       action = 'gallop';
       n = (Math.floor(tick / 6) + i) % 4 + 1;
+    } else if (foeNearUnit(i, wx, wy)) {
+      // The rider's sword slash (attack readability pass,
+      // 2026-10-22): same foeNearUnit trigger as the footmen.
+      action = 'attack';
+      n = Math.floor(tick / 7) % 3 + 1;
     }
   } else if (unit === 'archer' || unit === 'skirmisher') {
     if (pose.moving) {
