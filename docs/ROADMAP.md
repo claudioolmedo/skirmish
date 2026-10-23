@@ -33,6 +33,8 @@ The interface on the play page already follows the classic layout — top
 resource bar, bottom-left command panel, bottom-center selection panel,
 bottom-right minimap — with 100% original art.
 
+For proposed follow-up work, see [Suggestions for improving Skirmish II](IMPROVEMENT-SUGGESTIONS.md): review suggestions with priorities and acceptance criteria, not implemented features.
+
 ## What's missing — the rulebook scoreboard
 
 The [Mechanics Rulebook](MECHANICS-RULEBOOK.md) states **213 behavioral
