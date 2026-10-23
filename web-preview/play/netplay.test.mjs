@@ -40,6 +40,11 @@ test('validateCommand accepts the full vocabulary and rejects junk', () => {
     { t: 'force_dep', e: 7 },
     { t: 'auto_explore', e: 4, on: true },
     { t: 'auto_explore', e: 4, on: false },
+    { t: 'attackmove', e: 4, x: 10, y: -2 },
+    { t: 'attackmove', e: 4, x: 10, y: -2, q: true },
+    { t: 'patrol', e: 4, x: 0, y: 0 },
+    { t: 'stance', e: 4, s: 0 },
+    { t: 'stance', e: 4, s: 3 },
     { t: 'stop', e: 4 },
     { t: 'delete', e: 4 },
     { t: 'deleteb', b: 3 },
@@ -61,6 +66,12 @@ test('validateCommand accepts the full vocabulary and rejects junk', () => {
     { t: 'gather', e: 1 },
     { t: 'auto_explore', e: 4 },
     { t: 'auto_explore', e: 4, on: 1 },
+    { t: 'attackmove', e: 4, x: 1 },
+    { t: 'attackmove', e: -1, x: 1, y: 1 },
+    { t: 'patrol', e: 4, x: NaN, y: 1 },
+    { t: 'stance', e: 4 },
+    { t: 'stance', e: 4, s: 4 },
+    { t: 'stance', e: 4, s: 1.5 },
     { t: 'stop' },
     { t: 'delete', e: -1 },
     { t: 'deleteb' },
@@ -157,6 +168,12 @@ test('applyCommand maps semantic commands to the per-seat sim calls', () => {
   applyCommand(sim, { t: 'train_vil' }, 2, tcOf);
   applyCommand(sim, { t: 'research_tc', tech: 0 }, 0, tcOf);
   applyCommand(sim, { t: 'rally_tc', x: 3, y: 4 }, 2, tcOf);
+  // CMB-09/10/11: attack-move, patrol (direct + queued forms) and stance.
+  applyCommand(sim, { t: 'attackmove', e: 5, x: 7, y: 8 }, 0, tcOf);
+  applyCommand(sim, { t: 'attackmove', e: 5, x: 7, y: 8, q: true }, 0, tcOf);
+  applyCommand(sim, { t: 'patrol', e: 5, x: 9, y: 10 }, 0, tcOf);
+  applyCommand(sim, { t: 'patrol', e: 5, x: 9, y: 10, q: true }, 0, tcOf);
+  applyCommand(sim, { t: 'stance', e: 5, s: 2 }, 0, tcOf);
   assert.deepEqual(calls, [
     ['push_move', 5, 1, 2],
     ['push_move_queued', 5, 1, 2],
@@ -168,6 +185,11 @@ test('applyCommand maps semantic commands to the per-seat sim calls', () => {
     ['push_train_villager_at', 40],
     ['push_research_tc_at', 0, 0],
     ['push_set_rally_tc_of', 40, 3, 4],
+    ['push_attack_move', 5, 7, 8],
+    ['push_attack_move_queued', 5, 7, 8],
+    ['push_patrol', 5, 9, 10],
+    ['push_patrol_queued', 5, 9, 10],
+    ['push_set_stance', 5, 2],
   ]);
 });
 

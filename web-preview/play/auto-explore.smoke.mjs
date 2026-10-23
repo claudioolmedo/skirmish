@@ -7,8 +7,10 @@
 //
 // Proves the player flow Claudio asked for: with nothing
 // selected, G does nothing. The idle-military key (,) selects
-// the starting Scout Cavalry and its command panel shows ONLY
-// the AutoExplore toggle — icon-only, badged G, with the
+// the starting Scout Cavalry and its command panel shows the
+// military orders (CMB-09/10/11: Attack Move, Patrol, the
+// stance row — pinned by orders.smoke.mjs) with the AutoExplore
+// toggle among them — icon-only, badged G, with the
 // Auto-Explore tooltip. Pressing G turns the mode on (the
 // button's pressed state mirrors the sim's flag) and the scout
 // keeps exploring on its own across three minutes of pumped
@@ -365,19 +367,21 @@ console.log('PASS (1) no selection: panel empty, G inert');
 
 // ------------------------------------------------------------- (2)
 // ',' cycles idle military — in the sandbox start that is the
-// starting Scout Cavalry, and only it. Its panel is the single
-// AutoExplore toggle: badged G, not pressed, off-state tooltip.
+// starting Scout Cavalry, and only it. Its panel carries the
+// military orders and the AutoExplore toggle: badged G, not
+// pressed, off-state tooltip.
 key('Comma');
 pump(2);
-assert.deepEqual(cmdIds(), ['auto-explore', 'stop', 'delete'],
-  'starting scout selected: the AutoExplore button + Stop/Delete (SEL-14)');
+assert.deepEqual(cmdIds(), ['attack-move', 'patrol', 'stance-0', 'stance-1',
+  'stance-2', 'stance-3', 'auto-explore', 'stop', 'delete'],
+  'starting scout selected: the military orders (CMB-09/10/11) + AutoExplore + Stop/Delete (SEL-14)');
 const btn = () => cmdBtn('auto-explore');
 assert.ok(btn().innerHTML.includes('<span class="cmd-key">G</span>'),
   'the AutoExplore button is badged G');
 assert.ok(!btn().className.includes('active'), 'the mode starts off');
 assert.ok(btn().title.startsWith('Auto-Explore —'),
   `off-state tooltip, got: ${btn().title}`);
-console.log('PASS (2) scout panel: one AutoExplore button, badged G, off');
+console.log('PASS (2) scout panel: AutoExplore button among the military orders, badged G, off');
 
 // ------------------------------------------------------------- (3)
 // G turns it on: the pressed state mirrors the sim flag once the
