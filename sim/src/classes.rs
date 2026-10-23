@@ -46,6 +46,13 @@ pub const SKIRMISHER: u8 = 15;
 /// in the roster carries a bonus against it yet — the membership
 /// is data, ready for the rows that use it.
 pub const WALLS_AND_GATES: u8 = 16;
+/// Predator animals (wolves and kin — the study's class 21 analog,
+/// "Predator Animals"): carried by the Wolf kind so future
+/// anti-predator bonuses (e.g. the Magyar villager rule) have a
+/// class to key on; no current attack row uses it. (Numbered 17
+/// on landing: 13–16 were taken on main by ELEPHANT, SHIP,
+/// SKIRMISHER and WALLS_AND_GATES while the wolf branch waited.)
+pub const PREDATOR: u8 = 17;
 
 /// Membership bit for one class id.
 pub const fn bit(class: u8) -> u64 {

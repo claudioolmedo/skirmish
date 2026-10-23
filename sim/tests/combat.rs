@@ -47,8 +47,9 @@ fn run_until(sim: &mut Sim, cap: u64, mut done: impl FnMut(&Sim) -> bool) -> boo
 fn standard_start_has_scout_and_gaia_herds() {
     let sim = Sim::new(7);
     // M7 package: TC + 3 villagers + Scout + 8 sheep + 2 boars +
-    // 6 deer (near herd 3 + far herd 3, OPENING-SPEC §2.2).
-    assert_eq!(sim.entities().len(), 21);
+    // 6 deer (near herd 3 + far herd 3, OPENING-SPEC §2.2) — plus
+    // the AI-08 wolf pack (3), which brings the start to 24.
+    assert_eq!(sim.entities().len(), 24);
     let scout = ent(&sim, 4);
     assert_eq!(scout.kind, EntityKind::ScoutCavalry);
     assert_eq!(scout.owner, OWNER_PLAYER);
@@ -65,6 +66,7 @@ fn standard_start_has_scout_and_gaia_herds() {
     assert_eq!(count(EntityKind::Sheep), 8);
     assert_eq!(count(EntityKind::Boar), 2);
     assert_eq!(count(EntityKind::Deer), 6);
+    assert_eq!(count(EntityKind::Wolf), 3);
     assert!(
         sim.entities()
             .iter()
@@ -219,7 +221,7 @@ fn villager_dies_to_boar_population_drops_tombstone_stays() {
     assert_eq!(sim.population(), 3, "death must free the pop slot the same tick");
     // Tombstone: the entity is still in the list (ids stay stable),
     // out of play — and the boar, its victim gone, walks home.
-    assert_eq!(sim.entities().len(), 21); // M7 package size
+    assert_eq!(sim.entities().len(), 24); // M7 package size + AI-08 pack
     let recovered = run_until(&mut sim, 8000, |s| {
         let b = ent(s, 13);
         b.aggro_target.is_none() && b.hp == I16F16::from_num(75)
@@ -410,10 +412,54 @@ fn build_barracks_and_archer(sim: &mut Sim) {
                 })
             })
         };
+        // AI-08 (2026-10-22, landing): wolves hunt lumberjacks —
+        // on seed 31 the densest woodline's forest slopes toward
+        // the pack, and the pack killed both choppers before the
+        // Range went up (its builder among them, so the anchor
+        // search found a dead builder and no buildable cell).
+        // The pick must be safe as a CLUSTER, not just at the
+        // trunk: a chopper retargets to the nearest tree within
+        // RETARGET_RADIUS (12 wu) each time its trunk depletes,
+        // so a long gather drifts up to 12 wu per felled tree
+        // toward the pack. A candidate counts as wolf-safe when
+        // it and every tree within three hops (36 wu) stand at
+        // least 60 wu from every wolf post (sight is 48). On
+        // seed 31 that steers the pick to the northern forest,
+        // as a DE player would choose. Falls back to the plain
+        // pick if no candidate qualifies.
+        let wolf_posts: Vec<(f64, f64)> = sim
+            .entities()
+            .iter()
+            .filter(|e| e.kind == EntityKind::Wolf)
+            .map(|e| (f(e.pos_x), f(e.pos_y)))
+            .collect();
+        let post_dist = |t: &skirmish_sim::ResourceNode| {
+            wolf_posts
+                .iter()
+                .map(|(wx, wy)| {
+                    let dx = f(t.pos_x) - wx;
+                    let dy = f(t.pos_y) - wy;
+                    dx * dx + dy * dy
+                })
+                .fold(f64::INFINITY, f64::min)
+        };
+        let wolf_safe = |t: &skirmish_sim::ResourceNode| {
+            trees.iter().all(|o| {
+                let dx = f(o.pos_x) - f(t.pos_x);
+                let dy = f(o.pos_y) - f(t.pos_y);
+                dx * dx + dy * dy > 36.0 * 36.0 || post_dist(o) >= 60.0 * 60.0
+            })
+        };
         let best = trees
             .iter()
-            .filter(|t| has_free_side(t) && neighbors(t) >= 3)
+            .filter(|t| has_free_side(t) && neighbors(t) >= 3 && wolf_safe(t))
             .max_by_key(|t| neighbors(t))
+            .or_else(|| {
+                trees
+                    .iter()
+                    .filter(|t| has_free_side(t) && neighbors(t) >= 3)
+                    .max_by_key(|t| neighbors(t))
+            })
             .expect("no forest edge tree");
         (best.id, cell_of(sim, best.pos_x, best.pos_y))
     };

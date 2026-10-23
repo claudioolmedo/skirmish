@@ -38,7 +38,7 @@ import render
 from render import DIRECTIONS, hex2rgb
 
 REGISTRY = ('villager', 'archer', 'militia', 'maa', 'scout',
-            'sheep', 'boar', 'deer', 'spearman', 'skirmisher')
+            'sheep', 'boar', 'deer', 'spearman', 'skirmisher', 'wolf')
 DEFAULT_CANVAS = (128, 128, 64, 110)  # cw, ch, ax, ay
 
 

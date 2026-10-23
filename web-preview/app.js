@@ -212,11 +212,11 @@ const KIND_SHEEP = 5;
 // play/i18n.js on every locale switch (refreshNames) — the
 // semantic ids index the string table (unit.<id>, building.<id>).
 const KIND_I18N = ['villager', 'townCenter', 'scout', 'militia', 'archer',
-  'sheep', 'boar', 'deer', 'manAtArms', 'spearman', 'skirmisher'];
+  'sheep', 'boar', 'deer', 'manAtArms', 'spearman', 'skirmisher', 'wolf'];
 let KIND_NAME = {
   0: 'Villager', 1: 'Town Center', 2: 'Scout Cavalry', 3: 'Militia',
   4: 'Archer', 5: 'Sheep', 6: 'Boar', 7: 'Deer', 8: 'Man-at-Arms',
-  9: 'Spearman', 10: 'Skirmisher',
+  9: 'Spearman', 10: 'Skirmisher', 11: 'Wolf',
 };
 // Selection-panel portraits per unit kind (SVG symbol ids in
 // play/index.html).
@@ -1055,6 +1055,7 @@ const DIR_ART_SPEC = {
   sheep: { states: ['idle', 'walk', 'graze'], cell: 128, ax: 64, ay: 110, mask: false },
   boar: { states: ['idle', 'walk', 'graze'], cell: 128, ax: 64, ay: 110, mask: false },
   deer: { states: ['idle', 'walk', 'graze'], cell: 128, ax: 64, ay: 110, mask: false },
+  wolf: { states: ['idle', 'walk', 'attack'], cell: 128, ax: 64, ay: 110, mask: false },
 };
 const DIR_ART = { img: {}, mask: {}, red: {}, settled: {}, loaded: false, settledPromise: null };
 const DIR_PC_RED = [0xd2, 0x34, 0x2c]; // red player's base (blue #2e6fd8 is native)
@@ -7474,6 +7475,57 @@ function drawDeer(i, wx, wy) {
   }
 }
 
+// The wolf's directional-sheet action (AI-08): walk while it
+// moves, the lunge while it stands beside a foe (the same
+// adjacency inference the footmen use), idle at its post
+// otherwise. Wolves hold their ground — no graze cycle.
+function dirWolfAct(i, wx, wy) {
+  const pose = animalPoseFor(i, wx, wy);
+  if (pose.moving) return { action: 'walk', dir: pose.dir };
+  if (foeNearUnit(i, wx, wy)) return { action: 'attack', dir: pose.dir };
+  return { action: 'idle', dir: pose.dir };
+}
+
+function drawWolf(i, wx, wy) {
+  const [sx, sy] = worldToScreen(wx, wy);
+  const u = camS;
+  shadow(sx, sy, 1.1 * u);
+  if (selection.has(i)) drawSelRing(sx, sy, 1.4);
+  if (drawDirUnit('wolf', dirWolfAct(i, wx, wy), sx, sy)) return;
+  legs(sx, sy, u, [-0.6, -0.2, 0.4, 0.75], '#43464c');
+  ctx.fillStyle = '#6e7278'; // lean grey body
+  ctx.beginPath();
+  ctx.ellipse(sx, sy - 0.95 * u, 1.15 * u, 0.52 * u, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#43464c'; // dark saddle
+  ctx.beginPath();
+  ctx.ellipse(sx - 0.05 * u, sy - 1.24 * u, 0.85 * u, 0.28 * u, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#5a5e63'; // bushy tail, carried low
+  ctx.lineWidth = 0.34 * u;
+  ctx.beginPath();
+  ctx.moveTo(sx - 1.05 * u, sy - 1.0 * u);
+  ctx.lineTo(sx - 1.55 * u, sy - 0.55 * u);
+  ctx.stroke();
+  ctx.fillStyle = '#676b70'; // head
+  ctx.beginPath();
+  ctx.ellipse(sx + 1.25 * u, sy - 1.25 * u, 0.42 * u, 0.3 * u, 0.25, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#b4b8bd'; // pale muzzle
+  ctx.beginPath();
+  ctx.ellipse(sx + 1.62 * u, sy - 1.15 * u, 0.24 * u, 0.16 * u, 0.25, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#43464c'; // pointed ears
+  for (const s of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(sx + (1.02 + 0.15 * s) * u, sy - 1.46 * u);
+    ctx.lineTo(sx + (1.10 + 0.15 * s) * u, sy - 1.78 * u);
+    ctx.lineTo(sx + (1.22 + 0.15 * s) * u, sy - 1.44 * u);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
 // --- Unit animation art (UNIT_ART sets) -----------------------------
 // Same inference model as the animals: the renderer gets positions
 // every frame and no velocity or order state, so movement/facing
@@ -9294,7 +9346,7 @@ function draw() {
   // an HP bar above it.
   const UNIT_DRAW = [drawVillager, null, drawScout, drawMilitia, drawArcher,
     drawSheep, drawBoar, drawDeer, drawManAtArms, // 8: Man-at-Arms (M6)
-    drawSpearman, drawSkirmisher]; // 9/10: the Feudal base units
+    drawSpearman, drawSkirmisher, drawWolf]; // 9/10: Feudal base units, 11: Wolf (AI-08)
   for (let i = 0; i < count; i++) {
     const wx = pos[i * 2];
     const wy = pos[i * 2 + 1];

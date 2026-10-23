@@ -329,10 +329,36 @@ fn woodline_tree(sim: &Sim) -> u32 {
             })
         })
     };
-    trees
+    // AI-08 (2026-10-22): wolves hunt lumberjacks — DE behaviour,
+    // and on seed 101 the densest woodline stands inside a wolf
+    // pack's range, so the pack kills the choppers before any
+    // long gather finishes. A DE player picks the forest the
+    // wolves are not watching; do the same: among workable
+    // woodlines prefer one outside every wolf's sight (48 wu)
+    // plus a margin, falling back to the plain pick if none is.
+    let wolf_posts: Vec<(f64, f64)> = sim
+        .entities()
+        .iter()
+        .filter(|e| e.kind == EntityKind::Wolf)
+        .map(|e| (e.pos_x.to_num::<f64>(), e.pos_y.to_num::<f64>()))
+        .collect();
+    let wolf_safe = |t: &skirmish_sim::ResourceNode| {
+        wolf_posts.iter().all(|(wx, wy)| {
+            let dx = t.pos_x.to_num::<f64>() - wx;
+            let dy = t.pos_y.to_num::<f64>() - wy;
+            dx * dx + dy * dy >= 60.0 * 60.0
+        })
+    };
+    let candidates: Vec<_> = trees
         .iter()
         .filter(|t| workable(t) && neighbors(t) >= 3)
+        .copied()
+        .collect();
+    candidates
+        .iter()
+        .filter(|t| wolf_safe(t))
         .max_by_key(|t| neighbors(t))
+        .or_else(|| candidates.iter().max_by_key(|t| neighbors(t)))
         .expect("no workable woodline tree")
         .id
 }
@@ -341,11 +367,18 @@ fn woodline_tree(sim: &Sim) -> u32 {
 /// Camp (the requirement pair), berries until 500 food, click up.
 /// (Mirrors tech.rs's `reach_feudal`.)
 fn reach_feudal(sim: &mut Sim) {
-    raise(sim, 2, BuildingKind::Mill, 21, 20);
-    // Lumber Camp anchor (16, 20): the natural (18, 21) spot has a
-    // sheep standing on it, and placement refuses to cover a
-    // standing unit (M6 validate_build rule).
-    raise(sim, 3, BuildingKind::LumberCamp, 16, 20);
+    // AI-08 landing adaptation (2026-10-22): the historical anchors
+    // (21, 20) / (16, 20) stand ~55 cells south-west of seed 101's
+    // Town Center, and since AI-08 the walk there crosses the wolf
+    // pack's ground — the pack killed both builders on the commute
+    // (verified by trace: villagers 1 and 3 dead at the pack's LoS
+    // edge, the Stable's builder among them). A DE player builds
+    // beside his TC, not across a wolf pack: the pair now stands
+    // by the TC (36, 76) — the Mill at (39, 77) beside the berry
+    // patch (41–43, 78–80), the Lumber Camp at (30, 73) toward the
+    // woodline side. Both cells verified buildable on this seed.
+    raise(sim, 2, BuildingKind::Mill, 39, 77);
+    raise(sim, 3, BuildingKind::LumberCamp, 30, 73);
     let berry = first_node(sim, NodeKind::BerryBush);
     sim.push_command(Command::Gather {
         entity: 1,
@@ -395,7 +428,10 @@ fn a_trained_scout_is_eligible_and_explores() {
         });
     }
     wait_wood(&mut sim, 175);
-    raise(&mut sim, 1, BuildingKind::Barracks, 27, 20);
+    // AI-08 landing adaptation: same move as reach_feudal — the
+    // Barracks and Stable stand by the TC now, not across the
+    // wolf pack's ground. Cells verified buildable on seed 101.
+    raise(&mut sim, 1, BuildingKind::Barracks, 36, 80);
     // The Barracks spent the stockpile; refill for the Stable.
     let tree = woodline_tree(&sim);
     for id in 1..=3 {
@@ -405,7 +441,7 @@ fn a_trained_scout_is_eligible_and_explores() {
         });
     }
     wait_wood(&mut sim, 175);
-    raise(&mut sim, 1, BuildingKind::Stable, 27, 30);
+    raise(&mut sim, 1, BuildingKind::Stable, 29, 80);
     let stable = building_id(&sim, BuildingKind::Stable);
     let berry = first_live_node(&sim, NodeKind::BerryBush);
     sim.push_command(Command::Gather {

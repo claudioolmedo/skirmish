@@ -96,7 +96,11 @@ fn run_until(sim: &mut Sim, cap: u64, mut done: impl FnMut(&Sim) -> bool) -> boo
 
 // Open, verified-free anchors used across the tests (checked against
 // the static layout: no walls, no nodes, not the Town Center cell):
-//   house plot (18, 27) — west field, south of the berries
+//   house plot (30, 68) — beside seed 31's Town Center (26, 71);
+//     moved from (18, 27) at the AI-08 landing (2026-10-22): the
+//     walk to the old south-west plot crosses the wolf pack's
+//     ground on this seed and the pack killed the lone builder
+//     on the way — the foundation stood forever unfinished.
 //   farm plot  (20, 27) — two cells east, no anchor overlap with (18, 27)
 
 #[test]
@@ -107,7 +111,7 @@ fn house_completes_raises_cap_and_blocks_its_footprint() {
     assert_eq!(sim.population_cap(), 5, "Town Center alone gives +5");
 
     let start_wood = sim.stockpile().amount(ResourceKind::Wood);
-    build(&mut sim, 1, BuildingKind::House, 18, 27);
+    build(&mut sim, 1, BuildingKind::House, 30, 68);
     sim.tick(); // placement applied here
     assert_eq!(
         sim.stockpile().amount(ResourceKind::Wood),
@@ -124,15 +128,15 @@ fn house_completes_raises_cap_and_blocks_its_footprint() {
         "an unfinished house gives no room yet"
     );
     // The footprint cells are blocked for pathing immediately.
-    for (cx, cy) in [(18, 27), (19, 27), (18, 28), (19, 28)] {
+    for (cx, cy) in [(30, 68), (31, 68), (30, 69), (31, 69)] {
         assert!(
             sim.grid().is_dynamic(cx, cy),
             "house cell ({cx},{cy}) not blocked"
         );
     }
     // A path across the plot must detour around the footprint.
-    let from = sim.grid().cell_center(16, 27);
-    let to = sim.grid().cell_center(22, 27);
+    let from = sim.grid().cell_center(28, 68);
+    let to = sim.grid().cell_center(34, 68);
     let path = sim
         .grid()
         .find_path(from, to)
@@ -140,7 +144,7 @@ fn house_completes_raises_cap_and_blocks_its_footprint() {
     for &(wx, wy) in &path {
         let cell = sim.grid().world_to_cell(wx, wy);
         assert!(
-            ![(18, 27), (19, 27), (18, 28), (19, 28)].contains(&cell),
+            ![(30, 68), (31, 68), (30, 69), (31, 69)].contains(&cell),
             "path crosses the house footprint at {cell:?}"
         );
     }
