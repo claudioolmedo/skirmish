@@ -32,9 +32,12 @@
 //! Gaia behavior lives here too: sheep capture by proximity, the
 //! boar's aggro → chase → give-up → return → heal loop (OPENING-SPEC
 //! §2.2), and deer flight. Villagers never auto-attack and do not
-//! flee (M5 AI polish); idle Militia/Archers auto-acquire boars in
-//! LoS (CMB-08 — herdables and deer are never auto-targeted, and the
-//! starting Scout's Stand Ground default means it does not acquire).
+//! flee (M5 AI polish); idle military units auto-acquire by the
+//! CMB-08 chain (herdables and deer are never auto-targeted),
+//! stance-gated since CMB-09/10/11: No Attack never acquires,
+//! Stand Ground (the starting Scout's Dark Age default) acquires
+//! only inside attack range, Defensive chases only within its
+//! leash, and units on attack-move or patrol acquire while walking.
 
 use fixed::types::I16F16;
 
@@ -57,6 +60,15 @@ pub const MELEE_REACH: I16F16 = I16F16::from_bits(196_608); // 3.0
 /// gives no number; 1 tile is the tuned constant that reads as
 /// "next to it" (rulebook AI-06).
 pub const CAPTURE_RANGE: I16F16 = I16F16::from_bits(262_144); // 4.0
+/// How far a Defensive unit (CMB-09) may stray from its post
+/// while chasing an auto-acquired target before it breaks off
+/// and returns: 12.0 world units = 3 tiles. TUNED (UNVERIFIED):
+/// the wiki says only that a defensive unit "will follow for a
+/// certain number of tiles before returning to their original
+/// position" — no public source pins the number (the same
+/// disclosure as `CAPTURE_RANGE` above). 3 tiles keeps the chase
+/// inside the unit's own LoS (4 tiles) from its post.
+pub const DEFENSIVE_LEASH: I16F16 = I16F16::from_bits(786_432); // 12.0
 /// An un-locked boar gives up when it is this far from its target…
 const GIVE_UP_CHASE: I16F16 = I16F16::from_bits(1_310_720); // 20.0
 /// …or when its target is this far from the boar's post ("a short
@@ -73,6 +85,13 @@ const HIT_SLACK: I16F16 = I16F16::from_bits(49_152); // 0.75
 const CHASE_REPATH: I16F16 = I16F16::from_bits(196_608); // 3.0
 /// How long a deer keeps fleeing after a hit.
 const DEER_FLEE_TICKS: u64 = 90;
+/// How close a non-Gaia unit must come to restart a deer's flee
+/// window without touching it — AI-07's "or approaches" half, the
+/// deer push (Study #3 §c.1). ~2 tiles. The wiki documents the
+/// behaviour but gives no number (Hunt: "They flee when approached
+/// by any non-Gaia unit and continue to do so if pursued"), so the
+/// radius is a tuning constant (UNVERIFIED numerically).
+const DEER_PUSH_RANGE: I16F16 = I16F16::from_bits(524_288); // 8.0
 
 /// One projectile in flight (PRJ-01): spawn point, impact point,
 /// spawn/impact ticks, the intended target, and a snapshot of the
@@ -192,12 +211,24 @@ pub fn compute_damage_elev(
 /// the unit tables). Everything else is inert — a building never
 /// moves, shoots, or trains through this view.
 pub(crate) fn building_spec(kind: BuildingKind, owner_age: crate::tech::Age) -> UnitSpec {
+    // BLD-13: wall segments additionally belong to the Walls and
+    // Gates class (the reference's membership for the Palisade
+    // Wall, on top of All/Standard Buildings).
+    let classes = if kind.is_wall() {
+        cls::mask(&[
+            cls::ALL_BUILDINGS,
+            cls::STANDARD_BUILDINGS,
+            cls::WALLS_AND_GATES,
+        ])
+    } else {
+        cls::mask(&[cls::ALL_BUILDINGS, cls::STANDARD_BUILDINGS])
+    };
     UnitSpec {
         max_hp: kind.max_hp_at(owner_age),
         attacks: &[],
         armor_melee: kind.armor_melee_at(owner_age),
         armor_pierce: kind.armor_pierce_at(owner_age),
-        classes: cls::mask(&[cls::ALL_BUILDINGS, cls::STANDARD_BUILDINGS]),
+        classes,
         range_max: I16F16::ZERO,
         range_min: I16F16::ZERO,
         reload_ticks: 0,
@@ -473,6 +504,7 @@ impl Sim {
     /// Deer flight: while the flee timer runs, keep a move order away
     /// from where the attack came from (re-issued when it completes).
     fn deer_ai(&mut self, idx: usize) {
+        self.deer_proximity_flee(idx);
         if self.tick >= self.entities[idx].flee_until || self.entities[idx].order.is_some() {
             return;
         }
@@ -490,8 +522,46 @@ impl Sim {
         self.set_move_order(idx, dest_x, dest_y);
     }
 
-    /// Auto-acquisition (CMB-08): idle Militia-line units and Archers of *any*
-    /// player engage targets inside their LoS by the rule's
+    /// Proximity flight (AI-07, 2026-10-22 — Study #3's top finding):
+    /// a deer also flees a unit that merely APPROACHES it, which is
+    /// what makes pushing deer toward the Town Center with a scout
+    /// work in DE (wiki, Hunt: regular huntables "flee when
+    /// approached by any non-Gaia unit and continue to do so if
+    /// pursued"; "units such as Scout Cavalry" herd them "in the
+    /// direction of Town Centers and Mills"). The nearest mobile
+    /// non-Gaia unit inside DEER_PUSH_RANGE restarts the same flee
+    /// window the damage path sets, away from that unit's current
+    /// position — no new state, no new pathing. Runs before the
+    /// flee check so a pursuer staying on the deer's tail keeps
+    /// refreshing the window (the push), while a unit that stops
+    /// nearby lets the deer settle once it has stepped out of
+    /// range. Buildings never scare deer (the Town Center is an
+    /// entity, excluded by kind — deer are pushed TOWARD it), and
+    /// Gaia animals never do (owner check), so boars and sheep are
+    /// untouched by construction.
+    fn deer_proximity_flee(&mut self, idx: usize) {
+        let e = &self.entities[idx];
+        let (px, py) = (e.pos_x, e.pos_y);
+        let mut best: Option<(I16F16, I16F16, I16F16)> = None; // (dist, x, y)
+        for u in &self.entities {
+            if u.dead || u.owner == OWNER_GAIA || u.kind == EntityKind::TownCenter {
+                continue;
+            }
+            let d = steer::vec_len(u.pos_x - px, u.pos_y - py);
+            if d <= DEER_PUSH_RANGE && best.map_or(true, |(bd, _, _)| d < bd) {
+                best = Some((d, u.pos_x, u.pos_y));
+            }
+        }
+        if let Some((_, tx, ty)) = best {
+            let e = &mut self.entities[idx];
+            e.flee_until = self.tick + DEER_FLEE_TICKS;
+            e.flee_from_x = tx;
+            e.flee_from_y = ty;
+        }
+    }
+
+    /// Auto-acquisition (CMB-08): idle military units of *any*
+    /// player engage targets inside their sight by the rule's
     /// priority chain: (1) the closest attackable enemy *unit*;
     /// (2) if none, the enemy Town Center; (3) if none, the
     /// closest other enemy building (Farms are never auto-targeted;
@@ -501,9 +571,18 @@ impl Sim {
     /// 2026-10-22 (before that, buildings were never auto-acquired
     /// and razing was always an explicit order). Herdables and deer
     /// are never auto-targeted (killing them is always an explicit
-    /// order), villagers never auto-attack, and the Scout's Dark
-    /// Age default stance is Stand Ground (CMB-09), so it does not
-    /// acquire either.
+    /// order), and villagers never auto-attack.
+    ///
+    /// CMB-09/10/11 (2026-10-22): the chain is stance-gated. A
+    /// No Attack unit never acquires; a Stand Ground unit acquires
+    /// only inside its attack range (it will fight what reaches
+    /// it, never ride out — the starting Scout's Dark Age default
+    /// is Stand Ground, so it acquires only at point blank); other
+    /// stances acquire inside LoS. A unit under an attack-move or
+    /// patrol order acquires WHILE WALKING (that is the orders'
+    /// whole point); a unit under any other move order does not.
+    /// Every acquisition is marked `attack_auto` — the chase gates
+    /// in the attack steps read the provenance.
     fn acquire_targets(&mut self) {
         for idx in 0..self.entities.len() {
             let e = &self.entities[idx];
@@ -511,16 +590,31 @@ impl Sim {
                 || !is_player_owner(e.owner)
                 || !matches!(
                     e.kind,
-                    EntityKind::Militia | EntityKind::ManAtArms | EntityKind::Archer
+                    EntityKind::Militia
+                        | EntityKind::ManAtArms
+                        | EntityKind::Archer
+                        | EntityKind::ScoutCavalry
                 )
                 || e.attack_target.is_some()
                 || e.attack_building.is_some()
-                || e.order.is_some()
+                || e.stance == crate::Stance::NoAttack
+                || (e.order.is_some() && e.attack_move.is_none() && e.patrol.is_empty())
             {
                 continue;
             }
             let owner = e.owner;
             let spec = self.unit_stats(idx); // M6: the owner's effective LoS
+            // CMB-09: Stand Ground's acquisition radius is its
+            // attack range, not its LoS.
+            let radius = if e.stance == crate::Stance::StandGround {
+                if spec.range_max > I16F16::ZERO {
+                    spec.range_max
+                } else {
+                    MELEE_REACH
+                }
+            } else {
+                spec.los
+            };
             let (px, py) = (e.pos_x, e.pos_y);
             let mut best: Option<(i64, u32)> = None; // (distance² bits, id)
             for t in &self.entities {
@@ -535,7 +629,7 @@ impl Sim {
                     continue;
                 }
                 let d = steer::vec_len(t.pos_x - px, t.pos_y - py);
-                if d > spec.los {
+                if d > radius {
                     continue;
                 }
                 let db = d.to_bits() as i64;
@@ -549,6 +643,7 @@ impl Sim {
                 e.attack_target = Some(tid);
                 e.attack_engaged = false;
                 e.strike_tick = None;
+                e.attack_auto = true;
                 continue;
             }
             // CMB-08 step (2): no enemy unit in sight — the enemy
@@ -566,7 +661,7 @@ impl Sim {
                     continue;
                 }
                 let d = steer::vec_len(t.pos_x - px, t.pos_y - py);
-                if d > spec.los {
+                if d > radius {
                     continue;
                 }
                 let db = d.to_bits() as i64;
@@ -580,6 +675,7 @@ impl Sim {
                 e.attack_target = Some(tid);
                 e.attack_engaged = false;
                 e.strike_tick = None;
+                e.attack_auto = true;
                 continue;
             }
             // CMB-08 step (3): other enemy buildings, closest first
@@ -596,7 +692,7 @@ impl Sim {
                     continue;
                 }
                 let d = steer::vec_len(b.pos_x - px, b.pos_y - py);
-                if d > spec.los {
+                if d > radius {
                     continue;
                 }
                 let db = d.to_bits() as i64;
@@ -610,6 +706,7 @@ impl Sim {
                 e.attack_building = Some(bid);
                 e.attack_engaged = false;
                 e.strike_tick = None;
+                e.attack_auto = true;
             }
         }
     }
@@ -721,6 +818,33 @@ impl Sim {
                 }
             }
         } else {
+            // CMB-09: stance gates on AUTO-ACQUIRED targets only —
+            // an explicit order (attack_auto false) is followed to
+            // the death in every stance. Stand Ground never
+            // chases: out of range ends the engagement. Defensive
+            // breaks off at the leash and walks back to its post.
+            if self.entities[idx].attack_auto && is_player_owner(self.entities[idx].owner) {
+                match self.entities[idx].stance {
+                    crate::Stance::StandGround => {
+                        self.entities[idx].clear_combat();
+                        return;
+                    }
+                    crate::Stance::Defensive => {
+                        let e = &self.entities[idx];
+                        let d = steer::vec_len(
+                            e.pos_x - e.stance_anchor_x,
+                            e.pos_y - e.stance_anchor_y,
+                        );
+                        if d >= DEFENSIVE_LEASH {
+                            let (ax, ay) = (e.stance_anchor_x, e.stance_anchor_y);
+                            self.entities[idx].clear_combat();
+                            self.set_move_order(idx, ax, ay);
+                            return;
+                        }
+                    }
+                    _ => {}
+                }
+            }
             // Chase: refresh the internal move order when the victim
             // has drifted from where we are headed (CMB-06: chasing is
             // mechanism, not a player order).
@@ -877,10 +1001,31 @@ impl Sim {
             EntityKind::Militia | EntityKind::Archer => {
                 // Retaliation: an idle military unit of either
                 // player answers its attacker (M5). (Villagers never
-                // auto-attack — task rule.)
+                // auto-attack — task rule.) CMB-09: the answer is
+                // stance-gated — a No Attack unit never retaliates,
+                // and a Stand Ground unit answers only an attacker
+                // already inside its attack range (it will not ride
+                // out to one). The target is marked auto-acquired:
+                // the chase gates apply to it like any other.
                 let t = &self.entities[ti];
                 if is_player_owner(t.owner) && t.attack_target.is_none() && t.order.is_none() {
-                    self.entities[ti].attack_target = Some(attacker_id);
+                    let answers = match t.stance {
+                        crate::Stance::NoAttack => false,
+                        crate::Stance::StandGround => {
+                            let range = if tspec.range_max > I16F16::ZERO {
+                                tspec.range_max
+                            } else {
+                                MELEE_REACH
+                            };
+                            steer::vec_len(t.pos_x - threat.0, t.pos_y - threat.1) <= range
+                        }
+                        _ => true,
+                    };
+                    if answers {
+                        let e = &mut self.entities[ti];
+                        e.attack_target = Some(attacker_id);
+                        e.attack_auto = true;
+                    }
                 }
             }
             _ => {}
@@ -968,6 +1113,32 @@ impl Sim {
                 }
             }
         } else {
+            // CMB-09: stance gates on auto-acquired targets, as in
+            // attack_step — a Stand Ground unit never rides out to
+            // a building, and a Defensive unit breaks off at its
+            // leash and returns to post.
+            if self.entities[idx].attack_auto && is_player_owner(self.entities[idx].owner) {
+                match self.entities[idx].stance {
+                    crate::Stance::StandGround => {
+                        self.entities[idx].clear_combat();
+                        return;
+                    }
+                    crate::Stance::Defensive => {
+                        let e = &self.entities[idx];
+                        let d = steer::vec_len(
+                            e.pos_x - e.stance_anchor_x,
+                            e.pos_y - e.stance_anchor_y,
+                        );
+                        if d >= DEFENSIVE_LEASH {
+                            let (ax, ay) = (e.stance_anchor_x, e.stance_anchor_y);
+                            self.entities[idx].clear_combat();
+                            self.set_move_order(idx, ax, ay);
+                            return;
+                        }
+                    }
+                    _ => {}
+                }
+            }
             // Chase the nearest standable ring cell; re-path when the
             // current order no longer leads beside the footprint.
             // PRJ-08: a minimum-range attacker stands off at

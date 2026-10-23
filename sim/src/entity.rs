@@ -179,6 +179,55 @@ impl EntityKind {
 /// orders are player intent, so — like `Command` — they carry world
 /// points and ids, never paths; the path is recomputed when the
 /// order executes.
+/// Unit stance (CMB-09): a persistent per-unit setting on military
+/// units — it governs *automatic* engagement only (acquisition and
+/// chase); explicit orders always override it. Set by the `SetStance`
+/// command; never a task, so it survives orders and idle time.
+///
+/// Evidence (AoE wiki, "Unit stance", fetched 2026-10-22): Aggressive
+/// "units move without limitation and will follow enemy targets in
+/// LOS and range until they are killed"; Defensive "units attack any
+/// unit in their range, and will follow for a certain number of tiles
+/// before returning to their original position"; Stand Ground "units
+/// do not move to attack but will attack any enemy in their range";
+/// No Attack "units do not automatically attack unless ordered".
+/// The wiki's default is Aggressive for military units — the one
+/// exception in this game is the starting Scout Cavalry, whose Dark
+/// Age default is Stand Ground (MECHANICS-STUDY §9.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Stance {
+    Aggressive = 0,
+    Defensive = 1,
+    StandGround = 2,
+    NoAttack = 3,
+}
+
+impl Stance {
+    /// Stable tag for the state hash, the WASM ABI, and the netplay
+    /// vocabulary: 0 aggressive, 1 defensive, 2 stand ground,
+    /// 3 no attack.
+    pub fn tag(self) -> u8 {
+        self as u8
+    }
+
+    pub fn from_tag(tag: u8) -> Option<Stance> {
+        match tag {
+            0 => Some(Stance::Aggressive),
+            1 => Some(Stance::Defensive),
+            2 => Some(Stance::StandGround),
+            3 => Some(Stance::NoAttack),
+            _ => None,
+        }
+    }
+}
+
+impl Default for Stance {
+    fn default() -> Self {
+        Stance::Aggressive
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum QueuedOrder {
     /// Walk to a world point.
@@ -201,11 +250,21 @@ pub enum QueuedOrder {
     /// repair whose target has been destroyed, completed its
     /// repair, or was never valid is dropped.
     Repair { building: u32 },
+    /// Attack-move to a world point (CMB-10): walk there, engaging
+    /// whatever enters the unit's sight en route (CMB-08 chain),
+    /// then resume the walk and hold at the destination.
+    AttackMove { x: I16F16, y: I16F16 },
+    /// Patrol toward a world point (CMB-11): installs a loop
+    /// between the unit's position at execution and the point. When
+    /// the entity already patrols, queueing APPENDS the point to
+    /// the loop instead of queueing behind it (the loop never
+    /// ends, so a queued patrol could never execute otherwise).
+    Patrol { x: I16F16, y: I16F16 },
 }
 
 impl QueuedOrder {
     /// Stable tag for the state hash: 0 move, 1 gather, 2 attack,
-    /// 3 build, 4 repair.
+    /// 3 build, 4 repair, 5 attack-move, 6 patrol.
     pub fn tag(self) -> u8 {
         match self {
             QueuedOrder::Move { .. } => 0,
@@ -213,6 +272,8 @@ impl QueuedOrder {
             QueuedOrder::Attack { .. } => 2,
             QueuedOrder::Build { .. } => 3,
             QueuedOrder::Repair { .. } => 4,
+            QueuedOrder::AttackMove { .. } => 5,
+            QueuedOrder::Patrol { .. } => 6,
         }
     }
 }
@@ -469,6 +530,39 @@ pub struct Entity {
     /// wander step initializes it from the entity id on first sight.
     /// Owned sheep never wander; inert for other kinds.
     pub wander_until: u64,
+
+    // --- Orders & stances state (CMB-09/10/11; inert zeros elsewhere) ---
+    /// The unit's stance (CMB-09). Military kinds only — the
+    /// `SetStance` command gates on `EntityKind::is_military`.
+    /// Plain data — part of the hashed state.
+    pub stance: Stance,
+    /// The post a Defensive unit leashes to and returns to
+    /// (CMB-09): set when the stance is issued, and moved to the
+    /// resolved destination of each explicit move order. Written
+    /// to the hash only for Defensive units.
+    pub stance_anchor_x: I16F16,
+    pub stance_anchor_y: I16F16,
+    /// Provenance of the current combat target (CMB-09): true when
+    /// the target was set by the acquisition chain or by retaliation
+    /// (the unit chose it itself, so its stance governs the chase);
+    /// false for explicit player orders and for boar aggro (an
+    /// ordered attack is followed to the death, as in DE). Plain
+    /// data — part of the hashed state.
+    pub attack_auto: bool,
+    /// Attack-move destination (CMB-10): a standing order — walk
+    /// there, engaging what enters sight en route, then hold. The
+    /// destination is the *resolved* point (after the blocked-cell
+    /// snap), mirroring `apply_move`. Cleared on arrival and by any
+    /// other order. Plain data — part of the hashed state.
+    pub attack_move: Option<(I16F16, I16F16)>,
+    /// Patrol loop (CMB-11): the points the unit walks forever,
+    /// engaging en route like an attack-move; the first point is
+    /// the position where the patrol was issued, later points are
+    /// appended by further patrol orders. Empty = not patrolling.
+    /// Plain data — part of the hashed state.
+    pub patrol: Vec<(I16F16, I16F16)>,
+    /// Index into `patrol` of the leg the unit heads to next.
+    pub patrol_next: usize,
 }
 
 impl Entity {
@@ -513,6 +607,13 @@ impl Entity {
             auto_explore: false,
             auto_target: None,
             wander_until: 0,
+            stance: Stance::default(),
+            stance_anchor_x: pos_x,
+            stance_anchor_y: pos_y,
+            attack_auto: false,
+            attack_move: None,
+            patrol: Vec::new(),
+            patrol_next: 0,
         }
     }
 
@@ -541,6 +642,8 @@ impl Entity {
         self.attack_building = None;
         self.strike_tick = None;
         self.attack_engaged = false;
+        // The engagement is over, so its provenance is too (CMB-09).
+        self.attack_auto = false;
     }
 }
 

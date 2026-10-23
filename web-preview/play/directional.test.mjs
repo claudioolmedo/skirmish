@@ -26,7 +26,7 @@ function pngSize(path) {
 // (walk 8 -> 12, work/attack/shoot 4 -> 8, gallop 8 -> 12); the
 // die sheets live in DIE_SHEETS below (bigger cells).
 const SHEETS = {
-  villager: { idle: 4, walk: 12, gather: 8, carry: 12, build: 8 },
+  villager: { idle: 4, walk: 12, gather: 8, carry: 12, build: 8, attack: 4 },
   archer: { idle: 4, walk: 12, shoot: 8 },
   militia: { idle: 4, walk: 12, attack: 8 },
   maa: { idle: 4, walk: 12, attack: 8 },
@@ -55,21 +55,23 @@ for (const [unit, states] of Object.entries(SHEETS)) {
   }
 }
 
-test('scout sheets: 160px cells (idle 4, gallop 12) + masks', () => {
+test('scout sheets: 160px cells (idle 4, gallop 12, attack 4) + masks', () => {
   assert.deepEqual(pngSize(join(sheetsDir, 'scout-idle.png')), [4 * 160, 8 * 160]);
   assert.deepEqual(pngSize(join(sheetsDir, 'scout-gallop.png')), [12 * 160, 8 * 160]);
+  assert.deepEqual(pngSize(join(sheetsDir, 'scout-attack.png')), [4 * 160, 8 * 160]);
   assert.ok(existsSync(join(sheetsDir, 'scout-idle-pcmask.png')));
   assert.ok(existsSync(join(sheetsDir, 'scout-gallop-pcmask.png')));
+  assert.ok(existsSync(join(sheetsDir, 'scout-attack-pcmask.png')));
 });
 
 // Die sheets (animation pass 2026-10-22): 6 fall frames on the
-// bigger death cells (foot units 232x208, scout 256x216 — the
+// bigger death cells (foot units 232x208, scout 304x232 — the
 // STATE_CANVAS values in tools/sprite-pipeline/models/*.py),
 // each with its player-color mask twin.
 const DIE_SHEETS = {
   villager: [232, 208], archer: [232, 208], militia: [232, 208],
   maa: [232, 208], spearman: [232, 208], skirmisher: [232, 208],
-  scout: [256, 216],
+  scout: [304, 232],
 };
 for (const [unit, [cw, ch]] of Object.entries(DIE_SHEETS)) {
   test(`${unit}-die sheet: 6 frames x 8 directions on the death cell`, () => {

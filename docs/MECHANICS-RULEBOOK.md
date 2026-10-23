@@ -968,7 +968,10 @@ farm case. Today: farm exists with 175 food and the retire-on-deplete
 flow; footprint is 2×2 cells (BLD-12 note). Horse Collar shipped
 2026-10-22: farms raised by an owner holding the tech are stamped
 250 at creation, and the completion sweep tops up the owner's
-standing farms by 75 × (remaining ⁄ 175)² exactly. Heavy Plow and
+standing farms by 75 × (remaining ⁄ 175)², rounded up to whole
+food — the articles' examples all round the result up (+19 at
+half) though no rounding rule is stated; the inference flagged
+above is followed in the sim. Heavy Plow and
 Crop Rotation wait for their Ages. · *Status:* **DIFFERS** (core
 farm loop and Horse Collar match; footprint, work-rate cap, and
 the reseed queue pending M6/M7 conventions).
@@ -1165,14 +1168,103 @@ already reserve from placement, which is the reference behavior.
 *Source:* GAP 4.1; Skirmish II M2.5. · *Impl:* shipped — houses write the
 dynamic grid layer, farms never do. · *Status:* **MATCHES**.
 
-**BLD-13 — Walls and gates.** Wall segments are solid to everyone. A gate
-opens automatically for its owner and their allies and never for enemies;
-units pass only while it is open. Walls are placed by dragging a line of
-segments (a client gesture producing many build orders).
-*Source:* GAP 4.12, 4.13. · *Impl:* gate state derives from (owner,
-proximity of passable units) at path time — the pathing grid treats gates
-as conditionally blocked per querying player's diplomacy (M8 diplomacy
-table). · *Status:* **MISSING**.
+**BLD-13 — Walls and gates.** Wall segments are solid to everyone —
+owner and enemies alike; there is no friendly pass-through (that is
+the gate's job). A gate opens automatically for its owner and their
+allies and never for enemies; units pass only while it is open.
+Walls are placed by dragging a line of segments.
+*The Palisade Wall row (current DE, Age of Empires II wiki,
+"Palisade Wall" + the "Building" master table, retrieved
+2026-10-22):* Dark Age; **3 wood per segment** (2 before DE update
+56005); **build 7 s** (5 s in The Age of Kings, 6 s from The
+Forgotten, 7 s since update 42848 — the Building table's stale
+"CT 6" loses to the infobox + changelog); **HP 150 Dark / 250
+Feudal / 250 Castle / 250 Imperial** (the Dark 150 came with
+update 44725; before it, 250 in all ages); **armor 2 melee /
+5 pierce** (pierce 2 in AoK, 5 since The Conquerors 1.0b);
+foundation armor in DE is 0/5 (update 42848); 1×1; LoS 2;
+classes All Buildings, Standard Buildings, Walls and Gates.
+Segments are individually selectable and deletable (generic
+building behavior, BLD-02 delete/refund applies). Walls do NOT
+count toward age-up building requirements (DE's requirement
+counts production/economic buildings; the Castle Age dossier
+records the same exclusion). Names: EN "Palisade Wall", ES
+"Empalizada" (wiki ES langlink), PT "Paliçada".
+*Impl:* shipped for walls (2026-10-22). A segment is a 1×1
+blocking building kind (tag 9) on the generic construction /
+repair / delete / refund systems — BLD-17 repair already
+iterates every building, so segments repair at the standard
+rate; the destroy path frees the cell; entombment displacement
+(BLD-05) applies on completion; VIC-04 scores its wood cost.
+Placement is one semantic command carrying the drag's two
+endpoints (`Command::BuildLine`); the sim expands the line and
+runs each segment through the ordinary `validate_build`: an
+invalid cell is skipped (a gap, never a partial charge), an
+unaffordable tail truncates the line, a cell holding our own
+unfinished segment resumes it, and the BLD-16 Town Center
+reserve rejects segments exactly like any placement. One
+builder is assigned to the first effective segment and walks
+the rest as queued Build orders in drag order. The client's
+ghost preview runs the identical expansion
+(`web-preview/play/walls.js`, pinned to the sim's by shared
+golden vectors in both test suites) with the same per-segment
+budget walk, and shows the placeable segment count + total
+cost, so preview and committed line are cell-identical.
+*The line rule (studied 2026-10-22, Claudio's live report —
+dragged segments landed scattered across different rows
+instead of following one line):* DE walls are 1×1 grid
+segments laid by dragging (wiki, "Building (Age of Empires
+II)" master table, retrieved 2026-10-22), and DE's pieces
+visually join into one fence when connected in line — a
+piece's appearance "changes to a middle section wall piece if
+that piece is joined by another Palisade Wall piece/Palisade
+Gate on the opposite sides" (wiki, "Palisade Wall (Age of
+Empires II)", Trivia, retrieved 2026-10-22). Completed
+diagonal connections block passage: the Siege Engineers'
+Aoe2Sheet knowledge base (community documentation, retrieved
+2026-10-22) records that units can pass through a diagonal
+gate's corners only "while they are being constructed" —
+the exception is the construction phase, not the finished
+line. DE's exact drag rasterization (which cells a given
+non-axis drag commits, and its tie-breaking) is published in
+no source found — **UNVERIFIED**; the expansion shipped
+first (integer Bresenham, one cell per major-axis step) was
+therefore an unsourced guess, and it failed the observable
+properties above: on a shallow drag its segments formed
+disjoint horizontal runs on different rows joined only at
+corner points (a 13×13 endpoint scan also found 9,096 of
+28,392 drags producing a different set when reversed). The
+expansion is now the SUPERCOVER of the segment between the
+two anchor cells' centers — every cell the segment passes
+through, walked by an exact-integer grid traversal: consecutive
+segments are always edge-adjacent (one continuous fence on one
+line, no gaps, no corner-only joints), an exact corner
+crossing fills the canonically-chosen side cell (smaller x —
+a function of the corner's unordered cell pair), so a
+reversed drag commits the identical SET, and the line always
+has 1 + |dx| + |dy| segments. Diagonal movement between two
+corner-touching blockers placed as separate clicks remains
+governed by the movement system's corner rules, as with any
+buildings — a dragged line itself no longer contains
+corner-only joints.
+Panel: the villager military page's last slot (S) — DE keeps
+walls on the military page's defensive row after the production
+buildings; no authoritative text source fixes DE's exact
+five-wide slot, so the position follows that documented grouping
+in our three-wide compression.
+*Divergence:* DE gives palisade foundations 0 melee armor; the
+sim applies the standing armor (2/5) during construction for
+every kind (BLD-05 models only the foundation HP line), so
+palisade foundations fight at 2/5 here.
+*Follow-on (out of scope, recorded):* the Palisade Gate exists
+in DE on the same line (240/400/400/400 HP, armor 2/4, 20 wood,
+30 s, 4×1 footprint, per the Building table); gate state would
+derive from (owner, proximity of passable units) at path time,
+the pathing grid treating gates as conditionally blocked per
+querying player's diplomacy (M8 diplomacy table).
+*Source:* GAP 4.12, 4.13; wiki pages above. · *Status:*
+**DIFFERS** — walls ship with the semantics above; gates are
+not yet present.
 
 **BLD-14 — Docks straddle the shoreline.** A Dock's footprint must cover
 both land and water tiles. It is the production building for ships and
@@ -1388,8 +1480,13 @@ in line of sight, then other enemy buildings there, Farms
 expressly excluded (this rule's never-auto-targeted clause).
 Walls, gates, rams and trebuchets do not exist in this roster.
 Acquisition is idle-only: an explicit order always wins, and
-villagers and scouts never auto-acquire. Tests: `combat::cmb08_*`.
-· *Status:* **MATCHES**.
+villagers never auto-acquire. Since the orders & stances package
+(2026-10-22, CMB-09/10/11) acquisition is stance-gated and also
+runs under attack-move and patrol orders — a Stand Ground unit
+(the starting Scout's default) acquires only inside its attack
+range, a No Attack unit never acquires, and Scouts acquire like
+any military unit within their stance. Tests: `combat::cmb08_*`,
+`orders_stances::*`. · *Status:* **MATCHES**.
 
 **CMB-09 — Stances govern pursuit, not damage.** Four stances:
 *Aggressive* — pursue targets indefinitely. *Defensive* — engage nearby
@@ -1400,25 +1497,93 @@ nothing; just stands). Defaults: military units Aggressive; the starting
 Scout is Stand Ground. (Exact leash distances are UNVERIFIED anywhere
 public — they are adopted tuning constants, recorded in the data table as
 design decisions, not reference facts.)
-*Source:* MECHANICS-STUDY §9.1; GAP 2.6. · *Impl:* no stance state
-exists yet. Two defaults are observable today: the starting Scout never
-auto-acquires (its Stand-Ground default), and other military
-auto-acquire only boars (a narrow Aggressive). · *Status:* **DIFFERS**.
+*Source:* MECHANICS-STUDY §9.1; GAP 2.6; wiki, "Unit stance" (Age of
+Empires II), fetched 2026-10-22 — Aggressive: "units move without
+limitation and will follow enemy targets in LOS and range until they
+are killed"; Defensive: "units attack any unit in their range, and
+will follow for a certain number of tiles before returning to their
+original position"; Stand Ground: "units do not move to attack but
+will attack any enemy in their range"; No Attack: "units do not
+automatically attack unless ordered" — and the same page's default:
+military units are created Aggressive. · *Impl:* shipped 2026-10-22
+(the orders & stances package). Per-unit stance state
+(`entity::Stance`, set by the `SetStance` command — military kinds
+only, either seat; a setting, never an order: it cancels nothing).
+Both starting Scouts spawn at Stand Ground; every other military
+unit defaults to Aggressive. The stance gates *automatic*
+engagement only: the acquisition chain (CMB-08) skips No Attack
+units outright and shrinks a Stand Ground unit's acquisition radius
+from LoS to its attack range; acquisition under attack-move/patrol
+orders runs through the same gates. Every auto-acquired or
+retaliation target is marked with its provenance (`attack_auto`),
+and the chase steps apply the stance to marked targets only —
+Stand Ground drops an out-of-range target instead of chasing,
+Defensive breaks off at the leash and walks back to its post,
+Aggressive chases without limit; an explicit order's target is
+followed to the death in every stance. Retaliation is gated the
+same way (No Attack never answers; Stand Ground answers only an
+in-range attacker). The Defensive post is set when the stance is
+issued and moves to the destination of each explicit move order;
+when a fight ends (target dead, gone, or leash-dropped) the
+standing-order step walks the unit back to its post. The leash is `combat::DEFENSIVE_LEASH` = 12 world units
+(3 tiles) — **tuned, UNVERIFIED**, per this rule's own note above:
+no public source pins the number, and it is recorded here as a
+design decision, not a reference fact (the same disclosure as the
+sheep capture radius, AI-06). One wiki clause is NOT modelled: a
+Defensive unit "will retreat a few tiles if a ranged unit outside
+their LOS attacks them" — no stance in this game flees an attacker
+(retaliation answers it instead); recorded as the entry's one
+unmodelled remainder. Tests: `orders_stances::*` (the stance
+matrix against a lured boar, the leash-and-return pair against an
+Aggressive control, the starting Scouts' point-blank fight).
+· *Status:* **MATCHES** (from DIFFERS).
 
 **CMB-10 — Attack-move.** Ordered to a point, units move there engaging
 every enemy encountered on the way (per stance acquisition, CMB-08),
 then hold at the destination.
-*Source:* GAP 2.4. Its exact reference semantics are UNVERIFIED in public
-documentation (MECHANICS-STUDY §9.1) — Skirmish II adopts the conventional
-definition stated here as a design decision. · *Impl:* an order-queue
-entry (SEL-12) flagging the move as engage-en-route; combat state handles
-the rest. · *Status:* **MISSING**.
+*Source:* GAP 2.4; the semantics are now evidenced — the official Age
+of Empires forums ("Wonky Attack Move", fetched 2026-10-22) state the
+expected behaviour: an enemy unit and/or building entering the unit's
+LoS is attacked, then the unit resumes toward its destination; the
+wiki's "Hotkey" page (fetched 2026-10-22) gives DE's dedicated
+attack-move key as R. The conventional definition this rule stated
+is the documented one. · *Impl:* shipped 2026-10-22. A standing
+order on the entity (`Command::AttackMove`, military units with an
+attack row only): the destination resolves exactly like a move
+(clamp + blocked-cell snap), the unit walks it while the CMB-08
+chain — stance-gated per CMB-09 — acquires en route; after each
+fight the standing-order step re-aims the walk, and on arrival the
+order completes and the unit holds. Any other order (Move, Attack,
+Gather, Stop, AutoExplore, patrol) ends it, and it ends any of
+theirs; it cancels AutoExplore like every manual order (SEL-17).
+Shift-queueable (SEL-12); a queued chain waits behind an active
+attack-move until it completes. Client: panel button + the R key
+(DE's binding) arm targeting; the destination click drops the
+ground click marker (INF-09a). Tests: `orders_stances::*`,
+`orders.smoke.mjs`. · *Status:* **MATCHES** (from MISSING).
 
 **CMB-11 — Patrol.** A patrol order loops the unit between two (or a
 chain of) points indefinitely, engaging enemies it encounters like
 attack-move, and returns to the patrol path after each engagement.
-*Source:* MECHANICS-STUDY §9.1; GAP 2.5. · *Impl:* a cycling waypoint list
-in the order record. · *Status:* **MISSING**.
+*Source:* MECHANICS-STUDY §9.1; GAP 2.5; GameFAQs, Age of Kings
+strategy guide (fetched 2026-10-22): the unit "moves back and
+forth between its current position and the designated point",
+attacking hostiles it detects, and "way points also work with
+patrols — hold down shift and designate few points". · *Impl:*
+shipped 2026-10-22. `Command::Patrol` installs the loop
+[current position, resolved destination] on the entity; the
+standing-order step advances legs (an unreachable leg is skipped,
+one A* attempt per tick — the combat chase's failure discipline),
+and the CMB-08 chain engages en route exactly as attack-move.
+A further patrol order on a patrolling unit APPENDS its point to
+the loop — directly, or through the queue (a patrol point queued
+behind an endless loop could never execute, so queueing one
+appends at once instead). The loop's legs render as waypoint
+pennants (INF-09) and a patrolling unit is never idle (SEL-09).
+Any other order ends the patrol; Stop ends it too. Client: panel
+button arms targeting; Shift keeps the arm so legs chain click by
+click. Tests: `orders_stances::*`, `orders.smoke.mjs`.
+· *Status:* **MATCHES** (from MISSING).
 
 **CMB-12 — Friendly fire only where flagged.** Ordinary attacks never
 damage friendly units. Attacks flagged as blast in the data (Mangonel
@@ -2346,13 +2511,27 @@ the boar disengages. (Whether a disengaged boar returns to its exact
 start point is UNVERIFIED; wandering near the disengage point is the
 adopted default.)
 *Source:* wiki, Early Economy (boar lure described step by step); Hunt
-(animal behavior classes). · *Impl:* animals get a minimal state machine
-in the combat phase (idle / flee / chase-attacker) driven by the same
-damage events as CMB-01; no separate animal engine. · *Status:*
-**DIFFERS** (M3, 2026-10-16: deer flee and boars charge their attacker,
-disengaging when it dies or escapes. One deliberate divergence from the
-adopted default above: a disengaged boar returns to its original post
-and heals there, instead of wandering near the disengage point.)
+(animal behavior classes — regular huntables "flee when approached by
+any non-Gaia unit and continue to do so if pursued", and Scout Cavalry
+herds them "in the direction of Town Centers and Mills"). · *Impl:*
+animals get a minimal state machine in the combat phase (idle / flee /
+chase-attacker) driven by the same damage events as CMB-01; no separate
+animal engine. Deer flight is triggered by damage AND by proximity
+(2026-10-22, Study #3 §c.1 — Hera pushes deer with his scout for
+minutes without firing a shot): the nearest mobile non-Gaia unit
+within ~2 tiles restarts the flee window from its current position,
+using the existing flee state only. The radius (8 wu) is a tuning
+constant — the wiki documents the behaviour but gives no number
+(UNVERIFIED numerically). Buildings never trigger it (the Town Center
+is an entity, excluded by kind — deer are pushed TOWARD it), and the
+boar half is unchanged: proximity neither scares nor aggros a boar. ·
+*Status:* **MATCHES** (2026-10-22: the "or approaches" half landed —
+deer flee approaches as well as wounds, pinned by
+sim/tests/deer_push.rs incl. the settles-beside-an-idle-unit and
+boar-ignores-proximity cases. One deliberate divergence remains on
+the boar half, against the UNVERIFIED adopted default above: a
+disengaged boar returns to its original post and heals there,
+instead of wandering near the disengage point.)
 
 **AI-08 — Predators hunt villagers.** Wolves and similar predators are
 Gaia combat units: idle until a unit (typically a villager) enters their
@@ -3001,7 +3180,34 @@ the TEC-06 patch machinery, with the TEC-06 / ECO-02 / TEC-08
 entries extended and ECO-14's Horse Collar clause corrected to
 update 169123's proportional top-up (independently amended the
 same day by the verification sweep above). No status moves:
-the totals stand.
+the totals stand.; updated 2026-10-22 (day run)
+for the orders & stances package: CMB-09 moves DIFFERS →
+MATCHES (the four stances shipped, stance-gated acquisition
+and chase; the Defensive leash stays recorded as a tuned
+constant, and the wiki's defensive-retreat clause is recorded
+in the entry as unmodelled) and CMB-10/CMB-11 move MISSING →
+MATCHES (attack-move and patrol shipped as standing orders;
+their semantics are now evidenced — the official forums'
+attack-move thread, the wiki's Hotkey page, the GameFAQs
+patrol guide, all fetched 2026-10-22 — superseding CMB-10's
+earlier UNVERIFIED note), recounted mechanically below;
+updated 2026-10-22 for AI-07, deer pushing — proximity now
+triggers deer flight (Study #3 §c.1, the study's top finding;
+wiki, Hunt, documents the approach-flee, the ~2-tile radius
+stays an UNVERIFIED tuning constant), so §15 trades one
+DIFFERS for one MATCHES with the rule count unchanged,
+recounted mechanically below; updated 2026-10-22 for the
+ECO-14 round-up follow-up — the shipped Horse Collar sweep
+now rounds its proportional top-up up to whole food, per the
+inference flagged in the entry (a half farm gains 19, not
+18.75), with no status move; updated 2026-10-22 for the
+BLD-13 wall-line correction — the drag expansion moved from
+integer Bresenham to the supercover line (Claudio's live
+report: segments scattered across rows instead of following
+one line; the studied rule and sources are recorded in the
+entry, DE's exact rasterization marked UNVERIFIED). No
+status change: BLD-13 stays DIFFERS on the missing gates,
+and the totals stand).
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
@@ -3012,18 +3218,18 @@ the totals stand.
 | 5 | Movement, pathfinding & collision (MOV) | 12 | 4 | 3 | 5 |
 | 6 | Economy & drop-off (ECO) | 17 | 13 | 2 | 2 |
 | 7 | Buildings & placement (BLD) | 17 | 12 | 3 | 2 |
-| 8 | Combat & damage (CMB) | 16 | 11 | 2 | 3 |
+| 8 | Combat & damage (CMB) | 16 | 14 | 1 | 1 |
 | 9 | Projectiles & ballistics (PRJ) | 10 | 5 | 3 | 2 |
 | 10 | Unit classes & counters (CLS) | 8 | 5 | 0 | 3 |
 | 11 | Technologies & age advancement (TEC) | 11 | 5 | 3 | 3 |
 | 12 | Monks, conversion & relics (MNK) | 13 | 0 | 0 | 13 |
 | 13 | Trade, market & tribute (TRD) | 8 | 0 | 0 | 8 |
 | 14 | Garrison, transport & repair (GAR) | 10 | 0 | 0 | 10 |
-| 15 | AI behavior & difficulty (AI) | 9 | 5 | 2 | 2 |
+| 15 | AI behavior & difficulty (AI) | 9 | 6 | 1 | 2 |
 | 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |
 | 17 | Multiplayer determinism (NET) | 11 | 4 | 5 | 2 |
 | 18 | Information rules (INF) | 13 | 8 | 3 | 2 |
-| | **Total** | **218** | **115** | **34** | **69** |
+| | **Total** | **218** | **119** | **32** | **67** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer

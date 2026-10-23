@@ -41,6 +41,11 @@ pub const SHIP: u8 = 14;
 /// membership beside ARCHERY — the class future anti-skirmisher
 /// rows (e.g. the Genitour's) target.
 pub const SKIRMISHER: u8 = 15;
+/// Walls and gates (BLD-13): the membership the reference gives
+/// wall segments on top of All/Standard Buildings. No attack row
+/// in the roster carries a bonus against it yet — the membership
+/// is data, ready for the rows that use it.
+pub const WALLS_AND_GATES: u8 = 16;
 
 /// Membership bit for one class id.
 pub const fn bit(class: u8) -> u64 {

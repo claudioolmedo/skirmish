@@ -23,7 +23,11 @@
 //    as its panel click. On an armed page the buttons sit in grid order —
 //    economic: House Q, Mill W, Farm E, Lumber Camp A, Mining
 //    Camp S, Back C; military: Barracks Q, Archery Range W,
-//    Stable E, Blacksmith A, Back C. A building may ALSO answer
+//    Stable E, Blacksmith A, Palisade Wall S, Back C. (The
+//    Palisade Wall sits where DE puts it: the military page's
+//    defensive row, after the production buildings and the
+//    Blacksmith — in our three-wide compression that is the
+//    next free slot, S.) A building may ALSO answer
 //    to a silent alias (its go-to letter, mostly) — but ONLY
 //    where the alias collides with no button's slot letter in
 //    the same context. Two historical aliases died by that rule
@@ -57,17 +61,18 @@
 // same numbering app.js's BUILD_* tables use.
 
 // kind: 0 House, 1 Farm, 2 Barracks, 3 Lumber Camp, 4 Mill,
-//       5 Mining Camp, 6 Archery Range, 7 Stable, 8 Blacksmith.
+//       5 Mining Camp, 6 Archery Range, 7 Stable, 8 Blacksmith,
+//       9 Palisade Wall.
 // PAGE_KINDS is the pages' GRID (render) order: slot 0 first.
 export const PAGE_KINDS = {
   eco: [0, 4, 1, 3, 5],
-  mil: [2, 6, 7, 8],
+  mil: [2, 6, 7, 8, 9],
 };
 
 /** Which build page a building kind belongs to ('eco' | 'mil'). */
 export const PAGE_FOR_KIND = {
   0: 'eco', 1: 'eco', 3: 'eco', 4: 'eco', 5: 'eco',
-  2: 'mil', 6: 'mil', 7: 'mil', 8: 'mil',
+  2: 'mil', 6: 'mil', 7: 'mil', 8: 'mil', 9: 'mil',
 };
 
 /**
@@ -90,6 +95,7 @@ export const PAGE_KEYS = {
     KeyW: 6, // Archery Range — slot 1 (old alias A dropped: A is the Blacksmith's slot)
     KeyE: 7, KeyL: 7, // Stable — slot 2 (alias L)
     KeyA: 8, // Blacksmith — slot 3
+    KeyS: 9, // Palisade Wall — slot 4 (the defensive row, after the Blacksmith)
     KeyC: 'back', // Back — the last slot
   },
 };
@@ -97,11 +103,19 @@ export const PAGE_KEYS = {
 /** The one letter shown as a button's key badge on an armed page. */
 export const PAGE_BADGE = {
   eco: { 0: 'Q', 4: 'W', 1: 'E', 3: 'A', 5: 'S' },
-  mil: { 2: 'Q', 6: 'W', 7: 'E', 8: 'A' },
+  mil: { 2: 'Q', 6: 'W', 7: 'E', 8: 'A', 9: 'S' },
 };
 
 /** Panel contexts whose buttons answer to position keys, in order. */
 export const PANEL_BUTTONS = {
+  // The military selection's panel (CMB-09/10/11), in render
+  // order: Attack Move, Patrol, the four stances, Stop, Delete.
+  // AutoExplore renders between the stances and Stop for scouts,
+  // but is not listed: it carries no slot letter (its key is the
+  // dedicated G, app.js's fall-through) — the same treatment the
+  // build context's special buttons get outside these tables.
+  units: ['attack-move', 'patrol', 'stance-0', 'stance-1', 'stance-2', 'stance-3',
+    'stop', 'delete'],
   tc: ['train', 'research-loom', 'research-feudal', 'research-wheelbarrow'],
   barracks: ['train-militia', 'train-spearman', 'research-maa'],
   range: ['train-archer', 'train-skirmisher'],
@@ -129,6 +143,23 @@ export const PANEL_BUTTONS = {
 // is not in this table, so a villager's A still means force
 // drop-off, resolved by context exactly as DE resolves it.
 export const PANEL_KEYS = {
+  // The units panel's slot letters, by render order: Attack
+  // Move Q, Patrol W, the stances E / A / S / D, Stop X, Delete
+  // C. Two buttons ALSO carry DE's dedicated keys, badged
+  // instead of their slot letter and handled in app.js's
+  // fall-through like AutoExplore's G: Attack Move answers to R
+  // (the wiki Hotkey page's dedicated attack-move key), and
+  // AutoExplore keeps its G (it has no slot entry here at all).
+  units: {
+    'attack-move': ['KeyQ', 'Q'],
+    patrol: ['KeyW', 'W'],
+    'stance-0': ['KeyE', 'E'],
+    'stance-1': ['KeyA', 'A'],
+    'stance-2': ['KeyS', 'S'],
+    'stance-3': ['KeyD', 'D'],
+    stop: ['KeyX', 'X'],
+    delete: ['KeyC', 'C'],
+  },
   tc: {
     train: ['KeyQ', 'Q'],
     'research-loom': ['KeyA', 'A'],

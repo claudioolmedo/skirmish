@@ -50,7 +50,7 @@ use crate::econ::ResourceKind;
 use crate::entity::EntityKind;
 use crate::grid;
 use crate::tech::TechId;
-use crate::{Command, MatchMode, QueuedOrder, Sim};
+use crate::{Command, MatchMode, QueuedOrder, Sim, Stance};
 
 /// A `Sim` owned by JavaScript. One instance per match.
 #[wasm_bindgen]
@@ -368,6 +368,59 @@ impl WasmSim {
         ok
     }
 
+    /// Attack-move (CMB-10): the unit walks to the point,
+    /// engaging whatever enters its sight en route, then resumes
+    /// and holds at the destination. Returns whether the order
+    /// *would* be accepted (a living military unit owned by a
+    /// player, with an attack row); the sim re-validates when the
+    /// command is applied.
+    pub fn push_attack_move(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        let ok = self.inner.can_attack_move(entity);
+        if ok {
+            self.inner.push_command(Command::AttackMove {
+                entity,
+                x: I16F16::from_num(x),
+                y: I16F16::from_num(y),
+            });
+        }
+        ok
+    }
+
+    /// Patrol (CMB-11): the unit loops between where it stands and
+    /// the point, engaging en route like an attack-move; on a unit
+    /// that already patrols, the point is appended to its loop.
+    /// Returns whether the order *would* be accepted (same rule as
+    /// `push_attack_move`); the sim re-validates at apply time.
+    pub fn push_patrol(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        let ok = self.inner.can_attack_move(entity);
+        if ok {
+            self.inner.push_command(Command::Patrol {
+                entity,
+                x: I16F16::from_num(x),
+                y: I16F16::from_num(y),
+            });
+        }
+        ok
+    }
+
+    /// Set a military unit's stance (CMB-09) by tag (0 Aggressive,
+    /// 1 Defensive, 2 Stand Ground, 3 No Attack). A stance is a
+    /// setting, not an order — nothing else about the unit
+    /// changes. Returns whether the order *would* be accepted (a
+    /// living military unit owned by a player, and a valid tag);
+    /// the sim re-validates when the command is applied.
+    pub fn push_set_stance(&mut self, entity: u32, stance: u8) -> bool {
+        let Some(stance) = Stance::from_tag(stance) else {
+            return false;
+        };
+        let ok = self.inner.can_set_stance(entity);
+        if ok {
+            self.inner
+                .push_command(Command::SetStance { entity, stance });
+        }
+        ok
+    }
+
     /// Stop a unit's current order immediately (SEL-14): it
     /// stands idle where it is; a villager keeps its carry.
     /// Returns whether the order *would* be accepted (any living,
@@ -435,6 +488,17 @@ impl WasmSim {
             });
         }
         ok
+    }
+
+    /// Per-entity stance tags in entity-id order (CMB-09:
+    /// 0 Aggressive, 1 Defensive, 2 Stand Ground, 3 No Attack) —
+    /// the command panel's pressed state for the stance row.
+    pub fn entity_stance(&self) -> Vec<u8> {
+        self.inner
+            .entities()
+            .iter()
+            .map(|e| e.stance.tag())
+            .collect()
     }
 
     /// Per-entity AutoExplore flags (0/1) in entity-id order — the
@@ -516,6 +580,48 @@ impl WasmSim {
         self.push_build(entity, BuildingKind::Blacksmith, x, y)
     }
 
+    /// Order a villager to build one Palisade Wall segment
+    /// (3 wood, 1×1 — BLD-13) — see `push_build_house`. A dragged
+    /// line of segments goes through `push_build_wall_line`.
+    pub fn push_build_palisade_wall(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build(entity, BuildingKind::PalisadeWall, x, y)
+    }
+
+    /// Order a villager to raise a dragged line of Palisade Wall
+    /// segments (BLD-13) from the cell containing `(x0, y0)` to
+    /// the cell containing `(x1, y1)`: the sim expands the line
+    /// deterministically, validates and charges each segment
+    /// (3 wood) individually — obstructed cells and segments past
+    /// the stockpile are skipped — and walks the villager along
+    /// the line building segment after segment. Returns whether
+    /// at least one segment would take effect; the sim
+    /// re-validates when the command is applied.
+    pub fn push_build_wall_line(
+        &mut self,
+        entity: u32,
+        x0: f64,
+        y0: f64,
+        x1: f64,
+        y1: f64,
+    ) -> bool {
+        let (fx0, fy0) = (I16F16::from_num(x0), I16F16::from_num(y0));
+        let (fx1, fy1) = (I16F16::from_num(x1), I16F16::from_num(y1));
+        let ok = self
+            .inner
+            .can_build_line(entity, BuildingKind::PalisadeWall, fx0, fy0, fx1, fy1);
+        if ok {
+            self.inner.push_command(Command::BuildLine {
+                entity,
+                kind: BuildingKind::PalisadeWall,
+                x0: fx0,
+                y0: fy0,
+                x1: fx1,
+                y1: fy1,
+            });
+        }
+        ok
+    }
+
     fn push_build(&mut self, entity: u32, kind: BuildingKind, x: f64, y: f64) -> bool {
         let (fx, fy) = (I16F16::from_num(x), I16F16::from_num(y));
         let ok = self.inner.can_build(entity, kind, fx, fy);
@@ -564,6 +670,31 @@ impl WasmSim {
         self.push_queued(entity, QueuedOrder::Repair { building })
     }
 
+    /// Queue an attack-move behind the unit's current order
+    /// (CMB-10): it executes when the unit goes idle.
+    pub fn push_attack_move_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_queued(
+            entity,
+            QueuedOrder::AttackMove {
+                x: I16F16::from_num(x),
+                y: I16F16::from_num(y),
+            },
+        )
+    }
+
+    /// Queue a patrol order behind the unit's current order
+    /// (CMB-11). On a unit that already patrols, the point appends
+    /// to its loop immediately instead (see `Sim::issue_queue`).
+    pub fn push_patrol_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_queued(
+            entity,
+            QueuedOrder::Patrol {
+                x: I16F16::from_num(x),
+                y: I16F16::from_num(y),
+            },
+        )
+    }
+
     /// Queue a House build behind the villager's current order. The
     /// wood is charged when the order *executes*, not when queued —
     /// see `Sim::can_queue`.
@@ -609,6 +740,12 @@ impl WasmSim {
     /// Queue a Blacksmith build (M6) — see `push_build_house_queued`.
     pub fn push_build_blacksmith_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
         self.push_build_queued(entity, BuildingKind::Blacksmith, x, y)
+    }
+
+    /// Queue a single Palisade Wall segment (BLD-13) — see
+    /// `push_build_house_queued`.
+    pub fn push_build_palisade_wall_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build_queued(entity, BuildingKind::PalisadeWall, x, y)
     }
 
     fn push_build_queued(&mut self, entity: u32, kind: BuildingKind, x: f64, y: f64) -> bool {
@@ -720,7 +857,7 @@ impl WasmSim {
     /// cell_y, size, queue_len, train_progress, owner, hp]` — in
     /// building id order. `kind` tags: 0 house, 1 farm, 2 barracks
     /// (M3); 3 lumber camp, 4 mill, 5 mining camp, 6 archery range,
-    /// 7 stable, 8 blacksmith (M6). `progress` is the construction fraction 0..1 (1 when
+    /// 7 stable, 8 blacksmith (M6); 9 palisade wall (BLD-13). `progress` is the construction fraction 0..1 (1 when
     /// complete); `complete` is 0/1; `size` is the footprint edge in
     /// cells; `queue_len` and `train_progress` (0..1 on the queue's
     /// head) describe a production building's queue. M5 adds `owner`

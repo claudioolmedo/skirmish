@@ -44,6 +44,7 @@ test('military page: slot letters Q W E / A, Back on C, silent aliases', () => {
   assert.equal(mil('KeyE').id, 'build-7', 'Stable on E');
   assert.equal(mil('KeyL').id, 'build-7', 'Stable alias L');
   assert.equal(mil('KeyA').id, 'build-8', 'Blacksmith on A — the Range\u2019s old A alias is dropped');
+  assert.equal(mil('KeyS').id, 'build-9', 'Palisade Wall on S (slot 4, the defensive row)');
   assert.deepEqual(mil('KeyC'), { type: 'button', id: 'page-back' }, 'Back on C (last slot)');
 });
 
@@ -120,11 +121,34 @@ test('Town Center letters are DE’s own: Villager Q, Loom A, Feudal W, Wheelbar
   assert.equal(badgeForButton({ context: 'range', id: 'train-skirmisher', index: 1 }), 'W');
 });
 
-test('no hotkeys in unit / empty / enemy contexts — WASD keeps panning', () => {
-  for (const context of ['units', 'none', 'foe']) {
+test('no hotkeys in empty / enemy contexts — WASD keeps panning', () => {
+  for (const context of ['none', 'foe']) {
     assert.equal(resolveHotkey({ context, page: null, code: 'KeyQ' }), null, context);
     assert.equal(resolveHotkey({ context, page: null, code: 'KeyA' }), null, context);
   }
+});
+
+test('units context: the military panel answers on its slot letters (CMB-09/10/11)', () => {
+  const at = (code) => resolveHotkey({ context: 'units', page: null, code });
+  assert.deepEqual(at('KeyQ'), { type: 'button', id: 'attack-move' });
+  assert.deepEqual(at('KeyW'), { type: 'button', id: 'patrol' });
+  assert.deepEqual(at('KeyE'), { type: 'button', id: 'stance-0' });
+  assert.deepEqual(at('KeyA'), { type: 'button', id: 'stance-1' });
+  assert.deepEqual(at('KeyS'), { type: 'button', id: 'stance-2' });
+  assert.deepEqual(at('KeyD'), { type: 'button', id: 'stance-3' });
+  assert.deepEqual(at('KeyX'), { type: 'button', id: 'stop' });
+  assert.deepEqual(at('KeyC'), { type: 'button', id: 'delete' });
+  // R (DE's dedicated attack-move key) and G (AutoExplore) are
+  // NOT grid slots: they fall through to app.js's handlers.
+  assert.equal(at('KeyR'), null);
+  assert.equal(at('KeyG'), null);
+  assert.equal(at('KeyZ'), null);
+  // Badges are the slot letters (app.js badges Attack Move with
+  // its dedicated R and AutoExplore with G instead).
+  assert.equal(badgeForButton({ context: 'units', id: 'patrol' }), 'W');
+  assert.equal(badgeForButton({ context: 'units', id: 'stance-2' }), 'S');
+  assert.equal(badgeForButton({ context: 'units', id: 'stop' }), 'X');
+  assert.equal(badgeForButton({ context: 'units', id: 'delete' }), 'C');
 });
 
 test('go-to: Ctrl+letter jumps to a building type, in any context', () => {
@@ -145,10 +169,10 @@ test('go-to: Ctrl+letter jumps to a building type, in any context', () => {
 
 test('every building sits on exactly one page, in grid order, with a working badge', () => {
   assert.deepEqual([...PAGE_KINDS.eco, ...PAGE_KINDS.mil].sort((a, b) => a - b),
-    [0, 1, 2, 3, 4, 5, 6, 7, 8], 'the two pages partition the nine buildings');
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], 'the two pages partition the ten buildings');
   // Grid (render) order: the slots run Q W E / A S / ... in order.
   assert.deepEqual(PAGE_KINDS.eco, [0, 4, 1, 3, 5], 'economic: House, Mill, Farm, Lumber, Mining');
-  assert.deepEqual(PAGE_KINDS.mil, [2, 6, 7, 8], 'military: Barracks, Range, Stable, Blacksmith');
+  assert.deepEqual(PAGE_KINDS.mil, [2, 6, 7, 8, 9], 'military: Barracks, Range, Stable, Blacksmith, Palisade Wall');
   for (const [page, kinds] of Object.entries(PAGE_KINDS)) {
     for (const kind of kinds) {
       assert.equal(PAGE_FOR_KIND[kind], page);
@@ -184,7 +208,10 @@ test('badges in train/research contexts are the slot letters', () => {
   assert.equal(badgeForButton({ context: 'tc', id: 'train', index: 0 }), 'Q');
   assert.equal(badgeForButton({ context: 'tc', id: 'research-loom', index: 1 }), 'A');
   assert.equal(badgeForButton({ context: 'tc', id: 'research-feudal', index: 2 }), 'W');
-  assert.equal(badgeForButton({ context: 'units', id: 'x', index: 0 }), null);
+  // A context with no panel at all badges nothing. (This line
+  // used 'units' as its example until CMB-09/10/11 gave the
+  // military selection a real panel; 'none' carries the intent.)
+  assert.equal(badgeForButton({ context: 'none', id: 'x', index: 0 }), null);
 });
 
 test('edgePan: edges pan, corners go diagonal, the middle rests', () => {

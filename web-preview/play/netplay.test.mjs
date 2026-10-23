@@ -29,6 +29,8 @@ test('validateCommand accepts the full vocabulary and rejects junk', () => {
     { t: 'attackb', e: 1, b: 4 },
     { t: 'build', e: 1, k: 0, x: 0, y: 0 },
     { t: 'build', e: 1, k: 8, x: 0, y: 0 },
+    { t: 'build', e: 1, k: 9, x: 0, y: 0 },
+    { t: 'buildline', e: 1, x0: 0, y0: 0, x1: 5, y1: 5 },
     { t: 'train_at', b: 3, k: 2 },
     { t: 'train_vil' },
     { t: 'research_tc', tech: 1 },
@@ -38,6 +40,11 @@ test('validateCommand accepts the full vocabulary and rejects junk', () => {
     { t: 'force_dep', e: 7 },
     { t: 'auto_explore', e: 4, on: true },
     { t: 'auto_explore', e: 4, on: false },
+    { t: 'attackmove', e: 4, x: 10, y: -2 },
+    { t: 'attackmove', e: 4, x: 10, y: -2, q: true },
+    { t: 'patrol', e: 4, x: 0, y: 0 },
+    { t: 'stance', e: 4, s: 0 },
+    { t: 'stance', e: 4, s: 3 },
     { t: 'stop', e: 4 },
     { t: 'delete', e: 4 },
     { t: 'deleteb', b: 3 },
@@ -50,12 +57,21 @@ test('validateCommand accepts the full vocabulary and rejects junk', () => {
     null, 42, {}, { t: 'nope' },
     { t: 'move', e: -1, x: 0, y: 0 },
     { t: 'move', e: 1, x: NaN, y: 0 },
-    { t: 'build', e: 1, k: 9, x: 0, y: 0 },
+    { t: 'build', e: 1, k: 10, x: 0, y: 0 },
+    { t: 'buildline', e: 1, x0: 0, y0: 0, x1: 5 },
+    { t: 'buildline', e: -1, x0: 0, y0: 0, x1: 5, y1: 5 },
+    { t: 'buildline', e: 1, x0: NaN, y0: 0, x1: 5, y1: 5 },
     { t: 'train_at', b: 1, k: 5 },
     { t: 'research_tc', tech: 2 },
     { t: 'gather', e: 1 },
     { t: 'auto_explore', e: 4 },
     { t: 'auto_explore', e: 4, on: 1 },
+    { t: 'attackmove', e: 4, x: 1 },
+    { t: 'attackmove', e: -1, x: 1, y: 1 },
+    { t: 'patrol', e: 4, x: NaN, y: 1 },
+    { t: 'stance', e: 4 },
+    { t: 'stance', e: 4, s: 4 },
+    { t: 'stance', e: 4, s: 1.5 },
     { t: 'stop' },
     { t: 'delete', e: -1 },
     { t: 'deleteb' },
@@ -87,6 +103,8 @@ test('M10 lobby messages decode: ready, the password handshake, cancel', () => {
     { type: 'pw-ok' },
     { type: 'pw-no' },
     { type: 'cancel' },
+    // Relay v6's originated frame: the peer's socket is gone.
+    { type: 'peer-left' },
   ]) {
     const dec = decodeMessage(encodeMessage(m));
     assert.equal(dec.ok, true, JSON.stringify(m));
@@ -143,20 +161,35 @@ test('applyCommand maps semantic commands to the per-seat sim calls', () => {
   applyCommand(sim, { t: 'move', e: 5, x: 1, y: 2, q: true }, 0, tcOf);
   applyCommand(sim, { t: 'build', e: 5, k: 2, x: 1, y: 2 }, 0, tcOf);
   applyCommand(sim, { t: 'build', e: 5, k: 6, x: 1, y: 2, q: true }, 0, tcOf);
+  applyCommand(sim, { t: 'build', e: 5, k: 9, x: 1, y: 2 }, 0, tcOf);
+  applyCommand(sim, { t: 'buildline', e: 5, x0: 1, y0: 2, x1: 9, y1: 2 }, 0, tcOf);
   applyCommand(sim, { t: 'train_at', b: 9, k: 3 }, 0, tcOf);
   // Town Center orders resolve the ISSUER's Town Center:
   applyCommand(sim, { t: 'train_vil' }, 2, tcOf);
   applyCommand(sim, { t: 'research_tc', tech: 0 }, 0, tcOf);
   applyCommand(sim, { t: 'rally_tc', x: 3, y: 4 }, 2, tcOf);
+  // CMB-09/10/11: attack-move, patrol (direct + queued forms) and stance.
+  applyCommand(sim, { t: 'attackmove', e: 5, x: 7, y: 8 }, 0, tcOf);
+  applyCommand(sim, { t: 'attackmove', e: 5, x: 7, y: 8, q: true }, 0, tcOf);
+  applyCommand(sim, { t: 'patrol', e: 5, x: 9, y: 10 }, 0, tcOf);
+  applyCommand(sim, { t: 'patrol', e: 5, x: 9, y: 10, q: true }, 0, tcOf);
+  applyCommand(sim, { t: 'stance', e: 5, s: 2 }, 0, tcOf);
   assert.deepEqual(calls, [
     ['push_move', 5, 1, 2],
     ['push_move_queued', 5, 1, 2],
     ['push_build_barracks', 5, 1, 2],
     ['push_build_archery_range_queued', 5, 1, 2],
+    ['push_build_palisade_wall', 5, 1, 2],
+    ['push_build_wall_line', 5, 1, 2, 9, 2],
     ['push_train_militia', 9],
     ['push_train_villager_at', 40],
     ['push_research_tc_at', 0, 0],
     ['push_set_rally_tc_of', 40, 3, 4],
+    ['push_attack_move', 5, 7, 8],
+    ['push_attack_move_queued', 5, 7, 8],
+    ['push_patrol', 5, 9, 10],
+    ['push_patrol_queued', 5, 9, 10],
+    ['push_set_stance', 5, 2],
   ]);
 });
 
@@ -351,26 +384,132 @@ test('delay adaptation: a lagging link raises the input delay for both', () => {
   assert.equal(pair.eventsA.filter((e) => e.type === 'desync').length, 0);
 });
 
-test('rebase: play resumes from the executed frontier after a drop', () => {
-  const pair = linkedPair();
+test('rejoin: rebase (remaining peer) vs startAt (rejoiner) keep identical tick streams', () => {
+  // REGRESSION for F2 (2026-10-22 live exercise). The production
+  // resume is ASYMMETRIC — the remaining peer rebase()es and
+  // EXECUTES the gap turns [frontier, atTurn), while the rejoiner
+  // rebuilds from the recorded stream and startAt()s at atTurn.
+  // The old test called rebase() on BOTH sides with sims whose
+  // ticks it never accounted, so it could not see that startAt
+  // skipped the gap: the rejoiner's sim stayed delay + 2 turns
+  // behind and the first resumed hash exchange desynced. Here
+  // the fake sims' hashes are tick-sensitive, the rejoiner is a
+  // genuinely fresh sim + session rebuilt from the recorder
+  // stream (rejoinFromResync's shape), and the resumed match
+  // must compare equal hashes for 120+ turns with zero desyncs.
+  const rec = createRecorder({ seed: 9, modeTag: 3, seats: [0, 2] });
+  const hashesA = new Map();
+  const pair = linkedPair({
+    onTurn: (turn, c0, c1, hash) => {
+      rec.addTurn(turn, c0, c1);
+      hashesA.set(turn, hash);
+    },
+  });
   pair.a.start(0);
   pair.b.start(0);
+  pair.a.localCommand({ t: 'train_vil' });
+  pair.b.localCommand({ t: 'train_vil' });
   run(pair, 0, 2000);
   const frontier = pair.a.state().turn;
   assert.equal(frontier, pair.b.state().turn);
   assert.ok(frontier > 20);
-  // Both sides rebase to frontier + delay + 2 anchored "now" (the
-  // resync outcome): the gap turns are empty on both sides and the
-  // match continues in lockstep.
+  const snapshot = rec.finish({ ticks: frontier * TURN_TICKS });
+
+  // The drop: B's session and sim are gone, and whatever traffic
+  // was in flight is eaten by the disconnect.
+  pair.inboxA.length = 0;
+  pair.inboxB.length = 0;
+
+  // The rejoiner rebuilds: a fresh sim fast-forwarded through the
+  // transferred stream — each event's bundles applied at their
+  // tick, in slot order, ticking in between (exactly
+  // rejoinFromResync). It lands on the frontier, NOT on atTurn.
+  const simB2 = fakeSim();
+  const byTick = new Map();
+  for (const e of snapshot.events) byTick.set(e.tick, e);
+  for (let t = 0; t < snapshot.ticks; t++) {
+    const e = byTick.get(t);
+    if (e) {
+      simB2.applyBundle(0, e.s0);
+      if (e.s1) simB2.applyBundle(1, e.s1);
+    }
+    simB2.tick();
+  }
+  const eventsB2 = [];
+  const hashesB2 = new Map();
+  const b2 = createSession({
+    localSlot: 1,
+    send: (m) => pair.inboxA.push(m),
+    applyBundle: (s, cmds) => simB2.applyBundle(s, cmds),
+    tickOnce: () => simB2.tick(),
+    onEvent: (e) => eventsB2.push(e),
+    onTurn: (turn, c0, c1, hash) => hashesB2.set(turn, hash),
+  });
+  const flushAB2 = () => {
+    for (const m of pair.inboxA.splice(0)) pair.a.receive(m);
+    for (const m of pair.inboxB.splice(0)) b2.receive(m);
+  };
+  const runAB2 = (fromMs, toMs) => {
+    for (let t = fromMs; t <= toMs; t += 10) {
+      pair.a.pump(t);
+      b2.pump(t);
+      flushAB2();
+    }
+  };
+
+  // The resume handshake: the remaining peer rebases, the
+  // rejoiner startAts — both to frontier + delay + 2, and the
+  // rejoiner hands startAt its rebuilt tick count so the gap is
+  // ticked, not skipped (the F2 invariant).
   const atTurn = frontier + INITIAL_DELAY_TURNS + 2;
   pair.a.rebase(atTurn, 5000);
-  pair.b.rebase(atTurn, 5000);
+  b2.startAt(atTurn, 5000, INITIAL_DELAY_TURNS, snapshot.ticks);
   pair.a.localCommand({ t: 'move', e: 1, x: 5, y: 5 });
-  run(pair, 5000, 8000);
-  assert.ok(pair.a.state().turn > atTurn + 10, 'turns advanced past the rebase');
-  assert.equal(pair.a.state().turn, pair.b.state().turn);
-  assert.deepEqual(pair.simA.applied, pair.simB.applied);
-  assert.equal(pair.eventsA.filter((e) => e.type === 'desync').length, 0);
+  b2.localCommand({ t: 'move', e: 2, x: 6, y: 6 });
+  runAB2(5000, 5000 + 140 * TURN_MS + 500);
+
+  assert.ok(pair.a.state().turn > atTurn + 120,
+    `host advanced past the resume: ${pair.a.state().turn}`);
+  assert.equal(b2.state().turn, pair.a.state().turn,
+    'both sessions executed the same turns');
+  assert.equal(pair.eventsA.filter((e) => e.type === 'desync').length, 0,
+    'host desynced after the resume');
+  assert.equal(eventsB2.filter((e) => e.type === 'desync').length, 0,
+    'rejoiner desynced after the resume');
+  let compared = 0;
+  for (const [turn, h] of hashesB2) {
+    if (turn < atTurn) continue;
+    assert.equal(hashesA.get(turn), h, `hash mismatch at resumed turn ${turn}`);
+    compared++;
+  }
+  assert.ok(compared >= 120, `resumed hashes actually compared: ${compared}`);
+});
+
+test('startAt: rebuiltTicks ticks the empty gap before opening', () => {
+  const mkCounting = () => {
+    const sim = fakeSim();
+    const counter = { ticks: 0 };
+    const session = createSession({
+      localSlot: 1,
+      send: () => {},
+      applyBundle: (s, cmds) => sim.applyBundle(s, cmds),
+      tickOnce: () => { counter.ticks++; return sim.tick(); },
+      onEvent: () => {},
+    });
+    return { session, counter };
+  };
+  // Rebuilt to tick 282 (= the turn-94 frontier); the resume
+  // opens at turn 100: startAt must tick the (100 - 94) turns of
+  // command-free gap itself — the F2 invariant, counted.
+  const { session, counter } = mkCounting();
+  session.startAt(100, 5000, INITIAL_DELAY_TURNS, 282);
+  assert.equal(counter.ticks, 100 * TURN_TICKS - 282);
+  assert.equal(session.state().tick, 100 * TURN_TICKS);
+  // Without rebuiltTicks the legacy contract stands: the caller
+  // asserts the sim already stands at the frontier; nothing ticks.
+  const legacy = mkCounting();
+  legacy.session.startAt(100, 5000, INITIAL_DELAY_TURNS);
+  assert.equal(legacy.counter.ticks, 0);
 });
 
 // ---------------------------------------------------------------- recorder / replay

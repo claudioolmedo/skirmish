@@ -64,6 +64,19 @@ export const INITIAL_DELAY_TURNS = 4;
 export const MAX_DELAY_TURNS = 10;
 export const BUNDLE_CAP = 256; // NET-07: per-turn command volume bound
 export const REJOIN_GRACE_MS = 90_000;
+// Peer-loss detection fallback (2026-10-22, rejoin fix F1): the
+// relay (v6+) originates a 'peer-left' frame the moment a room
+// socket closes, which is the primary signal. A peer whose
+// connection dies WITHOUT a close ever reaching the relay (a
+// pulled cable, a phone losing signal — the socket lingers as a
+// zombie) produces no frame, so the client also treats a
+// continuous execution stall of this length mid-match as the
+// peer being gone. 20 s is far beyond any live-match stall a
+// connected peer produces (bundles flow every turn), and if the
+// peer turns out to be alive after all (a long-backgrounded
+// tab), its resumed bundle traffic revives the match — see
+// onPeerBack in app.js.
+export const PEER_STALL_TIMEOUT_MS = 20_000;
 // M10 loading phase: how long a client waits on the loading
 // screen for the peer's loaded signal (the guest's start-ack /
 // the host's go) before the match is cancelled and everyone
@@ -103,6 +116,7 @@ const BUILD_FNS = [
   'push_build_house', 'push_build_farm', 'push_build_barracks',
   'push_build_lumber_camp', 'push_build_mill', 'push_build_mining_camp',
   'push_build_archery_range', 'push_build_stable', 'push_build_blacksmith',
+  'push_build_palisade_wall',
 ];
 const BUILD_FNS_QUEUED = BUILD_FNS.map((n) => n + '_queued');
 const TRAIN_AT_FNS = {
@@ -123,7 +137,8 @@ export function validateCommand(c) {
     case 'attack': return isInt(c.e) && isInt(c.tg);
     case 'attackb': return isInt(c.e) && isInt(c.b);
     case 'repair': return isInt(c.e) && isInt(c.b);
-    case 'build': return isInt(c.e) && isInt(c.k) && c.k <= 8 && isNum(c.x) && isNum(c.y);
+    case 'build': return isInt(c.e) && isInt(c.k) && c.k <= 9 && isNum(c.x) && isNum(c.y);
+    case 'buildline': return isInt(c.e) && isNum(c.x0) && isNum(c.y0) && isNum(c.x1) && isNum(c.y1);
     case 'train_at': return isInt(c.b) && (c.k === 2 || c.k === 3 || c.k === 4 || c.k === 9 || c.k === 10);
     case 'train_vil': return true;
     case 'research_tc': return c.tech === 0 || c.tech === 1 || c.tech === 6;
@@ -132,6 +147,9 @@ export function validateCommand(c) {
     case 'rally_b': return isInt(c.b) && isNum(c.x) && isNum(c.y);
     case 'force_dep': return isInt(c.e);
     case 'auto_explore': return isInt(c.e) && typeof c.on === 'boolean';
+    case 'attackmove': return isInt(c.e) && isNum(c.x) && isNum(c.y);
+    case 'patrol': return isInt(c.e) && isNum(c.x) && isNum(c.y);
+    case 'stance': return isInt(c.e) && isInt(c.s) && c.s <= 3;
     case 'stop': return isInt(c.e);
     case 'delete': return isInt(c.e);
     case 'deleteb': return isInt(c.b);
@@ -166,6 +184,7 @@ export function applyCommand(sim, cmd, owner, tcOf) {
     case 'build': return cmd.q
       ? sim[BUILD_FNS_QUEUED[cmd.k]](cmd.e, cmd.x, cmd.y)
       : sim[BUILD_FNS[cmd.k]](cmd.e, cmd.x, cmd.y);
+    case 'buildline': return sim.push_build_wall_line(cmd.e, cmd.x0, cmd.y0, cmd.x1, cmd.y1);
     case 'train_at': return sim[TRAIN_AT_FNS[cmd.k]](cmd.b);
     case 'train_vil': return sim.push_train_villager_at(tcOf(owner));
     case 'research_tc': return sim.push_research_tc_at(tcOf(owner), cmd.tech);
@@ -174,6 +193,13 @@ export function applyCommand(sim, cmd, owner, tcOf) {
     case 'rally_b': return sim.push_set_rally_building(cmd.b, cmd.x, cmd.y);
     case 'force_dep': return sim.push_force_deposit(cmd.e);
     case 'auto_explore': return sim.push_auto_explore(cmd.e, cmd.on);
+    case 'attackmove': return cmd.q
+      ? sim.push_attack_move_queued(cmd.e, cmd.x, cmd.y)
+      : sim.push_attack_move(cmd.e, cmd.x, cmd.y);
+    case 'patrol': return cmd.q
+      ? sim.push_patrol_queued(cmd.e, cmd.x, cmd.y)
+      : sim.push_patrol(cmd.e, cmd.x, cmd.y);
+    case 'stance': return sim.push_set_stance(cmd.e, cmd.s);
     case 'stop': return sim.push_stop(cmd.e);
     case 'delete': return sim.push_delete(cmd.e);
     case 'deleteb': return sim.push_delete_building(cmd.b);
@@ -205,6 +231,11 @@ const MESSAGE_TYPES = new Set([
   'hello', 'start', 'start-ack', 'start-abort', 'go',
   'bundle', 'hash', 'delay', 'resign', 'resync', 'resync-done',
   'resume', 'claim', 'room-full',
+  // Relay v6: originated by the room object itself (never by a
+  // client) when a member's socket closes — the surviving
+  // client's signal that its peer is gone and the rejoin grace
+  // window opens. Carries no fields.
+  'peer-left',
   // M10 room model: ready flags and the private-room password
   // handshake. All lobby traffic — none of it ever reaches the sim
   // or the hashed state (NET-10 discipline).
@@ -458,14 +489,40 @@ export function createSession({
       return false;
     },
 
-    /// Rejoin, rejoiner side: the sim has already been rebuilt and
-    /// fast-forwarded to `turn` from the recorded command stream
-    /// (see createRecorder / the resync message). The session opens
-    /// at that frontier: turns [turn, turn+delay) are empty by
-    /// construction (the same input-delay buffer as start()), and
-    /// pacing anchors at the resume moment. The remaining peer runs
-    /// rebase() to the same frontier.
-    startAt(turn, nowMs, delayTurns = delay) {
+    /// Rejoin, rejoiner side: the sim has been rebuilt and
+    /// fast-forwarded from the recorded command stream (see
+    /// createRecorder / the resync message) to the resync frontier
+    /// — the last turn the remaining peer had executed when it
+    /// captured the transfer. The session then opens at `turn`
+    /// (= frontier + delay + 2, chosen by the remaining peer):
+    /// turns [turn, turn+delay) are empty by construction (the
+    /// same input-delay buffer as start()), and pacing anchors at
+    /// the resume moment. The remaining peer runs rebase() to the
+    /// same `turn`.
+    ///
+    /// THE TURN-ACCOUNTING INVARIANT (rejoin fix F2, 2026-10-22):
+    /// when turn `turn` opens, EACH peer's sim has executed
+    /// exactly turn * turnTicks ticks. The remaining peer honours
+    /// it by EXECUTING the gap turns [frontier, turn) — rebase()
+    /// pre-fills them empty and pump() ticks them. The rejoiner
+    /// honoured it by fast-forwarding only the transferred ticks
+    /// (= frontier * turnTicks) and then SKIPPING the gap — its
+    /// sim stayed delay + 2 turns behind the host's forever, and
+    /// the first resumed hash exchange desynced both sides (the
+    /// 2026-10-22 live exercise, finding F2). So: pass
+    /// `rebuiltTicks` (the rebuilt sim's actual tick count) and
+    /// startAt first ticks the command-free gap turns itself.
+    /// The gap turns carry no commands on either side by
+    /// construction (the transfer's events end at the frontier;
+    /// rebase pre-fills empties), so bare ticks here and executed
+    /// empty turns there land on the identical state. The ticks
+    /// produce no hash messages — the host's gap-turn hashes
+    /// arrive and simply find no local counterpart.
+    startAt(turn, nowMs, delayTurns = delay, rebuiltTicks = null) {
+      if (typeof rebuiltTicks === 'number') {
+        const target = turn * turnTicks;
+        for (let t = rebuiltTicks; t < target; t++) tickOnce();
+      }
       phase = 'running';
       delay = delayTurns;
       anchorTurn = turn;
@@ -477,13 +534,18 @@ export function createSession({
       for (let t = turn; t < turn + delay; t++) bundles.set(t, [[], []]);
     },
 
-    /// Rejoin support: both sides discard every unexecuted bundle
-    /// (they may disagree about them — the disconnect ate messages),
-    /// pre-fill the small gap [nextExec, atTurn) as empty, and
-    /// re-anchor the pacing clock at the resume moment. Executed
-    /// turns are final and identical, so the match continues from
-    /// solid ground. Orders issued into the discarded window are
-    /// lost — the honest cost of a dropped connection.
+    /// Rejoin support, remaining-peer side: discard every
+    /// unexecuted bundle (the two sides may disagree about them —
+    /// the disconnect ate messages), pre-fill the small gap
+    /// [nextExec, atTurn) as empty, and re-anchor the pacing clock
+    /// at the resume moment. The pre-filled gap EXECUTES through
+    /// pump() like any other turns — that execution is this side's
+    /// half of the turn-accounting invariant (see startAt): by the
+    /// time atTurn opens, this sim has ticked atTurn * turnTicks
+    /// ticks, exactly like the rejoined peer's. Executed turns are
+    /// final and identical, so the match continues from solid
+    /// ground. Orders issued into the discarded window are lost —
+    /// the honest cost of a dropped connection.
     rebase(atTurn, nowMs) {
       for (const t of [...bundles.keys()]) {
         if (t >= nextExec) bundles.delete(t);

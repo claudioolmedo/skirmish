@@ -62,6 +62,7 @@ import {
 } from './play/groups.js';
 import {
   TURN_TICKS as NET_TURN_TICKS, REJOIN_GRACE_MS, LOAD_TIMEOUT_MS,
+  PEER_STALL_TIMEOUT_MS,
   GAME_SPEED, TICK_MS, advanceTicks,
   applyCommand as netApplyCommand, tcIdOf as netTcIdOf,
   createSession, createRecorder, replayEvents, isReplay,
@@ -88,6 +89,7 @@ import {
 import { ClickMarkers, markerHeads } from './play/clickmarker.js';
 import { pennantsForSelection, pennantShape } from './play/pennants.js';
 import { occlusionFor, intersectionRect } from './play/occlusion.js';
+import { wallLineCells } from './play/walls.js';
 import {
   t, getLocale, setLocale, costText, genderOf,
 } from './play/i18n.js';
@@ -244,34 +246,42 @@ function pngIcon(png, cls) {
 
 // Building kind tags (must match the sim's BuildingKind::tag):
 // 0 house, 1 farm, 2 barracks (M2.5/M3); 3 lumber camp, 4 mill,
-// 5 mining camp, 6 archery range, 7 stable, 8 blacksmith (M6).
-// Costs and footprints mirror the sim (MECHANICS-STUDY §5).
-const BUILD_COST = [25, 60, 175, 100, 100, 100, 175, 175, 150];
+// 5 mining camp, 6 archery range, 7 stable, 8 blacksmith (M6);
+// 9 palisade wall (BLD-13).
+// Costs and footprints mirror the sim (MECHANICS-STUDY §5; the
+// palisade row is the current DE wiki row — 3 wood per segment).
+const BUILD_COST = [25, 60, 175, 100, 100, 100, 175, 175, 150, 3];
 const BUILD_I18N = ['house', 'farm', 'barracks', 'lumber', 'mill',
-  'mining', 'range', 'stable', 'blacksmith'];
+  'mining', 'range', 'stable', 'blacksmith', 'palisade'];
 let BUILD_NAME = ['House', 'Farm', 'Barracks', 'Lumber Camp', 'Mill',
-  'Mining Camp', 'Archery Range', 'Stable', 'Blacksmith'];
-const BUILD_SIZE = [2, 2, 3, 2, 2, 2, 3, 3, 3];
+  'Mining Camp', 'Archery Range', 'Stable', 'Blacksmith', 'Palisade Wall'];
+const BUILD_SIZE = [2, 2, 3, 2, 2, 2, 3, 3, 3, 1];
 const BUILD_ICON = ['i-house', 'i-farm', 'i-tc', 'i-lumber', 'i-mill',
-  'i-mining', 'i-range', 'i-stable', 'i-blacksmith'];
+  'i-mining', 'i-range', 'i-stable', 'i-blacksmith', 'i-palisade'];
 // The PNG set above, per building kind tag (same order as
 // BUILD_ICON): command buttons and building portraits.
 const BUILD_PNG = ['house.png', 'farm.png', 'barracks.png', 'lumber-camp.png',
   'mill.png', 'mining-camp.png', 'archery-range.png', 'stable.png',
-  'blacksmith.png'];
+  'blacksmith.png', 'palisade-wall.png'];
 // Building max HP by kind tag (the sim's building table, study
-// §5) — for the enemy-building info panel (M5).
-const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200];
-// WASM build commands by kind tag (M6 completes the set).
+// §5) — for the enemy-building info panel (M5). The palisade
+// entry is its Dark-Age value (150; 250 from Feudal, BLD-13 —
+// the same base-column convention the House's 550 follows here).
+const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200, 150];
+// WASM build commands by kind tag (M6 completes the set; BLD-13
+// adds the palisade's single-segment form — dragged lines go
+// through sim.push_build_wall_line, see attemptPlaceWallLine).
 const PUSH_BUILD = ['push_build_house', 'push_build_farm', 'push_build_barracks',
   'push_build_lumber_camp', 'push_build_mill', 'push_build_mining_camp',
-  'push_build_archery_range', 'push_build_stable', 'push_build_blacksmith'];
+  'push_build_archery_range', 'push_build_stable', 'push_build_blacksmith',
+  'push_build_palisade_wall'];
 const PUSH_BUILD_QUEUED = PUSH_BUILD.map((n) => `${n}_queued`);
 // Own-building minimap colors by kind tag (M6); kinds without an
 // entry keep the minimap's parchment default, the enemy's
 // buildings are always ENEMY_COLOR.
 const BUILDING_MINIMAP_COLOR = {
   3: '#8a6b42', 4: '#e5d9a8', 5: '#b9a24a', 6: '#c98f4e', 7: '#9a6a44', 8: '#6f6f76',
+  9: '#7a5a34',
 };
 
 // Ages and technologies (M6). Age tags match the sim's Age::tag;
@@ -556,7 +566,14 @@ async function sendFeedback() {
 }
 let lDrag = null; // left-button drag state, canvas px: { x0, y0, x1, y1, moved }
 let placement = null; // { kind } while placing a building
+// BLD-13: while Palisade Wall placement is armed and the left
+// button is down, the wall line's anchor cell [cx, cy] (the drag
+// start). The drag's live end is the cursor's cell; on release a
+// moved drag commits the whole line (attemptPlaceWallLine), a
+// plain click places the single segment.
+let wallAnchor = null;
 let repairArm = false; // Repair targeting armed (villager root panel, E)
+let orderArm = null; // CMB-10/11 order targeting armed: 'attackmove' | 'patrol' | null
 // M13 hotkey state (client-only, like placement): the armed
 // villager build page ('eco' | 'mil' | null), the go-to cycle
 // memory (building kind -> last id handed out), and the building
@@ -832,6 +849,10 @@ const BUILDING_ART_FILES = {
   blacksmithStage1: 'blacksmith-stage1.png',
   blacksmithStage2: 'blacksmith-stage2.png',
   blacksmithStage3: 'blacksmith-stage3.png',
+  palisade: 'palisade-wall.png',
+  palisadeStage1: 'palisade-wall-stage1.png',
+  palisadeStage2: 'palisade-wall-stage2.png',
+  palisadeStage3: 'palisade-wall-stage3.png',
   farm: 'farm.png',
   farmState1: 'farm-state1.png',
   farmState2: 'farm-state2.png',
@@ -854,7 +875,7 @@ function buildingStageImage(kind, progress) {
 // drawn by drawBuilding / drawNewBuilding.
 const BUILDING_ART_KEY = {
   0: 'house', 2: 'barracks', 3: 'lumber', 4: 'mill', 5: 'mining',
-  6: 'range', 7: 'stable', 8: 'blacksmith',
+  6: 'range', 7: 'stable', 8: 'blacksmith', 9: 'palisade',
 };
 // The settle cap: the loading gate waits for the art, but a hung
 // image (stalled connection) must never block a match longer
@@ -1028,7 +1049,7 @@ const DIR_ART_SPEC = {
   spearman: { states: ['idle', 'walk', 'attack'], cell: 128, ax: 64, ay: 110, mask: true },
   skirmisher: { states: ['idle', 'walk', 'shoot'], cell: 128, ax: 64, ay: 110, mask: true },
   maa: { states: ['idle', 'walk', 'attack'], cell: 128, ax: 64, ay: 110, mask: true },
-  scout: { states: ['idle', 'gallop'], cell: 160, ax: 80, ay: 138, mask: true },
+  scout: { states: ['idle', 'gallop', 'attack'], cell: 160, ax: 80, ay: 138, mask: true },
   sheep: { states: ['idle', 'walk', 'graze'], cell: 128, ax: 64, ay: 110, mask: false },
   boar: { states: ['idle', 'walk', 'graze'], cell: 128, ax: 64, ay: 110, mask: false },
   deer: { states: ['idle', 'walk', 'graze'], cell: 128, ax: 64, ay: 110, mask: false },
@@ -1187,7 +1208,7 @@ function drawArtImage(im, sx, sy, wWorld, dyWorld, frac) {
 // -> CC0 placeholder -> vector circle (all in drawVillager).
 const VIL_ORIGINAL = {
   cell: 128, ax: 64, ay: 110, pxPerUnit: 46, drawScale: 1.35,
-  frames: { idle: 4, walk: 12, gather: 8, carry: 12, build: 8 },
+  frames: { idle: 4, walk: 12, gather: 8, carry: 12, build: 8, attack: 4 },
   dirs: 8, // rows in the currently loaded sheets (the active tier)
   img: {},
   imgRed: {}, // M5: red palette-swap variants, built per sheet load
@@ -1256,6 +1277,13 @@ function updateVilAnim(i, wx, wy, now) {
   if (moving) state = carryKind.has(i) ? 'carry' : 'walk';
   else if (atNodeNow.has(i)) state = 'gather';
   else if (atBuildNow.has(i)) state = 'build';
+  // Attack readability pass (2026-10-22): a stationary villager
+  // with a foe in melee reach fights with its knife — the same
+  // foeNearUnit trigger the footmen use for their attack state,
+  // so a villager battling a boar or an enemy no longer reads as
+  // merely standing next to it. Work states win: a harvester
+  // being bitten keeps chopping, as in the reference.
+  else if (foeNearUnit(i, wx, wy)) state = 'attack';
   // Facing (forest readability pass): a stationary gatherer turns
   // to FACE its node for the whole harvest — movement facing used
   // to strand it sideways to the tree, one of the reasons the chop
@@ -1276,6 +1304,10 @@ function updateVilAnim(i, wx, wy, now) {
     // phase 1/2, so the hit feedback below never moves.
     frame = Math.floor(now / (560 / VIL_ORIGINAL.frames[state]))
       % VIL_ORIGINAL.frames[state];
+  } else if (state === 'attack') {
+    // The footmen's attack cadence (dirSheetFrame): 7 sim ticks
+    // per frame over the 4-frame windup/strike/follow/recover arc.
+    frame = Math.floor(sim.tick_count() / 7) % VIL_ORIGINAL.frames.attack;
   } else {
     frame = Math.floor(now / 400) % VIL_ORIGINAL.frames.idle;
   }
@@ -1676,9 +1708,11 @@ function mirrorValid(kind, cx, cy) {
   // M6 gates (mirrors of the sim's validate_build): Farms need a
   // completed Mill of ours; the Feudal buildings need the Feudal
   // Age; the Range and the Stable need a completed Barracks.
+  // (The Feudal set is named explicitly — kind 9, the Palisade
+  // Wall, is a Dark Age building, BLD-13.)
   const ownDone = buildings.filter((b) => b.owner === localOwner && b.complete);
   if (kind === 1 && !ownDone.some((b) => b.kind === 4)) return false;
-  if (kind >= 6 && myAge() < 1) return false;
+  if ((kind === 6 || kind === 7 || kind === 8) && myAge() < 1) return false;
   if ((kind === 6 || kind === 7) && !ownDone.some((b) => b.kind === 2)) return false;
   // Any standing building's footprint (square range overlap).
   for (const b of buildings) {
@@ -1798,6 +1832,8 @@ addEventListener('keydown', (e) => {
       placement = null;
     } else if (repairArm) {
       repairArm = false;
+    } else if (orderArm) {
+      orderArm = null; // CMB-10/11: Esc disarms order targeting
     } else if (buildPage) {
       buildPage = null; // M13: Esc backs out of an armed build page
     } else if (playing) {
@@ -2178,6 +2214,20 @@ function handleHotkey(e) {
       }
       return true;
     }
+    // CMB-10: R is DE's dedicated attack-move key (wiki Hotkey
+    // page) — the same fall-through discipline as G above: only
+    // in the units context, only unmodified, only after every
+    // grid binding had its say (no grid slot claims R). It arms
+    // the very targeting the panel button arms.
+    if (e.code === 'KeyR' && !e.ctrlKey && !e.metaKey && !e.altKey
+        && ctx === 'units') {
+      e.preventDefault();
+      if (!e.repeat) {
+        runCommandButton('attack-move');
+        renderCommands();
+      }
+      return true;
+    }
     return false;
   }
   e.preventDefault();
@@ -2371,6 +2421,7 @@ function applyLocalOrder(cmd) {
     case 'build': return cmd.q
       ? sim[PUSH_BUILD_QUEUED[cmd.k]](cmd.e, cmd.x, cmd.y)
       : sim[PUSH_BUILD[cmd.k]](cmd.e, cmd.x, cmd.y);
+    case 'buildline': return sim.push_build_wall_line(cmd.e, cmd.x0, cmd.y0, cmd.x1, cmd.y1);
     case 'train_at':
       return cmd.k === 2 ? sim.push_train_scout(cmd.b)
         : cmd.k === 3 ? sim.push_train_militia(cmd.b)
@@ -2388,6 +2439,13 @@ function applyLocalOrder(cmd) {
     case 'rally_b': return sim.push_set_rally_building(cmd.b, cmd.x, cmd.y);
     case 'force_dep': return sim.push_force_deposit(cmd.e);
     case 'auto_explore': return sim.push_auto_explore(cmd.e, cmd.on);
+    case 'attackmove': return cmd.q
+      ? sim.push_attack_move_queued(cmd.e, cmd.x, cmd.y)
+      : sim.push_attack_move(cmd.e, cmd.x, cmd.y);
+    case 'patrol': return cmd.q
+      ? sim.push_patrol_queued(cmd.e, cmd.x, cmd.y)
+      : sim.push_patrol(cmd.e, cmd.x, cmd.y);
+    case 'stance': return sim.push_set_stance(cmd.e, cmd.s);
     case 'stop': return sim.push_stop(cmd.e);
     case 'delete': return sim.push_delete(cmd.e);
     case 'deleteb': return sim.push_delete_building(cmd.b);
@@ -2582,6 +2640,7 @@ function makeNetSession() {
     },
     onTurn: (turn, c0, c1) => {
       if (!net) return;
+      net.lastTurnAt = Date.now();
       net.recorder.addTurn(turn, c0, c1);
       const ms = sim.match_state();
       if (ms !== 0 && net.phase === 'playing') {
@@ -2593,19 +2652,45 @@ function makeNetSession() {
 }
 
 let netWaitTimer = null;
+let netStallTimer = null;
 function onNetWaiting(waiting) {
   // Show the stall pill only for stalls that outlast a blink.
-  if (!netUi) return;
+  if (netUi) {
+    if (waiting) {
+      if (!netWaitTimer) {
+        netWaitTimer = setTimeout(() => {
+          if (netUi) netUi.netWait.hidden = false;
+        }, 500);
+      }
+    } else {
+      clearTimeout(netWaitTimer);
+      netWaitTimer = null;
+      netUi.netWait.hidden = true;
+    }
+  }
+  // Peer-loss fallback (rejoin fix F1): the relay's 'peer-left'
+  // frame is the primary drop signal, but a peer whose connection
+  // dies without a close ever reaching the relay sends no frame —
+  // all this client sees is an execution stall that never ends.
+  // A continuous stall of PEER_STALL_TIMEOUT_MS mid-match is
+  // therefore treated as the peer being gone, opening the same
+  // grace window. If the peer turns out to be alive (a tab
+  // backgrounded for a long while), its resumed traffic revives
+  // the match via onPeerBack — nothing is lost but the pause.
   if (waiting) {
-    if (!netWaitTimer) {
-      netWaitTimer = setTimeout(() => {
-        if (netUi) netUi.netWait.hidden = false;
-      }, 500);
+    if (!netStallTimer && net && net.phase === 'playing') {
+      netStallTimer = setTimeout(() => {
+        netStallTimer = null;
+        if (net && net.phase === 'playing' && net.session
+          && net.session.state().waiting) {
+          net.peerGone = true;
+          onPeerGone();
+        }
+      }, PEER_STALL_TIMEOUT_MS);
     }
   } else {
-    clearTimeout(netWaitTimer);
-    netWaitTimer = null;
-    netUi.netWait.hidden = true;
+    clearTimeout(netStallTimer);
+    netStallTimer = null;
   }
 }
 
@@ -3332,10 +3417,57 @@ function onPeerGone() {
   }
 }
 
+/// The peer was declared gone, but its turn traffic is flowing
+/// again — so it never actually left (the peer-left came from a
+/// zombie socket's late error, or the stall fallback fired on a
+/// long-backgrounded tab that has since resumed). Every message
+/// a dead socket ever sent precedes its close at the relay, so
+/// bundle/hash traffic arriving while this client is in
+/// 'peer-left' can only come from a live peer: cancel the grace
+/// and play on. (A peer that genuinely REJOINS arrives on a new
+/// socket and sends a hello first — that path goes through
+/// sendResync, not through here, because a rebuilding peer sends
+/// no turn traffic until it has resumed.)
+function onPeerBack() {
+  if (!net || net.phase !== 'peer-left') return;
+  net.phase = 'playing';
+  net.peerGone = false;
+  clearInterval(net.graceTimer);
+  clearTimeout(netStallTimer);
+  netStallTimer = null;
+  showOverlay(netUi.peerOverlay, false);
+  flash(t('flash.reconnectedPeer'));
+  updateNetStatus();
+}
+
 function onNetMessage(msg) {
   if (!net) return;
+  // Live peer traffic while we believe the peer is gone means it
+  // is back (see onPeerBack) — checked before the session eats
+  // the message, because the session consuming it is exactly the
+  // proof of life.
+  if (net.phase === 'peer-left'
+    && (msg.type === 'bundle' || msg.type === 'hash')) {
+    onPeerBack();
+  }
   if (net.session && net.session.receive(msg)) return;
   switch (msg.type) {
+    case 'peer-left':
+      // Relay v6: the room object tells the surviving socket that
+      // its peer's socket closed — THE drop signal (rejoin fix
+      // F1). Until this existed, peerGone was only ever set by
+      // this client's OWN socket closing, so the remaining
+      // player never learned of a drop, the grace window never
+      // opened, and the returning peer was answered room-full.
+      // Only the phases onPeerGone acts on: a stray notice in
+      // any other phase (a duplicate close+error pair landing
+      // during 'rebuilding', say) changes nothing.
+      if (net.phase === 'playing' || net.phase === 'starting'
+        || net.phase === 'lobby') {
+        net.peerGone = true;
+        onPeerGone();
+      }
+      break;
     case 'hello': {
       // M12: a sealed guest seat (AI / Closed) admits no human —
       // a late hello on a stale link is told the room is full,
@@ -3397,8 +3529,28 @@ function onNetMessage(msg) {
       } else if (net.phase === 'playing' && !wasGone && net.hellosSeen > 2) {
         // The real peer accounts for at most two hellos (its own
         // plus its reply to mine); a third hello is a third client
-        // opening the link mid-match.
-        net.client.send({ type: 'room-full' });
+        // opening the link mid-match — USUALLY. One exception
+        // (rejoin fix F1): the relay's peer-left notice can lag
+        // the drop by seconds (2.1 s and 6.6 s observed live,
+        // 2026-10-22), so the peer itself, returning fast on the
+        // same link, can arrive before its own departure notice.
+        // Its seat is provably silent then — the session is
+        // stalled waiting for its bundles and no turn has executed
+        // for over two seconds — so treat the hello as the peer
+        // reclaiming its seat: pass through the grace state and
+        // answer with the resync, exactly as if the notice had
+        // landed first. A genuinely live peer (turns still
+        // executing) keeps the room-full answer.
+        if (net.session && net.session.state().waiting
+          && net.lastTurnAt && Date.now() - net.lastTurnAt > 2000) {
+          net.peerGone = true;
+          onPeerGone();
+          showOverlay(netUi.peerOverlay, false);
+          net.phase = 'playing';
+          sendResync();
+        } else {
+          net.client.send({ type: 'room-full' });
+        }
       }
       updateNetStatus();
       break;
@@ -3527,8 +3679,12 @@ function onNetMessage(msg) {
       break;
     case 'resume':
       if (net.session && net.phase === 'rebuilding') {
+        // F2: hand startAt the rebuilt sim's real tick count — it
+        // ticks the empty gap turns itself, so this sim reaches
+        // atTurn * TURN_TICKS exactly like the rebased host's
+        // (see the invariant in netplay.js startAt).
         net.session.startAt(msg.atTurn, performance.now() + 700,
-          net.resyncDelay || undefined);
+          net.resyncDelay || undefined, sim.tick_count());
         net.phase = 'playing';
         showOverlay(netUi.onlineOverlay, false);
         setInMatch(true); // the resumed match is on screen again
@@ -3631,6 +3787,7 @@ function openLobby(join) {
     region: join ? (join.region || 'wnam') : null,
     client: null, session: null, phase: 'lobby',
     peerPresent: false, peerGone: false, helloReplied: false,
+    lastTurnAt: 0, // last executed turn's wall time (seat-silence test)
     seed: null, pendingSim: null, recorder: null,
     desyncs: 0, telemetryPosted: false, pingMs: null,
     selectedRegion: null,
@@ -4888,6 +5045,13 @@ async function main() {
   // Shift form (SEL-12): the order lines up behind each unit's
   // current one instead of replacing it.
   function smartOrderAt(wx, wy, queued = false) {
+    // CMB-10/11: with order targeting armed, a right-click HERE
+    // (the minimap — the canvas right-click disarms instead)
+    // issues the armed order at this point.
+    if (orderArm) {
+      attemptOrderGround(wx, wy, queued);
+      return;
+    }
     if (selectedBuilding) {
       // M5: rally points belong to OUR buildings only — an enemy
       // building selected for information takes no orders at all;
@@ -4971,7 +5135,7 @@ async function main() {
     // The order acknowledgement's voice: military if any soldier
     // is among the ordered, else the villager's — one cue per
     // order, however many units it names (generated audio).
-    const orderCue = () => (targets.some((id) => [2, 3, 4, 8].includes(st.kinds[id]))
+    const orderCue = () => (targets.some((id) => [2, 3, 4, 8, 9, 10].includes(st.kinds[id]))
       ? 'orderMilitary'
       : targets.some((id) => st.kinds[id] === 0) ? 'orderVillager' : null);
     // The enemy Town Center (M5): entityAt skips Town Centers, so
@@ -5130,6 +5294,63 @@ async function main() {
     playAudioCue('orderVillager');
   }
 
+  // Attack-move / patrol targeting (CMB-10/11): the armed click
+  // names the destination for every selected military unit. Group
+  // destinations keep the orderAt group-move shape (each unit's
+  // offset from the centroid, clamped, with the shared point as
+  // the obstacle fallback). A successful order drops the ground
+  // click marker (INF-09a: a ground order) and disarms — Shift
+  // keeps the arm, like repair targeting, so a patrol's legs can
+  // be chained click by click (each later patrol order appends a
+  // leg in the sim).
+  function attemptOrderGround(wx, wy, queued = false) {
+    const kind = orderArm;
+    if (!kind) return;
+    const st = entityState();
+    const targets = selectedUnits().filter((id) => [2, 3, 4, 8, 9, 10].includes(st.kinds[id]));
+    if (!targets.length) {
+      orderArm = null;
+      flash(t('flash.orderSelectMil'));
+      renderCommands();
+      return;
+    }
+    let moveDest = null;
+    if (targets.length >= 2) {
+      let cx = 0;
+      let cy = 0;
+      for (const id of targets) {
+        cx += st.pos[id * 2];
+        cy += st.pos[id * 2 + 1];
+      }
+      cx /= targets.length;
+      cy /= targets.length;
+      moveDest = (id) => {
+        let dx = st.pos[id * 2] - cx;
+        let dy = st.pos[id * 2 + 1] - cy;
+        const len = Math.hypot(dx, dy);
+        if (len > 6) {
+          dx *= 6 / len;
+          dy *= 6 / len;
+        }
+        const tx = wx + dx;
+        const ty = wy + dy;
+        const [ccx, ccy] = worldToCell(tx, ty);
+        return OBST[ccy * GW + ccx] ? [wx, wy] : [tx, ty];
+      };
+    }
+    let any = false;
+    for (const id of targets) {
+      const [mx, my] = moveDest ? moveDest(id) : [wx, wy];
+      if (issue({ t: kind, e: id, x: mx, y: my, q: queued || undefined })) any = true;
+    }
+    if (any) {
+      clickMarkers.add('ground', wx, wy, performance.now());
+      playAudioCue('orderMilitary');
+    }
+    if (!queued) orderArm = null;
+    renderCommands();
+  }
+
   function attemptPlace(wx, wy, queued = false) {
     // The builder is the selected VILLAGER nearest the placement
     // point: with a group selected, the closest pair of hands does
@@ -5174,6 +5395,43 @@ async function main() {
     }
   }
 
+  // BLD-13: commit a dragged palisade line. A single semantic
+  // command carries both endpoints (as cell-center world points);
+  // the sim expands the line with the same supercover the ghost
+  // previewed, then validates and charges each segment itself —
+  // invalid or unaffordable cells are skipped (a gap, never a
+  // partial charge) and one builder walks the line raising the
+  // foundations in drag order. The builder is the selected
+  // villager nearest the line's start, attemptPlace's rule.
+  function attemptPlaceWallLine(ax, ay, bx, by) {
+    const st = entityState();
+    const pos = st.pos;
+    const wx = -HALF + (ax + 0.5) * CS;
+    const wy = -HALF + (ay + 0.5) * CS;
+    let builder = null;
+    let bestD2 = Infinity;
+    for (const id of selectedUnits()) {
+      if (st.kinds[id] !== 0) continue;
+      const d2 = (pos[id * 2] - wx) ** 2 + (pos[id * 2 + 1] - wy) ** 2;
+      if (d2 < bestD2) { bestD2 = d2; builder = id; }
+    }
+    if (builder == null) {
+      placement = null;
+      flash(t('flash.buildSelectVil'));
+      return;
+    }
+    const ok = issue({
+      t: 'buildline', e: builder, x0: wx, y0: wy,
+      x1: -HALF + (bx + 0.5) * CS, y1: -HALF + (by + 0.5) * CS,
+    });
+    if (ok) {
+      placement = null;
+      playAudioCue('buildingPlaced');
+    } else {
+      flash(t('flash.cannotBuildThere', { name: BUILD_NAME[9] }));
+    }
+  }
+
   canvas.addEventListener('mousemove', (ev) => {
     mouseWorld = eventWorld(ev);
   });
@@ -5204,6 +5462,10 @@ async function main() {
     if (ev.button !== 0) return;
     const [sx, sy] = eventScreen(ev);
     lDrag = { x0: sx, y0: sy, x1: sx, y1: sy, moved: false };
+    // BLD-13: with palisade placement armed, the press cell
+    // anchors the wall line; the release cell ends it.
+    wallAnchor = placement && placement.kind === 9
+      ? worldToCell(...eventWorld(ev)) : null;
   });
   window.addEventListener('mousemove', (ev) => {
     if (!lDrag) return;
@@ -5218,11 +5480,23 @@ async function main() {
     lDrag = null;
     const [wx, wy] = eventWorld(ev);
     if (placement) {
-      if (!d.moved) attemptPlace(wx, wy, ev.shiftKey); // a placement click, not a drag
+      if (placement.kind === 9 && d.moved && wallAnchor) {
+        // BLD-13: a dragged palisade placement commits the line
+        // from the press cell to the release cell.
+        const [ex, ey] = worldToCell(wx, wy);
+        attemptPlaceWallLine(wallAnchor[0], wallAnchor[1], ex, ey);
+      } else if (!d.moved) {
+        attemptPlace(wx, wy, ev.shiftKey); // a placement click, not a drag
+      }
+      wallAnchor = null;
       return;
     }
     if (repairArm) {
       if (!d.moved) attemptRepair(wx, wy, ev.shiftKey); // a targeting click, not a drag
+      return;
+    }
+    if (orderArm) {
+      if (!d.moved) attemptOrderGround(wx, wy, ev.shiftKey); // a targeting click, not a drag
       return;
     }
     if (d.moved) {
@@ -5385,6 +5659,11 @@ async function main() {
     }
     if (repairArm) {
       repairArm = false;
+      return;
+    }
+    if (orderArm) {
+      orderArm = null; // CMB-10/11: a right-click cancels order targeting
+      renderCommands();
       return;
     }
     if (buildPage) {
@@ -6518,6 +6797,8 @@ function drawBuilding(b) {
     progressBar(sx, sy - 3.4 * camS, b.progress);
   } else if (b.kind === 2) {
     drawBarracks(b);
+  } else if (b.kind === 9) {
+    drawPalisade(b);
   } else if (b.kind >= 3) {
     drawNewBuilding(b);
   } else {
@@ -6527,7 +6808,7 @@ function drawBuilding(b) {
   // non-farm buildings only — a foundation has nothing to burn.
   if (b.complete && b.kind !== 1) {
     const [fx, fy] = worldToScreen(b.x, b.y);
-    drawBuildingFireAt(fx, fy - (b.size === 3 ? 5.3 : 4.2) * camS,
+    drawBuildingFireAt(fx, fy - (b.size === 3 ? 5.3 : b.size === 1 ? 2.4 : 4.2) * camS,
       b.size, b.hpFrac, b.id * 1.71);
   }
   // M5: a damaged building shows its HP above the roof — buildings
@@ -6535,7 +6816,67 @@ function drawBuilding(b) {
   // never stripped by the quality governor.
   if (b.hpFrac < 0.999) {
     const [sx, sy] = worldToScreen(b.x, b.y);
-    hpBar(sx, sy - (b.size === 3 ? 7.3 : 5.8) * camS, b.hpFrac);
+    hpBar(sx, sy - (b.size === 3 ? 7.3 : b.size === 1 ? 3.6 : 5.8) * camS, b.hpFrac);
+  }
+}
+
+// The Palisade Wall segment (BLD-13): one cell of sharpened
+// timber stakes. Art follows the building contract — the
+// pipeline's palisade set (finished art + three construction
+// stages on the canonical diamond): the stage frame while
+// building, the finished art when complete, the clip-reveal as
+// the in-between fallback, sized footprint × 1.12 like every
+// other building. Last resort: the vector fence below, same
+// palette, so a segment never renders as a foreign block.
+function drawPalisade(b) {
+  const [sx, sy] = worldToScreen(b.x, b.y);
+  const half = CS / 2;
+  shadow(sx, sy, half * 1.3 * camS);
+  const t = worldToScreen(b.x - half, b.y - half);
+  const r = worldToScreen(b.x + half, b.y - half);
+  const bt = worldToScreen(b.x + half, b.y + half);
+  const l = worldToScreen(b.x - half, b.y + half);
+  poly([t, r, bt, l], b.complete ? 'rgba(0,0,0,0.12)' : '#8d8578');
+  let artDrawn = false;
+  if (!b.complete) {
+    artDrawn = drawArtImage(buildingStageImage(b.kind, b.progress), sx, sy,
+      CS * 1.12, half * 0.45, 1);
+  }
+  if (!artDrawn && !drawArtImage(BUILDING_ART.img[BUILDING_ART_KEY[b.kind]], sx, sy,
+    CS * 1.12, half * 0.45, b.complete ? 1 : b.progress)) {
+    drawPalisadeVector(sx, sy, b);
+  }
+  if (!b.complete) progressBar(sx, sy - 3.1 * camS, b.progress);
+}
+
+// Vector fallback for a palisade segment: five sharpened oak
+// stakes across the cell on two darker rails, growing with
+// construction progress.
+function drawPalisadeVector(sx, sy, b) {
+  const u = camS;
+  const hgt = 2.3 * u * (b.complete ? 1 : Math.max(0.15, b.progress));
+  const shades = ['#7a5230', '#8a5f36', '#6f4a2a', '#835831', '#75502e'];
+  ctx.strokeStyle = '#5d4030';
+  ctx.lineWidth = Math.max(1, 0.12 * u);
+  for (const f of [0.38, 0.68]) {
+    ctx.beginPath();
+    ctx.moveTo(sx - 1.8 * u, sy - hgt * f);
+    ctx.lineTo(sx + 1.8 * u, sy - hgt * f);
+    ctx.stroke();
+  }
+  for (let i = 0; i < 5; i++) {
+    const cx = sx + (i - 2) * 0.82 * u;
+    const w = 0.34 * u;
+    const tip = sy - hgt * (1 - Math.abs(i - 2) * 0.045);
+    ctx.fillStyle = shades[i];
+    ctx.beginPath();
+    ctx.moveTo(cx - w, sy);
+    ctx.lineTo(cx - w, tip + 0.34 * u);
+    ctx.lineTo(cx, tip);
+    ctx.lineTo(cx + w, tip + 0.34 * u);
+    ctx.lineTo(cx + w, sy);
+    ctx.closePath();
+    ctx.fill();
   }
 }
 
@@ -7297,11 +7638,19 @@ function unitActionFor(unit, i, wx, wy) {
     } else if (atBuildNow.has(i)) {
       action = 'build';
       n = Math.floor(tick / 6) % 2 + 1;
+    } else if (foeNearUnit(i, wx, wy)) {
+      action = 'attack';
+      n = Math.floor(tick / 7) % 3 + 1;
     }
   } else if (unit === 'scout') {
     if (pose.moving) {
       action = 'gallop';
       n = (Math.floor(tick / 6) + i) % 4 + 1;
+    } else if (foeNearUnit(i, wx, wy)) {
+      // The rider's sword slash (attack readability pass,
+      // 2026-10-22): same foeNearUnit trigger as the footmen.
+      action = 'attack';
+      n = Math.floor(tick / 7) % 3 + 1;
     }
   } else if (unit === 'archer' || unit === 'skirmisher') {
     if (pose.moving) {
@@ -7590,6 +7939,29 @@ function runCommandButton(id, times = 1) {
     // SEL-17: the selected scouts' AutoExplore toggle — the same
     // order the G key issues (toggleAutoExplore plays the cue).
     toggleAutoExplore();
+  } else if (id === 'attack-move' || id === 'patrol') {
+    // CMB-10/11: arm (or disarm) order targeting — the click
+    // that follows names the destination, exactly like build
+    // placement. Re-clicking the armed button disarms it.
+    const kind = id === 'attack-move' ? 'attackmove' : 'patrol';
+    orderArm = orderArm === kind ? null : kind;
+    if (orderArm) {
+      placement = null;
+      repairArm = false;
+      flash(t(kind === 'attackmove' ? 'flash.attackMoveArm' : 'flash.patrolArm'));
+    }
+    playAudioCue('click');
+  } else if (id.startsWith('stance-')) {
+    // CMB-09: set the stance of every selected military unit —
+    // a setting, applied at once, no targeting.
+    const tag = Number(id.slice(7));
+    const st = entityState();
+    let any = false;
+    for (const uid of selectedUnits()) {
+      if (![2, 3, 4, 8, 9, 10].includes(st.kinds[uid])) continue;
+      if (issue({ t: 'stance', e: uid, s: tag })) any = true;
+    }
+    if (any) playAudioCue('click');
   } else if (id === 'stop') {
     // SEL-14: halt every selected unit where it stands.
     stopSelectedUnits();
@@ -7736,6 +8108,18 @@ function renderCommands() {
   const scoutSel = selScouts.length > 0;
   const scoutAuto = scoutSel
     && selScouts.some((id) => sim.entity_auto_explore()[id] === 1);
+  // CMB-09/10/11: the military orders (Attack Move, Patrol) and
+  // the stance row show in the units context whenever a military
+  // unit is selected. The pressed stance face is the stance every
+  // selected military unit shares, read from the sim's
+  // per-entity tags (-1 when the selection is mixed).
+  const selMil = context === 'units'
+    ? selUnits.filter((id) => [2, 3, 4, 8, 9, 10].includes(st.kinds[id])) : [];
+  const milStanceTags = selMil.length ? sim.entity_stance() : null;
+  const milStance = selMil.length
+    ? (selMil.every((id) => milStanceTags[id] === milStanceTags[selMil[0]])
+      ? milStanceTags[selMil[0]] : -1)
+    : -1;
   const age = myAge();
   const techMask = myTechMask();
   const blockM = bk && context === 'barracks' ? sim.building_train_block(bk.id, 3) : -1;
@@ -7765,6 +8149,7 @@ function renderCommands() {
     blockM, blockSp, blockA, blockSk, blockS, age, techMask, rbTc.join('.'), Object.values(rbB).join('.'),
     tcQueueCodes, bkQueueCodes, buildPage || '', repairArm ? 1 : 0,
     scoutSel ? selScouts.join('.') : -1, scoutAuto ? 1 : 0,
+    selMil.length ? selMil.join('.') : -1, milStance, orderArm || '',
     placement ? placement.kind : -1].join('|');
   if (sig === cmdSig) return;
   cmdSig = sig;
@@ -7782,7 +8167,7 @@ function renderCommands() {
     const buildBtn = (kind) => {
       let gate = null;
       if (kind === 1 && !hasMill) gate = t('gate.mill');
-      else if (kind >= 6 && age < 1) gate = t('gate.feudal');
+      else if ((kind === 6 || kind === 7 || kind === 8) && age < 1) gate = t('gate.feudal');
       else if ((kind === 6 || kind === 7) && !hasBarracks) gate = t('gate.barracks');
       const lacksWood = wood < BUILD_COST[kind];
       return cmdButton({
@@ -8045,6 +8430,37 @@ function renderCommands() {
       );
     }
   }
+  if (context === 'units' && selMil.length) {
+    // CMB-10/11: Attack Move (R — DE's dedicated key) and Patrol
+    // arm order targeting; the click that follows names the
+    // destination. CMB-09: the stance row — four faces, the
+    // shared stance of the selected military units pressed.
+    const STANCE_BTN = [
+      ['stance-0', 'i-stance-aggressive', 'cmd.stanceAggressive', 'cmd.stanceAggressiveTitle'],
+      ['stance-1', 'i-stance-defensive', 'cmd.stanceDefensive', 'cmd.stanceDefensiveTitle'],
+      ['stance-2', 'i-stance-standground', 'cmd.stanceStandGround', 'cmd.stanceStandGroundTitle'],
+      ['stance-3', 'i-stance-noattack', 'cmd.stanceNoAttack', 'cmd.stanceNoAttackTitle'],
+    ];
+    cmdGrid.append(
+      cmdButton({
+        id: 'attack-move', icon: 'i-attackmove', label: t('cmd.attackMove'),
+        active: orderArm === 'attackmove', key: 'R',
+        title: t('cmd.attackMoveTitle'),
+      }),
+      cmdButton({
+        id: 'patrol', icon: 'i-patrol', label: t('cmd.patrol'),
+        active: orderArm === 'patrol',
+        key: badgeForButton({ context, id: 'patrol' }),
+        title: t('cmd.patrolTitle'),
+      }),
+      ...STANCE_BTN.map(([bid, icon, labelKey, titleKey], tag) => cmdButton({
+        id: bid, icon, label: t(labelKey),
+        active: milStance === tag,
+        key: badgeForButton({ context, id: bid }),
+        title: t(titleKey),
+      })),
+    );
+  }
   if (context === 'units' && scoutSel) {
     // SEL-17: the AutoExplore toggle (G) for the selected
     // scout(s). The pressed face mirrors the sim's flag; the
@@ -8066,10 +8482,12 @@ function renderCommands() {
     cmdGrid.append(
       cmdButton({
         id: 'stop', icon: 'i-stop', label: t('cmd.stop'),
+        key: context === 'units' ? badgeForButton({ context, id: 'stop' }) : null,
         title: t('cmd.stopTitle'),
       }),
       cmdButton({
         id: 'delete', icon: 'i-delete', label: t('cmd.delete'),
+        key: context === 'units' ? badgeForButton({ context, id: 'delete' }) : null,
         title: t('cmd.deleteTitle'),
       }),
     );
@@ -9118,26 +9536,66 @@ function draw() {
 
   // Placement ghost: the footprint under the cursor, green when the
   // mirrored sim rules allow building there, red when they don't.
+  // BLD-13: while a palisade drag is live the ghost is the whole
+  // line — one cell diamond per segment, green where the sim
+  // would place it and red where it would skip it. The green/red
+  // walk mirrors the sim's per-segment charging (a cell holding
+  // our own unfinished palisade resumes for free; each later
+  // green cell spends 3 wood from the remaining budget), so the
+  // preview shows the same gaps the release will leave.
   if (placement && mouseWorld) {
     const [cx, cy] = worldToCell(mouseWorld[0], mouseWorld[1]);
-    const ok = mirrorValid(placement.kind, cx, cy);
-    const size = BUILD_SIZE[placement.kind];
-    const x0 = -HALF + cx * CS;
-    const y0 = -HALF + cy * CS;
-    const pts = [
-      worldToScreen(x0, y0),
-      worldToScreen(x0 + size * CS, y0),
-      worldToScreen(x0 + size * CS, y0 + size * CS),
-      worldToScreen(x0, y0 + size * CS),
-    ];
-    poly(pts, ok ? 'rgba(90, 230, 120, 0.30)' : 'rgba(240, 70, 55, 0.30)');
-    ctx.strokeStyle = ok ? 'rgba(140, 255, 170, 0.9)' : 'rgba(255, 110, 95, 0.9)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(pts[0][0], pts[0][1]);
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
-    ctx.closePath();
-    ctx.stroke();
+    if (placement.kind === 9 && wallAnchor && lDrag && lDrag.moved) {
+      const cells = wallLineCells(wallAnchor[0], wallAnchor[1], cx, cy);
+      let budget = myStock()[1];
+      let placeable = 0;
+      for (const [wx2, wy2] of cells) {
+        const resume = buildings.some((b) => !b.complete && b.owner === localOwner
+          && b.kind === 9 && b.cellX === wx2 && b.cellY === wy2);
+        let ok = mirrorValid(9, wx2, wy2);
+        if (ok && !resume) {
+          if (budget >= BUILD_COST[9]) {
+            budget -= BUILD_COST[9];
+            placeable++;
+          } else ok = false;
+        } else if (ok) placeable++;
+        const x0 = -HALF + wx2 * CS;
+        const y0 = -HALF + wy2 * CS;
+        poly([
+          worldToScreen(x0, y0), worldToScreen(x0 + CS, y0),
+          worldToScreen(x0 + CS, y0 + CS), worldToScreen(x0, y0 + CS),
+        ], ok ? 'rgba(90, 230, 120, 0.30)' : 'rgba(240, 70, 55, 0.30)');
+      }
+      // Segment count + total cost at the drag's end cell.
+      const label = t('wall.preview', { n: placeable, cost: placeable * BUILD_COST[9] });
+      const [lx, ly] = worldToScreen(-HALF + (cx + 0.5) * CS, -HALF + cy * CS);
+      ctx.font = `bold ${Math.max(11, Math.round(1.15 * camS))}px sans-serif`;
+      ctx.textAlign = 'center';
+      const tw = ctx.measureText(label).width;
+      ctx.fillStyle = 'rgba(20,16,10,.72)';
+      ctx.fillRect(lx - tw / 2 - 5, ly - 2.7 * camS, tw + 10, 1.8 * camS);
+      ctx.fillStyle = '#ffe9c9';
+      ctx.fillText(label, lx, ly - 1.4 * camS);
+    } else {
+      const ok = mirrorValid(placement.kind, cx, cy);
+      const size = BUILD_SIZE[placement.kind];
+      const x0 = -HALF + cx * CS;
+      const y0 = -HALF + cy * CS;
+      const pts = [
+        worldToScreen(x0, y0),
+        worldToScreen(x0 + size * CS, y0),
+        worldToScreen(x0 + size * CS, y0 + size * CS),
+        worldToScreen(x0, y0 + size * CS),
+      ];
+      poly(pts, ok ? 'rgba(90, 230, 120, 0.30)' : 'rgba(240, 70, 55, 0.30)');
+      ctx.strokeStyle = ok ? 'rgba(140, 255, 170, 0.9)' : 'rgba(255, 110, 95, 0.9)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+      ctx.closePath();
+      ctx.stroke();
+    }
   }
 
   // Selection box while left-dragging: translucent gold rect.

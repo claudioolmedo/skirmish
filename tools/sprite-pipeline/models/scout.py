@@ -31,8 +31,9 @@ from render import box_tris, hex2rgb, rot_x, rot_z, xform
 MATERIALS_ADD = {'horse': hex2rgb('#6e4f33'),
                  'horse_dark': hex2rgb('#4e3823')}
 PC_MATS = {'tunic', 'cloth'}
-STATES = {'idle': 4, 'gallop': 12, 'die': 6}
+STATES = {'idle': 4, 'gallop': 12, 'attack': 4, 'die': 6}
 CANVAS = (160, 160, 80, 138)
+RIDER_SHOULDER = (0.25, 0.05, 1.92)  # the right arm's swing pivot
 # Death cell: horse + rider tipped sideways lie a full body
 # length from the ground point — bigger than the standing cell.
 # Enlarged 2026-10-22 (landing fix): at 256x216 the tipped mass
@@ -42,8 +43,9 @@ CANVAS = (160, 160, 80, 138)
 # +143 px one way and -144 px the other (measured per cell on
 # the rendered sheet, dirs 1/5, frame 5), and 59 px below the
 # anchor (dir 3). 304x232 with the anchor at (152, 162) leaves
-# >= 8 px on every side in every direction; the client mirrors
-# this canvas in its corpse spec (app.js CORPSE_SPEC).
+# >= 4 px on every side in every direction (worst measured);
+# the client mirrors this canvas in its corpse spec
+# (app.js CORPSE_SPEC).
 STATE_CANVAS = {'die': (304, 232, 152, 162)}
 _FALL_SIDE = (0.0, 9.0, 24.0, 46.0, 66.0, 78.0)
 
@@ -124,10 +126,31 @@ def _tail(sway):
     return _sh(tris, 0.0, -0.76, 1.36)
 
 
-def _rider():
+def _sword_tris():
+    """The rider's sword, built in the right arm's rest frame (fist
+    at the reins, ~ (0.235, 0.35, 1.64)): belt-leather grip, steel
+    guard, and a bright steel blade running ~0.6 units forward of
+    the fist to a stepped point. The whole arm group rotates about
+    RIDER_SHOULDER in the attack state, so the blade sweeps with
+    the slash. Steel is NOT a player-color material."""
+    t = []
+    t += box_tris(0.235, 0.40, 1.58, 1.68, 0.05, 0.10, mat='belt')
+    t += box_tris(0.235, 0.46, 1.57, 1.69, 0.17, 0.04, mat='steel')
+    t += box_tris(0.235, 0.68, 1.585, 1.675, 0.06, 0.42, 0.05, 0.36,
+                  'steel')                                    # blade
+    t += box_tris(0.235, 0.95, 1.59, 1.67, 0.028, 0.10, 0.05, 0.05,
+                  'steel')                                    # point
+    return t
+
+
+def _rider(arm_angle=0.0, sword=False):
     """Seated rider, axis-aligned boxes hugging the barrel: thigh
     slabs over the barrel top, shins against its sides, boots forward.
-    Right arm reaches forward-down to the reins, left arm hangs."""
+    Right arm reaches forward-down to the reins, left arm hangs.
+    The right arm is collected separately so the attack state can
+    swing it (with its sword) about the shoulder; at rest
+    (angle 0, no sword) the triangles land in exactly the same
+    order and position as the original static build."""
     tris = []
     # Saddle + player-color blanket (blanket drapes over both sides).
     tris += box_tris(0, 0, 1.33, 1.45, 0.80, 0.66, 0.78, 0.64, 'cloth')
@@ -141,10 +164,16 @@ def _rider():
     tris += box_tris(0, -0.016, 2.20, 2.30, 0.26, 0.25, 0.235, 0.225,
                      'hair')
     # Arms: sleeves in player color, forearms skin.
-    tris += box_tris(0.255, 0.09, 1.70, 1.94, 0.105, 0.13, 0.115,
-                     0.14, 'tunic')                 # right sleeve
-    tris += box_tris(0.235, 0.26, 1.60, 1.74, 0.085, 0.22, 0.095,
-                     0.13, 'skin')                  # right forearm
+    arm = []
+    arm += box_tris(0.255, 0.09, 1.70, 1.94, 0.105, 0.13, 0.115,
+                    0.14, 'tunic')                  # right sleeve
+    arm += box_tris(0.235, 0.26, 1.60, 1.74, 0.085, 0.22, 0.095,
+                    0.13, 'skin')                   # right forearm
+    if sword:
+        arm += _sword_tris()
+    if arm_angle:
+        arm = _xf(arm, rot_x(arm_angle), RIDER_SHOULDER)
+    tris += arm
     tris += box_tris(-0.255, 0.0, 1.70, 1.94, 0.105, 0.125, 0.115,
                      0.135, 'tunic')                # left sleeve
     tris += box_tris(-0.265, 0.01, 1.44, 1.72, 0.085, 0.105, 0.095,
@@ -222,12 +251,31 @@ def tris_for(state, frame):
             tris += _leg(sx, 1, front + off * sx, bob)
             tris += _leg(sx, -1, hind - off * sx, bob)
         return tris
+    if state == 'attack':
+        # Sword slash (attack readability pass, 2026-10-22): a
+        # fighting scout is standing, not galloping — legs planted
+        # as in idle, the neck dipping toward the foe on the strike,
+        # and the rider's sword arm whipping the four-beat arc:
+        # trailing windup low beside the chest, STRIKE (frame 1:
+        # arm extended forward, blade swept clear of the horse's
+        # silhouette), follow-through, recover to the reins.
+        arm = (-40.0, 30.0, 20.0, 6.0)[frame % 4]
+        pitch = (-1.0, 1.5, 0.5, 0.0)[frame % 4]
+        stretch = (0.0, 2.0, 1.0, 0.0)[frame % 4]
+        body = _body() + _rider(arm, sword=True) + _tail(2.0)
+        body += _neck_assembly(stretch, 0.0)
+        tris += _body_xform(body, pitch, 0.01)
+        for sx in (-1, 1):
+            for sy in (-1, 1):
+                tris += _leg(sx, sy, 1.5 * sy, 0.01)
+        return tris
     if state == 'die':
         # Horse and rider tip sideways as one mass — rotation
         # about the forward (Y) axis through the ground origin,
         # easing in; the last frame is the corpse the client
         # leaves fading on the field. The base assembly is the
-        # idle frame-0 pose.
+        # idle frame-0 pose (the rider at rest — _rider() with
+        # no arm angle and no sword).
         body = _body() + _rider() + _tail(5.0 * math.sin(0.7))
         body += _neck_assembly(0.0, 0.0)
         tris += _body_xform(body, 0.0, 0.0)
