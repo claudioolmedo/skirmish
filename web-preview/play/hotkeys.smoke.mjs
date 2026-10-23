@@ -9,7 +9,7 @@
 //
 // Proves: '.' selects an idle villager → the panel root shows
 // ONLY the two build-page openers (badged Q / W) → Q arms the
-// economic page (its six buildings + Back, House badged Q) → Q
+// economic page (its seven buildings + Back, House badged Q) → Q
 // enters House placement and the panel STAYS on the page; Esc
 // cancels the placement back onto the page, a second Esc returns
 // to the root; Q,W enters Mill placement; W arms the military
@@ -380,7 +380,7 @@ assert.ok(cmdBtn('repair').innerHTML.includes('<span class=\"cmd-key\">E</span>'
   'the Repair button is badged E (BLD-17)');
 
 key('KeyQ');
-assert.deepEqual(cmdIds(), ECO_IDS, 'Q arms the economic page — its six buildings + Back');
+assert.deepEqual(cmdIds(), ECO_IDS, 'Q arms the economic page — its seven buildings + Back');
 assert.ok(cmdBtn('build-0').innerHTML.includes('<span class="cmd-key">Q</span>'),
   'the House button is badged Q (its grid slot)');
 assert.ok(cmdBtn('build-4').innerHTML.includes('<span class="cmd-key">W</span>'),
