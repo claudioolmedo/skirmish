@@ -102,15 +102,20 @@ test('settings: levels map to tiers, DPR caps and cosmetic flags', () => {
   assert.equal(low.groundStrokes, false);
   assert.equal(low.pathLines, false);
   assert.equal(low.projTrail, false);
+  // Corpses are the FIRST cosmetic shed: off at low while every
+  // other level keeps them (animation pass 2026-10-22).
+  assert.equal(low.corpses, false);
   const med = settingsFor('medium');
   assert.equal(med.tier, 16);
   assert.equal(med.tierDir, 'tier16');
   assert.equal(med.dprCap, 1.5);
   assert.equal(med.shadows, true);
+  assert.equal(med.corpses, true);
   const high = settingsFor('high');
   assert.equal(high.tier, 32);
   assert.equal(high.tierDir, 'tier32');
   assert.equal(high.dprCap, 2);
+  assert.equal(high.corpses, true);
   // Unknown input degrades to the safest level.
   assert.equal(settingsFor('ultra'), low);
 });
