@@ -103,6 +103,20 @@ pub const BUILD_RANGE: I16F16 = I16F16::from_bits(655_360); // 10.0
 /// builder on a ring cell can stand ~11.3 units from the center
 /// (corner ring cell) — 12.5 covers the whole ring.
 pub const BARRACKS_BUILD_RANGE: I16F16 = I16F16::from_bits(819_200); // 12.5
+/// Town Center construction cost: 275 wood + 100 stone (study §5;
+/// wiki, Town Center (Age of Empires II)) — the first building
+/// whose cost is not wood alone (see `BuildingKind::stone_cost`).
+pub const TOWN_CENTER_WOOD_COST: I16F16 = I16F16::from_bits(18_022_400); // 275
+/// Town Center construction stone cost: 100 (study §5).
+pub const TOWN_CENTER_STONE_COST: I16F16 = I16F16::from_bits(6_553_600); // 100
+/// Town Center build time: 150 s at 60 Hz (study §5 — the
+/// player-built figure; the 100 s techtree number is the
+/// non-buildable Dark Age "stack" variant, per the study note).
+pub const TOWN_CENTER_BUILD_TICKS: u64 = 9000;
+/// The Town Center's build range: its 4×4 footprint is 16 units
+/// wide, so a builder on a corner ring cell can stand ~14.1 units
+/// from the center — 15.0 covers the whole ring.
+pub const TOWN_CENTER_BUILD_RANGE: I16F16 = I16F16::from_bits(983_040); // 15.0
 
 /// A buildable building kind.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -128,12 +142,22 @@ pub enum BuildingKind {
     /// M6: the generic technology host (Fletching and the armor
     /// lines); Feudal Age, 3×3.
     Blacksmith,
+    /// Castle Age P1: an additional Town Center. The kind exists
+    /// only as a *construction record*: the Town Center is an
+    /// entity in this architecture (BLD-16), so the tick the
+    /// foundation completes, `Sim::complete_building` converts the
+    /// record into a Town Center entity with its own production
+    /// state and frees the footprint (a standing TC never blocks
+    /// its ground). Castle Age only; 275 wood + 100 stone, 150 s,
+    /// 4×4 (study §5; BLD-15's Castle extension).
+    TownCenter,
 }
 
 impl BuildingKind {
     /// Stable tag for the state hash and the WASM building array:
     /// 0 = house, 1 = farm, 2 = barracks, 3 = lumber camp, 4 = mill,
-    /// 5 = mining camp, 6 = archery range, 7 = stable, 8 = blacksmith.
+    /// 5 = mining camp, 6 = archery range, 7 = stable, 8 = blacksmith,
+    /// 9 = town center (construction record only — see the variant).
     pub fn tag(self) -> u8 {
         match self {
             BuildingKind::House => 0,
@@ -145,6 +169,7 @@ impl BuildingKind {
             BuildingKind::ArcheryRange => 6,
             BuildingKind::Stable => 7,
             BuildingKind::Blacksmith => 8,
+            BuildingKind::TownCenter => 9,
         }
     }
 
@@ -160,6 +185,17 @@ impl BuildingKind {
             BuildingKind::ArcheryRange => ARCHERY_RANGE_WOOD_COST,
             BuildingKind::Stable => STABLE_WOOD_COST,
             BuildingKind::Blacksmith => BLACKSMITH_WOOD_COST,
+            BuildingKind::TownCenter => TOWN_CENTER_WOOD_COST,
+        }
+    }
+
+    /// Stone paid at placement time: zero for every kind except
+    /// the Town Center (100) — the one two-resource build cost in
+    /// the roster so far, and what makes mined stone spendable.
+    pub fn stone_cost(self) -> I16F16 {
+        match self {
+            BuildingKind::TownCenter => TOWN_CENTER_STONE_COST,
+            _ => I16F16::ZERO,
         }
     }
 
@@ -175,6 +211,7 @@ impl BuildingKind {
             BuildingKind::ArcheryRange => ARCHERY_RANGE_BUILD_TICKS,
             BuildingKind::Stable => STABLE_BUILD_TICKS,
             BuildingKind::Blacksmith => BLACKSMITH_BUILD_TICKS,
+            BuildingKind::TownCenter => TOWN_CENTER_BUILD_TICKS,
         }
     }
 
@@ -188,7 +225,10 @@ impl BuildingKind {
     /// Whether a completed (and under-construction) building of this
     /// kind blocks its footprint cells for pathing. Houses and the
     /// Barracks are solid; farms are ground a villager walks and
-    /// works on.
+    /// works on. A Town Center *construction record* blocks like
+    /// any foundation; the standing Town Center it converts into
+    /// never does (BLD-16 pass-through) — the conversion frees the
+    /// cells.
     pub fn blocks_footprint(self) -> bool {
         match self {
             BuildingKind::Farm => false,
@@ -207,7 +247,8 @@ impl BuildingKind {
     /// Footprint edge length in grid cells: 2 for House/Farm and the
     /// camps, 3 for the Barracks and the Feudal buildings (the
     /// study's footprints where it gives them; the Blacksmith's 3×3
-    /// is adopted — UNVERIFIED, see the module docs).
+    /// is adopted — UNVERIFIED, see the module docs), 4 for the
+    /// Town Center (study §5).
     pub fn footprint_size(self) -> u32 {
         match self {
             BuildingKind::House
@@ -219,13 +260,16 @@ impl BuildingKind {
             | BuildingKind::ArcheryRange
             | BuildingKind::Stable
             | BuildingKind::Blacksmith => 3,
+            BuildingKind::TownCenter => 4,
         }
     }
 
     /// A builder this close to the building's center is actively
     /// building (see the range constants for the geometry).
     pub fn build_range(self) -> I16F16 {
-        if self.footprint_size() == 3 {
+        if self.footprint_size() == 4 {
+            TOWN_CENTER_BUILD_RANGE
+        } else if self.footprint_size() == 3 {
             BARRACKS_BUILD_RANGE
         } else {
             BUILD_RANGE
@@ -267,6 +311,7 @@ impl BuildingKind {
             BuildingKind::ArcheryRange | BuildingKind::Stable | BuildingKind::Blacksmith => {
                 Age::Feudal
             }
+            BuildingKind::TownCenter => Age::Castle,
             _ => Age::Dark,
         }
     }
@@ -311,11 +356,18 @@ impl BuildingKind {
     /// capable of producing units"): the Barracks, Archery Range
     /// and Stable. The Town Center also produces, but it is an
     /// entity in this architecture, not a placed building — the
-    /// elimination predicate checks it separately.
+    /// elimination predicate checks it separately. A Town Center
+    /// *foundation* counts here on the same footing as the other
+    /// production foundations (VIC-01 counts placed production
+    /// buildings at any construction stage): a player raising a
+    /// new Town Center has not been eliminated.
     pub fn produces_units(self) -> bool {
         matches!(
             self,
-            BuildingKind::Barracks | BuildingKind::ArcheryRange | BuildingKind::Stable
+            BuildingKind::Barracks
+                | BuildingKind::ArcheryRange
+                | BuildingKind::Stable
+                | BuildingKind::TownCenter
         )
     }
 
@@ -333,6 +385,23 @@ impl BuildingKind {
         )
     }
 
+    /// Whether this kind counts toward the Castle Age research
+    /// requirement (TEC-01 Castle rung; study §7): any completed
+    /// building *of the Feudal Age* — the kinds whose availability
+    /// begins in Feudal (walls and towers excluded; neither exists
+    /// yet). The reading mirrors `counts_toward_feudal` one rung
+    /// up: the Barracks counted toward Feudal because it is a
+    /// Dark-Age building; being Dark-Age-born, it does NOT count
+    /// toward Castle — the qualifying set is the Feudal-born
+    /// kinds (Range, Stable, Blacksmith; the Market and Dock are
+    /// Feudal-born too but do not exist in this roster).
+    pub fn counts_toward_castle(self) -> bool {
+        matches!(
+            self,
+            BuildingKind::ArcheryRange | BuildingKind::Stable | BuildingKind::Blacksmith
+        )
+    }
+
     /// Hit points of a fresh building of this kind (M5 — buildings
     /// take damage now; study §5, Dark Age row where the value is
     /// age-keyed). Death is HP < 1, the entity rule (CMB-02).
@@ -347,26 +416,32 @@ impl BuildingKind {
             BuildingKind::LumberCamp | BuildingKind::Mill | BuildingKind::MiningCamp => 550,
             BuildingKind::ArcheryRange | BuildingKind::Stable => 1500,
             BuildingKind::Blacksmith => 1200,
+            // The Town Center entity's own row (study §5): 2400 at
+            // every Age — the construction record shares it.
+            BuildingKind::TownCenter => 2400,
         }
     }
 
     /// Hit points at the owner's current Age (BLD-11): a building's
     /// HP follows its owner's Age column in the data table with no
-    /// research and no player action. Only the kinds whose per-age
-    /// rows the study (§5) pins have a step: the House (550 Dark →
-    /// 750 Feudal; 900/900 in the Castle/Imperial columns, ages the
-    /// `Age` enum does not reach yet) and the Barracks (1200 →
-    /// 1500; 1800/2100 later). The Archery Range and Stable are
-    /// Feudal-born at their first column (1500) — their step is a
-    /// Castle-Age value. Every other kind keeps its flat row at
-    /// every age (no per-age data is pinned for them; nothing is
-    /// invented). The maximum is a *lookup* (TEC-04): a standing
+    /// research and no player action. The study (§5) pins the
+    /// per-age rows: House 550/750/**900** (Dark/Feudal/Castle),
+    /// Barracks 1200/1500/**1800**, Archery Range and Stable
+    /// 1500 (Feudal-born) → **1800** in Castle. The Town Center is
+    /// 2400 at every Age; the camps and the Blacksmith keep their
+    /// flat adopted rows at every age (no per-age data is pinned
+    /// for them; nothing is invented — their Castle columns stay
+    /// UNVERIFIED). The maximum is a *lookup* (TEC-04): a standing
     /// building's current HP is never rewritten by an age advance —
     /// the max rises around the damage already taken.
     pub fn max_hp_at(self, age: Age) -> i32 {
         match (self, age) {
             (BuildingKind::House, Age::Feudal) => 750,
+            (BuildingKind::House, Age::Castle) => 900,
             (BuildingKind::Barracks, Age::Feudal) => 1500,
+            (BuildingKind::Barracks, Age::Castle) => 1800,
+            (BuildingKind::ArcheryRange, Age::Castle) => 1800,
+            (BuildingKind::Stable, Age::Castle) => 1800,
             _ => self.max_hp(),
         }
     }
@@ -375,44 +450,65 @@ impl BuildingKind {
     /// M6 Feudal buildings). The House's is *negative* in the Dark
     /// Age — early houses are soft to melee, exactly as the
     /// study's table records. The camps' and Blacksmith's values
-    /// are adopted — UNVERIFIED (see the module docs).
+    /// are adopted — UNVERIFIED (see the module docs). The Town
+    /// Center construction record carries the entity's Dark row
+    /// (3); its per-Age steps live in `armor_melee_at`.
     pub fn armor_melee(self) -> i32 {
         match self {
             BuildingKind::House => -2,
             BuildingKind::ArcheryRange | BuildingKind::Stable => 1,
+            BuildingKind::TownCenter => 3,
             _ => 0,
         }
     }
 
     /// Melee armor at the owner's current Age (BLD-11, study §5):
-    /// House −2 Dark → −1 Feudal (the wiki House changelog, update
-    /// 56005: "−2/−1/1 melee armor in the Dark/Feudal/Castle Age");
-    /// Barracks 0 → 1. Other kinds keep their flat row.
+    /// House −2 Dark → −1 Feudal → **1 Castle** (the wiki House
+    /// changelog, update 56005: "−2/−1/1 melee armor in the
+    /// Dark/Feudal/Castle Age"); Barracks 0 → 1 → **2**; Range
+    /// and Stable 1 → **2**; Town Center 3 → 4 → **5** (study §5's
+    /// 3/4/5/6 progression). Other kinds keep their flat row.
     pub fn armor_melee_at(self, age: Age) -> i32 {
         match (self, age) {
             (BuildingKind::House, Age::Feudal) => -1,
+            (BuildingKind::House, Age::Castle) => 1,
             (BuildingKind::Barracks, Age::Feudal) => 1,
+            (BuildingKind::Barracks, Age::Castle) => 2,
+            (BuildingKind::ArcheryRange, Age::Castle) => 2,
+            (BuildingKind::Stable, Age::Castle) => 2,
+            (BuildingKind::TownCenter, Age::Feudal) => 4,
+            (BuildingKind::TownCenter, Age::Castle) => 5,
             _ => self.armor_melee(),
         }
     }
 
-    /// Pierce armor (study §5, Dark/Feudal rows as above).
+    /// Pierce armor (study §5, Dark/Feudal rows as above). The
+    /// Town Center construction record carries the entity's Dark
+    /// row (5); its per-Age steps live in `armor_pierce_at`.
     pub fn armor_pierce(self) -> i32 {
         match self {
             BuildingKind::House => 7,
             BuildingKind::Farm => 0,
             BuildingKind::ArcheryRange | BuildingKind::Stable => 8,
+            BuildingKind::TownCenter => 5,
             _ => 7,
         }
     }
 
     /// Pierce armor at the owner's current Age (BLD-11, study §5):
-    /// House 7 → 8 and Barracks 7 → 8 on reaching Feudal. Other
-    /// kinds keep their flat row.
+    /// House 7 → 8 → **9**, Barracks 7 → 8 → **9**, Range and
+    /// Stable 8 → **9**, Town Center 5 → 6 → **7** (study §5's
+    /// progressions). Other kinds keep their flat row.
     pub fn armor_pierce_at(self, age: Age) -> i32 {
         match (self, age) {
             (BuildingKind::House, Age::Feudal) => 8,
+            (BuildingKind::House, Age::Castle) => 9,
             (BuildingKind::Barracks, Age::Feudal) => 8,
+            (BuildingKind::Barracks, Age::Castle) => 9,
+            (BuildingKind::ArcheryRange, Age::Castle) => 9,
+            (BuildingKind::Stable, Age::Castle) => 9,
+            (BuildingKind::TownCenter, Age::Feudal) => 6,
+            (BuildingKind::TownCenter, Age::Castle) => 7,
             _ => self.armor_pierce(),
         }
     }
@@ -726,6 +822,39 @@ mod tests {
         }
         assert_eq!(BuildingKind::Blacksmith.wood_cost(), I16F16::from_num(150));
         assert_eq!(BuildingKind::Blacksmith.age_required(), Age::Feudal);
+        // Town Center (Castle P1; study §5): 275 W + 100 S, 150 s,
+        // 4×4, Castle Age, 2400 HP; the only stone-cost kind.
+        assert_eq!(BuildingKind::TownCenter.wood_cost(), I16F16::from_num(275));
+        assert_eq!(BuildingKind::TownCenter.stone_cost(), I16F16::from_num(100));
+        assert_eq!(BuildingKind::TownCenter.build_ticks(), 150 * 60);
+        assert_eq!(BuildingKind::TownCenter.footprint_size(), 4);
+        assert_eq!(BuildingKind::TownCenter.age_required(), Age::Castle);
+        assert_eq!(BuildingKind::TownCenter.max_hp(), 2400);
+        assert_eq!(BuildingKind::House.stone_cost(), I16F16::ZERO);
+        // Castle qualifying set (TEC-01): the Feudal-born kinds
+        // only — the Dark-born Barracks does not count.
+        assert!(BuildingKind::ArcheryRange.counts_toward_castle());
+        assert!(BuildingKind::Stable.counts_toward_castle());
+        assert!(BuildingKind::Blacksmith.counts_toward_castle());
+        assert!(!BuildingKind::Barracks.counts_toward_castle());
+        assert!(!BuildingKind::Mill.counts_toward_castle());
+        // BLD-11 Castle steps (study §5): House 900 HP, −1→1
+        // melee, 8→9 pierce; Barracks 1800, 1→2, 8→9; Range and
+        // Stable 1800, 1→2, 8→9; Town Center armor 4/6 Feudal →
+        // 5/7 Castle at a flat 2400 HP; camps stay flat.
+        assert_eq!(BuildingKind::House.max_hp_at(Age::Castle), 900);
+        assert_eq!(BuildingKind::House.armor_melee_at(Age::Castle), 1);
+        assert_eq!(BuildingKind::House.armor_pierce_at(Age::Castle), 9);
+        assert_eq!(BuildingKind::Barracks.max_hp_at(Age::Castle), 1800);
+        assert_eq!(BuildingKind::Barracks.armor_melee_at(Age::Castle), 2);
+        assert_eq!(BuildingKind::Barracks.armor_pierce_at(Age::Castle), 9);
+        assert_eq!(BuildingKind::ArcheryRange.max_hp_at(Age::Castle), 1800);
+        assert_eq!(BuildingKind::ArcheryRange.armor_melee_at(Age::Castle), 2);
+        assert_eq!(BuildingKind::Stable.armor_pierce_at(Age::Castle), 9);
+        assert_eq!(BuildingKind::TownCenter.max_hp_at(Age::Castle), 2400);
+        assert_eq!(BuildingKind::TownCenter.armor_melee_at(Age::Feudal), 4);
+        assert_eq!(BuildingKind::TownCenter.armor_pierce_at(Age::Castle), 7);
+        assert_eq!(BuildingKind::Mill.max_hp_at(Age::Castle), 550);
         // The trainable relation (M6): one home per unit kind.
         assert!(BuildingKind::Barracks.trains(EntityKind::Militia));
         assert!(BuildingKind::Barracks.trains(EntityKind::Spearman));

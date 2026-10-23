@@ -26,6 +26,18 @@
 //!   in the M6 report).
 //! - Feudal Age: 500 food, 130 s, requires any 2 completed Dark-Age
 //!   buildings besides Houses/Farms (TEC-01; study §7).
+//! - Castle Age: 800 food / 200 gold, 160 s, requires any 2
+//!   completed Feudal-Age buildings (walls/towers excluded — none
+//!   exist yet) (TEC-01 Castle rung; study §7; wiki, Castle Age
+//!   (Age of Empires II)).
+//! - Hand Cart: 300 food / 200 wood, 55 s, Town Center, Castle
+//!   Age, requires Wheelbarrow (wiki, Hand Cart; wiki, Technology
+//!   (Age of Empires II), economy table). Effects: villager carry
+//!   capacity per the wiki's comparison table (generic 13 → 20,
+//!   hunted meat 44 → 66 — the table resolves the nominal +50%,
+//!   exactly as it resolved Wheelbarrow's 10 → 13 / 35 → 44) and
+//!   villager speed +10%, a second percentage layer on the
+//!   Wheelbarrow scalar in `Sim::stats_for` (TEC-06).
 //! - Fletching: 100 food / 50 gold, 30 s — archers +1 attack and
 //!   +1 range (study §8; the study's Castle/Tower/Town Center lines
 //!   have no targets in M6 — no such attacks exist yet).
@@ -47,30 +59,34 @@
 //!   it (10 → 13 ordinary, 35 → 44 hunted meat) and villager
 //!   speed +10% — TEC-06's first *percentage* patch: the speed
 //!   scalar multiplies the layered row (base + flat adds) in
-//!   `Sim::stats_for`. Its successor Hand Cart is a Castle Age
-//!   technology (same sources) and waits for that Age (ECO-03).
+//!   `Sim::stats_for`. Its successor Hand Cart (Castle Age, same
+//!   sources) landed with the Castle Age P1 package (ECO-03).
 
 use crate::build::BuildingKind;
 use crate::entity::EntityKind;
 use crate::units;
 
 /// The ages a player can stand in (M6 ships the first step of the
-/// TEC-01 ladder; Castle/Imperial are later milestones). Ordered:
-/// `Dark < Feudal`, so age requirements are plain comparisons.
+/// TEC-01 ladder; the Castle rung lands with the Castle Age P1
+/// package; Imperial is a later milestone). Ordered:
+/// `Dark < Feudal < Castle`, so age requirements are plain
+/// comparisons.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Age {
     #[default]
     Dark,
     Feudal,
+    Castle,
 }
 
 impl Age {
     /// Stable tag for the state hash and the WASM ABI:
-    /// 0 = Dark Age, 1 = Feudal Age.
+    /// 0 = Dark Age, 1 = Feudal Age, 2 = Castle Age.
     pub fn tag(self) -> u8 {
         match self {
             Age::Dark => 0,
             Age::Feudal => 1,
+            Age::Castle => 2,
         }
     }
 }
@@ -93,11 +109,16 @@ pub enum TechId {
     ManAtArms,
     /// Town Center, Feudal: villager carry + speed (ECO-03).
     Wheelbarrow,
+    /// Town Center: the Castle Age advancement itself (TEC-01).
+    CastleAge,
+    /// Town Center, Castle: villager carry + speed, the second
+    /// link of the ECO-03 chain (requires Wheelbarrow, TEC-07).
+    HandCart,
 }
 
 impl TechId {
     /// All technologies, in tag order.
-    pub const ALL: [TechId; 7] = [
+    pub const ALL: [TechId; 9] = [
         TechId::Loom,
         TechId::FeudalAge,
         TechId::Fletching,
@@ -105,10 +126,13 @@ impl TechId {
         TechId::PaddedArcherArmor,
         TechId::ManAtArms,
         TechId::Wheelbarrow,
+        TechId::CastleAge,
+        TechId::HandCart,
     ];
 
     /// Stable tag: 0 loom, 1 feudal age, 2 fletching, 3 scale mail,
-    /// 4 padded archer armor, 5 man-at-arms, 6 wheelbarrow.
+    /// 4 padded archer armor, 5 man-at-arms, 6 wheelbarrow,
+    /// 7 castle age, 8 hand cart.
     pub fn tag(self) -> u8 {
         match self {
             TechId::Loom => 0,
@@ -118,6 +142,8 @@ impl TechId {
             TechId::PaddedArcherArmor => 4,
             TechId::ManAtArms => 5,
             TechId::Wheelbarrow => 6,
+            TechId::CastleAge => 7,
+            TechId::HandCart => 8,
         }
     }
 
@@ -135,7 +161,11 @@ impl TechId {
     /// placed building kind.
     pub fn host(self) -> TechHost {
         match self {
-            TechId::Loom | TechId::FeudalAge | TechId::Wheelbarrow => TechHost::TownCenter,
+            TechId::Loom
+            | TechId::FeudalAge
+            | TechId::Wheelbarrow
+            | TechId::CastleAge
+            | TechId::HandCart => TechHost::TownCenter,
             TechId::Fletching | TechId::ScaleMail | TechId::PaddedArcherArmor => {
                 TechHost::Building(BuildingKind::Blacksmith)
             }
@@ -144,11 +174,27 @@ impl TechId {
     }
 
     /// The age the researching player must stand in (TEC-07). The
-    /// age advancement itself is researched *from* the Dark Age.
+    /// age advancements themselves are researched *from* the age
+    /// below (Feudal from Dark, Castle from Feudal).
     pub fn age_required(self) -> Age {
         match self {
             TechId::Loom | TechId::FeudalAge => Age::Dark,
+            TechId::CastleAge => Age::Feudal,
+            TechId::HandCart => Age::Castle,
             _ => Age::Feudal,
+        }
+    }
+
+    /// A technology that must already be researched before this
+    /// one can start (TEC-07's tech→tech prerequisite links — the
+    /// Castle package lands the first: Hand Cart chains from
+    /// Wheelbarrow, wiki, Hand Cart: "the further upgrade of
+    /// Wheelbarrow"). Age advancements read off the age state
+    /// itself, so they never appear here.
+    pub fn requires_tech(self) -> Option<TechId> {
+        match self {
+            TechId::HandCart => Some(TechId::Wheelbarrow),
+            _ => None,
         }
     }
 
@@ -165,6 +211,8 @@ impl TechId {
             TechId::PaddedArcherArmor => 2400,
             TechId::ManAtArms => 2400, // UNVERIFIED (module docs)
             TechId::Wheelbarrow => 4500,
+            TechId::CastleAge => 9600,
+            TechId::HandCart => 3300,
         }
     }
 
@@ -179,6 +227,8 @@ impl TechId {
             TechId::PaddedArcherArmor => (100, 0, 0, 0),
             TechId::ManAtArms => (100, 0, 40, 0), // UNVERIFIED (module docs)
             TechId::Wheelbarrow => (175, 50, 0, 0),
+            TechId::CastleAge => (800, 0, 200, 0),
+            TechId::HandCart => (300, 200, 0, 0),
         }
     }
 }
@@ -278,11 +328,30 @@ mod tests {
         assert_eq!(TechId::Wheelbarrow.ticks(), 75 * 60);
         assert_eq!(TechId::Wheelbarrow.host(), TechHost::TownCenter);
         assert_eq!(TechId::Wheelbarrow.age_required(), Age::Feudal);
+        // Castle Age: 800 F / 200 G, 160 s at the Town Center,
+        // researched from the Feudal Age (TEC-01; study §7).
+        assert_eq!(TechId::CastleAge.cost(), (800, 0, 200, 0));
+        assert_eq!(TechId::CastleAge.ticks(), 160 * 60);
+        assert_eq!(TechId::CastleAge.host(), TechHost::TownCenter);
+        assert_eq!(TechId::CastleAge.age_required(), Age::Feudal);
+        // Hand Cart: 300 F / 200 W, 55 s, Town Center, Castle Age,
+        // chained from Wheelbarrow (wiki, Hand Cart).
+        assert_eq!(TechId::HandCart.cost(), (300, 200, 0, 0));
+        assert_eq!(TechId::HandCart.ticks(), 55 * 60);
+        assert_eq!(TechId::HandCart.host(), TechHost::TownCenter);
+        assert_eq!(TechId::HandCart.age_required(), Age::Castle);
+        assert_eq!(TechId::HandCart.requires_tech(), Some(TechId::Wheelbarrow));
+        assert_eq!(TechId::Wheelbarrow.requires_tech(), None);
+        // Age tags: 0 Dark, 1 Feudal, 2 Castle.
+        assert_eq!(Age::Dark.tag(), 0);
+        assert_eq!(Age::Feudal.tag(), 1);
+        assert_eq!(Age::Castle.tag(), 2);
+        assert!(Age::Dark < Age::Feudal && Age::Feudal < Age::Castle);
         // Tags are stable and round-trip.
         for t in TechId::ALL {
             assert_eq!(TechId::from_tag(t.tag()), Some(t));
         }
-        assert_eq!(TechId::from_tag(7), None);
+        assert_eq!(TechId::from_tag(9), None);
     }
 
     #[test]

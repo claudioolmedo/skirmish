@@ -55,14 +55,16 @@
 // kind: 0 House, 1 Farm, 2 Barracks, 3 Lumber Camp, 4 Mill,
 //       5 Mining Camp, 6 Archery Range, 7 Stable, 8 Blacksmith.
 // PAGE_KINDS is the pages' GRID (render) order: slot 0 first.
+// Kind 9 (Town Center, Castle Age) closes the economic page —
+// DE's villager panel keeps the TC with the economic buildings.
 export const PAGE_KINDS = {
-  eco: [0, 4, 1, 3, 5],
+  eco: [0, 4, 1, 3, 5, 9],
   mil: [2, 6, 7, 8],
 };
 
 /** Which build page a building kind belongs to ('eco' | 'mil'). */
 export const PAGE_FOR_KIND = {
-  0: 'eco', 1: 'eco', 3: 'eco', 4: 'eco', 5: 'eco',
+  0: 'eco', 1: 'eco', 3: 'eco', 4: 'eco', 5: 'eco', 9: 'eco',
   2: 'mil', 6: 'mil', 7: 'mil', 8: 'mil',
 };
 
@@ -79,6 +81,7 @@ export const PAGE_KEYS = {
     KeyE: 1, KeyF: 1, // Farm — slot 2 (alias F)
     KeyA: 3, KeyR: 3, KeyZ: 3, // Lumber Camp — slot 3 (aliases R, Z)
     KeyS: 5, KeyG: 5, // Mining Camp — slot 4 (alias: its go-to G)
+    KeyD: 9, // Town Center — slot 5 (Castle Age)
     KeyC: 'back', // Back — the last slot
   },
   mil: {
@@ -92,13 +95,13 @@ export const PAGE_KEYS = {
 
 /** The one letter shown as a button's key badge on an armed page. */
 export const PAGE_BADGE = {
-  eco: { 0: 'Q', 4: 'W', 1: 'E', 3: 'A', 5: 'S' },
+  eco: { 0: 'Q', 4: 'W', 1: 'E', 3: 'A', 5: 'S', 9: 'D' },
   mil: { 2: 'Q', 6: 'W', 7: 'E', 8: 'A' },
 };
 
 /** Panel contexts whose buttons answer to position keys, in order. */
 export const PANEL_BUTTONS = {
-  tc: ['train', 'research-loom', 'research-feudal', 'research-wheelbarrow'],
+  tc: ['train', 'research-loom', 'research-age', 'research-wheelbarrow', 'research-handcart'],
   barracks: ['train-militia', 'train-spearman', 'research-maa'],
   range: ['train-archer', 'train-skirmisher'],
   stable: ['train-scout'],
@@ -124,11 +127,15 @@ export const PANEL_KEYS = {
   tc: {
     train: ['KeyQ', 'Q'],
     'research-loom': ['KeyA', 'A'],
-    'research-feudal': ['KeyW', 'W'],
+    // The age-advance button (DE has exactly one: it offers the
+    // NEXT Age — Feudal from Dark, Castle from Feudal — and sits
+    // top-row second, W, in both steps).
+    'research-age': ['KeyW', 'W'],
     // Wheelbarrow (2026-10-22) sits right of Loom on the second
     // row — DE's own Town Center arrangement (Loom A, Wheelbarrow
-    // S, Hand Cart D when that Age exists).
+    // S, Hand Cart D).
     'research-wheelbarrow': ['KeyS', 'S'],
+    'research-handcart': ['KeyD', 'D'],
   },
   barracks: {
     'train-militia': ['KeyQ', 'Q'],

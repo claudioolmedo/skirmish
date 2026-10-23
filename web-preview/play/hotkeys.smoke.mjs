@@ -435,7 +435,7 @@ assert.ok(cmdBtn('train').innerHTML.includes('<span class="cmd-key">Q</span>'),
   'the Villager button is badged Q');
 assert.ok(cmdBtn('research-loom').innerHTML.includes('<span class="cmd-key">A</span>'),
   'the Loom button is badged A (DE)');
-assert.ok(cmdBtn('research-feudal').innerHTML.includes('<span class="cmd-key">W</span>'),
+assert.ok(cmdBtn('research-age').innerHTML.includes('<span class="cmd-key">W</span>'),
   'the Feudal button is badged W (DE)');
 key('KeyQ');
 pump(6);
