@@ -79,7 +79,8 @@ pub use build::{
     TOWN_CENTER_POP_SUPPORT,
 };
 pub use combat::{
-    compute_damage, compute_damage_elev, elevation_factor, Projectile, DEFENSIVE_LEASH,
+    compute_damage, compute_damage_elev, compute_damage_hit, elevation_factor, Projectile,
+    DEFENSIVE_LEASH,
     MELEE_REACH,
 };
 pub use econ::{
