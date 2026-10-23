@@ -32,3 +32,38 @@ For production and technology work, extend the existing systems rather than crea
 Documentation-only changes need link and consistency checks. Gameplay changes should pass `cargo test`, the project's determinism checks and the WebAssembly build; client changes also need the checks in [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 No gameplay code or balance values are changed by this proposal.
+
+## Maintainer disposition (2026-10-22)
+
+Priorities 1 and 2 were executed the same day this review landed.
+
+- **Priority 1 — done.** The gap analysis was re-audited against the
+  shipped code at `0f303ca` (every corrected status names its
+  implementation and tests), the roadmap scoreboard now matches the
+  rulebook's mechanical recount (218 rules: 119 MATCHES / 33 DIFFERS /
+  66 MISSING), and the rulebook's own Appendix A table was corrected
+  where the recount found it stale (§7: 12/4/1).
+- **Priority 2 — done; the flagged case was a real bug.** Public DE
+  documentation composes all multipliers before the minimum clamp
+  (wiki, *Attack*: `Damage = max(1, k_ele × k_miss × …)`; wiki,
+  *Armor class*, steps 5–6: "the minimum damage rule is applied after
+  all the attack multipliers" — both fetched 2026-10-22). Our code
+  clamped first and halved after, so a mishit of a full-1 hit dealt
+  0.5. Fixed in `compute_damage_hit` (`sim/src/combat.rs`), with
+  regression tests covering high armor (Σ = 0), fractional HP,
+  exactly 1 HP, death below 1 HP, the mishit-at-full-1 case and
+  elevation × mishit composition; CMB-01/CMB-13 record the verified
+  order. The golden hash did not move.
+- **Priority 3 (blast-damage policy), Priority 4 (attack eligibility)
+  and Priority 5 (Ballistics + flight-path collision) — design
+  follow-ups, not yet scheduled as code.** They are tied to the Siege
+  (Castle Age package P4) and University/Ballistics work: blast and
+  pass-through projectiles do not exist in the roster yet, and
+  eligibility only becomes multi-policy once they do. Each will be
+  specified from public evidence before any code, per this file's
+  own hygiene rules.
+- **Priority 6 (garrison) — accepted, folded into the Castle Age P3
+  package design**: occupancy (admission, capacity, unloading,
+  destruction) is specified before arrows and healing, as suggested.
+  Sequencing inside that package is pending the maintainer's
+  garrison decision.

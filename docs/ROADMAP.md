@@ -28,6 +28,8 @@ it: [The Self-Sustaining System](SUSTAINABILITY.md).
 | **M4** ✅ | Command completeness: queued (shift) orders, rally points, control groups, idle villager/military keys, selection cap 60, minimap orders, formation-keeping group moves, gatherer retargeting |
 | **M5** ✅ | Scripted AI opponent + Conquest: per-player stockpiles/population/buildings, mirrored enemy start, an economy-and-army script (Easy/Normal) playing only through the command queue, victory/defeat |
 | **M6** ✅ | Ages & technologies (first rung): Dark → Feudal research and Loom in the Town Center's shared queue, per-player tech patches applied at stat lookup, the drop-off camps (Lumber Camp / Mill / Mining Camp) with nearest-valid-deposit routing and force drop-off, Farm gated on a Mill, Feudal buildings (Archery Range — Archers move there — Stable, Blacksmith with Fletching / Scale Mail / Padded Archer Armor), the Man-at-Arms line upgrade, and the AI taught the same layer |
+| **M7–M14** ✅ | Terrain/fog/random Arabia maps; lockstep multiplayer + replays; the Lobby Browser; lobby polish and mobile layout; the classic grid hotkeys + edge scrolling; directional sprites, player color, the building lifecycle and Repair (see the milestone log below) |
+| **Post-M14 fidelity batches** ✅ | 2026-10-20 → 2026-10-22: sheep conversion by presence + forest/chopping feel; Spearman and Skirmisher; the Feudal technology tier completed; match Score (VIC-04); the occluded-unit outline (INF-12); Orders & Stances (attack-move, patrol, the four stances); Palisade Walls and the one-line wall fix; deer pushing; scripted-AI repair; the online rejoin fix (verified live); readable attack animations; the ECO-14 farm top-up rounding |
 
 The interface on the play page already follows the classic layout — top
 resource bar, bottom-left command panel, bottom-center selection panel,
@@ -37,31 +39,32 @@ For proposed follow-up work, see [Suggestions for improving Skirmish II](IMPROVE
 
 ## What's missing — the rulebook scoreboard
 
-The [Mechanics Rulebook](MECHANICS-RULEBOOK.md) states **213 behavioral
-rules** across 18 systems (audit dated 2026-10-16; statuses are re-checked
-as milestones land):
+The [Mechanics Rulebook](MECHANICS-RULEBOOK.md) states **218 behavioral
+rules** across 18 systems. The counts below are a mechanical recount of
+the rulebook's per-rule statuses, re-verified **2026-10-22** (Codex
+review follow-up; the rulebook's own Appendix A carries the same table):
 
 | § | System | Rules | Match | Differ | Missing |
 |---|--------|------:|------:|-------:|--------:|
-| 1 | Simulation & time (SIM) | 12 | 10 | 1 | 1 |
-| 2 | Map, terrain & elevation (MAP) | 12 | 2 | 2 | 8 |
-| 3 | Visibility & exploration (VIS) | 10 | 1 | 1 | 8 |
-| 4 | Selection & orders (SEL) | 16 | 12 | 3 | 1 |
-| 5 | Movement, pathfinding & collision (MOV) | 12 | 3 | 4 | 5 |
+| 1 | Simulation & time (SIM) | 12 | 11 | 1 | 0 |
+| 2 | Map, terrain & elevation (MAP) | 12 | 7 | 4 | 1 |
+| 3 | Visibility & exploration (VIS) | 10 | 8 | 1 | 1 |
+| 4 | Selection & orders (SEL) | 17 | 15 | 2 | 0 |
+| 5 | Movement, pathfinding & collision (MOV) | 12 | 4 | 3 | 5 |
 | 6 | Economy & drop-off (ECO) | 17 | 13 | 2 | 2 |
-| 7 | Buildings & placement (BLD) | 15 | 8 | 4 | 3 |
-| 8 | Combat & damage (CMB) | 16 | 10 | 3 | 3 |
-| 9 | Projectiles & ballistics (PRJ) | 10 | 4 | 4 | 2 |
+| 7 | Buildings & placement (BLD) | 17 | 12 | 4 | 1 |
+| 8 | Combat & damage (CMB) | 16 | 14 | 1 | 1 |
+| 9 | Projectiles & ballistics (PRJ) | 10 | 5 | 3 | 2 |
 | 10 | Unit classes & counters (CLS) | 8 | 5 | 0 | 3 |
-| 11 | Technologies & age advancement (TEC) | 11 | 3 | 5 | 3 |
+| 11 | Technologies & age advancement (TEC) | 11 | 5 | 3 | 3 |
 | 12 | Monks, conversion & relics (MNK) | 13 | 0 | 0 | 13 |
 | 13 | Trade, market & tribute (TRD) | 8 | 0 | 0 | 8 |
 | 14 | Garrison, transport & repair (GAR) | 10 | 0 | 0 | 10 |
-| 15 | AI behavior & difficulty (AI) | 9 | 4 | 3 | 2 |
-| 16 | Victory, scoring & game modes (VIC) | 12 | 0 | 1 | 11 |
-| 17 | Multiplayer determinism (NET) | 11 | 2 | 1 | 8 |
-| 18 | Information rules (INF) | 11 | 2 | 4 | 5 |
-| | **Total** | **213** | **79** | **38** | **96** |
+| 15 | AI behavior & difficulty (AI) | 9 | 6 | 1 | 2 |
+| 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |
+| 17 | Multiplayer determinism (NET) | 11 | 4 | 5 | 2 |
+| 18 | Information rules (INF) | 13 | 8 | 3 | 2 |
+| | **Total** | **218** | **119** | **33** | **66** |
 
 Companion documents: the [Gap Analysis](GAP-ANALYSIS.md) inventories every
 missing feature against the code; [Opening Spec](OPENING-SPEC.md) specifies
@@ -82,20 +85,20 @@ From the [Gap Analysis](GAP-ANALYSIS.md): the items that most make Skirmish II
 *feel like the same game*, in order. Status notes are current.
 
 1. **Minimap** — ✅ shipped on the play page, orders via minimap included (SEL-16, M4)
-2. **Combat core** — ✅ shipped in M3 (queued orders ✅ M4; attack-move itself still open)
+2. **Combat core** — ✅ shipped in M3 (queued orders ✅ M4; attack-move ✅ 2026-10-22, CMB-10)
 3. **Scripted AI opponent + conquest win/lose** — ✅ shipped in M5; the sandbox is now a match
 4. **Control groups** — ✅ shipped in M4 (SEL-07, groups 1–9); pure muscle memory for anyone who has played
 5. **Idle villager key + idle indicator** — ✅ shipped in M4 (SEL-08, INF-03); the heartbeat of economy play
 6. **Queued orders + rally points** — ✅ shipped in M4 (SEL-12, SEL-13); orders feel professional instead of one-shot
-7. **Stances + formations** — army control stops feeling like a blob
+7. **Stances + formations** — stances ✅ shipped 2026-10-22 (CMB-09); selectable formation types (MOV-07/08) still open
 8. **Combat collision feel** — bump-stop in melee, overlap while engaged (partly in via MOV-04)
 9. **Ages** — ✅ shipped in M6 (the Dark → Feudal rung, with Loom and the first technology lines; Castle/Imperial rungs come with their content)
 10. **Fog of war + exploration** — M7; scouting, tension, surprise
 11. **Random maps** — M7; a different Arabia every match; replayability itself
 12. **Selection panel + command card with HP** — ✅ shipped on the play page
 13. **Garrison + Town Bell** — defense drama: bell rings, villagers run, arrows fly (planned for M6; carried to a later milestone)
-14. **Sound: unit barks + alert horn + completion chimes** — feel is half audio
-15. **Military variety** — knight/archer/siege/monk lines with real counters (archer line started in M3)
+14. **Sound: unit barks + alert horn + completion chimes** — alert horn + work/combat/completion sounds ✅ shipped (INF-10, M14); voice barks + music still open
+15. **Military variety** — Spearman + Skirmisher ✅ shipped 2026-10-22 with the archer line (M3); knight/siege/monk lines still open (Castle content)
 
 ## Milestone order
 
@@ -111,8 +114,8 @@ From the [Gap Analysis](GAP-ANALYSIS.md): the items that most make Skirmish II
   (villagers, houses, Barracks, Militia/Archers) with Easy/Normal
   profiles, attack waves, home defense, and Conquest victory/defeat
   (hash-covered match state). Sandbox remains as a mode. (Rulebook §B
-  and §15/§16 carry the per-rule record; stop/delete (SEL-14) remains
-  open. The animal-economy tags ECO-11…13 were confirmed MATCHES in
+  and §15/§16 carry the per-rule record; stop/delete (SEL-14) shipped
+  2026-10-21. The animal-economy tags ECO-11…13 were confirmed MATCHES in
   the M6 re-audit.)
 - **M6 — Ages & technologies.** ✅ Shipped 2026-10-16, scoped to the
   first rung. The Dark → Feudal ladder (500 food, 130 s, two qualifying
@@ -359,7 +362,9 @@ From the [Gap Analysis](GAP-ANALYSIS.md): the items that most make Skirmish II
   — a villager restores an own damaged building at the
   documented 750 HP/min (+375 per extra repairer) for 50% of its
   build cost, via right-click, the villager root panel's third
-  button, or hotkey **E**. The AI does not repair yet (gap).
+  button, or hotkey **E**. (The AI-repair gap noted here closed
+  2026-10-22: the scripted AI repairs its damaged buildings through
+  the same `Command::Repair` — BLD-17.)
 
 ## Good first contributions
 
