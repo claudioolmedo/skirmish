@@ -229,8 +229,8 @@ export function renderMinimap(ctx, g, state) {
     ctx.fill();
   }
 
-  // Buildings as footprint diamonds (2x2 cells in the sim; the
-  // Barracks is 3x3 — `size` carries the footprint edge, default 2).
+  // Buildings as footprint diamonds — `size` carries each kind's
+  // footprint edge from the sim (House/camps 2, Farm/Barracks 3).
   // Complete buildings are solid; under construction they are hollow.
   for (const b of state.buildings || []) {
     if (b.kind === 1 && b.complete) continue; // a finished farm reads as a node

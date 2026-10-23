@@ -968,7 +968,9 @@ completes, the proportional top-up above must be applied to the
 owner's standing farms from their stored amounts. Work-rate cap
 clamps the gather rate in the
 farm case. Today: farm exists with 175 food and the retire-on-deplete
-flow; footprint is 2×2 cells (BLD-12 note). Horse Collar shipped
+flow; footprint is 3×3 cells (BLD-12 note) — Claudio's decision of
+2026-10-22, adopting the DE-documented 3×3 over the earlier 2×2
+specification. Horse Collar shipped
 2026-10-22: farms raised by an owner holding the tech are stamped
 250 at creation, and the completion sweep tops up the owner's
 standing farms by 75 × (remaining ⁄ 175)², rounded up to whole
@@ -976,8 +978,9 @@ food — the articles' examples all round the result up (+19 at
 half) though no rounding rule is stated; the inference flagged
 above is followed in the sim. Heavy Plow and
 Crop Rotation wait for their Ages. · *Status:* **DIFFERS** (core
-farm loop and Horse Collar match; footprint, work-rate cap, and
-the reseed queue pending M6/M7 conventions).
+farm loop and Horse Collar match; the footprint matched on
+2026-10-22 — work-rate cap and the reseed queue pending M6/M7
+conventions).
 
 **ECO-15 — Fishing.** Villagers gather shore fish at 0.426/s. Fishing
 Ships gather from fish spots (0.280/s shore, 0.487/s deep-sea) and deposit
@@ -1074,12 +1077,12 @@ tiles (TC 4×4, House 2×2, Farm 3×3, Tower 1×1, Castle 4×4,
 MECHANICS-STUDY §5). The footprint blocks pathing (except farms, BLD-12)
 and defines placement validity (BLD-01).
 *Source:* MECHANICS-STUDY §5. · *Impl:* footprint columns in the building
-table; the full set landed with M6 (2×2 House/Farm/camps, 3×3
-Barracks/Range/Stable/Blacksmith). Two divergences remain: the Farm
-uses a 2×2-cell footprint where the reference's is 3×3 tiles (ECO-14),
-and the TC is an entity rather than a placed building: its 4×4
-footprint is placement-reserved but, per BLD-16, passable to units
-instead of blocking pathing. · *Status:* **DIFFERS**.
+table; the full set landed with M6 (2×2 House/camps, 3×3
+Barracks/Range/Stable/Blacksmith), and the Farm moved from 2×2 to
+the reference's 3×3 on 2026-10-22 (Claudio's decision, ECO-14).
+One divergence remains: the TC is an entity rather than a placed
+building: its 4×4 footprint is placement-reserved but, per BLD-16,
+passable to units instead of blocking pathing. · *Status:* **DIFFERS**.
 
 **BLD-07 — Repair.** Villagers repair damaged buildings, ships, and siege.
 Restoring a building from 1 HP to full costs 50% of its original build
@@ -3240,7 +3243,7 @@ report: segments scattered across rows instead of following
 one line; the studied rule and sources are recorded in the
 entry, DE's exact rasterization marked UNVERIFIED). No
 status change: BLD-13 stays DIFFERS on the missing gates,
-and the totals stand; updated 2026-10-22 for Castle Age P1 (the age-up and boom slice): ECO-03 moves DIFFERS → MATCHES (Hand Cart ships at the pinned carry 20 / hunt 66, with its Wheelbarrow prerequisite and second speed layer), so §6 trades one DIFFERS for one MATCHES; TEC-01 and TEC-07 narrow with no status change (the Castle rung lands — only Imperial still waits; the first tech-to-tech prerequisite link lands — the INF-06 tree UI is still the gap), and TEC-02, BLD-11 and BLD-15 extend to the Castle step with no status change (the two-Feudal-born-buildings predicate, the Castle HP/armor columns, buildable Town Centers), recounted mechanically below).
+and the totals stand; updated 2026-10-22 for Castle Age P1 (the age-up and boom slice): ECO-03 moves DIFFERS → MATCHES (Hand Cart ships at the pinned carry 20 / hunt 66, with its Wheelbarrow prerequisite and second speed layer), so §6 trades one DIFFERS for one MATCHES; TEC-01 and TEC-07 narrow with no status change (the Castle rung lands — only Imperial still waits; the first tech-to-tech prerequisite link lands — the INF-06 tree UI is still the gap), and TEC-02, BLD-11 and BLD-15 extend to the Castle step with no status change (the two-Feudal-born-buildings predicate, the Castle HP/armor columns, buildable Town Centers), recounted mechanically below; updated 2026-10-22 for the Farm footprint — the Farm is 3×3 (Claudio's decision, adopting the DE-documented footprint over his earlier 2×2 specification), closing ECO-14’s footprint clause and BLD-06’s Farm divergence, with no status moves (ECO-14 stays DIFFERS on the work-rate cap and reseed queue, BLD-06 stays DIFFERS on the Town Center divergence), recounted mechanically below).
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|

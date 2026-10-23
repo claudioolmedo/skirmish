@@ -260,7 +260,9 @@ const BUILD_I18N = ['house', 'farm', 'barracks', 'lumber', 'mill',
   'mining', 'range', 'stable', 'blacksmith', 'palisade', 'towncenter'];
 let BUILD_NAME = ['House', 'Farm', 'Barracks', 'Lumber Camp', 'Mill',
   'Mining Camp', 'Archery Range', 'Stable', 'Blacksmith', 'Palisade Wall', 'Town Center'];
-const BUILD_SIZE = [2, 2, 3, 2, 2, 2, 3, 3, 3, 1, 4];
+// Farm footprint is 3 (DE-documented; Claudio’s decision
+// 2026-10-22, superseding the earlier 2x2 specification).
+const BUILD_SIZE = [2, 3, 3, 2, 2, 2, 3, 3, 3, 1, 4];
 const BUILD_ICON = ['i-house', 'i-farm', 'i-tc', 'i-lumber', 'i-mill',
   'i-mining', 'i-range', 'i-stable', 'i-blacksmith', 'i-palisade', 'i-tc'];
 // The PNG set above, per building kind tag (same order as
@@ -1132,6 +1134,7 @@ function loadDirArt() {
       }
     }
   }
+  loadCorpseArt();
   const cap = new Promise((r) => { setTimeout(r, BUILDING_ART_SETTLE_TIMEOUT_MS); });
   DIR_ART.settledPromise = Promise.race([Promise.all(pending), cap]);
   return DIR_ART.settledPromise;
@@ -1140,21 +1143,28 @@ function whenDirArtSettled() {
   return DIR_ART.settledPromise || Promise.resolve();
 }
 
-// The sheet frame for an action at the current sim tick (the
-// sheets' frame counts are the pipeline's: walk/carry 8, gallop 8,
-// the work cycles 4, idle 4 slow).
-function dirSheetFrame(act) {
+// The sheet frame for an action at the current sim tick. Frame
+// counts are PER SHEET — drawDirUnit reads them off the loaded
+// image's width — and each action keeps its classic cycle length
+// in ticks; the frame is the cycle's phase at the sheet's own
+// density, so the 2026-10-22 density pass (walk 8 -> 12, attack
+// and shoot 4 -> 8, gallop 8 -> 12) plays the same motion sampled
+// finer at exactly the same speed. At the old counts every case
+// below reduces to the old per-action divisor formula.
+const DIR_CYCLE_TICKS = {
+  walk: 56, carry: 56, gallop: 48, gather: 32, build: 24,
+  attack: 28, graze: 40, idle: 120,
+};
+function dirSheetFrame(act, frames) {
   const tick = sim.tick_count();
-  switch (act.action) {
-    case 'walk': case 'carry': return Math.floor(tick / 7) % 8;
-    case 'gallop': return Math.floor(tick / 6) % 8;
-    case 'gather': return Math.floor(tick / 8) % 4;
-    case 'build': return Math.floor(tick / 6) % 4;
-    case 'attack': return Math.floor(tick / 7) % 4;
-    case 'shoot': return Math.min(3, Math.floor((tick - (act.shotTick || 0)) / 5));
-    case 'graze': return Math.floor(tick / 10) % 4;
-    default: return Math.floor(tick / 30) % 4; // idle
+  if (act.action === 'shoot') {
+    // A one-shot over ~20 ticks from the shot, clamped to the
+    // last frame (the release pose holds until the next shot).
+    const dt = Math.max(0, tick - (act.shotTick || 0));
+    return Math.min(frames - 1, Math.floor((dt * frames) / 20));
   }
+  const cyc = DIR_CYCLE_TICKS[act.action] || DIR_CYCLE_TICKS.idle;
+  return Math.floor((tick * frames) / cyc) % frames;
 }
 
 // Draw one directional-sheet cell for `unit` in the state/direction
@@ -1171,7 +1181,7 @@ function drawDirUnit(unit, act, sx, sy) {
   const rows = Math.max(1, Math.round((im.naturalHeight || im.height) / C));
   const frames = Math.max(1, Math.round((im.naturalWidth || im.width) / C));
   const d = ((Math.floor((act.dir * rows) / 8) % rows) + rows) % rows;
-  const f = ((dirSheetFrame(act) % frames) + frames) % frames;
+  const f = ((dirSheetFrame(act, frames) % frames) + frames) % frames;
   const k = (camS * 1.35) / 46;
   ctx.drawImage(im, f * C, d * C, C, C,
     sx - spec.ax * k, sy - spec.ay * k, C * k, C * k);
@@ -1213,7 +1223,7 @@ function drawArtImage(im, sx, sy, wWorld, dyWorld, frac) {
 // -> CC0 placeholder -> vector circle (all in drawVillager).
 const VIL_ORIGINAL = {
   cell: 128, ax: 64, ay: 110, pxPerUnit: 46, drawScale: 1.35,
-  frames: { idle: 4, walk: 8, gather: 4, carry: 8, build: 4, attack: 4 },
+  frames: { idle: 4, walk: 12, gather: 8, carry: 12, build: 8, attack: 4 },
   dirs: 8, // rows in the currently loaded sheets (the active tier)
   img: {},
   imgRed: {}, // M5: red palette-swap variants, built per sheet load
@@ -1303,7 +1313,12 @@ function updateVilAnim(i, wx, wy, now) {
   if (state === 'walk' || state === 'carry') {
     frame = Math.floor((a.phase % 1) * VIL_ORIGINAL.frames[state]);
   } else if (state === 'gather' || state === 'build') {
-    frame = Math.floor(now / 140) % VIL_ORIGINAL.frames[state];
+    // The work cycles keep their classic 560 ms period at any
+    // frame density (140 ms x 4 frames before the 2026-10-22
+    // density pass; 70 ms x 8 after) — the impact key stays at
+    // phase 1/2, so the hit feedback below never moves.
+    frame = Math.floor(now / (560 / VIL_ORIGINAL.frames[state]))
+      % VIL_ORIGINAL.frames[state];
   } else if (state === 'attack') {
     // The footmen's attack cadence (dirSheetFrame): 7 sim ticks
     // per frame over the 4-frame windup/strike/follow/recover arc.
@@ -5850,7 +5865,7 @@ function progressBar(sx, sy, frac) {
 //   each axe hit the tree wobbles briefly and sheds wood chips
 //                (pooled particles; LOW sheds fewer, never none
 //                of the wobble)
-const GATHER_IMPACT_FRAME = 2; // pose_gather's strike frame
+const GATHER_IMPACT_FRAME = 4; // pose_gather's strike key sits at phase 1/2 of the cycle: frame 2 of 4 before the density pass, frame 4 of 8 after it
 const TREE_H = 5.6; // world units: widened art is ~0.76 aspect,
                     // so neighbours 4 wu apart overlap canopies
 const FALL_MS = 500;
@@ -6181,16 +6196,19 @@ function drawStone(sx, sy) {
   ], '#c3c8cd');
 }
 
-// A farm field: a tilled-soil diamond spanning the farm's 2x2 cells
-// around its center point, with furrow lines and a crop tint whose
-// strength follows the food remaining (full field = lush, nearly
-// depleted = mostly bare soil). `cropFrac` null draws bare soil
-// (under construction).
+// A farm field: a tilled-soil diamond spanning the farm's 3x3 cells
+// around its center point (half-extent 1.5 cells; the 3x3 footprint
+// is Claudio's decision of 2026-10-22), with furrow lines and a crop
+// tint whose strength follows the food remaining (full field = lush,
+// nearly depleted = mostly bare soil). `cropFrac` null draws bare
+// soil (under construction).
+function farmHalf() { return 1.5 * CS; } // CS is set when the sim loads
 function drawFarmPlot(wx, wy, cropFrac) {
-  const t = worldToScreen(wx - CS, wy - CS);
-  const r = worldToScreen(wx + CS, wy - CS);
-  const b = worldToScreen(wx + CS, wy + CS);
-  const l = worldToScreen(wx - CS, wy + CS);
+  const fh = farmHalf();
+  const t = worldToScreen(wx - fh, wy - fh);
+  const r = worldToScreen(wx + fh, wy - fh);
+  const b = worldToScreen(wx + fh, wy + fh);
+  const l = worldToScreen(wx - fh, wy + fh);
   poly([t, r, b, l], '#6b4a2c'); // tilled soil
   // Furrows: three lines running one way across the field.
   ctx.strokeStyle = 'rgba(0,0,0,0.28)';
@@ -6212,7 +6230,7 @@ function drawFarmPlot(wx, wy, cropFrac) {
 }
 
 function drawFarm(sx, sy, frac, wx, wy) {
-  shadow(sx, sy, 3.4 * camS);
+  shadow(sx, sy, 5.1 * camS); // 3x3 field: 3.4 * 1.5 (Claudio 2026-10-22)
   // Base44 art: the farm plot image fitted to the field's
   // footprint diamond (width matched to the diamond, aspect kept,
   // centered on it). The image is one of four growth states picked
@@ -6229,10 +6247,11 @@ function drawFarm(sx, sy, frac, wx, wy) {
     : BUILDING_ART.img.farmState1;
   const im = spriteReady(stateIm) ? stateIm : BUILDING_ART.img.farm;
   if (spriteReady(im)) {
-    const t = worldToScreen(wx - CS, wy - CS);
-    const r = worldToScreen(wx + CS, wy - CS);
-    const b = worldToScreen(wx + CS, wy + CS);
-    const l = worldToScreen(wx - CS, wy + CS);
+    const fh = farmHalf();
+    const t = worldToScreen(wx - fh, wy - fh);
+    const r = worldToScreen(wx + fh, wy - fh);
+    const b = worldToScreen(wx + fh, wy + fh);
+    const l = worldToScreen(wx - fh, wy + fh);
     const w = r[0] - l[0];
     const h = w * (im.naturalHeight / im.naturalWidth);
     const cx = (t[0] + b[0]) / 2;
@@ -6626,14 +6645,182 @@ function updateRubble(buildings, st) {
   }
 }
 
+// --- Corpses (animation pass 2026-10-22) ---------------------------
+// Client-only battlefield dressing, the unit-scale twin of the
+// rubble pattern above: the sim keeps a dead unit as an hp<1
+// tombstone, and the client — which already observes every
+// tombstone in the draw snapshot — plays the pipeline's `die`
+// fall there and leaves the body fading on the field. Nothing
+// here feeds the sim, a command or the hash. Fog mirrors rubble
+// EXACTLY: an enemy unit is only remembered while its ground is
+// visible, its corpse spawns only if that ground is still
+// visible at the death moment, and an enemy corpse never draws
+// in unexplored fog (explored memory may show it, like rubble).
+// Player color washes out once the fall settles (buildWashed
+// Corpse). LOW quality sheds corpses FIRST (quality.js).
+const CORPSE_FADE_MS = 18000; // adopted — rubble's class of value
+const CORPSE_FALL_MS = 600; // 6 die frames at 100 ms
+const CORPSE_FRAMES = 6;
+const CORPSE_KIND_UNIT = {
+  0: 'villager', 2: 'scout', 3: 'militia', 4: 'archer',
+  8: 'maa', 9: 'spearman', 10: 'skirmisher',
+};
+// Die-sheet cell geometry — mirrors STATE_CANVAS in
+// tools/sprite-pipeline/models/*.py; change both or neither.
+const CORPSE_SPEC = {
+  villager: { cw: 232, ch: 208, ax: 116, ay: 152 },
+  archer: { cw: 232, ch: 208, ax: 116, ay: 152 },
+  militia: { cw: 232, ch: 208, ax: 116, ay: 152 },
+  maa: { cw: 232, ch: 208, ax: 116, ay: 152 },
+  spearman: { cw: 232, ch: 208, ax: 116, ay: 152 },
+  skirmisher: { cw: 232, ch: 208, ax: 116, ay: 152 },
+  scout: { cw: 304, ch: 232, ax: 152, ay: 162 },
+};
+const CORPSE_ART = { img: {}, mask: {}, red: {}, washed: {} };
+let corpseSim = null;
+const corpseSeen = new Map(); // entity index -> {unit, owner, x, y, dir}
+const corpseSites = []; // {unit, owner, x, y, dir, t0}
+
+// The settled-corpse variant of a die sheet: masked (player
+// color) pixels become neutral gray at the mask's own shade and
+// every other pixel desaturates 40% toward its luminance — a
+// body on the field belongs to no one. Built once per sheet.
+function buildWashedCorpse(img, mask) {
+  if (!img || !(img.naturalWidth > 0)) return null;
+  const w = img.naturalWidth, h = img.naturalHeight;
+  if (mask && (mask.naturalWidth !== w || mask.naturalHeight !== h)) {
+    mask = null;
+  }
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const g = c.getContext('2d');
+  g.drawImage(img, 0, 0);
+  const id = g.getImageData(0, 0, w, h);
+  const d = id.data;
+  let md = null;
+  if (mask) {
+    const mc = document.createElement('canvas');
+    mc.width = w; mc.height = h;
+    const mg = mc.getContext('2d');
+    mg.drawImage(mask, 0, 0);
+    md = mg.getImageData(0, 0, w, h).data;
+  }
+  for (let p = 0; p < d.length; p += 4) {
+    if (d[p + 3] === 0) continue;
+    const s = md ? md[p] : 0;
+    if (s > 8 && md[p + 3] > 0) {
+      d[p] = s; d[p + 1] = s; d[p + 2] = s;
+    } else {
+      const lum = 0.299 * d[p] + 0.587 * d[p + 1] + 0.114 * d[p + 2];
+      d[p] = d[p] * 0.6 + lum * 0.4;
+      d[p + 1] = d[p + 1] * 0.6 + lum * 0.4;
+      d[p + 2] = d[p + 2] * 0.6 + lum * 0.4;
+    }
+  }
+  g.putImageData(id, 0, 0);
+  return c;
+}
+
+function loadCorpseArt() {
+  for (const unit of Object.keys(CORPSE_SPEC)) {
+    const key = `${unit}-die`;
+    const im = new Image();
+    CORPSE_ART.img[key] = im;
+    const mk = new Image();
+    CORPSE_ART.mask[key] = mk;
+    const build = () => {
+      if (spriteReady(im) && spriteReady(mk)) {
+        CORPSE_ART.red[key] = buildMaskRed(im, mk);
+        CORPSE_ART.washed[key] = buildWashedCorpse(im, mk);
+      } else if (spriteReady(im) && !CORPSE_ART.washed[key]) {
+        CORPSE_ART.washed[key] = buildWashedCorpse(im, null);
+      }
+    };
+    im.addEventListener('load', build);
+    im.addEventListener('error', build);
+    mk.addEventListener('load', build);
+    im.src = assetUrl(`assets-original/${key}.png`);
+    mk.src = assetUrl(`assets-original/${key}-pcmask.png`);
+  }
+}
+
+// The facing row (of 8) a corpse keeps: the last facing the
+// unit's own animation state recorded while it lived.
+function corpseDir8(i, unit) {
+  if (unit === 'villager') {
+    const a = vilAnim.get(i);
+    return a ? (((Math.round((a.dir * 8) / VIL_ORIGINAL.dirs) % 8) + 8) % 8) : 2;
+  }
+  const p = UNIT_POSE_STATE[i];
+  return p ? p.dir : 2;
+}
+
+// Per-draw bookkeeping, mirroring updateRubble: a remembered
+// living unit whose tombstone appears leaves a corpse site.
+function updateCorpses(st) {
+  if (corpseSim !== sim) {
+    corpseSim = sim;
+    corpseSeen.clear();
+    corpseSites.length = 0;
+  }
+  const now = performance.now();
+  for (let i = 0; i < st.count; i++) {
+    const unit = CORPSE_KIND_UNIT[st.kinds[i]];
+    if (!unit) { corpseSeen.delete(i); continue; }
+    const owner = st.owners[i];
+    const x = st.pos[i * 2], y = st.pos[i * 2 + 1];
+    if (st.hp[i * 2] >= 1) {
+      if (owner !== foeOwner() || fogAtWorld(x, y) === 2) {
+        corpseSeen.set(i, { unit, owner, x, y, dir: corpseDir8(i, unit) });
+      }
+    } else if (corpseSeen.has(i)) {
+      const seen = corpseSeen.get(i);
+      corpseSeen.delete(i);
+      if (seen.owner !== foeOwner() || fogAtWorld(seen.x, seen.y) === 2) {
+        corpseSites.push({ ...seen, t0: now });
+      }
+    }
+  }
+}
+
+function drawCorpse(site, now) {
+  const key = `${site.unit}-die`;
+  const spec = CORPSE_SPEC[site.unit];
+  const age = now - site.t0;
+  let im, frame;
+  if (age < CORPSE_FALL_MS) {
+    // The fall plays in the owner's colors.
+    const red = site.owner === foeOwner() ? CORPSE_ART.red[key] : null;
+    im = red || CORPSE_ART.img[key];
+    frame = Math.min(CORPSE_FRAMES - 1,
+      Math.floor(age / (CORPSE_FALL_MS / CORPSE_FRAMES)));
+  } else {
+    // Settled: washed out, last frame, fading with the site.
+    im = CORPSE_ART.washed[key] || CORPSE_ART.img[key];
+    frame = CORPSE_FRAMES - 1;
+  }
+  if (!unitArtReady(im)) return;
+  const fadeStart = CORPSE_FADE_MS - 5000;
+  const alpha = age > fadeStart
+    ? Math.max(0, 1 - (age - fadeStart) / 5000) : 1;
+  const [sx, sy] = worldToScreen(site.x, site.y);
+  const k = (camS * 1.35) / 46;
+  ctx.globalAlpha = alpha;
+  ctx.drawImage(im, frame * spec.cw, site.dir * spec.ch, spec.cw, spec.ch,
+    sx - spec.ax * k, sy - spec.ay * k, spec.cw * k, spec.ch * k);
+  ctx.globalAlpha = 1;
+}
+
 function drawBuilding(b) {
   if (b.kind === 1) {
     // Farm under construction: bare tilled plot + progress bar.
     // (A completed farm is drawn by the node renderer instead.)
+    // Shadow/bar offsets scale with the 3x3 field (Claudio
+    // 2026-10-22): 3.4 * 1.5 = 5.1.
     const [sx, sy] = worldToScreen(b.x, b.y);
-    shadow(sx, sy, 3.4 * camS);
+    shadow(sx, sy, 5.1 * camS);
     drawFarmPlot(b.x, b.y, null);
-    progressBar(sx, sy - 3.4 * camS, b.progress);
+    progressBar(sx, sy - 5.1 * camS, b.progress);
   } else if (b.kind === 2) {
     drawBarracks(b);
   } else if (b.kind === 9) {
@@ -9154,6 +9341,22 @@ function draw() {
     const fadeStart = RUBBLE_FADE_MS - 5000;
     const alpha = age > fadeStart ? 1 - (age - fadeStart) / 5000 : 1;
     draws.push({ key: site.x + site.y + 0.5, fn: () => drawRubble(site, alpha) });
+  }
+  // Corpses: tracked from the same unit snapshot, drawn at
+  // ground level with the rubble decals (animation pass
+  // 2026-10-22). Expired sites are pruned even when the quality
+  // flag is off; LOW sheds the drawing entirely (first cosmetic
+  // out — quality.js).
+  updateCorpses(st);
+  for (let k = corpseSites.length - 1; k >= 0; k--) {
+    const site = corpseSites[k];
+    if (performance.now() - site.t0 > CORPSE_FADE_MS) {
+      corpseSites.splice(k, 1);
+      continue;
+    }
+    if (!Q.corpses) continue;
+    if (site.owner === foeOwner() && fogAtWorld(site.x, site.y) === 0) continue;
+    draws.push({ key: site.x + site.y + 0.5, fn: () => drawCorpse(site, performance.now()) });
   }
   // Unit draws dispatch by kind (M3); the dead are skipped (they
   // are tombstones in the sim, invisible here). A damaged unit gets

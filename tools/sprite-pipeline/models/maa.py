@@ -21,7 +21,10 @@ from render import box_tris, hex2rgb, rot_x, xform
 MATERIALS_ADD = {'steel': hex2rgb('#9aa3ad'),
                  'steel_dark': hex2rgb('#6d747c')}
 PC_MATS = {'cloth'}
-STATES = {'idle': 4, 'walk': 8, 'attack': 4}
+STATES = {'idle': 4, 'walk': 12, 'attack': 8, 'die': 6}
+# Death cell: the fallen body lies a full height from the feet.
+STATE_CANVAS = {'die': (232, 208, 116, 152)}
+_FALL = (0.0, 10.0, 26.0, 48.0, 68.0, 80.0)
 
 _PIVOTS = render.PIVOTS
 _WAIST = render.WAIST
@@ -141,10 +144,10 @@ def _pose_walk(f, n=8):
             'torso': 4.0, 'bob': -0.07 * abs(s) + 0.02}
 
 
-def _pose_attack(f, n=4):
+def _pose_attack(f, n=8):
     # same rhythm as the militia
-    arm_r = (-65.0, 75.0, 35.0, 5.0)[f % n]   # windup, slash, follow, recover
-    torso = (-6.0, 10.0, 14.0, 4.0)[f % n]
+    arm_r = render.key((-65.0, 75.0, 35.0, 5.0), f, n)   # windup, slash, follow, recover
+    torso = render.key((-6.0, 10.0, 14.0, 4.0), f, n)
     return {'legL': 10.0, 'legR': -10.0,
             'armL': 15.0, 'armR': arm_r,    # shield stays on guard
             'torso': torso, 'bob': 0.0}
@@ -154,4 +157,9 @@ _POSES = {'idle': _pose_idle, 'walk': _pose_walk, 'attack': _pose_attack}
 
 
 def tris_for(state, frame):
+    if state == 'die':
+        # Idle figure tipped backward about its own feet; the
+        # last frame is the corpse (see models/villager.py).
+        base = _apply(_POSES['idle'](0, STATES['idle']))
+        return render.spin_x(base, _FALL[frame % len(_FALL)])
     return _apply(_POSES[state](frame, STATES[state]))

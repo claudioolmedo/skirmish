@@ -50,9 +50,18 @@ def load_unit(name):
     return mod
 
 
+def canvas_for(mod, state):
+    """The canvas for one sheet: a model may override a single
+    state's cell via STATE_CANVAS (the 'die' sheets — a fallen
+    body lies a full height from the feet and cannot fit the
+    standing cell). Every other state uses the model CANVAS."""
+    per_state = getattr(mod, 'STATE_CANVAS', None) or {}
+    return per_state.get(state, getattr(mod, 'CANVAS', DEFAULT_CANVAS))
+
+
 def render_sheet(mod, state, mask=False):
     frames = mod.STATES[state]
-    cw, ch, ax, ay = getattr(mod, 'CANVAS', DEFAULT_CANVAS)
+    cw, ch, ax, ay = canvas_for(mod, state)
     sheet = Image.new('RGBA', (frames * cw, DIRECTIONS * ch))
     worst_margin = 99
     for d in range(DIRECTIONS):
@@ -74,18 +83,28 @@ def render_sheet(mod, state, mask=False):
 
 
 def contact_sheet(mod, name):
-    """Rows = states, columns = the 8 directions, mid-cycle frame."""
-    cw, ch, ax, ay = getattr(mod, 'CANVAS', DEFAULT_CANVAS)
-    states = list(mod.STATES)
-    grid = Image.new('RGBA', (DIRECTIONS * cw, len(states) * ch),
-                     (24, 24, 28, 255))
-    for r, state in enumerate(states):
+    """Rows = states, columns = the 8 directions, mid-cycle frame.
+    Each row uses its own state's canvas (see canvas_for), so the
+    'die' row shows the fallen body at full size."""
+    rows = []
+    width = 0
+    for state in mod.STATES:
+        cw, ch, ax, ay = canvas_for(mod, state)
         f = mod.STATES[state] // 2
         tris = mod.tris_for(state, f)
+        row = Image.new('RGBA', (DIRECTIONS * cw, ch), (24, 24, 28, 255))
         for d in range(DIRECTIONS):
             cell = render.render_cell(tris, d, cw=cw, ch=ch, ax=ax, ay=ay)
-            grid.paste(Image.fromarray(cell, 'RGBA'), (d * cw, r * ch),
-                       Image.fromarray(cell, 'RGBA'))
+            img = Image.fromarray(cell, 'RGBA')
+            row.paste(img, (d * cw, 0), img)
+        rows.append(row)
+        width = max(width, row.width)
+    grid = Image.new('RGBA', (width, sum(r.height for r in rows)),
+                     (24, 24, 28, 255))
+    y = 0
+    for r in rows:
+        grid.paste(r, (0, y))
+        y += r.height
     return grid
 
 
