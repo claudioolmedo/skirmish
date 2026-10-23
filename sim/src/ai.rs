@@ -45,8 +45,13 @@
 //!    its requirement buildings stand and a food spare exists
 //!    (M6).
 //! 5. Rally each production building toward the human's base and
-//!    train a mixed Militia/Archer army — each kind at its own
-//!    building — up to the army target.
+//!    train a mixed army — Militia, Spearman, Archer and
+//!    Skirmisher, each kind at its own building — up to the army
+//!    target. The mix follows the profile's composition weights
+//!    (AI-04): the kind furthest behind its weighted share of
+//!    the army so far trains next, and on Normal a visible enemy
+//!    archer mass promotes the Skirmisher — the anti-archer
+//!    answer — to the head of the ranking.
 //! 6. Launch attack waves: when the idle army at home reaches the
 //!    wave size, every idle soldier attacks — the nearest
 //!    *reachable* human unit, else the human Town Center, else the
@@ -104,6 +109,29 @@ pub(crate) struct AiConfig {
     /// a burning Barracks — while the rest keeps gathering, so the
     /// wood the drip spends is also being replaced.
     repairers_max: u32,
+    /// Army composition weights over the four trainable kinds
+    /// (`MIX_KINDS` order: Militia, Spearman, Archer,
+    /// Skirmisher). Each production decision trains the kind
+    /// furthest behind its weighted share of the army so far
+    /// (living + queued), so the standing army converges to the
+    /// weights' ratio. The mix is grounded in the counter
+    /// table: Militia and Archers are the gold-backed core (the
+    /// M5 script's pair); the Spearman is the cheap front line —
+    /// no gold, and the game's only answer-in-advance to
+    /// cavalry (its +15 already tells against the enemy's
+    /// Scout); the Skirmisher is the anti-archer screen (no
+    /// gold either, +3 vs Archers behind 3 pierce armor).
+    /// Folding the two gold-free kinds in holds the army's
+    /// *size* profile — `army_target` is untouched — while
+    /// easing the gold draw the old Militia/Archer alternation
+    /// put on a handful of gold miners.
+    mix_weights: [u32; 4],
+    /// Whether the script adapts its mix to the enemy army it
+    /// can currently see (the archer-mass answer in
+    /// `plan_train_military`). Normal adapts; Easy plays its
+    /// flat weights regardless — behavior only, like every
+    /// other profile difference (AI-03).
+    adaptive: bool,
 }
 
 /// The profile for a mode. Sandbox has no AI; its config is the
@@ -121,6 +149,8 @@ pub(crate) fn config(mode: MatchMode) -> AiConfig {
             wave_size: 4,
             wave_cooldown: 7200,
             repairers_max: 2,
+            mix_weights: [1, 1, 1, 1],
+            adaptive: false,
         },
         // Sandbox and TwoPlayer never reach `decide` (the tick gate
         // admits only the AI modes); they share this arm purely so
@@ -136,6 +166,8 @@ pub(crate) fn config(mode: MatchMode) -> AiConfig {
             wave_size: 6,
             wave_cooldown: 3600,
             repairers_max: 3,
+            mix_weights: [3, 2, 3, 2],
+            adaptive: true,
         },
     }
 }
@@ -229,11 +261,10 @@ pub(crate) fn decide(sim: &mut Sim) {
 
     // 4. Military production: keep the producing building's queue
     //    busy (one enqueue per decision) toward the army target,
-    //    alternating Militia and Archers so the mix — and the
-    //    resource draw — stays balanced; each kind is trained at
-    //    its M6 home (Militia at the Barracks, Archers at the
-    //    Archery Range). If the preferred kind cannot be trained,
-    //    try the other before giving up.
+    //    training the kind furthest behind its share of the
+    //    profile's composition weights at its own building (see
+    //    `plan_train_military`). If the preferred kind cannot be
+    //    trained, walk down the ranking before giving up.
     plan_train_military(sim, &cfg);
 
     // 5. Idle villagers to work.
@@ -713,21 +744,52 @@ fn plan_train_military(sim: &mut Sim, cfg: &AiConfig) {
     if army >= cfg.army_target {
         return;
     }
-    let preferred = if army % 2 == 0 {
-        EntityKind::Militia
-    } else {
-        EntityKind::Archer
-    };
-    let fallback = if preferred == EntityKind::Militia {
-        EntityKind::Archer
-    } else {
-        EntityKind::Militia
-    };
-    // Each kind trains at its M6 home (Barracks → Militia, Archery
-    // Range → Archer); the host's queue must be empty, as before —
-    // one production line per building, kept busy one enqueue at a
-    // time.
-    for kind in [preferred, fallback] {
+    // Composition (AI-04): rank the four trainable kinds by how
+    // far each lags its weighted share of the army so far, and
+    // train the first kind in the ranking that can actually be
+    // trained right now. The counts are living plus already
+    // queued, so a kind in training is not double-booked. The
+    // ranking is an apportionment walk — picking the largest
+    // deficit (weight × (total + 1) − count × total weight)
+    // converges the standing army to the weights' ratio
+    // (Normal 3:2:3:2 over Militia / Spearman / Archer /
+    // Skirmisher; Easy an even 1:1:1:1) — and because a deficit
+    // depends only on counts, the walk is a pure function of
+    // state like every other decision here.
+    let counts = composition_counts(sim, me);
+    let total: i64 = counts.iter().sum::<u32>() as i64;
+    let wsum: i64 = cfg.mix_weights.iter().sum::<u32>() as i64;
+    let mut ranked: Vec<(i64, usize)> = (0..MIX_KINDS.len())
+        .map(|i| (cfg.mix_weights[i] as i64 * (total + 1) - counts[i] as i64 * wsum, i))
+        .collect();
+    ranked.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    let mut candidates: Vec<EntityKind> = Vec::new();
+    // The adaptive answer (Normal only): an enemy archer mass
+    // the AI can currently *see* — fog rules, exactly as in the
+    // defense and wave steps — puts the Skirmisher, the
+    // anti-archer unit (+3 vs Archers, 3 pierce armor), at the
+    // head of the ranking for as long as the mass stays
+    // visible. The scan reads nothing a player at the seat
+    // could not see: the same `cell_visible_to` test every
+    // targeting decision in this script already obeys
+    // (VIS-01). No information access is widened — before this
+    // change the script's combat steps already read visible
+    // enemy units; production now does too, on adaptive
+    // profiles only.
+    if cfg.adaptive && visible_archer_mass(sim, me) {
+        candidates.push(EntityKind::Skirmisher);
+    }
+    for (_, i) in ranked {
+        let kind = MIX_KINDS[i];
+        if !candidates.contains(&kind) {
+            candidates.push(kind);
+        }
+    }
+    // Each kind trains at its own home (Barracks → Militia and
+    // Spearman, Archery Range → Archer and Skirmisher); the
+    // host's queue must be empty, as before — one production
+    // line per building, kept busy one enqueue at a time.
+    for kind in candidates {
         let Some(host) = sim.buildings().iter().find(|b| {
             b.owner == me && b.complete && b.kind.trains(kind)
         }) else {
@@ -744,6 +806,74 @@ fn plan_train_military(sim: &mut Sim, cfg: &AiConfig) {
             return;
         }
     }
+}
+
+/// The four kinds the composition plan trains, in weight order
+/// (`AiConfig::mix_weights` indexes this array).
+const MIX_KINDS: [EntityKind; 4] = [
+    EntityKind::Militia,
+    EntityKind::Spearman,
+    EntityKind::Archer,
+    EntityKind::Skirmisher,
+];
+
+/// Living plus queued counts of the composition kinds for
+/// `owner`: the army the composition plan is apportioning.
+/// Queued units count — a kind already in training at its
+/// building is part of the army being built, and counting it
+/// is what stops the walk from double-booking the same share
+/// while the first unit is still on the production line. The
+/// Scout is not a composition kind (a starting unit, never
+/// produced), and neither are villagers.
+fn composition_counts(sim: &Sim, owner: u8) -> [u32; 4] {
+    let mut counts = [0u32; 4];
+    for e in sim.entities() {
+        if e.owner != owner || e.dead {
+            continue;
+        }
+        if let Some(i) = MIX_KINDS.iter().position(|k| *k == e.kind) {
+            counts[i] += 1;
+        }
+    }
+    for b in sim.buildings() {
+        if b.owner != owner {
+            continue;
+        }
+        for entry in &b.queue {
+            if let crate::tech::ProdEntry::Unit(kind) = entry {
+                if let Some(i) = MIX_KINDS.iter().position(|k| k == kind) {
+                    counts[i] += 1;
+                }
+            }
+        }
+    }
+    counts
+}
+
+/// Whether the enemy army the AI can currently see is an
+/// archer mass: at least three living enemy Archers on cells
+/// visible to the AI, and Archers the majority of the visible
+/// enemy military. Fog-honest (VIS-01) — the same visibility
+/// test the defense and wave steps aim with; an archer the AI
+/// cannot see does not exist for this decision, and no other
+/// fact about the enemy is read.
+fn visible_archer_mass(sim: &Sim, me: u8) -> bool {
+    let mut archers = 0u32;
+    let mut total = 0u32;
+    for e in sim.entities() {
+        if e.owner != OWNER_PLAYER || e.dead || !e.kind.is_military() {
+            continue;
+        }
+        let (cx, cy) = sim.grid().world_to_cell(e.pos_x, e.pos_y);
+        if !sim.cell_visible_to(me, cx, cy) {
+            continue;
+        }
+        total += 1;
+        if e.kind == EntityKind::Archer {
+            archers += 1;
+        }
+    }
+    archers >= 3 && archers * 2 > total
 }
 
 /// Research step (M6): the script uses the same Town Center
@@ -1151,7 +1281,8 @@ fn plan_defense(sim: &mut Sim, acted: &mut Vec<u32>) {
 }
 
 /// The wave step: when the cooldown has passed and at least
-/// `wave_size` trained soldiers (Militia/Archers) stand idle at
+/// `wave_size` trained soldiers (every kind production trains:
+/// Militia, Spearmen, Archers, Skirmishers) stand idle at
 /// home, they all attack at once. Targeting obeys the AI's own
 /// fog of war (M7, VIS-01/06): a human *unit* is a target only
 /// while the AI can currently see it; the human Town Center and
@@ -1179,7 +1310,13 @@ fn plan_wave(sim: &mut Sim, cfg: &AiConfig, acted: &mut Vec<u32>) {
         .filter(|e| {
             e.owner == me
                 && !e.dead
-                && matches!(e.kind, EntityKind::Militia | EntityKind::Archer)
+                && matches!(
+                    e.kind,
+                    EntityKind::Militia
+                        | EntityKind::Spearman
+                        | EntityKind::Archer
+                        | EntityKind::Skirmisher
+                )
                 && is_idle(sim, e.id)
                 && !acted.contains(&e.id)
         })
@@ -1569,5 +1706,216 @@ mod tests {
         // Normal's 30 decides when the damage is first answered)
         // and fields fewer repairers — never incapable (AI-03).
         ai_repair_scenario(MatchMode::AiEasy, 2);
+    }
+
+    // --------------------------------------------------------------
+    // Composition (AI-04): the Spearman and the Skirmisher join
+    // the production plan. Staged like the repair scenarios
+    // above — the scene is set with records and stockpile
+    // grants, but every production decision asserted on is the
+    // script's own, taken on its natural cadence through the
+    // ordinary command path in a live AI match.
+
+    /// A complete, idle building record of the AI's at a cell
+    /// anchor (the shape of new_units_tests' `placed` fixture).
+    fn staged_building(
+        sim: &Sim,
+        id: u32,
+        kind: BuildingKind,
+        cell: (u32, u32),
+    ) -> crate::build::Building {
+        let size = kind.footprint_size();
+        let (x0, y0) = sim.grid().cell_center(cell.0, cell.1);
+        let half = I16F16::from_num(size as i32 * 2);
+        crate::build::Building {
+            id,
+            kind,
+            owner: OWNER_OPPONENT,
+            hp: I16F16::from_num(kind.max_hp()),
+            cell_x: cell.0,
+            cell_y: cell.1,
+            pos_x: x0 + half - I16F16::from_num(2),
+            pos_y: y0 + half - I16F16::from_num(2),
+            progress_thirds: 3,
+            repair_hp_remainder: 0,
+            repair_cost_remainder: 0,
+            complete: true,
+            node_id: None,
+            queue: Vec::new(),
+            train_progress: 0,
+            rally: None,
+            rally_node: None,
+        }
+    }
+
+    /// A cell near the AI's Town Center, clamped into the grid.
+    fn near_tc_cell(sim: &Sim, dx: i32, dy: i32) -> (u32, u32) {
+        let tc = sim.tc_entity_of(OWNER_OPPONENT).expect("AI Town Center");
+        let (cx, cy) = sim.grid().world_to_cell(tc.pos_x, tc.pos_y);
+        let x = (cx as i32 + dx).clamp(2, crate::GRID_DIM as i32 - 8);
+        let y = (cy as i32 + dy).clamp(2, crate::GRID_DIM as i32 - 8);
+        (x as u32, y as u32)
+    }
+
+    /// Stage a production-ready AI: Feudal age, a completed
+    /// Barracks and Archery Range plus spare Houses by its Town
+    /// Center, and deep stockpiles.
+    fn staged_production(mode: MatchMode) -> Sim {
+        let mut sim = Sim::new_match(11, mode);
+        let slot = crate::player_slot(OWNER_OPPONENT).expect("opponent slot");
+        sim.players[slot].age = crate::tech::Age::Feudal;
+        let mut bid = 900u32;
+        let mut place = |sim: &mut Sim, kind: BuildingKind, dx: i32, dy: i32| {
+            let cell = near_tc_cell(sim, dx, dy);
+            let b = staged_building(sim, bid, kind, cell);
+            bid += 1;
+            sim.buildings.push(b);
+        };
+        place(&mut sim, BuildingKind::Barracks, 7, 0);
+        place(&mut sim, BuildingKind::ArcheryRange, 0, 7);
+        for i in 0..6i32 {
+            place(&mut sim, BuildingKind::House, -7 + i * 3, -7);
+        }
+        for res in [ResourceKind::Food, ResourceKind::Wood, ResourceKind::Gold] {
+            sim.stockpile_mut(OWNER_OPPONENT)
+                .add(res, I16F16::from_num(5000));
+        }
+        sim
+    }
+
+    /// Run the live match, harvesting each military unit the
+    /// script enqueues at a production building: the queued kind
+    /// is recorded in order, the queue emptied, and a living
+    /// unit of the kind staged beside the building — the
+    /// training completion the composition counts read — so the
+    /// next decision apportions against the grown army. Stops
+    /// after `want` enqueues or `cap` ticks.
+    fn collect_enqueues(sim: &mut Sim, want: usize, cap: u64) -> Vec<EntityKind> {
+        let mut got: Vec<EntityKind> = Vec::new();
+        let mut next_id = 9500u32;
+        for _ in 0..cap {
+            if got.len() >= want {
+                break;
+            }
+            sim.tick();
+            let mut harvested: Vec<(EntityKind, I16F16, I16F16)> = Vec::new();
+            for b in sim.buildings.iter_mut() {
+                if b.owner != OWNER_OPPONENT || !b.kind.is_production() {
+                    continue;
+                }
+                let (bx, by) = (b.pos_x, b.pos_y);
+                for entry in b.queue.drain(..) {
+                    if let crate::tech::ProdEntry::Unit(kind) = entry {
+                        harvested.push((kind, bx, by));
+                    }
+                }
+                b.train_progress = 0;
+            }
+            for (kind, bx, by) in harvested {
+                got.push(kind);
+                sim.entities.push(crate::entity::Entity::spawned(
+                    next_id,
+                    kind,
+                    OWNER_OPPONENT,
+                    bx + I16F16::from_num(6),
+                    by,
+                ));
+                next_id += 1;
+            }
+        }
+        got
+    }
+
+    #[test]
+    fn ai_normal_composition_follows_the_profile_weights() {
+        let mut sim = staged_production(MatchMode::AiNormal);
+        // The apportionment walk over weights 3:2:3:2 from an
+        // empty army: each step trains the kind furthest behind
+        // its share (ties in Militia → Spearman → Archer →
+        // Skirmisher order). Nine enqueues fill the army target
+        // — the tenth slot is the starting Scout.
+        let got = collect_enqueues(&mut sim, 9, 6_000);
+        assert_eq!(
+            got,
+            vec![
+                EntityKind::Militia,
+                EntityKind::Archer,
+                EntityKind::Spearman,
+                EntityKind::Skirmisher,
+                EntityKind::Militia,
+                EntityKind::Archer,
+                EntityKind::Spearman,
+                EntityKind::Skirmisher,
+                EntityKind::Militia,
+            ]
+        );
+    }
+
+    #[test]
+    fn ai_easy_composition_rotates_evenly() {
+        let mut sim = staged_production(MatchMode::AiEasy);
+        // Weights 1:1:1:1 walk the four kinds in turn; four
+        // enqueues fill the Easy army target (Scout included).
+        let got = collect_enqueues(&mut sim, 4, 6_000);
+        assert_eq!(
+            got,
+            vec![
+                EntityKind::Militia,
+                EntityKind::Spearman,
+                EntityKind::Archer,
+                EntityKind::Skirmisher,
+            ]
+        );
+    }
+
+    /// Spawn `n` living human Archers on cells a few tiles from
+    /// the AI's Town Center — an archer mass standing where the
+    /// AI can genuinely see it, inside its Town Center's sight.
+    fn spawn_archer_mass(sim: &mut Sim, n: u32) {
+        let tc = sim.tc_entity_of(OWNER_OPPONENT).expect("AI Town Center");
+        let (tcx, tcy) = sim.grid().world_to_cell(tc.pos_x, tc.pos_y);
+        for i in 0..n {
+            let cell = (
+                (tcx as i32 + 4 + i as i32).clamp(0, crate::GRID_DIM as i32 - 1) as u32,
+                (tcy as i32 + 4).clamp(0, crate::GRID_DIM as i32 - 1) as u32,
+            );
+            let (x, y) = sim.grid().cell_center(cell.0, cell.1);
+            sim.entities.push(crate::entity::Entity::spawned(
+                9700 + i,
+                EntityKind::Archer,
+                OWNER_PLAYER,
+                x,
+                y,
+            ));
+        }
+        // The staging is only meaningful if the AI can actually
+        // see the mass — pin that, so a fog change fails here
+        // rather than silently voiding the scenario.
+        assert!(
+            visible_archer_mass(sim, OWNER_OPPONENT),
+            "the staged archer mass is not visible to the AI"
+        );
+    }
+
+    #[test]
+    fn ai_normal_answers_a_visible_archer_mass_with_skirmishers() {
+        let mut sim = staged_production(MatchMode::AiNormal);
+        spawn_archer_mass(&mut sim, 5);
+        // The base walk would open with a Militia; the visible
+        // archer mass promotes the counter — the Skirmisher —
+        // to the very first enqueue instead.
+        let got = collect_enqueues(&mut sim, 1, 2_000);
+        assert_eq!(got, vec![EntityKind::Skirmisher]);
+    }
+
+    #[test]
+    fn ai_easy_does_not_adapt_its_mix() {
+        let mut sim = staged_production(MatchMode::AiEasy);
+        spawn_archer_mass(&mut sim, 5);
+        // Easy is not adaptive: the same visible mass leaves its
+        // flat rotation untouched — the first enqueue is the
+        // rotation's Militia, not the counter.
+        let got = collect_enqueues(&mut sim, 1, 2_000);
+        assert_eq!(got, vec![EntityKind::Militia]);
     }
 }
