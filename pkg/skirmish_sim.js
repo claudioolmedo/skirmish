@@ -68,7 +68,7 @@ export class WasmSim {
      * cell_y, size, queue_len, train_progress, owner, hp]` — in
      * building id order. `kind` tags: 0 house, 1 farm, 2 barracks
      * (M3); 3 lumber camp, 4 mill, 5 mining camp, 6 archery range,
-     * 7 stable, 8 blacksmith (M6). `progress` is the construction fraction 0..1 (1 when
+     * 7 stable, 8 blacksmith (M6); 9 palisade wall (BLD-13). `progress` is the construction fraction 0..1 (1 when
      * complete); `complete` is 0/1; `size` is the footprint edge in
      * cells; `queue_len` and `train_progress` (0..1 on the queue's
      * head) describe a production building's queue. M5 adds `owner`
@@ -680,6 +680,31 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Order a villager to build one Palisade Wall segment
+     * (3 wood, 1×1 — BLD-13) — see `push_build_house`. A dragged
+     * line of segments goes through `push_build_wall_line`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_palisade_wall(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_palisade_wall(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Queue a single Palisade Wall segment (BLD-13) — see
+     * `push_build_house_queued`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_palisade_wall_queued(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_palisade_wall_queued(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
      * Order a villager to build a Stable (175 wood, 3×3 — M6;
      * Feudal Age, requires a Barracks) — see `push_build_house`.
      * @param {number} entity
@@ -700,6 +725,27 @@ export class WasmSim {
      */
     push_build_stable_queued(entity, x, y) {
         const ret = wasm.wasmsim_push_build_stable_queued(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Order a villager to raise a dragged line of Palisade Wall
+     * segments (BLD-13) from the cell containing `(x0, y0)` to
+     * the cell containing `(x1, y1)`: the sim expands the line
+     * deterministically, validates and charges each segment
+     * (3 wood) individually — obstructed cells and segments past
+     * the stockpile are skipped — and walks the villager along
+     * the line building segment after segment. Returns whether
+     * at least one segment would take effect; the sim
+     * re-validates when the command is applied.
+     * @param {number} entity
+     * @param {number} x0
+     * @param {number} y0
+     * @param {number} x1
+     * @param {number} y1
+     * @returns {boolean}
+     */
+    push_build_wall_line(entity, x0, y0, x1, y1) {
+        const ret = wasm.wasmsim_push_build_wall_line(this.__wbg_ptr, entity, x0, y0, x1, y1);
         return ret !== 0;
     }
     /**

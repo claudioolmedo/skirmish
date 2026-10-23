@@ -33,7 +33,7 @@ export class WasmSim {
      * cell_y, size, queue_len, train_progress, owner, hp]` — in
      * building id order. `kind` tags: 0 house, 1 farm, 2 barracks
      * (M3); 3 lumber camp, 4 mill, 5 mining camp, 6 archery range,
-     * 7 stable, 8 blacksmith (M6). `progress` is the construction fraction 0..1 (1 when
+     * 7 stable, 8 blacksmith (M6); 9 palisade wall (BLD-13). `progress` is the construction fraction 0..1 (1 when
      * complete); `complete` is 0/1; `size` is the footprint edge in
      * cells; `queue_len` and `train_progress` (0..1 on the queue's
      * head) describe a production building's queue. M5 adds `owner`
@@ -325,6 +325,17 @@ export class WasmSim {
      */
     push_build_mining_camp_queued(entity: number, x: number, y: number): boolean;
     /**
+     * Order a villager to build one Palisade Wall segment
+     * (3 wood, 1×1 — BLD-13) — see `push_build_house`. A dragged
+     * line of segments goes through `push_build_wall_line`.
+     */
+    push_build_palisade_wall(entity: number, x: number, y: number): boolean;
+    /**
+     * Queue a single Palisade Wall segment (BLD-13) — see
+     * `push_build_house_queued`.
+     */
+    push_build_palisade_wall_queued(entity: number, x: number, y: number): boolean;
+    /**
      * Order a villager to build a Stable (175 wood, 3×3 — M6;
      * Feudal Age, requires a Barracks) — see `push_build_house`.
      */
@@ -333,6 +344,18 @@ export class WasmSim {
      * Queue a Stable build (M6) — see `push_build_house_queued`.
      */
     push_build_stable_queued(entity: number, x: number, y: number): boolean;
+    /**
+     * Order a villager to raise a dragged line of Palisade Wall
+     * segments (BLD-13) from the cell containing `(x0, y0)` to
+     * the cell containing `(x1, y1)`: the sim expands the line
+     * deterministically, validates and charges each segment
+     * (3 wood) individually — obstructed cells and segments past
+     * the stockpile are skipped — and walks the villager along
+     * the line building segment after segment. Returns whether
+     * at least one segment would take effect; the sim
+     * re-validates when the command is applied.
+     */
+    push_build_wall_line(entity: number, x0: number, y0: number, x1: number, y1: number): boolean;
     /**
      * Cancel one entry of a placed building's production queue
      * (TEC-05), refunding its full cost to the building's owner.
@@ -688,8 +711,11 @@ export interface InitOutput {
     readonly wasmsim_push_build_mill_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_mining_camp: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_mining_camp_queued: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_palisade_wall: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_palisade_wall_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_stable: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_stable_queued: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_wall_line: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
     readonly wasmsim_push_cancel_queue_building: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_cancel_queue_tc: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_delete: (a: number, b: number) => number;

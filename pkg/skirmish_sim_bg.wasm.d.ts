@@ -59,8 +59,11 @@ export const wasmsim_push_build_mill: (a: number, b: number, c: number, d: numbe
 export const wasmsim_push_build_mill_queued: (a: number, b: number, c: number, d: number) => number;
 export const wasmsim_push_build_mining_camp: (a: number, b: number, c: number, d: number) => number;
 export const wasmsim_push_build_mining_camp_queued: (a: number, b: number, c: number, d: number) => number;
+export const wasmsim_push_build_palisade_wall: (a: number, b: number, c: number, d: number) => number;
+export const wasmsim_push_build_palisade_wall_queued: (a: number, b: number, c: number, d: number) => number;
 export const wasmsim_push_build_stable: (a: number, b: number, c: number, d: number) => number;
 export const wasmsim_push_build_stable_queued: (a: number, b: number, c: number, d: number) => number;
+export const wasmsim_push_build_wall_line: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
 export const wasmsim_push_cancel_queue_building: (a: number, b: number, c: number) => number;
 export const wasmsim_push_cancel_queue_tc: (a: number, b: number, c: number) => number;
 export const wasmsim_push_delete: (a: number, b: number) => number;

@@ -359,7 +359,7 @@ const cmdBtn = (id) => cmdButtons().find((b) => b.id === id);
 // a page = its buildings + Back in the last slot.
 const ROOT_IDS = ['page-eco', 'page-mil', 'repair', 'stop', 'delete']; // + Repair (BLD-17); Stop/Delete ride along (SEL-14)
 const ECO_IDS = ['build-0', 'build-4', 'build-1', 'build-3', 'build-5', 'page-back', 'stop', 'delete']; // Stop/Delete ride along (SEL-14)
-const MIL_IDS = ['build-2', 'build-6', 'build-7', 'build-8', 'page-back', 'stop', 'delete']; // Stop/Delete ride along (SEL-14)
+const MIL_IDS = ['build-2', 'build-6', 'build-7', 'build-8', 'build-9', 'page-back', 'stop', 'delete']; // Stop/Delete ride along (SEL-14)
 
 pump(3);
 
