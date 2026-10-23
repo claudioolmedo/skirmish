@@ -29,6 +29,12 @@
 //!    (a Mill by the berries, a Lumber Camp by the woodline), then
 //!    a Barracks once the economy is large enough to feed an army,
 //!    and an Archery Range once Feudal stands (M6).
+//! 2b. Repair its own damaged buildings (BLD-17): an idle or
+//!     nearby villager is sent through the same `Repair` command
+//!     a player issues — production buildings first, buildings
+//!     under attack next, the most damaged first — capped per
+//!     profile so the economy is never stripped bare, and only
+//!     while the wood stockpile can pay the repair drip.
 //! 3. Put every idle villager to work, balancing food / wood / gold
 //!    toward fixed worker targets (surplus to food); food comes
 //!    from the nearest food source — berries or carcasses first,
@@ -88,6 +94,16 @@ pub(crate) struct AiConfig {
     wave_size: usize,
     /// Ticks between waves.
     wave_cooldown: u64,
+    /// Most villagers on repair duty at once, across all buildings
+    /// (BLD-17). The cap is what keeps repair from stripping the
+    /// economy bare mid-attack: it is the same discipline as the
+    /// two-hunter cap on sheep hunts — a special duty may borrow
+    /// only a small, fixed slice of the village. Against the
+    /// villager targets (10 Easy / 16 Normal) that slice is about
+    /// a fifth of the workforce — roughly what a player pulls onto
+    /// a burning Barracks — while the rest keeps gathering, so the
+    /// wood the drip spends is also being replaced.
+    repairers_max: u32,
 }
 
 /// The profile for a mode. Sandbox has no AI; its config is the
@@ -104,6 +120,7 @@ pub(crate) fn config(mode: MatchMode) -> AiConfig {
             army_target: 5,
             wave_size: 4,
             wave_cooldown: 7200,
+            repairers_max: 2,
         },
         // Sandbox and TwoPlayer never reach `decide` (the tick gate
         // admits only the AI modes); they share this arm purely so
@@ -118,6 +135,7 @@ pub(crate) fn config(mode: MatchMode) -> AiConfig {
             army_target: 10,
             wave_size: 6,
             wave_cooldown: 3600,
+            repairers_max: 3,
         },
     }
 }
@@ -145,6 +163,17 @@ const DEFENSE_RADIUS: I16F16 = I16F16::from_bits(40 * 65536);
 /// carcasses land beside the Town Center, so this covers the
 /// start's own food with margin (M7 rescale of the arena's 20).
 const FOOD_SEARCH_RADIUS: I16F16 = I16F16::from_bits(44 * 65536);
+/// Wood reserve below which the AI starts no repairs (BLD-17):
+/// a full repair of even the cheapest building (a House: 25 wood
+/// to build) costs 12.5 wood of drip, so under 10 wood in the
+/// bank no meaningful restoration can be paid for — and scarce
+/// wood belongs to the build queue first, the villagers worth
+/// more chopping than standing at a wall they cannot mend. The
+/// floor doubles as hysteresis against the sim's own broke-stop:
+/// when a repair does drain the stockpile dry, `repair_tick`
+/// releases the repairers to idle, and this gate keeps the
+/// script from re-assigning them until the wood is back.
+const REPAIR_MIN_WOOD: I16F16 = I16F16::from_bits(10 * 65536);
 
 /// One decision pass. Called from `Sim::tick` on the cadence;
 /// enqueues commands only (see the module docs). Every loop runs in
@@ -172,6 +201,11 @@ pub(crate) fn decide(sim: &mut Sim) {
             sim.push_command(Command::TrainVillagerAt { tc: tc_id });
         }
     }
+
+    // 1.5 Repair (BLD-17): a damaged building — above all one
+    //     under attack right now — outranks new construction, so
+    //     repair claims its villagers before the build step does.
+    plan_repair(sim, &cfg, &mut acted);
 
     // 2. Construction (at most one placement per decision): houses
     //    ahead of the cap first, then the economy buildings.
@@ -243,6 +277,170 @@ fn is_idle(sim: &Sim, id: u32) -> bool {
         }
         None => false,
     }
+}
+
+/// Repair step (BLD-17): send villagers to mend the AI's own
+/// damaged, completed buildings through the ordinary
+/// `Command::Repair` — the same validation, rates and wood drip
+/// a player's order gets (the sim releases repairers on its own
+/// when the building is full or a tick's drip is unaffordable;
+/// this step only ever *assigns*). Targets in priority order:
+/// production buildings first (the army's source — and, with the
+/// Town Center unrepairable for everyone in our architecture,
+/// BLD-17's recorded scope, the highest-value placed buildings
+/// there are), then buildings under attack right now, then the
+/// most damaged; ties by ascending id. Farms are never assigned:
+/// a field is not repaired, for the AI exactly as for a player.
+/// Repairers come nearest-first — idle villagers, then gatherers
+/// pulled off the line (the construction step's own fallback) —
+/// and never more than `cfg.repairers_max` on duty at once
+/// across all buildings, so the economy is never stripped bare.
+/// A villager already on repair duty keeps the assignment: it
+/// counts against the cap here, and the generic allocator never
+/// sees it (`Task::Repair` is not idle). Below the wood floor no
+/// new assignment starts at all (see `REPAIR_MIN_WOOD`).
+/// Reaction speed is the persona's own decision cadence — Easy
+/// decides every 120 ticks against Normal's 30, so Easy simply
+/// notices the damage later, the same way it does everything
+/// else (AI-03: behavior only, never incapability).
+fn plan_repair(sim: &mut Sim, cfg: &AiConfig, acted: &mut Vec<u32>) {
+    let me = OWNER_OPPONENT;
+    if sim.stockpile_of(me).amount(ResourceKind::Wood) < REPAIR_MIN_WOOD {
+        return;
+    }
+    // Repairers already on duty: they hold their assignments
+    // and count against the cap.
+    let mut total: u32 = 0;
+    for e in sim.entities() {
+        if e.owner != me || e.dead {
+            continue;
+        }
+        if let Task::Repair { .. } = e.task {
+            total += 1;
+        }
+    }
+    if total >= cfg.repairers_max {
+        return;
+    }
+    // Damaged targets in priority order. The key: production
+    // first, under attack next, then lowest HP fraction (per
+    // mille, integer — decisions stay float-free), then id.
+    let mut targets: Vec<(u8, u8, i64, u32)> = Vec::new();
+    for b in sim.buildings() {
+        if b.owner != me || !b.complete || b.kind == BuildingKind::Farm {
+            continue;
+        }
+        let max_hp = b.kind.max_hp_at(sim.age_of(me));
+        if b.hp >= I16F16::from_num(max_hp) {
+            continue;
+        }
+        let production = if b.kind.is_production() { 0 } else { 1 };
+        let attacked = if building_under_attack(sim, b.pos_x, b.pos_y) {
+            0
+        } else {
+            1
+        };
+        let fraction = b.hp.to_bits() as i64 * 1000 / max_hp as i64;
+        targets.push((production, attacked, fraction, b.id));
+    }
+    targets.sort();
+    for (_, _, _, bid) in targets {
+        if total >= cfg.repairers_max {
+            break;
+        }
+        let (bx, by) = match sim.buildings().iter().find(|b| b.id == bid) {
+            Some(b) => (b.pos_x, b.pos_y),
+            None => continue,
+        };
+        // Fill this building before moving to the next: stacked
+        // repairers are how a building under fire is held (375
+        // HP/min each past the first, BLD-07), and one mended
+        // building beats two half-mended ones.
+        while total < cfg.repairers_max {
+            let Some(vid) = nearest_repair_candidate(sim, bx, by, acted) else {
+                break;
+            };
+            if !sim.can_repair(vid, bid) {
+                // The building side failed validation (the
+                // candidate side cannot differ between villagers:
+                // each is a living own villager by construction)
+                // — do not spin on it for the next candidate.
+                break;
+            }
+            sim.push_command(Command::Repair {
+                entity: vid,
+                building: bid,
+            });
+            acted.push(vid);
+            total += 1;
+        }
+    }
+}
+
+/// Whether an enemy soldier the AI can currently *see* stands
+/// within the defense ring of a point — the live-state reading
+/// of "under attack": a raider next to the building, inside the
+/// same 10-tile ring `plan_defense` guards around the Town
+/// Center. Fog applies (VIS-01): an attacker the AI cannot see
+/// does not raise the building's priority — its damage alone
+/// still queues it, just behind the ones visibly under fire.
+fn building_under_attack(sim: &Sim, bx: I16F16, by: I16F16) -> bool {
+    let me = OWNER_OPPONENT;
+    sim.entities().iter().any(|e| {
+        if e.owner != OWNER_PLAYER || e.dead || !e.kind.is_military() {
+            return false;
+        }
+        if steer::vec_len(e.pos_x - bx, e.pos_y - by) > DEFENSE_RADIUS {
+            return false;
+        }
+        let (cx, cy) = sim.grid().world_to_cell(e.pos_x, e.pos_y);
+        sim.cell_visible_to(me, cx, cy)
+    })
+}
+
+/// The nearest villager that may take a repair order for a
+/// building at (bx, by): idle villagers first, then gatherers
+/// (the construction step's fallback — pulling one worker off
+/// the line is what a player does; a hunter mid-chase or a
+/// builder mid-placement is never pulled). Nearest by squared
+/// distance, ties by ascending id; `acted` excludes villagers
+/// already booked this decision.
+fn nearest_repair_candidate(
+    sim: &Sim,
+    bx: I16F16,
+    by: I16F16,
+    acted: &[u32],
+) -> Option<u32> {
+    let me = OWNER_OPPONENT;
+    let mut best: Option<(i64, u32)> = None;
+    for pass in 0..2 {
+        for e in sim.entities() {
+            if e.owner != me || e.kind != EntityKind::Villager || e.dead {
+                continue;
+            }
+            if acted.contains(&e.id) {
+                continue;
+            }
+            let eligible = if pass == 0 {
+                is_idle(sim, e.id)
+            } else {
+                e.task == Task::Gathering && e.attack_target.is_none()
+            };
+            if !eligible {
+                continue;
+            }
+            let d = steer::vec_len(e.pos_x - bx, e.pos_y - by);
+            let db = d.to_bits() as i64;
+            let key = (db * db, e.id);
+            if best.map(|b| key < b).unwrap_or(true) {
+                best = Some(key);
+            }
+        }
+        if best.is_some() {
+            break;
+        }
+    }
+    best.map(|(_, id)| id)
 }
 
 /// Construction step: one placement per decision, placed by the
@@ -1096,4 +1294,280 @@ fn plan_wave(sim: &mut Sim, cfg: &AiConfig, acted: &mut Vec<u32>) {
         }
     }
     sim.ai.next_wave_tick = sim.tick_count() + cfg.wave_cooldown;
+}
+
+#[cfg(test)]
+mod tests {
+    //! AI repair gate tests (BLD-17): staged in-crate because the
+    //! scenario needs exact control of the AI's stockpile, which
+    //! the public API deliberately does not offer. The staging
+    //! cheats (grants, drains, direct damage) set the scene only —
+    //! every repair decision asserted on is the script's own,
+    //! taken through the ordinary command path in a live AI match.
+    use super::*;
+
+    fn drain_wood(sim: &mut Sim) {
+        let w = sim.stockpile_of(OWNER_OPPONENT).amount(ResourceKind::Wood);
+        sim.stockpile_mut(OWNER_OPPONENT)
+            .spend(ResourceKind::Wood, w);
+    }
+
+    fn set_wood(sim: &mut Sim, amount: i32) {
+        drain_wood(sim);
+        sim.stockpile_mut(OWNER_OPPONENT)
+            .add(ResourceKind::Wood, I16F16::from_num(amount));
+    }
+
+    /// Order every AI villager onto its nearest food node (the
+    /// allocator only ever reassigns the idle, so a herded
+    /// village stays off the woodline until the herding stops).
+    fn herd_to_food(sim: &mut Sim) {
+        let me = OWNER_OPPONENT;
+        let Some(tc) = sim.tc_entity_of(me) else {
+            return;
+        };
+        let Some(nid) = nearest_node(sim, ResourceKind::Food, tc.pos_x, tc.pos_y) else {
+            return;
+        };
+        let villagers: Vec<u32> = sim
+            .entities()
+            .iter()
+            .filter(|e| e.owner == me && e.kind == EntityKind::Villager && !e.dead)
+            .map(|e| e.id)
+            .collect();
+        for v in villagers {
+            sim.push_command(Command::Gather {
+                entity: v,
+                node: nid,
+            });
+        }
+    }
+
+    fn wood(sim: &Sim) -> f64 {
+        sim.stockpile_of(OWNER_OPPONENT)
+            .amount(ResourceKind::Wood)
+            .to_num::<f64>()
+    }
+
+    fn opp_building(sim: &Sim, kind: BuildingKind) -> Option<u32> {
+        sim.buildings()
+            .iter()
+            .find(|b| b.owner == OWNER_OPPONENT && b.kind == kind && b.complete)
+            .map(|b| b.id)
+    }
+
+    fn repairers_on(sim: &Sim, bid: u32) -> usize {
+        sim.entities()
+            .iter()
+            .filter(|e| {
+                e.owner == OWNER_OPPONENT && e.task == (Task::Repair { building: bid })
+            })
+            .count()
+    }
+
+    fn any_repairers(sim: &Sim) -> usize {
+        sim.entities()
+            .iter()
+            .filter(|e| e.owner == OWNER_OPPONENT && matches!(e.task, Task::Repair { .. }))
+            .count()
+    }
+
+    /// Stage: an AI match where two Houses and a Barracks stand
+    /// complete by the opponent Town Center, raised by its three
+    /// starting villagers. Each placement is granted its exact
+    /// cost on the tick it is ordered and the bank is drained
+    /// back to zero every tick, so the script itself places
+    /// nothing and the bank reads exactly what the test leaves.
+    fn staged_barracks(mode: MatchMode) -> (Sim, u32) {
+        let mut sim = Sim::new_match(11, mode);
+        let me = OWNER_OPPONENT;
+        let tc = sim.tc_entity_of(me).expect("the AI has a Town Center");
+        let (tc_x, tc_y) = (tc.pos_x, tc.pos_y);
+        let villagers: Vec<u32> = sim
+            .entities()
+            .iter()
+            .filter(|e| e.owner == me && e.kind == EntityKind::Villager && !e.dead)
+            .map(|e| e.id)
+            .collect();
+        assert_eq!(villagers.len(), 3, "the AI starts with three villagers");
+        let jobs = [
+            (villagers[0], BuildingKind::House),
+            (villagers[1], BuildingKind::House),
+            (villagers[2], BuildingKind::Barracks),
+        ];
+        for (v, kind) in jobs {
+            set_wood(&mut sim, kind.wood_cost().to_num::<i32>());
+            let (x, y) = find_anchor(&sim, v, kind, tc_x, tc_y).expect("a legal anchor");
+            sim.push_command(Command::Build {
+                entity: v,
+                kind,
+                x,
+                y,
+            });
+            sim.tick();
+            drain_wood(&mut sim);
+        }
+        let mut ticks = 0u64;
+        while opp_building(&sim, BuildingKind::Barracks).is_none() && ticks < 60_000 {
+            sim.tick();
+            drain_wood(&mut sim);
+            ticks += 1;
+        }
+        let bid = opp_building(&sim, BuildingKind::Barracks)
+            .expect("the staged Barracks never completed");
+        (sim, bid)
+    }
+
+    /// Beat the staged Barracks down by `amount` HP through the
+    /// combat path (armor and the minimum-1 clamp apply per hit,
+    /// so loop to the target).
+    fn damage(sim: &mut Sim, bid: u32, amount: i32) -> I16F16 {
+        let (bx, by, max_hp) = {
+            let b = sim.buildings().iter().find(|b| b.id == bid).unwrap();
+            (b.pos_x, b.pos_y, b.kind.max_hp_at(sim.age_of(b.owner)))
+        };
+        let elev = sim.height_at_world(bx, by);
+        let target = I16F16::from_num(max_hp - amount);
+        let mut hits = 0;
+        loop {
+            let hp = sim
+                .buildings()
+                .iter()
+                .find(|b| b.id == bid)
+                .unwrap()
+                .hp;
+            if hp <= target || hits >= 10_000 {
+                return hp;
+            }
+            sim.damage_building(bid, &[(crate::classes::MELEE, 50)], elev, OWNER_PLAYER);
+            hits += 1;
+        }
+    }
+
+    /// One scenario, run for both personas: with wood in the
+    /// bank the AI assigns repairers (never more than the
+    /// profile cap), the Barracks returns to full, the stockpile
+    /// pays while HP rises; with the bank held at zero nothing
+    /// is assigned and nobody gets stuck; when wood flows again
+    /// the repair resumes.
+    fn ai_repair_scenario(mode: MatchMode, cap: usize) {
+        let (mut sim, bid) = staged_barracks(mode);
+        let max_hp = {
+            let b = sim.buildings().iter().find(|b| b.id == bid).unwrap();
+            I16F16::from_num(b.kind.max_hp_at(sim.age_of(b.owner)))
+        };
+
+        // Phase 1 — funded repair.
+        let hurt = damage(&mut sim, bid, 300);
+        assert!(hurt < max_hp, "the staging damage did not land");
+        set_wood(&mut sim, 50);
+        let mut series: Vec<(f64, f64, usize)> = Vec::new(); // (hp, wood, buildings)
+        let mut saw_repair = false;
+        let mut max_on_duty = 0usize;
+        let mut ticks = 0u64;
+        while ticks < 12_000 {
+            sim.tick();
+            ticks += 1;
+            let hp = sim.buildings().iter().find(|b| b.id == bid).unwrap().hp;
+            saw_repair |= repairers_on(&sim, bid) > 0;
+            max_on_duty = max_on_duty.max(any_repairers(&sim));
+            series.push((
+                hp.to_num::<f64>(),
+                wood(&sim),
+                sim.buildings().len(),
+            ));
+            if hp >= max_hp && repairers_on(&sim, bid) == 0 && ticks > 600 {
+                break;
+            }
+        }
+        let full = sim.buildings().iter().find(|b| b.id == bid).unwrap().hp;
+        assert!(saw_repair, "the AI never assigned a repairer ({mode:?})");
+        assert!(
+            max_on_duty <= cap,
+            "the AI fielded {max_on_duty} repairers over its cap of {cap} ({mode:?})"
+        );
+        assert_eq!(full, max_hp, "the Barracks never returned to full ({mode:?})");
+        // The stockpile paid for the mending: somewhere in the
+        // series HP climbs over a 120-tick stretch with no new
+        // building placed (no other wood sink runs) while the
+        // wood balance strictly falls — the drip, observed.
+        let paid = series.windows(121).any(|w| {
+            w[120].0 > w[0].0 + 5.0 && w[120].1 < w[0].1 && w[120].2 == w[0].2
+        });
+        assert!(paid, "no stretch of rising HP at falling wood ({mode:?})");
+
+        // Phase 2 — the bank held at zero: no assignment, no
+        // stuck villagers, HP frozen (nothing is attacking; only
+        // repair could raise it). The bank alone cannot prove the
+        // gate from outside a tick (a deposit lands before the
+        // decide step), so the village is also herded onto food
+        // for the duration: with every villager on berries and a
+        // re-herd every 300 ticks, no wood trip (a ≥1 800-tick
+        // round trip) can ever complete, no deposit can reach a
+        // decision, and the floor is shut at every cadence.
+        let _ = damage(&mut sim, bid, 200);
+        herd_to_food(&mut sim);
+        // Settle: any repairer an accidental first-ticks deposit
+        // could have started is released by the broke-stop as the
+        // drain bites; then the HP snapshot is taken.
+        for _ in 0..300 {
+            sim.tick();
+            drain_wood(&mut sim);
+        }
+        let frozen = sim.buildings().iter().find(|b| b.id == bid).unwrap().hp;
+        for i in 0..3_300u64 {
+            if i % 300 == 0 {
+                herd_to_food(&mut sim);
+            }
+            sim.tick();
+            drain_wood(&mut sim);
+            assert_eq!(
+                any_repairers(&sim),
+                0,
+                "a repairer was assigned with an empty bank ({mode:?})"
+            );
+            let hp = sim.buildings().iter().find(|b| b.id == bid).unwrap().hp;
+            assert_eq!(hp, frozen, "HP moved while the AI was broke ({mode:?})");
+        }
+        let working = sim
+            .entities()
+            .iter()
+            .filter(|e| {
+                e.owner == OWNER_OPPONENT
+                    && e.kind == EntityKind::Villager
+                    && !e.dead
+                    && e.task != Task::Idle
+            })
+            .count();
+        assert!(
+            working > 0,
+            "the whole village stood idle in the no-wood case ({mode:?})"
+        );
+
+        // Phase 3 — wood flows again (the drain stops): the gate
+        // reopens and the repair resumes on the script's own
+        // schedule.
+        let mut resumed = false;
+        for _ in 0..12_000 {
+            sim.tick();
+            if repairers_on(&sim, bid) > 0 {
+                resumed = true;
+                break;
+            }
+        }
+        assert!(resumed, "repair never resumed once wood returned ({mode:?})");
+    }
+
+    #[test]
+    fn ai_normal_repairs_and_respects_the_wood_floor() {
+        ai_repair_scenario(MatchMode::AiNormal, 3);
+    }
+
+    #[test]
+    fn ai_easy_repairs_too_but_capped_lower() {
+        // Easy is slower to react (its 120-tick cadence against
+        // Normal's 30 decides when the damage is first answered)
+        // and fields fewer repairers — never incapable (AI-03).
+        ai_repair_scenario(MatchMode::AiEasy, 2);
+    }
 }

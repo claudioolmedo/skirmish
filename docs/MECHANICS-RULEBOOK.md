@@ -1223,7 +1223,7 @@ completion releases every repairer). Valid targets are only the
 repairer's own player's *complete, damaged* placed buildings:
 enemy and Gaia buildings, undamaged/full buildings, and
 foundations under construction are ignored (a foundation is
-resumed via Build); the scripted AI never issues repair. If the
+resumed via Build). If the
 owner cannot cover a tick's drip, that tick restores nothing and
 the building's repairers stop and stand idle. A repairer pulled
 away (new order, death) or whose building is destroyed leaves
@@ -1237,7 +1237,39 @@ assignment), `repair_tick` immediately after `construction_tick`,
 fixed-point HP and cost accumulators on the building record
 (`repair_hp_remainder` / `repair_cost_remainder`, both hashed);
 pinned by `sim/tests/repair.rs` (rate, stacking, drip total,
-rejections, wood-exhaustion stop, queued form). Scope divergence
+rejections, wood-exhaustion stop, queued form). **AI repair
+(2026-10-22 — the recorded "the AI does not repair" gap is
+closed):** the scripted opponent issues `Command::Repair`
+through the same path, under this behavior contract — targets
+are its own complete, damaged placed buildings (Farms excluded,
+as for a player), in priority order: production buildings
+first, then buildings under attack (an enemy soldier the AI can
+currently see within the 10-tile defense ring), then the most
+damaged, ties by id; the Town Center is *not* a target — it is
+unrepairable for the human too (the scope divergence below), so
+the AI gains nothing a player lacks. Repairers are the nearest
+idle villagers, gatherers pulled off the line only when nobody
+is idle (the construction step's own fallback); concurrent
+repairers are capped per profile (2 Easy / 3 Normal — about a
+fifth of the village, the two-hunter discipline) so the economy
+is never stripped bare; a villager on repair duty keeps the
+assignment (the generic allocator never sees it). No assignment
+starts while the wood stockpile is under a 10-wood floor (below
+which no meaningful drip can be paid; the floor is also the
+hysteresis against the broke-stop's release). Release is the
+sim's own: full HP or an unaffordable tick stands the repairers
+down, and the script re-assigns only once wood is back over the
+floor. Reaction speed is the persona's decision cadence — 120
+ticks on Easy against 30 on Normal — so Easy answers damage
+later, never never (AI-03: behavior only). Pinned by
+`sim/tests/ai_repair.rs` (a live-match soak: a human Militia
+squad dents the AI's Barracks, the AI mends it under fire and
+finishes the job after the withdrawal, repairers released) and
+the in-crate gate tests in `sim/src/ai.rs` (funded repair with
+the profile cap observed and the drip visible in the stockpile;
+the bank held at zero — no assignment, no stuck villagers, HP
+frozen; repair resumes when wood returns; both personas).
+Scope divergence
 from BLD-07: placed buildings only — ships and siege do not
 exist yet, and the Town Center is an entity in our architecture
 rather than a placed building, so TC repair (and its 550-wood
