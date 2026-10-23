@@ -10,7 +10,9 @@ status below was re-checked against the shipped code (`sim/src/*.rs`,
 `sim/tests/*.rs`, `web-preview/app.js`, `web-preview/play/`) at
 `origin/main` revision `0f303ca`; the follow-up branch was rebased onto
 `474084e` (2026-10-23), which landed the animation pass and the Farm
-footprint change, and the affected rows were re-checked there. The
+footprint change, and the affected rows were re-checked there; the
+landing rebase onto `a212dc3` (2026-10-23) landed the predator wolf
+(AI-08), and row 7.8 was re-checked there. The
 2026-10-16 audit predated M3–M14,
 so most of its MISSING rows described systems that have since shipped;
 each corrected status names its implementation and its tests. The
@@ -192,7 +194,7 @@ MISSING unless noted.
 | 7.5 | Water & shores | Water tiles for ships only; shores blend; Docks must touch water | **PARTIAL** — the water terrain layer exists in mapgen/grid (M7) and gates land placement; the ship domain (movement, Docks — BLD-14) is missing | Water layer + passability per domain (land/sea) | M | M7 remainder |
 | 7.6 | Fog of war | 3 states per player: unexplored (black), explored (dim, static terrain), visible (live); buildings remembered, units not | **HAVE** — per-player visibility grids in sim (hash-covered, recomputed on a bounded interval), renderer masking (M7; rulebook §3 VIS); tests: `sim/tests/world.rs`, `sim/tests/two_player.rs` | — | — | done (M7) |
 | 7.7 | Line of sight | Every unit/building has a LoS stat; Town Watch etc. raise building LoS | **HAVE** — LoS field in the stat tables feeding §7.6 (VIS-03; the Town Center's sight is the documented 8 tiles); tests: `sim/tests/world.rs` | — | — | done (M7) |
-| 7.8 | Animals (Gaia) | Herdables, huntables, predators (wolves attack villagers), straggler trees, decorative fauna | **PARTIAL** — herdables + huntables **HAVE** (3.6/3.7) incl. deer pushing (AI-07); predators are missing on main (AI-08 MISSING) and decorative fauna with them | Gaia predator kind + simple animal AI | M | M7 remainder |
+| 7.8 | Animals (Gaia) | Herdables, huntables, predators (wolves attack villagers), straggler trees, decorative fauna | **PARTIAL** — herdables + huntables **HAVE** (3.6/3.7) incl. deer pushing (AI-07); predators **HAVE** — the Grey Wolf Gaia kind (AI-08 MATCHES; tests: `sim/tests/wolf.rs`); decorative fauna still missing | Decorative fauna | M | M7 remainder |
 | 7.9 | Exploration start | Players start blind except around their TC; a scout unit maps the world | **HAVE** — fog from tick 0 + the starting Scout Cavalry (M3/M7) | — | — | done (M7) |
 
 ## 8. Game structure
