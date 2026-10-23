@@ -150,11 +150,25 @@ impl NodeKind {
     /// internal bonus is 26.95% so no case rounds below +25% —
     /// wiki, Wheelbarrow (Age of Empires II)).
     pub fn carry_cap_for(self, wheelbarrow: bool) -> I16F16 {
-        match (self, wheelbarrow) {
-            (NodeKind::CarcassHunt, true) => WHEELBARROW_HUNT_CARRY_CAPACITY,
-            (NodeKind::CarcassHunt, false) => HUNT_CARRY_CAPACITY,
-            (_, true) => WHEELBARROW_CARRY_CAPACITY,
-            (_, false) => CARRY_CAPACITY,
+        self.carry_cap_tiered(wheelbarrow, false)
+    }
+
+    /// The carry cap under the full ECO-03 chain (base →
+    /// Wheelbarrow → Hand Cart): the wiki's carry-capacity
+    /// comparison table (wiki, Hand Cart; wiki, Wheelbarrow
+    /// (Age of Empires II)) resolves Hand Cart's nominal +50% as
+    /// 13 → 20 ordinary and 44 → 66 hunted meat — pinned integers,
+    /// not a 1.5× multiplication of the Wheelbarrow row. Hand Cart
+    /// requires Wheelbarrow (TEC-07), so the `hand_cart` flag
+    /// alone decides the top tier.
+    pub fn carry_cap_tiered(self, wheelbarrow: bool, hand_cart: bool) -> I16F16 {
+        match (self, hand_cart, wheelbarrow) {
+            (NodeKind::CarcassHunt, true, _) => HAND_CART_HUNT_CARRY_CAPACITY,
+            (NodeKind::CarcassHunt, false, true) => WHEELBARROW_HUNT_CARRY_CAPACITY,
+            (NodeKind::CarcassHunt, false, false) => HUNT_CARRY_CAPACITY,
+            (_, true, _) => HAND_CART_CARRY_CAPACITY,
+            (_, false, true) => WHEELBARROW_CARRY_CAPACITY,
+            (_, false, false) => CARRY_CAPACITY,
         }
     }
 
@@ -271,6 +285,11 @@ pub const HUNT_CARRY_CAPACITY: I16F16 = I16F16::from_bits(2_293_760); // 35
 pub const WHEELBARROW_CARRY_CAPACITY: I16F16 = I16F16::from_bits(851_968); // 13
 /// Wheelbarrow hunt carry capacity (ECO-03): 44 (wiki table).
 pub const WHEELBARROW_HUNT_CARRY_CAPACITY: I16F16 = I16F16::from_bits(2_883_584); // 44
+/// Hand Cart carry capacity (ECO-03): 20 (wiki comparison table —
+/// the nominal +50% resolved; NOT 13 × 1.5).
+pub const HAND_CART_CARRY_CAPACITY: I16F16 = I16F16::from_bits(1_310_720); // 20
+/// Hand Cart hunt carry capacity (ECO-03): 66 (wiki table).
+pub const HAND_CART_HUNT_CARRY_CAPACITY: I16F16 = I16F16::from_bits(4_325_376); // 66
 /// Villager training cost: 50 food, deducted when the order is enqueued.
 pub const VILLAGER_FOOD_COST: I16F16 = I16F16::from_bits(3_276_800); // 50
 /// Villager training time: 25 s at 60 Hz.

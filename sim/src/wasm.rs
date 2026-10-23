@@ -263,6 +263,19 @@ impl WasmSim {
         self.push_research_tc(TechId::Wheelbarrow)
     }
 
+    /// Enqueue the Castle Age advancement at the Town Center
+    /// (800 food, 200 gold, 160 s; needs 2 completed Feudal-Age
+    /// buildings — TEC-01 Castle rung).
+    pub fn push_research_castle_age(&mut self) -> bool {
+        self.push_research_tc(TechId::CastleAge)
+    }
+
+    /// Enqueue Hand Cart at the Town Center (300 food, 200 wood,
+    /// 55 s; Castle Age, requires Wheelbarrow — ECO-03).
+    pub fn push_research_hand_cart(&mut self) -> bool {
+        self.push_research_tc(TechId::HandCart)
+    }
+
     fn push_research_tc(&mut self, tech: TechId) -> bool {
         let ok = self.inner.can_research_tc(tech);
         if ok {
@@ -620,6 +633,12 @@ impl WasmSim {
             });
         }
         ok
+    /// Order a villager to build an additional Town Center
+    /// (275 wood + 100 stone, 4×4 — Castle Age; the foundation
+    /// converts into a Town Center entity on completion) — see
+    /// `push_build_house`.
+    pub fn push_build_town_center(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build(entity, BuildingKind::TownCenter, x, y)
     }
 
     fn push_build(&mut self, entity: u32, kind: BuildingKind, x: f64, y: f64) -> bool {
@@ -746,6 +765,10 @@ impl WasmSim {
     /// `push_build_house_queued`.
     pub fn push_build_palisade_wall_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
         self.push_build_queued(entity, BuildingKind::PalisadeWall, x, y)
+    /// Queue a Town Center build (Castle Age) — see
+    /// `push_build_house_queued`.
+    pub fn push_build_town_center_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build_queued(entity, BuildingKind::TownCenter, x, y)
     }
 
     fn push_build_queued(&mut self, entity: u32, kind: BuildingKind, x: f64, y: f64) -> bool {

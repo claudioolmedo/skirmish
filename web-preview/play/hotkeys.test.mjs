@@ -49,7 +49,7 @@ test('military page: slot letters Q W E / A, Back on C, silent aliases', () => {
 });
 
 test('an armed page swallows its letters; other letters fall through', () => {
-  assert.equal(build({ page: 'eco', code: 'KeyD' }), null, 'D still pans');
+  assert.equal(build({ page: 'eco', code: 'KeyD' }).id, 'build-9', 'D places the Town Center (Castle P1)');
   assert.equal(build({ page: 'mil', code: 'KeyR' }), null);
   assert.deepEqual(build({ code: 'KeyE' }), { type: 'button', id: 'repair' }, 'unarmed E is Repair (BLD-17, the root panel’s third slot)');
   assert.equal(build({ code: 'KeyS' }), null, 'unarmed S still pans');
@@ -94,27 +94,28 @@ test('panel slot letters run a selected building\u2019s buttons', () => {
   assert.equal(at('miningcamp', 'KeyW').id, 'research-stonemining');
 });
 
-test('Town Center letters are DE’s own: Villager Q, Loom A, Feudal W, Wheelbarrow S', () => {
+test('Town Center letters are DE’s own: Villager Q, Loom A, Feudal W, Wheelbarrow S, Hand Cart D', () => {
   // DE's grid letter is the button's panel position, and the TC
   // panel's arrangement is not our button order (Age of Empires
   // wiki, "Hotkey"; the study video's Loom tooltip reads
   // "(Hotkey: A)"). Scoped to the TC context only: E runs
   // nothing here, and the villager context keeps its own A.
   // Wheelbarrow (2026-10-22) takes DE's second-row second slot,
-  // S, right of Loom; D stays empty — Hand Cart is a Castle Age
-  // technology and does not exist yet.
+  // S, right of Loom; Hand Cart (Castle P1) takes D, right of
+  // Wheelbarrow, exactly where DE keeps it.
   const at = (code) => resolveHotkey({ context: 'tc', page: null, code });
   assert.equal(at('KeyQ').id, 'train', 'Create Villager — top-left of the TC panel');
   assert.equal(at('KeyA').id, 'research-loom', 'Loom — below Villager (study frame f_025)');
-  assert.equal(at('KeyW').id, 'research-feudal', 'Feudal Age — top row, second slot');
+  assert.equal(at('KeyW').id, 'research-age', 'Age advancement — top row, second slot');
   assert.equal(at('KeyE'), null, 'E is not a TC letter in DE');
   assert.equal(at('KeyS').id, 'research-wheelbarrow', 'Wheelbarrow — below Feudal, right of Loom');
-  assert.equal(at('KeyD'), null, 'D would be Hand Cart — Castle Age, not shipped');
+  assert.equal(at('KeyD').id, 'research-handcart', 'Hand Cart — right of Wheelbarrow (Castle P1)');
   // The badges painted on the buttons carry the same letters.
   assert.equal(badgeForButton({ context: 'tc', id: 'train', index: 0 }), 'Q');
   assert.equal(badgeForButton({ context: 'tc', id: 'research-loom', index: 1 }), 'A');
-  assert.equal(badgeForButton({ context: 'tc', id: 'research-feudal', index: 2 }), 'W');
+  assert.equal(badgeForButton({ context: 'tc', id: 'research-age', index: 2 }), 'W');
   assert.equal(badgeForButton({ context: 'tc', id: 'research-wheelbarrow', index: 3 }), 'S');
+  assert.equal(badgeForButton({ context: 'tc', id: 'research-handcart', index: 4 }), 'D');
   // Other panels keep their position badges.
   assert.equal(badgeForButton({ context: 'barracks', id: 'research-maa', index: 2 }), 'A');
   assert.equal(badgeForButton({ context: 'barracks', id: 'train-spearman', index: 1 }), 'W');
@@ -171,7 +172,7 @@ test('every building sits on exactly one page, in grid order, with a working bad
   assert.deepEqual([...PAGE_KINDS.eco, ...PAGE_KINDS.mil].sort((a, b) => a - b),
     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], 'the two pages partition the ten buildings');
   // Grid (render) order: the slots run Q W E / A S / ... in order.
-  assert.deepEqual(PAGE_KINDS.eco, [0, 4, 1, 3, 5], 'economic: House, Mill, Farm, Lumber, Mining');
+  assert.deepEqual(PAGE_KINDS.eco, [0, 4, 1, 3, 5, 10], 'economic: House, Mill, Farm, Lumber, Mining, Town Center');
   assert.deepEqual(PAGE_KINDS.mil, [2, 6, 7, 8, 9], 'military: Barracks, Range, Stable, Blacksmith, Palisade Wall');
   for (const [page, kinds] of Object.entries(PAGE_KINDS)) {
     for (const kind of kinds) {
@@ -207,7 +208,7 @@ test('badges in train/research contexts are the slot letters', () => {
   assert.equal(badgeForButton({ context: 'blacksmith', id: 'research-padded', index: 2 }), 'A');
   assert.equal(badgeForButton({ context: 'tc', id: 'train', index: 0 }), 'Q');
   assert.equal(badgeForButton({ context: 'tc', id: 'research-loom', index: 1 }), 'A');
-  assert.equal(badgeForButton({ context: 'tc', id: 'research-feudal', index: 2 }), 'W');
+  assert.equal(badgeForButton({ context: 'tc', id: 'research-age', index: 2 }), 'W');
   // A context with no panel at all badges nothing. (This line
   // used 'units' as its example until CMB-09/10/11 gave the
   // military selection a real panel; 'none' carries the intent.)

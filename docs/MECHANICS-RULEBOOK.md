@@ -815,11 +815,14 @@ task source; the 35 case keys off the node kind (hunt carcass), not a
 villager state. Wheelbarrow shipped in the 2026-10-21/22 night run —
 carry 10 → 13 / hunt 35 → 44 via `NodeKind::carry_cap_for`, and the
 speed +10% as TEC-06's first *percentage* patch (the layered row ×
-11/10 in `stats_for`). Still open: Hand Cart (its 20-cap case —
-numbers now pinned above — and +10% speed) — it waits for the
-Castle Age, the tech's own Age.
-· *Status:* **DIFFERS** (Wheelbarrow ships; Hand Cart waits for the
-Castle Age).
+11/10 in `stats_for`). Hand Cart shipped 2026-10-22 (Castle P1):
+`NodeKind::carry_cap_tiered(wheelbarrow, hand_cart)` — the Hand Cart
+tier wins over Wheelbarrow's — at the pinned integers 20 / 66
+above, plus the second +10% speed layer in `stats_for`, the
+× 11/10 patch applied again over the Wheelbarrow layer. Both the
+chain (Hand Cart Locked until Wheelbarrow stands) and a working
+villager filling past 13 are pinned in `sim/tests/castle_age.rs`.
+· *Status:* **MATCHES**.)
 
 **ECO-04 — The gather loop.** Gather until the carry is full or the node
 empties, travel to a drop-off, deposit instantly, return to the node, and
@@ -1155,10 +1158,19 @@ ABI HP fraction) reads the owner's CURRENT age, TEC-04's lookup
 semantics: a standing building keeps its current HP when the age
 turns — its maximum rises, and Repair (BLD-17) can heal it the rest
 of the way; a building placed in Feudal starts at the Feudal value.
-The Archery Range and Stable are Feudal-born at their first column
-(their step is Castle, not yet in scope); the Town Center is an
-entity with a single 2400 HP row in the study, not a placed building
-in this rule's table. · *Status:* **MATCHES** (for the shipped ages).
+The Castle columns landed 2026-10-22 (Castle P1) from the study §5
+table: House 900 HP, melee 1, pierce 9; Barracks 1800 HP, 2 / 9;
+Archery Range and Stable 1800 HP, 2 / 9 — pinned by test, including
+the read side (a Feudal-raised undamaged House at 750 HP reads
+54613/65536 against the Castle ceiling). The camps' and
+Blacksmith's per-age armor columns are not pinned by any source in
+hand (their study rows give single values) — they stay flat rather
+than invented, UNVERIFIED. The Town Center is an entity with a
+single 2400 HP row in the study, not a placed building in this
+rule's table — but its armor follows the same per-age lookup
+through `stats_for`: melee 3/4/5, pierce 5/6/7 across
+Dark/Feudal/Castle (the Imperial 6/8 waits with its age), pinned by
+the same test. · *Status:* **MATCHES** (for the shipped ages).
 
 **BLD-12 — Farms do not block; other buildings do.** A placed farm never
 enters the obstacle grid (its farmer walks and stands on it). Every other
@@ -1283,7 +1295,15 @@ in-game building set (M6) — availability = (age, built-set) evaluated
 in `validate_build`, the same function the client's ghost and build
 menu mirror: Farms require a completed Mill; the Archery Range,
 Stable and Blacksmith require the Feudal Age; the Range and Stable
-also require a completed Barracks. Buildings not yet in the game
+also require a completed Barracks. Extended 2026-10-22 (Castle P1):
+the Town Center is a buildable kind from the Castle Age (275 wood +
+100 stone — the game's first stone spend and first two-resource
+building cost; before Castle the only Town Center is the starting
+one, the dossier's limit of 1). A TC foundation is a construction
+record like any other; on completion it converts into the TC entity
+(the entity-spawn path BLD-16's reserve already assumed), standing
+on the footprint's (1,1) cell so its BLD-16 reserve is exactly the
+placed 4×4. Buildings not yet in the game
 (Market, Monastery, …) arrive with their milestones. · *Status:*
 **MATCHES**.
 
@@ -1898,7 +1918,9 @@ the Town Center.
 table keyed by (from-age); the TC queue holds an "age research" entry
 like any other (TEC-03). · *Status:* **DIFFERS** (the Dark → Feudal
 rung ships with M6 at exactly these numbers — 500 food, 130 s; the
-Castle and Imperial rungs wait for their content).
+Feudal → Castle rung shipped 2026-10-22 in the Castle Age P1 package
+at exactly these numbers — 800 food + 200 gold, 160 s, pinned by
+`sim/tests/castle_age.rs`; only the Imperial rung still waits).
 
 **TEC-02 — Age-up requires two qualifying buildings.** Advancing requires
 owning any two buildings of the *current* age's tier, with exclusions:
@@ -1910,7 +1932,15 @@ any two Castle-Age buildings.
 completed-building set (`BuildingKind::counts_toward_feudal`: the
 Barracks and the three camps count; Houses and Farms do not),
 evaluated at enqueue time; the client disables the button from the
-same rule. Later rungs arrive with their ages. · *Status:*
+same rule. The Castle rung shipped 2026-10-22 (Castle P1) on the
+same model: `BuildingKind::counts_toward_castle` counts only the
+Feudal-born kinds (Archery Range, Stable, Blacksmith) — the study's
+"any two Feudal Age buildings" read against its exclusion data
+(walls/towers are not in the game; Dark-born kinds no more qualify
+a player for Castle than Houses qualify one for Feudal) — with the
+staged gate pinned by test (0 after Mill + Lumber Camp, still 0
+after a Barracks, 1 after a Blacksmith, 2 after an Archery Range).
+The Imperial rung arrives with its age. · *Status:*
 **MATCHES**.
 
 **TEC-03 — Age research occupies the Town Center.** While an Age is
@@ -1996,9 +2026,12 @@ the whole graph with met/unmet prerequisites (INF-06).
 *Source:* MECHANICS-STUDY §8; Technology wiki (full generic list). ·
 *Impl:* prerequisite fields in the tech table, evaluated by the same
 availability function as BLD-15. Shipped prerequisites are (age,
-host building) pairs — the first two links of every chain; no shipped
-technology yet requires a prior technology, and the tree UI (INF-06)
-does not exist. · *Status:* **DIFFERS**.
+host building) pairs — the first two links of every chain. The first
+tech-to-tech link shipped 2026-10-22 (Castle P1): Hand Cart requires
+Wheelbarrow (`TechId::requires_tech`), enforced in the same
+`check_research` gate — in Castle Age without Wheelbarrow the tech
+reads Locked, distinct from its Age block in Feudal. The tree UI
+(INF-06) still does not exist. · *Status:* **DIFFERS**.
 
 **TEC-08 — Percent effects apply before armor subtraction; flat effects
 are part of the stat.** Where a tech grants "attack +X%", it scales the
@@ -3207,7 +3240,7 @@ report: segments scattered across rows instead of following
 one line; the studied rule and sources are recorded in the
 entry, DE's exact rasterization marked UNVERIFIED). No
 status change: BLD-13 stays DIFFERS on the missing gates,
-and the totals stand).
+and the totals stand; updated 2026-10-22 for Castle Age P1 (the age-up and boom slice): ECO-03 moves DIFFERS → MATCHES (Hand Cart ships at the pinned carry 20 / hunt 66, with its Wheelbarrow prerequisite and second speed layer), so §6 trades one DIFFERS for one MATCHES; TEC-01 and TEC-07 narrow with no status change (the Castle rung lands — only Imperial still waits; the first tech-to-tech prerequisite link lands — the INF-06 tree UI is still the gap), and TEC-02, BLD-11 and BLD-15 extend to the Castle step with no status change (the two-Feudal-born-buildings predicate, the Castle HP/armor columns, buildable Town Centers), recounted mechanically below).
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
@@ -3216,7 +3249,7 @@ and the totals stand).
 | 3 | Visibility & exploration (VIS) | 10 | 8 | 1 | 1 |
 | 4 | Selection & orders (SEL) | 17 | 15 | 2 | 0 |
 | 5 | Movement, pathfinding & collision (MOV) | 12 | 4 | 3 | 5 |
-| 6 | Economy & drop-off (ECO) | 17 | 13 | 2 | 2 |
+| 6 | Economy & drop-off (ECO) | 17 | 14 | 1 | 2 |
 | 7 | Buildings & placement (BLD) | 17 | 12 | 3 | 2 |
 | 8 | Combat & damage (CMB) | 16 | 14 | 1 | 1 |
 | 9 | Projectiles & ballistics (PRJ) | 10 | 5 | 3 | 2 |
@@ -3229,7 +3262,7 @@ and the totals stand).
 | 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |
 | 17 | Multiplayer determinism (NET) | 11 | 4 | 5 | 2 |
 | 18 | Information rules (INF) | 13 | 8 | 3 | 2 |
-| | **Total** | **218** | **119** | **32** | **67** |
+| | **Total** | **218** | **120** | **31** | **67** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer

@@ -1366,14 +1366,18 @@ impl Sim {
         self.buildings[bi].hp -= dmg;
         if self.buildings[bi].hp < I16F16::from_num(1) {
             // VIC-04: the lethal hit credits the attacker's owner
-            // with the building's resource cost (its wood cost —
-            // the only cost buildings carry here), foundation or
-            // complete. A Delete never reaches this path (it calls
-            // `destroy_building` directly), so self-demolition
-            // credits no one.
+            // with the building's resource cost (its wood cost,
+            // plus the Town Center foundation's stone — the one
+            // two-resource cost), foundation or complete. A Delete
+            // never reaches this path (it calls `destroy_building`
+            // directly), so self-demolition credits no one.
             let (bowner, bvalue) = {
                 let b = &self.buildings[bi];
-                (b.owner, b.kind.wood_cost().to_num::<i32>() as i64)
+                (
+                    b.owner,
+                    b.kind.wood_cost().to_num::<i32>() as i64
+                        + b.kind.stone_cost().to_num::<i32>() as i64,
+                )
             };
             self.credit_destruction(attacker_owner, bowner, bvalue);
             self.destroy_building(bid);

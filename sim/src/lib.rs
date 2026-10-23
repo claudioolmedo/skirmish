@@ -1136,10 +1136,14 @@ impl Sim {
     }
 
     /// Whether a player has completed a technology (M6). The
-    /// Feudal Age "technology" reads off the age state itself.
+    /// age advancement "technologies" read off the age state
+    /// itself (Feudal from M6; Castle from the Castle P1 package).
     pub fn has_tech(&self, owner: u8, tech: TechId) -> bool {
         if tech == TechId::FeudalAge {
             return self.age_of(owner) >= Age::Feudal;
+        }
+        if tech == TechId::CastleAge {
+            return self.age_of(owner) >= Age::Castle;
         }
         match player_slot(owner) {
             Some(slot) => self.players[slot].techs & tech.bit() != 0,
@@ -1148,8 +1152,9 @@ impl Sim {
     }
 
     /// A player's researched-technology bitmask (M6), with the
-    /// Feudal Age bit set while the player stands in Feudal — the
-    /// client's one-call view of "what do I have".
+    /// age advancement bits set while the player stands in (or
+    /// past) the matching Age — the client's one-call view of
+    /// "what do I have".
     pub fn tech_mask_of(&self, owner: u8) -> u64 {
         let mut mask = match player_slot(owner) {
             Some(slot) => self.players[slot].techs,
@@ -1157,6 +1162,9 @@ impl Sim {
         };
         if self.age_of(owner) >= Age::Feudal {
             mask |= TechId::FeudalAge.bit();
+        }
+        if self.age_of(owner) >= Age::Castle {
+            mask |= TechId::CastleAge.bit();
         }
         mask
     }
@@ -1186,6 +1194,25 @@ impl Sim {
             s.speed = I16F16::from_bits(6_772); // 1.55 tiles/s (absolute tile scale)
             s.los = I16F16::from_bits(1_572_864); // 24 (6 tiles)
         }
+        // BLD-11 for the Town Center entity: its armor follows
+        // the owner's Age column (study §5: melee 3/4/5, pierce
+        // 5/6/7 in Dark/Feudal/Castle; HP is 2400 at every Age).
+        // The placed-building half of the same step lives in
+        // `BuildingKind::armor_*_at`; the Town Center is an
+        // entity, so its step is patched here like CLS-04's.
+        if kind == EntityKind::TownCenter {
+            match p.age {
+                Age::Feudal => {
+                    s.armor_melee = 4;
+                    s.armor_pierce = 6;
+                }
+                Age::Castle => {
+                    s.armor_melee = 5;
+                    s.armor_pierce = 7;
+                }
+                Age::Dark => {}
+            }
+        }
         // TEC-04 (Loom): villagers +15 HP, +1 melee / +2 pierce
         // armor, +0.1 tiles/s (RULEBOOK TEC-06/CLS-05 — see the
         // tech module docs for the study discrepancy note).
@@ -1200,6 +1227,14 @@ impl Sim {
         // row (base + the flat adds above), in exact integer bits:
         // speed × 11/10, truncating the sub-bit remainder.
         if kind == EntityKind::Villager && p.techs & TechId::Wheelbarrow.bit() != 0 {
+            s.speed = I16F16::from_bits(((s.speed.to_bits() as i64 * 11) / 10) as i32);
+        }
+        // Hand Cart (ECO-03's second link): villagers +10% speed
+        // again (wiki, Hand Cart) — the same percentage patch
+        // applied a second time over the Wheelbarrow layer, the
+        // sequential multiplication of the reference game's tech
+        // effects (×1.1 ×1.1 over the flat-layered row).
+        if kind == EntityKind::Villager && p.techs & TechId::HandCart.bit() != 0 {
             s.speed = I16F16::from_bits(((s.speed.to_bits() as i64 * 11) / 10) as i32);
         }
         // Fletching (study §8): archers +1 attack, +1 tile of range.
@@ -1300,6 +1335,16 @@ impl Sim {
         self.buildings
             .iter()
             .filter(|b| b.owner == owner && b.complete && b.kind.counts_toward_feudal())
+            .count() as u32
+    }
+
+    /// Completed buildings counting toward the Castle Age research
+    /// requirement (TEC-01 Castle rung): the Feudal-born kinds
+    /// (see `BuildingKind::counts_toward_castle`).
+    pub fn castle_building_count(&self, owner: u8) -> u32 {
+        self.buildings
+            .iter()
+            .filter(|b| b.owner == owner && b.complete && b.kind.counts_toward_castle())
             .count() as u32
     }
 
@@ -1622,10 +1667,18 @@ impl Sim {
         self.population_cap_of(entity::OWNER_PLAYER)
     }
 
-    /// Population capacity of one player (M5): the Town Center's
-    /// base room plus that player's completed Houses.
+    /// Population capacity of one player (M5): +5 per *living*
+    /// Town Center of the player (the starting one, plus every
+    /// additional TC built from the Castle Age — BLD-15's
+    /// extension; a razed TC's room is lost with it, the House
+    /// rule) plus that player's completed Houses.
     pub fn population_cap_of(&self, owner: u8) -> u32 {
-        let mut cap = TOWN_CENTER_POP_SUPPORT;
+        let mut cap = 0;
+        for e in &self.entities {
+            if e.kind == EntityKind::TownCenter && e.owner == owner && !e.dead {
+                cap += TOWN_CENTER_POP_SUPPORT;
+            }
+        }
         for b in &self.buildings {
             if b.owner == owner && b.complete {
                 cap += b.kind.pop_support();
@@ -1883,6 +1936,17 @@ impl Sim {
         if tech == TechId::FeudalAge && self.feudal_building_count(owner) < 2 {
             return ResearchBlock::Locked;
         }
+        if tech == TechId::CastleAge && self.castle_building_count(owner) < 2 {
+            return ResearchBlock::Locked;
+        }
+        // TEC-07: a tech→tech prerequisite unmet locks the
+        // research (Hand Cart behind Wheelbarrow — the first
+        // link of this kind).
+        if let Some(req) = tech.requires_tech() {
+            if !self.has_tech(owner, req) {
+                return ResearchBlock::Locked;
+            }
+        }
         if queue.len() as u32 >= TRAIN_QUEUE_CAP {
             return ResearchBlock::QueueFull;
         }
@@ -2009,6 +2073,9 @@ impl Sim {
         match tech {
             TechId::FeudalAge => {
                 self.players[slot].age = Age::Feudal;
+            }
+            TechId::CastleAge => {
+                self.players[slot].age = Age::Castle;
             }
             TechId::Loom => {
                 self.players[slot].techs |= tech.bit();
@@ -2190,12 +2257,15 @@ impl Sim {
             Some(i) => i,
             None => return,
         };
-        let (complete, owner, wood) = {
+        let (complete, owner, wood, stone) = {
             let b = &self.buildings[bi];
-            (b.complete, b.owner, b.kind.wood_cost())
+            (b.complete, b.owner, b.kind.wood_cost(), b.kind.stone_cost())
         };
         if !complete {
             self.stockpile_mut(owner).add(ResourceKind::Wood, wood);
+            if stone > I16F16::ZERO {
+                self.stockpile_mut(owner).add(ResourceKind::Stone, stone);
+            }
         }
         self.destroy_building(building);
     }
@@ -3765,7 +3835,8 @@ impl Sim {
     }
 
     /// Place one validated foundation for builder `idx`: charge
-    /// the builder's owner the kind's wood cost, register the
+    /// the builder's owner the kind's wood cost (and its stone
+    /// cost, for the one two-resource kind), register the
     /// building (blocking its footprint cells when the kind is
     /// solid), and return its id. The caller assigns the builder.
     /// Shared by `apply_build` (single placement) and
@@ -3780,11 +3851,25 @@ impl Sim {
         cell_y: u32,
     ) -> Option<u32> {
         let builder_owner = self.entities[idx].owner;
+        // The Town Center is the one kind with a second cost
+        // (100 stone, Castle Age P1): the stone is re-checked
+        // BEFORE either spend lands, so a failure can never
+        // take the wood and refuse the building (the P1 inline
+        // placement's guarantee, carried into the shared path).
+        if self.stockpile_of(builder_owner).amount(ResourceKind::Stone) < kind.stone_cost() {
+            return None;
+        }
         if !self
             .stockpile_mut(builder_owner)
             .spend(ResourceKind::Wood, kind.wood_cost())
         {
             return None;
+        }
+        if kind.stone_cost() > I16F16::ZERO {
+            let paid = self
+                .stockpile_mut(builder_owner)
+                .spend(ResourceKind::Stone, kind.stone_cost());
+            debug_assert!(paid, "stone spend re-checked above");
         }
         let id = self.next_building_id;
         self.next_building_id += 1;
@@ -4331,7 +4416,11 @@ impl Sim {
         }
         // The wood must be payable at placement — by the *builder's*
         // owner (M5: each player builds from their own stockpile).
+        // The Town Center's stone likewise (its two-resource cost).
         if self.stockpile_of(builder_owner).amount(ResourceKind::Wood) < kind.wood_cost() {
+            return BuildVerdict::Reject;
+        }
+        if self.stockpile_of(builder_owner).amount(ResourceKind::Stone) < kind.stone_cost() {
             return BuildVerdict::Reject;
         }
         // Reachable-ish: at least one ring cell stands open and the
@@ -4741,7 +4830,10 @@ impl Sim {
                 // nothing and the full check below sends it home to
                 // deposit first.
                 let wheelbarrow = owner_techs & TechId::Wheelbarrow.bit() != 0;
-                let cap = self.nodes[ni].kind.carry_cap_for(wheelbarrow);
+                let hand_cart = owner_techs & TechId::HandCart.bit() != 0;
+                let cap = self.nodes[ni]
+                    .kind
+                    .carry_cap_tiered(wheelbarrow, hand_cart);
                 let room = cap - self.entities[idx].carry;
                 let take = rate.min(room).min(self.nodes[ni].amount_left);
                 if take > I16F16::ZERO {
@@ -5164,9 +5256,56 @@ impl Sim {
         }
     }
 
+    /// A Town Center foundation completes (Castle P1, BLD-15's
+    /// extension): the construction record converts into a Town
+    /// Center *entity* — the TC's one true form in this
+    /// architecture (BLD-16) — with its own production state. The
+    /// footprint's blocked cells free up (a standing TC never
+    /// blocks its ground), the builders stand down, and damage
+    /// taken while building persists onto the entity (BLD-05's
+    /// standing HP; an undamaged foundation completes at the
+    /// line's top, the full 2400). The entity stands on the
+    /// center of the footprint's (1,1) cell — the starting Town
+    /// Center's convention, under which the BLD-16 reserve of the
+    /// entity is exactly the placed 4×4 footprint.
+    fn convert_to_town_center(&mut self, bid: u32) {
+        let bi = match self.building_index(bid) {
+            Some(bi) => bi,
+            None => return,
+        };
+        let b = self.buildings.remove(bi);
+        if b.kind.blocks_footprint() {
+            for (cx, cy) in b.footprint_cells() {
+                self.grid.set_dynamic(cx, cy, false);
+            }
+        }
+        for idx in 0..self.entities.len() {
+            if self.entities[idx].task == Task::Building
+                && self.entities[idx].task_building == Some(bid)
+            {
+                self.stop_task(idx);
+            }
+        }
+        let (px, py) = self.grid.cell_center(b.cell_x + 1, b.cell_y + 1);
+        let id = self.entities.len() as u32;
+        let mut e = Entity::spawned(id, EntityKind::TownCenter, b.owner, px, py);
+        let max_hp = I16F16::from_num(self.stats_for(b.owner, EntityKind::TownCenter).max_hp);
+        e.hp = b.hp.min(max_hp);
+        self.entities.push(e);
+        self.tc_states.push(TcState {
+            tc_id: id,
+            queue: Vec::new(),
+            progress: 0,
+            rally: None,
+            rally_node: None,
+        });
+    }
+
     /// Mark a building complete and apply its function: a Farm becomes
     /// a food node (and its active builders start working it); a House
-    /// simply starts counting toward the population cap.
+    /// simply starts counting toward the population cap. A Town
+    /// Center foundation converts into the TC entity instead (see
+    /// `convert_to_town_center`).
     fn complete_building(&mut self, bid: u32) {
         let bi = match self.building_index(bid) {
             Some(bi) => bi,
@@ -5176,6 +5315,10 @@ impl Sim {
             return;
         }
         self.buildings[bi].complete = true;
+        if self.buildings[bi].kind == BuildingKind::TownCenter {
+            self.convert_to_town_center(bid);
+            return;
+        }
         // Entombment cure (M6): a unit that wandered (or was
         // pushed) onto the footprint while the building rose is
         // displaced to the nearest open cell when it completes —
