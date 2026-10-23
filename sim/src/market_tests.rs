@@ -35,12 +35,18 @@ fn market_at(sim: &Sim, id: u32, owner: u8, cell: (u32, u32), complete: bool) ->
         progress_thirds: if complete { kind.build_thirds() } else { 0 },
         repair_hp_remainder: 0,
         repair_cost_remainder: 0,
+        repair_stone_remainder: 0,
         complete,
         node_id: None,
         queue: Vec::new(),
         train_progress: 0,
         rally: None,
         rally_node: None,
+        weapon_target: None,
+        weapon_target_building: None,
+        weapon_strike_tick: None,
+        weapon_next_tick: 0,
+        weapon_engaged: false,
     }
 }
 
@@ -57,7 +63,7 @@ fn market_building_table_is_the_wiki_row() {
     // AoE wiki, Market infobox (fetched 2026-10-22): Feudal Age,
     // requires a Mill, 175 wood, 4×4, 60 s build, 1800 HP and
     // 1/8 armor in the Feudal column.
-    assert_eq!(k.tag(), 10);
+    assert_eq!(k.tag(), 12);
     assert_eq!(k.wood_cost(), I16F16::from_num(175));
     assert_eq!(k.build_ticks(), 3600);
     assert_eq!(k.footprint_size(), 4);
