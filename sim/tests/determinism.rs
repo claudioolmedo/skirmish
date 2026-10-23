@@ -276,11 +276,41 @@ fn golden_hash_regression() {
     // enters this scenario. 042e33a17a6192ae -> 3c2febd6b29076a4.
     // New value verified stable across independent runs
     // (run-to-run determinism test in this file).
+    // Predator wolves (2026-10-22, deliberate update, AI-08):
+    // 042e33a17a6192ae -> 3e6361a3d06dbb8f. Step attribution: the
+    // ONLY change entering this scenario is the map generator's
+    // new wolf pack (3 wolves per start at 26–34 tiles; the
+    // sandbox spawns the human's pack — 3 new Gaia entities in
+    // the hashed entity stream). No commands are issued, the pack
+    // stands 24+ tiles from the nearest unit (far outside every
+    // LoS in the scenario, the wolf's own 12 included), so no
+    // wolf moves, hunts, or fights in 360 ticks — the stream
+    // moves on the placement alone. New value verified stable
+    // across independent runs (run-to-run determinism test in
+    // this file).
+    //
+    // Landing on main (2026-10-22, evening): the wolf arrived
+    // renumbered — kind tag 9 -> 11 (9/10 were taken on main by
+    // the Spearman/Skirmisher) and PREDATOR class 13 -> 17
+    // (13-16 taken) — and the two deliberate steps compose:
+    // 042e33a17a6192ae -> 3c2febd6b29076a4 (orders, above) ->
+    // 607d975bdd71e8eb (wolves). Probe attribution on the merged
+    // tree, each factor isolated: wolf generation removed ->
+    // exactly 3c2febd6b29076a4 (main's value); the two spawn
+    // stance assignments disabled -> exactly bb55a57ce00f1005,
+    // identical to the pristine wolf branch with only the tag
+    // renumbered; both reverted -> exactly 042e33a17a6192ae.
+    // The wolf step is placement plus its generator-stream
+    // wake: skipping only the wolf SPAWNS (generation intact)
+    // lands at 55a3cc8d30f1ef77, not main's value — the pack's
+    // generation draws regenerate the second start's package
+    // downstream (the MAP-09 mechanism), so the step is the
+    // mapgen change entire, with no other package inside it.
     let mut sim = Sim::new(42);
     let mut hash = 0;
     for _ in 0..360 {
         hash = sim.tick();
     }
     assert_eq!(sim.tick_count(), 360);
-    assert_eq!(format!("{:016x}", hash), "3c2febd6b29076a4");
+    assert_eq!(format!("{:016x}", hash), "607d975bdd71e8eb");
 }

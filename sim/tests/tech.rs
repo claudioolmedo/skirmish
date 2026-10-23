@@ -90,10 +90,36 @@ fn woodline_tree(sim: &Sim) -> u32 {
             })
         })
     };
-    trees
+    // AI-08 (2026-10-22): wolves hunt lumberjacks — DE behaviour,
+    // and on seed 101 the densest woodline stands inside a wolf
+    // pack's range, so the pack kills the choppers before any
+    // long gather finishes. A DE player picks the forest the
+    // wolves are not watching; do the same: among workable
+    // woodlines prefer one outside every wolf's sight (48 wu)
+    // plus a margin, falling back to the plain pick if none is.
+    let wolf_posts: Vec<(f64, f64)> = sim
+        .entities()
+        .iter()
+        .filter(|e| e.kind == EntityKind::Wolf)
+        .map(|e| (e.pos_x.to_num::<f64>(), e.pos_y.to_num::<f64>()))
+        .collect();
+    let wolf_safe = |t: &skirmish_sim::ResourceNode| {
+        wolf_posts.iter().all(|(wx, wy)| {
+            let dx = t.pos_x.to_num::<f64>() - wx;
+            let dy = t.pos_y.to_num::<f64>() - wy;
+            dx * dx + dy * dy >= 60.0 * 60.0
+        })
+    };
+    let candidates: Vec<_> = trees
         .iter()
         .filter(|t| workable(t) && neighbors(t) >= 3)
+        .copied()
+        .collect();
+    candidates
+        .iter()
+        .filter(|t| wolf_safe(t))
         .max_by_key(|t| neighbors(t))
+        .or_else(|| candidates.iter().max_by_key(|t| neighbors(t)))
         .expect("no workable woodline tree")
         .id
 }
@@ -357,7 +383,13 @@ fn deposits_route_to_the_nearest_valid_camp() {
     let mut sim = Sim::new(73);
     // A Mill beside the berry patch — strictly nearer to the
     // gatherer than the Town Center.
-    raise(&mut sim, 2, BuildingKind::Mill, 22, 27);
+    // (AI-08 landing, 2026-10-22: the historical anchor (22, 27)
+    // stands at the wolf pack's doorstep on this seed — the pack
+    // posts at (17–20, 21–22), six cells away — and the builder
+    // died on the walk, so the Mill never completed. The plot
+    // now sits beside the berry patch it serves (24–26, 56–58),
+    // as the scenario always described.)
+    raise(&mut sim, 2, BuildingKind::Mill, 23, 54);
     let berry = first_node(&sim, NodeKind::BerryBush);
     let start_food = sim.stockpile().amount(ResourceKind::Food);
     sim.push_command(Command::Gather {

@@ -2576,9 +2576,34 @@ They are never auto-targeted by passing military under CMB-08 until they
 engage (they are Gaia, not enemies, until combat starts — and military
 defends itself when attacked).
 *Source:* wiki, Hunt (predator class); MECHANICS-STUDY §1.3 (Predator
-Animals class). · *Impl:* same animal state machine as AI-07 with a
-"attack intruder" branch; the aggression radius is a data constant
-(UNVERIFIED numerically). · *Status:* **MISSING**.
+Animals class); wiki, Wolf (Grey Wolf) and Predator (both fetched
+2026-10-22): 25 HP, 3 melee attack, armour 0/0, **no food** (a kill
+leaves no carcass); line of sight 12 on Standard difficulty and above
+(4 on Easiest, 6 on Easy); "attacks Villagers and sometimes other
+units on sight", except Scout Cavalry, Monks, Trade Carts and siege
+weapons; "automatically attempts to attack the nearest unit";
+predators are "often found in groups". · *Impl:* shipped 2026-10-22 —
+`EntityKind::Wolf` (Gaia), `wolf_ai` in `sim/src/combat.rs`: holds its
+post, acquires the nearest eligible prey inside its line of sight
+(12 tiles; player-owned mobile units except Scout Cavalry and
+herdables), chases and attacks with the table stats, and gives up
+when the prey runs 18 tiles from the wolf or 24 tiles from the post,
+then walks home and holds (no healing at the post — unlike the boar).
+Being attacked overrides the on-sight exemptions: any non-Gaia
+attacker becomes the target (retaliation, as the boar). Wolves are
+deliberately NOT in the CMB-08 acquisition list — passing military
+ignores them until combat starts, per this rule. Mapgen: one pack of
+3 per start in the 26–34 tile band (adopted constant — the wiki
+publishes no per-player wolf count for Arabia; DE wolves are neutral
+dressing, so the count is mirrored per start for generator symmetry,
+and never within 24 tiles of a starting Town Center). UNVERIFIED
+(adopted, marked in code): speed 1.0 tiles/s (the boar's documented
+chase speed — faster than a villager, slower than a Scout), reload
+2.0 s and attack delay 0.5 s (the house melee rows); the give-up
+distances are adopted constants — the wiki documents luring
+qualitatively only. Behaviour suite: `sim/tests/wolf.rs` (placement,
+post-holding, hunt/kill with no carcass, scout exemption, villager
+kill, leash/return, determinism). · *Status:* **MATCHES**.
 
 **AI-09 — Gaia structures capture by presence (King of the Hill).** The
 KotH Monument is a Gaia building that belongs to the team with the most
@@ -3243,7 +3268,7 @@ report: segments scattered across rows instead of following
 one line; the studied rule and sources are recorded in the
 entry, DE's exact rasterization marked UNVERIFIED). No
 status change: BLD-13 stays DIFFERS on the missing gates,
-and the totals stand; updated 2026-10-22 for Castle Age P1 (the age-up and boom slice): ECO-03 moves DIFFERS → MATCHES (Hand Cart ships at the pinned carry 20 / hunt 66, with its Wheelbarrow prerequisite and second speed layer), so §6 trades one DIFFERS for one MATCHES; TEC-01 and TEC-07 narrow with no status change (the Castle rung lands — only Imperial still waits; the first tech-to-tech prerequisite link lands — the INF-06 tree UI is still the gap), and TEC-02, BLD-11 and BLD-15 extend to the Castle step with no status change (the two-Feudal-born-buildings predicate, the Castle HP/armor columns, buildable Town Centers), recounted mechanically below; updated 2026-10-22 for the Farm footprint — the Farm is 3×3 (Claudio's decision, adopting the DE-documented footprint over his earlier 2×2 specification), closing ECO-14’s footprint clause and BLD-06’s Farm divergence, with no status moves (ECO-14 stays DIFFERS on the work-rate cap and reseed queue, BLD-06 stays DIFFERS on the Town Center divergence), recounted mechanically below).
+and the totals stand; updated 2026-10-22 for Castle Age P1 (the age-up and boom slice): ECO-03 moves DIFFERS → MATCHES (Hand Cart ships at the pinned carry 20 / hunt 66, with its Wheelbarrow prerequisite and second speed layer), so §6 trades one DIFFERS for one MATCHES; TEC-01 and TEC-07 narrow with no status change (the Castle rung lands — only Imperial still waits; the first tech-to-tech prerequisite link lands — the INF-06 tree UI is still the gap), and TEC-02, BLD-11 and BLD-15 extend to the Castle step with no status change (the two-Feudal-born-buildings predicate, the Castle HP/armor columns, buildable Town Centers), recounted mechanically below; updated 2026-10-22 for the Farm footprint — the Farm is 3×3 (Claudio's decision, adopting the DE-documented footprint over his earlier 2×2 specification), closing ECO-14's footprint clause and BLD-06's Farm divergence, with no status moves (ECO-14 stays DIFFERS on the work-rate cap and reseed queue, BLD-06 stays DIFFERS on the Town Center divergence); updated 2026-10-22 for AI-08, the predator wolf — AI-08 moves MISSING → MATCHES, so §15 trades one MISSING for one MATCHES with the rule count unchanged, recounted mechanically below. The same recount corrects one pre-existing table drift the per-entry tags expose: BLD-07's 2026-10-19 move MISSING → DIFFERS never reached the §7 row — §7 counts 12 MATCHES / 4 DIFFERS / 1 MISSING.
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
@@ -3253,7 +3278,7 @@ and the totals stand; updated 2026-10-22 for Castle Age P1 (the age-up and boom 
 | 4 | Selection & orders (SEL) | 17 | 15 | 2 | 0 |
 | 5 | Movement, pathfinding & collision (MOV) | 12 | 4 | 3 | 5 |
 | 6 | Economy & drop-off (ECO) | 17 | 14 | 1 | 2 |
-| 7 | Buildings & placement (BLD) | 17 | 12 | 3 | 2 |
+| 7 | Buildings & placement (BLD) | 17 | 12 | 4 | 1 |
 | 8 | Combat & damage (CMB) | 16 | 14 | 1 | 1 |
 | 9 | Projectiles & ballistics (PRJ) | 10 | 5 | 3 | 2 |
 | 10 | Unit classes & counters (CLS) | 8 | 5 | 0 | 3 |
@@ -3261,11 +3286,11 @@ and the totals stand; updated 2026-10-22 for Castle Age P1 (the age-up and boom 
 | 12 | Monks, conversion & relics (MNK) | 13 | 0 | 0 | 13 |
 | 13 | Trade, market & tribute (TRD) | 8 | 0 | 0 | 8 |
 | 14 | Garrison, transport & repair (GAR) | 10 | 0 | 0 | 10 |
-| 15 | AI behavior & difficulty (AI) | 9 | 6 | 1 | 2 |
+| 15 | AI behavior & difficulty (AI) | 9 | 7 | 1 | 1 |
 | 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |
 | 17 | Multiplayer determinism (NET) | 11 | 4 | 5 | 2 |
 | 18 | Information rules (INF) | 13 | 8 | 3 | 2 |
-| | **Total** | **218** | **120** | **31** | **67** |
+| | **Total** | **218** | **121** | **32** | **65** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer

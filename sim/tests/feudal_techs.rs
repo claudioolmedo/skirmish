@@ -96,10 +96,33 @@ fn woodline_tree(sim: &Sim) -> u32 {
             })
         })
     };
+    // AI-08 (2026-10-22, landing): wolves hunt lumberjacks. Same
+    // adaptation as auto_explore.rs / tech.rs: among workable
+    // woodlines prefer one outside every wolf's sight (48 wu)
+    // plus a margin, falling back to the plain pick if none is.
+    let wolf_posts: Vec<(f64, f64)> = sim
+        .entities()
+        .iter()
+        .filter(|e| e.kind == EntityKind::Wolf)
+        .map(|e| (e.pos_x.to_num::<f64>(), e.pos_y.to_num::<f64>()))
+        .collect();
+    let wolf_safe = |t: &skirmish_sim::ResourceNode| {
+        wolf_posts.iter().all(|(wx, wy)| {
+            let dx = t.pos_x.to_num::<f64>() - wx;
+            let dy = t.pos_y.to_num::<f64>() - wy;
+            dx * dx + dy * dy >= 60.0 * 60.0
+        })
+    };
     trees
         .iter()
-        .filter(|t| workable(t) && neighbors(t) >= 3)
+        .filter(|t| workable(t) && neighbors(t) >= 3 && wolf_safe(t))
         .max_by_key(|t| neighbors(t))
+        .or_else(|| {
+            trees
+                .iter()
+                .filter(|t| workable(t) && neighbors(t) >= 3)
+                .max_by_key(|t| neighbors(t))
+        })
         .expect("no workable woodline tree")
         .id
 }
@@ -314,12 +337,18 @@ fn bloodlines_raises_max_and_current_hp_of_mounted_units() {
     let mut sim = Sim::new(101);
     reach_feudal(&mut sim);
     // The Stable requires a completed Barracks first (the
-    // Feudal military chain): wood for both (175 + 175),
-    // villager 3 chops. Anchors mirror the proven seed-101
-    // sequence in tests/tech.rs.
+    // Feudal military chain): wood for both (175 + 175).
+    // Villager 1 chops: villager 3 ends reach_feudal down at the
+    // Lumber Camp (16, 20), and since AI-08 the walk from there
+    // to the woodline crosses the wolf pack's ground — the pack
+    // killed it on that commute (the wood never stocked).
+    // Villager 3 stays south and builds both buildings (their
+    // anchors mirror the proven seed-101 sequence in
+    // tests/tech.rs); villager 2 keeps gathering food toward
+    // Bloodlines' 150 F.
     let tree = woodline_tree(&sim);
     sim.push_command(Command::Gather {
-        entity: 3,
+        entity: 1,
         node: tree,
     });
     wait_wood(&mut sim, 350);
@@ -414,10 +443,16 @@ fn horse_collar_stamps_new_farms_and_tops_up_standing_ones() {
     let mut sim = Sim::new(111);
     reach_feudal(&mut sim);
     let mill = building_id(&sim, BuildingKind::Mill);
-    // Wood for a farm (60) and Horse Collar (75): villager 3 chops.
+    // Wood for a farm (60) and Horse Collar (75): villager 1
+    // chops — villager 3 ends reach_feudal down at the Lumber
+    // Camp (16, 20), and since AI-08 its walk to the woodline
+    // crosses the wolf pack's ground on seed 111 too (the pack
+    // sits on the camp-to-forest line; the wood never stocked).
+    // Villager 3 stays south, where Farm B's anchor (23, 27)
+    // needs it later.
     let tree = woodline_tree(&sim);
     sim.push_command(Command::Gather {
-        entity: 3,
+        entity: 1,
         node: tree,
     });
     wait_wood(&mut sim, 135);

@@ -111,6 +111,7 @@ pub fn spec(kind: EntityKind) -> &'static UnitSpec {
         EntityKind::ManAtArms => &MAN_AT_ARMS,
         EntityKind::Spearman => &SPEARMAN,
         EntityKind::Skirmisher => &SKIRMISHER,
+        EntityKind::Wolf => &WOLF,
     }
 }
 
@@ -505,6 +506,42 @@ static BOAR: UnitSpec = UnitSpec {
 /// the module header for the conversion).
 pub const BOAR_CHASE_SPEED: I16F16 = I16F16::from_bits(4_369);
 
+/// Wolf (AI-08; Age of Empires wiki, "Wolf" — fetched 2026-10-22):
+/// HP 25, attack 3 melee, armor 0/0, and it "holds no food" — a
+/// kill leaves no carcass (`carcass_food` 0). Line of Sight 12 on
+/// Standard difficulty and harder (the wiki's difficulty ladder:
+/// 4 on Easiest, 6 on Easy, 12 otherwise) — the wolf's LoS doubles
+/// as its aggression radius in `combat::wolf_ai`. UNVERIFIED
+/// fields, adopted as recorded tuning constants: speed 1.0 tiles/s
+/// (the boar's documented chase speed — faster than a villager's
+/// 0.8 so a chase is a real threat, slower than a Scout's 1.2; the
+/// wiki's two-animation note — walk vs run-when-attacking — is
+/// client presentation), reload 120 ticks and attack delay 30
+/// (the house melee rows: villager/militia/boar).
+static WOLF: UnitSpec = UnitSpec {
+    max_hp: 25,
+    attacks: &[(cls::MELEE, 3)],
+    armor_melee: 0,
+    armor_pierce: 0,
+    classes: cls::mask(&[cls::PREDATOR]),
+    range_max: I16F16::ZERO,
+    range_min: I16F16::ZERO,
+    reload_ticks: 120,       // UNVERIFIED (see above)
+    attack_delay_ticks: 30,  // UNVERIFIED (see above)
+    accuracy: 100,
+    projectile_speed: I16F16::ZERO,
+    scatter: I16F16::ZERO,
+    speed: I16F16::from_bits(4_369), // 1.0 tiles/s (absolute scale) — UNVERIFIED
+    los: I16F16::from_bits(3_145_728), // 48 (12 tiles — wiki, Wolf)
+    radius: I16F16::from_bits(65_536), // 1.0
+    carcass_food: 0,                  // "holds no food" — no carcass
+    carcass_decay_bits: 0,
+    food_cost: 0,
+    wood_cost: 0,
+    gold_cost: 0,
+    train_ticks: 0,
+};
+
 /// Deer (OPENING-SPEC §2.2): 140 food, passive, flees when attacked,
 /// decays at the herdable 0.25/s. HP UNVERIFIED — the spec only
 /// records "two villager shots kill one", which bounds HP at ≤ 6
@@ -610,6 +647,10 @@ mod tests {
         ] {
             assert_eq!(spec(k).range_min, I16F16::ZERO);
         }
+        // Wolf (AI-08; wiki, Wolf): HP 25, attack 3, no food.
+        let w = spec(EntityKind::Wolf);
+        assert_eq!((w.max_hp, w.carcass_food), (25, 0));
+        assert_eq!(w.attacks, &[(cls::MELEE, 3)]);
     }
 
     #[test]

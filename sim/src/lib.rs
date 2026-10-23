@@ -13,7 +13,7 @@
 //! population room each) and Farms (175-food nodes), training stalls at
 //! the population cap, and placement is validated in the sim. M3 scope:
 //! combat — HP and table-driven damage, attack orders, Gaia animals
-//! (sheep/boar/deer) and hunting with decaying carcasses, the starting
+//! (sheep/boar/deer/wolves) and hunting with decaying carcasses, the starting
 //! Scout Cavalry, the Barracks training Militia and Archers, and
 //! projectiles as the first consumer of the seeded RNG. M4 scope:
 //! input & command completion — per-entity queued orders (SEL-12),
@@ -744,8 +744,9 @@ impl Sim {
         entities.push(starting_scout);
         next_id += 1;
         // Gaia animals at their generated cells, in the package's
-        // fixed order (sheep, boars, deer) — the historical id
-        // layout: 5–12 sheep, 13–14 boars, 15–20 deer.
+        // fixed order (sheep, boars, deer, wolves) — the historical
+        // id layout: 5–12 sheep, 13–14 boars, 15–20 deer, 21–23
+        // wolves (AI-08 appended the pack, earlier ids unmoved).
         for &(kind, cx, cy) in &pkg.animals {
             let (pos_x, pos_y) = grid.cell_center(cx, cy);
             entities.push(Entity::spawned(
@@ -809,7 +810,7 @@ impl Sim {
     /// The opponent's start (M5, generated in M7): package 1 of the
     /// generated map — its own Town Center, 3 villagers and a Scout
     /// at the mirrored offsets, and its own full animal set (sheep,
-    /// boars, deer — all Gaia-owned, as placed). The package is the
+    /// boars, deer, wolves — all Gaia-owned, as placed). The package is the
     /// human's mirrored through the map center by the generator, so
     /// the start is exactly as strong as the human's.
     fn spawn_opponent_start(&mut self, pkg: &mapgen::StartPackage) {
