@@ -1441,11 +1441,10 @@ accuracy 100 (a moving target dodges by travel time, PRJ-06).
 building-weapon step (after every entity attacker, building-id
 order; RNG draws only there), `Projectile::attacker_building`
 + `Entity::last_hit_owner` for attribution (all hashed only
-while set, behind marker bytes; the building-side state leaves
-a tower-free stream byte-identical, while the entity
-attribution marker is written on any landed hit — the golden
-hash steps once for it, step-attributed in
-`sim/tests/determinism.rs`); per-kind sight in
+while set, behind marker bytes; the golden hash is unchanged
+— verified on the landing tree: the golden scenario lands no
+hits, so the attribution marker never enters its stream, and
+no tower stands in it); per-kind sight in
 `recompute_visibility`; client panel/art/i18n in the same
 landing; towers register as occluders through the shared
 building draw path (INF-12). · *Status:* **DIFFERS** — base

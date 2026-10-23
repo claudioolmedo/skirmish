@@ -271,7 +271,9 @@ fn golden_hash_regression() {
     // here — no tower stands in this scenario. The value below
     // does NOT move for BLD-18: the package's own correction
     // commit established the same on its pre-merge tree (its
-    // real value there was 042e33a17a6192ae, unchanged).
+    // real value there was 042e33a17a6192ae, unchanged — an
+    // earlier landing draft had re-pinned from a mislabeled
+    // tool result).
     // New value verified stable across independent runs
     // (run-to-run determinism test in this file).
     //
