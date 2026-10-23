@@ -8,7 +8,10 @@ mechanics as Age of Empires II: Definitive Edition?***
 ***Re-audited 2026-10-22** (Codex review follow-up, Priority 1): every
 status below was re-checked against the shipped code (`sim/src/*.rs`,
 `sim/tests/*.rs`, `web-preview/app.js`, `web-preview/play/`) at
-`origin/main` revision `0f303ca`. The 2026-10-16 audit predated M3–M14,
+`origin/main` revision `0f303ca`; the follow-up branch was rebased onto
+`474084e` (2026-10-23), which landed the animation pass and the Farm
+footprint change, and the affected rows were re-checked there. The
+2026-10-16 audit predated M3–M14,
 so most of its MISSING rows described systems that have since shipped;
 each corrected status names its implementation and its tests. The
 per-rule record lives in [`MECHANICS-RULEBOOK.md`](MECHANICS-RULEBOOK.md);
@@ -115,8 +118,10 @@ Had today (re-audited 2026-10-22): **Town Center** (trains villagers,
 researches Loom and the Feudal Age advance in the shared queue; +5 pop
 support; an entity rather than a placed building — BLD-16; does not
 shoot, no garrison), **House** (25 wood, 25 s, +5 pop), **Farm**
-(60 wood, 15 s, 175 food, gated on a Mill; 2×2 cells — the recorded
-ECO-14 divergence from the reference's 3×3 tiles), **Barracks**,
+(60 wood, 15 s, 175 food, gated on a Mill; 3×3 cells since the
+2026-10-23 landing adopted the reference footprint — ECO-14's
+footprint clause is closed; it stays DIFFERS on the work-rate cap
+and the reseed queue), **Barracks**,
 **Archery Range**, **Stable**, **Blacksmith**, **Lumber Camp**,
 **Mill**, **Mining Camp**, **Palisade Wall**. Everything below is
 MISSING unless noted.
