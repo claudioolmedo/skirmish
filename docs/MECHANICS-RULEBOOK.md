@@ -3464,8 +3464,10 @@ composition: every multiplier applies before the minimum-1
 clamp, per the wiki's Attack and Armor class articles), so
 §8 counts 14 / 1 / 1; the mechanical recount over the
 combined body (this landing rebased over BLD-18 and the
-Market) stands at 220 rules, 124 / 34 / 62, and the table
-below equals the body.
+Market) stands at 220 rules, 124 / 34 / 62; with the Castle
+Age P1 merge above (ECO-03 DIFFERS → MATCHES) the combined
+book stands at 220 rules, 125 / 33 / 62, and the table below
+equals the body.
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
