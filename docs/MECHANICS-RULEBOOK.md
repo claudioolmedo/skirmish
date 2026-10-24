@@ -1267,6 +1267,41 @@ walls on the military page's defensive row after the production
 buildings; no authoritative text source fixes DE's exact
 five-wide slot, so the position follows that documented grouping
 in our three-wide compression.
+*The wall-flow correction (BLD-20, 2026-10-23, Claudio's live
+report — "o de madeira é muito estranho, ele não segue a
+linha"):* the expansion was never the divergence — ghost and
+sim run the identical supercover, pinned on both sides. The
+founded line diverged from the dragged ghost in three places
+downstream. (1) **Units deleted segments:** `validate_build`
+rejected any cell a living unit stood on, so a line dragged
+beside the TC — through milling villagers and sheep — founded
+with silent holes, while DE placement never checks units at
+all. Wall kinds are now exempt from the unit check (the
+completion displacement above keeps entombment impossible),
+and a regression test founds a line through a standing
+villager. (2) **The ghost lied about the TC reserve:** the
+client mirror blocked only the TC's anchor cell where the sim
+reserves the whole 4×4 (BLD-16); the mirror now reserves the
+same 4×4, so red cells in the preview are exactly the cells
+the release skips. (3) **One builder only:** DE tasks every
+selected villager to the line; the client now issues the line
+to all selected villagers and `issue_build_line` distributes
+them — each builder's primary target is the first segment no
+other villager is building yet, the rest queued behind in drag
+order. Foundations also follow DE's blocking rule now (shared
+with BLD-20): an untouched wall foundation does NOT block its
+cell — it joins the blocking grid when construction first
+advances on it (why DE quickwalling needs segments "built up
+slightly"), and is guaranteed blocked at completion; other
+buildings keep reserving from placement (above). Wall LoS is
+the DE 2 for both wall kinds (the palisade previously stamped
+the generic building 4). The client also stopped drawing the
+world HP bar on incomplete buildings (a foundation's HP rides
+the construction line, so every rising segment wore a "damaged"
+bar stacked on its progress bar — the giant black bars of
+Claudio's screenshot) and the progress bar now follows the
+footprint, segment-scale on 1×1 kinds. Dossier + gap audit:
+`~/workspace/skirmish-study/walls-de/`.
 *Divergence:* DE gives palisade foundations 0 melee armor; the
 sim applies the standing armor (2/5) during construction for
 every kind (BLD-05 models only the foundation HP line), so
@@ -1494,6 +1529,45 @@ the Castle dossier's building-weapons rule.)
 `sim/src/build.rs`, placed/repaired/deleted through the generic
 building flows; its razed value scores via the generic
 `wood_cost()` path (VIC-04). · *Status:* **MATCHES**.
+
+**BLD-20 — The Stone Wall.** The Palisade Wall's Feudal sibling:
+a 1×1 wall segment placed by the same dragged lines (BLD-13's
+flow, corrections included), on the stone economy instead of
+wood. *The Stone Wall row (current DE, Age of Empires II wiki,
+"Stone Wall" + the "Wall" master table, retrieved 2026-10-23):*
+Feudal Age; **5 stone per segment**; **build 10 s**; **HP 1080
+Feudal / 1800 Castle / 1800 Imperial** (the Feudal 1080 came
+with update 66692); **armor 8 melee / 10 pierce**; foundation
+melee armor 0 in DE (update 42848); 1×1; LoS 2; cannot be
+converted by Monks. Segments are individually selectable,
+deletable (a foundation refunds its 5 stone, BLD-02) and
+repairable like every building; walls do not count toward
+age-up building requirements (BLD-13). Names: EN "Stone Wall",
+PT "Muralha de Pedra", ES "Muralla de Piedra".
+*Impl:* shipped 2026-10-23 — `BuildingKind::StoneWall`
+(tag 14, append-only) in `sim/src/build.rs`, `is_wall()`
+alongside the palisade: same `Command::BuildLine` expansion and
+per-segment validation/charging (stone stockpile truncates the
+line in drag order), same distribution of tasked villagers,
+same foundation blocking rule; villager military page, slot X,
+beside the Palisade (S) on the defensive row; original stone
+panel art + three construction stages, connectivity-mirrored
+like the palisade (BLD-13's presentation rule). Tests:
+`sim/tests/walls.rs` (age gating, per-segment stone charge,
+truncation, the DE value row).
+*Follow-on (out of scope, recorded):* the **Fortified Wall**
+upgrade — University, Castle Age, 200 food / 100 wood, 50 s
+research; converts every standing Stone Wall in place to
+HP 3000, armor 12/12, +8 building armor (wiki "Fortified Wall"
++ "Upgrade", retrieved 2026-10-23). It waits for a University
+building to host the research; the Fortified segment build
+time is **UNVERIFIED** (8 s in the AoK changelog vs the master
+table's 10 s). Palisade/stone foundation armor also stays the
+standing armor here (BLD-13's divergence, shared).
+*Source:* wiki pages above; dossier in
+`~/workspace/skirmish-study/walls-de/`. · *Status:*
+**DIFFERS** — the segment ships exactly to its DE row; the
+Fortified Wall upgrade and the foundation-armor rule differ.
 
 ## 8. Combat & damage
 
@@ -3492,8 +3566,14 @@ clamp, per the wiki's Attack and Armor class articles), so
 combined body (this landing rebased over BLD-18 and the
 Market) stands at 220 rules, 124 / 34 / 62; with the Castle
 Age P1 merge above (ECO-03 DIFFERS → MATCHES) the combined
-book stands at 220 rules, 125 / 33 / 62, and the table below
-equals the body.
+book stands at 220 rules, 125 / 33 / 62. Updated 2026-10-23
+for the walls pass (BLD-20): §7 gains BLD-20 (the Stone Wall,
+DIFFERS — the segment ships to its DE row; the Fortified Wall
+upgrade and the foundation-armor rule differ), so §7 stands
+at 20 rules, 13 / 6 / 1 and the book at 221 rules,
+125 / 34 / 62. BLD-13 gains its wall-flow correction with no
+status change (gates still missing). The table below equals
+the body.
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
@@ -3503,7 +3583,7 @@ equals the body.
 | 4 | Selection & orders (SEL) | 17 | 15 | 2 | 0 |
 | 5 | Movement, pathfinding & collision (MOV) | 12 | 4 | 3 | 5 |
 | 6 | Economy & drop-off (ECO) | 17 | 14 | 1 | 2 |
-| 7 | Buildings & placement (BLD) | 19 | 13 | 5 | 1 |
+| 7 | Buildings & placement (BLD) | 20 | 13 | 6 | 1 |
 | 8 | Combat & damage (CMB) | 16 | 14 | 1 | 1 |
 | 9 | Projectiles & ballistics (PRJ) | 10 | 5 | 3 | 2 |
 | 10 | Unit classes & counters (CLS) | 8 | 5 | 0 | 3 |
@@ -3515,7 +3595,7 @@ equals the body.
 | 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |
 | 17 | Multiplayer determinism (NET) | 11 | 4 | 5 | 2 |
 | 18 | Information rules (INF) | 13 | 8 | 3 | 2 |
-| | **Total** | **220** | **125** | **33** | **62** |
+| | **Total** | **221** | **125** | **34** | **62** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer

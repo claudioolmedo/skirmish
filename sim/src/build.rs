@@ -11,6 +11,9 @@
 //! table (§2.4), converted once, by hand, at authoring time:
 //!
 //! - House: 25 wood, 25 s build time (1500 ticks), +5 population room.
+//! - Stone Wall (BLD-20): 5 stone per segment, 10 s build time
+//!   (600 ticks), 1080/1800 HP by Age, 8/10 armor — the DE row in
+//!   `~/workspace/skirmish-study/walls-de/DE-WALLS-DOSSIER.md` §2.
 //! - Farm: 60 wood, 15 s build time (900 ticks), holds 175 food
 //!   (§6.3 — the base amount; 250 is post-Horse-Collar), 3×3
 //!   footprint (study §5; Claudio's decision 2026-10-22). M6 gates
@@ -94,6 +97,12 @@ pub const PALISADE_WALL_WOOD_COST: I16F16 = I16F16::from_bits(196_608); // 3
 /// wiki infobox — 5 s in The Age of Kings, 6 s from The
 /// Forgotten, 7 s since DE update 42848).
 pub const PALISADE_WALL_BUILD_TICKS: u64 = 420;
+/// Stone Wall construction cost: 5 stone per segment (BLD-20;
+/// AoE wiki, Stone Wall article — the current DE row).
+pub const STONE_WALL_STONE_COST: I16F16 = I16F16::from_bits(327_680); // 5
+/// Stone Wall build time: 10 s per segment at 60 Hz (BLD-20;
+/// AoE wiki, Wall article's Building table).
+pub const STONE_WALL_BUILD_TICKS: u64 = 600;
 /// Blacksmith build time: 40 s at 60 Hz. UNVERIFIED — not in the
 /// project docs (see the module docs).
 pub const BLACKSMITH_BUILD_TICKS: u64 = 2400;
@@ -208,6 +217,15 @@ pub enum BuildingKind {
     /// its ground). Castle Age only; 275 wood + 100 stone, 150 s,
     /// 4×4 (study §5; BLD-15's Castle extension).
     TownCenter,
+    /// BLD-20: one Stone Wall segment — a 1×1 solid stone fence,
+    /// Feudal Age, placed in dragged lines like the Palisade Wall
+    /// (see `wall_line_cells` and `Command::BuildLine`). The DE
+    /// row (walls dossier, 2026-10-23): 5 stone per segment,
+    /// 10 s build, 1080 HP in Feudal / 1800 from Castle, 8/10
+    /// armor. The Fortified Wall upgrade (University, Castle
+    /// Age) is a recorded follow-up — there is no University to
+    /// host the research yet (dossier §6).
+    StoneWall,
 }
 
 impl BuildingKind {
@@ -216,8 +234,8 @@ impl BuildingKind {
     /// 5 = mining camp, 6 = archery range, 7 = stable, 8 = blacksmith,
     /// 9 = palisade wall, 10 = watch tower, 11 = outpost,
     /// 12 = market, 13 = town center (construction record only —
-    /// see the variant). Tags are an ABI contract — append only,
-    /// never renumber.
+    /// see the variant), 14 = stone wall (BLD-20). Tags are an ABI
+    /// contract — append only, never renumber.
     pub fn tag(self) -> u8 {
         match self {
             BuildingKind::House => 0,
@@ -234,6 +252,7 @@ impl BuildingKind {
             BuildingKind::Outpost => 11,
             BuildingKind::Market => 12,
             BuildingKind::TownCenter => 13,
+            BuildingKind::StoneWall => 14,
         }
     }
 
@@ -254,15 +273,17 @@ impl BuildingKind {
             11 => Some(BuildingKind::Outpost),
             12 => Some(BuildingKind::Market),
             13 => Some(BuildingKind::TownCenter),
+            14 => Some(BuildingKind::StoneWall),
             _ => None,
         }
     }
 
-    /// Whether this kind is a wall segment (BLD-13): 1×1, solid to
-    /// everyone, placed by dragged lines. Today only the Palisade
-    /// Wall; the Stone Wall joins this predicate when it ships.
+    /// Whether this kind is a wall segment (BLD-13, BLD-20): 1×1,
+    /// solid to everyone, placed by dragged lines. The Palisade
+    /// Wall (Dark Age, wood) and the Stone Wall (Feudal Age,
+    /// stone).
     pub fn is_wall(self) -> bool {
-        matches!(self, BuildingKind::PalisadeWall)
+        matches!(self, BuildingKind::PalisadeWall | BuildingKind::StoneWall)
     }
 
     /// Wood paid at placement time.
@@ -282,6 +303,8 @@ impl BuildingKind {
             BuildingKind::Outpost => OUTPOST_WOOD_COST,
             BuildingKind::Market => MARKET_WOOD_COST,
             BuildingKind::TownCenter => TOWN_CENTER_WOOD_COST,
+            // BLD-20: the Stone Wall's price is all stone.
+            BuildingKind::StoneWall => I16F16::ZERO,
         }
     }
 
@@ -296,6 +319,8 @@ impl BuildingKind {
             BuildingKind::WatchTower => WATCH_TOWER_STONE_COST,
             BuildingKind::Outpost => OUTPOST_STONE_COST,
             BuildingKind::TownCenter => TOWN_CENTER_STONE_COST,
+            // BLD-20: 5 stone per segment (dossier §2).
+            BuildingKind::StoneWall => STONE_WALL_STONE_COST,
             _ => I16F16::ZERO,
         }
     }
@@ -323,6 +348,7 @@ impl BuildingKind {
             BuildingKind::Outpost => OUTPOST_BUILD_TICKS,
             BuildingKind::Market => MARKET_BUILD_TICKS,
             BuildingKind::TownCenter => TOWN_CENTER_BUILD_TICKS,
+            BuildingKind::StoneWall => STONE_WALL_BUILD_TICKS,
         }
     }
 
@@ -364,7 +390,10 @@ impl BuildingKind {
     /// and 4 for the Town Center (study §5).
     pub fn footprint_size(self) -> u32 {
         match self {
-            BuildingKind::PalisadeWall | BuildingKind::WatchTower | BuildingKind::Outpost => 1,
+            BuildingKind::PalisadeWall
+            | BuildingKind::StoneWall
+            | BuildingKind::WatchTower
+            | BuildingKind::Outpost => 1,
             BuildingKind::House
             | BuildingKind::LumberCamp
             | BuildingKind::Mill
@@ -433,7 +462,8 @@ impl BuildingKind {
             | BuildingKind::Stable
             | BuildingKind::Blacksmith
             | BuildingKind::WatchTower
-            | BuildingKind::Market => Age::Feudal,
+            | BuildingKind::Market
+            | BuildingKind::StoneWall => Age::Feudal,
             BuildingKind::TownCenter => Age::Castle,
             _ => Age::Dark,
         }
@@ -458,6 +488,11 @@ impl BuildingKind {
     ///   documented 8.
     pub fn sight_tiles_at(self, age: Age) -> u32 {
         match self {
+            // BLD-20: walls see 2 tiles in DE (the wiki Wall
+            // article's Building table, both wall rows) — the
+            // palisade shipped with the generic building sight 4;
+            // this arm gives both wall kinds their DE row.
+            BuildingKind::PalisadeWall | BuildingKind::StoneWall => 2,
             BuildingKind::WatchTower => 10,
             BuildingKind::Outpost => match age {
                 Age::Dark => 6,
@@ -595,6 +630,12 @@ impl BuildingKind {
             // (150/250/250/250); the Feudal step lives in
             // `max_hp_at`.
             BuildingKind::PalisadeWall => 150,
+            // BLD-20: the Feudal column of the wiki Stone Wall
+            // row (1080/1800 — the Feudal step is DE update
+            // 66692); the Castle step lives in `max_hp_at`. The
+            // kind is Feudal-born, so this base row is the
+            // Feudal one.
+            BuildingKind::StoneWall => 1080,
             // BLD-18: the Watch Tower's Feudal row — 850 HP before
             // the Castle Age (update 61321 raised the pre-Castle
             // value to 850; the Castle step to 1020 lands with the
@@ -636,6 +677,9 @@ impl BuildingKind {
             // rather than naming Feudal so the row stays right
             // when the Castle Age lands (250 there too).
             (BuildingKind::PalisadeWall, age) if age != Age::Dark => 250,
+            // BLD-20: the Stone Wall's Castle step (wiki row
+            // 1080 Feudal / 1800 Castle+).
+            (BuildingKind::StoneWall, Age::Castle) => 1800,
             (BuildingKind::Barracks, Age::Castle) => 1800,
             (BuildingKind::ArcheryRange, Age::Castle) => 1800,
             (BuildingKind::Stable, Age::Castle) => 1800,
@@ -667,6 +711,9 @@ impl BuildingKind {
             // BLD-13: palisade melee armor 2 (wiki infobox; flat
             // across ages).
             BuildingKind::PalisadeWall => 2,
+            // BLD-20: stone wall melee armor 8 (wiki Building
+            // table; flat across ages).
+            BuildingKind::StoneWall => 8,
             BuildingKind::TownCenter => 3,
             _ => 0,
         }
@@ -705,6 +752,9 @@ impl BuildingKind {
             // BLD-13: palisade pierce armor 5 (wiki infobox; 2 in
             // The Age of Kings, 5 since The Conquerors patch 1.0b).
             BuildingKind::PalisadeWall => 5,
+            // BLD-20: stone wall pierce armor 10 (wiki Building
+            // table; flat across ages).
+            BuildingKind::StoneWall => 10,
             BuildingKind::TownCenter => 5,
             _ => 7,
         }

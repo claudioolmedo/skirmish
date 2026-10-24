@@ -5,6 +5,15 @@
 //! delete refunds (BLD-02), repair (BLD-17), and the age-up
 //! exclusion (walls never count toward TEC-01).
 //!
+//! BLD-20 adds: the ghost==founded regression across drag shapes
+//! (the client's preview and the sim's expansion are one line),
+//! segment founding under standing units (DE placement ignores
+//! units), foundation blocking that starts with construction
+//! (the DE quickwall rule), multi-villager distribution along a
+//! line, and the Stone Wall (Feudal Age, 5 stone per segment,
+//! 1080/1800 HP, 8/10 armor, 10 s build — the DE row in
+//! `~/workspace/skirmish-study/walls-de/DE-WALLS-DOSSIER.md`).
+//!
 //! Numbers under test are the current DE row (AoE wiki, Palisade
 //! Wall infobox, fetched 2026-10-22): Dark Age, 3 wood per segment
 //! (update 56005), 7 s build (update 42848), 150 HP Dark / 250 HP
@@ -12,8 +21,8 @@
 
 use fixed::types::I16F16;
 use skirmish_sim::{
-    wall_line_cells, BuildingKind, Command, Entity, EntityKind, MatchMode, ResourceKind, Sim,
-    OWNER_OPPONENT, OWNER_PLAYER,
+    wall_line_cells, Age, BuildingKind, Command, Entity, EntityKind, MatchMode, NodeKind,
+    ResourceKind, Sim, TechId, OWNER_OPPONENT, OWNER_PLAYER,
 };
 
 const WALL: BuildingKind = BuildingKind::PalisadeWall;
@@ -106,7 +115,7 @@ fn wall_buildings(sim: &Sim) -> Vec<&skirmish_sim::Building> {
 }
 
 #[test]
-fn line_places_every_segment_charges_per_segment_and_blocks() {
+fn line_places_every_segment_and_charges_per_segment() {
     let mut sim = Sim::new(31);
     let vil = villagers_of(&sim, OWNER_PLAYER)[0];
     let (ax, ay) = open_run_near_tc(&sim, OWNER_PLAYER, vil, 6);
@@ -120,14 +129,17 @@ fn line_places_every_segment_charges_per_segment_and_blocks() {
         sim.stockpile().amount(ResourceKind::Wood),
         wood0 - I16F16::from_num(18)
     );
-    // Segments sit on the dragged cells, in drag order, and every
-    // cell blocks the grid from placement (foundation up).
+    // Segments sit on the dragged cells, in drag order. An
+    // UNTOUCHED foundation does not block its cell (BLD-20: the
+    // DE quickwall rule — a segment blocks once construction
+    // starts on it, not at placement; see
+    // `foundation_blocks_only_once_construction_starts`).
     for (i, b) in walls.iter().enumerate() {
         assert_eq!((b.cell_x, b.cell_y), (ax + i as u32, ay));
         assert!(!b.complete);
         assert!(
-            sim.grid().is_blocked(b.cell_x, b.cell_y),
-            "segment cell must block"
+            !sim.grid().is_blocked(b.cell_x, b.cell_y),
+            "an untouched wall foundation must not block"
         );
     }
     // The villager is on construction duty for the first segment.
@@ -640,4 +652,433 @@ fn wall_line_is_deterministic() {
     let b = run(31);
     assert_eq!(a, b, "same seed + same line = same state");
     assert_eq!(a.1, 8);
+}
+
+// ---------------------------------------------------------------------
+// BLD-20: the DE wall pass — ghost == founded, units never delete
+// segments, foundations block when construction starts, villagers
+// distribute, and the Stone Wall.
+// ---------------------------------------------------------------------
+
+const STONE_WALL: BuildingKind = BuildingKind::StoneWall;
+
+fn build_line_kind(
+    sim: &mut Sim,
+    entity: u32,
+    kind: BuildingKind,
+    a: (u32, u32),
+    b: (u32, u32),
+) {
+    let (x0, y0) = cell_point(sim, a.0, a.1);
+    let (x1, y1) = cell_point(sim, b.0, b.1);
+    sim.push_command(Command::BuildLine { entity, kind, x0, y0, x1, y1 });
+}
+
+fn founded_cells(sim: &Sim, kind: BuildingKind) -> Vec<(u32, u32)> {
+    let mut cells: Vec<(u32, u32)> = sim
+        .buildings()
+        .iter()
+        .filter(|b| b.kind == kind)
+        .map(|b| (b.cell_x, b.cell_y))
+        .collect();
+    cells.sort();
+    cells
+}
+
+fn cell_of_ent(sim: &Sim, id: u32) -> (u32, u32) {
+    let e = ent(sim, id);
+    sim.grid().world_to_cell(e.pos_x, e.pos_y)
+}
+
+/// An anchor where the drag to `anchor + shape` founds completely
+/// for `entity` (every supercover cell individually validates),
+/// scanning outward from the player's Town Center.
+fn open_anchor_for_shape(sim: &Sim, entity: u32, shape: (i32, i32)) -> (u32, u32) {
+    let tc = ent(sim, find_id(sim, OWNER_PLAYER, EntityKind::TownCenter));
+    let (tcx, tcy) = sim.grid().world_to_cell(tc.pos_x, tc.pos_y);
+    for r in 4..=45i32 {
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if dx.abs() != r && dy.abs() != r {
+                    continue;
+                }
+                let (ax, ay) = (tcx as i32 + dx, tcy as i32 + dy);
+                if ax < 2 || ay < 2 {
+                    continue;
+                }
+                let (ax, ay) = (ax as u32, ay as u32);
+                let b = ((ax as i32 + shape.0) as u32, (ay as i32 + shape.1) as u32);
+                let ok = wall_line_cells(ax, ay, b.0, b.1).iter().all(|&(cx, cy)| {
+                    let (x, y) = cell_point(sim, cx, cy);
+                    sim.can_build(entity, WALL, x, y)
+                });
+                if ok {
+                    return (ax, ay);
+                }
+            }
+        }
+    }
+    panic!("no open anchor for drag shape {shape:?}");
+}
+
+/// BLD-20 regression for Claudio's report ("o de madeira não
+/// segue a linha"): for every drag shape, the founded segments
+/// are EXACTLY the supercover cells the drag ghost previewed —
+/// no gaps, no extras, including 45°, shallow and steep diagonals
+/// and a long drag.
+#[test]
+fn ghost_cells_equal_founded_cells_for_all_drag_shapes() {
+    let shapes: [(i32, i32); 6] = [(7, 0), (0, 7), (6, 6), (8, 2), (2, 8), (20, 3)];
+    for &(sx, sy) in &shapes {
+        let mut sim = Sim::new(31);
+        let vil = villagers_of(&sim, OWNER_PLAYER)[0];
+        let (ax, ay) = open_anchor_for_shape(&sim, vil, (sx, sy));
+        let b = ((ax as i32 + sx) as u32, (ay as i32 + sy) as u32);
+        let mut want = wall_line_cells(ax, ay, b.0, b.1);
+        want.sort();
+        build_line(&mut sim, vil, (ax, ay), b);
+        sim.tick(); // the line is applied here
+        assert_eq!(
+            founded_cells(&sim, WALL),
+            want,
+            "drag shape ({sx},{sy}): founded segments != ghost cells"
+        );
+        // Consecutive founded segments are edge-adjacent (the
+        // supercover guarantee: no gap a unit can slip through,
+        // diagonals included).
+        let line = wall_line_cells(ax, ay, b.0, b.1);
+        for w in line.windows(2) {
+            let d = (w[1].0 as i32 - w[0].0 as i32).abs() + (w[1].1 as i32 - w[0].1 as i32).abs();
+            assert_eq!(d, 1, "drag shape ({sx},{sy}): non-adjacent step {w:?}");
+        }
+    }
+}
+
+/// BLD-20 (dossier §3): DE placement never checks units — a line
+/// dragged through a cell another villager is standing on founds
+/// that segment too. Before this pass the sim silently dropped
+/// every segment under a living unit (the ghost showed green), so
+/// walls beside the TC — where villagers and sheep mill about —
+/// came up full of holes.
+#[test]
+fn line_founds_segments_under_standing_units() {
+    let mut sim = Sim::new(31);
+    let vils = villagers_of(&sim, OWNER_PLAYER);
+    let (gx, gy) = open_run_near_tc(&sim, OWNER_PLAYER, vils[0], 6);
+    // Park the second villager on open ground the line can cross.
+    let park = (gx + 2, gy);
+    let (px, py) = cell_point(&sim, park.0, park.1);
+    sim.push_command(Command::Move { entity: vils[1], x: px, y: py });
+    let parked = run_until(&mut sim, 30_000, |s| cell_of_ent(s, vils[1]) == park);
+    assert!(parked, "the second villager never reached the parking cell");
+    let his = cell_of_ent(&sim, vils[1]);
+    // A 6-run through HIS cell that fully validates: his own cell
+    // validates only because walls are exempt from the unit check
+    // (pre-BLD-20 this scan found no line through him at all).
+    let mut start = None;
+    for s0 in his.0.saturating_sub(5)..=his.0 {
+        let ok = (0..6).all(|i| {
+            let (x, y) = cell_point(&sim, s0 + i, his.1);
+            sim.can_build(vils[0], WALL, x, y)
+        });
+        if ok {
+            start = Some(s0);
+            break;
+        }
+    }
+    let lx = start.expect("no valid wall line through the standing villager");
+    build_line(&mut sim, vils[0], (lx, his.1), (lx + 5, his.1));
+    sim.tick();
+    let cells = founded_cells(&sim, WALL);
+    assert_eq!(cells.len(), 6, "the segment under the standing villager was dropped");
+    assert!(cells.contains(&his), "no foundation on the occupied cell {his:?}");
+}
+
+/// BLD-20 (dossier §3): an untouched wall foundation is walkable
+/// ground; its cell joins the blocking grid when construction
+/// first advances on it (the DE quickwall rule), and a completed
+/// segment always blocks.
+#[test]
+fn foundation_blocks_only_once_construction_starts() {
+    let mut sim = Sim::new(31);
+    let vil = villagers_of(&sim, OWNER_PLAYER)[0];
+    let (ax, ay) = open_run_near_tc(&sim, OWNER_PLAYER, vil, 4);
+    build_line(&mut sim, vil, (ax, ay), (ax + 3, ay));
+    sim.tick();
+    let cells = founded_cells(&sim, WALL);
+    assert_eq!(cells.len(), 4);
+    for &(cx, cy) in &cells {
+        assert!(
+            !sim.grid().is_blocked(cx, cy),
+            "untouched foundation blocks at ({cx},{cy})"
+        );
+    }
+    // The builder reaches segment one and starts it: its cell —
+    // and only its cell — joins the blocking grid. (Later
+    // segments cannot be started before segment one completes,
+    // hundreds of ticks later, so this observation is exact.)
+    let first = cells[0];
+    let started = run_until(&mut sim, 60_000, |s| s.grid().is_blocked(first.0, first.1));
+    assert!(started, "the started segment never joined the blocking grid");
+    for &(cx, cy) in &cells[1..] {
+        assert!(
+            !sim.grid().is_blocked(cx, cy),
+            "unstarted segment ({cx},{cy}) blocked too early"
+        );
+    }
+    let done = run_until(&mut sim, 120_000, |s| {
+        s.buildings().iter().all(|b| b.complete)
+    });
+    assert!(done, "the line never completed");
+    for &(cx, cy) in &cells {
+        assert!(
+            sim.grid().is_blocked(cx, cy),
+            "completed segment ({cx},{cy}) does not block"
+        );
+    }
+}
+
+/// BLD-20 (dossier §3): DE tasks every selected villager to the
+/// line; the client issues the line per villager, and the sim's
+/// distribution rule gives each builder the first segment nobody
+/// is building yet — two villagers on one line start on segment
+/// one and segment two, never both on segment one.
+#[test]
+fn two_villagers_distribute_along_the_line() {
+    let mut sim = Sim::new(31);
+    let vils = villagers_of(&sim, OWNER_PLAYER);
+    let (ax, ay) = open_run_near_tc(&sim, OWNER_PLAYER, vils[0], 5);
+    build_line(&mut sim, vils[0], (ax, ay), (ax + 4, ay));
+    build_line(&mut sim, vils[1], (ax, ay), (ax + 4, ay));
+    sim.tick(); // both line commands apply here
+    let walls = wall_buildings(&sim);
+    assert_eq!(walls.len(), 5, "the second line must resume the same five foundations");
+    assert_eq!(ent(&sim, vils[0]).task_building, Some(walls[0].id));
+    assert_eq!(
+        ent(&sim, vils[1]).task_building,
+        Some(walls[1].id),
+        "second villager piled onto segment one instead of distributing"
+    );
+    // The whole line still completes (and faster than one builder
+    // would manage alone is the multi-builder rate's business,
+    // covered by the construction tests).
+    let done = run_until(&mut sim, 120_000, |s| {
+        s.buildings().iter().all(|b| b.complete)
+    });
+    assert!(done, "the two-villager line never completed");
+}
+
+/// The Stone Wall's kind-level row (dossier §2) — pure values, no
+/// sim: tag 14, 5 stone, 10 s, 1080 Feudal / 1800 Castle HP,
+/// 8/10 armor, Feudal-gated, wall LoS 2 (the palisade's too).
+#[test]
+fn stone_wall_values_match_the_de_row() {
+    let k = STONE_WALL;
+    assert_eq!(k.tag(), 14);
+    assert_eq!(BuildingKind::from_tag(14), Some(k));
+    assert!(k.is_wall());
+    assert_eq!(f(k.wood_cost()), 0.0);
+    assert_eq!(f(k.stone_cost()), 5.0);
+    assert_eq!(k.build_ticks(), 600);
+    assert_eq!(k.max_hp_at(Age::Feudal), 1080);
+    assert_eq!(k.max_hp_at(Age::Castle), 1800);
+    assert_eq!(k.armor_melee_at(Age::Feudal), 8);
+    assert_eq!(k.armor_pierce_at(Age::Feudal), 10);
+    assert_eq!(k.age_required(), Age::Feudal);
+    assert_eq!(k.sight_tiles_at(Age::Feudal), 2);
+    assert_eq!(BuildingKind::PalisadeWall.sight_tiles_at(Age::Dark), 2);
+}
+
+/// `open_run_near_tc` for an arbitrary kind (the stone tests run
+/// on a drained wood stockpile — the Mill and the Lumber Camp ate
+/// it — so the run must validate against the STONE row).
+fn open_run_for(sim: &Sim, entity: u32, kind: BuildingKind, len: u32) -> (u32, u32) {
+    let tc = ent(sim, find_id(sim, OWNER_PLAYER, EntityKind::TownCenter));
+    let (tcx, tcy) = sim.grid().world_to_cell(tc.pos_x, tc.pos_y);
+    for r in 3..=40i32 {
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if dx.abs() != r && dy.abs() != r {
+                    continue;
+                }
+                let (ax, ay) = (tcx as i32 + dx, tcy as i32 + dy);
+                if ax < 0 || ay < 0 {
+                    continue;
+                }
+                let (ax, ay) = (ax as u32, ay as u32);
+                // A cell holding ANY standing building is out —
+                // including our own incomplete wall foundations,
+                // which `can_build` would otherwise read as a
+                // Resume and hand back the same run forever.
+                let occupied = |cx: u32, cy: u32| {
+                    sim.buildings().iter().any(|b| {
+                        let bs = b.kind.footprint_size();
+                        cx >= b.cell_x && cx < b.cell_x + bs && cy >= b.cell_y && cy < b.cell_y + bs
+                    })
+                };
+                let ok = (0..len).all(|i| {
+                    let (x, y) = cell_point(sim, ax + i, ay);
+                    !occupied(ax + i, ay) && sim.can_build(entity, kind, x, y)
+                });
+                if ok {
+                    return (ax, ay);
+                }
+            }
+        }
+    }
+    panic!("no open run of {len} for {kind:?} near the Town Center");
+}
+
+fn first_node_walls(sim: &Sim, kind: NodeKind) -> u32 {
+    sim.nodes()
+        .iter()
+        .find(|n| n.kind == kind)
+        .unwrap_or_else(|| panic!("no {kind:?} node"))
+        .id
+}
+
+fn anchor_near_walls(
+    sim: &Sim,
+    entity: u32,
+    kind: BuildingKind,
+    center: (u32, u32),
+) -> (u32, u32) {
+    for r in 1..=14i32 {
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if dx.abs() != r && dy.abs() != r {
+                    continue;
+                }
+                let (ax, ay) = (center.0 as i32 + dx, center.1 as i32 + dy);
+                if ax < 0 || ay < 0 {
+                    continue;
+                }
+                let (ax, ay) = (ax as u32, ay as u32);
+                let (x, y) = cell_point(sim, ax, ay);
+                if sim.can_build(entity, kind, x, y) {
+                    return (ax, ay);
+                }
+            }
+        }
+    }
+    panic!("no buildable anchor near {center:?} for {kind:?}");
+}
+
+fn raise_walls(sim: &mut Sim, entity: u32, kind: BuildingKind, cell: (u32, u32)) {
+    let (x, y) = cell_point(sim, cell.0, cell.1);
+    sim.push_command(Command::Build { entity, kind, x, y });
+    let done = run_until(sim, 120_000, |s| {
+        s.buildings()
+            .iter()
+            .find(|b| b.kind == kind && b.owner == OWNER_PLAYER)
+            .map(|b| b.complete)
+            .unwrap_or(false)
+    });
+    assert!(done, "{kind:?} never completed");
+}
+
+/// The towers/feudal staging in walls idioms: Mill + Lumber Camp
+/// by the Town Center, berries to 500 food, research, wait.
+fn reach_feudal_walls(sim: &mut Sim) {
+    let vils = villagers_of(sim, OWNER_PLAYER);
+    let tc = ent(sim, find_id(sim, OWNER_PLAYER, EntityKind::TownCenter));
+    let tc_cell = sim.grid().world_to_cell(tc.pos_x, tc.pos_y);
+    let mill = anchor_near_walls(sim, vils[1], BuildingKind::Mill, tc_cell);
+    raise_walls(sim, vils[1], BuildingKind::Mill, mill);
+    let lumber = anchor_near_walls(sim, vils[2], BuildingKind::LumberCamp, tc_cell);
+    raise_walls(sim, vils[2], BuildingKind::LumberCamp, lumber);
+    let berry = first_node_walls(sim, NodeKind::BerryBush);
+    for v in [vils[0], vils[1]] {
+        sim.push_command(Command::Gather { entity: v, node: berry });
+    }
+    let food = run_until(sim, 180_000, |s| {
+        f(s.stockpile().amount(ResourceKind::Food)) >= 500.0
+    });
+    assert!(food, "never gathered the Feudal food");
+    sim.push_command(Command::ResearchTc { tech: TechId::FeudalAge });
+    let up = run_until(sim, 60_000, |s| s.age_of(OWNER_PLAYER) == Age::Feudal);
+    assert!(up, "never reached Feudal");
+}
+
+/// BLD-20: the Stone Wall line is refused in the Dark Age (the
+/// Feudal gate), then founds in Feudal at exactly 5 stone per
+/// segment and completes at the Feudal HP row of 1080.
+#[test]
+fn stone_wall_line_gated_by_age_then_charges_stone_per_segment() {
+    let mut sim = Sim::new(31);
+    let vils = villagers_of(&sim, OWNER_PLAYER);
+    let (ax, ay) = open_run_near_tc(&sim, OWNER_PLAYER, vils[0], 4);
+    let (x0, y0) = cell_point(&sim, ax, ay);
+    let (x1, y1) = cell_point(&sim, ax + 3, ay);
+    assert!(
+        !sim.can_build_line(vils[0], STONE_WALL, x0, y0, x1, y1),
+        "a Dark Age stone line reports placeable"
+    );
+    build_line_kind(&mut sim, vils[0], STONE_WALL, (ax, ay), (ax + 3, ay));
+    sim.tick();
+    assert_eq!(
+        founded_cells(&sim, STONE_WALL).len(),
+        0,
+        "a Dark Age stone line founded segments"
+    );
+
+    reach_feudal_walls(&mut sim);
+    // A fresh run (the Mill and Lumber Camp stand by the TC now,
+    // and the wood stockpile is drained — the run validates
+    // against the stone row).
+    let (bx, by) = open_run_for(&sim, vils[0], STONE_WALL, 4);
+    let (bx0, by0) = cell_point(&sim, bx, by);
+    let (bx1, by1) = cell_point(&sim, bx + 3, by);
+    assert!(sim.can_build_line(vils[0], STONE_WALL, bx0, by0, bx1, by1));
+    let stone0 = sim.stockpile().amount(ResourceKind::Stone);
+    build_line_kind(&mut sim, vils[0], STONE_WALL, (bx, by), (bx + 3, by));
+    sim.tick();
+    let cells = founded_cells(&sim, STONE_WALL);
+    assert_eq!(cells.len(), 4, "the Feudal stone line did not found every segment");
+    assert_eq!(
+        sim.stockpile().amount(ResourceKind::Stone),
+        stone0 - I16F16::from_num(20),
+        "stone charge is not 5 per segment"
+    );
+    let done = run_until(&mut sim, 120_000, |s| {
+        s.buildings()
+            .iter()
+            .filter(|b| b.kind == STONE_WALL)
+            .all(|b| b.complete)
+    });
+    assert!(done, "the stone line never completed");
+    for b in sim.buildings().iter().filter(|b| b.kind == STONE_WALL) {
+        assert_eq!(f(b.hp), 1080.0, "a completed Feudal stone segment is not 1080 HP");
+        assert!(sim.grid().is_blocked(b.cell_x, b.cell_y));
+    }
+}
+
+/// BLD-20: past the stone stockpile the line truncates in drag
+/// order — segments the stone cannot pay for are skipped, never
+/// partially charged (the palisade wood rule, on stone).
+#[test]
+fn stone_wall_line_truncates_where_the_stone_runs_out() {
+    let mut sim = Sim::new(31);
+    let vils = villagers_of(&sim, OWNER_PLAYER);
+    reach_feudal_walls(&mut sim);
+    // Burn the 200 starting stone down to exactly 20 with three
+    // 12-segment lines (36 × 5 = 180), farmed across open runs.
+    for _ in 0..3 {
+        let (ax, ay) = open_run_for(&sim, vils[0], STONE_WALL, 12);
+        build_line_kind(&mut sim, vils[0], STONE_WALL, (ax, ay), (ax + 11, ay));
+        sim.tick();
+    }
+    assert_eq!(f(sim.stockpile().amount(ResourceKind::Stone)), 20.0);
+    assert_eq!(founded_cells(&sim, STONE_WALL).len(), 36);
+    // A 5-segment line on 20 stone founds exactly its first four.
+    let (ax, ay) = open_run_for(&sim, vils[0], STONE_WALL, 5);
+    build_line_kind(&mut sim, vils[0], STONE_WALL, (ax, ay), (ax + 4, ay));
+    sim.tick();
+    let cells = founded_cells(&sim, STONE_WALL);
+    assert_eq!(cells.len(), 40, "the line did not truncate at the stockpile");
+    for i in 0..4u32 {
+        assert!(cells.contains(&(ax + i, ay)), "segment {i} of the paid prefix missing");
+    }
+    assert!(!cells.contains(&(ax + 4, ay)), "the unaffordable segment was founded");
+    assert_eq!(f(sim.stockpile().amount(ResourceKind::Stone)), 0.0);
 }

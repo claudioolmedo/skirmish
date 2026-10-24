@@ -66,19 +66,20 @@
 // kind: 0 House, 1 Farm, 2 Barracks, 3 Lumber Camp, 4 Mill,
 //       5 Mining Camp, 6 Archery Range, 7 Stable, 8 Blacksmith,
 //       9 Palisade Wall, 10 Watch Tower, 11 Outpost (BLD-18),
-//       12 Market (BLD-19; the tags are the sim's — append only).
+//       12 Market (BLD-19), 14 Stone Wall (BLD-20; the tags are
+//       the sim's — append only).
 // PAGE_KINDS is the pages' GRID (render) order: slot 0 first.
 // Kind 9 (Town Center, Castle Age) closes the economic page —
 // DE's villager panel keeps the TC with the economic buildings.
 export const PAGE_KINDS = {
   eco: [0, 4, 1, 3, 5, 12, 13],
-  mil: [2, 6, 7, 8, 9, 10, 11],
+  mil: [2, 6, 7, 8, 9, 10, 11, 14],
 };
 
 /** Which build page a building kind belongs to ('eco' | 'mil'). */
 export const PAGE_FOR_KIND = {
   0: 'eco', 1: 'eco', 3: 'eco', 4: 'eco', 5: 'eco', 12: 'eco', 13: 'eco',
-  2: 'mil', 6: 'mil', 7: 'mil', 8: 'mil', 9: 'mil', 10: 'mil', 11: 'mil',
+  2: 'mil', 6: 'mil', 7: 'mil', 8: 'mil', 9: 'mil', 10: 'mil', 11: 'mil', 14: 'mil',
 };
 
 /**
@@ -106,6 +107,7 @@ export const PAGE_KEYS = {
     KeyS: 9, // Palisade Wall — slot 4 (the defensive row, after the Blacksmith)
     KeyD: 10, // Watch Tower — slot 5 (BLD-18; next free slot — S is the wall's)
     KeyZ: 11, // Outpost — slot 6 (BLD-18)
+    KeyX: 14, // Stone Wall — slot 7 (BLD-20; the defensive row's second wall, beside the Palisade as in DE)
     KeyC: 'back', // Back — the last slot
   },
 };
@@ -113,7 +115,7 @@ export const PAGE_KEYS = {
 /** The one letter shown as a button's key badge on an armed page. */
 export const PAGE_BADGE = {
   eco: { 0: 'Q', 4: 'W', 1: 'E', 3: 'A', 5: 'S', 12: 'D', 13: 'T' },
-  mil: { 2: 'Q', 6: 'W', 7: 'E', 8: 'A', 9: 'S', 10: 'D', 11: 'Z' },
+  mil: { 2: 'Q', 6: 'W', 7: 'E', 8: 'A', 9: 'S', 10: 'D', 11: 'Z', 14: 'X' },
 };
 
 /** Panel contexts whose buttons answer to position keys, in order. */

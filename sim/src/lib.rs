@@ -4080,28 +4080,40 @@ impl Sim {
             weapon_next_tick: 0,
             weapon_engaged: false,
         };
-        if kind.blocks_footprint() {
+        if kind.blocks_footprint() && !kind.is_wall() {
             for (cx, cy) in building.footprint_cells() {
                 self.grid.set_dynamic(cx, cy, true);
             }
         }
+        // BLD-20: a WALL foundation does not block its cell yet —
+        // in DE an untouched foundation is walkable ground (that
+        // is why quickwalling needs each segment "built up
+        // slightly" before it blocks; dossier §3). The cell joins
+        // the blocking grid when construction first advances the
+        // segment (`construction_tick`) and is guaranteed blocked
+        // at completion (`complete_building`).
         self.buildings.push(building);
         Some(id)
     }
 
-    /// Apply a `BuildLine` command (BLD-13): expand the dragged
-    /// line deterministically (`build::wall_line_cells`) and run
-    /// every segment through the ordinary build validation. The
-    /// first segment that takes effect gets the villager as its
-    /// builder; every later one becomes a queued `Build` order
-    /// behind it (the foundations already stand — execution
-    /// resumes them), so the villager walks the line raising
-    /// segment after segment. Segments that fail validation are
-    /// skipped — a dragged line over a tree, a node, a Town
-    /// Center's reserved ground or past the wood stockpile leaves
-    /// gaps, never partial charges. Like `issue_build`, a line
-    /// that takes effect replaces the villager's order queue; a
-    /// line where nothing takes effect changes nothing at all.
+    /// Apply a `BuildLine` command (BLD-13, BLD-20): expand the
+    /// dragged line deterministically (`build::wall_line_cells`)
+    /// and run every segment through the ordinary build
+    /// validation. The segments that take effect stand as
+    /// foundations at once; this villager's primary target is the
+    /// first segment **no other villager is already building**
+    /// (BLD-20: DE tasks every selected villager to the line and
+    /// they distribute along it — the client issues the line to
+    /// each selected villager, and this rule keeps them from all
+    /// piling onto segment one), and every other segment becomes
+    /// a queued `Build` order behind it, so a lone villager walks
+    /// the line raising segment after segment in drag order.
+    /// Segments that fail validation are skipped — a dragged line
+    /// over a tree, a node, a Town Center's reserved ground or
+    /// past the stockpile leaves gaps, never partial charges.
+    /// Like `issue_build`, a line that takes effect replaces the
+    /// villager's order queue; a line where nothing takes effect
+    /// changes nothing at all.
     fn issue_build_line(
         &mut self,
         entity: u32,
@@ -4123,9 +4135,11 @@ impl Sim {
         }
         let (ax, ay) = self.grid.world_to_cell(clamp_pos(x0), clamp_pos(y0));
         let (bx, by) = self.grid.world_to_cell(clamp_pos(x1), clamp_pos(y1));
-        let mut assigned = false;
-        let mut acted = false;
-        let mut followups: Vec<QueuedOrder> = Vec::new();
+        // Every segment that took effect, in drag order: its
+        // building id plus the cell-center point a queued Build
+        // order names. The primary target is chosen after the
+        // walk (distribution, see the doc above).
+        let mut effected: Vec<(u32, I16F16, I16F16)> = Vec::new();
         for (cx, cy) in build::wall_line_cells(ax, ay, bx, by) {
             // A point strictly inside the segment's cell — the
             // same anchor convention the client's placement uses.
@@ -4133,28 +4147,40 @@ impl Sim {
             match self.validate_build(entity, kind, wx, wy) {
                 BuildVerdict::Reject => {}
                 BuildVerdict::Resume(bid) => {
-                    acted = true;
-                    if !assigned {
-                        self.assign_builder(idx, bid);
-                        assigned = true;
-                    } else {
-                        followups.push(QueuedOrder::Build { kind, x: wx, y: wy });
-                    }
+                    effected.push((bid, wx, wy));
                 }
                 BuildVerdict::Place(px, py) => {
                     if let Some(id) = self.place_building(idx, kind, px, py) {
-                        acted = true;
-                        if !assigned {
-                            self.assign_builder(idx, id);
-                            assigned = true;
-                        } else {
-                            followups.push(QueuedOrder::Build { kind, x: wx, y: wy });
-                        }
+                        effected.push((id, wx, wy));
                     }
                 }
             }
         }
-        if acted {
+        if !effected.is_empty() {
+            // Distribution: the first segment no OTHER villager
+            // is travelling to or building right now; if every
+            // segment is claimed, share the first (the ordinary
+            // multi-builder rate then applies to it).
+            let claimed = |bid: u32| {
+                self.entities.iter().any(|e| {
+                    e.id != entity
+                        && !e.dead
+                        && e.task_building == Some(bid)
+                        && matches!(e.task, Task::ToBuild | Task::Building)
+                })
+            };
+            let primary = effected
+                .iter()
+                .position(|(bid, _, _)| !claimed(*bid))
+                .unwrap_or(0);
+            let (primary_bid, _, _) = effected[primary];
+            self.assign_builder(idx, primary_bid);
+            let followups: Vec<QueuedOrder> = effected
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != primary)
+                .map(|(_, (_, wx, wy))| QueuedOrder::Build { kind, x: *wx, y: *wy })
+                .collect();
             // Replace semantics (the `issue_build` contract): the
             // line clears whatever the villager had queued, then
             // the line's own remaining segments line up behind the
@@ -4194,6 +4220,7 @@ impl Sim {
         }
         let owner = self.entities[idx].owner;
         let budget = self.stockpile_of(owner).amount(ResourceKind::Wood);
+        let budget_stone = self.stockpile_of(owner).amount(ResourceKind::Stone);
         let (ax, ay) = self.grid.world_to_cell(clamp_pos(x0), clamp_pos(y0));
         let (bx, by) = self.grid.world_to_cell(clamp_pos(x1), clamp_pos(y1));
         for (cx, cy) in build::wall_line_cells(ax, ay, bx, by) {
@@ -4201,7 +4228,7 @@ impl Sim {
             match self.validate_build(entity, kind, wx, wy) {
                 BuildVerdict::Resume(_) => return true,
                 BuildVerdict::Place(_, _) => {
-                    if budget >= kind.wood_cost() {
+                    if budget >= kind.wood_cost() && budget_stone >= kind.stone_cost() {
                         return true;
                     }
                 }
@@ -4560,7 +4587,16 @@ impl Sim {
             // Farms are exempt: they never block, and their farmer
             // stands on them by design. The ordering builder is
             // exempt: it steps to the ring to work.
-            if kind != BuildingKind::Farm {
+            // WALLS are exempt too (BLD-20, walls dossier §3): DE
+            // placement never checks units — a wall line dragged
+            // through milling villagers and sheep founds every
+            // segment, and `complete_building`'s displacement
+            // cure moves anyone standing on a segment when it
+            // completes, so the entombment the check guards
+            // against cannot persist for a 1×1 wall either. The
+            // exemption is what makes the dragged line the wall:
+            // no silent holes where a unit happened to stand.
+            if kind != BuildingKind::Farm && !kind.is_wall() {
                 for e in &self.entities {
                     if e.id != entity
                         && !e.dead
@@ -5262,6 +5298,11 @@ impl Sim {
             }
         }
         let mut completed: Vec<u32> = Vec::new();
+        // BLD-20: wall foundations whose construction starts this
+        // tick — their cells join the blocking grid now (an
+        // untouched wall foundation is walkable; a started one
+        // blocks, the DE quickwall rule; dossier §3).
+        let mut started_walls: Vec<(u32, u32)> = Vec::new();
         for (bi, &n) in counts.iter().enumerate() {
             if n == 0 || self.buildings[bi].complete {
                 continue;
@@ -5279,6 +5320,9 @@ impl Sim {
             let total = kind.build_thirds();
             let b = &mut self.buildings[bi];
             let ceiling_before = build::construction_hp_ceiling(max_hp, b.progress_thirds, total);
+            if b.progress_thirds == 0 && kind.is_wall() {
+                started_walls.push((b.cell_x, b.cell_y));
+            }
             b.progress_thirds += build::build_rate_thirds(n);
             let ceiling_after = build::construction_hp_ceiling(max_hp, b.progress_thirds, total);
             if ceiling_after > ceiling_before {
@@ -5287,6 +5331,9 @@ impl Sim {
             if b.progress_thirds >= total {
                 completed.push(id);
             }
+        }
+        for (cx, cy) in started_walls {
+            self.grid.set_dynamic(cx, cy, true);
         }
         for bid in completed {
             self.complete_building(bid);
@@ -5518,6 +5565,14 @@ impl Sim {
             return;
         }
         self.buildings[bi].complete = true;
+        // BLD-20: a completed wall segment blocks its cell,
+        // unconditionally (a started one already does — this is
+        // the guarantee for a segment whose whole construction
+        // landed between two blocking updates).
+        if self.buildings[bi].kind.is_wall() {
+            let (cx, cy) = (self.buildings[bi].cell_x, self.buildings[bi].cell_y);
+            self.grid.set_dynamic(cx, cy, true);
+        }
         if self.buildings[bi].kind == BuildingKind::TownCenter {
             self.convert_to_town_center(bid);
             return;

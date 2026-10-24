@@ -121,7 +121,7 @@ const BUILD_FNS = [
   'push_build_archery_range', 'push_build_stable', 'push_build_blacksmith',
   'push_build_palisade_wall',
   'push_build_watch_tower', 'push_build_outpost', 'push_build_market',
-  'push_build_town_center',
+  'push_build_town_center', 'push_build_stone_wall',
 ];
 const BUILD_FNS_QUEUED = BUILD_FNS.map((n) => n + '_queued');
 const TRAIN_AT_FNS = {
@@ -142,12 +142,20 @@ export function validateCommand(c) {
     case 'attack': return isInt(c.e) && isInt(c.tg);
     case 'attackb': return isInt(c.e) && isInt(c.b);
     case 'repair': return isInt(c.e) && isInt(c.b);
-    case 'build': return isInt(c.e) && isInt(c.k) && c.k <= 12 && isNum(c.x) && isNum(c.y);
+    // The cap is the build table's own length (BUILD_FNS): every
+    // kind the applier can dispatch is wire-legal, the first
+    // index past the table is junk. (BLD-20 raised it to 14 with
+    // the Stone Wall; 13 — the Town Center — was already
+    // dispatchable but not validatable, an old inconsistency.)
+    case 'build': return isInt(c.e) && isInt(c.k) && c.k <= 14 && isNum(c.x) && isNum(c.y);
     // TRD-01..03: Market trades — a building id and a commodity
     // tag (food 1, wood 2, stone 4; gold is never a commodity).
     case 'mbuy': case 'msell':
       return isInt(c.b) && (c.r === 1 || c.r === 2 || c.r === 4);
-    case 'buildline': return isInt(c.e) && isNum(c.x0) && isNum(c.y0) && isNum(c.x1) && isNum(c.y1);
+    // BLD-20: a wall line names its wall kind (9 palisade when
+    // absent — the pre-BLD-20 wire form — or 14 stone wall).
+    case 'buildline': return isInt(c.e) && isNum(c.x0) && isNum(c.y0) && isNum(c.x1) && isNum(c.y1)
+      && (c.k === undefined || c.k === 9 || c.k === 14);
     case 'train_at': return isInt(c.b) && (c.k === 2 || c.k === 3 || c.k === 4 || c.k === 9 || c.k === 10);
     case 'train_vil': return c.tc === undefined || isInt(c.tc);
     case 'research_tc': return (c.tech === 0 || c.tech === 1 || c.tech === 6
@@ -194,7 +202,9 @@ export function applyCommand(sim, cmd, owner, tcOf) {
     case 'build': return cmd.q
       ? sim[BUILD_FNS_QUEUED[cmd.k]](cmd.e, cmd.x, cmd.y)
       : sim[BUILD_FNS[cmd.k]](cmd.e, cmd.x, cmd.y);
-    case 'buildline': return sim.push_build_wall_line(cmd.e, cmd.x0, cmd.y0, cmd.x1, cmd.y1);
+    case 'buildline': return cmd.k === 14
+      ? sim.push_build_stone_wall_line(cmd.e, cmd.x0, cmd.y0, cmd.x1, cmd.y1)
+      : sim.push_build_wall_line(cmd.e, cmd.x0, cmd.y0, cmd.x1, cmd.y1);
     case 'train_at': return sim[TRAIN_AT_FNS[cmd.k]](cmd.b);
     case 'train_vil': return sim.push_train_villager_at(cmd.tc != null ? cmd.tc : tcOf(owner));
     case 'research_tc': return sim.push_research_tc_at(cmd.tc != null ? cmd.tc : tcOf(owner), cmd.tech);

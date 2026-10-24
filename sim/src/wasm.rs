@@ -600,6 +600,14 @@ impl WasmSim {
         self.push_build(entity, BuildingKind::PalisadeWall, x, y)
     }
 
+    /// Order a villager to build one Stone Wall segment
+    /// (5 stone, 1×1, Feudal Age — BLD-20) — see
+    /// `push_build_house`. A dragged line of segments goes
+    /// through `push_build_stone_wall_line`.
+    pub fn push_build_stone_wall(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build(entity, BuildingKind::StoneWall, x, y)
+    }
+
     /// Order a villager to raise a dragged line of Palisade Wall
     /// segments (BLD-13) from the cell containing `(x0, y0)` to
     /// the cell containing `(x1, y1)`: the sim expands the line
@@ -626,6 +634,40 @@ impl WasmSim {
             self.inner.push_command(Command::BuildLine {
                 entity,
                 kind: BuildingKind::PalisadeWall,
+                x0: fx0,
+                y0: fy0,
+                x1: fx1,
+                y1: fy1,
+            });
+        }
+        ok
+    }
+
+    /// Order a villager to raise a dragged line of Stone Wall
+    /// segments (BLD-20) from the cell containing `(x0, y0)` to
+    /// the cell containing `(x1, y1)`: the same dragged-line
+    /// contract as `push_build_wall_line`, with the Stone Wall's
+    /// own row — Feudal Age, 5 stone charged per segment,
+    /// obstructed cells and segments past the stone stockpile
+    /// skipped. Returns whether at least one segment would take
+    /// effect; the sim re-validates when the command is applied.
+    pub fn push_build_stone_wall_line(
+        &mut self,
+        entity: u32,
+        x0: f64,
+        y0: f64,
+        x1: f64,
+        y1: f64,
+    ) -> bool {
+        let (fx0, fy0) = (I16F16::from_num(x0), I16F16::from_num(y0));
+        let (fx1, fy1) = (I16F16::from_num(x1), I16F16::from_num(y1));
+        let ok = self
+            .inner
+            .can_build_line(entity, BuildingKind::StoneWall, fx0, fy0, fx1, fy1);
+        if ok {
+            self.inner.push_command(Command::BuildLine {
+                entity,
+                kind: BuildingKind::StoneWall,
                 x0: fx0,
                 y0: fy0,
                 x1: fx1,
@@ -836,6 +878,12 @@ impl WasmSim {
     /// `push_build_house_queued`.
     pub fn push_build_palisade_wall_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
         self.push_build_queued(entity, BuildingKind::PalisadeWall, x, y)
+    }
+
+    /// Queue a single Stone Wall segment (BLD-20) — see
+    /// `push_build_house_queued`.
+    pub fn push_build_stone_wall_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build_queued(entity, BuildingKind::StoneWall, x, y)
     }
 
     /// Queue a Town Center build (Castle Age) — see
