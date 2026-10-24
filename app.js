@@ -115,6 +115,54 @@ function playAudioCueScaled(cue, gain) {
   try { return gameAudio.play(cue, { gain }); } catch { return false; }
 }
 
+/// The generated sound set (tools/sound-gen): unit-class voice
+/// acknowledgments and one-shot effects from the asset bank. The
+/// engine falls back to the synth cues above whenever an asset
+/// has not loaded, so these wrappers never go accidentally mute.
+function playAck(cls, action) {
+  try { return gameAudio.playAck({ cls, action }); } catch { return false; }
+}
+function playSfx(key, gain = 1, delay = 0) {
+  try { return gameAudio.playSound(key, { gain, delay }); } catch { return false; }
+}
+/// The typed under-attack alert: bells when the town is hit
+/// (villagers, buildings), the horn when soldiers are.
+function playAttackAlert(town) {
+  try { return gameAudio.play({ type: 'attack', town: !!town }); } catch { return false; }
+}
+/// The faint ambient layer's scheduler tick (engine-timed).
+function playAmbience() {
+  try { return gameAudio.ambience(); } catch { return false; }
+}
+
+/// The acknowledgment class of a set of unit kind tags (the sim's
+/// kinds): cavalry answers first, then footmen, archers, the
+/// villager; a lone sheep answers for itself ('animal').
+function ackClassForKinds(kinds) {
+  if (kinds.includes(2)) return 'cavalry';
+  if (kinds.some((k) => [3, 8, 9].includes(k))) return 'infantry';
+  if (kinds.some((k) => [4, 10].includes(k))) return 'archer';
+  if (kinds.includes(0)) return 'villager';
+  if (kinds.includes(5)) return 'animal';
+  return null;
+}
+
+/// Selection feedback with a voice: the newly selected group's
+/// class acknowledges the click (a selected sheep bleats);
+/// building selections and empty groups keep the plain tick.
+function playSelectAck() {
+  const st = entityState();
+  const kinds = [];
+  for (const id of selection) {
+    const k = st.kinds[id];
+    if (k != null) kinds.push(k);
+  }
+  const cls = ackClassForKinds(kinds);
+  if (cls === 'animal') { playSfx('sheep.baa', 0.7); return; }
+  if (cls) { playAck(cls, 'select'); return; }
+  playAudioCue('select');
+}
+
 const params = new URLSearchParams(location.search);
 const seed = parseInt(params.get('seed') || '7', 10);
 
@@ -769,6 +817,8 @@ function resetEventFeed() {
 function resetAudioWorldState() {
   audioPrevHp = null;
   audioPrevHpAll = null;
+  audioPrevMetaAll = null;
+  audioPrevSheepOwners = new Map();
   lastAttackAlert = null;
   audioHousedPrev = false;
   lastIdleVil = -1;
@@ -1411,6 +1461,20 @@ function updateVilAnim(i, wx, wy, now) {
   } else {
     frame = Math.floor(now / 400) % VIL_ORIGINAL.frames.idle;
   }
+  // Generated combat audio: the knife's strike frame (the arc's
+  // halfway frame — the gather impact's twin) sounds once per
+  // swing, distance-scaled like the work strikes.
+  if (state === 'attack' && !playback) {
+    const strike = Math.floor(VIL_ORIGINAL.frames.attack / 2);
+    if (frame === strike && a.lastAtkFrame !== strike) {
+      const [ccx, ccy] = s2w(canvas.width / 2, canvas.height / 2, camS, camOx, camOy);
+      const gain = distanceGain(Math.hypot(wx - ccx, wy - ccy));
+      if (gain > 0.02) playSfx('hit.knife', gain);
+    }
+    a.lastAtkFrame = frame;
+  } else if (state !== 'attack') {
+    a.lastAtkFrame = -1;
+  }
   // Hit feedback: frame 2 of the gather cycle is the axe's impact
   // frame (sprite pipeline pose_gather). A villager gathering WOOD
   // lands one hit per cycle on its tree — the tree renderer turns
@@ -1431,7 +1495,20 @@ function updateVilAnim(i, wx, wy, now) {
       && !playback) {
     const [ccx, ccy] = s2w(canvas.width / 2, canvas.height / 2, camS, camOx, camOy);
     const gain = distanceGain(Math.hypot(wx - ccx, wy - ccy));
-    if (gain > 0.02) playAudioCueScaled('work', gain);
+    if (gain > 0.02) {
+      // The generated set splits the strike by what is being
+      // worked: axe on tree, pick on gold (bright) or stone
+      // (dull), hammer on the building site, a soft swish for
+      // farm, berry and carcass work. The synth tick answers
+      // only while an asset is unavailable.
+      let key = 'work.farm';
+      if (state === 'build') key = 'work.hammer';
+      else if (gTarget) {
+        key = { 0: 'work.chop', 2: 'work.minegold', 3: 'work.minestone' }[gTarget.kind]
+          || 'work.farm';
+      }
+      if (!playSfx(key, gain)) playAudioCueScaled('work', gain);
+    }
   }
   return { state, dir: a.dir, frame };
 }
@@ -1999,7 +2076,7 @@ function cycleIdle(kind, selectAll) {
   }
   if (selectAll) {
     selectUnits(new Set(ids));
-    playAudioCue('select');
+    playSelectAck();
     return;
   }
   const id = nextInCycle(ids, kind === 'villager' ? idleCycleVil : idleCycleMil);
@@ -2008,7 +2085,7 @@ function cycleIdle(kind, selectAll) {
   selectUnits(new Set([id]));
   const pos = sim.positions();
   centerOn(pos[id * 2], pos[id * 2 + 1]);
-  playAudioCue('select');
+  playSelectAck();
 }
 
 function handleGameKey(e) {
@@ -2044,7 +2121,7 @@ function handleGameKey(e) {
           sy += pos[id * 2 + 1];
         }
         centerOn(sx / members.length, sy / members.length);
-        playAudioCue('select');
+        playSelectAck();
       }
       return true;
     }
@@ -2059,14 +2136,14 @@ function handleGameKey(e) {
       const sel = selectedUnits();
       if (sel.length) {
         controlGroups.addToGroup(n, sel);
-        playAudioCue('select');
+        playSelectAck();
       }
       return true;
     }
     const members = liveGroupMembers(n);
     if (!members.length) return true;
     selectUnits(new Set(members));
-    playAudioCue('select');
+    playSelectAck();
     if (groupTaps.tap(n, performance.now()) === 'center') {
       const pos = sim.positions();
       let sx = 0;
@@ -2097,7 +2174,7 @@ function handleGameKey(e) {
         selectBuilding({ type: 'tc', id: tc, owner: localOwner });
         const pos = sim.positions();
         centerOn(pos[tc * 2], pos[tc * 2 + 1]);
-        playAudioCue('select');
+        playSelectAck();
       }
       return true;
     }
@@ -2130,17 +2207,17 @@ function handleGameKey(e) {
           sy += pos[id * 2 + 1];
         }
         centerOn(sx / ids.length, sy / ids.length);
-        playAudioCue('select');
+        playSelectAck();
       } else if (selectedBuilding) {
         if (selectedBuilding.type === 'tc') {
           const tc = selectedBuilding.id;
           centerOn(pos[tc * 2], pos[tc * 2 + 1]);
-          playAudioCue('select');
+          playSelectAck();
         } else {
           const bk = buildingList().find((b) => b.id === selectedBuilding.id);
           if (bk) {
             centerOn(bk.x, bk.y);
-            playAudioCue('select');
+            playSelectAck();
           }
         }
       }
@@ -2155,7 +2232,7 @@ function handleGameKey(e) {
       e.preventDefault();
       if (!e.repeat && lastAttackAlert) {
         centerOn(lastAttackAlert.x, lastAttackAlert.y);
-        playAudioCue('select');
+        playSelectAck();
       }
       return true;
     }
@@ -2210,7 +2287,7 @@ function toggleAutoExplore() {
     }
   }
   if (!issued) return false;
-  playAudioCue('orderMilitary');
+  playAck('cavalry', 'order');
   return true;
 }
 
@@ -2271,7 +2348,7 @@ function forceDropOffSelected() {
     if (st.kinds[id] === 0 && carryKind.has(id) && issue({ t: 'force_dep', e: id })) any = true;
   }
   if (!any) flash(t('flash.noLoadedVil'));
-  else playAudioCue('orderVillager');
+  else playAck('villager', 'order');
 }
 
 /// Go-to (Ctrl+letter): cycle our completed buildings of a kind,
@@ -2287,7 +2364,7 @@ function goToBuildingKind(kind, selectAll) {
   if (selectAll && list.length > 1) {
     selectBuilding({ type: 'building', id: list[0].id, kind, owner: localOwner });
     buildingGroup = list.map((b) => b.id);
-    playAudioCue('select');
+    playSelectAck();
     return;
   }
   const id = nextInCycle(list.map((b) => b.id), gotoCycleMem[kind] ?? -1);
@@ -2295,7 +2372,7 @@ function goToBuildingKind(kind, selectAll) {
   const b = list.find((x) => x.id === id);
   selectBuilding({ type: 'building', id: b.id, kind: b.kind, owner: b.owner });
   centerOn(b.x, b.y);
-  playAudioCue('select');
+  playSelectAck();
 }
 
 function handleHotkey(e) {
@@ -5630,12 +5707,13 @@ async function main() {
       if (sent) groundMoveSent = true;
       return sent;
     };
-    // The order acknowledgement's voice: military if any soldier
-    // is among the ordered, else the villager's — one cue per
-    // order, however many units it names (generated audio).
-    const orderCue = () => (targets.some((id) => [2, 3, 4, 8, 9, 10].includes(st.kinds[id]))
-      ? 'orderMilitary'
-      : targets.some((id) => st.kinds[id] === 0) ? 'orderVillager' : null);
+    // The order acknowledgement's voice: the ordered group's
+    // class answers — one voice per order, however many units it
+    // names (generated sound set). A sheep-only group stays mute.
+    const orderAck = (action) => {
+      const cls = ackClassForKinds(targets.map((id) => st.kinds[id]));
+      if (cls && cls !== 'animal') playAck(cls, action);
+    };
     // The enemy Town Center (M5): entityAt skips Town Centers, so
     // it gets its own pick — an attack order for everyone who can
     // fight. Our own TC is never a target: clicks on it fall
@@ -5650,7 +5728,7 @@ async function main() {
         if (st.kinds[id] === KIND_SHEEP) continue;
         if (issue({ t: 'attack', e: id, tg: tcT, q: queued || undefined })) any = true;
       }
-      if (any) { playAudioCue(orderCue()); return; }
+      if (any) { orderAck('attack'); return; }
     }
     let t = entityAt(wx, wy);
     // M7: a non-own unit is a target only while currently visible
@@ -5664,7 +5742,7 @@ async function main() {
         if (st.kinds[id] === KIND_SHEEP) continue; // sheep don't fight
         if (issue({ t: 'attack', e: id, tg: t, q: queued || undefined })) any = true;
       }
-      if (any) { playAudioCue(orderCue()); return; }
+      if (any) { orderAck('attack'); return; }
       // Nobody could attack (e.g. only sheep selected): fall through
       // to a plain move toward the point.
     }
@@ -5678,7 +5756,7 @@ async function main() {
         if (st.kinds[id] === KIND_SHEEP) continue;
         if (issue({ t: 'attackb', e: id, b: bT.id })) any = true;
       }
-      if (any) { playAudioCue(orderCue()); return; }
+      if (any) { orderAck('attack'); return; }
     }
     // Build-resume (SEL-11, 2026-10-22): an own foundation —
     // a building still under construction, Farms included —
@@ -5694,7 +5772,7 @@ async function main() {
         // from the world point, so the click point is the order.
         if (issue({ t: 'build', k: bT.kind, e: id, x: wx, y: wy, q: queued || undefined })) any = true;
       }
-      if (any) { playAudioCue('orderVillager'); return; }
+      if (any) { playAck('villager', 'order'); return; }
     }
     // Repair (BLD-17): an own, complete, damaged building takes
     // every selected villager as a repairer. One exception: a
@@ -5712,7 +5790,7 @@ async function main() {
           if (st.kinds[id] !== 0) continue;
           if (issue({ t: 'repair', e: id, b: bT.id, q: queued || undefined })) any = true;
         }
-        if (any) { playAudioCue('orderVillager'); return; }
+        if (any) { playAck('villager', 'order'); return; }
       }
     }
     // Force drop-off (M6, ECO-07): the click lands on OUR Town
@@ -5727,7 +5805,7 @@ async function main() {
       for (const id of targets) {
         if (st.kinds[id] === 0 && carryKind.has(id) && issue({ t: 'force_dep', e: id })) any = true;
       }
-      if (any) { playAudioCue('orderVillager'); return; }
+      if (any) { playAck('villager', 'order'); return; }
     }
     let n = nodeAt(wx, wy);
     // M7: a node on unexplored ground cannot be ordered — the
@@ -5741,7 +5819,7 @@ async function main() {
         any = true;
       }
     }
-    if (any) playAudioCue(orderCue());
+    if (any) orderAck('order');
     // INF-09 click marker: the click named a NODE (an object) —
     // no ground marker, exactly as in DE. A pure ground move
     // (nobody was sent to an object) gets the marker at the
@@ -5789,7 +5867,7 @@ async function main() {
       return;
     }
     if (!queued) repairArm = false;
-    playAudioCue('orderVillager');
+    playAck('villager', 'order');
   }
 
   // Attack-move / patrol targeting (CMB-10/11): the armed click
@@ -5843,7 +5921,8 @@ async function main() {
     }
     if (any) {
       clickMarkers.add('ground', wx, wy, performance.now());
-      playAudioCue('orderMilitary');
+      const cls = ackClassForKinds(targets.map((id) => st.kinds[id]));
+      if (cls) playAck(cls, kind === 'patrol' ? 'order' : 'attack');
     }
     if (!queued) orderArm = null;
     renderCommands();
@@ -5890,6 +5969,7 @@ async function main() {
       playAudioCue('buildingPlaced'); // the wood knock
     } else {
       flash(t('flash.cannotBuildThere', { name: BUILD_NAME[placement.kind] }));
+      playSfx('ui.error'); // the refusal buzz (generated set)
     }
   }
 
@@ -5936,6 +6016,7 @@ async function main() {
       playAudioCue('buildingPlaced');
     } else {
       flash(t('flash.cannotBuildThere', { name: BUILD_NAME[kind] }));
+      playSfx('ui.error'); // the refusal buzz (generated set)
     }
   }
 
@@ -6029,7 +6110,7 @@ async function main() {
       } else {
         selectUnits(new Set(boxed));
       }
-      if (boxed.length) playAudioCue('select');
+      if (boxed.length) playSelectAck();
       return;
     }
     // Plain click.
@@ -6043,7 +6124,7 @@ async function main() {
       } else {
         selectUnits(new Set([v]));
       }
-      playAudioCue('select');
+      playSelectAck();
     } else if (!ev.shiftKey) {
       // No unit hit: an animal that is not ours selects for
       // information (see animalAt); the Town Center and placed
@@ -6065,12 +6146,12 @@ async function main() {
       if (tc != null && (st.owners[tc] === localOwner
           || cellExploredW(st.pos[tc * 2], st.pos[tc * 2 + 1]))) {
         selectBuilding({ type: 'tc', id: tc, owner: st.owners[tc] });
-        playAudioCue('select');
+        playSelectAck();
       } else {
         const b = buildingAt(wx, wy);
         if (b && (b.owner !== foeOwner() || cellExploredW(b.x, b.y))) {
           selectBuilding({ type: 'building', id: b.id, kind: b.kind, owner: b.owner });
-          playAudioCue('select');
+          playSelectAck();
         } else selectUnits(new Set());
       }
     }
@@ -6095,7 +6176,7 @@ async function main() {
     } else {
       selectUnits(new Set(same));
     }
-    if (same.length) playAudioCue('select');
+    if (same.length) playSelectAck();
   });
 
   // Zoom toward the cursor with the mouse wheel.
@@ -6460,6 +6541,12 @@ function updateTreeTracking(nodes, now) {
       stage: prev.frac > 2 / 3 ? 0 : prev.frac > 1 / 3 ? 1 : 2,
       ang: treeFallAngle(prev.x, prev.y), t0: now, stumpDone: false,
     });
+    // Generated audio: the fall itself — creak, crash and thump,
+    // distance-scaled like every world sound (never in replays).
+    if (!playback) {
+      const gain = combatGainAt(prev.x, prev.y);
+      if (gain > 0.02) playSfx('work.treefall', gain);
+    }
   }
   // Finished falls become stumps.
   for (let k = fallingTrees.length - 1; k >= 0; k--) {
@@ -8356,6 +8443,15 @@ function unitArtPick(unit, action, n) {
 // the world facing `dir`) and the side-view picker below; `n` is
 // the side-view frame number, the sheet frame is derived from the
 // action + tick in dirSheetFrame.
+
+// Generated combat audio bookkeeping: the last attack marker
+// sounded per entity, so a swing sounds once, not per frame.
+const atkSndMark = new Map();
+function combatGainAt(wx, wy) {
+  const [ccx, ccy] = s2w(canvas.width / 2, canvas.height / 2, camS, camOx, camOy);
+  return distanceGain(Math.hypot(wx - ccx, wy - ccy));
+}
+
 function unitActionFor(unit, i, wx, wy) {
   const pose = unitPoseFor(i, wx, wy);
   const tick = sim.tick_count();
@@ -8414,6 +8510,33 @@ function unitActionFor(unit, i, wx, wy) {
     } else if (foeNearUnit(i, wx, wy)) {
       action = 'attack';
       n = Math.floor(tick / 7) % 3 + 1;
+    }
+  }
+  // Generated combat audio: this runs on the draw path, so only
+  // visible units are heard. The strike frame of the attack arc
+  // (n == 2 of windup/strike/recover) sounds the weapon once per
+  // swing; a fresh shot looses the bow and schedules the arrow's
+  // landing a flight-time later.
+  if (!playback) {
+    if (action === 'attack') {
+      const mark = `atk:${n}`;
+      if (n === 2 && atkSndMark.get(i) !== mark) {
+        const gain = combatGainAt(wx, wy);
+        if (gain > 0.02) {
+          playSfx(unit === 'spearman' ? 'hit.spear' : 'hit.sword', gain);
+        }
+      }
+      atkSndMark.set(i, mark);
+    } else if (action === 'shoot' && shotTick >= 0) {
+      const mark = `shot:${shotTick}`;
+      if (atkSndMark.get(i) !== mark) {
+        atkSndMark.set(i, mark);
+        const gain = combatGainAt(wx, wy);
+        if (gain > 0.02) {
+          playSfx('bow.release', gain);
+          playSfx('arrow.hit', gain * 0.8, 0.24);
+        }
+      }
     }
   }
   return { action, n, face, dir, shotTick };
@@ -8502,6 +8625,8 @@ let lastAge = -1; // M6: the last age tag shown in the top bar
 // match (resetAudioWorldState, next to the feed's reset).
 let audioPrevHp = null;
 let audioPrevHpAll = null; // every entity/building, for combat noise
+let audioPrevMetaAll = null; // kind/position memory for deaths (generated audio)
+let audioPrevSheepOwners = new Map(); // sheep conversions bleat (generated audio)
 let lastAttackAlert = null; // INF-01: { x, y, at } of the latest located alert
 let audioHousedPrev = false;
 
@@ -8571,22 +8696,39 @@ function updateAudioWorldState(housedNow) {
   const hpAll = new Map();
   const meta = new Map();
   const st = entityState();
+  const sheepOwners = new Map();
   for (let i = 0; i < st.count; i++) {
     const key = 'e' + i;
     hpAll.set(key, st.hp[i * 2]);
-    meta.set(key, { x: st.pos[i * 2], y: st.pos[i * 2 + 1] });
+    meta.set(key, { x: st.pos[i * 2], y: st.pos[i * 2 + 1], kind: st.kinds[i] });
     if (st.owners[i] === localOwner) hp.set(key, st.hp[i * 2]);
+    if (st.kinds[i] === 5) {
+      sheepOwners.set(i, st.owners[i]);
+      // A sheep joining our herd bleats — the conversion sound
+      // of the reference (generated set, distance-scaled).
+      const prevOwner = audioPrevSheepOwners.get(i);
+      if (prevOwner != null && prevOwner !== localOwner
+          && st.owners[i] === localOwner) {
+        const [ccx, ccy] = s2w(canvas.width / 2, canvas.height / 2, camS, camOx, camOy);
+        const gain = distanceGain(Math.hypot(st.pos[i * 2] - ccx, st.pos[i * 2 + 1] - ccy));
+        if (gain > 0.02) playSfx('sheep.baa', gain);
+      }
+    }
   }
   for (const b of buildingList()) {
     const key = 'b' + b.id;
     hpAll.set(key, b.hpFrac);
-    meta.set(key, { x: b.x, y: b.y });
+    meta.set(key, { x: b.x, y: b.y, kind: b.kind, building: true });
     if (b.owner === localOwner) hp.set(key, b.hpFrac);
   }
   if (audioPrevHp) {
     const drop = firstHpDrop(audioPrevHp, hp, meta);
     if (drop) {
-      playAudioCue('underAttack');
+      // The alert is typed, as in the reference: bells when the
+      // town is under attack (a building, or a villager), the
+      // horn when soldiers are taking the hit.
+      const dm = meta.get(drop.key);
+      playAttackAlert(drop.key.startsWith('b') || (dm && dm.kind === 0));
       const now = performance.now();
       if (alertDue(lastAttackAlert, now)) {
         lastAttackAlert = { x: drop.x, y: drop.y, at: now };
@@ -8596,11 +8738,49 @@ function updateAudioWorldState(housedNow) {
     const fight = nearestHpDrop(audioPrevHpAll, hpAll, meta, ccx, ccy);
     if (fight) {
       const gain = distanceGain(fight.dist);
-      if (gain > 0.02) playAudioCueScaled('combat', gain);
+      if (gain > 0.02) {
+        playAudioCueScaled('combat', gain);
+        // A fighting animal growls over the fray (generated set).
+        const fm = meta.get(fight.key);
+        if (fm && fm.kind === 11) playSfx('wolf.growl', gain);
+        else if (fm && fm.kind === 6) playSfx('boar.grunt', gain);
+      }
+    }
+    // Generated audio: deaths and destructions ride the same
+    // all-owners diff — an entity whose hp crossed to a
+    // tombstone, or a building that left the list entirely.
+    if (audioPrevMetaAll) {
+      const DEATH_KEYS = {
+        0: 'death.human', 2: 'death.cavalry', 3: 'death.human',
+        4: 'death.human', 5: 'sheep.death', 6: 'boar.death',
+        7: 'deer.death', 8: 'death.human', 9: 'death.human',
+        10: 'death.human', 11: 'wolf.death',
+      };
+      for (const [key, before] of audioPrevHpAll) {
+        const m = audioPrevMetaAll.get(key);
+        if (!m) continue;
+        const cur = hpAll.get(key);
+        const dead = m.building
+          ? (cur == null || cur <= 0)
+          : (before >= 1 && (cur == null || cur < 1));
+        if (!dead) continue;
+        const gain = distanceGain(Math.hypot(m.x - ccx, m.y - ccy));
+        if (gain <= 0.02) continue;
+        // Wall segments fall silently — only real structures
+        // crash (building kinds 9 and 14 are the two walls).
+        if (m.building) {
+          if (m.kind !== 9 && m.kind !== 14) playSfx('build.destroy', gain);
+        } else if (DEATH_KEYS[m.kind]) {
+          playSfx(DEATH_KEYS[m.kind], gain);
+        }
+      }
     }
   }
+  playAmbience();
   audioPrevHp = hp;
   audioPrevHpAll = hpAll;
+  audioPrevMetaAll = meta;
+  audioPrevSheepOwners = sheepOwners;
 }
 
 /// One training attempt for a train button; true when the sim
@@ -8786,8 +8966,8 @@ function runCommandButton(id, times = 1) {
         && issue({ t: side === 'buy' ? 'mbuy' : 'msell', b: selectedBuilding.id, r: tag })) {
         done++;
       }
-      if (done === 0) flash(t('block.cannotTrade'));
-      else playAudioCue('click');
+      if (done === 0) { flash(t('block.cannotTrade')); playSfx('ui.error'); }
+      else if (!playSfx('ui.coin')) playAudioCue('click');
     }
   }
 }

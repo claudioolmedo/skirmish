@@ -1,0 +1,267 @@
+{
+ "version": 1,
+ "generator": "tools/sound-gen (see SOUND-CATALOG.md)",
+ "phrases": {
+  "ack.villager.select": [
+   "Yes?",
+   "Ready."
+  ],
+  "ack.villager.order": [
+   "Right away.",
+   "On my way."
+  ],
+  "ack.villager.attack": [
+   "I'll fight!",
+   "Take that!"
+  ],
+  "ack.infantry.select": [
+   "Yes, sir?",
+   "At your command."
+  ],
+  "ack.infantry.order": [
+   "Forward!",
+   "As ordered."
+  ],
+  "ack.infantry.attack": [
+   "Attack!",
+   "Charge!"
+  ],
+  "ack.archer.select": [
+   "Archer ready.",
+   "Yes?"
+  ],
+  "ack.archer.order": [
+   "Moving.",
+   "To position."
+  ],
+  "ack.archer.attack": [
+   "Loose!",
+   "Fire!"
+  ],
+  "ack.cavalry.select": [
+   "Mounted and ready.",
+   "Yes, sir?"
+  ],
+  "ack.cavalry.order": [
+   "Riding out!",
+   "At the gallop!"
+  ],
+  "ack.cavalry.attack": [
+   "Charge!",
+   "Ride them down!"
+  ]
+ },
+ "voices": {
+  "ack.villager.select": "am_michael",
+  "ack.villager.order": "am_michael",
+  "ack.villager.attack": "am_michael",
+  "ack.infantry.select": "am_adam",
+  "ack.infantry.order": "am_adam",
+  "ack.infantry.attack": "am_adam",
+  "ack.archer.select": "af_sarah",
+  "ack.archer.order": "af_sarah",
+  "ack.archer.attack": "af_sarah",
+  "ack.cavalry.select": "am_eric",
+  "ack.cavalry.order": "am_eric",
+  "ack.cavalry.attack": "am_eric"
+ },
+ "sounds": {
+  "ack.archer.attack": [
+   "ack.archer.attack-1.wav",
+   "ack.archer.attack-2.wav"
+  ],
+  "ack.archer.order": [
+   "ack.archer.order-1.wav",
+   "ack.archer.order-2.wav"
+  ],
+  "ack.archer.select": [
+   "ack.archer.select-1.wav",
+   "ack.archer.select-2.wav"
+  ],
+  "ack.cavalry.attack": [
+   "ack.cavalry.attack-1.wav",
+   "ack.cavalry.attack-2.wav"
+  ],
+  "ack.cavalry.order": [
+   "ack.cavalry.order-1.wav",
+   "ack.cavalry.order-2.wav"
+  ],
+  "ack.cavalry.select": [
+   "ack.cavalry.select-1.wav",
+   "ack.cavalry.select-2.wav"
+  ],
+  "ack.infantry.attack": [
+   "ack.infantry.attack-1.wav",
+   "ack.infantry.attack-2.wav"
+  ],
+  "ack.infantry.order": [
+   "ack.infantry.order-1.wav",
+   "ack.infantry.order-2.wav"
+  ],
+  "ack.infantry.select": [
+   "ack.infantry.select-1.wav",
+   "ack.infantry.select-2.wav"
+  ],
+  "ack.villager.attack": [
+   "ack.villager.attack-1.wav",
+   "ack.villager.attack-2.wav"
+  ],
+  "ack.villager.order": [
+   "ack.villager.order-1.wav",
+   "ack.villager.order-2.wav"
+  ],
+  "ack.villager.select": [
+   "ack.villager.select-1.wav",
+   "ack.villager.select-2.wav"
+  ],
+  "alert.bell": [
+   "alert.bell-1.wav"
+  ],
+  "alert.horn": [
+   "alert.horn-1.wav"
+  ],
+  "ambient.bird": [
+   "ambient.bird-1.wav",
+   "ambient.bird-2.wav",
+   "ambient.bird-3.wav"
+  ],
+  "ambient.wind": [
+   "ambient.wind-1.wav"
+  ],
+  "arrow.hit": [
+   "arrow.hit-1.wav",
+   "arrow.hit-2.wav"
+  ],
+  "boar.death": [
+   "boar.death-1.wav"
+  ],
+  "boar.grunt": [
+   "boar.grunt-1.wav"
+  ],
+  "bow.release": [
+   "bow.release-1.wav",
+   "bow.release-2.wav"
+  ],
+  "build.complete": [
+   "build.complete-1.wav"
+  ],
+  "build.destroy": [
+   "build.destroy-1.wav"
+  ],
+  "build.place": [
+   "build.place-1.wav"
+  ],
+  "build.research": [
+   "build.research-1.wav"
+  ],
+  "death.cavalry": [
+   "death.cavalry-1.wav"
+  ],
+  "death.human": [
+   "death.human-1.wav",
+   "death.human-2.wav"
+  ],
+  "deer.death": [
+   "deer.death-1.wav"
+  ],
+  "hit.building": [
+   "hit.building-1.wav",
+   "hit.building-2.wav"
+  ],
+  "hit.knife": [
+   "hit.knife-1.wav",
+   "hit.knife-2.wav"
+  ],
+  "hit.spear": [
+   "hit.spear-1.wav",
+   "hit.spear-2.wav"
+  ],
+  "hit.sword": [
+   "hit.sword-1.wav",
+   "hit.sword-2.wav",
+   "hit.sword-3.wav"
+  ],
+  "horse.hooves": [
+   "horse.hooves-1.wav"
+  ],
+  "horse.neigh": [
+   "horse.neigh-1.wav",
+   "horse.neigh-2.wav"
+  ],
+  "housed.warn": [
+   "housed.warn-1.wav"
+  ],
+  "sheep.baa": [
+   "sheep.baa-1.wav",
+   "sheep.baa-2.wav"
+  ],
+  "sheep.death": [
+   "sheep.death-1.wav"
+  ],
+  "sting.ageup": [
+   "sting.ageup-1.wav"
+  ],
+  "sting.defeat": [
+   "sting.defeat-1.wav"
+  ],
+  "sting.victory": [
+   "sting.victory-1.wav"
+  ],
+  "ui.coin": [
+   "ui.coin-1.wav"
+  ],
+  "ui.error": [
+   "ui.error-1.wav"
+  ],
+  "ui.ready": [
+   "ui.ready-1.wav"
+  ],
+  "wolf.death": [
+   "wolf.death-1.wav"
+  ],
+  "wolf.growl": [
+   "wolf.growl-1.wav"
+  ],
+  "work.chop": [
+   "work.chop-1.wav",
+   "work.chop-2.wav",
+   "work.chop-3.wav"
+  ],
+  "work.dropoff": [
+   "work.dropoff-1.wav"
+  ],
+  "work.farm": [
+   "work.farm-1.wav",
+   "work.farm-2.wav"
+  ],
+  "work.hammer": [
+   "work.hammer-1.wav",
+   "work.hammer-2.wav",
+   "work.hammer-3.wav"
+  ],
+  "work.minegold": [
+   "work.minegold-1.wav",
+   "work.minegold-2.wav"
+  ],
+  "work.minestone": [
+   "work.minestone-1.wav",
+   "work.minestone-2.wav"
+  ],
+  "work.treefall": [
+   "work.treefall-1.wav"
+  ]
+ },
+ "cueSounds": {
+  "ageAdvance": "sting.ageup",
+  "victory": "sting.victory",
+  "defeat": "sting.defeat",
+  "researchComplete": "build.research",
+  "constructionComplete": "build.complete",
+  "buildingPlaced": "build.place",
+  "housed": "housed.warn",
+  "villagerTrained": "ui.ready",
+  "trained": "ui.ready",
+  "combat": "hit.sword",
+  "work": "work.chop"
+ }
+}
