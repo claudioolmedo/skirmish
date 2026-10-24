@@ -29,6 +29,7 @@
 
 ## Scope check
 
+- [ ] I submit this contribution under the Apache License 2.0 (inbound = outbound — see docs/LEGAL.md)
 - [ ] No game assets, code, text, or data copied from any existing game (clean room — public documentation only)
 - [ ] New sim state, if any, is covered by the state hash and a determinism test
 - [ ] Docs updated in the same PR where a status or fact changed

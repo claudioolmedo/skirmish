@@ -123,8 +123,9 @@ Skirmish II is an original implementation inspired by a classic game:
 4. Open the PR with a description that names the **rule IDs you
    implemented** (e.g. "Implements ECO-09 — gatherers retarget to a
    same-type neighbor") and says how you tested determinism.
-5. Contributions are made under the project's license once it is
-   published by the maintainer.
+5. Contributions are submitted under the Apache License 2.0 — the
+   project's license (inbound = outbound; see the `LICENSE` file and
+   [docs/LEGAL.md](docs/LEGAL.md)).
 
 Not sure where to start? The "Good first contributions" table in
 [docs/ROADMAP.md](docs/ROADMAP.md) is maintained exactly for that, and

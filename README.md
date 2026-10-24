@@ -98,10 +98,32 @@ down, rule by rule, so anyone can pick it up:
   art is produced
 - [docs/SUSTAINABILITY.md](docs/SUSTAINABILITY.md) — the self-sustaining
   system: how the game funds and maintains itself for the long term
+- [docs/LEGAL.md](docs/LEGAL.md) — the legal foundation: license,
+  clean-room method, sources policy, and asset provenance
 - [CONTRIBUTING.md](CONTRIBUTING.md) — how to build, test, and submit
 - [docs/CONTRIBUTORS-SYSTEM.md](docs/CONTRIBUTORS-SYSTEM.md) — how to
   claim an issue, what we promise back, and how contributors get credited
 
-## License
+## License & legal
 
-To be decided.
+**Code and art.** All of Skirmish II's code and art are original works,
+created for this project, and are licensed under the
+[Apache License 2.0](LICENSE). You may use, modify, and redistribute
+them under that license's terms.
+
+**Independence.** Skirmish II is an independent community project. It is
+**not affiliated with, endorsed by, or sponsored by Microsoft, Ensemble
+Studios, or Xbox Game Studios**. *Age of Empires* is a trademark of
+Microsoft; the name is used here only descriptively, to say what
+inspired the game.
+
+**Clean room.** The game was built from scratch using public
+documentation only. Game mechanics, rules, and numeric values are facts
+and ideas documented publicly (for example, on the community wiki) —
+Skirmish II uses no Microsoft code, art, music, sounds, fonts, or other
+assets anywhere. See [docs/LEGAL.md](docs/LEGAL.md) for the full
+statement of method, sources, and asset provenance.
+
+**Contributions.** Contributions are welcome, and by submitting one you
+license it to the project under the same Apache License 2.0
+(inbound = outbound).
