@@ -3,8 +3,9 @@ name = "skirmish-sim"
 version = "0.1.0"
 edition = "2021"
 description = "Skirmish — headless deterministic simulation core (M2)"
-# License: to be decided by the project owner. No LICENSE file is shipped
-# until that decision is made.
+license = "Apache-2.0"
+# Licensed under the Apache License 2.0 — see the LICENSE file at the
+# repository root and docs/LEGAL.md.
 
 [lib]
 # cdylib so the wasm32 target emits a real .wasm for the JS shell (M4);
