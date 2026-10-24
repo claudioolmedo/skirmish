@@ -628,6 +628,52 @@ process.on('unhandledRejection', (e) => unhandled.push(e));
   console.log('PASS (11) top edge held 180 frames: cursor pinned to the edge, view pans up');
 }
 
+// (12) Escape NEVER shows the pause menu (Claudio, 2026-10-23:
+//      "a única forma de mostrar o menu é apertar menu, e ESC é
+//      para sair do modo tela cheia"). The Menu button is the
+//      ONLY way in — and it toggles back out, windowed and under
+//      lock alike. Esc is the browser's key (leave fullscreen /
+//      lock); in-game it only backs out of transient states.
+//      The help overlay is pre-dismissed so each Escape falls
+//      through every transient branch to where the pause toggle
+//      used to live.
+{
+  const tab = makeTab('https://skirmish.online/play/');
+  const calls = installCaptureApis(tab);
+  await boot(tab);
+  tab.el('btn-solo').click();
+  await sleep(1500);
+  assert.equal(inMatch(tab), true, 'match running');
+  const menuShown = () => tab.el('pause-menu').style.display === 'flex';
+  assert.equal(menuShown(), false, 'menu starts hidden');
+  tab.el('help-overlay').style.display = 'none';
+  // Windowed: Escape does not open the menu…
+  tab.fireWindow('keydown', { code: 'Escape' });
+  assert.equal(menuShown(), false, 'Escape does NOT show the pause menu (windowed)');
+  // …the Menu button does…
+  tab.el('pause-btn').click();
+  assert.equal(menuShown(), true, 'the Menu button shows the pause menu');
+  // …Escape does not act on the open menu either…
+  tab.fireWindow('keydown', { code: 'Escape' });
+  assert.equal(menuShown(), true, 'Escape leaves the open menu alone');
+  // …and the Menu button toggles it back closed.
+  tab.el('pause-btn').click();
+  assert.equal(menuShown(), false, 'the Menu button hides the pause menu again');
+  // Captured: the same rule under pointer lock.
+  tab.document.pointerLockElement = tab.el('view');
+  tab.fireDocument('pointerlockchange', {}, false);
+  tab.fireWindow('keydown', { code: 'Escape' });
+  assert.equal(menuShown(), false, 'Escape does NOT show the pause menu (captured)');
+  tab.hitEl = tab.el('pause-btn');
+  tab.fireDocument('click', { button: 0 });
+  assert.equal(menuShown(), true, 'the routed Menu click opens the menu under lock');
+  tab.fireDocument('click', { button: 0 });
+  assert.equal(menuShown(), false, 'a second routed Menu click closes it under lock');
+  assert.equal(tab.document.pointerLockElement, tab.el('view'), 'still locked throughout');
+  assert.equal(calls.exitLock, 0, 'the lock was never exited for the menu');
+  console.log('PASS (12) Escape never shows the menu; the Menu button toggles it, windowed + locked');
+}
+
 assert.equal(unhandled.length, 0, 'no unhandled rejection in any case');
 console.log('FULLSCREEN SMOKE: all cases passed');
 process.exit(0);
