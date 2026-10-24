@@ -89,6 +89,13 @@
 
 <canvas id="view"></canvas>
 
+<!-- The game's own cursor, shown ONLY while the pointer is locked
+     (fullscreen + pointer lock on match start): the OS cursor is
+     hidden by the lock, so app.js moves this arrow with the
+     virtual cursor. pointer-events:none — it never swallows a
+     click or an elementFromPoint hit-test. -->
+<div id="lock-cursor" hidden aria-hidden="true"><svg width="26" height="26" viewBox="0 0 26 26"><path d="M3 1 L3 19 L8.2 15.4 L11 22 L14.2 20.6 L11.4 14 L18 14 Z" fill="#e8dcc0" stroke="#20150c" stroke-width="1.6" stroke-linejoin="round"/></svg></div>
+
 <!-- TOP: resource bar -->
 <header class="ui-topbar">
   <div class="ui-res-group" id="res-group" role="status" aria-label="Resources">

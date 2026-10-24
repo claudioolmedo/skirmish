@@ -136,6 +136,10 @@ const pauseBtn = document.getElementById('pause-btn');
 // a pause-menu entry, both driving the one toggleFullscreen().
 const fullscreenBtn = document.getElementById('fullscreen-btn');
 const pauseFullscreenBtn = document.getElementById('pause-fullscreen-btn');
+// The app-drawn cursor for pointer lock (2026-10-23): shown only
+// while the pointer is locked; the lock hides the OS cursor, so
+// this arrow is what the player aims with then.
+const lockCursorEl = document.getElementById('lock-cursor');
 // Idle indicators (M4, INF-03): always-visible counts in the top bar;
 // clicking one does what the '.' / ',' keys do (SEL-08/09).
 const idleVilBtn = document.getElementById('idle-vil-btn');
@@ -466,6 +470,8 @@ let playback = null; // replay playback state while a replay runs
 /// decision — Restart and Back to menu are the exits.
 function showMatchEnd(ms) {
   matchEnded = true;
+  // The end card (score, feedback form) is real-cursor work.
+  exitGamePointerLock();
   const secs = Math.floor(sim.tick_count() / 60);
   const mm = String(Math.floor(secs / 60)).padStart(2, '0');
   const ss = String(secs % 60).padStart(2, '0');
@@ -2348,12 +2354,17 @@ function applyEdgeScroll(now) {
   camOy += v.y * step;
 }
 
-// --- Fullscreen (2026-10-19) -----------------------------------------------
-// One toggle for the top-bar button and the pause-menu entry:
-// fullscreen keeps the pointer inside the game (with viewport-
-// edge scrolling it can ride the screen edges without slipping
-// out of the window). The glyph/title track the real state via
-// fullscreenchange, so Esc-out-of-fullscreen stays in sync too.
+// --- Fullscreen + pointer lock (2026-10-19; lock 2026-10-23) ---------------
+// The streaming model (Claudio, 2026-10-23, after GeForce NOW):
+// entering a match takes the game fullscreen AND captures the
+// pointer (pointer lock), so the mouse rides the screen edges —
+// the top edge included — without ever slipping out to the
+// browser chrome; Alt+Tab and Esc stay the ways out, exactly as
+// in a streaming client. Under lock the browser freezes every
+// event's clientX/Y at the capture point, so the game keeps a
+// VIRTUAL cursor (below) and every coordinate read goes through
+// it (evClient, beside eventWorld). The top-bar button and the
+// pause-menu entry remain the manual fullscreen toggle.
 function isFullscreen() {
   return !!(document.fullscreenElement || document.webkitFullscreenElement);
 }
@@ -2369,23 +2380,220 @@ function syncFullscreenUi() {
   }
 }
 
+// The fullscreen request on its own, shared by the toggle and by
+// match start: feature-detected both ways (standard, then the
+// webkit prefix), the returned promise handed back so callers can
+// chain on its settling. A browser without the API (iOS Safari
+// on iPhone) simply has neither method — the game plays windowed,
+// exactly as before. NEVER a gate on play.
+function requestGameFullscreen() {
+  const el = document.documentElement;
+  try {
+    if (el.requestFullscreen) return el.requestFullscreen();
+    if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+  } catch { /* a refused request must never break a start */ }
+  return undefined;
+}
+
 function toggleFullscreen() {
   if (isFullscreen()) {
     const exit = document.exitFullscreen || document.webkitExitFullscreen;
     if (exit) exit.call(document);
     return;
   }
-  const el = document.documentElement;
-  if (el.requestFullscreen) {
-    const p = el.requestFullscreen();
+  const p = requestGameFullscreen();
+  if (p && p.catch) p.catch(() => {});
+}
+
+// fullscreenchange: the button glyph tracks the real state (so
+// Esc-out-of-fullscreen stays in sync), and the canvas backing
+// store refits NOW — the window resize event lands too and its
+// fit is a no-op delta by then, but the first fullscreen frame
+// must already be the right size (top-edge scroll reads the
+// viewport on the very next frame).
+function onFullscreenChange() {
+  syncFullscreenUi();
+  fitCanvas();
+}
+
+// --- Pointer lock + the virtual cursor ------------------------------
+// pointerLocked mirrors document.pointerLockElement === canvas
+// (kept by syncPointerLock on pointerlockchange). virtualCursor
+// is the pointer's true position while locked: mousemove deltas
+// accumulate into it, clamped to the viewport, so pushing the
+// mouse up keeps the cursor ON the top edge and the M13 edge
+// scroll pans on, uninterrupted — the core of Claudio's report.
+let pointerLocked = false;
+const virtualCursor = { x: 0, y: 0 };
+
+function positionLockCursor() {
+  if (lockCursorEl) {
+    lockCursorEl.style.transform =
+      `translate(${virtualCursor.x}px, ${virtualCursor.y}px)`;
+  }
+}
+
+function syncPointerLock() {
+  const el = document.pointerLockElement || document.webkitPointerLockElement;
+  pointerLocked = !!el && el === canvas;
+  if (pointerLocked) {
+    // Seed where the real cursor was captured: no jump on entry.
+    if (mouseClientPt) {
+      virtualCursor.x = mouseClientPt.x;
+      virtualCursor.y = mouseClientPt.y;
+    } else {
+      virtualCursor.x = (window.innerWidth || 0) / 2;
+      virtualCursor.y = (window.innerHeight || 0) / 2;
+    }
+    positionLockCursor();
+  }
+  if (lockCursorEl) lockCursorEl.hidden = !pointerLocked;
+}
+
+function advanceVirtualCursor(e) {
+  virtualCursor.x = Math.min(
+    Math.max(virtualCursor.x + (e.movementX || 0), 0),
+    window.innerWidth || 0);
+  virtualCursor.y = Math.min(
+    Math.max(virtualCursor.y + (e.movementY || 0), 0),
+    window.innerHeight || 0);
+  positionLockCursor();
+}
+
+// The lock request: silent in every failure mode — no API
+// (touch devices, iOS), no user gesture (a network 'go' is
+// none), Chrome's re-lock cooldown right after an Esc exit.
+// A failed capture never blocks or delays play; the next click
+// into the game retries.
+function requestGamePointerLock() {
+  if (pointerLocked || !canvas) return;
+  try {
+    const fn = canvas.requestPointerLock || canvas.webkitRequestPointerLock;
+    if (!fn) return;
+    const p = fn.call(canvas);
     if (p && p.catch) p.catch(() => {});
-  } else if (el.webkitRequestFullscreen) {
-    el.webkitRequestFullscreen();
+  } catch { /* cooldown / no gesture: silent by design */ }
+}
+
+function exitGamePointerLock() {
+  if (!pointerLocked) return;
+  try {
+    if (document.exitPointerLock) document.exitPointerLock();
+    else if (document.webkitExitPointerLock) document.webkitExitPointerLock();
+  } catch { /* already out: nothing to do */ }
+}
+
+// Entering play (Claudio, 2026-10-23): fullscreen first, then the
+// lock — chained on the fullscreen promise's settling (either
+// way: a refused fullscreen still leaves the lock, and a missing
+// fullscreen API locks windowed). Called ONLY from user-gesture
+// handlers: the solo start, the room's Start button, Restart,
+// Resume, and clicks back into the game — the APIs demand a
+// gesture, and the match start itself (after the async load)
+// no longer has one.
+function enterGameCapture() {
+  if (!isFullscreen()) {
+    const p = requestGameFullscreen();
+    if (p && typeof p.then === 'function') {
+      if (p.catch) p.catch(() => {});
+      p.then(requestGamePointerLock, requestGamePointerLock);
+      return;
+    }
+  }
+  requestGamePointerLock();
+}
+
+// --- Locked-event routing -------------------------------------------
+// Under pointer lock the browser retargets EVERY mouse event to
+// the locked element (the canvas): the HUD would go deaf — no
+// button clicks, the minimap unreachable. This router (document,
+// capture phase, wired in main) restores the unlocked hit-testing
+// by hand while locked:
+//   - mousemove only advances the virtual cursor (never held back);
+//   - an event whose virtual position is over the canvas passes
+//     through untouched — under lock the real event already
+//     targets the canvas, and its handlers read the virtual
+//     cursor via evClient, so they never notice the difference;
+//   - an event over anything else (a HUD button, the minimap, an
+//     overlay control) is suppressed and re-dispatched to the
+//     element actually under the virtual cursor, carrying the
+//     virtual coordinates and bubbling as a real event does —
+//     the same handlers run, with the same numbers, and window-
+//     level listeners (selection end, the drag pan) still see it.
+// A press routed to a HUD element also forwards the rest of that
+// drag (moves + the release) to it — the pointer capture the
+// minimap would have set for itself, done by hand.
+const LOCK_ROUTED_TYPES = [
+  'mousedown', 'mouseup', 'pointerdown', 'pointermove',
+  'pointerup', 'pointercancel', 'click', 'dblclick', 'contextmenu',
+  'wheel',
+];
+let lockDragTarget = null;
+
+function fireSynthetic(target, type, src) {
+  const init = {
+    bubbles: true, cancelable: true,
+    clientX: virtualCursor.x, clientY: virtualCursor.y,
+    button: src.button || 0, buttons: src.buttons || 0,
+    shiftKey: !!src.shiftKey, ctrlKey: !!src.ctrlKey,
+    altKey: !!src.altKey, metaKey: !!src.metaKey,
+    detail: src.detail || 0,
+  };
+  let ev = null;
+  if (typeof PointerEvent === 'function' && type.startsWith('pointer')) {
+    try {
+      ev = new PointerEvent(type, {
+        ...init,
+        pointerId: src.pointerId != null ? src.pointerId : 1,
+        pointerType: 'mouse', isPrimary: true,
+      });
+    } catch { ev = null; }
+  }
+  if (!ev && typeof MouseEvent === 'function') {
+    try { ev = new MouseEvent(type, init); } catch { ev = null; }
+  }
+  if (ev) { target.dispatchEvent(ev); return; }
+  // Stub DOM (the node smokes): drive the element's own registry.
+  if (typeof target.dispatch === 'function') target.dispatch(type, init);
+}
+
+function routeLockedEvent(type, e) {
+  if (!pointerLocked) return;
+  if (type === 'pointermove' && lockDragTarget) {
+    e.stopPropagation();
+    fireSynthetic(lockDragTarget, type, e);
+    return;
+  }
+  const hit = document.elementFromPoint
+    ? document.elementFromPoint(virtualCursor.x, virtualCursor.y)
+    : null;
+  if (!hit || hit === canvas) return; // over the game: pass through
+  e.stopPropagation();
+  if (type === 'wheel') return; // no HUD wheel handlers exist to feed
+  if (type === 'contextmenu') e.preventDefault();
+  if (type === 'pointerup' || type === 'pointercancel') {
+    fireSynthetic(lockDragTarget || hit, type, e);
+    lockDragTarget = null;
+    return;
+  }
+  fireSynthetic(hit, type, e);
+  if (type === 'pointerdown') lockDragTarget = hit;
+}
+
+function wirePointerLockRouting() {
+  document.addEventListener('mousemove', (e) => {
+    if (pointerLocked) advanceVirtualCursor(e);
+  }, true);
+  for (const type of LOCK_ROUTED_TYPES) {
+    document.addEventListener(type, (e) => routeLockedEvent(type, e), true);
   }
 }
 
 function setPaused(v) {
   if (!playing) return;
+  // The pause menu is worked with the real cursor (2026-10-23):
+  // opening it hands the pointer back; Resume re-captures.
+  if (v) exitGamePointerLock();
   const wasPaused = paused;
   paused = v;
   pauseMenu.style.display = paused ? 'flex' : 'none';
@@ -2625,6 +2833,8 @@ function showOverlay(el, show) {
 /// playback) and at every return (openLobby, leaving a match,
 /// back-to-menu) — nowhere else.
 function setInMatch(on) {
+  // Leaving the game view (lobby, menu) hands the pointer back.
+  if (!on) exitGamePointerLock();
   if (document.body) document.body.classList.toggle('in-match', !!on);
 }
 
@@ -2759,6 +2969,7 @@ function postTelemetry(result) {
 function netMatchEnd(localMs, opts) {
   if (!net || net.phase === 'ended') return;
   net.phase = 'ended';
+  exitGamePointerLock(); // end/desync cards are real-cursor work
   if (net.session) net.session.stop();
   if (netUi) netUi.netWait.hidden = true;
   showOverlay(netUi && netUi.peerOverlay, false);
@@ -3336,6 +3547,10 @@ function toggleReady() {
     guestSlot: net.guestSlot,
   })) return;
   net.selfReady = !net.selfReady;
+  // Start (2026-10-23): readying up IS this player's Play gesture
+  // — capture fullscreen + pointer lock now; the match itself
+  // begins at 'go', a network moment with no gesture to spend.
+  if (net.selfReady) enterGameCapture();
   net.client.send({ type: 'ready', ready: net.selfReady });
   renderRoom();
   maybeStartMatch();
@@ -4130,6 +4345,10 @@ async function playSoloFromLobby() {
     playing = true;
     return;
   }
+  // Play (2026-10-23): fullscreen + pointer lock, asked HERE —
+  // inside the click, while the gesture still counts; the start
+  // itself lands after the async load, far past it.
+  enterGameCapture();
   if (net) teardownNet();
   showOverlay(netUi.onlineOverlay, false);
   // Solo loading screen: one seat — you, loading, then loaded.
@@ -4528,9 +4747,23 @@ async function main() {
   pauseBtn.addEventListener('click', () => setPaused(true));
   if (fullscreenBtn) fullscreenBtn.addEventListener('click', toggleFullscreen);
   if (pauseFullscreenBtn) pauseFullscreenBtn.addEventListener('click', toggleFullscreen);
-  document.addEventListener('fullscreenchange', syncFullscreenUi);
-  document.addEventListener('webkitfullscreenchange', syncFullscreenUi);
+  document.addEventListener('fullscreenchange', onFullscreenChange);
+  document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+  document.addEventListener('pointerlockchange', syncPointerLock);
+  document.addEventListener('webkitpointerlockchange', syncPointerLock);
   syncFullscreenUi();
+  // Locked play: the virtual cursor + the HUD event router.
+  wirePointerLockRouting();
+  // Re-entry (2026-10-23): after an Esc-unlock or an Alt+Tab, the
+  // next click INTO the game re-captures (fullscreen + lock). Only
+  // a live, unpaused match — menu and overlay clicks keep the
+  // real cursor, and HUD clicks never reach the canvas anyway.
+  canvas.addEventListener('pointerdown', () => {
+    if (playing && !paused && !matchEnded && !pointerLocked
+      && document.body && document.body.classList.contains('in-match')) {
+      enterGameCapture();
+    }
+  });
   // Idle indicators double as buttons: the same cycle the '.' / ','
   // keys run (SEL-08/09).
   idleVilBtn.addEventListener('click', () => { if (sim) cycleIdle('villager', false); });
@@ -4567,8 +4800,8 @@ async function main() {
     if (t.closest('#cmd-grid, #view, #pause-btn, #resume-btn, #menu-close, #idle-vil-btn, #idle-mil-btn')) return;
     if (t.closest('button, select, input, .game-row')) playAudioCue('click');
   });
-  resumeBtn.addEventListener('click', () => setPaused(false));
-  menuClose.addEventListener('click', () => setPaused(false));
+  resumeBtn.addEventListener('click', () => { enterGameCapture(); setPaused(false); });
+  menuClose.addEventListener('click', () => { enterGameCapture(); setPaused(false); });
   helpCloseX.addEventListener('click', () => { helpOverlay.style.display = 'none'; });
   helpBtn.addEventListener('click', () => { helpOverlay.style.display = 'flex'; });
   helpClose.addEventListener('click', () => { helpOverlay.style.display = 'none'; });
@@ -4583,6 +4816,8 @@ async function main() {
       leaveNetMatch('abandoned');
       return;
     }
+    // A fresh match begins on every path below (2026-10-23).
+    enterGameCapture();
     // M12: an AI-room match restarts like a local match — the
     // same configuration (same seed, same AI difficulty).
     if (aiRoom) {
@@ -4598,6 +4833,7 @@ async function main() {
   // the same seed; Back to menu resets a fresh match and opens the
   // pause menu over it (there is no start screen anymore).
   endRestartBtn.addEventListener('click', () => {
+    enterGameCapture(); // every path here begins a fresh match
     if (net) {
       // The finished online match cannot restart; leave it and
       // begin a fresh local match in the mode checked in the menu.
@@ -4839,6 +5075,7 @@ async function main() {
   const replayFile = document.getElementById('replay-file');
   if (replayFile) {
     replayFile.addEventListener('change', async () => {
+      enterGameCapture(); // playback enters the game view too
       const f = replayFile.files && replayFile.files[0];
       replayFile.value = '';
       if (!f) return;
@@ -4926,8 +5163,9 @@ async function main() {
   function minimapPointerWorld(ev) {
     if (!mmGeom) return null;
     const r = minimapCanvas.getBoundingClientRect();
-    const mx = (ev.clientX - r.left) * (minimapCanvas.width / r.width);
-    const my = (ev.clientY - r.top) * (minimapCanvas.height / r.height);
+    const p = evClient(ev);
+    const mx = (p.x - r.left) * (minimapCanvas.width / r.width);
+    const my = (p.y - r.top) * (minimapCanvas.height / r.height);
     return minimapToWorld(mmGeom, mx, my);
   }
   function minimapJump(ev) {
@@ -4942,7 +5180,10 @@ async function main() {
       return;
     }
     mmDrag = true;
-    minimapCanvas.setPointerCapture(ev.pointerId);
+    // Capture is an optimization for drag tracking; a routed or
+    // locked pointer may refuse it — the router forwards the drag
+    // either way, so a refusal must never break the jump.
+    try { minimapCanvas.setPointerCapture(ev.pointerId); } catch { /* forwarded by the lock router instead */ }
     minimapJump(ev);
   });
   minimapCanvas.addEventListener('pointermove', (ev) => {
@@ -4953,10 +5194,21 @@ async function main() {
   minimapCanvas.addEventListener('contextmenu', (ev) => ev.preventDefault());
 
   // --- Pointer ---------------------------------------------------------
+  // THE coordinate accessor (2026-10-23): under pointer lock an
+  // event's own clientX/Y freeze at the capture point, so every
+  // picking / drag / zoom read goes through here and gets the
+  // virtual cursor instead. Unlocked, it is exactly the event's
+  // own point — the same numbers as always.
+  function evClient(ev) {
+    if (pointerLocked) return virtualCursor;
+    return { x: ev.clientX, y: ev.clientY };
+  }
+
   function eventWorld(ev) {
     const r = canvas.getBoundingClientRect();
-    const sx = (ev.clientX - r.left) * (canvas.width / r.width);
-    const sy = (ev.clientY - r.top) * (canvas.height / r.height);
+    const p = evClient(ev);
+    const sx = (p.x - r.left) * (canvas.width / r.width);
+    const sy = (p.y - r.top) * (canvas.height / r.height);
     let [wx, wy] = s2w(sx, sy, camS, camOx, camOy);
     // M7: the projection lifts elevated ground (see worldToScreen);
     // picking must undo the lift — solve with the height at the
@@ -4972,9 +5224,10 @@ async function main() {
 
   function eventScreen(ev) {
     const r = canvas.getBoundingClientRect();
+    const p = evClient(ev);
     return [
-      (ev.clientX - r.left) * (canvas.width / r.width),
-      (ev.clientY - r.top) * (canvas.height / r.height),
+      (p.x - r.left) * (canvas.width / r.width),
+      (p.y - r.top) * (canvas.height / r.height),
     ];
   }
 
@@ -5486,7 +5739,11 @@ async function main() {
   // edge bands (the top bar did exactly that to the top edge).
   // Overlays still rest the pan via applyEdgeScroll's own gates.
   addEventListener('mousemove', (e) => {
-    mouseClientPt = { x: e.clientX, y: e.clientY };
+    // Under pointer lock the point IS the virtual cursor (the
+    // router advanced it in the capture phase, before this).
+    mouseClientPt = pointerLocked
+      ? { x: virtualCursor.x, y: virtualCursor.y }
+      : { x: e.clientX, y: e.clientY };
   });
   document.addEventListener('mouseleave', () => {
     mouseClientPt = null;
@@ -5635,8 +5892,9 @@ async function main() {
   canvas.addEventListener('wheel', (ev) => {
     ev.preventDefault();
     const r = canvas.getBoundingClientRect();
-    const mx = (ev.clientX - r.left) * (canvas.width / r.width);
-    const my = (ev.clientY - r.top) * (canvas.height / r.height);
+    const p = evClient(ev);
+    const mx = (p.x - r.left) * (canvas.width / r.width);
+    const my = (p.y - r.top) * (canvas.height / r.height);
     const ns = Math.min(S_MAX, Math.max(S_MIN, camS * Math.exp(-ev.deltaY * 0.0012)));
     camOx = mx - (mx - camOx) * (ns / camS);
     camOy = my - (my - camOy) * (ns / camS);
@@ -5679,18 +5937,19 @@ async function main() {
   // or cancels placement mode.
   let drag = null; // [clientX, clientY, moved]
   canvas.addEventListener('mousedown', (e) => {
-    if (e.button === 2) drag = [e.clientX, e.clientY, false];
+    if (e.button === 2) { const p = evClient(e); drag = [p.x, p.y, false]; }
   });
   addEventListener('mousemove', (e) => {
     if (!drag) return;
     const r = canvas.getBoundingClientRect();
     const f = canvas.width / r.width;
-    if (Math.abs(e.clientX - drag[0]) + Math.abs(e.clientY - drag[1]) > 3) {
+    const p = evClient(e);
+    if (Math.abs(p.x - drag[0]) + Math.abs(p.y - drag[1]) > 3) {
       drag[2] = true;
     }
-    camOx += (e.clientX - drag[0]) * f;
-    camOy += (e.clientY - drag[1]) * f;
-    drag = [e.clientX, e.clientY, drag[2]];
+    camOx += (p.x - drag[0]) * f;
+    camOy += (p.y - drag[1]) * f;
+    drag = [p.x, p.y, drag[2]];
   });
   addEventListener('mouseup', (e) => {
     if (e.button !== 2 || !drag) return;
