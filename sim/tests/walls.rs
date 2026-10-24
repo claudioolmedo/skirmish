@@ -169,14 +169,15 @@ fn villager_walks_the_line_and_raises_every_segment() {
 }
 
 #[test]
-fn diagonal_line_lays_an_edge_connected_staircase() {
+fn diagonal_line_lays_a_diagonal_chain() {
     let mut sim = Sim::new(31);
     let vil = villagers_of(&sim, OWNER_PLAYER)[0];
-    // The supercover of a (0,0)->(3,3) drag: seven cells, each
-    // exact corner filled on the canonical side. Find a start
-    // where all seven validate.
+    // The straight-line expansion of a (0,0)->(3,3) drag: FOUR
+    // cells, a pure chain of diagonal neighbours (Claudio's
+    // 2026-10-24 correction — the supercover laid seven cells in
+    // a staircase). Find a start where all four validate.
     let want = wall_line_cells(0, 0, 3, 3);
-    assert_eq!(want.len(), 7);
+    assert_eq!(want.len(), 4);
     let tc = ent(&sim, find_id(&sim, OWNER_PLAYER, EntityKind::TownCenter));
     let (tcx, tcy) = sim.grid().world_to_cell(tc.pos_x, tc.pos_y);
     let mut start = None;
@@ -210,11 +211,15 @@ fn diagonal_line_lays_an_edge_connected_staircase() {
     // (ghost == committed, end to end), in drag order.
     let want_abs: Vec<(u32, u32)> = want.iter().map(|&(cx, cy)| (ax + cx, ay + cy)).collect();
     assert_eq!(cells, want_abs);
-    // And the chain has no corner-only joints: every consecutive
-    // pair of segments is edge-adjacent — one continuous fence.
+    // Every consecutive pair of segments steps DIAGONALLY —
+    // the chain runs corner to corner along the drag's own
+    // diagonal, never an axis step (the staircase defect).
     for w in cells.windows(2) {
-        let step = (w[1].0 as i64 - w[0].0 as i64).abs() + (w[1].1 as i64 - w[0].1 as i64).abs();
-        assert_eq!(step, 1, "edge-adjacent step");
+        let step = (
+            (w[1].0 as i64 - w[0].0 as i64).abs(),
+            (w[1].1 as i64 - w[0].1 as i64).abs(),
+        );
+        assert_eq!(step, (1, 1), "diagonal step");
     }
 }
 
@@ -475,6 +480,160 @@ fn completed_wall_blocks_owner_and_enemy_pathing() {
     assert!(arrived, "the Scout never reached the far side");
 }
 
+/// Sealing regression for the straight-line expansion (Claudio's
+/// 2026-10-24 correction): a 45° drag is a chain of
+/// diagonally-adjacent segments, and the corner joint between two
+/// diagonal neighbours must SEAL — no unit may slip through the
+/// corner gap, anywhere along the line. The seal is the A* corner
+/// rule (a diagonal step is barred when an orthogonal neighbour
+/// is a building cell) plus grid integrity; foundations that have
+/// not started construction stay walkable (the DE quickwall
+/// rule), so this test uses COMPLETED segments, like the AoE2Sheet
+/// note: diagonal corner passage is a construction-state
+/// exception only.
+#[test]
+fn diagonal_wall_line_seals_every_corner_joint() {
+    let mut sim = Sim::with_mode(31, MatchMode::TwoPlayer);
+    let opp_vil = villagers_of(&sim, OWNER_OPPONENT)[0];
+    // Anchor scan around the OPPONENT's TC: every line cell must
+    // validate for its villager AND every flank cell of every
+    // joint must stand on open ground (the corner probes below).
+    let tc = ent(&sim, find_id(&sim, OWNER_OPPONENT, EntityKind::TownCenter));
+    let (tcx, tcy) = sim.grid().world_to_cell(tc.pos_x, tc.pos_y);
+    let mut anchor = None;
+    'scan: for r in 4..=45i32 {
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if dx.abs() != r && dy.abs() != r {
+                    continue;
+                }
+                let (ax, ay) = (tcx as i32 + dx, tcy as i32 + dy);
+                if ax < 2 || ay < 2 || ax > 110 || ay > 110 {
+                    continue;
+                }
+                let (ax, ay) = (ax as u32, ay as u32);
+                let line = wall_line_cells(ax, ay, ax + 6, ay + 6);
+                let cells_ok = line.iter().all(|&(cx, cy)| {
+                    let (x, y) = cell_point(&sim, cx, cy);
+                    sim.can_build(opp_vil, WALL, x, y)
+                });
+                let flanks_ok = line.windows(2).all(|w| {
+                    !sim.grid().is_blocked(w[1].0, w[0].1)
+                        && !sim.grid().is_blocked(w[0].0, w[1].1)
+                });
+                if cells_ok && flanks_ok {
+                    anchor = Some((ax, ay));
+                    break 'scan;
+                }
+            }
+        }
+    }
+    let (ax, ay) = anchor.expect("no open diagonal near the opponent TC");
+    build_line(&mut sim, opp_vil, (ax, ay), (ax + 6, ay + 6));
+    sim.tick();
+    assert_eq!(wall_buildings(&sim).len(), 7);
+    let done = run_until(&mut sim, 200_000, |s| {
+        s.buildings().iter().all(|b| b.complete)
+    });
+    assert!(done, "the diagonal line never completed");
+    let line = wall_line_cells(ax, ay, ax + 6, ay + 6);
+    let wall_cells: Vec<(u32, u32)> = wall_buildings(&sim)
+        .iter()
+        .map(|b| (b.cell_x, b.cell_y))
+        .collect();
+
+    // Grid level: at EVERY joint, a path between the two flanking
+    // cells exists only as a detour — the direct corner step
+    // between the flanks never appears in it. (A joint whose
+    // flanks cannot path at all is sealed by terrain as well and
+    // is skipped; most joints must produce a detour, so the check
+    // cannot pass vacuously.)
+    let mut detours = 0;
+    for w in line.windows(2) {
+        let fa = (w[1].0, w[0].1);
+        let fb = (w[0].0, w[1].1);
+        let (pax, pay) = cell_point(&sim, fa.0, fa.1);
+        let (pbx, pby) = cell_point(&sim, fb.0, fb.1);
+        let Some(path) = sim.grid().find_path((pax, pay), (pbx, pby)) else {
+            continue;
+        };
+        detours += 1;
+        let cells: Vec<(u32, u32)> = path
+            .iter()
+            .map(|&(px, py)| sim.grid().world_to_cell(px, py))
+            .collect();
+        for pair in cells.windows(2) {
+            assert!(
+                !(pair[0] == fa && pair[1] == fb) && !(pair[0] == fb && pair[1] == fa),
+                "path threads the corner joint {w:?} between flanks {fa:?}/{fb:?}"
+            );
+        }
+        for cell in &cells {
+            assert!(!wall_cells.contains(cell), "detour crosses wall cell {cell:?}");
+        }
+    }
+    assert!(detours >= 4, "only {detours} joints had a flank detour to check");
+
+    // Entity level: the player's Scout is walked to the +1-side
+    // flank of the MIDDLE joint, then ordered to the -1-side
+    // flank. Inside the line's bounding square, the Scout's side
+    // sign s = (cx-ax) - (cy-ay) may never flip within one
+    // continuous stay inside the square (the s == 0 cells inside
+    // the square are exactly the wall cells): reaching the far
+    // flank requires leaving the square around an END of the
+    // line. The Scout must still arrive — around, never through.
+    let mid = line.windows(2).nth(3).unwrap();
+    let fa = (mid[1].0, mid[0].1); // s = +1 side
+    let fb = (mid[0].0, mid[1].1); // s = -1 side
+    let scout = find_id(&sim, OWNER_PLAYER, EntityKind::ScoutCavalry);
+    let (fx, fy) = cell_point(&sim, fa.0, fa.1);
+    sim.push_command(Command::Move { entity: scout, x: fx, y: fy });
+    sim.tick(); // the command lands (run_until checks before ticking)
+    let staged = run_until(&mut sim, 600_000, |s| ent(s, scout).order.is_none());
+    assert!(staged, "the Scout never staged at the near flank");
+    let staged_cell = cell_of_ent(&sim, scout);
+    assert!(
+        (staged_cell.0 as i32 - fa.0 as i32).abs() <= 1
+            && (staged_cell.1 as i32 - fa.1 as i32).abs() <= 1,
+        "the Scout staged at {staged_cell:?}, not the flank {fa:?}"
+    );
+    let (tx, ty) = cell_point(&sim, fb.0, fb.1);
+    sim.push_command(Command::Move { entity: scout, x: tx, y: ty });
+    let mut streak_sign: Option<i32> = None;
+    let mut arrived = false;
+    for _ in 0..600_000 {
+        sim.tick();
+        let cell = cell_of_ent(&sim, scout);
+        assert!(
+            !wall_cells.contains(&cell),
+            "the Scout entered a wall cell {cell:?}"
+        );
+        let inside = (ax..=ax + 6).contains(&cell.0) && (ay..=ay + 6).contains(&cell.1);
+        if inside {
+            let s = (cell.0 as i32 - ax as i32) - (cell.1 as i32 - ay as i32);
+            assert_ne!(s, 0, "inside the square off the wall line at {cell:?}");
+            match streak_sign {
+                None => streak_sign = Some(s.signum()),
+                Some(prev) => assert_eq!(
+                    s.signum(),
+                    prev,
+                    "the Scout crossed the diagonal INSIDE the square at {cell:?} \
+                     — a corner joint leaked"
+                ),
+            }
+        } else {
+            streak_sign = None;
+        }
+        if ent(&sim, scout).order.is_none() {
+            let near = (cell.0 as i32 - fb.0 as i32).abs() <= 1
+                && (cell.1 as i32 - fb.1 as i32).abs() <= 1;
+            arrived = near;
+            break;
+        }
+    }
+    assert!(arrived, "the Scout never reached the far flank around an end");
+}
+
 #[test]
 fn damaged_wall_repairs_at_the_standard_rate() {
     let mut sim = Sim::with_mode(81, MatchMode::TwoPlayer);
@@ -691,7 +850,7 @@ fn cell_of_ent(sim: &Sim, id: u32) -> (u32, u32) {
 }
 
 /// An anchor where the drag to `anchor + shape` founds completely
-/// for `entity` (every supercover cell individually validates),
+/// for `entity` (every expansion cell individually validates),
 /// scanning outward from the player's Town Center.
 fn open_anchor_for_shape(sim: &Sim, entity: u32, shape: (i32, i32)) -> (u32, u32) {
     let tc = ent(sim, find_id(sim, OWNER_PLAYER, EntityKind::TownCenter));
@@ -723,7 +882,7 @@ fn open_anchor_for_shape(sim: &Sim, entity: u32, shape: (i32, i32)) -> (u32, u32
 
 /// BLD-20 regression for Claudio's report ("o de madeira não
 /// segue a linha"): for every drag shape, the founded segments
-/// are EXACTLY the supercover cells the drag ghost previewed —
+/// are EXACTLY the straight-line cells the drag ghost previewed —
 /// no gaps, no extras, including 45°, shallow and steep diagonals
 /// and a long drag.
 #[test]
@@ -743,12 +902,16 @@ fn ghost_cells_equal_founded_cells_for_all_drag_shapes() {
             want,
             "drag shape ({sx},{sy}): founded segments != ghost cells"
         );
-        // Consecutive founded segments are edge-adjacent (the
-        // supercover guarantee: no gap a unit can slip through,
-        // diagonals included).
+        // Consecutive founded segments are king-adjacent (the
+        // straight-line guarantee: consecutive cells touch,
+        // diagonal steps included — their corner joints are
+        // sealed for movement by the A* corner rule, see
+        // `diagonal_wall_line_seals_every_corner_joint`).
         let line = wall_line_cells(ax, ay, b.0, b.1);
         for w in line.windows(2) {
-            let d = (w[1].0 as i32 - w[0].0 as i32).abs() + (w[1].1 as i32 - w[0].1 as i32).abs();
+            let d = (w[1].0 as i32 - w[0].0 as i32)
+                .abs()
+                .max((w[1].1 as i32 - w[0].1 as i32).abs());
             assert_eq!(d, 1, "drag shape ({sx},{sy}): non-adjacent step {w:?}");
         }
     }

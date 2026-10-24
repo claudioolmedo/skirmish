@@ -1240,28 +1240,47 @@ Aoe2Sheet knowledge base (community documentation, retrieved
 2026-10-22) records that units can pass through a diagonal
 gate's corners only "while they are being constructed" —
 the exception is the construction phase, not the finished
-line. DE's exact drag rasterization (which cells a given
-non-axis drag commits, and its tie-breaking) is published in
-no source found — **UNVERIFIED**; the expansion shipped
-first (integer Bresenham, one cell per major-axis step) was
-therefore an unsourced guess, and it failed the observable
-properties above: on a shallow drag its segments formed
-disjoint horizontal runs on different rows joined only at
-corner points (a 13×13 endpoint scan also found 9,096 of
-28,392 drags producing a different set when reversed). The
-expansion is now the SUPERCOVER of the segment between the
-two anchor cells' centers — every cell the segment passes
-through, walked by an exact-integer grid traversal: consecutive
-segments are always edge-adjacent (one continuous fence on one
-line, no gaps, no corner-only joints), an exact corner
-crossing fills the canonically-chosen side cell (smaller x —
-a function of the corner's unordered cell pair), so a
-reversed drag commits the identical SET, and the line always
-has 1 + |dx| + |dy| segments. Diagonal movement between two
-corner-touching blockers placed as separate clicks remains
-governed by the movement system's corner rules, as with any
-buildings — a dragged line itself no longer contains
-corner-only joints.
+line. DE's drag rasterization is documented in its
+observable form by the official forum ("Get rid of 'L' shape
+when creating walls now!", retrieved 2026-10-24): a drag
+between two points on the same row, column or diagonal is
+drawn as a straight line; every other drag is an L of a
+diagonal leg plus a straight leg, at max(|dx|, |dy|) + 1
+tiles. The expansion shipped first (integer Bresenham, one
+cell per major-axis step) failed the observable properties
+above: on a shallow drag its segments formed disjoint
+horizontal runs on different rows joined only at corner
+points (a 13×13 endpoint scan also found 9,096 of 28,392
+drags producing a different set when reversed). The second
+expansion (2026-10-22, the Amanatides–Woo SUPERCOVER: every
+cell the segment touches, 1 + |dx| + |dy| cells, an
+edge-connected staircase) was rejected by Claudio live on
+2026-10-24 — a diagonal drag rendered as a zigzag of
+alternating straight runs; "não existe este tipo de
+muralha… ele pega uma ponta a outra para fazer em uma linha
+reta; o diagonal como vc sugere nunca vi no jogo". The
+expansion is now the STRAIGHT-LINE raster: at each of the
+n + 1 steps of the major axis (n = max(|dx|, |dy|)), the cell
+nearest the ideal point of the segment between the two
+anchor cells' centers, each coordinate rounded (halves up) by
+a pure function of its absolute position in exact integer
+math — so a reversed drag commits the identical cells in
+exactly reversed order, consecutive segments are king-adjacent
+(Chebyshev step exactly 1), and the line has max(|dx|, |dy|)
++ 1 segments. For row/column/45° drags this is cell-for-cell
+DE's straight line; for shallow/steep drags it spreads the
+diagonal steps along the ideal segment where DE bunches
+them into the L's diagonal leg — the same endpoints and the
+same optimal tile count, by Claudio's explicit ruling (the
+full evidence and cell tables are in the study dossier,
+walls-de/DE-WALL-LINE-CORRECTION.md). A diagonal chain's
+corner joints are sealed for movement by the A* corner rule
+(a diagonal step is barred when an orthogonal neighbour is a
+building cell) plus the grid-integrity displacement, pinned
+by the sealing test in sim/tests/walls.rs; diagonal movement
+between two corner-touching blockers placed as separate
+clicks remains governed by the same corner rules, as with
+any buildings.
 Panel: the villager military page's last slot (S) — DE keeps
 walls on the military page's defensive row after the production
 buildings; no authoritative text source fixes DE's exact
@@ -1270,7 +1289,7 @@ in our three-wide compression.
 *The wall-flow correction (BLD-20, 2026-10-23, Claudio's live
 report — "o de madeira é muito estranho, ele não segue a
 linha"):* the expansion was never the divergence — ghost and
-sim run the identical supercover, pinned on both sides. The
+sim run the identical expansion, pinned on both sides. The
 founded line diverged from the dragged ghost in three places
 downstream. (1) **Units deleted segments:** `validate_build`
 rejected any cell a living unit stood on, so a line dragged
@@ -3493,7 +3512,21 @@ report: segments scattered across rows instead of following
 one line; the studied rule and sources are recorded in the
 entry, DE's exact rasterization marked UNVERIFIED). No
 status change: BLD-13 stays DIFFERS on the missing gates,
-and the totals stand); updated 2026-10-22 for the Farm
+and the totals stand); updated 2026-10-24 for the BLD-13/20
+wall-LINE correction — the drag expansion moved from the
+supercover staircase to the straight-line raster (Claudio's
+live report: a diagonal drag rendered as a zigzag of
+alternating straight runs, a wall type he has never seen in
+DE; DE's rasterization is now documented from the official
+forum — straight lines for row/column/diagonal drags, an
+L of diagonal + straight legs otherwise, at the same
+max-axis tile count the new raster commits — and the
+diagonal joints are sealed by the A* corner rule, pinned by
+a new regression test; evidence, cell tables and the
+corner-pair art approval are in the study dossier,
+walls-de/DE-WALL-LINE-CORRECTION.md). No status change:
+BLD-13 stays DIFFERS on the missing gates, BLD-20 stays
+DIFFERS, and the totals stand); updated 2026-10-22 for the Farm
 footprint — the Farm is 3×3 (Claudio's decision, adopting
 the DE-documented footprint over his earlier 2×2
 specification), closing ECO-14's footprint clause and

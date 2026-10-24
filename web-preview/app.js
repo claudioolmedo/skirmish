@@ -974,6 +974,10 @@ const BUILDING_ART_FILES = {
   palisadePieceDiagNW: 'palisade-piece-diagnw.png',
   palisadePieceDiagNS: 'palisade-piece-diagns.png',
   palisadePieceDiagEW: 'palisade-piece-diagew.png',
+  palisadePieceElbWSE: 'palisade-piece-elbwse.png',
+  palisadePieceElbWNE: 'palisade-piece-elbwne.png',
+  palisadePieceElbENW: 'palisade-piece-elbenw.png',
+  palisadePieceElbESW: 'palisade-piece-elbesw.png',
   stonewallPieceMidX: 'stone-piece-midx.png',
   stonewallPieceMidXStage1: 'stone-piece-midx-stage1.png',
   stonewallPieceMidXStage2: 'stone-piece-midx-stage2.png',
@@ -991,6 +995,10 @@ const BUILDING_ART_FILES = {
   stonewallPieceDiagNW: 'stone-piece-diagnw.png',
   stonewallPieceDiagNS: 'stone-piece-diagns.png',
   stonewallPieceDiagEW: 'stone-piece-diagew.png',
+  stonewallPieceElbWSE: 'stone-piece-elbwse.png',
+  stonewallPieceElbWNE: 'stone-piece-elbwne.png',
+  stonewallPieceElbENW: 'stone-piece-elbenw.png',
+  stonewallPieceElbESW: 'stone-piece-elbesw.png',
   // BLD-18: complete art only (the Town Center precedent) — no
   // stage frames; construction uses the clip-reveal of the
   // finished art over the foundation diamond.
@@ -5976,7 +5984,7 @@ async function main() {
   // BLD-13/BLD-20: commit a dragged wall line (palisade or
   // stone). A single semantic command per villager carries both
   // endpoints (as cell-center world points); the sim expands the
-  // line with the same supercover the ghost previewed, then
+  // line with the same straight-line raster the ghost previewed, then
   // validates and charges each segment itself — invalid or
   // unaffordable cells are skipped (a gap, never a partial
   // charge) and the foundations stand at once. DE tasks EVERY
@@ -7486,6 +7494,7 @@ const WALL_PIECE_ART = {
   corneren: 'CornerEN', cornerwn: 'CornerWN', tees: 'TeeS', teen: 'TeeN',
   cross: 'Cross', diagse: 'DiagSE', diagsw: 'DiagSW', diagnw: 'DiagNW',
   diagns: 'DiagNS', diagew: 'DiagEW',
+  elbwse: 'ElbWSE', elbwne: 'ElbWNE', elbenw: 'ElbENW', elbesw: 'ElbESW',
 };
 // Construction reveal fractions for pieces without their own
 // stage art — the stage thirds' own fractions (the palisade stage

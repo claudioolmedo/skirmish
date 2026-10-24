@@ -210,7 +210,7 @@ test('wall pieces: every configuration key has art for both families', () => {
   assert.ok(suffixes.length >= 14, 'piece suffix map parsed');
   const pieceKeys = new Set(['midx', 'ende', 'endew', 'corneres', 'corneren',
     'cornerwn', 'tees', 'teen', 'cross', 'diagse', 'diagsw', 'diagnw',
-    'diagns', 'diagew']);
+    'diagns', 'diagew', 'elbwse', 'elbwne', 'elbenw', 'elbesw']);
   for (const [key] of suffixes) assert.ok(pieceKeys.has(key), `suffix for ${key}`);
   for (const fam of ['palisade', 'stonewall']) {
     for (const [, suffix] of suffixes) {
