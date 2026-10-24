@@ -30,7 +30,7 @@ test('economic page: slot letters Q W E / A S D, Back on C, silent aliases', () 
   assert.equal(eco('KeyF').id, 'build-1', 'Farm alias F');
   assert.equal(eco('KeyA').id, 'build-3', 'Lumber Camp on A (slot 3)');
   assert.equal(eco('KeyR').id, 'build-3', 'Lumber Camp alias R');
-  assert.equal(eco('KeyZ').id, 'build-3', 'Lumber Camp alias Z');
+  assert.equal(eco('KeyZ').id, 'build-13', 'Town Center on Z — DE\u2019s own build letter (the Lumber Camp\u2019s silent Z alias died: the cell\u2019s letter rules)');
   assert.equal(eco('KeyS').id, 'build-5', 'Mining Camp on S (slot 4)');
   assert.equal(eco('KeyG').id, 'build-5', 'Mining Camp alias G (its go-to)');
   assert.equal(eco('KeyD').id, 'build-12', 'Market on D (slot 5 — DE\u2019s own build letter for it)');
@@ -52,7 +52,7 @@ test('military page: slot letters Q W E / A, Back on C, silent aliases', () => {
 
 test('an armed page swallows its letters; other letters fall through', () => {
   assert.equal(build({ page: 'eco', code: 'KeyD' }).id, 'build-12', 'D places the Market');
-  assert.equal(build({ page: 'eco', code: 'KeyT' }).id, 'build-13', 'T places the Town Center (Castle P1)');
+  assert.equal(build({ page: 'eco', code: 'KeyT' }), null, 'T places nothing — the Town Center sits on Z, its DE build letter');
   assert.equal(build({ page: 'eco', code: 'KeyU' }), null, 'U still pans');
   assert.equal(build({ page: 'mil', code: 'KeyR' }), null);
   assert.deepEqual(build({ code: 'KeyE' }), { type: 'button', id: 'repair' }, 'unarmed E is Repair (BLD-17, the root panel’s third slot)');
@@ -98,28 +98,38 @@ test('panel slot letters run a selected building\u2019s buttons', () => {
   assert.equal(at('miningcamp', 'KeyW').id, 'research-stonemining');
 });
 
-test('Town Center letters are DE’s own: Villager Q, Loom A, Feudal W, Wheelbarrow S, Hand Cart D', () => {
+test('Town Center letters are DE’s own: Villager Q, Loom A, Age Z, the Wheelbarrow line S', () => {
   // DE's grid letter is the button's panel position, and the TC
-  // panel's arrangement is not our button order (Age of Empires
-  // wiki, "Hotkey"; the study video's Loom tooltip reads
-  // "(Hotkey: A)"). Scoped to the TC context only: E runs
-  // nothing here, and the villager context keeps its own A.
-  // Wheelbarrow (2026-10-22) takes DE's second-row second slot,
-  // S, right of Loom; Hand Cart (Castle P1) takes D, right of
-  // Wheelbarrow, exactly where DE keeps it.
-  const at = (code) => resolveHotkey({ context: 'tc', page: null, code });
+  // panel's arrangement is not our button order — it is the
+  // reference panel's own, read off the 2026-10-19 player
+  // study's frames of a selected TC (f_005/f_024, Dark Age;
+  // f_052, Feudal researching): the first column stacks
+  // Villager, Loom (its tooltip reads "(Hotkey: A)", frame
+  // f_025) and the Age advancement; the Wheelbarrow icon sits
+  // darkened at row 2, column 2 until Feudal. Hand Cart is that
+  // same cell's next rung — the panel never shows both — so S
+  // resolves to whichever rung is rendered. Scoped to the TC
+  // context only: W/E/D run nothing here (D is Town Watch's
+  // cell in DE — a tech we do not have), and the villager
+  // context keeps its own A.
+  const at = (code, rendered) => resolveHotkey({ context: 'tc', page: null, code, rendered });
   assert.equal(at('KeyQ').id, 'train', 'Create Villager — top-left of the TC panel');
   assert.equal(at('KeyA').id, 'research-loom', 'Loom — below Villager (study frame f_025)');
-  assert.equal(at('KeyW').id, 'research-age', 'Age advancement — top row, second slot');
+  assert.equal(at('KeyZ').id, 'research-age', 'Age advancement — below Loom, first column\u2019s foot');
+  assert.equal(at('KeyW'), null, 'W is not a TC letter in DE');
   assert.equal(at('KeyE'), null, 'E is not a TC letter in DE');
-  assert.equal(at('KeyS').id, 'research-wheelbarrow', 'Wheelbarrow — below Feudal, right of Loom');
-  assert.equal(at('KeyD').id, 'research-handcart', 'Hand Cart — right of Wheelbarrow (Castle P1)');
+  assert.equal(at('KeyD'), null, 'D is not a TC letter (Town Watch\u2019s cell in DE — a tech we do not have)');
+  assert.equal(at('KeyS').id, 'research-wheelbarrow', 'Wheelbarrow — right of Loom');
+  assert.equal(at('KeyS', ['train', 'research-loom', 'research-age', 'research-handcart']).id,
+    'research-handcart', 'Hand Cart — the Wheelbarrow cell\u2019s next rung, once Wheelbarrow is in');
+  assert.equal(at('KeyS', ['train', 'research-loom', 'research-age', 'research-wheelbarrow']).id,
+    'research-wheelbarrow', '— and Wheelbarrow while it is the rung on the panel');
   // The badges painted on the buttons carry the same letters.
   assert.equal(badgeForButton({ context: 'tc', id: 'train', index: 0 }), 'Q');
   assert.equal(badgeForButton({ context: 'tc', id: 'research-loom', index: 1 }), 'A');
-  assert.equal(badgeForButton({ context: 'tc', id: 'research-age', index: 2 }), 'W');
+  assert.equal(badgeForButton({ context: 'tc', id: 'research-age', index: 2 }), 'Z');
   assert.equal(badgeForButton({ context: 'tc', id: 'research-wheelbarrow', index: 3 }), 'S');
-  assert.equal(badgeForButton({ context: 'tc', id: 'research-handcart', index: 4 }), 'D');
+  assert.equal(badgeForButton({ context: 'tc', id: 'research-handcart', index: 4 }), 'S');
   // Other panels keep their position badges.
   assert.equal(badgeForButton({ context: 'barracks', id: 'research-maa', index: 2 }), 'A');
   assert.equal(badgeForButton({ context: 'barracks', id: 'train-spearman', index: 1 }), 'W');
@@ -227,7 +237,7 @@ test('badges in train/research contexts are the slot letters', () => {
   assert.equal(badgeForButton({ context: 'blacksmith', id: 'research-padded', index: 2 }), 'A');
   assert.equal(badgeForButton({ context: 'tc', id: 'train', index: 0 }), 'Q');
   assert.equal(badgeForButton({ context: 'tc', id: 'research-loom', index: 1 }), 'A');
-  assert.equal(badgeForButton({ context: 'tc', id: 'research-age', index: 2 }), 'W');
+  assert.equal(badgeForButton({ context: 'tc', id: 'research-age', index: 2 }), 'Z');
   // A context with no panel at all badges nothing. (This line
   // used 'units' as its example until CMB-09/10/11 gave the
   // military selection a real panel; 'none' carries the intent.)

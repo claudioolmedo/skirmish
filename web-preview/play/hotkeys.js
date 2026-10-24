@@ -42,14 +42,27 @@
 //    letters too — see PANEL_KEYS: mostly plain left-to-right
 //    (Barracks: Militia Q, Spearman W, Man-at-Arms A below the
 //    Militia; Range: Archer Q, Skirmisher W; Stable: Scout Q),
-//    with DE's own two-row arrangements where
-//    the reference panel has them: the Town Center (Villager Q,
-//    Feudal Age W, Loom A below the Villager) and the Blacksmith
-//    (Fletching Q, Scale Mail W, Padded Archer Armor A — plus,
-//    since the 2026-10-22 Feudal completion, Forging E and
-//    Scale Barding Armor S under Scale Mail). The Stable gained
-//    Bloodlines W; the Lumber Camp, Mill and Mining Camp panels
-//    are plain top-row runs (Q, then W).
+//    with DE's own arrangements where the reference panel has
+//    them: the Town Center (first column: Villager Q, Loom A,
+//    Age advancement Z; the Wheelbarrow line beside Loom, S —
+//    see PANEL_KEYS) and the Blacksmith (Fletching Q, Scale Mail
+//    W, Padded Archer Armor A — plus, since the 2026-10-22
+//    Feudal completion, Forging E and Scale Barding Armor S
+//    under Scale Mail). The Stable gained Bloodlines W; the
+//    Lumber Camp, Mill and Mining Camp panels are plain top-row
+//    runs (Q, then W).
+//
+//    PLACEMENT (2026-10-23, Claudio's report): a button's letter
+//    is its CELL, and the renderer now puts every button INTO
+//    its letter's cell (panelCellFor below; empty cells stay
+//    empty). That was not always so: the study-fix landing gave
+//    the TC DE's letters (Loom A) while the renderer kept
+//    filling the grid in code order, so the panel READ Q A W /
+//    S D with no button sitting in its letter's cell — and each
+//    later button (Wheelbarrow S, Hand Cart D, Man-at-Arms A,
+//    the Blacksmith's second row) inherited the scramble.
+//    panels.test.mjs pins every panel's layout cell by cell so
+//    no landing can reshuffle one silently again.
 //
 // Go-to (jump to a building type) is Ctrl+letter with the
 // reference's letters: Lumber Camp Z, Mill I, Mining Camp G,
@@ -69,7 +82,7 @@
 //       12 Market (BLD-19), 14 Stone Wall (BLD-20; the tags are
 //       the sim's — append only).
 // PAGE_KINDS is the pages' GRID (render) order: slot 0 first.
-// Kind 9 (Town Center, Castle Age) closes the economic page —
+// Kind 13 (Town Center, Castle Age) closes the economic page —
 // DE's villager panel keeps the TC with the economic buildings.
 export const PAGE_KINDS = {
   eco: [0, 4, 1, 3, 5, 12, 13],
@@ -93,10 +106,10 @@ export const PAGE_KEYS = {
     KeyQ: 0, // House — slot 0
     KeyW: 4, KeyI: 4, // Mill — slot 1 (alias: its go-to I)
     KeyE: 1, KeyF: 1, // Farm — slot 2 (alias F)
-    KeyA: 3, KeyR: 3, KeyZ: 3, // Lumber Camp — slot 3 (aliases R, Z)
+    KeyA: 3, KeyR: 3, // Lumber Camp — slot 3 (alias R: DE's build letter for it)
     KeyS: 5, KeyG: 5, // Mining Camp — slot 4 (alias: its go-to G)
     KeyD: 12, KeyM: 12, // Market — slot 5 (D is DE's build letter; alias M, its go-to)
-    KeyT: 13, // Town Center — slot 6 (Castle Age; T, its initial — D is the Market's)
+    KeyZ: 13, // Town Center — slot 6 (Castle Age; Z is DE's own TC build letter — the wiki's DE build table — and slot 6 IS the Z cell. The old T "initial" badge and the Lumber Camp's silent Z alias (its go-to letter) both died here: the cell's letter rules.)
     KeyC: 'back', // Back — the last slot
   },
   mil: {
@@ -114,7 +127,7 @@ export const PAGE_KEYS = {
 
 /** The one letter shown as a button's key badge on an armed page. */
 export const PAGE_BADGE = {
-  eco: { 0: 'Q', 4: 'W', 1: 'E', 3: 'A', 5: 'S', 12: 'D', 13: 'T' },
+  eco: { 0: 'Q', 4: 'W', 1: 'E', 3: 'A', 5: 'S', 12: 'D', 13: 'Z' },
   mil: { 2: 'Q', 6: 'W', 7: 'E', 8: 'A', 9: 'S', 10: 'D', 11: 'Z', 14: 'X' },
 };
 
@@ -128,7 +141,6 @@ export const PANEL_BUTTONS = {
   // build context's special buttons get outside these tables.
   units: ['attack-move', 'patrol', 'stance-0', 'stance-1', 'stance-2', 'stance-3',
     'stop', 'delete'],
-  tc: ['train', 'research-loom', 'research-feudal', 'research-wheelbarrow'],
   tc: ['train', 'research-loom', 'research-age', 'research-wheelbarrow', 'research-handcart'],
   barracks: ['train-militia', 'train-spearman', 'research-maa'],
   range: ['train-archer', 'train-skirmisher'],
@@ -148,17 +160,23 @@ export const PANEL_BUTTONS = {
 // (button id -> [KeyboardEvent.code, letter]). The plain cases
 // run left to right along the grid's first row (Barracks:
 // Militia Q, Man-at-Arms W; Range: Archer Q; Stable: Scout Q).
-// Two panels reproduce DE's own two-row arrangements instead:
-// the Town Center — Create Villager top-left (Q), the Feudal
-// Age advancement top-row second (W), Loom below the Villager
+// Two panels reproduce DE's own arrangements instead: the
+// Town Center — read off real DE footage (the 2026-10-19
+// player study's frames of a selected TC, f_005/f_024/f_052):
+// the first column stacks Create Villager (Q), Loom below it
 // (A — the study video's in-game tooltip reads "Loom …
-// (Hotkey: A)"; sources: Age of Empires wiki, "Hotkey" — the
-// letter IS the button's panel position — plus the 2026-10-19
-// player study, frame f_025) — and the Blacksmith, whose
-// Padded Archer Armor sits under Fletching (A), not after
-// Scale Mail. Villager-context letters are unaffected: 'build'
-// is not in this table, so a villager's A still means force
-// drop-off, resolved by context exactly as DE resolves it.
+// (Hotkey: A)", frame f_025) and the Age advancement below
+// Loom (Z); the Wheelbarrow line sits beside Loom (S — the
+// frames show its darkened, Feudal-locked icon at row 2,
+// column 2) — and the Blacksmith, whose Padded Archer Armor
+// sits under Fletching (A), not after Scale Mail. (An earlier
+// table claimed Age at W "top-row second" and Hand Cart at D:
+// neither survives the frames — the age button is the first
+// column's third cell, and Hand Cart is the Wheelbarrow cell's
+// next rung, below.) Villager-context letters are unaffected:
+// 'build' is not in this table, so a villager's A still means
+// force drop-off, resolved by context exactly as DE resolves
+// it.
 export const PANEL_KEYS = {
   // The units panel's slot letters, by render order: Attack
   // Move Q, Patrol W, the stances E / A / S / D, Stop X, Delete
@@ -181,14 +199,21 @@ export const PANEL_KEYS = {
     train: ['KeyQ', 'Q'],
     'research-loom': ['KeyA', 'A'],
     // The age-advance button (DE has exactly one: it offers the
-    // NEXT Age — Feudal from Dark, Castle from Feudal — and sits
-    // top-row second, W, in both steps).
-    'research-age': ['KeyW', 'W'],
-    // Wheelbarrow (2026-10-22) sits right of Loom on the second
-    // row — DE's own Town Center arrangement (Loom A, Wheelbarrow
-    // S, Hand Cart D).
+    // NEXT Age — Feudal from Dark, Castle from Feudal) closes
+    // the first column, under Loom: Z in both steps. (Study
+    // frames f_005/f_024: the red chalice icon stacked third in
+    // the TC's first column; f_052: the same cell busy while
+    // Feudal researches.)
+    'research-age': ['KeyZ', 'Z'],
+    // The Wheelbarrow line (2026-10-22) sits right of Loom on
+    // the second row: S. Hand Cart is the SAME cell's next rung
+    // — DE never shows both; the panel renders whichever rung
+    // is current (app.js swaps on the Wheelbarrow bit), and
+    // both ids carry the cell's letter. (Castle P1's separate
+    // Hand Cart at D was wrong twice over: D is where the
+    // reference panel keeps Town Watch, a tech we do not have.)
     'research-wheelbarrow': ['KeyS', 'S'],
-    'research-handcart': ['KeyD', 'D'],
+    'research-handcart': ['KeyS', 'S'],
   },
   barracks: {
     'train-militia': ['KeyQ', 'Q'],
@@ -271,11 +296,15 @@ export const GOTO_KEYS = {
  * panning in contexts where the grid claims the letter, exactly
  * like the reference game).
  *
- * Input: { context, page, code, ctrl, shift } — context is the
- * renderCommands() context string ('build' | 'tc' | 'barracks' |
- * 'range' | 'stable' | 'blacksmith' | anything else), page the
- * armed build page ('eco' | 'mil' | null), code the KeyboardEvent
- * code, ctrl/shift the modifier state.
+ * Input: { context, page, code, ctrl, shift, rendered } —
+ * context is the renderCommands() context string ('build' |
+ * 'tc' | 'barracks' | 'range' | 'stable' | 'blacksmith' |
+ * anything else), page the armed build page ('eco' | 'mil' |
+ * null), code the KeyboardEvent code, ctrl/shift the modifier
+ * state. `rendered`, when given (the ids currently on the
+ * panel), disambiguates the one cell two ids share — the TC's
+ * Wheelbarrow/Hand Cart rung: the key runs whichever rung the
+ * panel actually shows.
  *
  * Actions:
  *   { type: 'arm', page }        — open a build page
@@ -283,7 +312,7 @@ export const GOTO_KEYS = {
  *   { type: 'drop-off' }         — force drop-off (DE's villager A)
  *   { type: 'goto', kind, all }  — jump to / select a building type
  */
-export function resolveHotkey({ context, page, code, ctrl = false, shift = false }) {
+export function resolveHotkey({ context, page, code, ctrl = false, shift = false, rendered = null }) {
   if (ctrl) {
     const kind = GOTO_KEYS[code];
     return kind != null ? { type: 'goto', kind, all: !!shift } : null;
@@ -309,12 +338,17 @@ export function resolveHotkey({ context, page, code, ctrl = false, shift = false
     const byLetter = PANEL_KEYS[context];
     if (byLetter) {
       for (const [id, [keyCode]] of Object.entries(byLetter)) {
-        if (keyCode === code) return { type: 'button', id };
+        if (keyCode !== code) continue;
+        if (rendered && !rendered.includes(id)) continue;
+        return { type: 'button', id };
       }
       return null;
     }
     const idx = POSITION_CODES.indexOf(code);
-    if (idx >= 0 && idx < buttons.length) return { type: 'button', id: buttons[idx] };
+    if (idx >= 0 && idx < buttons.length
+      && (!rendered || rendered.includes(buttons[idx]))) {
+      return { type: 'button', id: buttons[idx] };
+    }
   }
   return null;
 }
@@ -338,6 +372,60 @@ export function badgeForButton({ context, page, id, index }) {
   if (PANEL_BUTTONS[context] && index >= 0 && index < POSITION_LETTERS.length) {
     return POSITION_LETTERS[index];
   }
+  return null;
+}
+
+/** The grid cell ([row, column], 1-based) of each grid letter. */
+export const GRID_CELLS = {
+  Q: [1, 1], W: [1, 2], E: [1, 3],
+  A: [2, 1], S: [2, 2], D: [2, 3],
+  Z: [3, 1], X: [3, 2], C: [3, 3],
+};
+
+/**
+ * The grid letter whose CELL a rendered panel button belongs
+ * in, or null when the button takes the next free cell in
+ * reading order (CSS auto-flow). This is the placement half of
+ * the hotkey tables: a button's letter is its position, so the
+ * renderer drops every lettered button into its own cell and
+ * leaves the cells of absent buttons EMPTY — the sparse DE
+ * panel — instead of filling the grid in code order and
+ * stamping letters on wherever a button happened to land
+ * (the 2026-10-23 scramble: the TC read Q A W / S D because
+ * its buttons were appended train, loom, age, wheelbarrow,
+ * handcart while their letters claim Q, A, Z, S, S).
+ *
+ * Sources, per context: PANEL_KEYS for the building/unit
+ * panels (the Attack Move's cell is its slot Q — its badge
+ * stays DE's dedicated R); PAGE_BADGE for an armed build page
+ * (Back rides the page's last slot, C); the build root's three
+ * openers carry their arm letters (Q / W / E). The building
+ * Delete rides the panel's bottom-right cell (C) UNBADGED —
+ * DE keeps building deletion at the panel's bottom-right
+ * corner, off the grid's letter flow, and no letter key runs
+ * it (the keyboard's Delete key does, in app.js). Buttons
+ * with a dedicated non-grid key and no slot (AutoExplore, G)
+ * and the unit Stop/Delete riding a villager selection take
+ * auto-flow, exactly where sequential fill already put them.
+ */
+export function panelCellFor({ context, page, id }) {
+  if (id === 'delete-building' || (id === 'delete' && !page)) return 'C';
+  if (context === 'build') {
+    if (page) {
+      if (id === 'page-back') return 'C';
+      if (id.startsWith('build-')) {
+        const letter = PAGE_BADGE[page][Number(id.slice(6))];
+        return GRID_CELLS[letter] ? letter : null;
+      }
+      return null;
+    }
+    if (id === 'page-eco') return 'Q';
+    if (id === 'page-mil') return 'W';
+    if (id === 'repair') return 'E';
+    return null;
+  }
+  const byLetter = PANEL_KEYS[context];
+  if (byLetter && byLetter[id]) return byLetter[id][1];
   return null;
 }
 
