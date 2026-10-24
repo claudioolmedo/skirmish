@@ -139,6 +139,7 @@ const EN = {
   'audio.note': 'Every sound is synthesized in your browser — no audio files.',
   'pause.testBuildNote': 'Test build · M13',
   'pause.backToSite': '← Back to the Skirmish II site',
+  'legal.note': 'Skirmish II is an original clean-room project, developed from scratch. It is not affiliated with, or endorsed by, Microsoft or Age of Empires.',
   'lang.label': 'Language',
   // --- net status line ---------------------------------------------
   'net.online': 'Online',
@@ -574,6 +575,7 @@ const PT_BR = {
   'audio.note': 'Todo som é sintetizado no seu navegador — sem arquivos de áudio.',
   'pause.testBuildNote': 'Versão de teste · M13',
   'pause.backToSite': '← Voltar ao site do Skirmish II',
+  'legal.note': 'Skirmish II é um projeto original, criado do zero (clean-room). Não é afiliado a, nem endossado por, Microsoft ou Age of Empires.',
   'lang.label': 'Idioma',
   // --- net status line ---------------------------------------------------
   'net.online': 'Online',
@@ -1009,6 +1011,7 @@ const ES = {
   'audio.note': 'Todo el sonido se sintetiza en tu navegador — sin archivos de audio.',
   'pause.testBuildNote': 'Versión de prueba · M13',
   'pause.backToSite': '← Volver al sitio de Skirmish II',
+  'legal.note': 'Skirmish II es un proyecto original, creado desde cero (clean-room). No está afiliado a, ni respaldado por, Microsoft o Age of Empires.',
   'lang.label': 'Idioma',
   // --- net status line ---------------------------------------------------
   'net.online': 'En línea',

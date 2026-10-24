@@ -4580,6 +4580,7 @@ function applyStaticStrings() {
   setText('audio-note', 'audio.note');
   setText('test-note', 'pause.testBuildNote');
   setText('back-site-link', 'pause.backToSite');
+  setText('legal-note', 'legal.note');
   setText('lang-label-lobby', 'lang.label');
   setText('lang-label-pause', 'lang.label');
   // Help overlay (the items carry <strong> markup — innerHTML).
