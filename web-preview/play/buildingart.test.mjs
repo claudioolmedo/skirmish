@@ -194,3 +194,37 @@ test('building art: each kind and its stage frames share one canvas', () => {
       `${base}: stage set canvases differ (${keys.map((k, i) => `${k}=${sizes[i]}`).join(', ')})`);
   }
 });
+
+// ------------------------------------------------------------------
+// Wall pieces (angle pass): every configuration wallPiece can
+// return must have registered art for BOTH families, on the shared
+// 512x494 canvas (the piece generator's contract — the bottom-
+// anchor draw and the per-family plan origin only line up if
+// every piece shares it). A missing registration would silently
+// drop the segment to the vector fallback in live play.
+test('wall pieces: every configuration key has art for both families', () => {
+  const mapBlock = appJs.match(/const WALL_PIECE_ART = \{([\s\S]*?)\};/);
+  assert.ok(mapBlock, 'WALL_PIECE_ART block found in app.js');
+  const suffixes = [...mapBlock[1].matchAll(/(\w+):\s*'(\w+)'/g)]
+    .map((m) => [m[1], m[2]]);
+  assert.ok(suffixes.length >= 14, 'piece suffix map parsed');
+  const pieceKeys = new Set(['midx', 'ende', 'endew', 'corneres', 'corneren',
+    'cornerwn', 'tees', 'teen', 'cross', 'diagse', 'diagsw', 'diagnw',
+    'diagns', 'diagew']);
+  for (const [key] of suffixes) assert.ok(pieceKeys.has(key), `suffix for ${key}`);
+  for (const fam of ['palisade', 'stonewall']) {
+    for (const [, suffix] of suffixes) {
+      const artKey = `${fam}Piece${suffix}`;
+      assert.ok(ART_FILES[artKey], `${artKey} registered in BUILDING_ART_FILES`);
+      const path = join(buildingsDir, ART_FILES[artKey]);
+      assert.ok(existsSync(path), `${artKey} file exists: ${ART_FILES[artKey]}`);
+      const { w, h } = decodePngAlpha(path);
+      assert.deepEqual([w, h], [512, 494], `${artKey} on the shared piece canvas`);
+    }
+    for (const n of [1, 2, 3]) {
+      const artKey = `${fam}PieceMidXStage${n}`;
+      assert.ok(ART_FILES[artKey], `${artKey} registered`);
+      assert.ok(existsSync(join(buildingsDir, ART_FILES[artKey])), `${artKey} exists`);
+    }
+  }
+});

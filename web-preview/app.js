@@ -89,7 +89,7 @@ import {
 import { ClickMarkers, markerHeads } from './play/clickmarker.js';
 import { pennantsForSelection, pennantShape } from './play/pennants.js';
 import { occlusionFor, intersectionRect } from './play/occlusion.js';
-import { wallLineCells } from './play/walls.js';
+import { wallLineCells, wallPiece } from './play/walls.js';
 import {
   t, getLocale, setLocale, costText, genderOf,
 } from './play/i18n.js';
@@ -900,6 +900,47 @@ const BUILDING_ART_FILES = {
   stonewallStage1: 'stone-wall-stage1.png',
   stonewallStage2: 'stone-wall-stage2.png',
   stonewallStage3: 'stone-wall-stage3.png',
+  // Wall PIECES (BLD-13/20 angle pass): per-configuration art for
+  // both wall families — DE picks each segment's piece from its
+  // neighbours and draws it in the tile's isometric frame, angled
+  // pieces included (see wallPiece in play/walls.js and
+  // gen-wall-pieces.py). The midx set carries real construction
+  // stages; every other piece clip-reveals its finished art while
+  // building, in the same stage fractions.
+  palisadePieceMidX: 'palisade-piece-midx.png',
+  palisadePieceMidXStage1: 'palisade-piece-midx-stage1.png',
+  palisadePieceMidXStage2: 'palisade-piece-midx-stage2.png',
+  palisadePieceMidXStage3: 'palisade-piece-midx-stage3.png',
+  palisadePieceEndE: 'palisade-piece-ende.png',
+  palisadePieceEndW: 'palisade-piece-endew.png',
+  palisadePieceCornerES: 'palisade-piece-corneres.png',
+  palisadePieceCornerEN: 'palisade-piece-corneren.png',
+  palisadePieceCornerWN: 'palisade-piece-cornerwn.png',
+  palisadePieceTeeS: 'palisade-piece-tees.png',
+  palisadePieceTeeN: 'palisade-piece-teen.png',
+  palisadePieceCross: 'palisade-piece-cross.png',
+  palisadePieceDiagSE: 'palisade-piece-diagse.png',
+  palisadePieceDiagSW: 'palisade-piece-diagsw.png',
+  palisadePieceDiagNW: 'palisade-piece-diagnw.png',
+  palisadePieceDiagNS: 'palisade-piece-diagns.png',
+  palisadePieceDiagEW: 'palisade-piece-diagew.png',
+  stonewallPieceMidX: 'stone-piece-midx.png',
+  stonewallPieceMidXStage1: 'stone-piece-midx-stage1.png',
+  stonewallPieceMidXStage2: 'stone-piece-midx-stage2.png',
+  stonewallPieceMidXStage3: 'stone-piece-midx-stage3.png',
+  stonewallPieceEndE: 'stone-piece-ende.png',
+  stonewallPieceEndW: 'stone-piece-endew.png',
+  stonewallPieceCornerES: 'stone-piece-corneres.png',
+  stonewallPieceCornerEN: 'stone-piece-corneren.png',
+  stonewallPieceCornerWN: 'stone-piece-cornerwn.png',
+  stonewallPieceTeeS: 'stone-piece-tees.png',
+  stonewallPieceTeeN: 'stone-piece-teen.png',
+  stonewallPieceCross: 'stone-piece-cross.png',
+  stonewallPieceDiagSE: 'stone-piece-diagse.png',
+  stonewallPieceDiagSW: 'stone-piece-diagsw.png',
+  stonewallPieceDiagNW: 'stone-piece-diagnw.png',
+  stonewallPieceDiagNS: 'stone-piece-diagns.png',
+  stonewallPieceDiagEW: 'stone-piece-diagew.png',
   // BLD-18: complete art only (the Town Center precedent) — no
   // stage frames; construction uses the clip-reveal of the
   // finished art over the foundation diamond.
@@ -7320,22 +7361,87 @@ function drawBuilding(b, all) {
   }
 }
 
-// BLD-20: a wall segment's connections pick its presentation —
-// the DE wall-piece rule, approximated with the one original
-// panel: a run along the grid's x axis reads in the panel's
-// native orientation; a run along the y axis is the same piece
-// mirrored (the dimetric mirror). Corners and junctions with an
-// x-run keep the x orientation (the run the eye follows); an
-// isolated segment stands native.
-function wallSegmentFlip(b, all) {
-  let nx = false;
-  let ny = false;
+// BLD-13/20 angle pass: a wall segment's neighbours pick its
+// PIECE — the DE wall-piece rule. The landed draw had ONE panel
+// per kind, mirrored for the other axis: straight billboards on
+// every configuration, diagonals and corners read wrong to a DE
+// eye (Claudio's live verdict 2026-10-23: the walls were shown
+// "sem os ângulos que deveriam estar"). Now each segment is
+// classified by its full 8-neighbour same-kind mask (wallPiece in
+// play/walls.js) into a baked per-configuration piece — sloped
+// middle sections, corner pieces turning through the tile, capped
+// ends, T/cross junctions, diagonal arms — drawn in the tile's
+// isometric frame (gen-wall-pieces.py; catalogue + audit in the
+// study dossier's DE-WALL-PIECES-ADDENDUM).
+function wallNeighbourMask(b, all) {
+  const mask = { e: false, s: false, w: false, n: false, se: false, sw: false, ne: false, nw: false };
   for (const o of all || buildingList()) {
     if (o === b || o.kind !== b.kind) continue;
-    if (o.cellY === b.cellY && Math.abs(o.cellX - b.cellX) === 1) nx = true;
-    else if (o.cellX === b.cellX && Math.abs(o.cellY - b.cellY) === 1) ny = true;
+    const dx = o.cellX - b.cellX;
+    const dy = o.cellY - b.cellY;
+    if (Math.abs(dx) > 1 || Math.abs(dy) > 1 || (dx === 0 && dy === 0)) continue;
+    if (dx === 1 && dy === 0) mask.e = true;
+    else if (dx === -1 && dy === 0) mask.w = true;
+    else if (dx === 0 && dy === 1) mask.s = true;
+    else if (dx === 0 && dy === -1) mask.n = true;
+    else if (dx === 1 && dy === 1) mask.se = true;
+    else if (dx === -1 && dy === 1) mask.sw = true;
+    else if (dx === 1 && dy === -1) mask.ne = true;
+    else if (dx === -1 && dy === -1) mask.nw = true;
   }
-  return ny && !nx;
+  return mask;
+}
+
+// wallPiece key -> BUILDING_ART suffix (pieces live under the
+// family's key + 'Piece' + suffix).
+const WALL_PIECE_ART = {
+  midx: 'MidX', ende: 'EndE', endew: 'EndW', corneres: 'CornerES',
+  corneren: 'CornerEN', cornerwn: 'CornerWN', tees: 'TeeS', teen: 'TeeN',
+  cross: 'Cross', diagse: 'DiagSE', diagsw: 'DiagSW', diagnw: 'DiagNW',
+  diagns: 'DiagNS', diagew: 'DiagEW',
+};
+// Construction reveal fractions for pieces without their own
+// stage art — the stage thirds' own fractions (the palisade stage
+// semantics), so a corner foundation rises in the same steps as a
+// straight run does.
+const WALL_STAGE_FRAC = [0.35, 0.65, 0.90];
+
+// Draw one wall segment's art for its neighbour configuration.
+// Returns true when art was drawn; the caller falls back to its
+// vector draw otherwise. A segment with no neighbours at all
+// ('single') keeps the family's established panel chain,
+// untouched.
+function drawWallPieceArt(b, all, sx, sy, half) {
+  const famKey = BUILDING_ART_KEY[b.kind];
+  const piece = wallPiece(wallNeighbourMask(b, all));
+  let drawn = false;
+  drawWallArt(piece.flip, sx, () => {
+    if (piece.key === 'single') {
+      if (!b.complete) {
+        drawn = drawArtImage(buildingStageImage(b.kind, b.progress), sx, sy,
+          CS * 1.12, half * 0.45, 1);
+      }
+      if (!drawn) {
+        drawn = drawArtImage(BUILDING_ART.img[famKey], sx, sy,
+          CS * 1.12, half * 0.45, b.complete ? 1 : b.progress);
+      }
+      return;
+    }
+    const pieceImg = BUILDING_ART.img[famKey + 'Piece' + WALL_PIECE_ART[piece.key]];
+    if (b.complete) {
+      drawn = drawArtImage(pieceImg, sx, sy, CS * 1.12, half * 0.45, 1);
+      return;
+    }
+    const n = b.progress < 1 / 3 ? 1 : b.progress < 2 / 3 ? 2 : 3;
+    if (piece.key === 'midx') {
+      drawn = drawArtImage(BUILDING_ART.img[famKey + 'PieceMidXStage' + n], sx, sy,
+        CS * 1.12, half * 0.45, 1);
+    }
+    if (!drawn) {
+      drawn = drawArtImage(pieceImg, sx, sy, CS * 1.12, half * 0.45, WALL_STAGE_FRAC[n - 1]);
+    }
+  });
+  return drawn;
 }
 
 // Run a wall segment's art draw, mirrored around the segment's
@@ -7353,13 +7459,13 @@ function drawWallArt(flip, sx, draw) {
 }
 
 // The Palisade Wall segment (BLD-13): one cell of sharpened
-// timber stakes. Art follows the building contract — the
-// pipeline's palisade set (finished art + three construction
-// stages on the canonical diamond): the stage frame while
-// building, the finished art when complete, the clip-reveal as
-// the in-between fallback, sized footprint × 1.12 like every
-// other building. Last resort: the vector fence below, same
-// palette, so a segment never renders as a foreign block.
+// timber stakes. Art follows the building contract, sized
+// footprint × 1.12 like every other building — and since the
+// angle pass, the art is the segment's neighbour-configuration
+// PIECE (drawWallPieceArt): sloped runs, turning corners, capped
+// ends, diagonal arms, in the tile's isometric frame. Last
+// resort: the vector fence below, same palette, so a segment
+// never renders as a foreign block.
 function drawPalisade(b, all) {
   const [sx, sy] = worldToScreen(b.x, b.y);
   const half = CS / 2;
@@ -7369,25 +7475,13 @@ function drawPalisade(b, all) {
   const bt = worldToScreen(b.x + half, b.y + half);
   const l = worldToScreen(b.x - half, b.y + half);
   poly([t, r, bt, l], b.complete ? 'rgba(0,0,0,0.12)' : '#8d8578');
-  let artDrawn = false;
-  drawWallArt(wallSegmentFlip(b, all), sx, () => {
-    if (!b.complete) {
-      artDrawn = drawArtImage(buildingStageImage(b.kind, b.progress), sx, sy,
-        CS * 1.12, half * 0.45, 1);
-    }
-    if (!artDrawn) {
-      artDrawn = drawArtImage(BUILDING_ART.img[BUILDING_ART_KEY[b.kind]], sx, sy,
-        CS * 1.12, half * 0.45, b.complete ? 1 : b.progress);
-    }
-  });
-  if (!artDrawn) drawPalisadeVector(sx, sy, b);
+  if (!drawWallPieceArt(b, all, sx, sy, half)) drawPalisadeVector(sx, sy, b);
   if (!b.complete) progressBar(sx, sy - 3.1 * camS, b.progress, CS * 0.9);
 }
 
 // The Stone Wall segment (BLD-20): one cell of coursed stone
-// blocks — the palisade's draw contract with its own art set
-// (finished panel + three construction stages, connectivity
-// flip included) and a stone-block vector fallback.
+// blocks — the palisade's draw contract with its own piece set
+// and a stone-block vector fallback.
 function drawStoneWall(b, all) {
   const [sx, sy] = worldToScreen(b.x, b.y);
   const half = CS / 2;
@@ -7397,18 +7491,7 @@ function drawStoneWall(b, all) {
   const bt = worldToScreen(b.x + half, b.y + half);
   const l = worldToScreen(b.x - half, b.y + half);
   poly([t, r, bt, l], b.complete ? 'rgba(0,0,0,0.12)' : '#8d8578');
-  let artDrawn = false;
-  drawWallArt(wallSegmentFlip(b, all), sx, () => {
-    if (!b.complete) {
-      artDrawn = drawArtImage(buildingStageImage(b.kind, b.progress), sx, sy,
-        CS * 1.12, half * 0.45, 1);
-    }
-    if (!artDrawn) {
-      artDrawn = drawArtImage(BUILDING_ART.img[BUILDING_ART_KEY[b.kind]], sx, sy,
-        CS * 1.12, half * 0.45, b.complete ? 1 : b.progress);
-    }
-  });
-  if (!artDrawn) drawStoneWallVector(sx, sy, b);
+  if (!drawWallPieceArt(b, all, sx, sy, half)) drawStoneWallVector(sx, sy, b);
   if (!b.complete) progressBar(sx, sy - 3.1 * camS, b.progress, CS * 0.9);
 }
 
