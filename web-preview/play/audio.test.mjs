@@ -236,3 +236,195 @@ test('INF-10 ambient cues: combat and work map, throttle and attenuate', () => {
   t = 1600;
   assert.equal(engine.play({ type: 'work' }, { gain: 1 }), true);
 });
+
+// --- The generated sound bank (tools/sound-gen) -------------------
+// The manifest on disk is the contract: every file it names
+// exists, decodes as our WAV format, and the priority spine of
+// the catalog (acks for every class, horses, animals, combat,
+// economy, building, UI, alerts, stingers) is covered.
+import { readFileSync, existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const AUDIO_DIR = join(dirname(fileURLToPath(import.meta.url)), 'audio');
+const MANIFEST = JSON.parse(readFileSync(join(AUDIO_DIR, 'manifest.json'), 'utf8'));
+const MANIFEST_FILES = [...new Set(Object.values(MANIFEST.sounds).flat())];
+
+function wavInfo(buf) {
+  assert.equal(buf.toString('ascii', 0, 4), 'RIFF');
+  assert.equal(buf.toString('ascii', 8, 12), 'WAVE');
+  // fmt chunk: audioFormat, channels, sampleRate, ..., bitsPerSample
+  const fmtAt = buf.indexOf('fmt ');
+  assert.ok(fmtAt > 0, 'fmt chunk present');
+  return {
+    format: buf.readUInt16LE(fmtAt + 8),
+    channels: buf.readUInt16LE(fmtAt + 10),
+    rate: buf.readUInt32LE(fmtAt + 12),
+    bits: buf.readUInt16LE(fmtAt + 22),
+  };
+}
+
+test('the generated manifest covers the catalog spine and every file decodes', () => {
+  const keys = Object.keys(MANIFEST.sounds);
+  assert.ok(keys.length >= 50, `sound keys: ${keys.length}`);
+  for (const cls of ['villager', 'infantry', 'archer', 'cavalry']) {
+    for (const action of ['select', 'order', 'attack']) {
+      assert.ok(MANIFEST.sounds[`ack.${cls}.${action}`], `ack.${cls}.${action}`);
+    }
+  }
+  for (const key of [
+    'alert.bell', 'alert.horn', 'horse.hooves', 'horse.neigh',
+    'sheep.baa', 'sheep.death', 'boar.grunt', 'boar.death',
+    'deer.death', 'wolf.growl', 'wolf.death',
+    'hit.sword', 'hit.spear', 'hit.knife', 'bow.release',
+    'arrow.hit', 'hit.building', 'death.human', 'death.cavalry',
+    'work.chop', 'work.treefall', 'work.minegold', 'work.minestone',
+    'work.farm', 'work.hammer', 'work.dropoff',
+    'build.place', 'build.complete', 'build.research', 'build.destroy',
+    'ui.coin', 'ui.error', 'ui.ready', 'housed.warn',
+    'sting.ageup', 'sting.victory', 'sting.defeat',
+    'ambient.bird', 'ambient.wind',
+  ]) {
+    assert.ok(MANIFEST.sounds[key], `spine key ${key}`);
+  }
+  let totalBytes = 0;
+  for (const file of MANIFEST_FILES) {
+    const path = join(AUDIO_DIR, file);
+    assert.ok(existsSync(path), `asset exists: ${file}`);
+    const buf = readFileSync(path);
+    totalBytes += buf.length;
+    const info = wavInfo(buf);
+    assert.equal(info.format, 1, `${file}: PCM`);
+    assert.equal(info.channels, 1, `${file}: mono`);
+    assert.equal(info.rate, 22050, `${file}: rate`);
+    assert.equal(info.bits, 16, `${file}: 16-bit`);
+    assert.ok(buf.length > 1000, `${file}: non-trivial payload`);
+  }
+  assert.ok(totalBytes < 3 * 1024 * 1024, `bank stays small: ${totalBytes}`);
+  for (const cue of ['ageAdvance', 'victory', 'defeat', 'researchComplete',
+    'constructionComplete', 'buildingPlaced', 'housed', 'combat', 'work']) {
+    assert.ok(MANIFEST.cueSounds[cue], `cue mapping ${cue}`);
+    assert.ok(MANIFEST.sounds[MANIFEST.cueSounds[cue]],
+      `cue ${cue} maps to a real sound`);
+  }
+});
+
+// A fake context that also decodes: each fetched file's first
+// byte tags its decoded buffer, so tests can see WHICH asset a
+// call started.
+function makeBankContext() {
+  const ctx = makeFakeContext();
+  ctx.startedBuffers = [];
+  ctx.decodeAudioData = (buf) => Promise.resolve({
+    duration: 0.2, tag: new Uint8Array(buf)[0],
+  });
+  const baseCreate = ctx.createBufferSource.bind(ctx);
+  ctx.createBufferSource = () => {
+    const src = baseCreate();
+    const start = src.start.bind(src);
+    src.start = (when) => { ctx.startedBuffers.push(src.buffer); start(when); };
+    return src;
+  };
+  return ctx;
+}
+
+function makeBankFetch() {
+  const tags = new Map();
+  MANIFEST_FILES.forEach((f, i) => tags.set(f, i + 1));
+  const fetchImpl = (url) => {
+    const s = String(url);
+    const file = MANIFEST_FILES.find((f) => s.endsWith('/' + f))
+      || (s.endsWith('manifest.json') ? 'manifest.json' : null);
+    if (!file) return Promise.resolve({ ok: false, status: 404 });
+    if (file === 'manifest.json') {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(MANIFEST),
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
+      });
+    }
+    const bytes = new Uint8Array(64);
+    bytes[0] = tags.get(file);
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.reject(new Error('not json')),
+      arrayBuffer: () => Promise.resolve(bytes.buffer),
+    });
+  };
+  return { fetchImpl, tagOf: (file) => tags.get(file) };
+}
+
+async function bankedEngine() {
+  const ctx = makeBankContext();
+  const { fetchImpl, tagOf } = makeBankFetch();
+  let t = 0;
+  const engine = createAudioEngine({
+    storage: makeStorage(),
+    contextFactory: () => ctx,
+    now: () => t,
+    fetchImpl,
+    soundBaseUrl: 'https://example.test/audio/',
+  });
+  engine.unlock();
+  assert.equal(await engine.loadSounds(), true);
+  return { engine, ctx, tagOf, advance: (ms) => { t += ms; } };
+}
+
+test('the bank loads through the injected fetch and plays decoded buffers', async () => {
+  const { engine, ctx, tagOf } = await bankedEngine();
+  assert.equal(engine.bank.manifestSeen, true);
+  assert.ok(engine.bank.sounds.get('work.chop').length >= 1);
+  assert.equal(engine.playSound('work.chop'), true);
+  const chopTags = MANIFEST.sounds['work.chop'].map(tagOf);
+  assert.ok(chopTags.includes(ctx.startedBuffers.at(-1).tag), 'a chop variant played');
+  // A genuinely unknown key reports missing, so callers fall back.
+  assert.equal(engine.playSound('nope.key'), false);
+});
+
+test('playSound spacing: inside the window it is handled but silent', async () => {
+  const { engine, ctx, advance } = await bankedEngine();
+  assert.equal(engine.playSound('work.chop'), true);
+  const started = ctx.startedBuffers.length;
+  assert.equal(engine.playSound('work.chop'), true); // cooldown: handled
+  assert.equal(ctx.startedBuffers.length, started); // ...but not replayed
+  advance(500); // past the 380 ms chop spacing
+  assert.equal(engine.playSound('work.chop'), true);
+  assert.equal(ctx.startedBuffers.length, started + 1);
+});
+
+test('playAck routes by class and action, with the per-voice cooldown', async () => {
+  const { engine, ctx, tagOf, advance } = await bankedEngine();
+  assert.equal(engine.playAck({ cls: 'villager', action: 'select' }), true);
+  assert.ok(MANIFEST.sounds['ack.villager.select'].map(tagOf)
+    .includes(ctx.startedBuffers.at(-1).tag), 'the villager answered');
+  // The same voice again at once: refused (no machine-gun acks).
+  assert.equal(engine.playAck({ cls: 'villager', action: 'select' }), false);
+  // A different class answers once the small global gap passes.
+  advance(200);
+  assert.equal(engine.playAck({ cls: 'infantry', action: 'order' }), true);
+  assert.ok(MANIFEST.sounds['ack.infantry.order'].map(tagOf)
+    .includes(ctx.startedBuffers.at(-1).tag), 'the footman answered');
+});
+
+test('mapped cues and the typed under-attack alert play the bank first', async () => {
+  const { engine, ctx, tagOf, advance } = await bankedEngine();
+  assert.equal(engine.play({ type: 'feed', kind: 'research' }), true);
+  assert.ok(MANIFEST.sounds['build.research'].map(tagOf)
+    .includes(ctx.startedBuffers.at(-1).tag), 'the research chime is generated');
+  advance(10000); // past the 9 s underAttack cue gate
+  assert.equal(engine.play({ type: 'attack', town: true }), true);
+  assert.ok(MANIFEST.sounds['alert.bell'].map(tagOf)
+    .includes(ctx.startedBuffers.at(-1).tag), 'the town gets bells');
+  advance(10000); // past the alert gate again
+  assert.equal(engine.play({ type: 'attack', town: false }), true);
+  assert.ok(MANIFEST.sounds['alert.horn'].map(tagOf)
+    .includes(ctx.startedBuffers.at(-1).tag), 'soldiers get the horn');
+});
+
+test('the ambient layer arms quietly, then speaks within its window', async () => {
+  const { engine, ctx, advance } = await bankedEngine();
+  assert.equal(engine.ambience(), false); // first call only arms
+  advance(10000);
+  engine.ambience();
+  assert.ok(ctx.startedBuffers.length >= 1, 'a bird or the wind played');
+});

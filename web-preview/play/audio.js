@@ -1,13 +1,23 @@
-// Skirmish II — generated audio (2026-10-20, Claudio's request).
+// Skirmish II — generated audio (2026-10-20, Claudio's request;
+// generated sound set 2026-10-23).
 //
-// A client-only sound layer: EVERY cue is synthesized at runtime
-// with the Web Audio API — oscillators and filtered noise shaped
-// by envelopes. There are no samples, no audio files, and nothing
-// from any other game. The layer reads only local UI actions and
-// client-side state transitions (the same own-seat snapshots the
-// event feed uses); it never touches the sim, never issues a
-// command, and never enters a network payload — lockstep
-// determinism and the golden hash are untouched by construction.
+// A client-only sound layer with two tiers, both 100% ours:
+//  1. The GENERATED SOUND SET (tools/sound-gen): procedural DSP
+//     effects and Kokoro-TTS acknowledgments of original phrases,
+//     rendered offline into play/audio/*.wav with a manifest.json.
+//     The categories and recipes were designed by studying public
+//     documentation of the reference game's sound design — no
+//     audio, line, or melody from any other game is used.
+//  2. The runtime synth (the original layer): oscillators and
+//     filtered noise shaped by envelopes, still the voice of the
+//     UI clicks and the FALLBACK for every cue whose asset has
+//     not loaded (or does not exist). Silence is the last resort,
+//     never the plan.
+// The layer reads only local UI actions and client-side state
+// transitions (the same own-seat snapshots the event feed uses);
+// it never touches the sim, never issues a command, and never
+// enters a network payload — lockstep determinism and the golden
+// hash are untouched by construction.
 //
 // The context is created lazily by unlock(), which app.js calls
 // from the first pointer/key gesture (browser autoplay policy).
@@ -49,6 +59,51 @@ export const CUE_INTERVALS_MS = {
 // a few ms after a click; the stinger must not be eaten by it) —
 // their own per-cue intervals still apply.
 const PRIORITY_CUES = new Set(['victory', 'defeat', 'ageAdvance', 'housed', 'underAttack']);
+
+// --- The generated sound set (play/audio/, tools/sound-gen) ------
+
+/** Directory the manifest and its .wav files live in. */
+export const SOUND_BASE_URL = new URL('./audio/', import.meta.url).href;
+
+// Acknowledgment restraint: DE-style responses never machine-gun.
+// One answer per (class, action) per cooldown window, and a small
+// global spacing so a click-storm cannot stack voices.
+export const ACK_COOLDOWN_MS = 900;
+export const ACK_GLOBAL_GAP_MS = 150;
+
+// Per-sound minimum spacing for one-shot effects. Work strikes
+// keep the old work gate's ~400 ms collapse (a whole crew lands
+// as one strike per window); combat hits may layer faster.
+export const SFX_INTERVALS_MS = {
+  'work.chop': 380,
+  'work.hammer': 380,
+  'work.minegold': 380,
+  'work.minestone': 380,
+  'work.farm': 380,
+  'work.treefall': 800,
+  'work.dropoff': 300,
+  'hit.sword': 110,
+  'hit.knife': 110,
+  'hit.spear': 110,
+  'hit.building': 130,
+  'bow.release': 150,
+  'arrow.hit': 150,
+  'death.human': 300,
+  'death.cavalry': 450,
+  'sheep.baa': 1200,
+  'sheep.death': 300,
+  'boar.grunt': 500,
+  'boar.death': 300,
+  'deer.death': 300,
+  'wolf.growl': 500,
+  'wolf.death': 300,
+  'horse.neigh': 1500,
+  'horse.hooves': 900,
+  'build.destroy': 800,
+  'ui.error': 350,
+  'ui.coin': 120,
+};
+export const SFX_DEFAULT_INTERVAL_MS = 90;
 
 /**
  * Map a semantic event to a cue name (pure). Accepts a cue name
@@ -209,6 +264,8 @@ export function createAudioEngine({
   storage = defaultStorage(),
   contextFactory = defaultContextFactory,
   now = () => Date.now(),
+  soundBaseUrl = SOUND_BASE_URL,
+  fetchImpl = (...args) => globalThis.fetch(...args),
 } = {}) {
   let settings = loadAudioSettings(storage);
   const gate = createCueGate(now);
@@ -216,6 +273,93 @@ export function createAudioEngine({
   let master = null;
   let armed = false; // a user gesture has unlocked audio at least once
   let noiseBuffer = null;
+
+  // The generated sound bank: manifest.json's key -> variant
+  // buffers, filled asynchronously after the first unlock. Until
+  // a key's buffers land, its callers hear the synth fallback.
+  const bank = {
+    sounds: new Map(), // key -> [AudioBuffer]
+    cueSounds: {}, // legacy cue name -> sound key
+    manifestSeen: false,
+    loading: null,
+  };
+  const sfxLast = new Map(); // sound key -> last emit time (ms)
+  const sfxVariant = new Map(); // sound key -> last variant index
+  const ackLast = new Map(); // ack key -> last answer time (ms)
+  let ackLastAny = -Infinity;
+  let ambientNextAt = 0;
+
+  function loadSounds() {
+    if (bank.loading) return bank.loading;
+    const c = ensureContext();
+    if (!c || !c.decodeAudioData || !fetchImpl) return Promise.resolve(false);
+    bank.loading = (async () => {
+      try {
+        const res = await fetchImpl(soundBaseUrl + 'manifest.json');
+        if (!res || !res.ok) return false;
+        const manifest = await res.json();
+        bank.cueSounds = manifest.cueSounds || {};
+        bank.manifestSeen = true;
+        const jobs = [];
+        for (const [key, files] of Object.entries(manifest.sounds || {})) {
+          bank.sounds.set(key, []);
+          for (const file of files) {
+            jobs.push((async () => {
+              try {
+                const r = await fetchImpl(soundBaseUrl + file);
+                if (!r || !r.ok) return;
+                const buf = await c.decodeAudioData(await r.arrayBuffer());
+                if (buf) bank.sounds.get(key).push(buf);
+              } catch { /* one missing asset: that key stays synth */ }
+            })());
+          }
+        }
+        await Promise.all(jobs);
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+    return bank.loading;
+  }
+
+  /**
+   * Emit one generated sound. Returns 'played', 'cooldown', or
+   * 'missing' (no buffer yet — the caller may fall back to synth).
+   * Variants rotate without immediate repeats. When `gated` is
+   * false the per-key interval is skipped (the caller already
+   * passed the cue gate).
+   */
+  function emit(key, { gain = 1, delay = 0, gated = true } = {}) {
+    const buffers = bank.sounds.get(key);
+    if (!buffers || buffers.length === 0) return 'missing';
+    const at = now();
+    if (gated) {
+      const interval = SFX_INTERVALS_MS[key] ?? SFX_DEFAULT_INTERVAL_MS;
+      const last = sfxLast.get(key);
+      if (last != null && at - last < interval) return 'cooldown';
+    }
+    const c = ensureContext();
+    if (!c || !c.createBufferSource) return 'missing';
+    let idx = Math.floor(Math.random() * buffers.length);
+    if (buffers.length > 1 && idx === sfxVariant.get(key)) {
+      idx = (idx + 1) % buffers.length;
+    }
+    sfxVariant.set(key, idx);
+    sfxLast.set(key, at);
+    try {
+      const src = c.createBufferSource();
+      src.buffer = buffers[idx];
+      const g = c.createGain();
+      g.gain.value = Math.max(0, Math.min(1, gain));
+      src.connect(g);
+      g.connect(master);
+      src.start(c.currentTime + Math.max(0, delay));
+    } catch {
+      return 'missing';
+    }
+    return 'played';
+  }
 
   function ensureContext() {
     if (ctx) return ctx;
@@ -386,6 +530,7 @@ export function createAudioEngine({
         const p = c.resume();
         if (p && p.catch) p.catch(() => {});
       }
+      loadSounds(); // the generated bank streams in behind the gesture
       return true;
     },
     /**
@@ -405,9 +550,93 @@ export function createAudioEngine({
       }
       const gain = Number.isFinite(opts.gain)
         ? Math.max(0, Math.min(1, opts.gain)) : 1;
+      // The generated set speaks first where the manifest maps
+      // this cue; the synth recipe is the fallback, not a rival.
+      // The under-attack alert is typed, as in the reference:
+      // bells for the town (villagers, buildings), a horn for
+      // soldiers — app.js classifies the located HP drop.
+      if (cue === 'underAttack') {
+        const key = event && event.town ? 'alert.bell' : 'alert.horn';
+        if (emit(key, { gated: false }) === 'played') return true;
+      } else if (bank.cueSounds[cue]) {
+        if (emit(bank.cueSounds[cue], { gain, gated: false }) === 'played') return true;
+      }
       schedule(cue, gain);
       return true;
     },
+    /**
+     * Play a generated one-shot by sound key (work strikes,
+     * weapon hits, deaths, animals, UI). True when the request
+     * was handled — played, or deliberately inside its spacing
+     * window; false only when the asset is unavailable, so the
+     * caller can fall back to a synth cue exactly then.
+     */
+    playSound(key, opts = {}) {
+      if (!settings.enabled || !armed) return false;
+      const gain = Number.isFinite(opts.gain)
+        ? Math.max(0, Math.min(1, opts.gain)) : 1;
+      const delay = Number.isFinite(opts.delay) ? Math.max(0, opts.delay) : 0;
+      return emit(key, { gain, delay }) !== 'missing';
+    },
+    /**
+     * A unit-class acknowledgment: { cls: 'villager'|'infantry'|
+     * 'archer'|'cavalry', action: 'select'|'order'|'attack' }.
+     * One voice answers per order; the per-class cooldown keeps
+     * click-storms quiet. Cavalry answers may carry the horse
+     * with them (hoofbeats under a move order, an occasional
+     * neigh). Before the voice assets land, the legacy synth
+     * order/select cues answer instead.
+     */
+    playAck({ cls, action } = {}) {
+      if (!settings.enabled || !armed || !cls || !action) return false;
+      const key = `ack.${cls}.${action}`;
+      const at = now();
+      const last = ackLast.get(key);
+      if (last != null && at - last < ACK_COOLDOWN_MS) return false;
+      if (at - ackLastAny < ACK_GLOBAL_GAP_MS) return false;
+      ackLast.set(key, at);
+      ackLastAny = at;
+      if (emit(key, { gated: false }) === 'played') {
+        if (cls === 'cavalry') {
+          if (action === 'order' || action === 'attack') {
+            emit('horse.hooves', { gain: 0.45, gated: false });
+          } else if (Math.random() < 0.35) {
+            emit('horse.neigh', { gain: 0.35, gated: false });
+          }
+        }
+        return true;
+      }
+      // Fallback: the synth voice of the old layer.
+      const cue = action === 'select' ? 'select'
+        : cls === 'villager' ? 'orderVillager' : 'orderMilitary';
+      if (!ensureContext()) return false;
+      schedule(cue, 1);
+      return true;
+    },
+    /**
+     * The faint ambient layer (bird calls, a rare wind gust),
+     * self-scheduled: app.js calls this from its world-state
+     * update and the engine decides when the next sound is due.
+     * Never during the first seconds, never loud.
+     */
+    ambience() {
+      if (!settings.enabled || !armed) return false;
+      const at = now();
+      if (!ambientNextAt) {
+        ambientNextAt = at + 9000;
+        return false;
+      }
+      if (at < ambientNextAt) return false;
+      const wind = Math.random() < 0.22;
+      const key = wind ? 'ambient.wind' : 'ambient.bird';
+      const played = emit(key, { gain: wind ? 0.13 : 0.3, gated: false });
+      ambientNextAt = at + (wind ? 45000 : 13000) + Math.random() * 15000;
+      return played === 'played';
+    },
+    /** Load (or return the in-flight load of) the sound bank. */
+    loadSounds,
+    /** Test/debug view of the generated bank. */
+    bank,
     setEnabled(enabled) {
       settings = { ...settings, enabled: !!enabled };
       saveAudioSettings(storage, settings);
