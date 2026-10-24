@@ -260,37 +260,42 @@ function pngIcon(png, cls) {
 // 12 market (BLD-19); 13 town center (Castle P1 — a construction
 // record that converts into the TC entity on completion; its cost
 // is 275 wood PLUS 100 stone: BUILD_COST holds the wood, the
-// stone rides BUILD_COST_STONE).
+// stone rides BUILD_COST_STONE); 14 stone wall (BLD-20 — the
+// palisade's Feudal sibling: 0 wood, 5 stone per segment).
 // Costs and footprints mirror the sim (MECHANICS-STUDY §5; the
 // palisade row is the current DE wiki row — 3 wood per segment).
-const BUILD_COST = [25, 60, 175, 100, 100, 100, 175, 175, 150, 3, 35, 25, 175, 275];
+const BUILD_COST = [25, 60, 175, 100, 100, 100, 175, 175, 150, 3, 35, 25, 175, 275, 0];
 // Stone paid at placement, by kind tag (BLD-18's two defensive
-// structures and the Town Center cost stone; every other entry 0).
-const BUILD_COST_STONE = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 125, 5, 0, 100];
+// structures, the Town Center and the Stone Wall cost stone;
+// every other entry 0).
+const BUILD_COST_STONE = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 125, 5, 0, 100, 5];
 const BUILD_I18N = ['house', 'farm', 'barracks', 'lumber', 'mill',
   'mining', 'range', 'stable', 'blacksmith', 'palisade', 'watchtower',
-  'outpost', 'market', 'towncenter'];
+  'outpost', 'market', 'towncenter', 'stonewall'];
 let BUILD_NAME = ['House', 'Farm', 'Barracks', 'Lumber Camp', 'Mill',
   'Mining Camp', 'Archery Range', 'Stable', 'Blacksmith', 'Palisade Wall',
-  'Watch Tower', 'Outpost', 'Market', 'Town Center'];
+  'Watch Tower', 'Outpost', 'Market', 'Town Center', 'Stone Wall'];
 // Farm footprint is 3 (DE-documented; Claudio's decision
 // 2026-10-22, superseding the earlier 2x2 specification).
-const BUILD_SIZE = [2, 3, 3, 2, 2, 2, 3, 3, 3, 1, 1, 1, 4, 4];
+const BUILD_SIZE = [2, 3, 3, 2, 2, 2, 3, 3, 3, 1, 1, 1, 4, 4, 1];
+// The wall kinds (BLD-13 palisade, BLD-20 stone): 1×1 segments
+// placed by dragged lines, not single footprints.
+function isWallKind(kind) { return kind === 9 || kind === 14; }
 const BUILD_ICON = ['i-house', 'i-farm', 'i-tc', 'i-lumber', 'i-mill',
   'i-mining', 'i-range', 'i-stable', 'i-blacksmith', 'i-palisade',
-  'i-watchtower', 'i-outpost', 'i-market', 'i-tc'];
+  'i-watchtower', 'i-outpost', 'i-market', 'i-tc', 'i-stonewall'];
 // The PNG set above, per building kind tag (same order as
 // BUILD_ICON): command buttons and building portraits.
 const BUILD_PNG = ['house.png', 'farm.png', 'barracks.png', 'lumber-camp.png',
   'mill.png', 'mining-camp.png', 'archery-range.png', 'stable.png',
   'blacksmith.png', 'palisade-wall.png', 'watchtower.png', 'outpost.png',
-  'market.png', 'town-center.png'];
+  'market.png', 'town-center.png', 'stone-wall.png'];
 // Building max HP by kind tag (the sim's building table, study
 // §5) — for the enemy-building info panel (M5). The palisade
 // entry is its Dark-Age value (150; 250 from Feudal, BLD-13 —
 // the same base-column convention the House's 550 follows here);
 // the Watch Tower's 850 is its pre-Castle value (BLD-18).
-const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200, 150, 850, 500, 1800, 2400];
+const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200, 150, 850, 500, 1800, 2400, 1080];
 // WASM build commands by kind tag (M6 completes the set; BLD-13
 // adds the palisade's single-segment form — dragged lines go
 // through sim.push_build_wall_line, see attemptPlaceWallLine).
@@ -298,7 +303,7 @@ const PUSH_BUILD = ['push_build_house', 'push_build_farm', 'push_build_barracks'
   'push_build_lumber_camp', 'push_build_mill', 'push_build_mining_camp',
   'push_build_archery_range', 'push_build_stable', 'push_build_blacksmith',
   'push_build_palisade_wall', 'push_build_watch_tower', 'push_build_outpost',
-  'push_build_market', 'push_build_town_center'];
+  'push_build_market', 'push_build_town_center', 'push_build_stone_wall'];
 const PUSH_BUILD_QUEUED = PUSH_BUILD.map((n) => `${n}_queued`);
 // Own-building minimap colors by kind tag (M6); kinds without an
 // entry keep the minimap's parchment default, the enemy's
@@ -306,7 +311,7 @@ const PUSH_BUILD_QUEUED = PUSH_BUILD.map((n) => `${n}_queued`);
 const BUILDING_MINIMAP_COLOR = {
   3: '#8a6b42', 4: '#e5d9a8', 5: '#b9a24a', 6: '#c98f4e', 7: '#9a6a44', 8: '#6f6f76',
   9: '#7a5a34', 10: '#7a7a72', 11: '#a8843f', 12: '#b03a2e',
-  13: '#d8cf9f',
+  13: '#d8cf9f', 14: '#8d8578',
 };
 
 // Ages and technologies (M6). Age tags match the sim's Age::tag;
@@ -888,6 +893,13 @@ const BUILDING_ART_FILES = {
   palisadeStage1: 'palisade-wall-stage1.png',
   palisadeStage2: 'palisade-wall-stage2.png',
   palisadeStage3: 'palisade-wall-stage3.png',
+  // BLD-20: the Stone Wall's own set (original art, same
+  // contract as the palisade's: finished panel + three
+  // construction stages on the canonical diamond).
+  stonewall: 'stone-wall.png',
+  stonewallStage1: 'stone-wall-stage1.png',
+  stonewallStage2: 'stone-wall-stage2.png',
+  stonewallStage3: 'stone-wall-stage3.png',
   // BLD-18: complete art only (the Town Center precedent) — no
   // stage frames; construction uses the clip-reveal of the
   // finished art over the foundation diamond.
@@ -921,6 +933,7 @@ const BUILDING_ART_KEY = {
   // it rises (no 'tcStage' frames exist, so buildingStageImage
   // falls through to exactly this reveal).
   13: 'tc',
+  14: 'stonewall',
 };
 // The settle cap: the loading gate waits for the art, but a hung
 // image (stalled connection) must never block a match longer
@@ -1759,6 +1772,7 @@ function mirrorValid(kind, cx, cy) {
   const ownDone = buildings.filter((b) => b.owner === localOwner && b.complete);
   if (kind === 1 && !ownDone.some((b) => b.kind === 4)) return false;
   if ((kind === 6 || kind === 7 || kind === 8) && myAge() < 1) return false;
+  if (kind === 14 && myAge() < 1) return false; // Stone Wall is Feudal (BLD-20)
   if ((kind === 6 || kind === 7) && !ownDone.some((b) => b.kind === 2)) return false;
   // Any standing building's footprint (square range overlap).
   for (const b of buildings) {
@@ -1770,21 +1784,34 @@ function mirrorValid(kind, cx, cy) {
   for (let dx = 0; dx < size; dx++) {
     for (let dy = 0; dy < size; dy++) cells.push([cx + dx, cy + dy]);
   }
-  // Every Town Center's cell is off-limits (M5: both players').
-  const tcCells = [];
+  // Every Town Center's reserved 4×4 is off-limits (M5: both
+  // players'; BLD-16) — the sim reserves the TC's whole footprint
+  // (its cell −1..+2 on each axis), not just its anchor cell.
+  // The mirror used to block only the anchor cell, so the wall
+  // ghost previewed green over 15 cells the sim then silently
+  // skipped (BLD-20: the ghost IS the wall — mirror the reserve
+  // exactly).
+  const tcReserved = new Set();
   {
     const kinds = sim.entity_kinds();
     const pos = sim.positions();
     for (let i = 0; i < kinds.length; i++) {
-      if (kinds[i] === KIND_TC) tcCells.push(worldToCell(pos[i * 2], pos[i * 2 + 1]));
+      if (kinds[i] === KIND_TC) {
+        const [tx, ty] = worldToCell(pos[i * 2], pos[i * 2 + 1]);
+        for (let dy = -1; dy <= 2; dy++) {
+          for (let dx = -1; dx <= 2; dx++) {
+            const rx = tx + dx;
+            const ry = ty + dy;
+            if (rx >= 0 && ry >= 0) tcReserved.add(ry * GW + rx);
+          }
+        }
+      }
     }
   }
   const nodes = nodeList();
   for (const [x, y] of cells) {
     if (OBST[y * GW + x]) return false; // static wall
-    for (const [tx, ty] of tcCells) {
-      if (x === tx && y === ty) return false; // a Town Center
-    }
+    if (tcReserved.has(y * GW + x)) return false; // a Town Center's reserve
     for (const n of nodes) { // a live node on this cell
       if (n.amount <= 0) continue;
       const nc = worldToCell(n.x, n.y);
@@ -2781,7 +2808,9 @@ function applyLocalOrder(cmd) {
     case 'build': return cmd.q
       ? sim[PUSH_BUILD_QUEUED[cmd.k]](cmd.e, cmd.x, cmd.y)
       : sim[PUSH_BUILD[cmd.k]](cmd.e, cmd.x, cmd.y);
-    case 'buildline': return sim.push_build_wall_line(cmd.e, cmd.x0, cmd.y0, cmd.x1, cmd.y1);
+    case 'buildline': return cmd.k === 14
+      ? sim.push_build_stone_wall_line(cmd.e, cmd.x0, cmd.y0, cmd.x1, cmd.y1)
+      : sim.push_build_wall_line(cmd.e, cmd.x0, cmd.y0, cmd.x1, cmd.y1);
     case 'train_at':
       return cmd.k === 2 ? sim.push_train_scout(cmd.b)
         : cmd.k === 3 ? sim.push_train_militia(cmd.b)
@@ -5819,40 +5848,49 @@ async function main() {
     }
   }
 
-  // BLD-13: commit a dragged palisade line. A single semantic
-  // command carries both endpoints (as cell-center world points);
-  // the sim expands the line with the same supercover the ghost
-  // previewed, then validates and charges each segment itself —
-  // invalid or unaffordable cells are skipped (a gap, never a
-  // partial charge) and one builder walks the line raising the
-  // foundations in drag order. The builder is the selected
-  // villager nearest the line's start, attemptPlace's rule.
+  // BLD-13/BLD-20: commit a dragged wall line (palisade or
+  // stone). A single semantic command per villager carries both
+  // endpoints (as cell-center world points); the sim expands the
+  // line with the same supercover the ghost previewed, then
+  // validates and charges each segment itself — invalid or
+  // unaffordable cells are skipped (a gap, never a partial
+  // charge) and the foundations stand at once. DE tasks EVERY
+  // selected villager to the line, so the command goes to all
+  // selected villagers (nearest the line's start first); the sim
+  // distributes them along the line — each takes the first
+  // segment nobody is building yet — and a lone villager walks
+  // the whole line raising segment after segment.
   function attemptPlaceWallLine(ax, ay, bx, by) {
+    const kind = placement.kind;
     const st = entityState();
     const pos = st.pos;
     const wx = -HALF + (ax + 0.5) * CS;
     const wy = -HALF + (ay + 0.5) * CS;
-    let builder = null;
-    let bestD2 = Infinity;
+    const builders = [];
     for (const id of selectedUnits()) {
       if (st.kinds[id] !== 0) continue;
       const d2 = (pos[id * 2] - wx) ** 2 + (pos[id * 2 + 1] - wy) ** 2;
-      if (d2 < bestD2) { bestD2 = d2; builder = id; }
+      builders.push({ id, d2 });
     }
-    if (builder == null) {
+    if (builders.length === 0) {
       placement = null;
       flash(t('flash.buildSelectVil'));
       return;
     }
-    const ok = issue({
-      t: 'buildline', e: builder, x0: wx, y0: wy,
-      x1: -HALF + (bx + 0.5) * CS, y1: -HALF + (by + 0.5) * CS,
-    });
-    if (ok) {
+    builders.sort((p, q) => p.d2 - q.d2);
+    let any = false;
+    for (const b of builders) {
+      const ok = issue({
+        t: 'buildline', e: b.id, k: kind, x0: wx, y0: wy,
+        x1: -HALF + (bx + 0.5) * CS, y1: -HALF + (by + 0.5) * CS,
+      });
+      any = any || ok;
+    }
+    if (any) {
       placement = null;
       playAudioCue('buildingPlaced');
     } else {
-      flash(t('flash.cannotBuildThere', { name: BUILD_NAME[9] }));
+      flash(t('flash.cannotBuildThere', { name: BUILD_NAME[kind] }));
     }
   }
 
@@ -5890,9 +5928,9 @@ async function main() {
     if (ev.button !== 0) return;
     const [sx, sy] = eventScreen(ev);
     lDrag = { x0: sx, y0: sy, x1: sx, y1: sy, moved: false };
-    // BLD-13: with palisade placement armed, the press cell
+    // BLD-13/BLD-20: with wall placement armed, the press cell
     // anchors the wall line; the release cell ends it.
-    wallAnchor = placement && placement.kind === 9
+    wallAnchor = placement && isWallKind(placement.kind)
       ? worldToCell(...eventWorld(ev)) : null;
   });
   window.addEventListener('mousemove', (ev) => {
@@ -5908,9 +5946,9 @@ async function main() {
     lDrag = null;
     const [wx, wy] = eventWorld(ev);
     if (placement) {
-      if (placement.kind === 9 && d.moved && wallAnchor) {
-        // BLD-13: a dragged palisade placement commits the line
-        // from the press cell to the release cell.
+      if (isWallKind(placement.kind) && d.moved && wallAnchor) {
+        // BLD-13/BLD-20: a dragged wall placement commits the
+        // line from the press cell to the release cell.
         const [ex, ey] = worldToCell(wx, wy);
         attemptPlaceWallLine(wallAnchor[0], wallAnchor[1], ex, ey);
       } else if (!d.moved) {
@@ -6242,9 +6280,12 @@ function amountBar(sx, sy, frac) {
 }
 
 // Construction progress bar, drawn at an explicit anchor (above the
-// building), gold fill — same visual family as amountBar.
-function progressBar(sx, sy, frac) {
-  const w = 5 * camS;
+// building), gold fill — same visual family as amountBar. The width
+// follows the footprint (BLD-20): the default 5 world units suits
+// the 2×2-and-up buildings; 1×1 kinds pass a segment-scale width
+// (CS × 0.9) so the bar belongs to the one cell it describes.
+function progressBar(sx, sy, frac, wWorld = 5) {
+  const w = wWorld * camS;
   const h = Math.max(3, camS * 0.6);
   const x = sx - w / 2;
   ctx.fillStyle = 'rgba(0,0,0,0.55)';
@@ -7227,7 +7268,7 @@ function drawCorpse(site, now) {
 const TALL_FIRE_Y = { 10: 10.2, 11: 6.2 };
 const TALL_BAR_Y = { 10: 11.8, 11: 8.0 };
 
-function drawBuilding(b) {
+function drawBuilding(b, all) {
   if (b.kind === 1) {
     // Farm under construction: bare tilled plot + progress bar.
     // (A completed farm is drawn by the node renderer instead.)
@@ -7240,7 +7281,9 @@ function drawBuilding(b) {
   } else if (b.kind === 2) {
     drawBarracks(b);
   } else if (b.kind === 9) {
-    drawPalisade(b);
+    drawPalisade(b, all);
+  } else if (b.kind === 14) {
+    drawStoneWall(b, all);
   } else if (b.kind >= 3) {
     drawNewBuilding(b);
   } else {
@@ -7257,11 +7300,52 @@ function drawBuilding(b) {
   // M5: a damaged building shows its HP above the roof — buildings
   // are attackable now, and their remaining health is information,
   // never stripped by the quality governor.
-  if (b.hpFrac < 0.999) {
+  // BLD-20: only once the building stands COMPLETE. A foundation's
+  // HP rides the construction line by design (BLD-05), so the
+  // "damaged" reading lit this bar on EVERY building under
+  // construction, stacked a few pixels from its gold progress
+  // bar — at high zoom the pair reads as one giant black slab,
+  // and a wall line under construction wore a skyline of them
+  // (Claudio's 2026-10-23 screenshot). DE shows no HP bar on a
+  // foundation; the progress bar carries the state until the
+  // building stands.
+  if (b.complete && b.hpFrac < 0.999) {
     const [sx, sy] = worldToScreen(b.x, b.y);
     hpBar(sx, sy - (b.size === 3 ? 7.3
       : TALL_BAR_Y[b.kind] ?? (b.size === 1 ? 3.6 : 5.8)) * camS, b.hpFrac);
   }
+}
+
+// BLD-20: a wall segment's connections pick its presentation —
+// the DE wall-piece rule, approximated with the one original
+// panel: a run along the grid's x axis reads in the panel's
+// native orientation; a run along the y axis is the same piece
+// mirrored (the dimetric mirror). Corners and junctions with an
+// x-run keep the x orientation (the run the eye follows); an
+// isolated segment stands native.
+function wallSegmentFlip(b, all) {
+  let nx = false;
+  let ny = false;
+  for (const o of all || buildingList()) {
+    if (o === b || o.kind !== b.kind) continue;
+    if (o.cellY === b.cellY && Math.abs(o.cellX - b.cellX) === 1) nx = true;
+    else if (o.cellX === b.cellX && Math.abs(o.cellY - b.cellY) === 1) ny = true;
+  }
+  return ny && !nx;
+}
+
+// Run a wall segment's art draw, mirrored around the segment's
+// screen center when its connections call for the flip.
+function drawWallArt(flip, sx, draw) {
+  if (!flip) {
+    draw();
+    return;
+  }
+  ctx.save();
+  ctx.translate(2 * sx, 0);
+  ctx.scale(-1, 1);
+  draw();
+  ctx.restore();
 }
 
 // The Palisade Wall segment (BLD-13): one cell of sharpened
@@ -7272,7 +7356,7 @@ function drawBuilding(b) {
 // the in-between fallback, sized footprint × 1.12 like every
 // other building. Last resort: the vector fence below, same
 // palette, so a segment never renders as a foreign block.
-function drawPalisade(b) {
+function drawPalisade(b, all) {
   const [sx, sy] = worldToScreen(b.x, b.y);
   const half = CS / 2;
   shadow(sx, sy, half * 1.3 * camS);
@@ -7282,15 +7366,71 @@ function drawPalisade(b) {
   const l = worldToScreen(b.x - half, b.y + half);
   poly([t, r, bt, l], b.complete ? 'rgba(0,0,0,0.12)' : '#8d8578');
   let artDrawn = false;
-  if (!b.complete) {
-    artDrawn = drawArtImage(buildingStageImage(b.kind, b.progress), sx, sy,
-      CS * 1.12, half * 0.45, 1);
-  }
-  if (!artDrawn && !drawArtImage(BUILDING_ART.img[BUILDING_ART_KEY[b.kind]], sx, sy,
-    CS * 1.12, half * 0.45, b.complete ? 1 : b.progress)) {
-    drawPalisadeVector(sx, sy, b);
-  }
-  if (!b.complete) progressBar(sx, sy - 3.1 * camS, b.progress);
+  drawWallArt(wallSegmentFlip(b, all), sx, () => {
+    if (!b.complete) {
+      artDrawn = drawArtImage(buildingStageImage(b.kind, b.progress), sx, sy,
+        CS * 1.12, half * 0.45, 1);
+    }
+    if (!artDrawn) {
+      artDrawn = drawArtImage(BUILDING_ART.img[BUILDING_ART_KEY[b.kind]], sx, sy,
+        CS * 1.12, half * 0.45, b.complete ? 1 : b.progress);
+    }
+  });
+  if (!artDrawn) drawPalisadeVector(sx, sy, b);
+  if (!b.complete) progressBar(sx, sy - 3.1 * camS, b.progress, CS * 0.9);
+}
+
+// The Stone Wall segment (BLD-20): one cell of coursed stone
+// blocks — the palisade's draw contract with its own art set
+// (finished panel + three construction stages, connectivity
+// flip included) and a stone-block vector fallback.
+function drawStoneWall(b, all) {
+  const [sx, sy] = worldToScreen(b.x, b.y);
+  const half = CS / 2;
+  shadow(sx, sy, half * 1.3 * camS);
+  const t = worldToScreen(b.x - half, b.y - half);
+  const r = worldToScreen(b.x + half, b.y - half);
+  const bt = worldToScreen(b.x + half, b.y + half);
+  const l = worldToScreen(b.x - half, b.y + half);
+  poly([t, r, bt, l], b.complete ? 'rgba(0,0,0,0.12)' : '#8d8578');
+  let artDrawn = false;
+  drawWallArt(wallSegmentFlip(b, all), sx, () => {
+    if (!b.complete) {
+      artDrawn = drawArtImage(buildingStageImage(b.kind, b.progress), sx, sy,
+        CS * 1.12, half * 0.45, 1);
+    }
+    if (!artDrawn) {
+      artDrawn = drawArtImage(BUILDING_ART.img[BUILDING_ART_KEY[b.kind]], sx, sy,
+        CS * 1.12, half * 0.45, b.complete ? 1 : b.progress);
+    }
+  });
+  if (!artDrawn) drawStoneWallVector(sx, sy, b);
+  if (!b.complete) progressBar(sx, sy - 3.1 * camS, b.progress, CS * 0.9);
+}
+
+// Vector fallback for a stone wall segment: two staggered
+// courses of ashlar blocks in the foundation gray's family,
+// growing with construction progress.
+function drawStoneWallVector(sx, sy, b) {
+  const u = camS;
+  const hgt = 2.6 * u * (b.complete ? 1 : Math.max(0.15, b.progress));
+  const w = 1.9 * u;
+  ctx.fillStyle = '#8d8578';
+  ctx.fillRect(sx - w, sy - hgt, 2 * w, hgt);
+  ctx.fillStyle = '#7c7568';
+  ctx.fillRect(sx - w, sy - hgt, 2 * w, Math.max(1, hgt * 0.14));
+  ctx.strokeStyle = '#5d574d';
+  ctx.lineWidth = Math.max(1, 0.09 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx - w, sy - hgt / 2);
+  ctx.lineTo(sx + w, sy - hgt / 2);
+  ctx.moveTo(sx - w * 0.33, sy - hgt);
+  ctx.lineTo(sx - w * 0.33, sy - hgt / 2);
+  ctx.moveTo(sx + w * 0.33, sy - hgt);
+  ctx.lineTo(sx + w * 0.33, sy - hgt / 2);
+  ctx.moveTo(sx, sy - hgt / 2);
+  ctx.lineTo(sx, sy);
+  ctx.stroke();
 }
 
 // Vector fallback for a palisade segment: five sharpened oak
@@ -7383,7 +7523,8 @@ function drawNewBuilding(b) {
       }
     }
   }
-  if (!b.complete) progressBar(sx, sy - (b.size === 3 ? 6.4 : TALL_BAR_Y[b.kind] ?? 4.9) * camS, b.progress);
+  if (!b.complete) progressBar(sx, sy - (b.size === 3 ? 6.4 : TALL_BAR_Y[b.kind] ?? 4.9) * camS,
+    b.progress, b.size === 1 ? CS * 0.9 : 5);
 }
 
 // One small identifying feature per M6 building kind, drawn on the
@@ -8714,10 +8855,10 @@ function renderCommands() {
       let gate = null;
       if (kind === 13 && age < 2) gate = t('gate.castle');
       else if (kind === 1 && !hasMill) gate = t('gate.mill');
-      // The Feudal kinds (BLD-18: the Watch Tower joins them; the
-      // Outpost and the Palisade Wall are Dark-Age kinds and
-      // never age-gated).
-      else if ((kind === 6 || kind === 7 || kind === 8 || kind === 10) && age < 1) gate = t('gate.feudal');
+      // The Feudal kinds (BLD-18: the Watch Tower joins them;
+      // BLD-20: the Stone Wall too; the Outpost and the Palisade
+      // Wall are Dark-Age kinds and never age-gated).
+      else if ((kind === 6 || kind === 7 || kind === 8 || kind === 10 || kind === 14) && age < 1) gate = t('gate.feudal');
       else if ((kind === 6 || kind === 7) && !hasBarracks) gate = t('gate.barracks');
       // BLD-19: the Market is Feudal AND needs a completed Mill
       // (the wiki's requirement row) — age gate first, then Mill.
@@ -8725,11 +8866,16 @@ function renderCommands() {
       else if (kind === 12 && !hasMill) gate = t('gate.mill');
       const lacksWood = wood < BUILD_COST[kind];
       const lacksStone = myStock()[3] < BUILD_COST_STONE[kind];
-      const costParts = [[BUILD_COST[kind], 'wood']];
+      const costParts = [];
+      if (BUILD_COST[kind] > 0) costParts.push([BUILD_COST[kind], 'wood']);
       if (BUILD_COST_STONE[kind] > 0) costParts.push([BUILD_COST_STONE[kind], 'stone']);
       return cmdButton({
         id: `build-${kind}`, icon: BUILD_ICON[kind], img: BUILD_PNG[kind], label: BUILD_NAME[kind],
-        costIcon: 'i-wood', cost: BUILD_COST[kind],
+        // The badge price is the wood cost when the kind has one;
+        // the all-stone Stone Wall badges its stone instead
+        // (BLD-20). The full price always rides the title.
+        costIcon: BUILD_COST[kind] > 0 ? 'i-wood' : 'i-stone',
+        cost: BUILD_COST[kind] > 0 ? BUILD_COST[kind] : BUILD_COST_STONE[kind],
         disabled: !!gate || lacksWood || lacksStone,
         active: !!placement && placement.kind === kind,
         key: badgeForButton({ context, page: buildPage, id: `build-${kind}` }),
@@ -9875,7 +10021,7 @@ function draw() {
   }
   for (const b of renderBuildings) {
     if (b.kind === 1 && b.complete) continue; // drawn as a farm node
-    draws.push({ key: b.x + b.y + CS, occ: { role: 'occluder' }, fn: () => drawBuilding(b) });
+    draws.push({ key: b.x + b.y + CS, occ: { role: 'occluder' }, fn: () => drawBuilding(b, renderBuildings) });
   }
   // Tree depletion tracking (falling trees + stumps) — the same
   // per-frame bookkeeping pattern as rubble, over the node list.
@@ -10173,26 +10319,30 @@ function draw() {
 
   // Placement ghost: the footprint under the cursor, green when the
   // mirrored sim rules allow building there, red when they don't.
-  // BLD-13: while a palisade drag is live the ghost is the whole
+  // BLD-13/BLD-20: while a wall drag is live the ghost is the whole
   // line — one cell diamond per segment, green where the sim
   // would place it and red where it would skip it. The green/red
   // walk mirrors the sim's per-segment charging (a cell holding
-  // our own unfinished palisade resumes for free; each later
-  // green cell spends 3 wood from the remaining budget), so the
-  // preview shows the same gaps the release will leave.
+  // our own unfinished segment of the same wall kind resumes for
+  // free; each later green cell spends the segment's price from
+  // the remaining budget — wood for the palisade, stone for the
+  // stone wall), so the preview shows the same gaps the release
+  // will leave.
   if (placement && mouseWorld) {
     const [cx, cy] = worldToCell(mouseWorld[0], mouseWorld[1]);
-    if (placement.kind === 9 && wallAnchor && lDrag && lDrag.moved) {
+    if (isWallKind(placement.kind) && wallAnchor && lDrag && lDrag.moved) {
+      const kind = placement.kind;
+      const segCost = kind === 14 ? BUILD_COST_STONE[14] : BUILD_COST[kind];
       const cells = wallLineCells(wallAnchor[0], wallAnchor[1], cx, cy);
-      let budget = myStock()[1];
+      let budget = kind === 14 ? myStock()[3] : myStock()[1];
       let placeable = 0;
       for (const [wx2, wy2] of cells) {
         const resume = buildings.some((b) => !b.complete && b.owner === localOwner
-          && b.kind === 9 && b.cellX === wx2 && b.cellY === wy2);
-        let ok = mirrorValid(9, wx2, wy2);
+          && b.kind === kind && b.cellX === wx2 && b.cellY === wy2);
+        let ok = mirrorValid(kind, wx2, wy2);
         if (ok && !resume) {
-          if (budget >= BUILD_COST[9]) {
-            budget -= BUILD_COST[9];
+          if (budget >= segCost) {
+            budget -= segCost;
             placeable++;
           } else ok = false;
         } else if (ok) placeable++;
@@ -10204,7 +10354,8 @@ function draw() {
         ], ok ? 'rgba(90, 230, 120, 0.30)' : 'rgba(240, 70, 55, 0.30)');
       }
       // Segment count + total cost at the drag's end cell.
-      const label = t('wall.preview', { n: placeable, cost: placeable * BUILD_COST[9] });
+      const label = t(kind === 14 ? 'wall.previewStone' : 'wall.preview',
+        { n: placeable, cost: placeable * segCost });
       const [lx, ly] = worldToScreen(-HALF + (cx + 0.5) * CS, -HALF + cy * CS);
       ctx.font = `bold ${Math.max(11, Math.round(1.15 * camS))}px sans-serif`;
       ctx.textAlign = 'center';

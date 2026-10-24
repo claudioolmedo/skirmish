@@ -397,6 +397,29 @@ export class WasmSim {
      */
     push_build_stable_queued(entity: number, x: number, y: number): boolean;
     /**
+     * Order a villager to build one Stone Wall segment
+     * (5 stone, 1×1, Feudal Age — BLD-20) — see
+     * `push_build_house`. A dragged line of segments goes
+     * through `push_build_stone_wall_line`.
+     */
+    push_build_stone_wall(entity: number, x: number, y: number): boolean;
+    /**
+     * Order a villager to raise a dragged line of Stone Wall
+     * segments (BLD-20) from the cell containing `(x0, y0)` to
+     * the cell containing `(x1, y1)`: the same dragged-line
+     * contract as `push_build_wall_line`, with the Stone Wall's
+     * own row — Feudal Age, 5 stone charged per segment,
+     * obstructed cells and segments past the stone stockpile
+     * skipped. Returns whether at least one segment would take
+     * effect; the sim re-validates when the command is applied.
+     */
+    push_build_stone_wall_line(entity: number, x0: number, y0: number, x1: number, y1: number): boolean;
+    /**
+     * Queue a single Stone Wall segment (BLD-20) — see
+     * `push_build_house_queued`.
+     */
+    push_build_stone_wall_queued(entity: number, x: number, y: number): boolean;
+    /**
      * Order a villager to build an additional Town Center
      * (275 wood + 100 stone, 4×4 — Castle Age; the foundation
      * converts into a Town Center entity on completion) — see
@@ -846,6 +869,9 @@ export interface InitOutput {
     readonly wasmsim_push_build_palisade_wall_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_stable: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_stable_queued: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_stone_wall: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_stone_wall_line: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
+    readonly wasmsim_push_build_stone_wall_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_town_center: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_town_center_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_wall_line: (a: number, b: number, c: number, d: number, e: number, f: number) => number;

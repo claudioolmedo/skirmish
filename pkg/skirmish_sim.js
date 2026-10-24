@@ -840,6 +840,52 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Order a villager to build one Stone Wall segment
+     * (5 stone, 1×1, Feudal Age — BLD-20) — see
+     * `push_build_house`. A dragged line of segments goes
+     * through `push_build_stone_wall_line`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_stone_wall(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_stone_wall(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Order a villager to raise a dragged line of Stone Wall
+     * segments (BLD-20) from the cell containing `(x0, y0)` to
+     * the cell containing `(x1, y1)`: the same dragged-line
+     * contract as `push_build_wall_line`, with the Stone Wall's
+     * own row — Feudal Age, 5 stone charged per segment,
+     * obstructed cells and segments past the stone stockpile
+     * skipped. Returns whether at least one segment would take
+     * effect; the sim re-validates when the command is applied.
+     * @param {number} entity
+     * @param {number} x0
+     * @param {number} y0
+     * @param {number} x1
+     * @param {number} y1
+     * @returns {boolean}
+     */
+    push_build_stone_wall_line(entity, x0, y0, x1, y1) {
+        const ret = wasm.wasmsim_push_build_stone_wall_line(this.__wbg_ptr, entity, x0, y0, x1, y1);
+        return ret !== 0;
+    }
+    /**
+     * Queue a single Stone Wall segment (BLD-20) — see
+     * `push_build_house_queued`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_stone_wall_queued(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_stone_wall_queued(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
      * Order a villager to build an additional Town Center
      * (275 wood + 100 stone, 4×4 — Castle Age; the foundation
      * converts into a Town Center entity on completion) — see
