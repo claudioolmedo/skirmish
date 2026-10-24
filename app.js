@@ -79,7 +79,7 @@ import {
   slotLabel, roomConfigText,
 } from './play/room.js';
 import {
-  PAGE_KINDS, resolveHotkey, badgeForButton, edgePan,
+  PAGE_KINDS, resolveHotkey, badgeForButton, panelCellFor, GRID_CELLS, edgePan,
 } from './play/hotkeys.js';
 import { diffFeedEvents } from './play/feed.js';
 import { createAudioEngine, cuesForSnapshotDiff, distanceGain } from './play/audio.js';
@@ -2273,6 +2273,10 @@ function handleHotkey(e) {
   const act = resolveHotkey({
     context: ctx, page: buildPage, code: e.code,
     ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey,
+    // The ids actually on the panel: the one cell two ids
+    // share (the TC's Wheelbarrow/Hand Cart rung) resolves to
+    // the rung the panel shows.
+    rendered: [...cmdGrid.children].map((b) => b.id),
   });
   if (!act) {
     // SEL-17: G toggles AutoExplore — but ONLY in the units
@@ -8979,31 +8983,31 @@ function renderCommands() {
                 ? t('cmd.feudalGate', { age: AGE_NAMES[1] })
                 : t('cmd.feudalTitle', { age: AGE_NAMES[1], cost: costText([[500, 'food']]), secs: 130 }) + (RESEARCH_BLOCK_TITLES[rbTc[1]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[1]] : ''),
           }),
-      // Wheelbarrow (2026-10-22, ECO-03): Feudal Age Town Center
-      // research — villagers carry +25% and move +10% faster.
-      // Glyph-only button (the stroke-symbol tier; no PNG icon
-      // exists in the art set for it).
-      cmdButton({
-        id: 'research-wheelbarrow', icon: 'i-wheelbarrow', label: 'Wheelbarrow',
-        costIcon: 'i-food', cost: 175, cost2Icon: 'i-wood', cost2: 50,
-        disabled: wbDone || rbTc[2] === 2 || rbTc[2] === 3,
-        key: badgeForButton({ context, id: 'research-wheelbarrow', index: 3 }),
-        title: wbDone
-          ? t('cmd.wheelbarrowDone', { name: TECH_NAME[6] })
-          : t('cmd.wheelbarrowTitle', { name: TECH_NAME[6], cost: costText([[175, 'food'], [50, 'wood']]), secs: 75 }) + (RESEARCH_BLOCK_TITLES[rbTc[2]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[2]] : ''),
-      }),
-      // Hand Cart (Castle P1, ECO-03): the Wheelbarrow chain's
-      // Castle Age rung — carry +50% (to 20), +10% speed. Glyph
-      // shared with Wheelbarrow until dedicated art exists.
-      cmdButton({
-        id: 'research-handcart', icon: 'i-wheelbarrow', label: 'Hand Cart',
-        costIcon: 'i-food', cost: 300, cost2Icon: 'i-wood', cost2: 200,
-        disabled: hcDone || rbTc[4] === 2 || rbTc[4] === 3,
-        key: badgeForButton({ context, id: 'research-handcart', index: 4 }),
-        title: hcDone
-          ? t('cmd.handcartDone', { name: TECH_NAME[15] })
-          : t('cmd.handcartTitle', { name: TECH_NAME[15], cost: costText([[300, 'food'], [200, 'wood']]), secs: 55 }) + (RESEARCH_BLOCK_TITLES[rbTc[4]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[4]] : ''),
-      }),
+      // The Wheelbarrow line (ECO-03) is ONE cell of the TC
+      // panel (S, right of Loom), exactly as in DE: the cell
+      // shows the line's current rung — Wheelbarrow (Feudal:
+      // carry +25%, move +10% faster) until it is researched,
+      // then Hand Cart (Castle P1: carry +50% to 20, +10%
+      // speed) in the very same cell. The two never stand side
+      // by side. Glyph-only buttons (the stroke-symbol tier;
+      // no PNG icon exists in the art set for them).
+      wbDone
+        ? cmdButton({
+          id: 'research-handcart', icon: 'i-wheelbarrow', label: 'Hand Cart',
+          costIcon: 'i-food', cost: 300, cost2Icon: 'i-wood', cost2: 200,
+          disabled: hcDone || rbTc[4] === 2 || rbTc[4] === 3,
+          key: badgeForButton({ context, id: 'research-handcart', index: 4 }),
+          title: hcDone
+            ? t('cmd.handcartDone', { name: TECH_NAME[15] })
+            : t('cmd.handcartTitle', { name: TECH_NAME[15], cost: costText([[300, 'food'], [200, 'wood']]), secs: 55 }) + (RESEARCH_BLOCK_TITLES[rbTc[4]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[4]] : ''),
+        })
+        : cmdButton({
+          id: 'research-wheelbarrow', icon: 'i-wheelbarrow', label: 'Wheelbarrow',
+          costIcon: 'i-food', cost: 175, cost2Icon: 'i-wood', cost2: 50,
+          disabled: rbTc[2] === 2 || rbTc[2] === 3,
+          key: badgeForButton({ context, id: 'research-wheelbarrow', index: 3 }),
+          title: t('cmd.wheelbarrowTitle', { name: TECH_NAME[6], cost: costText([[175, 'food'], [50, 'wood']]), secs: 75 }) + (RESEARCH_BLOCK_TITLES[rbTc[2]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[2]] : ''),
+        }),
     );
   } else if (context === 'barracks') {
     const underConstruction = !bk.complete;
@@ -9268,6 +9272,22 @@ function renderCommands() {
       id: 'delete-building', icon: 'i-delete', label: t('cmd.delete'),
       title: t('cmd.deleteBuildingTitle'),
     }));
+  }
+  // Panel placement (2026-10-23): a button's hotkey letter is
+  // its grid CELL — every lettered button is placed into its
+  // own cell (panelCellFor / GRID_CELLS in hotkeys.js) and the
+  // cells of absent buttons stay empty, instead of the grid
+  // filling in append order and the badges landing wherever
+  // the code order put them (Claudio's Q A W / S D Town
+  // Center). Unlettered buttons (AutoExplore, the unit
+  // Stop/Delete riding a villager selection) keep the next
+  // free cell in reading order via CSS auto-flow.
+  for (const el of cmdGrid.children) {
+    const cell = panelCellFor({ context, page: buildPage, id: el.id });
+    if (!cell) continue;
+    const [row, col] = GRID_CELLS[cell];
+    el.style.gridRowStart = String(row);
+    el.style.gridColumnStart = String(col);
   }
   // 'foe' and no-selection contexts (and a units selection without
   // a scout) render nothing: DE's command panel carries

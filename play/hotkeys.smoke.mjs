@@ -423,10 +423,12 @@ console.log('PASS (2) Q,W enters Mill placement; W arms military; Esc backs out 
 
 // ------------------------------------------------------------- (3)
 // H selects the Town Center. Its letters are DE's own (study
-// fix, gap 1): Q trains a villager, A researches Loom, W is the
-// Feudal Age advancement — badged on the buttons, resolving
-// only in this context. And no .cmd-badge exists anywhere on
-// the grid (2026-10-19 addendum): the queue count lives in the
+// fix, gap 1; placement fix 2026-10-23): Q trains a villager,
+// A researches Loom, Z is the Feudal Age advancement — the TC
+// panel's first column, read off the study frames of a
+// selected TC — badged on the buttons, resolving only in this
+// context. And no .cmd-badge exists anywhere on the grid
+// (2026-10-19 addendum): the queue count lives in the
 // selection panel's info line, where DE puts it.
 key('KeyH');
 pump(2);
@@ -435,8 +437,8 @@ assert.ok(cmdBtn('train').innerHTML.includes('<span class="cmd-key">Q</span>'),
   'the Villager button is badged Q');
 assert.ok(cmdBtn('research-loom').innerHTML.includes('<span class="cmd-key">A</span>'),
   'the Loom button is badged A (DE)');
-assert.ok(cmdBtn('research-age').innerHTML.includes('<span class="cmd-key">W</span>'),
-  'the Feudal button is badged W (DE)');
+assert.ok(cmdBtn('research-age').innerHTML.includes('<span class="cmd-key">Z</span>'),
+  'the Feudal button is badged Z (DE)');
 key('KeyQ');
 pump(6);
 assert.ok(tab.el('sel-info').textContent.includes('Queue 1'),
@@ -447,13 +449,13 @@ key('KeyA');
 pump(6);
 assert.ok(tab.el('sel-info').textContent.includes('Queue 2'),
   'A queued Loom at the TC (context decides: not the villager drop-off)');
-key('KeyW');
+key('KeyZ');
 pump(6);
 assert.ok(tab.el('toast').textContent.includes('Feudal Age needs 2 completed'),
-  'W ran the Feudal advancement (gated: its refusal explains itself)');
+  'Z ran the Feudal advancement (gated: its refusal explains itself)');
 assert.ok(tab.el('sel-info').textContent.includes('Queue 2'),
-  '…and queued nothing — W is not Loom any more');
-console.log('PASS (3) TC letters are DE’s: Q villager, A Loom, W Feudal; queue lives in the info line');
+  '…and queued nothing — Z is not Loom any more');
+console.log('PASS (3) TC letters are DE’s: Q villager, A Loom, Z Feudal; queue lives in the info line');
 
 // ------------------------------------------------------------- (4)
 // A with villagers selected and no page armed: force drop-off.
