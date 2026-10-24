@@ -6,7 +6,7 @@
 //   node --test walls.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { wallLineCells } from './walls.js';
+import { wallLineCells, wallPiece } from './walls.js';
 
 test('a click is a single segment', () => {
   assert.deepEqual(wallLineCells(5, 5, 5, 5), [[5, 5]]);
@@ -72,5 +72,79 @@ test('line integrity over every drag in a 13x13 field', () => {
     const fwd = new Set(cells.map(key));
     const rev = new Set(wallLineCells(bx, by, ax, ay).map(key));
     assert.deepEqual(rev, fwd);
+  }
+});
+
+// ------------------------------------------------------------------
+// Piece selection (the angle pass): every neighbour configuration
+// maps to the baked piece DE's configuration catalogue calls for,
+// with the horizontal mirror (the plan mirror (u,v)->(v,u):
+// e<->s, w<->n, se/nw fixed, sw<->ne) as the only transform. These
+// cases pin the table in wallPiece; the art files behind the keys
+// are pinned by buildingart.test.mjs (every WALL_PIECE_ART suffix
+// must exist in BUILDING_ART_FILES with its file on disk).
+const M = (dirs) => Object.fromEntries(
+  ['e', 's', 'w', 'n', 'se', 'sw', 'ne', 'nw'].map((d) => [d, dirs.includes(d)]));
+
+test('piece: an unjoined segment is the default appearance', () => {
+  assert.deepEqual(wallPiece(M([])), { key: 'single', flip: false });
+});
+
+test('piece: straight runs are middle sections along their axis', () => {
+  assert.deepEqual(wallPiece(M(['e', 'w'])), { key: 'midx', flip: false });
+  assert.deepEqual(wallPiece(M(['n', 's'])), { key: 'midx', flip: true });
+});
+
+test('piece: free ends cap toward their one neighbour', () => {
+  assert.deepEqual(wallPiece(M(['e'])), { key: 'ende', flip: false });
+  assert.deepEqual(wallPiece(M(['s'])), { key: 'ende', flip: true });
+  assert.deepEqual(wallPiece(M(['w'])), { key: 'endew', flip: false });
+  assert.deepEqual(wallPiece(M(['n'])), { key: 'endew', flip: true });
+});
+
+test('piece: corners turn with their own pieces', () => {
+  assert.deepEqual(wallPiece(M(['e', 's'])), { key: 'corneres', flip: false });
+  assert.deepEqual(wallPiece(M(['e', 'n'])), { key: 'corneren', flip: false });
+  assert.deepEqual(wallPiece(M(['w', 's'])), { key: 'corneren', flip: true });
+  assert.deepEqual(wallPiece(M(['w', 'n'])), { key: 'cornerwn', flip: false });
+});
+
+test('piece: T junctions and the crossing', () => {
+  assert.deepEqual(wallPiece(M(['e', 'w', 's'])), { key: 'tees', flip: false });
+  assert.deepEqual(wallPiece(M(['e', 's', 'n'])), { key: 'tees', flip: true });
+  assert.deepEqual(wallPiece(M(['e', 'w', 'n'])), { key: 'teen', flip: false });
+  assert.deepEqual(wallPiece(M(['w', 's', 'n'])), { key: 'teen', flip: true });
+  assert.deepEqual(wallPiece(M(['e', 'w', 's', 'n'])), { key: 'cross', flip: false });
+});
+
+test('piece: diagonal-only neighbours reach toward the shared corner', () => {
+  assert.deepEqual(wallPiece(M(['se'])), { key: 'diagse', flip: false });
+  assert.deepEqual(wallPiece(M(['sw'])), { key: 'diagsw', flip: false });
+  assert.deepEqual(wallPiece(M(['ne'])), { key: 'diagsw', flip: true });
+  assert.deepEqual(wallPiece(M(['nw'])), { key: 'diagnw', flip: false });
+  assert.deepEqual(wallPiece(M(['se', 'nw'])), { key: 'diagns', flip: false });
+  assert.deepEqual(wallPiece(M(['sw', 'ne'])), { key: 'diagew', flip: false });
+});
+
+test('piece: a staircase step is a corner (orthogonal beats diagonal)', () => {
+  // The middle of a 45-degree staircase run: joined E and S (the
+  // steps), with diagonal neighbours along the run's line — the
+  // corner piece is what bands the run through the tile.
+  assert.deepEqual(wallPiece(M(['e', 's', 'se', 'nw'])), { key: 'corneres', flip: false });
+  assert.deepEqual(wallPiece(M(['w', 'n', 'se', 'nw'])), { key: 'cornerwn', flip: false });
+  // Any orthogonal neighbour at all keeps diagonals silent.
+  assert.deepEqual(wallPiece(M(['e', 'se'])), { key: 'ende', flip: false });
+});
+
+test('piece: every one of the 256 masks resolves to a baked key', () => {
+  const baked = new Set(['single', 'midx', 'ende', 'endew', 'corneres',
+    'corneren', 'cornerwn', 'tees', 'teen', 'cross', 'diagse', 'diagsw',
+    'diagnw', 'diagns', 'diagew']);
+  const dirs = ['e', 's', 'w', 'n', 'se', 'sw', 'ne', 'nw'];
+  for (let bits = 0; bits < 256; bits++) {
+    const mask = Object.fromEntries(dirs.map((d, i) => [d, !!(bits & (1 << i))]));
+    const p = wallPiece(mask);
+    assert.ok(baked.has(p.key), `mask ${bits} -> ${p.key}`);
+    assert.equal(typeof p.flip, 'boolean');
   }
 });
