@@ -140,6 +140,11 @@ const pauseFullscreenBtn = document.getElementById('pause-fullscreen-btn');
 // while the pointer is locked; the lock hides the OS cursor, so
 // this arrow is what the player aims with then.
 const lockCursorEl = document.getElementById('lock-cursor');
+// The click-to-capture pill (2026-10-23 fix): shown whenever a
+// live match wants the pointer captured but the lock is not held
+// (a refused request, an Esc exit) — the visible, one-click way
+// back into capture, instead of a silently windowed match.
+const captureOverlayEl = document.getElementById('capture-overlay');
 // Idle indicators (M4, INF-03): always-visible counts in the top bar;
 // clicking one does what the '.' / ',' keys do (SEL-08/09).
 const idleVilBtn = document.getElementById('idle-vil-btn');
@@ -470,6 +475,7 @@ let playback = null; // replay playback state while a replay runs
 /// decision — Restart and Back to menu are the exits.
 function showMatchEnd(ms) {
   matchEnded = true;
+  syncCaptureOverlay();
   // The end card (score, feedback form) is real-cursor work.
   exitGamePointerLock();
   const secs = Math.floor(sim.tick_count() / 60);
@@ -2414,6 +2420,12 @@ function toggleFullscreen() {
 function onFullscreenChange() {
   syncFullscreenUi();
   fitCanvas();
+  // The transition has SETTLED: if a live match wants capture
+  // and the lock is not held, take it now — this is the reliable
+  // half of the capture chain (see enterGameCapture). It also
+  // makes the manual fullscreen toggle mid-match re-capture.
+  if (captureWanted && !pointerLocked) requestGamePointerLock();
+  syncCaptureOverlay();
 }
 
 // --- Pointer lock + the virtual cursor ------------------------------
@@ -2425,6 +2437,37 @@ function onFullscreenChange() {
 // scroll pans on, uninterrupted — the core of Claudio's report.
 let pointerLocked = false;
 const virtualCursor = { x: 0, y: 0 };
+// captureWanted: a live match is on screen and the player has
+// asked for capture (every start gesture routes through
+// enterGameCapture). It is what makes a lost lock VISIBLE (the
+// click-to-capture pill) instead of silent, and what takes the
+// lock when a fullscreen transition settles. Cleared when the
+// game view is left (setInMatch(false)).
+let captureWanted = false;
+// A lock request whose promise has not settled yet: a second
+// request inside that window makes Chrome fire pointerlockerror
+// for the duplicate, which would flash the recovery pill.
+let lockRequestInFlight = false;
+
+function pointerLockSupported() {
+  return !!(canvas && (canvas.requestPointerLock || canvas.webkitRequestPointerLock));
+}
+
+// The pill shows exactly when capture is wanted, possible and
+// not held — never in the lobby (captureWanted is cleared on
+// the way out, and the .in-match class is off), never over the
+// pause menu or the end card, never where the API does not
+// exist (iOS plays windowed, unnagged, exactly as before).
+// Deliberately NOT gated on `playing`: the start paths flip
+// .in-match and `playing` in their own orders, and the pill
+// must come up reliably when a start's capture was refused.
+function syncCaptureOverlay() {
+  if (!captureOverlayEl) return;
+  const show = captureWanted && !pointerLocked && pointerLockSupported()
+    && !paused && !matchEnded
+    && document.body && document.body.classList.contains('in-match');
+  captureOverlayEl.hidden = !show;
+}
 
 function positionLockCursor() {
   if (lockCursorEl) {
@@ -2448,6 +2491,8 @@ function syncPointerLock() {
     positionLockCursor();
   }
   if (lockCursorEl) lockCursorEl.hidden = !pointerLocked;
+  lockRequestInFlight = false;
+  syncCaptureOverlay();
 }
 
 function advanceVirtualCursor(e) {
@@ -2460,19 +2505,37 @@ function advanceVirtualCursor(e) {
   positionLockCursor();
 }
 
-// The lock request: silent in every failure mode — no API
-// (touch devices, iOS), no user gesture (a network 'go' is
-// none), Chrome's re-lock cooldown right after an Esc exit.
-// A failed capture never blocks or delays play; the next click
-// into the game retries.
+// The lock request: a failure never blocks or delays play —
+// but since the 2026-10-23 report it is no longer SILENT either:
+// a refused request (no gesture, Chrome's re-lock cooldown
+// right after an Esc exit) raises the click-to-capture pill,
+// whose click is a fresh gesture that retries the whole chain.
 function requestGamePointerLock() {
-  if (pointerLocked || !canvas) return;
+  if (pointerLocked || lockRequestInFlight || !canvas) return;
   try {
     const fn = canvas.requestPointerLock || canvas.webkitRequestPointerLock;
     if (!fn) return;
+    lockRequestInFlight = true;
     const p = fn.call(canvas);
-    if (p && p.catch) p.catch(() => {});
-  } catch { /* cooldown / no gesture: silent by design */ }
+    if (p && p.then) {
+      p.then(
+        () => { lockRequestInFlight = false; },
+        () => { lockRequestInFlight = false; syncCaptureOverlay(); });
+    } else {
+      lockRequestInFlight = false;
+    }
+  } catch {
+    lockRequestInFlight = false;
+    syncCaptureOverlay();
+  }
+}
+
+// pointerlockerror (the async refusal — cooldown, no gesture):
+// the request is over; if the match still wants capture, the
+// pill is the standing retry.
+function onPointerLockError() {
+  lockRequestInFlight = false;
+  syncCaptureOverlay();
 }
 
 function exitGamePointerLock() {
@@ -2483,24 +2546,39 @@ function exitGamePointerLock() {
   } catch { /* already out: nothing to do */ }
 }
 
-// Entering play (Claudio, 2026-10-23): fullscreen first, then the
-// lock — chained on the fullscreen promise's settling (either
-// way: a refused fullscreen still leaves the lock, and a missing
-// fullscreen API locks windowed). Called ONLY from user-gesture
-// handlers: the solo start, the room's Start button, Restart,
-// Resume, and clicks back into the game — the APIs demand a
+// Entering play (Claudio, 2026-10-23): fullscreen first, then
+// the lock. Called ONLY from user-gesture handlers: the solo
+// start, the room's Start button, Restart, Resume, the capture
+// pill, and clicks back into the game — the APIs demand a
 // gesture, and the match start itself (after the async load)
 // no longer has one.
+//
+// The lock is deliberately NOT requested from this call when a
+// fullscreen transition is in flight: asking mid-transition was
+// the flaky ordering behind the 2026-10-23 report (the game ran
+// windowed and uncaptured, every failure swallowed). Instead,
+// onFullscreenChange requests the lock once the transition has
+// SETTLED; if fullscreen was refused outright, the settled
+// promise takes the lock windowed — the lock alone already
+// keeps the mouse off the browser chrome. Whatever still fails
+// leaves the click-to-capture pill up: a visible retry, never a
+// silent dead end.
 function enterGameCapture() {
+  captureWanted = true;
+  if (pointerLocked) { syncCaptureOverlay(); return; }
   if (!isFullscreen()) {
     const p = requestGameFullscreen();
     if (p && typeof p.then === 'function') {
       if (p.catch) p.catch(() => {});
-      p.then(requestGamePointerLock, requestGamePointerLock);
+      p.then(
+        () => { if (!isFullscreen()) requestGamePointerLock(); },
+        () => requestGamePointerLock());
+      syncCaptureOverlay();
       return;
     }
   }
   requestGamePointerLock();
+  syncCaptureOverlay();
 }
 
 // --- Locked-event routing -------------------------------------------
@@ -2529,6 +2607,12 @@ const LOCK_ROUTED_TYPES = [
   'wheel',
 ];
 let lockDragTarget = null;
+// Re-entrancy guard for the router below: while a re-dispatched
+// event is being delivered, the document capture listeners see
+// it again (in a real browser every dispatch travels window →
+// document → target). Recognizing our own events is what lets
+// them PASS to their true target — see routeLockedEvent.
+let routingSyntheticDepth = 0;
 
 function fireSynthetic(target, type, src) {
   const init = {
@@ -2552,13 +2636,28 @@ function fireSynthetic(target, type, src) {
   if (!ev && typeof MouseEvent === 'function') {
     try { ev = new MouseEvent(type, init); } catch { ev = null; }
   }
-  if (ev) { target.dispatchEvent(ev); return; }
-  // Stub DOM (the node smokes): drive the element's own registry.
-  if (typeof target.dispatch === 'function') target.dispatch(type, init);
+  if (ev) { try { ev.__skirmishRouted = true; } catch { /* a frozen event object: the depth guard still covers it */ } }
+  routingSyntheticDepth += 1;
+  try {
+    if (ev) { target.dispatchEvent(ev); return; }
+    // Stub DOM (the node smokes): drive the element's own registry.
+    if (typeof target.dispatch === 'function') target.dispatch(type, init);
+  } finally {
+    routingSyntheticDepth -= 1;
+  }
 }
 
 function routeLockedEvent(type, e) {
   if (!pointerLocked) return;
+  // Our own re-dispatched events must PASS — they are already
+  // addressed to their true target. Without this guard the
+  // document capture listener intercepted each synthetic event
+  // on its way down, stopped it, and re-dispatched it again:
+  // in a real browser every routed click died before delivery —
+  // "ao clicar não acontece nada" (Claudio, 2026-10-23). The
+  // stub smokes never saw it: their dispatch() bypassed the
+  // document listeners the real event path travels through.
+  if (routingSyntheticDepth > 0 || (e && e.__skirmishRouted)) return;
   if (type === 'pointermove' && lockDragTarget) {
     e.stopPropagation();
     fireSynthetic(lockDragTarget, type, e);
@@ -2591,12 +2690,18 @@ function wirePointerLockRouting() {
 
 function setPaused(v) {
   if (!playing) return;
-  // The pause menu is worked with the real cursor (2026-10-23):
-  // opening it hands the pointer back; Resume re-captures.
-  if (v) exitGamePointerLock();
+  // The pause menu is worked WITH the captured pointer
+  // (Claudio, 2026-10-23): the Menu button opens it WITHOUT
+  // handing the pointer back — the locked-event router operates
+  // every item at the virtual cursor, and closing the menu
+  // resumes still captured. Esc is the deliberate way out of
+  // capture; the menu is not an exit. (Before this fix, opening
+  // the menu unlocked — and under a real browser the routed
+  // Menu click never even arrived; see routeLockedEvent.)
   const wasPaused = paused;
   paused = v;
   pauseMenu.style.display = paused ? 'flex' : 'none';
+  syncCaptureOverlay();
   // Generated audio: the menu's own open/close cues.
   if (wasPaused !== paused) playAudioCue(paused ? 'menuOpen' : 'menuClose');
   // M8: connection details live in the pause menu (the top bar
@@ -2834,8 +2939,9 @@ function showOverlay(el, show) {
 /// back-to-menu) — nowhere else.
 function setInMatch(on) {
   // Leaving the game view (lobby, menu) hands the pointer back.
-  if (!on) exitGamePointerLock();
+  if (!on) { captureWanted = false; exitGamePointerLock(); }
   if (document.body) document.body.classList.toggle('in-match', !!on);
+  syncCaptureOverlay();
 }
 
 /// Adopt a freshly built sim as THE match (start of an online game,
@@ -2970,6 +3076,7 @@ function netMatchEnd(localMs, opts) {
   if (!net || net.phase === 'ended') return;
   net.phase = 'ended';
   exitGamePointerLock(); // end/desync cards are real-cursor work
+  syncCaptureOverlay();
   if (net.session) net.session.stop();
   if (netUi) netUi.netWait.hidden = true;
   showOverlay(netUi && netUi.peerOverlay, false);
@@ -4581,6 +4688,7 @@ function applyStaticStrings() {
   setText('test-note', 'pause.testBuildNote');
   setText('back-site-link', 'pause.backToSite');
   setText('legal-note', 'legal.note');
+  setText('capture-overlay-txt', 'capture.click');
   setText('lang-label-lobby', 'lang.label');
   setText('lang-label-pause', 'lang.label');
   // Help overlay (the items carry <strong> markup — innerHTML).
@@ -4752,6 +4860,8 @@ async function main() {
   document.addEventListener('webkitfullscreenchange', onFullscreenChange);
   document.addEventListener('pointerlockchange', syncPointerLock);
   document.addEventListener('webkitpointerlockchange', syncPointerLock);
+  document.addEventListener('pointerlockerror', onPointerLockError);
+  document.addEventListener('webkitpointerlockerror', onPointerLockError);
   syncFullscreenUi();
   // Locked play: the virtual cursor + the HUD event router.
   wirePointerLockRouting();
@@ -4765,6 +4875,14 @@ async function main() {
       enterGameCapture();
     }
   });
+  // The capture pill: the visible way back in. Its click is a
+  // fresh user gesture, so the full chain (fullscreen, then the
+  // lock on settle) re-runs — including right after an Esc,
+  // once Chrome's re-lock cooldown has passed; a click inside
+  // the cooldown simply keeps the pill up for the next one.
+  if (captureOverlayEl) {
+    captureOverlayEl.addEventListener('click', () => { enterGameCapture(); });
+  }
   // Idle indicators double as buttons: the same cycle the '.' / ','
   // keys run (SEL-08/09).
   idleVilBtn.addEventListener('click', () => { if (sim) cycleIdle('villager', false); });

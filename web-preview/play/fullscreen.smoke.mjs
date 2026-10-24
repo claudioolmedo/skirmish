@@ -10,7 +10,13 @@
 // Drives the REAL ../app.js in Node against a stub DOM whose
 // document/window listener registries are REAL (unlike the
 // prematch smoke's no-op ones), so the capture-phase router and
-// the fullscreenchange refit can be exercised. The fetch stub
+// the fullscreenchange refit can be exercised. Element dispatch
+// is FAITHFUL since the 2026-10-23 fix: an event delivered to an
+// element travels the document capture listeners first, exactly
+// as in a browser — the journey the pre-fix router's own
+// re-dispatched events died on (it intercepted them en route,
+// stopped them, and re-dispatched them again, so under a real
+// browser every locked click did nothing). The fetch stub
 // serves the REAL .wasm bytes, so starts genuinely run.
 // Run from web-preview/play/:
 //   node fullscreen.smoke.mjs
@@ -27,6 +33,11 @@ const simMod = await import('../pkg/skirmish_sim.js');
 await simMod.default(new Uint8Array(WASM_BYTES));
 
 // ------------------------------------------------------------------ stubs
+
+// Set by makeTab: runs the tab's document capture listeners
+// for an event on its way to an element. El.dispatch consults
+// it BEFORE the element's own listeners — the real event path.
+let docCaptureHook = null;
 
 class El {
   constructor(tag = 'div', id = '') {
@@ -57,19 +68,29 @@ class El {
   addEventListener(ev, fn) { (this._listeners[ev] ||= []).push(fn); }
   removeEventListener() {}
   dispatch(ev, extra = {}) {
+    let stopped = false;
     const e = {
-      preventDefault() {}, stopPropagation() {},
+      preventDefault() {},
       target: this, currentTarget: this, ...extra,
+      stopPropagation() { stopped = true; },
     };
-    for (const fn of this._listeners[ev] || []) fn(e);
+    if (docCaptureHook) docCaptureHook(ev, e);
+    if (!stopped) {
+      for (const fn of this._listeners[ev] || []) fn(e);
+    }
     return e;
   }
   dispatchEvent(ev) {
+    let stopped = false;
     const e = {
-      preventDefault() {}, stopPropagation() {},
+      preventDefault() {},
       target: this, currentTarget: this, ...ev,
+      stopPropagation() { stopped = true; },
     };
-    for (const fn of this._listeners[ev.type] || []) fn(e);
+    if (docCaptureHook) docCaptureHook(ev.type, e);
+    if (!stopped) {
+      for (const fn of this._listeners[ev.type] || []) fn(e);
+    }
     return true;
   }
   click() { this.dispatch('click'); }
@@ -187,6 +208,11 @@ function makeTab(href) {
     fullscreenElement: null,
     pointerLockElement: null,
     elementFromPoint: () => tab.hitEl,
+  };
+  // Element dispatches in this tab travel the document capture
+  // phase first (see El.dispatch) — the real event path.
+  docCaptureHook = (type, e) => {
+    for (const l of docListeners.filter((l) => l.type === type && l.capture)) l.fn(e);
   };
   tab.fireDocument = (type, ev = {}, capture = true) => {
     const e = {
@@ -376,9 +402,11 @@ process.on('unhandledRejection', (e) => unhandled.push(e));
   assert.equal(inMatch(tab), true, 'match starts despite refused capture');
   assert.equal(calls.fs, 1, 'fullscreen was attempted');
   assert.equal(calls.lock, 1, 'lock was attempted after the refusal');
+  assert.equal(tab.el('capture-overlay').hidden, false,
+    'a refused capture is VISIBLE now: the click-to-capture pill is up');
   await sleep(200);
   assert.equal(unhandled.length, 0, 'no unhandled rejection escaped');
-  console.log('PASS (2) refused APIs: silent, the match starts windowed');
+  console.log('PASS (2) refused APIs: match starts windowed, the pill offers the retry');
 }
 
 // (3) No capture APIs at all (iOS Safari on iPhone): the start is
@@ -389,6 +417,8 @@ process.on('unhandledRejection', (e) => unhandled.push(e));
   tab.el('btn-solo').click();
   await sleep(1500);
   assert.equal(inMatch(tab), true, 'match starts with no capture APIs present');
+  assert.equal(tab.el('capture-overlay').hidden, true,
+    'no capture pill where pointer lock does not exist (no nagging on iOS)');
   console.log('PASS (3) no APIs: windowed start, unchanged');
 }
 
@@ -424,10 +454,16 @@ process.on('unhandledRejection', (e) => unhandled.push(e));
   console.log('PASS (4) virtual cursor: seeded, accumulated, clamped; top edge pans');
 }
 
-// (5) Locked routing: a click over a HUD button is re-dispatched
-//     to it (the pause menu opens, and hands the pointer back);
-//     a press over the canvas passes through untouched; Resume
-//     re-captures.
+// (5) Locked routing + the menu UNDER lock: a click over a HUD
+//     button is re-dispatched to it and DELIVERED (this is the
+//     regression case for "ao clicar não acontece nada": with
+//     faithful dispatch the synthetic event travels back through
+//     the document capture listeners, where the pre-fix router
+//     intercepted and killed it). A press over the canvas passes
+//     through untouched. The Menu button opens the pause menu
+//     WITHOUT unlocking (Claudio's design call, 2026-10-23: Esc
+//     exits capture, the menu does not); menu items respond at
+//     the virtual cursor; Resume closes the menu still captured.
 {
   const tab = makeTab('https://skirmish.online/play/');
   const calls = installCaptureApis(tab);
@@ -441,21 +477,29 @@ process.on('unhandledRejection', (e) => unhandled.push(e));
   let stopped = false;
   tab.fireDocument('mousedown', { button: 0, stopPropagation: () => { stopped = true; } });
   assert.equal(stopped, false, 'canvas press passes through under lock');
-  // Click over the top bar's Menu button: intercepted + routed.
+  // Click over the top bar's Menu button: intercepted + routed
+  // + DELIVERED — the pause menu opens, still captured.
   tab.hitEl = tab.el('pause-btn');
   stopped = false;
   tab.fireDocument('click', { button: 0, stopPropagation: () => { stopped = true; } });
   assert.equal(stopped, true, 'HUD click is intercepted under lock');
-  assert.equal(tab.el('pause-menu').style.display, 'flex', 'the routed click opened the pause menu');
-  assert.equal(calls.exitLock, 1, 'opening the menu handed the pointer back');
-  assert.equal(tab.el('lock-cursor').hidden, true, 'game cursor hides with the lock');
-  // Resume (a real click, unlocked): re-captures.
-  const lockBefore = calls.lock;
-  tab.el('resume-btn').click();
-  await sleep(60);
-  assert.equal(tab.el('pause-menu').style.display, 'none', 'menu closed');
-  assert.ok(calls.lock > lockBefore, 'Resume re-requests the lock');
-  console.log('PASS (5) routing: HUD clicks land, canvas passes, Resume re-captures');
+  assert.equal(tab.el('pause-menu').style.display, 'flex', 'the routed Menu click opened the pause menu');
+  assert.equal(calls.exitLock, 0, 'opening the menu does NOT hand the pointer back');
+  assert.equal(tab.document.pointerLockElement, tab.el('view'), 'still locked with the menu open');
+  assert.equal(tab.el('lock-cursor').hidden, false, 'the game cursor stays up over the menu');
+  // A second menu item under lock: the menu's Fullscreen toggle.
+  const fsBefore = calls.fs;
+  tab.hitEl = tab.el('pause-fullscreen-btn');
+  tab.fireDocument('click', { button: 0 });
+  assert.ok(calls.fs > fsBefore, 'the menu Fullscreen toggle responds under lock');
+  // Resume, clicked at the virtual cursor while still locked:
+  // the menu closes and capture is untouched.
+  tab.hitEl = tab.el('resume-btn');
+  tab.fireDocument('click', { button: 0 });
+  assert.equal(tab.el('pause-menu').style.display, 'none', 'the routed Resume click closed the menu');
+  assert.equal(tab.document.pointerLockElement, tab.el('view'), 'still locked after Resume');
+  assert.equal(calls.exitLock, 0, 'the lock was never exited for the menu');
+  console.log('PASS (5) routing DELIVERS: menu opens/works/closes under lock, canvas passes');
 }
 
 // (6) fullscreenchange refits the canvas backing store.
@@ -507,6 +551,81 @@ process.on('unhandledRejection', (e) => unhandled.push(e));
   assert.ok(calls.lock > lockBefore, 'Restart re-requests the lock');
   assert.equal(inMatch(tab), true, 'still in the fresh match');
   console.log('PASS (8) Restart: capture re-requested');
+}
+
+// (9) The pill is a working recovery, not a label: after a
+//     refused capture it is up; clicking it re-runs the whole
+//     chain (fullscreen + lock) from its fresh gesture; when the
+//     browser then grants the lock, it hides.
+{
+  const tab = makeTab('https://skirmish.online/play/');
+  const calls = installCaptureApis(tab, 'reject');
+  await boot(tab);
+  tab.el('btn-solo').click();
+  await sleep(1500);
+  assert.equal(inMatch(tab), true, 'match running');
+  assert.equal(tab.el('capture-overlay').hidden, false, 'pill up after the refused capture');
+  const fsBefore = calls.fs; const lockBefore = calls.lock;
+  tab.el('capture-overlay').click();
+  await sleep(120);
+  assert.ok(calls.fs > fsBefore, 'pill click re-requests fullscreen');
+  assert.ok(calls.lock > lockBefore, 'pill click re-requests the lock');
+  // The browser grants this time:
+  tab.document.pointerLockElement = tab.el('view');
+  tab.fireDocument('pointerlockchange', {}, false);
+  assert.equal(tab.el('capture-overlay').hidden, true, 'pill hides once the lock is held');
+  console.log('PASS (9) pill: visible after refusal, one click re-runs the chain, hides on lock');
+}
+
+// (10) Esc: the browser drops the lock (the accepted way out).
+//      The game stays playable windowed, the pill is the way
+//      back, and one click re-captures — the player is never
+//      trapped and never loses the mouse by accident.
+{
+  const tab = makeTab('https://skirmish.online/play/');
+  const calls = installCaptureApis(tab);
+  await boot(tab);
+  tab.el('btn-solo').click();
+  await sleep(1500);
+  tab.document.pointerLockElement = tab.el('view');
+  tab.fireDocument('pointerlockchange', {}, false);
+  assert.equal(tab.el('capture-overlay').hidden, true, 'no pill while captured');
+  // Esc: pointerlockchange with no element.
+  tab.document.pointerLockElement = null;
+  tab.fireDocument('pointerlockchange', {}, false);
+  assert.equal(tab.el('capture-overlay').hidden, false, 'Esc leaves the pill as the way back');
+  const lockBefore = calls.lock;
+  tab.el('capture-overlay').click();
+  await sleep(120);
+  assert.ok(calls.lock > lockBefore, 'one click re-captures after Esc');
+  console.log('PASS (10) Esc: clean exit, pill up, one click re-captures');
+}
+
+// (11) The top edge, held hard (the headline acceptance): with
+//      the lock granted, repeated maximal upward movement keeps
+//      the virtual cursor ON the top edge — the position every
+//      coordinate read uses — so edge scroll pans up and the
+//      real cursor (frozen by the lock) never exists to reach
+//      the browser chrome. Asserted over several seconds of
+//      frames: the cursor never leaves the edge, and edgePan
+//      reads "up" on every frame.
+{
+  const tab = makeTab('https://skirmish.online/play/');
+  installCaptureApis(tab);
+  await boot(tab);
+  tab.el('btn-solo').click();
+  await sleep(1500);
+  tab.document.pointerLockElement = tab.el('view');
+  tab.fireDocument('pointerlockchange', {}, false);
+  const cursor = tab.el('lock-cursor');
+  for (let frame = 0; frame < 180; frame++) { // ~3 s at 60 fps
+    tab.fireDocument('mousemove', { movementX: 0, movementY: -500 });
+    const m = /translate\((-?\d+)px, (-?\d+)px\)/.exec(cursor.style.transform);
+    assert.ok(m, 'cursor transform readable');
+    assert.equal(Number(m[2]), 0, `frame ${frame}: virtual cursor stays ON the top edge`);
+    assert.equal(edgePan(640, 0, 1280, 800, 6).y, 1, `frame ${frame}: the view pans up`);
+  }
+  console.log('PASS (11) top edge held 180 frames: cursor pinned to the edge, view pans up');
 }
 
 assert.equal(unhandled.length, 0, 'no unhandled rejection in any case');
