@@ -1873,6 +1873,12 @@ const keys = new Set();
 addEventListener('keydown', (e) => {
   if (e.code.startsWith('Arrow')) e.preventDefault();
   if (e.code === 'Escape') {
+    // Escape NEVER shows the pause menu (Claudio, 2026-10-23):
+    // the Menu button is the only way in — and back out. Esc's
+    // own job is the browser's: leaving fullscreen / pointer
+    // lock. In-game it only backs out of transient input states
+    // (and closes the help overlay); with none armed it does
+    // nothing at all. Do not re-add a pause branch here.
     if (helpOverlay.style.display !== 'none') {
       helpOverlay.style.display = 'none';
     } else if (placement) {
@@ -1883,8 +1889,6 @@ addEventListener('keydown', (e) => {
       orderArm = null; // CMB-10/11: Esc disarms order targeting
     } else if (buildPage) {
       buildPage = null; // M13: Esc backs out of an armed build page
-    } else if (playing) {
-      setPaused(!paused);
     }
     return;
   }
@@ -4853,7 +4857,11 @@ async function main() {
   }
   playing = false; // no match exists until one is entered
   paused = false;
-  pauseBtn.addEventListener('click', () => setPaused(true));
+  // The Menu button is the ONLY way to show the pause menu
+  // (Claudio, 2026-10-23) — and it toggles it back closed, so
+  // the menu is fully Menu-button-driven; Escape never shows
+  // it (see the keydown handler).
+  pauseBtn.addEventListener('click', () => setPaused(!paused));
   if (fullscreenBtn) fullscreenBtn.addEventListener('click', toggleFullscreen);
   if (pauseFullscreenBtn) pauseFullscreenBtn.addEventListener('click', toggleFullscreen);
   document.addEventListener('fullscreenchange', onFullscreenChange);
