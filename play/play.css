@@ -15,16 +15,21 @@ html, body {
 /* Beta strip layout (Claudio, 2026-10-25): the page is a column —
    the strip takes the top --beta-h and every viewport-anchored game
    layer below is offset by it, so the canvas SHRINKS by the strip's
-   height instead of being overlapped or pushed off-screen. In
-   fullscreen the strip's row collapses (--beta-h: 0) and the game
-   is full-bleed, pixel-identical to before the strip existed. */
+   height instead of being overlapped or pushed off-screen. The
+   strip stays in FULLSCREEN too (his correction, same day: he plays
+   fullscreen and the banner must show at the top of the game
+   itself): the fullscreen element is the document element, so the
+   fixed strip renders at the top of the fullscreen viewport and
+   the same --beta-h offsets keep the game area below it, in both
+   modes identically. Click routing is unaffected: picking maps
+   through the canvas rect (eventWorld/eventScreen), and under
+   pointer lock a click over the strip hits the strip — page
+   chrome, exactly as in windowed play. */
 :root { --beta-h: 30px; }
 @media (max-width: 560px) {
   /* one line no longer fits a phone: two shorter rows instead */
   :root { --beta-h: 46px; }
 }
-html:fullscreen { --beta-h: 0px; }
-html:-webkit-full-screen { --beta-h: 0px; }
 
 #beta-banner {
   position: fixed;
