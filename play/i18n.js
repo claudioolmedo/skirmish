@@ -112,6 +112,7 @@ const EN = {
   'top.exitFullscreen': 'Exit fullscreen',
   'top.menu': 'Menu',
   'top.menuTitle': 'Menu (Esc)',
+  'beta.banner': 'Beta version — Skirmish II is being built right now. New things land all the time, so check back often!',
   // --- pause menu --------------------------------------------------
   'pause.title': 'Paused',
   'pause.closeMenu': 'Close menu',
@@ -567,6 +568,7 @@ const PT_BR = {
   'top.exitFullscreen': 'Sair da tela cheia',
   'top.menu': 'Menu',
   'top.menuTitle': 'Menu (Esc)',
+  'beta.banner': 'Versão beta — o Skirmish II está sendo construído agora. Tem novidade toda hora, então volte sempre!',
   // --- pause menu ---------------------------------------------------------
   'pause.title': 'Pausado',
   'pause.closeMenu': 'Fechar menu',
@@ -1022,6 +1024,7 @@ const ES = {
   'top.exitFullscreen': 'Salir de pantalla completa',
   'top.menu': 'Menú',
   'top.menuTitle': 'Menú (Esc)',
+  'beta.banner': 'Versión beta — Skirmish II se está construyendo ahora. Hay novedades todo el tiempo, ¡así que vuelve seguido!',
   // --- pause menu ---------------------------------------------------------
   'pause.title': 'Pausa',
   'pause.closeMenu': 'Cerrar menú',

@@ -5098,6 +5098,9 @@ function setOptions(id, pairs) {
 function applyStaticStrings() {
   document.title = t('title.play');
   if (document.documentElement) document.documentElement.lang = getLocale();
+  // Beta strip (2026-10-25): one line at the very top of the page,
+  // following the language switcher like every other static.
+  setText('beta-banner-text', 'beta.banner');
   // Top bar (the age chip / idle titles; the fullscreen button's
   // title is syncFullscreenUi's, called by applyLocale).
   setAttr('res-group', 'aria-label', 'top.resources');

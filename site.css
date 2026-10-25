@@ -438,6 +438,26 @@ a { color: var(--gold-bright); }
 }
 .ad-notice button:hover { color: var(--ink); border-color: var(--gold); }
 
+/* Beta strip (Claudio, 2026-10-25): one slim line at the very top of
+   the landing and play pages, so a visitor immediately understands
+   the game is a beta being built right now — and should come back
+   often. No dismiss button: it stays. On the landing it sits in the
+   normal flow above the sticky header; on /play/ it becomes the top
+   row of the game column (play/play.css positions it and offsets
+   the whole game layer by its height). Text is localized: the
+   landing swaps it from the stored game locale with a small inline
+   script, /play/ voices it from play/i18n.js ('beta.banner'). */
+.beta-banner {
+  background: linear-gradient(180deg, #3a2c10, #2a2110);
+  border-bottom: 1px solid var(--gold);
+  color: #f5e9c9;
+  text-align: center;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  padding: 6px 12px;
+}
+
 /* ---------- ad slots (max 2, always labeled, never over the game) --- */
 
 .ad-wrap {

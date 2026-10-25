@@ -28,6 +28,14 @@
 </head>
 <body>
 
+<!-- Beta strip (Claudio, 2026-10-25): the top row of the page
+     column — the game layer below is offset by its height
+     (play.css, --beta-h), never overlapped; in fullscreen the row
+     collapses and the game is full-bleed exactly as before. The
+     text is voiced by app.js from i18n.js ('beta.banner') and
+     follows the language switcher. -->
+<div class="beta-banner" id="beta-banner" role="note"><span id="beta-banner-text">Beta version — Skirmish II is being built right now. New things land all the time, so check back often!</span></div>
+
 <!-- Original icon set (ours). Simple geometric silhouettes, drawn for
      Skirmish II; referenced as <svg class="ui-icon"><use href="#i-...">. -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" xmlns:xlink="http://www.w3.org/1999/xlink">
