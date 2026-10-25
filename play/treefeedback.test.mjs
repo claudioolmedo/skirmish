@@ -164,3 +164,23 @@ test('the fall is wired: a tree leaving the live set tips over, with its sound',
   // The fall leaves a stump.
   assert.match(appJs, /stumpSites\.push\(\{ x: f\.x, y: f\.y, t0: now \}\);/);
 });
+
+test('the felled tree LIES on the ground before becoming a stump (bot-loop, 2026-10-25)', () => {
+  // DE's sequence (Claudio's 2026-10-25 decision): standing ->
+  // fallen on the ground -> stump. The old code faded the tree
+  // out DURING its 500 ms tip-over and removed it 120 ms later,
+  // so the "fallen" state effectively never reached the screen
+  // (every bot-loop live session saw trees simply vanish).
+  const fallenM = appJs.match(/const FALLEN_MS = ([0-9_]+);/);
+  assert.ok(fallenM, 'FALLEN_MS found in app.js');
+  const fallenMs = Number(fallenM[1].replaceAll('_', ''));
+  assert.ok(fallenMs >= 2000, `the felled tree must lie long enough to be seen (${fallenMs} ms)`);
+  // Removal and stump spawn both wait for the full fall + dwell.
+  assert.match(appJs, /now - f\.t0 > FALL_MS \+ FALLEN_MS && !f\.stumpDone/);
+  assert.match(appJs, /now - f\.t0 > FALL_MS \+ FALLEN_MS\) fallingTrees\.splice/);
+  assert.doesNotMatch(appJs, /FALL_MS \+ 120/, 'the old instant removal is gone');
+  // The falling draw must not fade the tree away mid-fall.
+  const fallFn = appJs.match(/function drawFallingTree\(f, now\) \{[\s\S]*?\n\}/);
+  assert.ok(fallFn, 'drawFallingTree found');
+  assert.doesNotMatch(fallFn[0], /alpha/, 'drawFallingTree draws at full opacity');
+});
