@@ -311,7 +311,6 @@
     </div>
     <div class="pause-actions">
       <button id="end-restart-btn" class="btn btn-gold" type="button">Restart match</button>
-      <button id="end-challenge-btn" class="btn btn-ghost" type="button">Challenge a friend</button>
       <button id="end-menu-btn" class="btn btn-ghost" type="button">Back to menu</button>
       <button id="end-replay-btn" class="btn btn-ghost" type="button">Download replay</button>
     </div>
@@ -355,15 +354,11 @@
     <h2 class="game-title-sm" id="lobby-title-h">Lobby Browser</h2>
     <p class="overlay-sub" id="lobby-sub">Join an open game, or create your own. Games marked 🔒 ask for a password. No accounts: the link is the invitation.</p>
     <div class="lang-row"><label id="lang-label-lobby" for="lang-select">Language</label><select id="lang-select" class="lang-select"><option value="en">EN</option><option value="pt-BR">PT</option><option value="es">ES</option></select></div>
-    <!-- Growth package (2026-10-24): the player name — typed once,
-         stored locally, ridden by challenge links and the match
-         handshake. With Instagram sign-in (optional, flag-gated)
-         the name is the Instagram username, set automatically. -->
+    <!-- The player name (2026-10-24): typed once, stored locally,
+         riding the match handshake so both seats can show it. -->
     <div class="profile-row">
       <label id="profile-name-label" for="player-name">Your name</label>
       <input id="player-name" type="text" maxlength="32" placeholder="e.g. Ana" autocomplete="off">
-      <button id="btn-ig-login" class="btn btn-ghost btn-sm" type="button" hidden>Continue with Instagram</button>
-      <span id="ig-line" class="overlay-note" hidden></span>
     </div>
     <div class="lobby-layout">
       <div class="lobby-main">
@@ -392,7 +387,6 @@
             <span class="games-actions-spacer"></span>
             <button id="btn-join-lobby" class="btn btn-gold" type="button" disabled>Join Lobby</button>
             <button id="btn-create-open" class="btn btn-gold" type="button">Create Lobby</button>
-            <button id="btn-challenge" class="btn btn-gold" type="button">Challenge a friend</button>
           </div>
         </div>
         <div id="create-section" hidden>
@@ -473,15 +467,6 @@
             <button id="btn-ready" class="btn btn-gold btn-big" type="button" disabled>Start</button>
           </div>
           <p class="invite-row"><span id="invite-txt">Invite link —</span> <button id="btn-copy-link" class="linklike" type="button">copy</button></p>
-          <!-- Growth package: in a challenge room this box carries
-               the chain — the host gets the copy-ready challenge
-               text + share button; the challenged guest sees who
-               challenged them. -->
-          <div id="challenge-box" hidden>
-            <p id="challenge-vs" class="overlay-note" hidden></p>
-            <p id="challenge-share-text" class="challenge-share"></p>
-            <button id="btn-share-challenge" class="btn btn-gold btn-sm" type="button">Share challenge</button>
-          </div>
         </div>
         <p id="lobby-status" class="overlay-note">Pick a server, then create the game.</p>
       </div>

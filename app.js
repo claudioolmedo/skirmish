@@ -67,13 +67,10 @@ import {
   applyCommand as netApplyCommand, tcIdOf as netTcIdOf,
   createSession, createRecorder, replayEvents, isReplay,
   createRelayClient, probeRegionPing, makeRoomId, buildPlayUrl,
-  buildChallengeUrl,
   linkJoinRoom, pickFastestRegion, REGIONS as NET_REGIONS,
 } from './play/netplay.js';
 import {
-  cleanDisplayName, readStoredName, writeStoredName,
-  readIgIdentity, displayName, buildIgAuthorizeUrl, igLoginAvailable,
-  challengeJoinPayload, challengeResultPayload,
+  cleanDisplayName, readStoredName, writeStoredName, displayName,
 } from './play/growth.js';
 import {
   LOBBIES_REFRESH_MS, parseLobbies, lobbyRowModel, sortLobbyRows,
@@ -232,8 +229,7 @@ const endTitle = document.getElementById('end-title');
 const endDetail = document.getElementById('end-detail');
 const endRestartBtn = document.getElementById('end-restart-btn');
 const endMenuBtn = document.getElementById('end-menu-btn');
-const endChallengeBtn = document.getElementById('end-challenge-btn');
-// Growth package (2026-10-24): the report / contribute overlay,
+// The report / contribute overlay (2026-10-24),
 // opened from the pause menu. Same relay pipeline as the
 // end-of-match card, tagged by kind (see sendReport).
 const reportBtn = document.getElementById('btn-report');
@@ -531,82 +527,18 @@ let matchEnded = false; // the victory/defeat overlay is up; the sim holds
 const RELAY_HTTP = 'https://skirmish-relay.hoardserdure7.workers.dev';
 const BUILD_VERSION = 'm8';
 
-// --- growth package (2026-10-24): name, challenge chain, report --
+// --- the player name + report form (2026-10-24) ------------------
 //
-// Claudio's rule for all of it: SUPER EASY. Nothing here ever
-// gates playing — no account, no form, no login. The name is a
-// display string stored on this device; the challenge chain is
-// recorded on the relay as a courtesy to the chain, never as a
-// condition of play; the report form posts into the same relay
-// feedback pipeline as the end-of-match card.
+// Claudio's rule: SUPER EASY. Nothing here ever gates playing —
+// no account, no form, no login. The name is a display string
+// stored on this device, riding the match handshake; the report
+// form posts into the same relay feedback pipeline as the
+// end-of-match card.
 
-/// This player's display name: the Instagram username when they
-/// signed in with Instagram (set automatically, never typed),
-/// else the name typed once in the lobby, else "Guest".
+/// This player's display name: the name typed once in the
+/// lobby, else "Guest".
 function myName() {
-  return displayName({
-    ig: readIgIdentity(localStorage),
-    stored: readStoredName(localStorage),
-  });
-}
-
-/// The peer's display name, learned from their hello (null until
-/// one arrives — seats then fall back to the classic labels).
-function peerDisplayName() {
-  return (net && cleanDisplayName(net.peerName)) || null;
-}
-
-/// POST a growth record to the relay. Fire-and-forget by design:
-/// a failed record loses a statistic, never a match.
-function postGrowth(path, payload) {
-  if (!payload) return;
-  try {
-    fetch(RELAY_HTTP + path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      keepalive: true,
-    }).catch(() => {});
-  } catch { /* offline — the chain just misses this link */ }
-}
-
-/// Report this challenge match's pairing to the chain store,
-/// once, from whichever seat this client holds. Both clients
-/// report; the relay upserts by room, so the record converges
-/// on the same pairing from both sides.
-function reportChallengeJoin() {
-  if (!net) return;
-  const isChallenger = net.role === 'host' && net.challenge;
-  const isChallenged = net.role === 'guest' && !!net.challengeFrom;
-  if (!isChallenger && !isChallenged) return;
-  const me = myName();
-  const peer = peerDisplayName();
-  postGrowth('/challenges', challengeJoinPayload({
-    room: net.room,
-    challenger: isChallenger ? me : (peer || net.challengeFrom),
-    challenged: isChallenger ? peer : me,
-  }));
-}
-
-/// Report the result of a challenge match, from this seat. The
-/// relay keeps the FIRST result for a room — the two clients
-/// agree by construction (the same lockstep outcome), and a
-/// stray duplicate changes nothing. A desync reports nothing:
-/// nobody won a match that fell apart.
-function reportChallengeResult(result) {
-  if (!net) return;
-  const selfRole = net.role === 'host' && net.challenge ? 'challenger'
-    : net.role === 'guest' && net.challengeFrom ? 'challenged' : null;
-  if (!selfRole || result === 'desync') return;
-  postGrowth('/challenges/result', challengeResultPayload({
-    room: net.room,
-    selfRole,
-    selfName: myName(),
-    peerName: peerDisplayName(),
-    // Resigning loses the match — the peer takes the chain win,
-    // mirroring the match's own result vocabulary.
-    selfWon: result === 'victory',
-  }));
+  return displayName({ stored: readStoredName(localStorage) });
 }
 let localOwner = 0;
 let myTcId = 0; // entity id of the LOCAL player's Town Center
@@ -744,7 +676,7 @@ async function sendFeedback() {
   }
 }
 
-/// Growth package: the report / contribute form's send. Same
+/// The report / contribute form's send. Same
 /// relay /feedback pipeline as the card above — the payload's
 /// `kind` is what makes it a FORM entry (urgent / contribution /
 /// other) instead of a match review, and the daily digest reads
@@ -785,27 +717,12 @@ async function sendReport() {
   }
 }
 
-/// Growth package: paint the identity surfaces — the lobby name
-/// field (the stored name, disabled while an Instagram identity
-/// owns it), the signed-in line, and the Instagram button's
-/// visibility (flag-gated: hidden unless the login is enabled
-/// AND an app id is configured — a dead button never renders).
-function refreshIdentityUi() {
-  const ig = readIgIdentity(localStorage);
+/// Paint the lobby name field from the stored name.
+function refreshNameUi() {
   const nameInput = document.getElementById('player-name');
-  const igBtn = document.getElementById('btn-ig-login');
-  const igLine = document.getElementById('ig-line');
   if (nameInput) {
-    // Signed in: the field shows the Instagram username and is
-    // not editable — the name was set automatically, by design.
-    nameInput.value = ig ? ig.username : (readStoredName(localStorage) || '');
-    nameInput.disabled = !!ig;
+    nameInput.value = readStoredName(localStorage) || '';
   }
-  if (igLine) {
-    igLine.hidden = !ig;
-    if (ig) igLine.textContent = t('ig.signedIn', { name: ig.username });
-  }
-  if (igBtn) igBtn.hidden = !igLoginAvailable() || !!ig;
 }
 let lDrag = null; // left-button drag state, canvas px: { x0, y0, x1, y1, moved }
 let placement = null; // { kind } while placing a building
@@ -2125,6 +2042,22 @@ const clickMarkers = new ClickMarkers();
 // until it reaches the Town Center (deposit). This matches the sim's
 // semantics — a Move override keeps the carry, only deposit clears it.
 const AT_NODE_R2 = 2.6 * 2.6;
+// Trees take a wider gate (forest-feedback fix, 2026-10-24):
+// the sim's woodcutter stands AT the trunk — 2.5 units out
+// orthogonally, ≈3.33 at a diagonal corner (the stand-point
+// geometry in sim econ/lib), and his gather flip can certify
+// up to the stand + his order's 0.5 arrival radius (≈3.83 at a
+// diagonal) — beyond the 2.6 every other node uses, so a
+// chopper never registered as "at" his tree: no gather pose,
+// no wobble, no wood chips, no chop sound (the regression
+// Claudio caught live: "uma vez eu vi funcionando uma árvore
+// tremendo quando está cortando, mas já não tem mais"). 3.9
+// covers the diagonal flip bound plus settling drift; the
+// sticky gate below then HOLDS the tree out to 4.8 while he
+// keeps working it (a crewmate's separation shove at a shared
+// tree must not flicker the feedback off).
+const AT_TREE_R2 = 3.9 * 3.9;
+const AT_TREE_STICK_R2 = 4.8 * 4.8;
 const DEPOSIT_R2 = 3.6 * 3.6;
 const lastNodeKind = new Map();
 const carryKind = new Map();
@@ -2148,16 +2081,33 @@ function updateCarry(nodes, tcPos, pos, kinds, hp) {
     const wy = pos[i * 2 + 1];
     let atKind = null;
     let atNode = null;
-    let atD2 = AT_NODE_R2;
+    let atD2 = Infinity;
     for (const n of nodes) {
       if (n.amount <= 0) continue;
       const dx = n.x - wx;
       const dy = n.y - wy;
       const d2 = dx * dx + dy * dy;
-      if (d2 <= atD2) {
+      const r2 = n.kind === 0 ? AT_TREE_R2 : AT_NODE_R2;
+      if (d2 <= r2 && d2 < atD2) {
         atD2 = d2;
         atKind = n.kind;
         atNode = n;
+      }
+    }
+    if (atNode === null) {
+      // Sticky trunk (see AT_TREE_R2): a cutter who was at a
+      // tree last frame keeps it while he is still beside it.
+      const prev = atNodeTarget.get(i);
+      if (prev && prev.kind === 0) {
+        const n = nodes.find((m) => m.id === prev.id);
+        if (n && n.amount > 0) {
+          const dx = n.x - wx;
+          const dy = n.y - wy;
+          if (dx * dx + dy * dy <= AT_TREE_STICK_R2) {
+            atKind = 0;
+            atNode = n;
+          }
+        }
       }
     }
     if (atKind !== null) {
@@ -3413,7 +3363,6 @@ function netMatchEnd(localMs, opts) {
     ? net.recorder.finish({ result, ticks: sim.tick_count() })
     : null;
   postTelemetry(result);
-  reportChallengeResult(result); // growth: the chain learns who won
   updateNetStatus();
   if (opts.desync) {
     if (netUi) {
@@ -3661,13 +3610,10 @@ function writeRoomLinkMark(room) {
 function cleanPlayUrl() {
   try {
     const p = new URLSearchParams(location.search);
-    if (!p.has('room') && !p.has('region') && !p.has('private')
-      && !p.has('challenge') && !p.has('from')) return;
+    if (!p.has('room') && !p.has('region') && !p.has('private')) return;
     p.delete('room');
     p.delete('region');
     p.delete('private');
-    p.delete('challenge');
-    p.delete('from');
     const qs = p.toString();
     history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
   } catch { /* non-http(s) context — nothing to clean */ }
@@ -3834,7 +3780,6 @@ function beginOnlineMatch() {
   playing = true;
   updateNetStatus();
   refreshNetPing();
-  reportChallengeJoin(); // growth: the chain learns this pairing
   return net.session;
 }
 
@@ -3953,33 +3898,6 @@ function renderRoom() {
   netUi.readyBtn.disabled = !can;
   netUi.readyBtn.textContent = net.selfReady ? t('room.readyCancel') : t('room.start');
   netUi.readyBtn.classList.toggle('active', !!net.selfReady);
-  // Growth package: the challenge box. The challenger (host of a
-  // challenge room) gets the copy-ready challenge text; the
-  // challenged guest sees who challenged them. Everyone else:
-  // no box — a plain room stays exactly as it always was.
-  if (netUi.challengeBox) {
-    const hostChallenge = isHost && net.challenge;
-    const guestChallenge = !isHost && !!net.challengeFrom;
-    netUi.challengeBox.hidden = !(hostChallenge || guestChallenge);
-    if (hostChallenge && netUi.challengeShareText) {
-      netUi.challengeShareText.textContent = t('challenge.shareText', {
-        name: myName(),
-        url: net.roomLinkValue || buildChallengeUrl(
-          location.origin + location.pathname, net.room, net.region, myName()),
-      });
-    }
-    if (netUi.challengeVs) {
-      netUi.challengeVs.hidden = !guestChallenge;
-      if (guestChallenge) {
-        netUi.challengeVs.textContent = t('challenge.youWereChallenged', {
-          name: net.challengeFrom,
-        });
-      }
-    }
-    if (netUi.shareChallengeBtn) {
-      netUi.shareChallengeBtn.hidden = !hostChallenge;
-    }
-  }
 }
 
 /// The both-ready rule (host side only — startGate enforces it):
@@ -4192,9 +4110,9 @@ function onNetMessage(msg) {
       }
       break;
     case 'hello': {
-      // Growth package: the peer's display name rides the hello
-      // (an older client sends none — the seat keeps its classic
-      // label). Cleaned on arrival; it is foreign input.
+      // The peer's display name rides the hello (an older client
+      // sends none — the seat keeps its classic label). Cleaned
+      // on arrival; it is foreign input.
       const peerName = cleanDisplayName(msg.name);
       if (peerName) net.peerName = peerName;
       // M12: a sealed guest seat (AI / Closed) admits no human —
@@ -4474,9 +4392,7 @@ function connectToRoom() {
       if (net.role === 'host') {
         // M12: a sealed seat changes what "created" means — the
         // room is not in the public list and needs no guest.
-        if (net.challenge) {
-          lobbyStatus(t('status.challengeRoom'));
-        } else if (slotIsAi(net.guestSlot)) {
+        if (slotIsAi(net.guestSlot)) {
           lobbyStatus(t('status.roomAi', { slot: slotLabel(net.guestSlot, slotStrings()) }));
         } else if (net.guestSlot === 'closed') {
           lobbyStatus(t('status.roomClosed'));
@@ -4532,14 +4448,7 @@ function openLobby(join) {
     selfReady: false, peerReady: false,
     pwState: join && join.private ? 'needed' : 'na',
     roomLinkValue: '',
-    // Growth package: the challenge chain's seat state. A host
-    // who created the room FROM the Challenge button is the
-    // challenger; a guest who arrived on a challenge link knows
-    // who challenged them (cleaned — the link is foreign input).
     // peerName arrives on the peer's hello.
-    challenge: false,
-    challengeFrom: join && join.challenge
-      ? cleanDisplayName(join.from) : null,
     peerName: null,
     selfLoaded: false, peerLoaded: false, loadTimer: null,
   };
@@ -4662,31 +4571,6 @@ function createGame() {
     { private: net.privacy === 'private' });
   if (netUi.createBtn) netUi.createBtn.disabled = true;
   // The room screen takes over from the browser + create view.
-  stopLobbyBrowser();
-  if (netUi.gamesSection) netUi.gamesSection.hidden = true;
-  if (netUi.createSection) netUi.createSection.hidden = true;
-  renderRegionList({});
-  renderRoom();
-  connectToRoom();
-}
-
-/// Growth package: the CHALLENGE button's one tap. A challenge is
-/// an ordinary public room with an open seat, created exactly
-/// like Create Lobby's defaults — the only differences are the
-/// link (it carries the challenge flag + this player's name) and
-/// the chain bookkeeping. No form, no settings: tap, share, play.
-function createChallengeGame() {
-  if (!net || net.room) return;
-  net.privacy = 'public';
-  net.password = '';
-  net.guestSlot = 'open';
-  net.region = net.selectedRegion || net.region || regionList[0].id;
-  net.room = makeRoomId();
-  net.challenge = true;
-  cleanPlayUrl();
-  net.roomLinkValue = buildChallengeUrl(
-    location.origin + location.pathname, net.room, net.region, myName());
-  if (netUi.createBtn) netUi.createBtn.disabled = true;
   stopLobbyBrowser();
   if (netUi.gamesSection) netUi.gamesSection.hidden = true;
   if (netUi.createSection) netUi.createSection.hidden = true;
@@ -5118,10 +5002,10 @@ function applyStaticStrings() {
   setPlaceholder('feedback-text', 'feedback.placeholder');
   setText('feedback-send', 'feedback.send');
   setText('feedback-thanks', 'feedback.thanks');
-  // Growth package: the report form, the challenge buttons, the
-  // profile row. The report type options carry VALUES the relay
-  // whitelists (urgent/contribution/other) — only their LABELS
-  // are localized here.
+  // The report form and the profile row (2026-10-24). The report
+  // type options carry VALUES the relay whitelists
+  // (urgent/contribution/other) — only their LABELS are
+  // localized here.
   setText('btn-report', 'report.menuEntry');
   setText('report-title', 'report.title');
   setText('report-send', 'report.send');
@@ -5139,12 +5023,8 @@ function applyStaticStrings() {
       if (labels[opts[i].value]) opts[i].textContent = labels[opts[i].value];
     }
   }
-  setText('end-challenge-btn', 'challenge.button');
-  setText('btn-challenge', 'challenge.button');
-  setText('btn-share-challenge', 'challenge.shareButton');
   setText('profile-name-label', 'profile.nameLabel');
   setPlaceholder('player-name', 'profile.namePlaceholder');
-  setText('btn-ig-login', 'ig.button');
   for (const btn of feedbackStarBtns) {
     if (btn && btn.setAttribute) {
       const n = Number(btn.dataset.stars);
@@ -5220,7 +5100,7 @@ function applyLocale(loc) {
   setLocale(loc);
   refreshNames();
   applyStaticStrings();
-  refreshIdentityUi(); // growth: the signed-in line is localized
+  refreshNameUi(); // the lobby name field follows the locale paint
   syncFullscreenUi();
   cmdSig = '';
   selSig = '';
@@ -5434,9 +5314,8 @@ async function main() {
     });
   }
 
-  // Growth package: the report / contribute overlay (pause-menu
-  // entry), the end card's Challenge button, and the lobby's
-  // profile row.
+  // The report / contribute overlay (pause-menu entry) and the
+  // lobby's profile row (2026-10-24).
   const closeReport = () => { if (reportOverlay) reportOverlay.style.display = 'none'; };
   if (reportBtn) reportBtn.addEventListener('click', () => {
     if (reportThanks) reportThanks.hidden = true;
@@ -5453,33 +5332,13 @@ async function main() {
     if (e.target === reportOverlay) closeReport();
   });
   if (reportSendBtn) reportSendBtn.addEventListener('click', () => { sendReport(); });
-  if (endChallengeBtn) endChallengeBtn.addEventListener('click', () => {
-    // The chain continues: this match is over — leave it and
-    // open a challenge room of your own to pass on. (Back to
-    // menu's close-out, then straight into the challenge room.)
-    if (endOverlay) endOverlay.style.display = 'none';
-    if (net) {
-      leaveNetMatch('abandoned');
-      setPaused(false); // leaveNetMatch parks the pause menu open
-    }
-    openLobby(null);
-    createChallengeGame();
-  });
   const nameInput = document.getElementById('player-name');
   if (nameInput) {
     nameInput.addEventListener('change', () => {
       writeStoredName(localStorage, nameInput.value);
       nameInput.value = readStoredName(localStorage) || '';
-      // A challenge room already on screen re-renders its share
-      // text under the new name.
-      if (net && net.room) renderRoom();
     });
   }
-  const igBtn = document.getElementById('btn-ig-login');
-  if (igBtn) igBtn.addEventListener('click', () => {
-    const url = buildIgAuthorizeUrl();
-    if (url) location.href = url;
-  });
 
   // --- M8 wiring: lobby, online menu entries, replay ----------------
   netUi = {
@@ -5517,11 +5376,6 @@ async function main() {
     pwNote: document.getElementById('pw-note'),
     readyBtn: document.getElementById('btn-ready'),
     copyLinkBtn: document.getElementById('btn-copy-link'),
-    challengeBox: document.getElementById('challenge-box'),
-    challengeVs: document.getElementById('challenge-vs'),
-    challengeShareText: document.getElementById('challenge-share-text'),
-    shareChallengeBtn: document.getElementById('btn-share-challenge'),
-    challengeBtn: document.getElementById('btn-challenge'),
     lobbyStatus: document.getElementById('lobby-status'),
     loadingOverlay: document.getElementById('loading-overlay'),
     loadSlotHost: document.getElementById('load-slot-host'),
@@ -5600,28 +5454,6 @@ async function main() {
     netUi.soloBtn.addEventListener('click', playSoloFromLobby);
   }
   if (netUi.createBtn) netUi.createBtn.addEventListener('click', createGame);
-  // Growth package: one tap creates the challenge room; in the
-  // room, Share uses the native share sheet where the browser
-  // has one and falls back to copying the challenge text.
-  if (netUi.challengeBtn) {
-    netUi.challengeBtn.addEventListener('click', createChallengeGame);
-  }
-  if (netUi.shareChallengeBtn) {
-    netUi.shareChallengeBtn.addEventListener('click', async () => {
-      if (!net || !net.challenge) return;
-      const url = buildChallengeUrl(
-        location.origin + location.pathname, net.room, net.region, myName());
-      net.roomLinkValue = url;
-      const text = t('challenge.shareText', { name: myName(), url });
-      if (navigator.share) {
-        try { await navigator.share({ text, url }); return; } catch { /* dismissed — fall through to copy */ }
-      }
-      if (navigator.clipboard) {
-        try { await navigator.clipboard.writeText(text); } catch { /* the text sits selected-able in the box */ }
-      }
-      flash(t('flash.linkCopied'));
-    });
-  }
   // M12: the room screen's guest-seat selector (host only; the
   // create panel's twin is read by createGame itself).
   if (netUi.roomGuestSlot) {
@@ -5652,12 +5484,9 @@ async function main() {
       // state — never read from the address bar, which is kept
       // room-free so a reload lands on the Lobby Browser.
       if (net && net.room) {
-        net.roomLinkValue = net.challenge
-          ? buildChallengeUrl(
-            location.origin + location.pathname, net.room, net.region, myName())
-          : buildPlayUrl(
-            location.origin + location.pathname, net.room, net.region,
-            { private: net.privacy === 'private' });
+        net.roomLinkValue = buildPlayUrl(
+          location.origin + location.pathname, net.room, net.region,
+          { private: net.privacy === 'private' });
         if (navigator.clipboard) {
           navigator.clipboard.writeText(net.roomLinkValue);
         }

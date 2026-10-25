@@ -14,9 +14,10 @@ import {
   encodeMessage, decodeMessage,
   createSession, createRecorder, isReplay, replayEvents,
   createRelayClient, probeRegionPing,
-  makeRoomId, buildPlayUrl, buildChallengeUrl, parsePlayParams, linkJoinRoom,
+  makeRoomId, buildPlayUrl, parsePlayParams, linkJoinRoom,
   pickFastestRegion, REGIONS,
 } from './netplay.js';
+import * as netplay from './netplay.js';
 
 // ---------------------------------------------------------------- codec
 
@@ -142,34 +143,26 @@ test('M10 link params: the private flag round-trips', () => {
   const priv = buildPlayUrl('https://skirmish.online/play/', 'abc123def4', 'wnam', { private: true });
   assert.equal(priv, 'https://skirmish.online/play/?room=abc123def4&region=wnam&private=1');
   assert.deepEqual(parsePlayParams('?room=abc123def4&region=wnam&private=1'),
-    { room: 'abc123def4', region: 'wnam', online: false, private: true, challenge: false, from: null });
+    { room: 'abc123def4', region: 'wnam', online: false, private: true });
   const pub = buildPlayUrl('https://skirmish.online/play/', 'abc123def4', 'wnam');
   assert.equal(pub, 'https://skirmish.online/play/?room=abc123def4&region=wnam');
   assert.equal(parsePlayParams('?room=abc123def4&region=wnam').private, false);
 });
 
-test('growth: a challenge link round-trips its flag and challenger name', () => {
-  const url = buildChallengeUrl(
-    'https://skirmish.online/play/', 'abc123def4', 'wnam', 'Ana María');
-  assert.equal(url,
-    'https://skirmish.online/play/?room=abc123def4&region=wnam&challenge=1&from=Ana%20Mar%C3%ADa');
-  const search = url.slice(url.indexOf('?'));
-  const parsed = parsePlayParams(search);
-  assert.equal(parsed.challenge, true);
-  assert.equal(parsed.from, 'Ana María');
-  // The challenge rides the ordinary link flow (consume-once too).
-  const join = linkJoinRoom(search, null);
+test('removal: the in-game challenge is gone (Claudio, 2026-10-24)', () => {
+  // The challenge chain was removed — his challenge design lives
+  // on Instagram, not in the game. Pin the absence so it cannot
+  // silently come back: no builder export, and a challenge-style
+  // link parses as an ordinary room link (the stray params are
+  // ignored, the room join itself is untouched).
+  assert.equal('buildChallengeUrl' in netplay, false);
+  const parsed = parsePlayParams('?room=abc123def4&region=wnam&challenge=1&from=Ana');
+  assert.deepEqual(parsed,
+    { room: 'abc123def4', region: 'wnam', online: false, private: false });
+  const join = linkJoinRoom('?room=abc123def4&region=wnam&challenge=1&from=Ana', null);
   assert.equal(join.room, 'abc123def4');
-  assert.equal(join.challenge, true);
-  assert.equal(join.from, 'Ana María');
-  assert.equal(linkJoinRoom(search, 'abc123def4'), null);
-  // A plain invite is not a challenge and carries no name.
-  const plain = parsePlayParams('?room=abc123def4&region=wnam');
-  assert.equal(plain.challenge, false);
-  assert.equal(plain.from, null);
-  // A hostile from is capped raw; app.js cleans it before use.
-  const hostile = parsePlayParams('?room=r&challenge=1&from=' + 'x'.repeat(500));
-  assert.equal(hostile.from.length, 64);
+  assert.equal('challenge' in join, false);
+  assert.equal('from' in join, false);
 });
 
 test('the load timeout is the documented 90 s', () => {
@@ -180,7 +173,7 @@ test('linkJoinRoom: a room link joins once per tab session', () => {
   const link = '?room=abc123def4&region=wnam';
   // Fresh tab (no mark): the boot joins the link's room.
   assert.deepEqual(linkJoinRoom(link, null),
-    { room: 'abc123def4', region: 'wnam', online: false, private: false, challenge: false, from: null });
+    { room: 'abc123def4', region: 'wnam', online: false, private: false });
   // Reload in the same tab (mark matches): front door, no join.
   assert.equal(linkJoinRoom(link, 'abc123def4'), null);
   // Same tab, a DIFFERENT room's link: joins the new room.
@@ -686,7 +679,7 @@ test('lobby helpers: room ids, links, fastest region', () => {
   const url = buildPlayUrl('https://skirmish.online/play/', 'abc123xyz9', 'wnam');
   assert.equal(url, 'https://skirmish.online/play/?room=abc123xyz9&region=wnam');
   const parsed = parsePlayParams('?room=abc123xyz9&region=wnam');
-  assert.deepEqual(parsed, { room: 'abc123xyz9', region: 'wnam', online: false, private: false, challenge: false, from: null });
+  assert.deepEqual(parsed, { room: 'abc123xyz9', region: 'wnam', online: false, private: false });
   assert.equal(parsePlayParams('?online=1').online, true);
   assert.equal(pickFastestRegion({ wnam: 80, weur: 25, sam: null }), 'weur');
   assert.equal(pickFastestRegion({}), null);
