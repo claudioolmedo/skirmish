@@ -10,6 +10,7 @@ export const wasmsim_buildings: (a: number) => [number, number];
 export const wasmsim_cell_size: (a: number) => number;
 export const wasmsim_entity_auto_explore: (a: number) => [number, number];
 export const wasmsim_entity_can_auto_explore: (a: number, b: number) => number;
+export const wasmsim_entity_carry: (a: number) => [number, number];
 export const wasmsim_entity_count: (a: number) => number;
 export const wasmsim_entity_hp: (a: number) => [number, number];
 export const wasmsim_entity_kinds: (a: number) => [number, number];

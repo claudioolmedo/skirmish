@@ -118,6 +118,23 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Per-entity carried-resource tags in entity-id order:
+     * 255 = hands empty; otherwise the `ResourceKind` index
+     * (0 Food, 1 Wood, 2 Gold, 3 Stone). `carry_kind` is `None`
+     * iff the carry is zero, so a tag here means the villager is
+     * hauling that resource right now. Read-only presentation
+     * glue — the renderer hangs the matching visible load on the
+     * hauler and shows empty hands again the moment the deposit
+     * lands, on the sim's own word rather than a client guess.
+     * @returns {Uint8Array}
+     */
+    entity_carry() {
+        const ret = wasm.wasmsim_entity_carry(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
      * Number of entities (Town Center + villagers).
      * @returns {number}
      */

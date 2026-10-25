@@ -62,6 +62,17 @@ export class WasmSim {
      */
     entity_can_auto_explore(entity: number): boolean;
     /**
+     * Per-entity carried-resource tags in entity-id order:
+     * 255 = hands empty; otherwise the `ResourceKind` index
+     * (0 Food, 1 Wood, 2 Gold, 3 Stone). `carry_kind` is `None`
+     * iff the carry is zero, so a tag here means the villager is
+     * hauling that resource right now. Read-only presentation
+     * glue — the renderer hangs the matching visible load on the
+     * hauler and shows empty hands again the moment the deposit
+     * lands, on the sim's own word rather than a client guess.
+     */
+    entity_carry(): Uint8Array;
+    /**
      * Number of entities (Town Center + villagers).
      */
     entity_count(): number;
@@ -807,6 +818,7 @@ export interface InitOutput {
     readonly wasmsim_cell_size: (a: number) => number;
     readonly wasmsim_entity_auto_explore: (a: number) => [number, number];
     readonly wasmsim_entity_can_auto_explore: (a: number, b: number) => number;
+    readonly wasmsim_entity_carry: (a: number) => [number, number];
     readonly wasmsim_entity_count: (a: number) => number;
     readonly wasmsim_entity_hp: (a: number) => [number, number];
     readonly wasmsim_entity_kinds: (a: number) => [number, number];
