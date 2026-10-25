@@ -93,6 +93,69 @@ body.in-match #event-feed { display: flex; }
 }
 #event-feed .feed-line.fade { opacity: 0; }
 
+/* ---------- P2P chat (2026-10-24) ---------- */
+/* The chat log: same parchment-on-dark voice as the event
+   feed, directly beneath it, in-match only. Lines are plain
+   text nodes (app.js uses textContent — chat is foreign input
+   and is never parsed as HTML). The input box rides top-center
+   while typing, with the taunt code list above the field —
+   the list lives here, in the chat itself, not in any menu. */
+#chat-log {
+  position: fixed;
+  top: 168px;
+  left: 10px;
+  z-index: 19;
+  display: none;
+  flex-direction: column;
+  gap: 2px;
+  pointer-events: none;
+  max-width: min(52vw, 420px);
+}
+body.in-match #chat-log { display: flex; }
+#chat-log .chat-line {
+  color: var(--ui-text);
+  font: 600 12.5px/1.35 system-ui, sans-serif;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95);
+  background: linear-gradient(rgba(11, 7, 2, 0.55), rgba(11, 7, 2, 0.55));
+  border-left: 2px solid rgba(120, 170, 220, 0.65);
+  border-radius: 0 3px 3px 0;
+  padding: 2px 8px 2px 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 1;
+  transition: opacity 0.9s ease;
+}
+#chat-log .chat-line.fade { opacity: 0; }
+#chat-box {
+  position: fixed;
+  top: 48px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  width: min(540px, 86vw);
+}
+#chat-codes {
+  color: var(--ui-text);
+  font: 600 11px/1.5 system-ui, sans-serif;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95);
+  background: linear-gradient(rgba(11, 7, 2, 0.72), rgba(11, 7, 2, 0.72));
+  border-radius: 4px;
+  padding: 4px 8px;
+  margin-bottom: 4px;
+}
+#chat-input {
+  width: 100%;
+  box-sizing: border-box;
+  font: 600 14px system-ui, sans-serif;
+  color: var(--ui-text);
+  background: rgba(11, 7, 2, 0.88);
+  border: 1px solid rgba(201, 162, 39, 0.65);
+  border-radius: 4px;
+  padding: 7px 9px;
+  outline: none;
+}
+
 .ui-res-group {
   display: flex;
   align-items: center;

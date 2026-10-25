@@ -49,6 +49,39 @@
   "ack.cavalry.attack": [
    "Charge!",
    "Ride them down!"
+  ],
+  "taunt.1": [
+   "Yes."
+  ],
+  "taunt.2": [
+   "No."
+  ],
+  "taunt.3": [
+   "Food, please."
+  ],
+  "taunt.4": [
+   "Wood, please."
+  ],
+  "taunt.5": [
+   "Gold, please."
+  ],
+  "taunt.6": [
+   "Stone, please."
+  ],
+  "taunt.7": [
+   "Help! I am under attack!"
+  ],
+  "taunt.11": [
+   "Ha ha ha ha!"
+  ],
+  "taunt.12": [
+   "Send food, if you can spare it."
+  ],
+  "taunt.13": [
+   "Send wood, if you can spare it."
+  ],
+  "taunt.14": [
+   "Let the battle begin!"
   ]
  },
  "voices": {
@@ -63,7 +96,18 @@
   "ack.archer.attack": "af_sarah",
   "ack.cavalry.select": "am_eric",
   "ack.cavalry.order": "am_eric",
-  "ack.cavalry.attack": "am_eric"
+  "ack.cavalry.attack": "am_eric",
+  "taunt.1": "am_fenrir",
+  "taunt.2": "am_fenrir",
+  "taunt.3": "am_fenrir",
+  "taunt.4": "am_fenrir",
+  "taunt.5": "am_fenrir",
+  "taunt.6": "am_fenrir",
+  "taunt.7": "am_fenrir",
+  "taunt.11": "am_fenrir",
+  "taunt.12": "am_fenrir",
+  "taunt.13": "am_fenrir",
+  "taunt.14": "am_fenrir"
  },
  "sounds": {
   "ack.archer.attack": [
@@ -206,6 +250,42 @@
   ],
   "sting.victory": [
    "sting.victory-1.wav"
+  ],
+  "taunt.1": [
+   "taunt.1-1.wav"
+  ],
+  "taunt.11": [
+   "taunt.11-1.wav"
+  ],
+  "taunt.12": [
+   "taunt.12-1.wav"
+  ],
+  "taunt.13": [
+   "taunt.13-1.wav"
+  ],
+  "taunt.14": [
+   "taunt.14-1.wav"
+  ],
+  "taunt.2": [
+   "taunt.2-1.wav"
+  ],
+  "taunt.3": [
+   "taunt.3-1.wav"
+  ],
+  "taunt.30": [
+   "taunt.30-1.wav"
+  ],
+  "taunt.4": [
+   "taunt.4-1.wav"
+  ],
+  "taunt.5": [
+   "taunt.5-1.wav"
+  ],
+  "taunt.6": [
+   "taunt.6-1.wav"
+  ],
+  "taunt.7": [
+   "taunt.7-1.wav"
   ],
   "ui.coin": [
    "ui.coin-1.wav"

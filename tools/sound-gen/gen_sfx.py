@@ -544,6 +544,31 @@ def r_ambient(seed):
     return out
 
 
+def r_taunt_chant(seed):
+    """Taunt 30 — the chant (2026-10-24): a wordless group chant,
+    three detuned low voices on one slow two-tone phrase with a
+    breathing swell. An ORIGINAL contour and timbre, composed for
+    this game — no other game's chant (its word, melody or
+    recording) is imitated; the code's semantics are the only
+    inheritance (see SOUND-CATALOG.md)."""
+    dur = 2.3
+    t = t_axis(dur)
+    # two-tone phrase: a held low tone, a step down, a long settle
+    f0 = np.concatenate([
+        glide(196, 190, 0.8),
+        glide(190, 165, 0.35),
+        glide(165, 162, dur - 1.15),
+    ])[:len(t)]
+    swell = (0.55 + 0.45 * np.sin(2 * np.pi * 0.45 * t)) * env_ad(dur, 0.25, 0.5)
+    x = np.zeros_like(t)
+    for detune, gain in ((1.0, 0.55), (1.007, 0.3), (0.994, 0.3)):
+        x += gain * formant_voice(f0 * detune, dur, [(700, 0.85), (1150, 0.45), (2600, 0.15)],
+                                  tremolo_hz=5.5, tremolo_depth=0.35)
+    r = np.random.RandomState(seed)
+    breath = filt(noise(r, dur), "bandpass", [400, 900]) * 0.05
+    return {"taunt.30-1.wav": (x + breath) * swell}
+
+
 RECIPES = [
     ("hit.sword", r_sword, 1101),
     ("hit.knife", r_knife, 1202),
@@ -565,6 +590,7 @@ RECIPES = [
     ("horse", r_horse, 2818),       # horse.neigh, horse.hooves, death.cavalry
     ("death.human", r_death_human, 2919),
     ("ambient", r_ambient, 3020),   # ambient.bird, ambient.wind
+    ("taunt.30", r_taunt_chant, 3131),  # the chant (voice taunts come from gen_voices.py)
 ]
 
 # Legacy cue name -> generated sound key (engine tries the asset

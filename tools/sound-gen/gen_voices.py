@@ -25,6 +25,31 @@ VOICES = os.path.expanduser("~/.cache/kokoro/voices-v1.0.bin")
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "work", "voice")
 
+# Taunts (2026-10-24): the numbered chat codes of play/chat.js,
+# spoken by a fifth voice — the PLAYER's voice, distinct from
+# every unit class. One variant per code (a taunt is a chosen
+# line, not an acknowledgment). Phrases are original, written
+# for this game, following only the numbering semantics a DE
+# player expects from public documentation (1 yes, 2 no,
+# 3-6 resource asks, 7 attack call, 11 laugh, 12/13 resupply,
+# 14 begin). Code 30 (the chant) is NOT a voice slot: it is a
+# wordless original chant rendered by gen_sfx.py's DSP recipe,
+# so no other game's chant — word or melody — is imitated.
+TAUNT_VOICE = "am_fenrir"
+TAUNTS = {
+    "taunt.1": "Yes.",
+    "taunt.2": "No.",
+    "taunt.3": "Food, please.",
+    "taunt.4": "Wood, please.",
+    "taunt.5": "Gold, please.",
+    "taunt.6": "Stone, please.",
+    "taunt.7": "Help! I am under attack!",
+    "taunt.11": "Ha ha ha ha!",
+    "taunt.12": "Send food, if you can spare it.",
+    "taunt.13": "Send wood, if you can spare it.",
+    "taunt.14": "Let the battle begin!",
+}
+
 # key -> (kokoro voice, speed, [phrase, phrase]) — two variants
 # per slot so orders do not repeat verbatim back to back.
 SLOTS = {
@@ -47,7 +72,10 @@ def main() -> int:
     os.makedirs(OUT, exist_ok=True)
     kokoro = Kokoro(MODEL, VOICES)
     manifest = {}
-    for key, (voice, speed, phrases) in SLOTS.items():
+    slots = dict(SLOTS)
+    for key, phrase in TAUNTS.items():
+        slots[key] = (TAUNT_VOICE, 1.0, [phrase])
+    for key, (voice, speed, phrases) in slots.items():
         files = []
         for n, text in enumerate(phrases, start=1):
             samples, sr = kokoro.create(text, voice=voice, speed=speed, lang="en-us")
