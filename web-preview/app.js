@@ -5125,6 +5125,13 @@ function downloadReplay(replayObj) {
   a.download = `skirmish2-replay-seed${replayObj.seed}.json`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  // Success feedback (bot-loop fix, 2026-10-25): until now the ONLY
+  // flash in this function was the no-replay failure case, so a
+  // successful download was invisible in-page — three live sessions
+  // in a row clicked "Download replay" and saw nothing happen at
+  // all, reading the button as dead. Confirm the save like every
+  // other completed action does.
+  flash(t('flash.replaySaved'));
 }
 
 function currentReplay() {
