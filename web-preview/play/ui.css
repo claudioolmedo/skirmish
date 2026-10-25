@@ -38,7 +38,7 @@
 
 .ui-topbar {
   position: fixed;
-  top: 0;
+  top: var(--beta-h);
   left: 0;
   right: 0;
   z-index: 20;
@@ -67,7 +67,7 @@
    lobby: it exists only while a match is on screen. */
 #event-feed {
   position: fixed;
-  top: 50px; /* the 42px topbar + a breath */
+  top: calc(var(--beta-h) + 50px); /* the 42px topbar + a breath */
   left: 10px;
   z-index: 19; /* under the topbar (20), over the canvas */
   display: none;
@@ -102,7 +102,7 @@ body.in-match #event-feed { display: flex; }
    the list lives here, in the chat itself, not in any menu. */
 #chat-log {
   position: fixed;
-  top: 168px;
+  top: calc(var(--beta-h) + 168px);
   left: 10px;
   z-index: 19;
   display: none;
@@ -129,7 +129,7 @@ body.in-match #chat-log { display: flex; }
 #chat-log .chat-line.fade { opacity: 0; }
 #chat-box {
   position: fixed;
-  top: 48px;
+  top: calc(var(--beta-h) + 48px);
   left: 50%;
   transform: translateX(-50%);
   z-index: 30;
@@ -540,7 +540,7 @@ body.in-match #chat-log { display: flex; }
 @media (max-width: 700px) {
   /* no floating site link anymore: the topbar reclaims its row */
   .ui-topbar { padding: 6px 12px; height: auto; min-height: 42px; flex-wrap: wrap; gap: 6px 14px; }
-  #event-feed { top: 92px; } /* below the wrapped two-row topbar */
+  #event-feed { top: calc(var(--beta-h) + 92px); } /* below the wrapped two-row topbar */
   .sel-line { display: none; }
   .sel-grid { display: none; }
   /* bottom strip must FIT a phone: it may take a larger share

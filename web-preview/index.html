@@ -30,6 +30,8 @@
 </head>
 <body>
 
+<div class="beta-banner" role="note"><span id="beta-banner-text">Beta version — Skirmish II is being built right now. New things land all the time, so check back often!</span></div>
+
 <header class="site-header">
   <div class="bar">
     <a class="brand" href="#top">
@@ -184,5 +186,30 @@
 </footer>
 
 <script src="ads.js"></script>
+<script>
+  // Beta strip: the text mirrors the game's 'beta.banner' string
+  // (play/i18n.js) in the three site languages. Like the feedback
+  // page, read the game's stored locale (skirmish2.locale), else
+  // the browser language, so a returning player lands in theirs.
+  (function () {
+    var STRINGS = {
+      en: 'Beta version — Skirmish II is being built right now. New things land all the time, so check back often!',
+      'pt-BR': 'Versão beta — o Skirmish II está sendo construído agora. Tem novidade toda hora, então volte sempre!',
+      es: 'Versión beta — Skirmish II se está construyendo ahora. Hay novedades todo el tiempo, ¡así que vuelve seguido!'
+    };
+    var loc = 'en';
+    try {
+      var stored = localStorage.getItem('skirmish2.locale');
+      if (stored && STRINGS[stored]) loc = stored;
+      else {
+        var nav = String(navigator.language || '').toLowerCase();
+        if (nav.indexOf('pt') === 0) loc = 'pt-BR';
+        else if (nav.indexOf('es') === 0) loc = 'es';
+      }
+    } catch (e) { /* keep English */ }
+    var el = document.getElementById('beta-banner-text');
+    if (el) el.textContent = STRINGS[loc];
+  })();
+</script>
 </body>
 </html>
