@@ -309,6 +309,43 @@ test('the generated manifest covers the catalog spine and every file decodes', (
   }
 });
 
+test('the taunt set is complete: every chat code has a sound, and voice taunts carry their phrase', async () => {
+  const { TAUNTS, TAUNT_CODES } = await import('./chat.js');
+  for (const code of TAUNT_CODES) {
+    const key = `taunt.${code}`;
+    assert.ok(MANIFEST.sounds[key], `${key} has a generated sound`);
+    for (const file of MANIFEST.sounds[key]) {
+      assert.ok(MANIFEST_FILES.includes(file), `${file} listed`);
+    }
+    // Code 30 is the wordless chant (a DSP render, no voice
+    // slot); every other code's manifest phrase is the line
+    // the chat log shows.
+    if (code !== 30) {
+      assert.deepEqual(MANIFEST.phrases[key], [TAUNTS[code]], `${key} phrase`);
+      assert.ok(MANIFEST.voices[key], `${key} voice`);
+    }
+  }
+});
+
+test('playTaunt plays the local taunt asset, honors mute and the 2 s spacing', async () => {
+  const { engine, ctx, tagOf, advance } = await bankedEngine();
+  assert.equal(engine.playTaunt(7), true);
+  const tauntTags = MANIFEST.sounds['taunt.7'].map(tagOf);
+  assert.ok(tauntTags.includes(ctx.startedBuffers.at(-1).tag), 'the taunt.7 asset played');
+  // Spacing: an instant repeat is handled but silent.
+  const started = ctx.startedBuffers.length;
+  assert.equal(engine.playTaunt(7), true);
+  assert.equal(ctx.startedBuffers.length, started);
+  advance(2100);
+  assert.equal(engine.playTaunt(7), true);
+  assert.equal(ctx.startedBuffers.length, started + 1);
+  // A code with no asset is missing, not a synth beep.
+  assert.equal(engine.playTaunt(99), false);
+  // Mute governs taunts exactly like every other sound.
+  engine.setEnabled(false);
+  assert.equal(engine.playTaunt(1), false);
+});
+
 // A fake context that also decodes: each fetched file's first
 // byte tags its decoded buffer, so tests can see WHICH asset a
 // call started.

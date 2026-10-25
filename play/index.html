@@ -144,6 +144,19 @@
      by app.js from state diffs; lines fade after ~5 s. -->
 <div id="event-feed" aria-hidden="true"></div>
 
+<!-- P2P chat (2026-10-24): DE-style direct chat between the two
+     players of a match. The log sits under the event feed; the
+     input box (with the numbered taunt codes) appears only
+     while typing. Content rides an encrypted WebRTC data
+     channel between the two browsers — it is never sent to,
+     relayed as content by, or stored on any server
+     (play/chat.js). -->
+<div id="chat-log" aria-hidden="true"></div>
+<div id="chat-box" hidden>
+  <div id="chat-codes"></div>
+  <input id="chat-input" type="text" maxlength="200" autocomplete="off" spellcheck="false">
+</div>
+
 <!-- BOTTOM: command panel | selection panel | minimap -->
 <footer class="ui-bottombar">
 

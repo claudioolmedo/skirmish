@@ -115,6 +115,37 @@ test('message codec round-trips bundles and rejects malformed traffic', () => {
   assert.equal(decodeMessage('{"type":"hash","turn":1}').ok, false);
 });
 
+test('rtc signaling decodes for the P2P chat channel — and only signaling shapes', () => {
+  for (const m of [
+    { type: 'rtc', kind: 'offer', sdp: 'v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\n' },
+    { type: 'rtc', kind: 'answer', sdp: 'v=0\r\no=- 3 4 IN IP4 127.0.0.1\r\n' },
+    { type: 'rtc', kind: 'ice', candidate: 'candidate:1 1 udp 1 192.0.2.1 9 typ host', sdpMid: '0', sdpMLineIndex: 0 },
+    { type: 'rtc', kind: 'ice', candidate: '', sdpMid: null, sdpMLineIndex: null },
+  ]) {
+    const dec = decodeMessage(encodeMessage(m));
+    assert.equal(dec.ok, true, JSON.stringify(m));
+    assert.deepEqual(dec.msg, m);
+  }
+  // The envelope carries signaling, never content: other kinds,
+  // missing/oversized payloads and off-shape candidates reject.
+  assert.equal(decodeMessage('{"type":"rtc","kind":"text","text":"hi"}').ok, false);
+  assert.equal(decodeMessage('{"type":"rtc","kind":"offer"}').ok, false);
+  assert.equal(decodeMessage('{"type":"rtc","kind":"offer","sdp":""}').ok, false);
+  assert.equal(decodeMessage(`{"type":"rtc","kind":"offer","sdp":"${'x'.repeat(16385)}"}`).ok, false);
+  assert.equal(decodeMessage('{"type":"rtc","kind":"ice"}').ok, false);
+  assert.equal(decodeMessage(`{"type":"rtc","kind":"ice","candidate":"${'x'.repeat(1025)}","sdpMid":null,"sdpMLineIndex":null}`).ok, false);
+  assert.equal(decodeMessage('{"type":"rtc","kind":"ice","candidate":"c","sdpMid":4,"sdpMLineIndex":null}').ok, false);
+  // A session never consumes signaling: receive() hands it back
+  // to the app layer (the chat link), untouched by the sim.
+  const s = createSession({
+    localSlot: 0,
+    send: () => {},
+    applyBundle: () => {},
+    tickOnce: () => '0',
+  });
+  assert.equal(s.receive({ type: 'rtc', kind: 'offer', sdp: 'v=0' }), false);
+});
+
 test('M10 lobby messages decode: ready, the password handshake, cancel', () => {
   for (const m of [
     { type: 'ready', ready: true },

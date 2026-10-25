@@ -73,6 +73,9 @@ import {
   cleanDisplayName, readStoredName, writeStoredName, displayName,
 } from './play/growth.js';
 import {
+  createChatLink, TAUNTS, TAUNT_CODES,
+} from './play/chat.js';
+import {
   LOBBIES_REFRESH_MS, parseLobbies, lobbyRowModel, sortLobbyRows,
   joinTarget, filterLobbyRows, selectionSurvives, pingQuality,
 } from './play/lobby.js';
@@ -2136,7 +2139,24 @@ function updateCarry(nodes, tcPos, pos, kinds, hp) {
 // --- Input: pan / zoom -------------------------------------------------
 const keys = new Set();
 addEventListener('keydown', (e) => {
+  // P2P chat owns the keyboard while its input is open: typed
+  // letters must not pan the camera or fire hotkeys. The input
+  // element's own listener handles Enter/Escape (and stops
+  // propagation); this guard covers every other key.
+  if (chatInputOpen()) return;
   if (e.code.startsWith('Arrow')) e.preventDefault();
+  // Enter opens the chat input — online matches only, and
+  // never while typing in another field (lobby name, password,
+  // search). DE's chat key, with DE's scope: the match peer.
+  if (e.code === 'Enter' && playing && net && net.session && chatLink) {
+    const a = document.activeElement;
+    const typing = a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT');
+    if (!typing) {
+      e.preventDefault();
+      openChatInput();
+      return;
+    }
+  }
   if (e.code === 'Escape') {
     // Escape NEVER shows the pause menu (Claudio, 2026-10-23):
     // the Menu button is the only way in — and back out. Esc's
@@ -3384,6 +3404,7 @@ function onDesync(e) {
 /// Tear the whole netplay state down (the caller resets the local
 /// game afterwards when appropriate).
 function teardownNet() {
+  stopChatLink();
   stopLobbyBrowser();
   if (net && net.loadTimer) clearTimeout(net.loadTimer);
   if (net && net.client) net.client.close();
@@ -3774,6 +3795,7 @@ function beginOnlineMatch() {
   });
   net.session = makeNetSession();
   net.phase = 'playing';
+  startChatLink();
   stopLobbyBrowser();
   showOverlay(netUi.onlineOverlay, false);
   setPaused(false);
@@ -4017,6 +4039,9 @@ function sendResync() {
 function onPeerGone() {
   if (!net) return;
   if (net.phase === 'playing') {
+    // The direct chat dies with the peer's seat; a rejoin
+    // starts a fresh link at the resume handshake.
+    stopChatLink();
     net.phase = 'peer-left';
     net.peerLeftAt = Date.now();
     updateNetStatus();
@@ -4079,6 +4104,149 @@ function onPeerBack() {
   showOverlay(netUi.peerOverlay, false);
   flash(t('flash.reconnectedPeer'));
   updateNetStatus();
+}
+
+// --- P2P chat (2026-10-24, Claudio) ---------------------------------
+//
+// DE-style chat between the two players of an online match,
+// direct browser-to-browser over an encrypted WebRTC data
+// channel (play/chat.js). NOTHING about a message — text or
+// taunt code — ever rides the relay socket, is written to
+// storage, enters the replay, or reaches telemetry: the relay
+// carries only the WebRTC signaling handshake ('rtc'), the
+// same dumb-pipe treatment every lobby message gets. When the
+// direct channel cannot be established the chat fails closed
+// with one plain line — there is no relay fallback. The link
+// lives and dies with the match: started when play begins
+// (and again on a rejoin resume), closed on teardown and on
+// the peer leaving. AI-room and local matches have no peer
+// and never create one.
+
+let chatLink = null;
+let chatEls = null; // { log, box, codes, input } once grabbed
+const CHAT_MAX_LINES = 6;
+
+function chatElements() {
+  if (chatEls) return chatEls;
+  const log = document.getElementById('chat-log');
+  const box = document.getElementById('chat-box');
+  const codes = document.getElementById('chat-codes');
+  const input = document.getElementById('chat-input');
+  if (!log || !box || !codes || !input) return null;
+  // The taunt code list lives in the chat box itself (Claudio's
+  // subtraction rule: no help page, no menu entry): code =
+  // phrase, shown while the input is open. Plain text only.
+  codes.textContent = TAUNT_CODES
+    .map((code) => `${code} ${TAUNTS[code]}`)
+    .join('   ·   ');
+  input.placeholder = t('chat.placeholder');
+  input.addEventListener('keydown', (e) => {
+    if (box.hidden) return; // closed: keys are the game's again
+    // The input owns its keys while open: nothing typed here
+    // may pan the camera, fire a hotkey, or leave fullscreen.
+    e.stopPropagation();
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      submitChatInput();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      closeChatInput();
+    }
+  });
+  chatEls = { log, box, codes, input };
+  return chatEls;
+}
+
+function chatInputOpen() {
+  const els = chatElements();
+  return !!els && !els.box.hidden;
+}
+
+function openChatInput() {
+  const els = chatElements();
+  if (!els || !chatLink) return;
+  if (!chatLink.open) {
+    // Still connecting: wait in silence. Failed or closed:
+    // fail closed, said plainly once per attempt — there is
+    // no lesser channel to offer instead.
+    if (chatLink.state() !== 'connecting') flash(t('chat.unavailable'));
+    return;
+  }
+  els.box.hidden = false;
+  els.input.value = '';
+  els.input.focus();
+}
+
+function closeChatInput() {
+  const els = chatElements();
+  if (!els) return;
+  els.box.hidden = true;
+  if (typeof els.input.blur === 'function') els.input.blur();
+}
+
+function pushChatLine(name, text) {
+  const els = chatElements();
+  if (!els) return;
+  const line = document.createElement('div');
+  line.className = 'chat-line';
+  const label = document.createElement('span');
+  label.textContent = `${name}: `;
+  line.appendChild(label);
+  // Chat is foreign input: text nodes only, never HTML.
+  line.appendChild(document.createTextNode(text));
+  els.log.appendChild(line);
+  while (els.log.children.length > CHAT_MAX_LINES) {
+    els.log.removeChild(els.log.children[0]);
+  }
+  const fade = setTimeout(() => line.classList.add('fade'), 11000);
+  const drop = setTimeout(() => line.remove(), 12000);
+  if (fade.unref) fade.unref();
+  if (drop.unref) drop.unref();
+}
+
+function submitChatInput() {
+  const els = chatElements();
+  if (!els || !chatLink) return;
+  const sent = chatLink.sendInput(els.input.value);
+  if (sent) {
+    pushChatLine(myName(), sent.kind === 'taunt' ? TAUNTS[sent.code] : sent.text);
+  }
+  closeChatInput();
+}
+
+function startChatLink() {
+  if (!net || !net.client) return;
+  stopChatLink();
+  chatLink = createChatLink({
+    isHost: net.role === 'host',
+    sendSignal: (msg) => { if (net && net.client) net.client.send(msg); },
+    onLocalTaunt: (code) => { gameAudio.playTaunt(code); },
+    onMessage: (frame) => {
+      const name = (net && net.peerName) || 'Guest';
+      if (frame.kind === 'taunt') {
+        pushChatLine(name, TAUNTS[frame.code]);
+        if (frame.audible) gameAudio.playTaunt(frame.code);
+      } else {
+        pushChatLine(name, frame.text);
+      }
+    },
+    onEvent: (e) => {
+      if (e.type === 'unavailable') flash(t('chat.unavailable'));
+    },
+  });
+  chatLink.start();
+}
+
+function stopChatLink() {
+  if (chatLink) {
+    chatLink.close();
+    chatLink = null;
+  }
+  closeChatInput();
+  const els = chatElements();
+  if (els) {
+    while (els.log.children.length) els.log.removeChild(els.log.children[0]);
+  }
 }
 
 function onNetMessage(msg) {
@@ -4320,6 +4488,7 @@ function onNetMessage(msg) {
         const atTurn = st.turn + st.delay + 2;
         net.client.send({ type: 'resume', atTurn });
         net.session.rebase(atTurn, performance.now() + 700);
+        startChatLink();
         flash(t('flash.reconnectedPeer'));
       }
       break;
@@ -4337,8 +4506,15 @@ function onNetMessage(msg) {
         setPaused(false);
         playing = true;
         updateNetStatus();
+        startChatLink();
         flash(t('flash.reconnectedSelf'));
       }
+      break;
+    case 'rtc':
+      // P2P chat signaling (SDP/ICE for the direct channel).
+      // The session never consumes it; the chat link does. The
+      // relay forwarded it untouched, like every envelope.
+      if (chatLink) chatLink.handleSignal(msg);
       break;
     default:
       break;

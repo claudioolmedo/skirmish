@@ -102,6 +102,21 @@ export const SFX_INTERVALS_MS = {
   'build.destroy': 800,
   'ui.error': 350,
   'ui.coin': 120,
+  // Chat taunts (2026-10-24): the backstop spacing behind
+  // chat.js's own per-player 2 s cooldown — a taunt is a spoken
+  // line, never a machine gun, whichever path asks for it.
+  'taunt.1': 2000,
+  'taunt.2': 2000,
+  'taunt.3': 2000,
+  'taunt.4': 2000,
+  'taunt.5': 2000,
+  'taunt.6': 2000,
+  'taunt.7': 2000,
+  'taunt.11': 2000,
+  'taunt.12': 2000,
+  'taunt.13': 2000,
+  'taunt.14': 2000,
+  'taunt.30': 2000,
 };
 export const SFX_DEFAULT_INTERVAL_MS = 90;
 
@@ -612,6 +627,22 @@ export function createAudioEngine({
       if (!ensureContext()) return false;
       schedule(cue, 1);
       return true;
+    },
+    /**
+     * A chat taunt by its DE-style code (play/chat.js): plays
+     * this client's LOCAL copy of the generated taunt sound.
+     * Governed by the same master switch + volume as every
+     * sound (a player who muted the game hears no taunts) and
+     * by the per-key spacing above. True when the request was
+     * handled (played or inside its spacing window); false
+     * only when the asset is not loaded — taunts have no synth
+     * fallback: a spoken line or silence, never a beep wearing
+     * its clothes.
+     */
+    playTaunt(code) {
+      if (!settings.enabled || !armed) return false;
+      if (!Number.isInteger(code)) return false;
+      return emit(`taunt.${code}`, {}) !== 'missing';
     },
     /**
      * The faint ambient layer (bird calls, a rare wind gust),

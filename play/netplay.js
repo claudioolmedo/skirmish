@@ -269,6 +269,16 @@ const MESSAGE_TYPES = new Set([
   // peer returns to the lobby too instead of waiting out the
   // timeout. A disconnect needs no message — it cancels by itself.
   'cancel',
+  // P2P chat signaling (2026-10-24): WebRTC session descriptions
+  // and ICE candidates for the direct player-to-player chat
+  // channel (play/chat.js). The relay stays a dumb pipe for this
+  // envelope like any other; the CHAT ITSELF never rides this
+  // socket — text and taunt codes travel only over the encrypted
+  // RTCDataChannel the signaling sets up. The codec bounds the
+  // payload shapes below; the session never consumes 'rtc'
+  // (receive() returns false — the app's chat link handles it),
+  // and nothing here reaches the sim or the hashed state.
+  'rtc',
 ]);
 
 export function encodeMessage(msg) {
@@ -305,6 +315,30 @@ export function decodeMessage(text) {
   // A password is a short human string; anything else is junk.
   if (msg.type === 'pw' && (typeof msg.pw !== 'string' || msg.pw.length > 128)) {
     return { ok: false, error: 'bad pw' };
+  }
+  // WebRTC signaling for the P2P chat channel: exactly three
+  // kinds, each with its one payload field, size-bounded (an SDP
+  // blob is a few KB; anything larger is junk). The descriptions
+  // and candidates are opaque to every layer here — validated
+  // for shape only, forwarded by the relay untouched.
+  if (msg.type === 'rtc') {
+    if (msg.kind === 'offer' || msg.kind === 'answer') {
+      if (typeof msg.sdp !== 'string' || msg.sdp.length < 1 || msg.sdp.length > 16384) {
+        return { ok: false, error: 'bad rtc' };
+      }
+    } else if (msg.kind === 'ice') {
+      if (typeof msg.candidate !== 'string' || msg.candidate.length > 1024) {
+        return { ok: false, error: 'bad rtc' };
+      }
+      if (msg.sdpMid !== null && typeof msg.sdpMid !== 'string') {
+        return { ok: false, error: 'bad rtc' };
+      }
+      if (msg.sdpMLineIndex !== null && !isInt(msg.sdpMLineIndex)) {
+        return { ok: false, error: 'bad rtc' };
+      }
+    } else {
+      return { ok: false, error: 'bad rtc' };
+    }
   }
   return { ok: true, msg };
 }
