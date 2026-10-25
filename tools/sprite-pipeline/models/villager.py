@@ -19,7 +19,13 @@ from render import box_tris, rot_x, xform
 
 PC_MATS = {'tunic'}
 STATES = {'idle': 4, 'walk': 12, 'gather': 8, 'carry': 12, 'build': 8,
-          'attack': 4, 'die': 6}
+          'attack': 4, 'die': 6,
+          # Visible-carry sheets (2026-10-25): the carry cycle
+          # hauling ONE resource — the overhead prop is that
+          # resource (render.LOAD_SETS), so a loaded villager
+          # reads its cargo; empty hands use the plain walk.
+          'carry-wood': 12, 'carry-gold': 12, 'carry-stone': 12,
+          'carry-food': 12}
 # Death needs a bigger cell than the standing figure: the fallen
 # body lies a full height from the feet in model space. The client
 # mirrors this canvas in its corpse spec (app.js CORPSE_SPEC).
@@ -47,7 +53,7 @@ def _apply(pose):
             v = v + np.array([0.0, 0.0, pose.get('bob', 0.0)])
             out.append((v, mat))
     if pose.get('load'):
-        for verts, mat in _LOAD:
+        for verts, mat in render.LOAD_SETS[pose.get('load_kind', 'generic')]:
             v = xform(verts, torso_mat, _WAIST)
             v = v + np.array([0.0, 0.0, pose.get('bob', 0.0)])
             out.append((v, mat))
@@ -117,9 +123,23 @@ def _pose_attack(f, n=4):
             'knife': True}
 
 
+def _carry_kind(kind):
+    """The carry cycle hauling one resource (see STATES): render's
+    pose_carry with the load kind set — only the prop differs."""
+    def pose(f, n=12):
+        p = render.pose_carry(f, n)
+        p['load_kind'] = kind
+        return p
+    return pose
+
+
 _POSES = {'idle': render.pose_idle, 'walk': render.pose_walk,
           'gather': render.pose_gather, 'carry': render.pose_carry,
-          'build': _pose_build, 'attack': _pose_attack}
+          'build': _pose_build, 'attack': _pose_attack,
+          'carry-wood': _carry_kind('wood'),
+          'carry-gold': _carry_kind('gold'),
+          'carry-stone': _carry_kind('stone'),
+          'carry-food': _carry_kind('food')}
 
 
 def tris_for(state, frame):

@@ -56,6 +56,15 @@ MATERIALS = {
     'boots':    hex2rgb('#33241a'),
     'belt':     hex2rgb('#4a2f1d'),
     'load':     hex2rgb('#a9803e'),  # generic wooden bundle for carry
+    # Visible-carry props (the load IS the resource hauled — see
+    # LOAD_SETS below): bright ore, meat + bone, cut log ends, and
+    # a darker rock shade to set against 'stone'.
+    'gold':     hex2rgb('#e9b83a'),
+    'sack':     hex2rgb('#bd9a58'),
+    'meat':     hex2rgb('#b0472f'),
+    'bone':     hex2rgb('#ecdcbc'),
+    'rock':     hex2rgb('#8d867c'),
+    'logend':   hex2rgb('#dcb57f'),
     'tunic':    None,                # filled from --player-color
     # House materials (v1 cottage): warm plaster, dark timber frame,
     # terracotta roof, stone foundation/chimney — same earthy family
@@ -160,6 +169,99 @@ def build_villager():
 
 LOAD_TRIS = box_tris(0, 0.0, 1.72, 1.97, 0.50, 0.38, 0.43, 0.33, 'load')
 
+
+def _tilt(tris, pivot, rz=0.0, ry=0.0):
+    """Rotate a prop's triangles about a pivot (yaw, then roll) —
+    the chunks of a load sit at easy angles, never axis-aligned
+    clones of the generic crate."""
+    out = []
+    for verts, mat in tris:
+        v = verts
+        if ry:
+            v = xform(v, rot_y(ry), pivot)
+        if rz:
+            v = xform(v, rot_z(rz), pivot)
+        out.append((v, mat))
+    return out
+
+
+def _load_wood():
+    """A firewood bundle: two logs side by side (two bark shades),
+    a third across the top, pale cut ends proud of every log end —
+    at game zoom it reads as LOGS, not a box."""
+    t = []
+    for cy, mat in ((-0.075, 'wood'), (0.075, 'timber')):
+        t += box_tris(0, cy, 1.735, 1.845, 0.58, 0.105, mat=mat)
+    t += box_tris(0, 0.0, 1.845, 1.95, 0.54, 0.105, mat='wood')
+    for cy, z0, z1, ln in ((-0.075, 1.74, 1.84, 0.58),
+                           (0.075, 1.74, 1.84, 0.58),
+                           (0.0, 1.85, 1.945, 0.54)):
+        for sgn in (-1, 1):
+            t += box_tris(sgn * (ln / 2 + 0.008), cy, z0, z1,
+                          0.016, 0.085, mat='logend')
+    return t
+
+
+def _load_gold():
+    """A tan sack heaped with gold — the bright ore IS the load:
+    four chunky lumps piled over the mouth until yellow is the
+    silhouette from every side; the sack only holds them up to
+    the hands. (v1's dark sack and pebbles read as hair at game
+    zoom — the heap has to shout.)"""
+    t = box_tris(0, 0, 1.70, 1.85, 0.37, 0.31, 0.28, 0.24, mat='sack')
+    for cx, cy, z0, z1, sx, sy, rz, ry in (
+            (-0.095, 0.045, 1.83, 1.985, 0.175, 0.15, 16.0, 6.0),
+            (0.095, -0.05, 1.83, 1.975, 0.165, 0.145, -18.0, -8.0),
+            (0.05, 0.085, 1.90, 2.035, 0.145, 0.125, 28.0, 10.0),
+            (-0.055, -0.075, 1.915, 2.05, 0.135, 0.12, -26.0, 12.0),
+            (0.005, 0.0, 1.96, 2.075, 0.115, 0.10, 8.0, -14.0)):
+        lump = box_tris(cx, cy, z0, z1, sx, sy, mat='gold')
+        t += _tilt(lump, (cx, cy, (z0 + z1) / 2), rz=rz, ry=ry)
+    return t
+
+
+def _load_stone():
+    """Two raw rock chunks, the big one low, a smaller darker one
+    riding its shoulder — gray on gray, told apart by shade and
+    silhouette."""
+    big = box_tris(-0.03, 0, 1.715, 1.935, 0.37, 0.31, 0.29, 0.25,
+                   mat='stone')
+    t = _tilt(big, (-0.03, 0, 1.82), rz=-7.0, ry=9.0)
+    small = box_tris(0.145, 0.07, 1.845, 1.975, 0.165, 0.145, 0.13,
+                     0.115, mat='rock')
+    t += _tilt(small, (0.145, 0.07, 1.91), rz=16.0)
+    return t
+
+
+def _load_food():
+    """A haunch of meat carried by its bone (the food load for
+    every food source — berries, farm, carcass): a big rust-red
+    haunch with a pale fat cap, tilted up, its long bone shaft
+    and knuckle jutting clear of the meat so the shape reads
+    from any side. (v1 read as a red cap — the bone has to
+    escape the silhouette.)"""
+    haunch = box_tris(-0.05, 0, 1.75, 1.96, 0.38, 0.24, 0.26, 0.16,
+                      mat='meat')
+    t = _tilt(haunch, (-0.05, 0, 1.855), rz=16.0, ry=-7.0)
+    fat = box_tris(-0.05, 0, 1.945, 1.995, 0.30, 0.185, 0.21, 0.13,
+                   mat='bone')
+    t += _tilt(fat, (-0.05, 0, 1.97), rz=16.0, ry=-7.0)
+    bone = box_tris(0.20, 0.01, 1.875, 1.935, 0.24, 0.052, mat='bone')
+    t += _tilt(bone, (0.20, 0.01, 1.905), rz=24.0)
+    knob = box_tris(0.315, 0.025, 1.885, 2.005, 0.085, 0.105, mat='bone')
+    t += _tilt(knob, (0.315, 0.025, 1.945), rz=24.0)
+    return t
+
+
+# The overhead load per hauled resource (visible-carry pass,
+# 2026-10-25): a carrying villager shows WHAT it carries — logs,
+# gold, stone or meat — and empty hands when it carries nothing
+# (no load triangles at all). 'generic' keeps the old plain crate
+# for the plain 'carry' state, the fallback sheet.
+LOAD_SETS = {'generic': LOAD_TRIS,
+             'wood': _load_wood(), 'gold': _load_gold(),
+             'stone': _load_stone(), 'food': _load_food()}
+
 # The gather AXE (chop readability pass, 2026-10-20): a haft hanging
 # from the right hand, continuing the forearm's line, with a steel
 # head at the far end. Built unposed (arm hanging straight down,
@@ -190,7 +292,7 @@ def pose_model(pose):
             v = v + np.array([0.0, 0.0, pose.get('bob', 0.0)])
             out.append((v, mat))
     if pose.get('load'):
-        for verts, mat in LOAD_TRIS:
+        for verts, mat in LOAD_SETS[pose.get('load_kind', 'generic')]:
             v = xform(verts, torso_mat, WAIST)
             v = v + np.array([0.0, 0.0, pose.get('bob', 0.0)])
             out.append((v, mat))
@@ -242,6 +344,16 @@ def pose_carry(f, n=8):
     p.update({'armL': 152.0, 'armR': 152.0, 'torso': 2.5, 'load': True})
     return p
 
+def pose_carry_kind(kind):
+    """pose_carry hauling one resource: the cycle, arms and pitch
+    are carry's own — only the overhead prop (LOAD_SETS) changes,
+    so a loaded villager reads its cargo at a glance."""
+    def pose(f, n=8):
+        p = pose_carry(f, n)
+        p['load_kind'] = kind
+        return p
+    return pose
+
 def pose_gather(f, n=4):
     # Chop cycle: raise high back, swing through, IMPACT (frame 2,
     # deepest torso pitch, axe fully forward-down), recover. The
@@ -257,7 +369,11 @@ def pose_gather(f, n=4):
             'tool': True}
 
 STATES = {'idle': (pose_idle, 4), 'walk': (pose_walk, 12),
-          'gather': (pose_gather, 8), 'carry': (pose_carry, 12)}
+          'gather': (pose_gather, 8), 'carry': (pose_carry, 12),
+          'carry-wood': (pose_carry_kind('wood'), 12),
+          'carry-gold': (pose_carry_kind('gold'), 12),
+          'carry-stone': (pose_carry_kind('stone'), 12),
+          'carry-food': (pose_carry_kind('food'), 12)}
 
 # ----------------------------------------------------------------------
 # Software renderer: orthographic 2:1 dimetric projection (identical to

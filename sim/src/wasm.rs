@@ -524,6 +524,25 @@ impl WasmSim {
             .collect()
     }
 
+    /// Per-entity carried-resource tags in entity-id order:
+    /// 255 = hands empty; otherwise the `ResourceKind` index
+    /// (0 Food, 1 Wood, 2 Gold, 3 Stone). `carry_kind` is `None`
+    /// iff the carry is zero, so a tag here means the villager is
+    /// hauling that resource right now. Read-only presentation
+    /// glue — the renderer hangs the matching visible load on the
+    /// hauler and shows empty hands again the moment the deposit
+    /// lands, on the sim's own word rather than a client guess.
+    pub fn entity_carry(&self) -> Vec<u8> {
+        self.inner
+            .entities()
+            .iter()
+            .map(|e| match e.carry_kind {
+                Some(kind) => kind.index() as u8,
+                None => 255,
+            })
+            .collect()
+    }
+
     /// Could AutoExplore (SEL-17) be toggled on this entity right
     /// now — a living Scout Cavalry owned by a player? The client
     /// mirrors its button placement and the G key from this query
