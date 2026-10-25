@@ -13,6 +13,7 @@
 // reference game (2026-10-19) and the public hotkey references.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { panelCellFor, badgeForButton, PAGE_KINDS } from './hotkeys.js';
 
 // Each layout: the ids the renderer puts on the panel, the
@@ -151,3 +152,33 @@ for (const [name, layout] of Object.entries(LAYOUTS)) {
     }
   });
 }
+
+// Badge COST pins (bot-loop regression, 2026-10-24): the price
+// printed on a train button's face must be the price the sim
+// actually charges (sim/src/units.rs table; current DE values).
+// The Militia badge read 60 food — the pre-update-141935 price —
+// while the sim charged 50 and the button's own title said 50:
+// a player with 50–59 food saw a price they could not trust.
+// Every train button is pinned here so a cost change in the sim
+// table (or a stray edit in app.js) fails loudly instead of
+// drifting on the panel face.
+const appJsCosts = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
+function badgeCost(id) {
+  const at = appJsCosts.indexOf(`id: '${id}'`);
+  assert.ok(at >= 0, `${id} button exists in app.js`);
+  const block = appJsCosts.slice(at, at + 500);
+  const first = /costIcon: 'i-(\w+)', cost: (\d+)/.exec(block);
+  assert.ok(first, `${id} carries a badge cost`);
+  const second = /cost2Icon: 'i-(\w+)', cost2: (\d+)/.exec(block);
+  const out = { [first[1]]: Number(first[2]) };
+  if (second) out[second[1]] = Number(second[2]);
+  return out;
+}
+test('train badge costs match the sim table', () => {
+  assert.deepEqual(badgeCost('train'), { food: 50 });
+  assert.deepEqual(badgeCost('train-militia'), { food: 50, gold: 20 });
+  assert.deepEqual(badgeCost('train-spearman'), { food: 35, wood: 25 });
+  assert.deepEqual(badgeCost('train-archer'), { wood: 25, gold: 45 });
+  assert.deepEqual(badgeCost('train-skirmisher'), { food: 25, wood: 35 });
+  assert.deepEqual(badgeCost('train-scout'), { food: 80 });
+});
