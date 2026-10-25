@@ -82,7 +82,13 @@ html, body {
      clamp(150px, 20vh, 232px)) */
   bottom: calc(clamp(150px, 20vh, 232px) + 10px);
   transform: translateX(-50%);
-  z-index: 25;
+  /* Above the menu overlays (40) and the beta strip (45), below the
+     lock cursor (100): the toast is how actions taken FROM a menu
+     confirm themselves (e.g. Download replay in the pause menu) —
+     at z-index 25 it rendered hidden behind the very menu the
+     click came from, so the confirmation never reached the screen
+     (bot-loop live verification, 2026-10-25 12:22 run). */
+  z-index: 50;
   background: rgba(122, 32, 18, 0.95);
   color: #ffe9e2;
   border: 1px solid rgba(232, 180, 90, 0.55);
