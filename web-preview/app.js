@@ -9632,7 +9632,7 @@ function renderCommands() {
     cmdGrid.append(
       cmdButton({
         id: 'train-militia', icon: 'i-militia', img: 'militia.png', label: 'Militia',
-        costIcon: 'i-food', cost: 60, cost2Icon: 'i-gold', cost2: 20,
+        costIcon: 'i-food', cost: 50, cost2Icon: 'i-gold', cost2: 20,
         disabled: underConstruction || blockM === 2,
         key: badgeForButton({ context, id: 'train-militia', index: 0 }),
         title: underConstruction
