@@ -1,20 +1,22 @@
-// Growth package unit tests (2026-10-24): the player name
-// sources, the Instagram authorize URL + availability flag, and
-// the challenge-chain payloads. Pure — storage is a Map-backed
-// stub in the localStorage shape.
+// Player-name unit tests (2026-10-24) + the removal pins for
+// the challenge chain and the Instagram Login (removed the
+// same day at Claudio's direction: his challenge design lives
+// on Instagram, not in the game, and the login is deferred —
+// both are preserved in git history at b7c7543). Pure — storage
+// is a Map-backed stub in the localStorage shape; the removal
+// pins read the shipped sources.
 // Run from web-preview/: node --test play/growth.test.mjs
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
-  IG_LOGIN_ENABLED, IG_APP_ID, IG_REDIRECT_URI,
-  NAME_STORE_KEY, IG_STORE_KEY, GUEST_NAME,
-  cleanDisplayName, readStoredName, writeStoredName,
-  readIgIdentity, writeIgIdentity, displayName,
-  buildIgAuthorizeUrl, igLoginAvailable,
-  challengeJoinPayload, challengeResultPayload,
+  NAME_STORE_KEY, GUEST_NAME,
+  cleanDisplayName, readStoredName, writeStoredName, displayName,
 } from './growth.js';
+import * as growth from './growth.js';
+import * as netplay from './netplay.js';
 
 function stubStorage(seed = {}) {
   const map = new Map(Object.entries(seed));
@@ -49,83 +51,48 @@ test('the stored name round-trips cleaned; garbage clears it', () => {
   assert.equal(readStoredName(bad).length, 32);
 });
 
-test('the Instagram identity round-trips and shadows the typed name', () => {
-  const s = stubStorage();
-  assert.equal(readIgIdentity(s), null);
-  writeStoredName(s, 'TypedName');
-  const ig = writeIgIdentity(s, { id: '178414', username: 'claudioolmedo_com' });
-  assert.deepEqual(ig, { id: '178414', username: 'claudioolmedo_com' });
-  assert.deepEqual(readIgIdentity(s), ig);
-  // The typed-name slot is kept in step with the identity.
-  assert.equal(readStoredName(s), 'claudioolmedo_com');
-  // Off-shape identities never stick.
-  assert.equal(writeIgIdentity(s, { id: '', username: 'x' }), null);
-  assert.equal(writeIgIdentity(s, { username: 'x' }), null);
-  const corrupt = stubStorage({ [IG_STORE_KEY]: '{not json' });
-  assert.equal(readIgIdentity(corrupt), null);
-  const weird = stubStorage({ [IG_STORE_KEY]: '{"id":42,"username":"x"}' });
-  assert.equal(readIgIdentity(weird), null);
-});
-
-test('displayName: Instagram first, then the typed name, then Guest', () => {
+test('displayName: the typed name, else Guest', () => {
   assert.equal(displayName({}), GUEST_NAME);
   assert.equal(displayName({ stored: 'Ana' }), 'Ana');
-  assert.equal(
-    displayName({ ig: { id: '1', username: 'ana.gg' }, stored: 'Ana' }),
-    'ana.gg');
-  assert.equal(displayName({ ig: { id: '1', username: ' ' }, stored: 'Ana' }), 'Ana');
+  assert.equal(displayName({ stored: '  ' }), GUEST_NAME);
+  assert.equal(displayName({ stored: null }), GUEST_NAME);
 });
 
-test('Instagram Login ships disabled: no URL, no button', () => {
-  assert.equal(IG_LOGIN_ENABLED, false);
-  assert.equal(IG_APP_ID, '');
-  assert.equal(igLoginAvailable(), false);
-  assert.equal(igLoginAvailable({ enabled: true, appId: '' }), false);
-  assert.equal(igLoginAvailable({ enabled: false, appId: 'x' }), false);
-  assert.equal(igLoginAvailable({ enabled: true, appId: 'x' }), true);
-  // With no app id there is no authorize URL to send anyone to.
-  assert.equal(buildIgAuthorizeUrl(), null);
+// --- removal pins: the challenge chain + Instagram Login are GONE ---
+
+test('growth.js exports no challenge or Instagram surface anymore', () => {
+  for (const gone of [
+    'IG_LOGIN_ENABLED', 'IG_APP_ID', 'IG_REDIRECT_URI', 'IG_SCOPE',
+    'IG_STORE_KEY', 'readIgIdentity', 'writeIgIdentity',
+    'buildIgAuthorizeUrl', 'igLoginAvailable',
+    'challengeJoinPayload', 'challengeResultPayload',
+  ]) {
+    assert.equal(gone in growth, false, `${gone} must stay removed`);
+  }
+  assert.equal('buildChallengeUrl' in netplay, false);
 });
 
-test('the authorize URL is the official Instagram Login shape', () => {
-  const url = buildIgAuthorizeUrl({ appId: '123456' });
-  const u = new URL(url);
-  assert.equal(u.origin + u.pathname, 'https://www.instagram.com/oauth/authorize');
-  assert.equal(u.searchParams.get('client_id'), '123456');
-  assert.equal(u.searchParams.get('redirect_uri'), IG_REDIRECT_URI);
-  assert.equal(IG_REDIRECT_URI, 'https://skirmish.online/auth/instagram/callback');
-  assert.equal(u.searchParams.get('scope'), 'instagram_business_basic');
-  assert.equal(u.searchParams.get('response_type'), 'code');
-});
+const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 
-test('challengeJoinPayload validates and cleans both names', () => {
-  assert.deepEqual(
-    challengeJoinPayload({ room: 'abc123', challenger: ' Ana ', challenged: 'Bob' }),
-    { room: 'abc123', challenger: 'Ana', challenged: 'Bob' });
-  assert.equal(challengeJoinPayload({ room: 'bad room', challenger: 'A', challenged: 'B' }), null);
-  assert.equal(challengeJoinPayload({ room: 'abc', challenger: '', challenged: 'B' }), null);
-  assert.equal(challengeJoinPayload({ room: 'abc', challenger: 'A' }), null);
-  assert.equal(challengeJoinPayload(), null);
-});
-
-test('challengeResultPayload maps a seat win/loss to the chain', () => {
-  // The challenger (host) won, reported from the host's seat.
-  assert.deepEqual(
-    challengeResultPayload({
-      room: 'r1', selfRole: 'challenger', selfName: 'Ana', peerName: 'Bob', selfWon: true,
-    }),
-    { room: 'r1', winner: 'challenger', winnerName: 'Ana' });
-  // The same match from the challenged guest's seat: agrees.
-  assert.deepEqual(
-    challengeResultPayload({
-      room: 'r1', selfRole: 'challenged', selfName: 'Bob', peerName: 'Ana', selfWon: false,
-    }),
-    { room: 'r1', winner: 'challenger', winnerName: 'Ana' });
-  // A desync / abandoned match (selfWon null) reports nothing.
-  assert.equal(challengeResultPayload({
-    room: 'r1', selfRole: 'challenger', selfName: 'Ana', peerName: 'Bob', selfWon: null,
-  }), null);
-  assert.equal(challengeResultPayload({
-    room: 'r1', selfRole: 'host', selfName: 'Ana', peerName: 'Bob', selfWon: true,
-  }), null);
+test('no shipped source carries the challenge or Instagram surfaces', () => {
+  const app = read('../app.js');
+  assert.equal(/challenge/i.test(app), false, 'app.js still mentions the challenge');
+  assert.equal(/instagram/i.test(app), false, 'app.js still mentions Instagram');
+  const page = read('./index.html');
+  for (const id of ['btn-challenge', 'end-challenge-btn', 'challenge-box',
+    'btn-share-challenge', 'btn-ig-login', 'ig-line']) {
+    assert.equal(page.includes(`id="${id}"`), false,
+      `play/index.html still carries #${id}`);
+  }
+  const i18n = read('./i18n.js');
+  assert.equal(/'challenge\.|'ig\.|'status\.challengeRoom'/.test(i18n), false,
+    'i18n.js still carries challenge/ig strings');
+  const css = read('./play.css');
+  assert.equal(css.includes('challenge-share'), false,
+    'play.css still carries the challenge share box style');
+  const privacy = read('../privacy/index.html');
+  assert.equal(/challenge/i.test(privacy), false,
+    'the privacy page still carries a Challenges mention');
+  assert.equal(/instagram/i.test(privacy), false,
+    'the privacy page still carries an Instagram mention');
 });
