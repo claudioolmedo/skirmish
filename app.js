@@ -3428,7 +3428,11 @@ function leaveNetMatch(result) {
     postTelemetry(result || 'abandoned');
   }
   teardownNet();
-  setInMatch(false); // back to the menu side: chrome hides again
+  // The fresh local game IS on screen, under the pause menu (this
+  // function's own contract above) — it must carry .in-match, or
+  // Resume would hide the menu over a page with no game view at
+  // all (the bot-loop black screen, 2026-10-25).
+  setInMatch(true);
   resetSim(matchMode);
   playing = true;
   setPaused(true);
@@ -4599,7 +4603,16 @@ function connectToRoom() {
 /// the open-games table over the create view. With `join`
 /// ({room, region}) the client skips the browser entirely, enters
 /// as the guest and connects at once (the link flow).
+/// Set when the lobby was opened from the pause menu over a live,
+// still-unfinished match (the pause menu's "Play online" entry):
+// closing the lobby then returns to that match instead of leaving
+// the page with no game on screen (bot-loop black screen,
+// 2026-10-25: openLobby cleared .in-match and Resume only hid the
+// pause menu, so nothing ever brought the game view back).
+let lobbyReturnToMatch = false;
+
 function openLobby(join) {
+  lobbyReturnToMatch = !!(playing && paused && !matchEnded && !join);
   setInMatch(false); // the lobby is up: no game on screen
   aiRoom = null; // entering the lobby dissolves any AI-room match
   if (net) teardownNet();
@@ -5582,6 +5595,17 @@ async function main() {
   if (onlineBtn) onlineBtn.addEventListener('click', () => openLobby(null));
   if (netUi.onlineClose) {
     netUi.onlineClose.addEventListener('click', () => {
+      if (lobbyReturnToMatch) {
+        // Opened from the pause menu over a live match: closing
+        // the lobby returns to that match — drop the lobby's net
+        // session, bring the game view back, and leave the pause
+        // menu up over it, exactly as it was before "Play online".
+        lobbyReturnToMatch = false;
+        teardownNet();
+        setInMatch(true);
+        setPaused(true);
+        return;
+      }
       stopLobbyBrowser();
       showOverlay(netUi.onlineOverlay, false);
     });
