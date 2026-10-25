@@ -815,6 +815,19 @@ export function buildPlayUrl(base, room, region, opts = {}) {
   return url;
 }
 
+/// Growth package (2026-10-24): a CHALLENGE link — the invite
+/// link plus the challenge flag and the challenger's display
+/// name, so the friend who opens it lands straight in the match
+/// AND the chain knows who challenged them. The name is a
+/// display string the challenger chose to share (it rides their
+/// own link); it is NOT an identity claim — the relay cleans and
+/// caps it again when the pairing is reported.
+export function buildChallengeUrl(base, room, region, fromName) {
+  const name = typeof fromName === 'string' ? fromName : '';
+  return buildPlayUrl(base, room, region)
+    + `&challenge=1&from=${encodeURIComponent(name)}`;
+}
+
 export function parsePlayParams(search) {
   const p = new URLSearchParams(search || '');
   return {
@@ -822,6 +835,11 @@ export function parsePlayParams(search) {
     region: p.get('region') || null,
     online: p.get('online') === '1',
     private: p.get('private') === '1',
+    // Growth package: a challenge link's flag + challenger name.
+    // `from` is returned RAW (capped) — app.js runs it through
+    // the name cleaner before it is shown or reported anywhere.
+    challenge: p.get('challenge') === '1',
+    from: (p.get('from') || '').slice(0, 64) || null,
   };
 }
 
