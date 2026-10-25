@@ -28,6 +28,34 @@
 // never half-enable.
 export const IG_LOGIN_ENABLED = false;
 export const IG_APP_ID = '';
+// PRIVACY TEXT HELD FOR THIS FEATURE (removed from the live
+// privacy page 2026-10-24 at Claudio's direction — nothing about
+// Instagram is public while the feature is off; restore these
+// verbatim into web-preview/privacy/index.html when the flag is
+// flipped on):
+//  1. Short-version bullet suffix:
+//     " (An entirely optional Instagram sign-in exists for players
+//     who want their in-game name set automatically — see
+//     Optional Instagram sign-in below.)" (linked to #instagram)
+//  2. Section:
+//     "Optional Instagram sign-in — If you choose to sign in with
+//     Instagram (optional), the sign-in happens on Instagram's own
+//     page — your Instagram password never reaches this site.
+//     Instagram returns your Instagram user id and username to our
+//     relay, which stores that id and username so the game can
+//     recognize the sign-in, and your in-game name becomes your
+//     Instagram username automatically; there is nothing to type.
+//     Signing in is never required to play: the game is fully
+//     playable with no account at all, and if you never sign in,
+//     none of this applies to you. You can undo the sign-in on your
+//     device by clearing this site's local storage; to have a
+//     stored registration removed from the relay, use the contact
+//     below."
+//  3. Browser-storage bullet:
+//     "your Instagram sign-in (your Instagram id and username),
+//     only if you chose to sign in with Instagram,"
+//     (and the player-name bullet read "…if you set one in the
+//     lobby or it was set by signing in,")
 export const IG_REDIRECT_URI = 'https://skirmish.online/auth/instagram/callback';
 export const IG_SCOPE = 'instagram_business_basic';
 
