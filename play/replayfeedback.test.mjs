@@ -49,3 +49,27 @@ test('the replay-saved string exists in every locale', () => {
   const hits = i18nJs.match(/'flash\.replaySaved':/g) || [];
   assert.equal(hits.length, 3, 'flash.replaySaved is defined for EN, PT and ES');
 });
+
+// Second half of the same defect (bot-loop live verification,
+// 2026-10-25 12:22 run): the success flash existed and was live, yet
+// a real-client session clicked Download replay FROM the pause menu
+// and saw nothing in 8 s — because flash() renders into #toast
+// (z-index 25) while the pause menu is an .overlay at z-index 40.
+// The confirmation was drawn behind the very menu the click came
+// from. Pin the layer order: the toast must sit above the overlays.
+test('the confirmation toast renders above the menu overlays', () => {
+  const css = readFileSync(join(here, 'play.css'), 'utf8');
+  const zOf = (selectorRe) => {
+    const m = css.match(selectorRe);
+    assert.ok(m, 'selector block found in play.css');
+    const z = m[0].match(/z-index:\s*(\d+)/);
+    assert.ok(z, 'z-index declared');
+    return Number(z[1]);
+  };
+  const toastZ = zOf(/\.toast\s*\{[^}]*\}/);
+  const overlayZ = zOf(/\.overlay\s*\{[^}]*\}/);
+  assert.ok(
+    toastZ > overlayZ,
+    `toast z-index ${toastZ} must exceed overlay z-index ${overlayZ}, ` +
+    'or menu-triggered confirmations render hidden behind the menu');
+});
