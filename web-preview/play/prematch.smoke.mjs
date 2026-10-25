@@ -360,5 +360,42 @@ const roomSocket = () =>
   FakeImage.plan = { mode: 'load', delayMs: 0 };
 }
 
+// (6) Regression (bot-loop, 2026-10-25): Pause → Play online →
+//     close the lobby → Resume black-screened the page. Opening
+//     the lobby cleared .in-match and created a net session, the
+//     lobby's close restored neither, and Resume only hid the
+//     pause menu — leaving no game on screen at all. The close
+//     must return to the live match under its pause menu, Resume
+//     must land in the game, and Restart after that round-trip
+//     must start visibly too.
+{
+  const tab = makeTab('https://skirmish.online/play/');
+  await boot(tab);
+  tab.el('btn-solo').click();
+  await sleep(1500);
+  assert.equal(inMatch(tab), true, 'solo match started');
+  tab.el('pause-btn').click();
+  assert.equal(tab.el('pause-menu').style.display, 'flex', 'pause menu open');
+  tab.el('btn-online').click();
+  assert.equal(tab.el('online-overlay').style.display, 'flex', 'lobby overlay open');
+  assert.equal(inMatch(tab), false, 'game view hidden while the lobby is up');
+  tab.el('online-close').click();
+  assert.equal(tab.el('online-overlay').style.display, 'none', 'lobby closed');
+  assert.equal(inMatch(tab), true, 'closing the lobby restores the game view');
+  assert.equal(tab.el('pause-menu').style.display, 'flex', 'pause menu back over the match');
+  tab.el('resume-btn').click();
+  assert.equal(tab.el('pause-menu').style.display, 'none', 'resume hides the pause menu');
+  assert.equal(inMatch(tab), true, 'resume lands IN the game, not on a black page');
+  // The full reported sequence: the same round-trip, then Restart.
+  tab.el('pause-btn').click();
+  tab.el('btn-online').click();
+  tab.el('online-close').click();
+  tab.el('restart-btn').click();
+  await sleep(100);
+  assert.equal(inMatch(tab), true, 'restart after the lobby round-trip shows the fresh match');
+  assert.equal(tab.el('pause-menu').style.display, 'none', 'restart leaves the pause menu closed');
+  console.log('PASS (6) pause → Play online → close → Resume/Restart: no black screen');
+}
+
 console.log('PREMATCH SMOKE: all cases passed');
 process.exit(0);
