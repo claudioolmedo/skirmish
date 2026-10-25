@@ -134,6 +134,28 @@ test('hit feedback is wired: gather impact frame -> noteTreeHit on trees only', 
   assert.match(appJs, /AT_TREE_STICK_R2/, 'the sticky trunk hold is in place');
 });
 
+test('the shake is VISIBLE at default zoom (bot-loop, 2026-10-25)', () => {
+  // The wiring pins above cannot catch a shake that exists but is
+  // too small to see — exactly what happened: 0.09 units / 0.02 rad
+  // is 0.45 px at INITIAL_S (5 px/unit), and three live sessions
+  // reported a perfectly still tree. Pin the peak on-screen
+  // displacement of the wobble at the default zoom instead.
+  const sM = appJs.match(/const INITIAL_S = ([0-9.]+);/);
+  assert.ok(sM, 'INITIAL_S found in app.js');
+  const S = Number(sM[1]);
+  const hM = appJs.match(/const TREE_H = ([0-9.]+);/);
+  assert.ok(hM, 'TREE_H found in app.js');
+  const H = Number(hM[1]);
+  const oxM = appJs.match(/ox = Math\.sin\(age \/ 22\) \* ([0-9.]+) \* u \* d;/);
+  assert.ok(oxM, 'wobble shift amplitude found in drawTree');
+  const wobM = appJs.match(/wob = Math\.sin\(age \/ 22\) \* ([0-9.]+) \* d;/);
+  assert.ok(wobM, 'wobble sway amplitude found in drawTree');
+  const shiftPx = Number(oxM[1]) * S;
+  const topPx = Math.sin(Number(wobM[1])) * H * S;
+  assert.ok(shiftPx >= 1.2, `trunk shift ${shiftPx.toFixed(2)} px at default zoom must read on screen`);
+  assert.ok(topPx >= 1.5, `treetop swing ${topPx.toFixed(2)} px at default zoom must read on screen`);
+});
+
 test('the fall is wired: a tree leaving the live set tips over, with its sound', () => {
   assert.match(appJs, /function updateTreeTracking\(nodes, now\) \{[\s\S]*?fallingTrees\.push\(\{/);
   assert.match(appJs, /playSfx\('work\.treefall', gain\)/);
