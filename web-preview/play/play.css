@@ -290,6 +290,52 @@ html, body {
   border-top: 1px solid rgba(61, 42, 18, 0.35);
   font-weight: 700;
 }
+/* Growth package (2026-10-24): the lobby profile row (your name
+   + the optional Instagram sign-in), the challenge share box in
+   the room card, and the report/contribute form — all in the
+   existing parchment language, nothing new to learn. */
+.profile-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 10px;
+}
+.profile-row label { font: 700 13px Georgia, 'Times New Roman', serif; color: #43300f; }
+.profile-row input {
+  flex: 0 1 180px;
+  padding: 6px 9px;
+  border: 1px solid rgba(61, 42, 18, 0.35);
+  border-radius: 6px;
+  background: rgba(255, 252, 244, 0.9);
+  font: 14px Georgia, 'Times New Roman', serif;
+  color: #2b1d08;
+}
+.profile-row input:disabled { opacity: 0.65; }
+.challenge-share {
+  margin: 6px 0 8px;
+  padding: 8px 10px;
+  background: rgba(61, 42, 18, 0.10);
+  border: 1px solid rgba(61, 42, 18, 0.16);
+  border-radius: 8px;
+  font: 13.5px/1.45 Georgia, 'Times New Roman', serif;
+  color: #43300f;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.report-form { display: flex; flex-direction: column; gap: 8px; text-align: left; margin: 0 0 14px; }
+.report-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid rgba(61, 42, 18, 0.35);
+  border-radius: 6px;
+  background: rgba(255, 252, 244, 0.95);
+  font: 14px/1.4 Georgia, 'Times New Roman', serif;
+  color: #2b1d08;
+}
+.report-form textarea.report-input { resize: vertical; }
+
 /* End-of-match feedback block (2026-10-19): an inset parchment
    box inside the end card, in the .howto language — one question,
    tappable stars, a short text area, and the GitHub star line.

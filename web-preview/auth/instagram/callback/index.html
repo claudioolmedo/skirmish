@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Skirmish II — Signing in…</title>
+<meta name="robots" content="noindex">
+<!-- Google Analytics (GA4) — same property as the rest of the site. -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-XRMHRTPM27"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-XRMHRTPM27');
+</script>
+<link rel="stylesheet" href="/site.css">
+</head>
+<body>
+<main>
+  <p class="kicker">Skirmish II</p>
+  <h1 id="cb-title">Signing you in…</h1>
+  <p id="cb-note">One moment — Instagram confirmed, the game is setting your name.</p>
+  <p id="cb-fallback" hidden><a href="/play/">Continue to the game →</a></p>
+</main>
+<script>
+  // Instagram Login callback (growth package, 2026-10-24).
+  // Instagram returns the player here with a one-time `code`;
+  // the RELAY exchanges it server-side (the app secret never
+  // reaches this page or any client code) and answers with the
+  // public identity: the Instagram id + username. The username
+  // becomes the player's in-game name automatically — nothing is
+  // typed, ever. While the feature flag is off, the relay answers
+  // 501 and this page simply explains and links back to the game:
+  // playing never required a sign-in in the first place.
+  var REDIRECT_URI = 'https://skirmish.online/auth/instagram/callback';
+  var RELAY = 'https://skirmish-relay.hoardserdure7.workers.dev';
+  var title = document.getElementById('cb-title');
+  var note = document.getElementById('cb-note');
+  function fail(msg) {
+    title.textContent = 'Sign-in did not finish';
+    note.textContent = msg;
+    document.getElementById('cb-fallback').hidden = false;
+  }
+  var code = new URLSearchParams(location.search).get('code');
+  if (!code) {
+    fail('Instagram did not return a sign-in code. No problem — the game needs no account; you can play right away.');
+  } else {
+    fetch(RELAY + '/auth/instagram/exchange', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: code, redirectUri: REDIRECT_URI })
+    }).then(function (resp) {
+      if (resp.status === 501) {
+        fail('Instagram sign-in is not switched on yet. No problem — the game needs no account; you can play right away.');
+        return null;
+      }
+      if (!resp || !resp.ok) throw new Error('rejected');
+      return resp.json();
+    }).then(function (profile) {
+      if (!profile) return;
+      try {
+        localStorage.setItem('skirmish2.igIdentity', JSON.stringify({
+          id: String(profile.id), username: String(profile.username)
+        }));
+        // The in-game name IS the Instagram username from now on.
+        localStorage.setItem('skirmish2.playerName', String(profile.username));
+      } catch (e) { /* private mode — the session still continues */ }
+      location.replace('/play/');
+    }).catch(function () {
+      fail('The sign-in could not be completed. No problem — the game needs no account; you can play right away.');
+    });
+  }
+</script>
+</body>
+</html>

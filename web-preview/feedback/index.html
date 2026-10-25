@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Skirmish II — Report a problem / Contribute</title>
+<meta name="description" content="Report an urgent problem or send a contribution idea for Skirmish II. No account, no email — one short form, read by the developer.">
+<!-- Google Analytics (GA4) — same property as the rest of the site. -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-XRMHRTPM27"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-XRMHRTPM27');
+</script>
+<link rel="stylesheet" href="/site.css">
+<style>
+  form.feedback-form { display: flex; flex-direction: column; gap: 10px; margin-top: 18px; }
+  form.feedback-form select,
+  form.feedback-form input,
+  form.feedback-form textarea {
+    width: 100%; box-sizing: border-box; padding: 10px 12px;
+    border: 1px solid rgba(61, 42, 18, 0.4); border-radius: 8px;
+    background: rgba(255, 252, 244, 0.95);
+    font: 15px/1.45 Georgia, 'Times New Roman', serif; color: #2b1d08;
+  }
+  form.feedback-form textarea { resize: vertical; }
+  form.feedback-form button {
+    align-self: flex-start; padding: 10px 22px; border: 0; border-radius: 8px;
+    background: #8a5a10; color: #fff8ea; font: 700 15px Georgia, 'Times New Roman', serif;
+    cursor: pointer;
+  }
+  form.feedback-form button:disabled { opacity: 0.55; cursor: default; }
+  .form-note { min-height: 1.4em; }
+</style>
+</head>
+<body>
+<main>
+  <p class="kicker">Skirmish II</p>
+  <h1 id="fb-title">Report a problem / Contribute</h1>
+  <p id="fb-intro">Something urgent broken — or an idea for what the game should have?
+  Send it here. No account, no email: the message goes straight to the developer,
+  and urgent problems are read first. The same form lives inside the game, in the
+  pause menu.</p>
+
+  <form class="feedback-form" id="fb-form">
+    <select id="fb-type">
+      <option value="urgent">Urgent problem</option>
+      <option value="contribution">Contribution idea</option>
+      <option value="other">Other</option>
+    </select>
+    <textarea id="fb-text" rows="6" maxlength="2000"
+      placeholder="What happened — or what should the game have? One short paragraph is plenty."></textarea>
+    <input id="fb-name" type="text" maxlength="32" placeholder="Your name (optional)" autocomplete="off">
+    <button id="fb-send" type="submit">Send</button>
+    <p class="form-note" id="fb-thanks" hidden></p>
+    <p class="form-note" id="fb-error" hidden></p>
+  </form>
+
+  <p><a href="/play/">← Back to the game</a> · <a href="/">Skirmish II home</a></p>
+</main>
+<script>
+  // The strings mirror the game's report.* keys (play/i18n.js) in
+  // the three site languages; the page reads the game's stored
+  // locale (skirmish2.locale) so a player lands in their language.
+  var STRINGS = {
+    en: {
+      title: 'Report a problem / Contribute',
+      intro: 'Something urgent broken — or an idea for what the game should have? Send it here. No account, no email: the message goes straight to the developer, and urgent problems are read first. The same form lives inside the game, in the pause menu.',
+      typeUrgent: 'Urgent problem',
+      typeContribution: 'Contribution idea',
+      typeOther: 'Other',
+      placeholder: 'What happened — or what should the game have? One short paragraph is plenty.',
+      namePlaceholder: 'Your name (optional)',
+      send: 'Send',
+      thanks: 'Sent — thank you. Urgent problems are read first.',
+      error: 'Could not send — check your connection and try again.'
+    },
+    'pt-BR': {
+      title: 'Reportar um problema / Contribuir',
+      intro: 'Algo urgente quebrou — ou uma ideia do que o jogo deveria ter? Envie por aqui. Sem conta, sem e-mail: a mensagem vai direto ao desenvolvedor, e problemas urgentes são lidos primeiro. O mesmo formulário vive dentro do jogo, no menu de pausa.',
+      typeUrgent: 'Problema urgente',
+      typeContribution: 'Ideia de contribuição',
+      typeOther: 'Outro',
+      placeholder: 'O que aconteceu — ou o que o jogo deveria ter? Um parágrafo curto basta.',
+      namePlaceholder: 'Seu nome (opcional)',
+      send: 'Enviar',
+      thanks: 'Enviado — obrigado. Problemas urgentes são lidos primeiro.',
+      error: 'Não foi possível enviar — confira sua conexão e tente de novo.'
+    },
+    es: {
+      title: 'Reportar un problema / Contribuir',
+      intro: 'Algo urgente se rompió — o una idea de lo que el juego debería tener? Envíala por aquí. Sin cuenta, sin correo: el mensaje va directo al desarrollador, y los problemas urgentes se leen primero. El mismo formulario vive dentro del juego, en el menú de pausa.',
+      typeUrgent: 'Problema urgente',
+      typeContribution: 'Idea de contribución',
+      typeOther: 'Otro',
+      placeholder: 'Qué pasó — o qué debería tener el juego? Un párrafo corto basta.',
+      namePlaceholder: 'Tu nombre (opcional)',
+      send: 'Enviar',
+      thanks: 'Enviado — gracias. Los problemas urgentes se leen primero.',
+      error: 'No se pudo enviar — revisa tu conexión e inténtalo de nuevo.'
+    }
+  };
+  var loc = 'en';
+  try {
+    var stored = localStorage.getItem('skirmish2.locale');
+    if (stored && STRINGS[stored]) loc = stored;
+  } catch (e) { /* keep English */ }
+  var s = STRINGS[loc];
+  document.documentElement.lang = loc;
+  document.title = 'Skirmish II — ' + s.title;
+  document.getElementById('fb-title').textContent = s.title;
+  document.getElementById('fb-intro').textContent = s.intro;
+  var typeSel = document.getElementById('fb-type');
+  typeSel.options[0].textContent = s.typeUrgent;
+  typeSel.options[1].textContent = s.typeContribution;
+  typeSel.options[2].textContent = s.typeOther;
+  var textEl = document.getElementById('fb-text');
+  textEl.placeholder = s.placeholder;
+  var nameEl = document.getElementById('fb-name');
+  nameEl.placeholder = s.namePlaceholder;
+  try {
+    var storedName = localStorage.getItem('skirmish2.playerName');
+    if (storedName) nameEl.value = storedName;
+  } catch (e) { /* the name is optional anyway */ }
+  var sendBtn = document.getElementById('fb-send');
+  sendBtn.textContent = s.send;
+  document.getElementById('fb-form').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var text = textEl.value.trim();
+    if (!text || sendBtn.disabled) { textEl.focus(); return; }
+    sendBtn.disabled = true;
+    var thanks = document.getElementById('fb-thanks');
+    var error = document.getElementById('fb-error');
+    error.hidden = true;
+    fetch('https://skirmish-relay.hoardserdure7.workers.dev/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        kind: typeSel.value,
+        text: text.slice(0, 2000),
+        name: nameEl.value,
+        buildVersion: 'web-form'
+      })
+    }).then(function (resp) {
+      if (!resp || !resp.ok) throw new Error('rejected');
+      thanks.textContent = s.thanks;
+      thanks.hidden = false;
+      textEl.value = '';
+    }).catch(function () {
+      error.textContent = s.error;
+      error.hidden = false;
+    }).finally(function () {
+      sendBtn.disabled = false;
+    });
+  });
+</script>
+</body>
+</html>
