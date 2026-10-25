@@ -6890,7 +6890,8 @@ function progressBar(sx, sy, frac, wWorld = 5) {
 //   1/3 .. 2/3   tree-dmg1 art (notch, ~30% foliage gone) + lean
 //   frac < 1/3   tree-dmg2 art (deep notch, ~60% gone) + lean
 //   depletion    client-side tip-over (~0.5 s, away from the last
-//                cutter when known) leaving a fading stump
+//                cutter when known), the felled tree lying on the
+//                ground for FALLEN_MS, then a fading stump
 //                (~18 s, the rubble-decal pattern)
 //   each axe hit the tree wobbles briefly and sheds wood chips
 //                (pooled particles; LOW sheds fewer, never none
@@ -6899,6 +6900,14 @@ const GATHER_IMPACT_FRAME = 4; // pose_gather's strike key sits at phase 1/2 of 
 const TREE_H = 5.6; // world units: widened art is ~0.76 aspect,
                     // so neighbours 4 wu apart overlap canopies
 const FALL_MS = 500;
+const FALLEN_MS = 3000; // the felled tree LIES on the ground this
+                        // long before it becomes a stump (DE's
+                        // sequence: standing -> fallen -> stump;
+                        // Claudio's decision, 2026-10-25). Before
+                        // this the fallen tree was removed 120 ms
+                        // after the tip-over while fading out during
+                        // the fall itself, so no live session ever
+                        // saw a tree fall or lie felled.
 const STUMP_FADE_MS = 18000;
 const treeKey = (x, y) => `${Math.round(x * 8)},${Math.round(y * 8)}`;
 const treeWobble = new Map(); // key -> hit time (ms)
@@ -7001,14 +7010,15 @@ function updateTreeTracking(nodes, now) {
       if (gain > 0.02) playSfx('work.treefall', gain);
     }
   }
-  // Finished falls become stumps.
+  // A felled tree lies on the ground for FALLEN_MS, then becomes
+  // a stump (the stump replaces it; the two never overlap).
   for (let k = fallingTrees.length - 1; k >= 0; k--) {
     const f = fallingTrees[k];
-    if (now - f.t0 > FALL_MS && !f.stumpDone) {
+    if (now - f.t0 > FALL_MS + FALLEN_MS && !f.stumpDone) {
       f.stumpDone = true;
       stumpSites.push({ x: f.x, y: f.y, t0: now });
     }
-    if (now - f.t0 > FALL_MS + 120) fallingTrees.splice(k, 1);
+    if (now - f.t0 > FALL_MS + FALLEN_MS) fallingTrees.splice(k, 1);
   }
   for (let k = stumpSites.length - 1; k >= 0; k--) {
     if (now - stumpSites[k].t0 > STUMP_FADE_MS) stumpSites.splice(k, 1);
@@ -7129,10 +7139,12 @@ function drawFallingTree(f, now) {
   while (target > Math.PI) target -= Math.PI * 2;
   while (target < -Math.PI) target += Math.PI * 2;
   const rot = target * ease * 0.94;
-  const alpha = p > 0.6 ? 1 - (p - 0.6) / 0.4 * 0.55 : 1;
+  // No fade: the tree tips over at full opacity and then lies
+  // felled on the ground (p stays 1, rot stays at the target)
+  // until updateTreeTracking turns it into a stump.
   const flip = treeHash(f.x, f.y, 1) < 0.5;
   const scale = 0.92 + treeHash(f.x, f.y, 2) * 0.16;
-  drawTreeImage(im, sx, sy, f.x, f.y, { flip, scale, rot, alpha });
+  drawTreeImage(im, sx, sy, f.x, f.y, { flip, scale, rot });
 }
 
 // The stump a felled tree leaves: a short trunk stub with a pale
