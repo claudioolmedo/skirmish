@@ -368,3 +368,76 @@ fn gather_to_wrong_kind_first_deposits_carry() {
     let v = villager(&sim, 1);
     assert!(v.carry == I16F16::ZERO || v.carry_kind == Some(ResourceKind::Gold));
 }
+
+/// The nearest node of `kind` to the Town Center, and the tick on
+/// which villager 1 first stands in `Task::Gathering` at it, with
+/// his distance from the node's center at that moment.
+fn gather_stop_distance(sim: &mut Sim, kind: NodeKind) -> f64 {
+    let tc = sim.town_center().clone();
+    let node = sim
+        .nodes()
+        .iter()
+        .filter(|n| n.kind == kind)
+        .min_by_key(|n| {
+            let dx = (n.pos_x - tc.pos_x).to_bits() as i64;
+            let dy = (n.pos_y - tc.pos_y).to_bits() as i64;
+            dx * dx + dy * dy
+        })
+        .unwrap()
+        .clone();
+    sim.push_command(Command::Gather {
+        entity: 1,
+        node: node.id,
+    });
+    for _ in 0..6000 {
+        sim.tick();
+        let v = villager(sim, 1);
+        if v.task == Task::Gathering {
+            let dx = f(v.pos_x - node.pos_x);
+            let dy = f(v.pos_y - node.pos_y);
+            return (dx * dx + dy * dy).sqrt();
+        }
+    }
+    panic!("villager never started gathering from {kind:?}");
+}
+
+/// Claudio's live report (2026-10-24): the woodcutter chopped
+/// "muito longe" — measured stops of 4.06–5.66 units (1.0–1.41
+/// tiles) from the trunk, because the stand target was the ring
+/// cell's center and arrival certified on mere ring-cell entry.
+/// The cutter now stands at the trunk: his order targets the
+/// stand point (2.5 units orthogonally, ≈3.33 at a diagonal
+/// corner) with a tight 0.5 arrival radius, so the gather flip
+/// certifies at ≤3.0 / ≤3.83 respectively — always inside the
+/// old minimum — and never inside the trunk's own cell.
+#[test]
+fn woodcutter_stands_at_the_trunk() {
+    for seed in [1, 3, 7, 42] {
+        let mut sim = Sim::new(seed);
+        let d = gather_stop_distance(&mut sim, NodeKind::Tree);
+        assert!(
+            d <= 3.9,
+            "seed {seed}: cutter stands {d:.2} units from the trunk (old defect: >= 4.06)"
+        );
+        assert!(
+            d >= 1.9,
+            "seed {seed}: cutter stands inside the trunk ({d:.2})"
+        );
+    }
+}
+
+/// The other gather anchors, re-checked with the 2026-10-24 fix:
+/// non-tree nodes are pathed to directly, and their gatherers stop
+/// within GATHER_RANGE (2.5) of the node point — at the node's
+/// edge, as in DE. (Farms are worked from on the field; carcasses
+/// where the animal fell — both are unblocked node points, the
+/// same direct-path case as the mine.)
+#[test]
+fn miner_and_forager_stand_at_the_node() {
+    let mut sim = Sim::new(3);
+    let d = gather_stop_distance(&mut sim, NodeKind::GoldMine);
+    assert!(d <= 2.6, "miner stands {d:.2} units from the mine center");
+    let mut sim = Sim::new(3);
+    let d = gather_stop_distance(&mut sim, NodeKind::BerryBush);
+    assert!(d <= 2.6, "forager stands {d:.2} units from the bush center");
+}

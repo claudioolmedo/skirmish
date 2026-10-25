@@ -133,7 +133,8 @@ fn raise_scan(sim: &mut Sim, entity: u32, kind: BuildingKind) -> u32 {
         .filter(|b| b.kind == kind)
         .map(|b| b.id)
         .collect();
-    let before = complete_count(sim, kind);
+    // (The complete-count itself is deliberately not used as an
+    // oracle — see the wait in the scan loop: Farms deplete.)
     let tc = sim.town_center();
     let (tcx, tcy) = sim.grid().world_to_cell(tc.pos_x, tc.pos_y);
     for r in 2i32..=20 {
@@ -152,7 +153,22 @@ fn raise_scan(sim: &mut Sim, entity: u32, kind: BuildingKind) -> u32 {
                     continue;
                 }
                 build(sim, entity, kind, cx, cy);
-                let up = run_until(sim, 90_000, |s| complete_count(s, kind) > before);
+                // Wait for THIS placement to complete, by id (the
+                // return below makes the same check). Counting
+                // complete buildings of the kind is a racy oracle
+                // for Farms: a completed Farm's record is removed
+                // when its node is eaten dry, so during this wait
+                // an earlier farm can deplete and the net count
+                // never rises even though this farm completed and
+                // its builder is already farming it (traced
+                // 2026-10-24: the 5th farm of reach_castle_ready
+                // completed while two earlier records expired —
+                // the count peaked at `before`, never above).
+                let up = run_until(sim, 90_000, |s| {
+                    s.buildings()
+                        .iter()
+                        .any(|b| b.kind == kind && b.complete && !before_ids.contains(&b.id))
+                });
                 assert!(up, "{kind:?} placed at ({cx}, {cy}) never completed");
                 return sim
                     .buildings()

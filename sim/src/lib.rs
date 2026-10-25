@@ -86,7 +86,7 @@ pub use combat::{
 pub use econ::{
     NodeKind, ResourceKind, ResourceNode, Stockpile, CARRY_CAPACITY, DEPOSIT_RANGE, GATHER_RANGE,
     HUNT_CARRY_CAPACITY, RALLY_NODE_SNAP_RADIUS, RETARGET_RADIUS, TRAIN_QUEUE_CAP,
-    VILLAGER_FOOD_COST, VILLAGER_TRAIN_TICKS,
+    TREE_STAND_INSET, VILLAGER_FOOD_COST, VILLAGER_TRAIN_TICKS,
 };
 pub use entity::{
     is_player_owner, Dropoff, Entity, EntityKind, MoveOrder, QueuedOrder, Stance, Task,
@@ -3365,6 +3365,7 @@ impl Sim {
                     o.wp_index,
                     speed,
                     !e.suppress_separation,
+                    o.arrive,
                 ),
                 // No order: the unit stands still *except* for the
                 // separation shove — a stationary unit must never be an
@@ -3856,10 +3857,15 @@ impl Sim {
     /// Install a move order taking entity `idx` to work node
     /// `node_id` (M7). Ordinary nodes are pathed to directly, as
     /// always. A TREE node's own cell is blocked by the tree
-    /// (MAP-04), so the order targets the best standing cell beside
-    /// it instead: the reachable ring cell with the shortest path
+    /// (MAP-04), so the order targets a standing point beside it
+    /// instead: the reachable ring cell with the shortest path
     /// (ties break in fixed ring order — the search is bounded at
-    /// the tree's 8 neighbors, once per order, never per tick).
+    /// the tree's 8 neighbors, once per order, never per tick),
+    /// and within that cell the point at the trunk (see
+    /// `tree_stand_point`) — DE's cutter works at the tree tile's
+    /// edge, not from the neighboring tile's center (Claudio's
+    /// live report, 2026-10-24: from the cell center he stood a
+    /// full tile from the trunk, "muito longe").
     /// Returns whether an order was installed; on failure the
     /// entity's order is cleared, exactly like `set_move_order`.
     fn move_order_to_node(&mut self, idx: usize, node_id: u32) -> bool {
@@ -3890,13 +3896,14 @@ impl Sim {
                     continue;
                 }
                 let center = self.grid.cell_center(cx, cy);
-                if let Some(wps) = self.grid.find_path(from, center) {
+                let stand = tree_stand_point(nx, ny, center.0, center.1);
+                if let Some(wps) = self.grid.find_path(from, stand) {
                     let better = match &best {
                         None => true,
                         Some((len, _, _)) => wps.len() < *len,
                     };
                     if better {
-                        best = Some((wps.len(), center, wps));
+                        best = Some((wps.len(), stand, wps));
                     }
                 }
             }
@@ -3909,6 +3916,12 @@ impl Sim {
                     target_y: target.1,
                     waypoints: wps,
                     wp_index: 0,
+                    // A tree order settles AT its stand point (see
+                    // the ToNode arrival rule in `work_tick`): the
+                    // tight arrival radius stops steering from
+                    // completing the order a full generic radius
+                    // short of the trunk.
+                    arrive: steer::TREE_ARRIVE,
                 });
                 true
             }
@@ -4698,8 +4711,34 @@ impl Sim {
                 continue;
             }
             let center = self.grid.cell_center(cx, cy);
-            if self.grid.find_path(from, center).is_some() {
-                return Some(center);
+            // A 1×1 site's builder must stand BESIDE his segment
+            // (SMALL_BUILD_RANGE, 5.8): targeting the ring cell's
+            // center livelocked a diagonal approach — steering
+            // completes the order up to 1.0 short of the center,
+            // stranding him up to ≈6.66 from the segment's center,
+            // outside build range; the re-issued order then
+            // completed instantly, forever (the stone-line stall
+            // the 2026-10-24 walls tests caught). So a 1×1 stand
+            // point is pulled in along the ray from the site's
+            // center to 4.6 units: still inside the ring cell
+            // (which spans 2.0–6.0 orthogonally, 2.83–8.49
+            // diagonally), and his walk crosses into build range
+            // before steering can complete the order.
+            let target = if size == 1 {
+                let site = self.grid.cell_center(ax, ay);
+                let (dx, dy) = (center.0 - site.0, center.1 - site.1);
+                let len = steer::vec_len(dx, dy);
+                if len > I16F16::ZERO {
+                    let stand = I16F16::from_bits(301_466); // ≈4.6
+                    (site.0 + dx * stand / len, site.1 + dy * stand / len)
+                } else {
+                    center
+                }
+            } else {
+                center
+            };
+            if self.grid.find_path(from, target).is_some() {
+                return Some(target);
             }
         }
         None
@@ -4773,6 +4812,7 @@ impl Sim {
                 target_y: y,
                 waypoints: wps,
                 wp_index: 0,
+                arrive: steer::WAYPOINT_REACH,
             }),
             _ => None,
         };
@@ -4969,11 +5009,31 @@ impl Sim {
                 };
                 let d = self.distance_to(idx, nx, ny);
                 // M7 (MAP-04): a tree's own cell is blocked by the
-                // tree, so a woodcutter "arrives" by standing on any
-                // cell beside it — the gather range alone (2.5
-                // units) can never be met from a neighboring cell
-                // center 4 units away.
-                let beside_tree = {
+                // tree, so a woodcutter arrives at his stand point
+                // beside it (see `tree_stand_point`): 2.5 units
+                // from the trunk orthogonally — inside the gather
+                // range — and ≈3.33 at a diagonal corner, beyond
+                // it. For trees, arrival certifies when he stands
+                // in a ring cell AND within HIS stand's distance +
+                // the tree order's arrival radius
+                // (`steer::TREE_ARRIVE`, 0.5): 3.0 from an
+                // orthogonal cell, ≈3.83 from a diagonal one. His
+                // order carries that same tight radius precisely
+                // so steering cannot complete it earlier, a full
+                // generic radius short of the stand — with the
+                // generic `WAYPOINT_REACH` the order completed at
+                // up to ~4.3 from the trunk and he chopped from
+                // there (Claudio's live report, 2026-10-24: "ele
+                // fica muito longe"). The bounded completion
+                // branch (order done, ≤4.4) covers only the
+                // crowded case, where a crewmate's separation
+                // shove holds him slightly off the stand point;
+                // clean approaches flip on the distance branch
+                // first. Mere ring-cell *entry* must not certify
+                // (the pre-2026-10-24 rule): crossing into the far
+                // edge of a neighboring cell stops the cutter up
+                // to ~1.5 tiles from the trunk.
+                let (beside_tree, diag_cell) = {
                     let ni = self.node_index(node_id).expect("live node checked");
                     if self.nodes[ni].kind == NodeKind::Tree {
                         let (vx, vy) = self.grid.world_to_cell(
@@ -4981,12 +5041,22 @@ impl Sim {
                             self.entities[idx].pos_y,
                         );
                         let (tx, ty) = self.grid.world_to_cell(nx, ny);
-                        vx.abs_diff(tx) <= 1 && vy.abs_diff(ty) <= 1
+                        let (adx, ady) = (vx.abs_diff(tx), vy.abs_diff(ty));
+                        (adx <= 1 && ady <= 1, adx == 1 && ady == 1)
                     } else {
-                        false
+                        (false, false)
                     }
                 };
-                if d <= GATHER_RANGE || beside_tree {
+                let stand_limit = if diag_cell {
+                    I16F16::from_bits(251_000) // ≈3.83 = diagonal stand 3.33 + TREE_ARRIVE
+                } else {
+                    I16F16::from_bits(196_608) // 3.0 = orthogonal stand 2.5 + TREE_ARRIVE
+                };
+                let at_tree_stand = beside_tree
+                    && (d <= stand_limit
+                        || (self.entities[idx].order.is_none()
+                            && d <= I16F16::from_bits(288_358))); // 4.4, crowded case only
+                if d <= GATHER_RANGE || at_tree_stand {
                     let e = &mut self.entities[idx];
                     e.task = Task::Gathering;
                     e.order = None;
@@ -6170,6 +6240,7 @@ impl Sim {
                     h.write_u8(1);
                     h.write_i32(o.target_x.to_bits());
                     h.write_i32(o.target_y.to_bits());
+                    h.write_i32(o.arrive.to_bits());
                     h.write_u32(o.wp_index as u32);
                     h.write_u32(o.waypoints.len() as u32);
                     for &(wx, wy) in &o.waypoints {
@@ -6470,6 +6541,38 @@ fn clamp_pos(v: I16F16) -> I16F16 {
     } else {
         v
     }
+}
+
+/// The move-order target for a woodcutter whose tree's center is
+/// `(nx, ny)`, when his standing cell is the ring cell centered at
+/// `(cx, cy)`: on the ray from the trunk toward that cell, just
+/// outside the tree's own cell — `TREE_STAND_INSET` past the cell
+/// boundary (2.0 units from the center orthogonally, 2√2 ≈ 2.828
+/// diagonally), so the stand sits 2.5 units from the trunk
+/// orthogonally and ≈3.33 diagonally, and the cutter's body ends
+/// at the trunk the DE way. The order targets the stand itself
+/// and carries the tight `steer::TREE_ARRIVE` radius, so steering
+/// settles him there instead of completing a full generic radius
+/// short. Before 2026-10-24 the order targeted the ring cell's
+/// center — 4.0–5.66 units out — and the cutter visibly chopped
+/// from a full tile away (Claudio's live report).
+fn tree_stand_point(nx: I16F16, ny: I16F16, cx: I16F16, cy: I16F16) -> (I16F16, I16F16) {
+    let dx = cx - nx;
+    let dy = cy - ny;
+    let len = steer::vec_len(dx, dy);
+    if len <= I16F16::ZERO {
+        return (cx, cy);
+    }
+    // Distance from the cell center to the cell boundary along
+    // this ray: the half-width (2.0) orthogonally; the corner
+    // (2√2) diagonally.
+    let boundary = if dx == I16F16::ZERO || dy == I16F16::ZERO {
+        I16F16::from_num(2)
+    } else {
+        I16F16::from_bits(185_364) // 2√2 ≈ 2.82843
+    };
+    let dist = boundary + TREE_STAND_INSET;
+    (nx + dx * dist / len, ny + dy * dist / len)
 }
 
 #[cfg(test)]

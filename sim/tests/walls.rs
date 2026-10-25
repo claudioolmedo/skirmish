@@ -22,7 +22,7 @@
 use fixed::types::I16F16;
 use skirmish_sim::{
     wall_line_cells, Age, BuildingKind, Command, Entity, EntityKind, MatchMode, NodeKind,
-    ResourceKind, Sim, TechId, OWNER_OPPONENT, OWNER_PLAYER,
+    ResourceKind, Sim, Task, TechId, OWNER_OPPONENT, OWNER_PLAYER,
 };
 
 const WALL: BuildingKind = BuildingKind::PalisadeWall;
@@ -1244,4 +1244,115 @@ fn stone_wall_line_truncates_where_the_stone_runs_out() {
     }
     assert!(!cells.contains(&(ax + 4, ay)), "the unaffordable segment was founded");
     assert_eq!(f(sim.stockpile().amount(ResourceKind::Stone)), 0.0);
+}
+
+/// Claudio's live report (2026-10-24): "quando se constrói um
+/// muro ele está muito longe e não caminha" — the wall builder
+/// stood far from his segment and never walked to it. Root cause:
+/// the generic BUILD_RANGE (10.0, sized for 2×2 buildings) also
+/// governed 1×1 segments, so the builder's walk order was
+/// cancelled up to 2.5 tiles out and he hammered from there; a
+/// lone villager could even chain a whole line from one spot,
+/// the next segment's center being only 4.0 away. With the 1×1
+/// range (SMALL_BUILD_RANGE, 5.8), a villager in the Building
+/// state must be standing in a ring cell of the segment he is
+/// building — every tick, for every builder, distributed or lone.
+#[test]
+fn builders_stand_beside_the_segment_they_are_building() {
+    let mut sim = Sim::new(31);
+    let vils = villagers_of(&sim, OWNER_PLAYER);
+    assert!(vils.len() >= 3, "need the three starting villagers");
+    let crew = &vils[..3];
+    let (ax, ay) = open_run_near_tc(&sim, OWNER_PLAYER, crew[0], 6);
+    // The whole crew is tasked to the line (the client issues the
+    // line to each selected villager; the sim distributes them).
+    for &v in crew {
+        build_line(&mut sim, v, (ax, ay), (ax + 5, ay));
+    }
+    let mut built_by = [false; 3];
+    let mut finished = false;
+    for _ in 0..120_000 {
+        sim.tick();
+        for (i, &v) in crew.iter().enumerate() {
+            let e = ent(&sim, v);
+            if e.task == Task::Building {
+                built_by[i] = true;
+                let bid = e.task_building.expect("a building task names its site");
+                let b = sim
+                    .buildings()
+                    .iter()
+                    .find(|b| b.id == bid)
+                    .expect("the site stands");
+                let (vx, vy) = cell_of_ent(&sim, v);
+                assert!(
+                    vx.abs_diff(b.cell_x) <= 1 && vy.abs_diff(b.cell_y) <= 1,
+                    "villager {v} builds the segment at ({}, {}) from cell \
+                     ({vx}, {vy}) — not beside it",
+                    b.cell_x, b.cell_y
+                );
+                let dx = f(e.pos_x - b.pos_x);
+                let dy = f(e.pos_y - b.pos_y);
+                let d = (dx * dx + dy * dy).sqrt();
+                assert!(
+                    d <= 5.81,
+                    "villager {v} builds from {d:.2} units out (1×1 range is 5.8)"
+                );
+            }
+        }
+        if wall_buildings(&sim).len() == 6
+            && wall_buildings(&sim).iter().all(|b| b.complete)
+        {
+            finished = true;
+            break;
+        }
+    }
+    assert!(finished, "the line never completed");
+    assert!(
+        built_by.iter().all(|&x| x),
+        "distribution: every tasked villager should have built ({built_by:?})"
+    );
+}
+
+/// The lone-villager case of the same defect: walking the line
+/// segment by segment means his *building* position moves with
+/// the segment under construction — when he raises the last
+/// segment he stands beside IT, not back at the first one.
+#[test]
+fn lone_builder_walks_to_each_segment_of_the_line() {
+    let mut sim = Sim::new(31);
+    let vil = villagers_of(&sim, OWNER_PLAYER)[0];
+    let (ax, ay) = open_run_near_tc(&sim, OWNER_PLAYER, vil, 5);
+    build_line(&mut sim, vil, (ax, ay), (ax + 4, ay));
+    let mut saw_build_at = [false; 5];
+    let mut finished = false;
+    for _ in 0..120_000 {
+        sim.tick();
+        let e = ent(&sim, vil);
+        if e.task == Task::Building {
+            let bid = e.task_building.expect("a building task names its site");
+            let b = sim
+                .buildings()
+                .iter()
+                .find(|b| b.id == bid)
+                .expect("the site stands");
+            let (vx, vy) = cell_of_ent(&sim, vil);
+            assert!(
+                vx.abs_diff(b.cell_x) <= 1 && vy.abs_diff(b.cell_y) <= 1,
+                "lone builder raises segment ({}, {}) from cell ({vx}, {vy})",
+                b.cell_x, b.cell_y
+            );
+            saw_build_at[(b.cell_x - ax) as usize] = true;
+        }
+        if wall_buildings(&sim).len() == 5
+            && wall_buildings(&sim).iter().all(|b| b.complete)
+        {
+            finished = true;
+            break;
+        }
+    }
+    assert!(finished, "the lone builder never finished the line");
+    assert!(
+        saw_build_at.iter().all(|&x| x),
+        "the builder must have stood at every segment ({saw_build_at:?})"
+    );
 }

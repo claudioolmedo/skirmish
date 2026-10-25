@@ -2125,6 +2125,22 @@ const clickMarkers = new ClickMarkers();
 // until it reaches the Town Center (deposit). This matches the sim's
 // semantics — a Move override keeps the carry, only deposit clears it.
 const AT_NODE_R2 = 2.6 * 2.6;
+// Trees take a wider gate (forest-feedback fix, 2026-10-24):
+// the sim's woodcutter stands AT the trunk — 2.5 units out
+// orthogonally, ≈3.33 at a diagonal corner (the stand-point
+// geometry in sim econ/lib), and his gather flip can certify
+// up to the stand + his order's 0.5 arrival radius (≈3.83 at a
+// diagonal) — beyond the 2.6 every other node uses, so a
+// chopper never registered as "at" his tree: no gather pose,
+// no wobble, no wood chips, no chop sound (the regression
+// Claudio caught live: "uma vez eu vi funcionando uma árvore
+// tremendo quando está cortando, mas já não tem mais"). 3.9
+// covers the diagonal flip bound plus settling drift; the
+// sticky gate below then HOLDS the tree out to 4.8 while he
+// keeps working it (a crewmate's separation shove at a shared
+// tree must not flicker the feedback off).
+const AT_TREE_R2 = 3.9 * 3.9;
+const AT_TREE_STICK_R2 = 4.8 * 4.8;
 const DEPOSIT_R2 = 3.6 * 3.6;
 const lastNodeKind = new Map();
 const carryKind = new Map();
@@ -2148,16 +2164,33 @@ function updateCarry(nodes, tcPos, pos, kinds, hp) {
     const wy = pos[i * 2 + 1];
     let atKind = null;
     let atNode = null;
-    let atD2 = AT_NODE_R2;
+    let atD2 = Infinity;
     for (const n of nodes) {
       if (n.amount <= 0) continue;
       const dx = n.x - wx;
       const dy = n.y - wy;
       const d2 = dx * dx + dy * dy;
-      if (d2 <= atD2) {
+      const r2 = n.kind === 0 ? AT_TREE_R2 : AT_NODE_R2;
+      if (d2 <= r2 && d2 < atD2) {
         atD2 = d2;
         atKind = n.kind;
         atNode = n;
+      }
+    }
+    if (atNode === null) {
+      // Sticky trunk (see AT_TREE_R2): a cutter who was at a
+      // tree last frame keeps it while he is still beside it.
+      const prev = atNodeTarget.get(i);
+      if (prev && prev.kind === 0) {
+        const n = nodes.find((m) => m.id === prev.id);
+        if (n && n.amount > 0) {
+          const dx = n.x - wx;
+          const dy = n.y - wy;
+          if (dx * dx + dy * dy <= AT_TREE_STICK_R2) {
+            atKind = 0;
+            atNode = n;
+          }
+        }
       }
     }
     if (atKind !== null) {

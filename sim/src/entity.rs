@@ -679,4 +679,10 @@ pub struct MoveOrder {
     /// the commanded target point.
     pub waypoints: Vec<(I16F16, I16F16)>,
     pub wp_index: usize,
+    /// Arrival radius for the FINAL waypoint (steer::WAYPOINT_REACH
+    /// for ordinary orders). A woodcutter's tree order carries
+    /// steer::TREE_ARRIVE (0.5): with the generic radius, steering
+    /// completed his order while he was still ~4.3 units from the
+    /// trunk and he chopped from a full tile away (2026-10-24).
+    pub arrive: I16F16,
 }

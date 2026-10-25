@@ -300,6 +300,16 @@ pub const TRAIN_QUEUE_CAP: u32 = 15;
 /// Generous on purpose — separation can hold a latecomer slightly off the
 /// node point when others are already working it.
 pub const GATHER_RANGE: I16F16 = I16F16::from_bits(163_840); // 2.5
+/// How far past its own cell's edge a woodcutter stands from the
+/// trunk (M7 stand-point geometry, fixed 2026-10-24): the cutter's
+/// standing point sits on the ray from the tree's center toward his
+/// standing cell, this far outside the tree cell's boundary — 2.5
+/// units from the trunk orthogonally (inside `GATHER_RANGE`),
+/// ≈3.33 diagonally. Before the fix the standing point was the
+/// ring cell's *center*, a full tile (4.0–5.66 units) from the
+/// trunk, and Claudio's live play caught the cutter chopping from
+/// that far out ("ele fica muito longe").
+pub const TREE_STAND_INSET: I16F16 = I16F16::from_bits(32_768); // 0.5
 /// A villager this close to the Town Center deposits instantly: 3.0 units.
 pub const DEPOSIT_RANGE: I16F16 = I16F16::from_bits(196_608); // 3.0
 /// ECO-09 retarget search radius (M4): when a gatherer's node

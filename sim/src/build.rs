@@ -148,6 +148,24 @@ pub const BUILD_RANGE: I16F16 = I16F16::from_bits(655_360); // 10.0
 /// builder on a ring cell can stand ~11.3 units from the center
 /// (corner ring cell) — 12.5 covers the whole ring.
 pub const BARRACKS_BUILD_RANGE: I16F16 = I16F16::from_bits(819_200); // 12.5
+/// The 1×1 kinds' build range (wall segments, Watch Tower,
+/// Outpost): the builder's stand point sits 4.6 units from the
+/// segment's center (see `Sim::approach_point` — the ring cell's
+/// center itself livelocks a diagonal approach: steering
+/// completes the order up to 1.0 short of it, stranding him up to
+/// ≈6.66 out in an arrive/re-approach loop, the same stall the
+/// BUILD_RANGE note records for 9.0). 5.8 covers the stand plus
+/// the full 1.0 arrival shortfall with margin — and nothing
+/// beyond the ring: the nearest point of any non-ring cell is
+/// 6.0 units out, so a builder counted as building is provably
+/// standing beside his segment. The generic 10.0 governed walls
+/// until 2026-10-24, when Claudio's live play caught the defect:
+/// a wall builder's walk order was cancelled up to 2.5 tiles from
+/// his segment and he hammered from there, motionless — and a
+/// lone villager could chain a whole line from one spot, the next
+/// segment's center being only 4.0 away ("ele está muito longe e
+/// não caminha").
+pub const SMALL_BUILD_RANGE: I16F16 = I16F16::from_bits(380_109); // 5.8
 /// Town Center construction cost: 275 wood + 100 stone (study §5;
 /// wiki, Town Center (Age of Empires II)) — the first building
 /// whose cost is not wood alone (see `BuildingKind::stone_cost`).
@@ -421,6 +439,10 @@ impl BuildingKind {
             TOWN_CENTER_BUILD_RANGE
         } else if self.footprint_size() == 3 {
             BARRACKS_BUILD_RANGE
+        } else if self.footprint_size() == 1 {
+            // Walls, Watch Tower, Outpost: the builder must stand
+            // beside the segment (see SMALL_BUILD_RANGE).
+            SMALL_BUILD_RANGE
         } else {
             BUILD_RANGE
         }

@@ -20,6 +20,14 @@ pub const MAX_SPEED: I16F16 = I16F16::from_bits(65_536); // 1.0
 pub const SLOW_RADIUS: I16F16 = I16F16::from_bits(262_144); // 4.0
 /// A waypoint closer than this counts as reached.
 pub const WAYPOINT_REACH: I16F16 = I16F16::from_bits(65_536); // 1.0
+/// The tighter final-waypoint reach for a woodcutter's tree order
+/// (2026-10-24): with the generic 1.0 reach, steering completed the
+/// order while the cutter was still ~4.3 units from the trunk —
+/// the arrival circle around his stand point is entered long
+/// before he reaches it — and he chopped from a full tile away
+/// (Claudio's live report). Half a unit makes his stopping point
+/// land at the stand itself (≤ stand + 0.5 from the trunk).
+pub const TREE_ARRIVE: I16F16 = I16F16::from_bits(32_768); // 0.5
 /// Separation distance between two standard units (M1/M2 semantics):
 /// since M3 the actual distance is the sum of the two units' table
 /// radii (MOV-05); two 1.0-radius units still separate at 2.0.
@@ -127,6 +135,11 @@ pub fn shove(positions: &[SnapshotEntry], me: usize, max_speed: I16F16) -> (I16F
 /// own table speed (M3: speed is a per-unit stat — MOV-01).
 /// `apply_separation` is false for a melee unit actively attacking:
 /// separation must not push it out of its target's reach (MOV-04).
+/// `final_reach` is the arrival radius for the LAST waypoint only
+/// (intermediate waypoints always use `WAYPOINT_REACH`): most
+/// orders pass `WAYPOINT_REACH` itself; a woodcutter's tree order
+/// passes `TREE_ARRIVE` so he settles at his stand point beside
+/// the trunk instead of stopping a full arrival radius short.
 /// Returns `(vel_x, vel_y, new_wp_index, arrived)`.
 pub fn steer(
     positions: &[SnapshotEntry],
@@ -135,6 +148,7 @@ pub fn steer(
     wp_index: usize,
     max_speed: I16F16,
     apply_separation: bool,
+    final_reach: I16F16,
 ) -> (I16F16, I16F16, usize, bool) {
     let (px, py, _) = positions[me];
 
@@ -147,7 +161,12 @@ pub fn steer(
         }
         let (wx, wy) = waypoints[idx];
         let d = vec_len(wx - px, wy - py);
-        if d >= WAYPOINT_REACH {
+        let reach = if idx + 1 == waypoints.len() {
+            final_reach
+        } else {
+            WAYPOINT_REACH
+        };
+        if d >= reach {
             break (wx, wy, d);
         }
         idx += 1;
@@ -243,7 +262,7 @@ mod tests {
     fn steer_heads_for_waypoint() {
         let positions = [entry(0, 0)];
         let wps = [(I16F16::from_num(10), I16F16::ZERO)];
-        let (vx, vy, idx, arrived) = steer(&positions, 0, &wps, 0, MAX_SPEED, true);
+        let (vx, vy, idx, arrived) = steer(&positions, 0, &wps, 0, MAX_SPEED, true, WAYPOINT_REACH);
         assert!(!arrived);
         assert_eq!(idx, 0);
         assert!(vx > I16F16::ZERO, "must move toward +x");
@@ -256,10 +275,33 @@ mod tests {
         let positions = [entry(0, 0)];
         // 2 units away, inside SLOW_RADIUS (4): speed must be scaled to ~half.
         let wps = [(I16F16::from_num(2), I16F16::ZERO)];
-        let (vx, _, _, arrived) = steer(&positions, 0, &wps, 0, MAX_SPEED, true);
+        let (vx, _, _, arrived) = steer(&positions, 0, &wps, 0, MAX_SPEED, true, WAYPOINT_REACH);
         assert!(!arrived);
         assert!(vx < MAX_SPEED, "arrival slowdown missing: {vx}");
         assert!(vx > I16F16::ZERO);
+    }
+
+    #[test]
+    fn steer_final_reach_governs_only_the_last_waypoint() {
+        // 0.75 units from the target: inside the generic 1.0 reach
+        // (order completes) but outside a tree order's 0.5 reach
+        // (he keeps walking to his stand point).
+        let positions = [entry(0, 0)];
+        let wps = [(I16F16::from_num(0.75), I16F16::ZERO)];
+        let (_, _, _, arrived) = steer(&positions, 0, &wps, 0, MAX_SPEED, true, WAYPOINT_REACH);
+        assert!(arrived, "generic reach must complete the order");
+        let (vx, _, _, arrived) = steer(&positions, 0, &wps, 0, MAX_SPEED, true, TREE_ARRIVE);
+        assert!(!arrived, "tree reach must keep him walking");
+        assert!(vx > I16F16::ZERO);
+        // An intermediate waypoint still uses the generic reach even
+        // on a tree order: 0.75 from waypoint 0 of 2, he advances.
+        let wps2 = [
+            (I16F16::from_num(0.75), I16F16::ZERO),
+            (I16F16::from_num(10), I16F16::ZERO),
+        ];
+        let (_, _, idx, arrived) = steer(&positions, 0, &wps2, 0, MAX_SPEED, true, TREE_ARRIVE);
+        assert!(!arrived);
+        assert_eq!(idx, 1, "intermediate waypoint must use WAYPOINT_REACH");
     }
 
     #[test]
@@ -270,7 +312,7 @@ mod tests {
         let positions = [entry(0, 0)];
         let wps = [(I16F16::from_num(100), I16F16::ZERO)];
         let slow = I16F16::from_bits(57_344); // 0.875
-        let (vx, _, _, _) = steer(&positions, 0, &wps, 0, slow, true);
+        let (vx, _, _, _) = steer(&positions, 0, &wps, 0, slow, true, WAYPOINT_REACH);
         assert_eq!(vx, slow);
     }
 
@@ -280,8 +322,8 @@ mod tests {
         // one must feel a push toward -x on top of its desired velocity.
         let p = [entry(0, 0), entry(1, 0)];
         let wps = [(I16F16::from_num(100), I16F16::ZERO)];
-        let (vx0, _, _, _) = steer(&p, 0, &wps, 0, MAX_SPEED, true);
-        let (vx1, _, _, _) = steer(&p, 1, &wps, 0, MAX_SPEED, true);
+        let (vx0, _, _, _) = steer(&p, 0, &wps, 0, MAX_SPEED, true, WAYPOINT_REACH);
+        let (vx1, _, _, _) = steer(&p, 1, &wps, 0, MAX_SPEED, true, WAYPOINT_REACH);
         // Entity 0 is pushed left (negative x contribution)…
         assert!(vx0 < MAX_SPEED, "entity 0 felt no separation push");
         // …entity 1 is pushed right (it keeps full speed toward +x).
@@ -294,7 +336,7 @@ mod tests {
         // steers purely by its order — no sideways push at all.
         let p = [entry(0, 0), entry(1, 0)];
         let wps = [(I16F16::from_num(100), I16F16::ZERO)];
-        let (vx, vy, _, _) = steer(&p, 0, &wps, 0, MAX_SPEED, false);
+        let (vx, vy, _, _) = steer(&p, 0, &wps, 0, MAX_SPEED, false, WAYPOINT_REACH);
         assert_eq!((vx, vy), (MAX_SPEED, I16F16::ZERO));
     }
 
@@ -315,7 +357,7 @@ mod tests {
         ];
         let wps = [(I16F16::ZERO, I16F16::from_num(100))];
         let villager_speed = I16F16::from_bits(3_495); // 0.8 tiles/s
-        let (_, vy, _, arrived) = steer(&positions, 0, &wps, 0, villager_speed, true);
+        let (_, vy, _, arrived) = steer(&positions, 0, &wps, 0, villager_speed, true, WAYPOINT_REACH);
         assert!(!arrived);
         assert!(
             vy >= villager_speed / 2 - I16F16::from_bits(64),
