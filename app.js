@@ -7068,6 +7068,14 @@ function drawTree(sx, sy, frac = 1, wx = 0, wy = 0) {
   const lean = (stage === 1 ? 0.028 : stage === 2 ? 0.062 : 0)
     * (Math.cos(treeFallAngle(wx, wy)) >= 0 ? 1 : -1);
   // Hit wobble: a short decaying shake after the last axe impact.
+  // Amplitudes carry a VISIBILITY FLOOR (bot-loop fix, 2026-10-25):
+  // the original 0.09-unit shift / 0.02-rad sway moved the canopy
+  // 0.45 px at the default zoom (INITIAL_S = 5 px/unit) — sub-pixel,
+  // so the shake Claudio asked for never reached the screen (three
+  // live sessions saw a perfectly still tree). At 0.30 units /
+  // 0.08 rad the trunk shifts ~1.5 px and the treetop swings
+  // ~2.2 px at default zoom: a clear hit shudder, still well short
+  // of cartoonish. treefeedback.test.mjs pins this floor.
   let ox = 0;
   let wob = 0;
   const hitAt = treeWobble.get(key);
@@ -7075,8 +7083,8 @@ function drawTree(sx, sy, frac = 1, wx = 0, wy = 0) {
     const age = performance.now() - hitAt;
     if (age < 240) {
       const d = 1 - age / 240;
-      ox = Math.sin(age / 22) * 0.09 * u * d;
-      wob = Math.sin(age / 22) * 0.02 * d;
+      ox = Math.sin(age / 22) * 0.30 * u * d;
+      wob = Math.sin(age / 22) * 0.08 * d;
     }
   }
   const im = treeStageImage(frac);
