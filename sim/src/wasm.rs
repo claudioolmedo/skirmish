@@ -552,6 +552,26 @@ impl WasmSim {
         self.inner.can_auto_explore(entity)
     }
 
+    /// INF-05: [attack, armor_melee, armor_pierce] for one entity,
+    /// from its effective stat row (empty when the id is unknown).
+    /// Attack is -1 for kinds with no attack.
+    pub fn entity_display_stats(&self, entity: u32) -> Vec<i32> {
+        match self.inner.entity_display_stats(entity) {
+            Some((a, m, p)) => vec![a, m, p],
+            None => Vec::new(),
+        }
+    }
+
+    /// INF-05: [attack, armor_melee, armor_pierce] for one placed
+    /// building, from its effective weapon/armor rows (empty when
+    /// the id is unknown). Attack is -1 for unarmed kinds.
+    pub fn building_display_stats(&self, building: u32) -> Vec<i32> {
+        match self.inner.building_display_stats(building) {
+            Some((a, m, p)) => vec![a, m, p],
+            None => Vec::new(),
+        }
+    }
+
     /// Order a villager to build a House with its 2×2-cell footprint
     /// anchored at the cell containing the world point `(x, y)`. The
     /// 25-wood cost is deducted at placement (next tick). Returns

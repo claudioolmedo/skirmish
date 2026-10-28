@@ -2582,6 +2582,34 @@ impl Sim {
     /// Claudio's 2026-10-20 ruling "tem que ser como no
     /// original"; each scout carries its own flag and target, so
     /// any number may explore independently at once).
+    /// INF-05 display stats for one entity: (attack, armor_melee,
+    /// armor_pierce) from the entity's effective stat row
+    /// (`unit_stats` — the same row combat reads, so tech patches
+    /// and age steps are already applied). Attack is the row's
+    /// primary (first) attack value, or -1 when the kind has no
+    /// attack. Read-only: never hashed, never mutates state.
+    pub fn entity_display_stats(&self, entity: u32) -> Option<(i32, i32, i32)> {
+        let idx = self.entity_index(entity)?;
+        let s = self.unit_stats(idx);
+        let attack = s.attacks.first().map(|(_, v)| *v).unwrap_or(-1);
+        Some((attack, s.armor_melee, s.armor_pierce))
+    }
+
+    /// INF-05 display stats for one placed building: (attack,
+    /// armor_melee, armor_pierce) — the weapon's primary attack
+    /// value via `building_weapon` (tech patches included), or -1
+    /// when the kind is unarmed; armor is the kind's row at the
+    /// owner's current Age. Read-only, like the entity form.
+    pub fn building_display_stats(&self, building: u32) -> Option<(i32, i32, i32)> {
+        let b = self.buildings.iter().find(|b| b.id == building)?;
+        let age = self.age_of(b.owner);
+        let attack = self
+            .building_weapon(b.owner, b.kind)
+            .and_then(|w| w.attacks.first().map(|(_, v)| *v))
+            .unwrap_or(-1);
+        Some((attack, b.kind.armor_melee_at(age), b.kind.armor_pierce_at(age)))
+    }
+
     pub fn can_auto_explore(&self, entity: u32) -> bool {
         match self.entity_index(entity) {
             Some(idx) => {

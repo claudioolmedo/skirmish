@@ -3231,9 +3231,18 @@ name + HP (M3's HP model + ABI) and, for production buildings, the
 queue contents — units and research alike (M6). Rally points DO
 have their visual marker — the selected building's/TC's rally flag
 (`drawRallyFlag`, shipped with SEL-13; this entry's earlier text
-was stale, corrected 2026-10-22). What remains open is only the
-attack/armor stats, which are not shown. · *Status:* **DIFFERS**
-(attack/armor stats only).
+was stale, corrected 2026-10-22). The attack/armor stats landed
+2026-10-28 (bot-loop): the panel appends the selected unit's /
+building's attack and melee/pierce armor to its info line, read
+from the sim's effective rows through the read-only
+`entity_display_stats` / `building_display_stats` getters
+(`Sim::stats_for` / `unit_stats` for entities — the Town Center
+included, as an entity — and `Sim::building_weapon` + the
+per-Age armor rows for placed buildings), so the displayed
+numbers are the very numbers combat uses, tech patches included;
+the stats join the panel's render signature, so a completed
+research refreshes them the tick it lands. Unarmed selections
+show armor only. · *Status:* **MATCHES**.
 
 **INF-06 — The command panel is the tech tree's front door.** A selected
 unit/building's panel shows exactly its available actions (build menu,
@@ -3616,6 +3625,13 @@ at 20 rules, 13 / 6 / 1 and the book at 221 rules,
 status change (gates still missing). The table below equals
 the body.
 
+updated 2026-10-28 for INF-05 (bot-loop): the selection panel
+now shows the attack/armor stats — its entry's only recorded
+remainder — read from the sim's effective stat rows through
+read-only display getters, so INF-05 moves DIFFERS → MATCHES,
+§18 stands at 13 rules, 9 / 2 / 2 and the book at 221 rules,
+126 / 33 / 62. The table below equals the body.
+
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
 | 1 | Simulation & time (SIM) | 12 | 11 | 1 | 0 |
@@ -3635,8 +3651,8 @@ the body.
 | 15 | AI behavior & difficulty (AI) | 9 | 7 | 1 | 1 |
 | 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |
 | 17 | Multiplayer determinism (NET) | 11 | 4 | 5 | 2 |
-| 18 | Information rules (INF) | 13 | 8 | 3 | 2 |
-| | **Total** | **221** | **125** | **34** | **62** |
+| 18 | Information rules (INF) | 13 | 9 | 2 | 2 |
+| | **Total** | **221** | **126** | **33** | **62** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer
