@@ -31,6 +31,8 @@ import { dirname, join } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const appJs = readFileSync(join(here, '..', 'app.js'), 'utf8');
+const gridRs = readFileSync(join(here, '..', '..', 'sim', 'src', 'grid.rs'), 'utf8');
+const treePng = readFileSync(join(here, '..', 'assets-original', 'nodes', 'tree.png'));
 const econRs = readFileSync(join(here, '..', '..', 'sim', 'src', 'econ.rs'), 'utf8');
 const libRs = readFileSync(join(here, '..', '..', 'sim', 'src', 'lib.rs'), 'utf8');
 const steerRs = readFileSync(join(here, '..', '..', 'sim', 'src', 'steer.rs'), 'utf8');
@@ -183,4 +185,42 @@ test('the felled tree LIES on the ground before becoming a stump (bot-loop, 2026
   const fallFn = appJs.match(/function drawFallingTree\(f, now\) \{[\s\S]*?\n\}/);
   assert.ok(fallFn, 'drawFallingTree found');
   assert.doesNotMatch(fallFn[0], /alpha/, 'drawFallingTree draws at full opacity');
+});
+
+test('the tree FILLS its tile like DE (Claudio decision 2026-10-25; bot-loop improvement 2026-10-27)', () => {
+  // DE's trees occupy their square: trunk and canopy fill the
+  // tile and reach its borders, so a cutter on the neighbouring
+  // tile reads as standing AT the trunk. Our old draw spanned
+  // only ~53% of the cell's iso diamond width, and every live
+  // session measured a strip of bare green between the cutter
+  // and the trunk — Claudio's live defect #1 (2026-10-24).
+  // This is a RENDER-only change: the sim stand stays pinned at
+  // 2.5 wu by the first test in this file, and no sim file is
+  // touched, so the golden hash cannot move.
+  const hM = appJs.match(/const TREE_H = ([0-9.]+);/);
+  assert.ok(hM, 'TREE_H found in app.js');
+  const wideM = appJs.match(/const TREE_WIDE = ([0-9.]+);/);
+  assert.ok(wideM, 'TREE_WIDE found in app.js (the filled-tile stretch)');
+  assert.match(appJs, /const w = h \* \(im\.naturalWidth \/ im\.naturalHeight\) \* TREE_WIDE;/,
+    'drawTreeImage applies the stretch');
+  // The tree art's natural aspect, read from the PNG header
+  // (width/height are big-endian u32s at bytes 16/20).
+  const pngW = treePng.readUInt32BE(16);
+  const pngH = treePng.readUInt32BE(20);
+  assert.ok(pngW > 0 && pngH > 0, 'tree.png dimensions parsed');
+  const aspect = pngW / pngH;
+  const drawnW = Number(hM[1]) * aspect * Number(wideM[1]);
+  // The cell's iso diamond width in the same screen units:
+  // 2 * CELL_SIZE (CELL_SIZE parsed from the sim's grid.rs).
+  const cellM = gridRs.match(/pub const CELL_SIZE: I16F16 = I16F16::from_bits\((\d[\d_]*)\)/);
+  assert.ok(cellM, 'CELL_SIZE found in grid.rs');
+  const cell = Number(cellM[1].replaceAll('_', '')) / 65536;
+  const diamondW = 2 * cell;
+  assert.ok(drawnW >= 0.9 * diamondW,
+    `drawn tree width ${drawnW.toFixed(2)} wu must fill >=90% of its ${diamondW} wu tile diamond`);
+  // The canopy's half-width must reach past the cutter's
+  // furthest certified stand (orthogonal stand 2.5 + arrival
+  // 0.5 = 3.0), so the eye reads contact at the trunk, not a gap.
+  assert.ok(drawnW / 2 >= standOrth + treeArrive,
+    `canopy half-width ${(drawnW / 2).toFixed(2)} wu must reach the cutter stand ${standOrth + treeArrive}`);
 });
