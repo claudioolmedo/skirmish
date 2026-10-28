@@ -2225,14 +2225,22 @@ addEventListener('keydown', (e) => {
   }
   if (e.code === 'Escape') {
     // Escape NEVER shows the pause menu (Claudio, 2026-10-23):
-    // the Menu button is the only way in — and back out. Esc's
-    // own job is the browser's: leaving fullscreen / pointer
-    // lock. In-game it only backs out of transient input states
-    // (and closes the help overlay); with none armed it does
-    // nothing at all. Do not re-add a pause branch here.
-    if (helpOverlay.style.display !== 'none') {
-      helpOverlay.style.display = 'none';
-    } else if (placement) {
+    // the Menu button is the only way in — and back out. Do not
+    // re-add a pause branch here.
+    // Esc stack (Claudio, 2026-10-26 design; approved for
+    // automatic execution 2026-10-27): one press does exactly one
+    // step, in this order —
+    //   1. cancel an armed placement / targeting state,
+    //   2. close a transient panel or the chat input,
+    //   3. deselect.
+    // In fullscreen the Keyboard Lock API (see lockEscapeKey)
+    // hands Esc to the game so this stack runs there too;
+    // leaving fullscreen is then by holding Esc ~2 s (Chrome
+    // warns) or by the fullscreen button. In a window the same
+    // stack runs. Where the API does not exist the browser may
+    // still take Esc for fullscreen/pointer-lock exit — the
+    // stack above is unchanged and no error is raised.
+    if (placement) {
       placement = null;
     } else if (repairArm) {
       repairArm = false;
@@ -2240,6 +2248,12 @@ addEventListener('keydown', (e) => {
       orderArm = null; // CMB-10/11: Esc disarms order targeting
     } else if (buildPage) {
       buildPage = null; // M13: Esc backs out of an armed build page
+    } else if (chatInputOpen()) {
+      closeChatInput();
+    } else if (helpOverlay.style.display !== 'none') {
+      helpOverlay.style.display = 'none';
+    } else if (selection.size || selectedBuilding || selectedAnimal != null) {
+      selectUnits(new Set()); // deselect units / building / animal
     }
     return;
   }
@@ -2770,6 +2784,32 @@ function toggleFullscreen() {
   if (p && p.catch) p.catch(() => {});
 }
 
+// Keyboard Lock for Escape (Claudio, 2026-10-26 design;
+// approved 2026-10-27): while fullscreen, lock Escape so a
+// short Esc press reaches the game (the Esc stack in the
+// keydown handler) instead of exiting fullscreen. Leaving
+// fullscreen is then by holding Esc ~2 s — Chrome shows its
+// own warning for that — or by the fullscreen button.
+// Feature-detected: browsers without navigator.keyboard
+// (Safari/Firefox today) keep the previous behaviour exactly,
+// and a refused lock must never break fullscreen or play.
+function lockEscapeKey() {
+  try {
+    const kb = typeof navigator !== 'undefined' ? navigator.keyboard : null;
+    if (kb && typeof kb.lock === 'function') {
+      const p = kb.lock(['Escape']);
+      if (p && p.catch) p.catch(() => {});
+    }
+  } catch { /* no Keyboard Lock API: current behaviour stands */ }
+}
+
+function unlockEscapeKey() {
+  try {
+    const kb = typeof navigator !== 'undefined' ? navigator.keyboard : null;
+    if (kb && typeof kb.unlock === 'function') kb.unlock();
+  } catch { /* nothing locked / no API: nothing to do */ }
+}
+
 // fullscreenchange: the button glyph tracks the real state (so
 // Esc-out-of-fullscreen stays in sync), and the canvas backing
 // store refits NOW — the window resize event lands too and its
@@ -2778,6 +2818,8 @@ function toggleFullscreen() {
 // viewport on the very next frame).
 function onFullscreenChange() {
   syncFullscreenUi();
+  if (isFullscreen()) lockEscapeKey();
+  else unlockEscapeKey();
   fitCanvas();
   // The transition has SETTLED: if a live match wants capture
   // and the lock is not held, take it now — this is the reliable
@@ -5496,6 +5538,18 @@ async function main() {
   });
   resumeBtn.addEventListener('click', () => { enterGameCapture(); setPaused(false); });
   menuClose.addEventListener('click', () => { enterGameCapture(); setPaused(false); });
+  // Portrait click deselects (Claudio, 2026-10-26 design): the
+  // mouse-only twin of the Esc stack's last step — works in
+  // every browser, fullscreen or windowed, locked or not.
+  // With nothing selected it is a plain no-op.
+  if (selPortrait) {
+    selPortrait.addEventListener('click', () => {
+      if (selection.size || selectedBuilding || selectedAnimal != null) {
+        selectUnits(new Set());
+        selSig = '';
+      }
+    });
+  }
   helpCloseX.addEventListener('click', () => { helpOverlay.style.display = 'none'; });
   helpBtn.addEventListener('click', () => { helpOverlay.style.display = 'flex'; });
   helpClose.addEventListener('click', () => { helpOverlay.style.display = 'none'; });
