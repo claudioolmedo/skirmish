@@ -411,7 +411,13 @@ if (ACT === 'a') {
   assert.equal(payload.stars, 4);
   assert.equal(payload.text, 'The boar ate my scout. 10/10 would lose again.');
   assert.equal(payload.result, 'defeat');
-  assert.ok(Number.isInteger(payload.durationTicks) && payload.durationTicks > 100000,
+  // The bound proves the payload carries a real full match, not a
+  // stub number. It was 100000 before the HOUSED front
+  // (2026-10-27): with enqueue refused at the cap, the AI no
+  // longer parks resources in over-queued units that stall at
+  // 0%, so its waves land sooner and the passive player dies
+  // earlier — measured 90630 ticks on the new build.
+  assert.ok(Number.isInteger(payload.durationTicks) && payload.durationTicks > 50000,
     `durationTicks is the real match length (${payload.durationTicks})`);
   assert.equal(payload.buildVersion, 'm8');
   assert.equal(tab.el('feedback-thanks').hidden, false, 'the thanks state shows');

@@ -9504,7 +9504,7 @@ let TRAIN_BLOCK_TITLES = [
   '',
   'Not enough resources.',
   'The training queue is full.',
-  'Housed: population is at capacity — training cannot finish until a House stands.',
+  'Housed: population is at capacity — training is refused until a House stands.',
 ];
 
 // Contextual commands, bottom-left: units selected (with a villager
@@ -9693,7 +9693,7 @@ function renderCommands() {
       cmdButton({
         id: 'train', icon: 'i-train', img: 'villager.png', label: 'Villager',
         costIcon: 'i-food', cost: 50,
-        disabled: reason === 2, // queue full; other blocks flash on click
+        disabled: reason === 2 || reason === 3, // queue full or housed: the button is blocked (HOUSED front, 2026-10-27); the no-food block still flashes on click
         key: badgeForButton({ context, id: 'train', index: 0 }),
         title: TRAIN_BLOCK_TITLES[reason]
           ? t('cmd.trainVilBlocked', { block: TRAIN_BLOCK_TITLES[reason] })
@@ -9773,7 +9773,7 @@ function renderCommands() {
       cmdButton({
         id: 'train-militia', icon: 'i-militia', img: 'militia.png', label: 'Militia',
         costIcon: 'i-food', cost: 50, cost2Icon: 'i-gold', cost2: 20,
-        disabled: underConstruction || blockM === 2,
+        disabled: underConstruction || blockM === 2 || blockM === 3,
         key: badgeForButton({ context, id: 'train-militia', index: 0 }),
         title: underConstruction
           ? t('cmd.underConstruction', { name: KIND_NAME[3], building: BUILD_NAME[2] })
@@ -9786,7 +9786,7 @@ function renderCommands() {
       cmdButton({
         id: 'train-spearman', icon: 'i-spearman', label: 'Spearman',
         costIcon: 'i-food', cost: 35, cost2Icon: 'i-wood', cost2: 25,
-        disabled: underConstruction || blockSp === 2,
+        disabled: underConstruction || blockSp === 2 || blockSp === 3,
         key: badgeForButton({ context, id: 'train-spearman', index: 1 }),
         title: underConstruction
           ? t('cmd.underConstruction', { name: KIND_NAME[9], building: BUILD_NAME[2] })
@@ -9812,7 +9812,7 @@ function renderCommands() {
       cmdButton({
         id: 'train-archer', icon: 'i-archer', img: 'archer.png', label: 'Archer',
         costIcon: 'i-wood', cost: 25, cost2Icon: 'i-gold', cost2: 45,
-        disabled: underConstruction || blockA === 2,
+        disabled: underConstruction || blockA === 2 || blockA === 3,
         key: badgeForButton({ context, id: 'train-archer', index: 0 }),
         title: underConstruction
           ? t('cmd.underConstruction', { name: KIND_NAME[4], building: BUILD_NAME[6] })
@@ -9822,7 +9822,7 @@ function renderCommands() {
       cmdButton({
         id: 'train-skirmisher', icon: 'i-skirmisher', label: 'Skirmisher',
         costIcon: 'i-food', cost: 25, cost2Icon: 'i-wood', cost2: 35,
-        disabled: underConstruction || blockSk === 2,
+        disabled: underConstruction || blockSk === 2 || blockSk === 3,
         key: badgeForButton({ context, id: 'train-skirmisher', index: 1 }),
         title: underConstruction
           ? t('cmd.underConstruction', { name: KIND_NAME[10], building: BUILD_NAME[6] })
@@ -9836,7 +9836,7 @@ function renderCommands() {
       cmdButton({
         id: 'train-scout', icon: 'i-villager', img: 'scout.png', label: 'Scout Cavalry',
         costIcon: 'i-food', cost: 80,
-        disabled: underConstruction || blockS === 2,
+        disabled: underConstruction || blockS === 2 || blockS === 3,
         key: badgeForButton({ context, id: 'train-scout', index: 0 }),
         title: underConstruction
           ? t('cmd.underConstruction', { name: KIND_NAME[2], building: BUILD_NAME[7] })
