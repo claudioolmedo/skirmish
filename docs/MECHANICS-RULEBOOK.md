@@ -3108,9 +3108,13 @@ are derived, never stored) layered on top.
 viewer: every match (online or local) records (seed, mode, command
 stream) client-side; the play page downloads it and re-executes it
 under Watch replay with play/pause and speed controls and a free
-camera. · *Status:* **DIFFERS** (the recording and re-simulation
-match; playback fog is the recording seat's — there is no per-player
-fog choice in the viewer yet).
+camera. The per-player fog choice shipped 2026-10-28 (bot-loop front
+7): the playback bar's Fog button cycles the viewer's fog through
+each seat in the recording, then the fully revealed map, then back —
+`myFog` derives the chosen seat's fog from the sim on every frame
+(VIS states are derived, never stored, exactly as this rule
+requires), and switching views clears the previous view's
+explored-memory. · *Status:* **MATCHES** (from DIFFERS).
 
 **NET-09 — Save/restore snapshots the sim.** A saved game is a full
 serialization of sim state; its hash (SIM-05) verifies the snapshot, and
