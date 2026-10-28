@@ -16,6 +16,12 @@ export class WasmSim {
      */
     age_for(owner: number): number;
     /**
+     * INF-05: [attack, armor_melee, armor_pierce] for one placed
+     * building, from its effective weapon/armor rows (empty when
+     * the id is unknown). Attack is -1 for unarmed kinds.
+     */
+    building_display_stats(building: number): Int32Array;
+    /**
      * A placed building's queue as flat entry codes (M6) — see
      * `tc_queue`.
      */
@@ -76,6 +82,12 @@ export class WasmSim {
      * Number of entities (Town Center + villagers).
      */
     entity_count(): number;
+    /**
+     * INF-05: [attack, armor_melee, armor_pierce] for one entity,
+     * from its effective stat row (empty when the id is unknown).
+     * Attack is -1 for kinds with no attack.
+     */
+    entity_display_stats(entity: number): Int32Array;
     /**
      * Per-entity hit points as flat `[hp, max_hp, …]` pairs in id
      * order (M3). An entity with hp < 1 is dead (the CMB-02 rule) —
@@ -812,6 +824,7 @@ export interface InitOutput {
     readonly __wbg_wasmsim_free: (a: number, b: number) => void;
     readonly wasmsim_age: (a: number) => number;
     readonly wasmsim_age_for: (a: number, b: number) => number;
+    readonly wasmsim_building_display_stats: (a: number, b: number) => [number, number];
     readonly wasmsim_building_queue: (a: number, b: number) => [number, number];
     readonly wasmsim_building_train_block: (a: number, b: number, c: number) => number;
     readonly wasmsim_buildings: (a: number) => [number, number];
@@ -820,6 +833,7 @@ export interface InitOutput {
     readonly wasmsim_entity_can_auto_explore: (a: number, b: number) => number;
     readonly wasmsim_entity_carry: (a: number) => [number, number];
     readonly wasmsim_entity_count: (a: number) => number;
+    readonly wasmsim_entity_display_stats: (a: number, b: number) => [number, number];
     readonly wasmsim_entity_hp: (a: number) => [number, number];
     readonly wasmsim_entity_kinds: (a: number) => [number, number];
     readonly wasmsim_entity_order_route: (a: number, b: number) => [number, number];

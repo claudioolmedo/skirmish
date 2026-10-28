@@ -10180,7 +10180,21 @@ function updateSelPanel() {
   // selected building's HP fraction.
   const selTcHp = selectedBuilding && selectedBuilding.type === 'tc'
     ? Math.floor(st.hp[selectedBuilding.id * 2]) : -1;
+  // INF-05: the single selected unit's / building's display stats
+  // (attack + armor from the sim's effective rows, tech patches
+  // included). They join the signature — a completed research
+  // (Forging, Scale Mail…) must refresh the panel the tick it
+  // lands, exactly as it refreshes combat.
+  const selStats = context === 'units' && selUnits.length === 1
+      && st.kinds[selUnits[0]] !== KIND_SHEEP
+      ? sim.entity_display_stats(selUnits[0])
+    : (context === 'tc' || context === 'foe-tc') && selectedBuilding
+      ? sim.entity_display_stats(selectedBuilding.id)
+    : (context === 'production' || context === 'building' || context === 'foe-building') && bk
+      ? sim.building_display_stats(bk.id)
+      : null;
   const sig = [context, selUnits.join(','), JSON.stringify(selectedBuilding),
+    selStats ? selStats.join(',') : '',
     selectedAnimal != null
       ? `${selectedAnimal}:${Math.floor(st.hp[selectedAnimal * 2])}:${st.owners[selectedAnimal]}`
       : '',
@@ -10342,6 +10356,15 @@ function updateSelPanel() {
     selPortrait.innerHTML = pngIcon('villager.png', 'ui-icon');
     selName.textContent = t('sel.none');
     selInfo.textContent = t('sel.noneInfo');
+  }
+  // INF-05: append the attack/armor stats to the single-selection
+  // info line (computed above, through the sim's own getters, so
+  // the panel can never disagree with combat).
+  if (selStats && selStats.length >= 3) {
+    const s = selStats[0] >= 0
+      ? t('sel.statsAtk', { atk: selStats[0], melee: selStats[1], pierce: selStats[2] })
+      : t('sel.statsNoAtk', { melee: selStats[1], pierce: selStats[2] });
+    selInfo.textContent = selInfo.textContent ? `${selInfo.textContent} · ${s}` : s;
   }
 }
 

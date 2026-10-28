@@ -38,6 +38,19 @@ export class WasmSim {
         return ret >>> 0;
     }
     /**
+     * INF-05: [attack, armor_melee, armor_pierce] for one placed
+     * building, from its effective weapon/armor rows (empty when
+     * the id is unknown). Attack is -1 for unarmed kinds.
+     * @param {number} building
+     * @returns {Int32Array}
+     */
+    building_display_stats(building) {
+        const ret = wasm.wasmsim_building_display_stats(this.__wbg_ptr, building);
+        var v1 = getArrayI32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
      * A placed building's queue as flat entry codes (M6) — see
      * `tc_queue`.
      * @param {number} building
@@ -141,6 +154,19 @@ export class WasmSim {
     entity_count() {
         const ret = wasm.wasmsim_entity_count(this.__wbg_ptr);
         return ret >>> 0;
+    }
+    /**
+     * INF-05: [attack, armor_melee, armor_pierce] for one entity,
+     * from its effective stat row (empty when the id is unknown).
+     * Attack is -1 for kinds with no attack.
+     * @param {number} entity
+     * @returns {Int32Array}
+     */
+    entity_display_stats(entity) {
+        const ret = wasm.wasmsim_entity_display_stats(this.__wbg_ptr, entity);
+        var v1 = getArrayI32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
     }
     /**
      * Per-entity hit points as flat `[hp, max_hp, …]` pairs in id
