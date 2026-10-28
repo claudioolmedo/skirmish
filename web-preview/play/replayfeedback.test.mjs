@@ -45,6 +45,27 @@ test('download replay still explains the empty case', () => {
     'the no-replay branch keeps its explanatory flash');
 });
 
+// "Watch replay" rename (bot-loop front 4, Claudio 2026-10-27): the
+// pause-menu button is a file-picker label — clicking it opens the OS
+// dialog to load a downloaded replay .json. Two live sessions in a row
+// read the old bare "Watch replay" label as a dead button because
+// nothing in-page happens and the label never said it loads a file.
+// The label must say so, in every shipped locale, and the static
+// fallback text in index.html must match the EN string.
+test('the watch-replay label says it loads a file, in every locale', () => {
+  const values = [...i18nJs.matchAll(/'pause\.watchReplay':\s*'([^']+)'/g)]
+    .map((m) => m[1]);
+  assert.equal(values.length, 3, 'pause.watchReplay is defined for EN, PT and ES');
+  assert.equal(values[0], 'Watch replay from file…');
+  assert.match(values[1], /arquivo/, 'PT label names the file it loads');
+  assert.match(values[2], /archivo/, 'ES label names the file it loads');
+  const html = readFileSync(join(here, 'index.html'), 'utf8');
+  assert.ok(
+    html.includes('id="btn-watch-replay"') &&
+    html.includes('>Watch replay from file…</label>'),
+    'the static index.html label matches the EN string');
+});
+
 test('the replay-saved string exists in every locale', () => {
   const hits = i18nJs.match(/'flash\.replaySaved':/g) || [];
   assert.equal(hits.length, 3, 'flash.replaySaved is defined for EN, PT and ES');
