@@ -674,6 +674,45 @@ process.on('unhandledRejection', (e) => unhandled.push(e));
   console.log('PASS (12) Escape never shows the menu; the Menu button toggles it, windowed + locked');
 }
 
+// (13) Keyboard Lock for Escape (Claudio, 2026-10-26 design;
+//      bot-loop front (3), 2026-10-28): entering fullscreen locks
+//      Escape via navigator.keyboard.lock(["Escape"]) so the
+//      game's Esc stack receives the key; leaving fullscreen
+//      unlocks it. Without the API (Safari/Firefox) the
+//      fullscreenchange path must run cleanly with no error.
+{
+  const tab = makeTab('https://skirmish.online/play/');
+  const calls = installCaptureApis(tab);
+  await boot(tab);
+  tab.el('btn-solo').click();
+  await sleep(1500);
+  assert.equal(inMatch(tab), true, 'match running');
+  // No keyboard API in this tab's navigator: entering and
+  // leaving fullscreen must not throw (the old behaviour).
+  tab.document.fullscreenElement = tab.document.documentElement;
+  tab.fireDocument('fullscreenchange', {}, false);
+  tab.document.fullscreenElement = null;
+  tab.fireDocument('fullscreenchange', {}, false);
+  // With the API present: lock on entry, unlock on exit.
+  const kbCalls = { lock: [], unlock: 0 };
+  globalThis.navigator.keyboard = {
+    lock: (keys) => { kbCalls.lock.push(keys); return Promise.resolve(); },
+    unlock: () => { kbCalls.unlock += 1; },
+  };
+  tab.document.fullscreenElement = tab.document.documentElement;
+  tab.fireDocument('fullscreenchange', {}, false);
+  assert.deepEqual(kbCalls.lock, [['Escape']], 'entering fullscreen locks Escape');
+  tab.document.fullscreenElement = null;
+  tab.fireDocument('fullscreenchange', {}, false);
+  assert.equal(kbCalls.unlock, 1, 'leaving fullscreen unlocks Escape');
+  delete globalThis.navigator.keyboard;
+  // Portrait click with a selection-less panel: a plain no-op
+  // that must not throw (the deselect wiring is pinned in
+  // esclock.test.mjs).
+  tab.el('sel-portrait').click();
+  console.log('PASS (13) Keyboard Lock: Escape locked on fullscreen entry, unlocked on exit; no-API path clean');
+}
+
 assert.equal(unhandled.length, 0, 'no unhandled rejection in any case');
 console.log('FULLSCREEN SMOKE: all cases passed');
 process.exit(0);
