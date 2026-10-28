@@ -6897,8 +6897,24 @@ function progressBar(sx, sy, frac, wWorld = 5) {
 //                (pooled particles; LOW sheds fewer, never none
 //                of the wobble)
 const GATHER_IMPACT_FRAME = 4; // pose_gather's strike key sits at phase 1/2 of the cycle: frame 2 of 4 before the density pass, frame 4 of 8 after it
-const TREE_H = 5.6; // world units: widened art is ~0.76 aspect,
-                    // so neighbours 4 wu apart overlap canopies
+const TREE_H = 6.8; // world units: art is ~0.76 aspect
+const TREE_WIDE = 1.45; // horizontal stretch applied in drawTreeImage:
+                    // the drawn tree spans TREE_H * 0.76 * TREE_WIDE
+                    // ≈ 7.5 wu of screen width — ≈94% of the 8-wu iso
+                    // diamond width of its 4-wu cell — so the tree
+                    // FILLS its tile and reaches the cell borders,
+                    // the way DE's trees do (Claudio's decision,
+                    // 2026-10-25; bot-loop improvement, 2026-10-27).
+                    // Before, the drawn width was ≈4.27 wu (≈53% of
+                    // the diamond): a cutter at the sim's stand —
+                    // which does NOT change here (2.5 wu orthogonal,
+                    // test-pinned in the sim) — read on screen as
+                    // chopping across a strip of bare green, which
+                    // is exactly what Claudio reported live on
+                    // 2026-10-24 and what the bot loop kept
+                    // re-measuring (≈95–123 px of green at zoom).
+                    // Neighbours 4 wu apart now overlap canopies
+                    // into a denser forest mass, as in DE.
 const FALL_MS = 500;
 const FALLEN_MS = 3000; // the felled tree LIES on the ground this
                         // long before it becomes a stump (DE's
@@ -7062,7 +7078,7 @@ function treeStageImage(frac) {
 // the falling animation.
 function drawTreeImage(im, sx, sy, wx, wy, opts = {}) {
   const h = TREE_H * camS * (opts.scale ?? 1);
-  const w = h * (im.naturalWidth / im.naturalHeight);
+  const w = h * (im.naturalWidth / im.naturalHeight) * TREE_WIDE;
   ctx.save();
   ctx.translate(sx + (opts.ox || 0), sy);
   if (opts.rot) ctx.rotate(opts.rot);
@@ -7111,19 +7127,21 @@ function drawTree(sx, sy, frac = 1, wx = 0, wy = 0) {
     return;
   }
   if (drawSpriteH(SPRITES.tree, sx, sy, 4.4)) return;
+  // Fallback vector tree, scaled to the same filled-tile read as
+  // the sprite path (TREE_H / TREE_WIDE above).
   ctx.fillStyle = '#6b4a2b'; // trunk
-  ctx.fillRect(sx - 0.18 * u, sy - 1.5 * u, 0.36 * u, 1.5 * u);
+  ctx.fillRect(sx - 0.26 * u, sy - 1.8 * u, 0.52 * u, 1.8 * u);
   ctx.fillStyle = '#256b2e'; // canopy, dark side
   ctx.beginPath();
-  ctx.arc(sx - 0.55 * u, sy - 1.85 * u, 1.15 * u, 0, Math.PI * 2);
+  ctx.arc(sx - 0.8 * u, sy - 2.2 * u, 1.65 * u, 0, Math.PI * 2);
   ctx.fill();
   ctx.fillStyle = '#2e8b3a'; // canopy, main
   ctx.beginPath();
-  ctx.arc(sx + 0.35 * u, sy - 2.1 * u, 1.35 * u, 0, Math.PI * 2);
+  ctx.arc(sx + 0.5 * u, sy - 2.5 * u, 1.9 * u, 0, Math.PI * 2);
   ctx.fill();
   ctx.fillStyle = '#3aa544'; // canopy, lit top
   ctx.beginPath();
-  ctx.arc(sx + 0.05 * u, sy - 2.55 * u, 0.8 * u, 0, Math.PI * 2);
+  ctx.arc(sx + 0.05 * u, sy - 3.05 * u, 1.1 * u, 0, Math.PI * 2);
   ctx.fill();
 }
 
