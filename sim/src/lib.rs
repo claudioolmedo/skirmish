@@ -62,6 +62,8 @@ mod steer;
 mod tech;
 mod units;
 #[cfg(test)]
+mod housed_tests;
+#[cfg(test)]
 mod market_tests;
 #[cfg(test)]
 mod new_units_tests;
@@ -431,8 +433,11 @@ pub enum TrainBlock {
     NoFood,
     /// The training queue is at its cap (15).
     QueueFull,
-    /// Population is at capacity: queued villagers cannot finish
-    /// training until more housing stands (the AoE2 "housed" state).
+    /// Population is at capacity: training is refused until more
+    /// housing stands (the "housed" state). The refusal is at
+    /// enqueue time (Claudio's decision, 2026-10-27, bot-loop
+    /// HOUSED front): a unit is never queued into a stall at 0% —
+    /// see `can_train_at` / `can_train_villager_at`.
     Housed,
 }
 
@@ -547,8 +552,10 @@ struct TcState {
     /// The shared production queue (M6, TEC-03): villagers in
     /// training and technologies in research, head first — before
     /// M6 this was a bare villager count. Progress accrues on the
-    /// head only; a unit head stalls while its owner is housed, a
-    /// research head does not (population gates units, not ideas).
+    /// head only; a unit head stalls only if the cap has dropped
+    /// below the living population (enqueue itself is refused at
+    /// the cap — see `can_train_villager_at`), while a research
+    /// head never stalls (population gates units, not ideas).
     queue: Vec<ProdEntry>,
     /// Ticks of progress on the queue's head entry.
     progress: u64,
@@ -1953,9 +1960,16 @@ impl Sim {
     }
 
     /// Would a `TrainAt` command be accepted right now? Mirrors the
-    /// Town Center contract: queue room and funds gate the enqueue;
-    /// being housed does not (production stalls instead, and resumes
-    /// when housing frees up).
+    /// Town Center contract: queue room, funds and population room
+    /// gate the enqueue. Being housed REFUSES the enqueue
+    /// (Claudio's decision, 2026-10-27, bot-loop HOUSED front):
+    /// population room is read as living + already-queued units
+    /// against the cap (`population_of`), so a player can queue
+    /// exactly up to the cap and never one unit beyond it — no
+    /// unit ever sits in a queue stalled at 0% for lack of a House.
+    /// (The economy phase still stalls a unit head if the cap
+    /// *drops* below the living population, e.g. a House is razed
+    /// while units are queued — that guard keeps the cap absolute.)
     pub fn can_train_at(&self, building: u32, kind: EntityKind) -> bool {
         let bi = match self.building_index(building) {
             Some(bi) => bi,
@@ -1967,6 +1981,7 @@ impl Sim {
             && b.kind.trains(kind)
             && self.age_of(b.owner) >= kind.train_age()
             && (b.queue.len() as u32) < TRAIN_QUEUE_CAP
+            && self.population_of(b.owner) < self.population_cap_of(b.owner)
             && self.can_afford(b.owner, kind)
     }
 
@@ -2000,9 +2015,10 @@ impl Sim {
     }
 
     /// Would a `TrainVillager` command be accepted right now at the
-    /// human Town Center? (Food covers the cost and the queue has
-    /// room.) The command path re-checks at apply time; this is for
-    /// UI affordances.
+    /// human Town Center? (Food covers the cost, the queue has
+    /// room, and there is population room — being housed refuses
+    /// the enqueue, see `can_train_at`.) The command path
+    /// re-checks at apply time; this is for UI affordances.
     pub fn can_train_villager(&self) -> bool {
         self.can_train_villager_at(TOWN_CENTER_ID)
     }
@@ -2018,6 +2034,7 @@ impl Sim {
             _ => return false,
         };
         queue < TRAIN_QUEUE_CAP
+            && self.population_of(owner) < self.population_cap_of(owner)
             && self.stockpile_of(owner).amount(ResourceKind::Food) >= VILLAGER_FOOD_COST
     }
 
@@ -4849,13 +4866,16 @@ impl Sim {
         }
         // Production (M6, TEC-03): every Town Center runs its
         // shared queue — villagers and research in one FIFO. The
-        // head accrues progress; a *unit* head stalls while its
-        // owner is at the population cap (the "housed" state: the
-        // queue keeps its place and its progress, and resumes the
-        // tick housing frees up, so the cap can never be exceeded),
-        // while a *research* head accrues regardless — population
-        // gates units, not ideas. Completion spawns only while
-        // there is room. (M3: the room check counts every living
+        // head accrues progress; since the HOUSED front
+        // (2026-10-27) enqueue is refused at the cap, a *unit*
+        // head can only stall when the cap has *dropped* below
+        // the living population (a House or Town Center razed
+        // while units were queued): the queue then keeps its
+        // place and its progress and resumes the tick housing
+        // frees up, so the cap can never be exceeded. A *research*
+        // head accrues regardless — population gates units, not
+        // ideas. Completion spawns only while there is room.
+        // (M3: the room check counts every living
         // population unit — villagers, Scout, military — not just
         // villagers. M5: every Town Center runs its own queue,
         // checked against its owner's population and capacity.)

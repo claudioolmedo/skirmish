@@ -1,6 +1,6 @@
 //! Construction tests (M2.5): Houses and Farms built by villagers,
 //! sim-validated placement, population capacity and the "housed"
-//! training stall, farm lifecycle (raise → gather → deplete → ground
+//! training refusal, farm lifecycle (raise → gather → deplete → ground
 //! freed), and determinism of scripted build runs.
 //!
 //! Numbers under test come from the public mechanics study
@@ -160,7 +160,10 @@ fn house_completes_raises_cap_and_blocks_its_footprint() {
 }
 
 #[test]
-fn training_stalls_at_cap_and_resumes_after_a_house() {
+fn training_is_refused_at_cap_and_trains_after_a_house() {
+    // HOUSED front (2026-10-27): the pre-amendment form of this
+    // test queued the order at the cap and stalled it at 0%; the
+    // amended rule refuses the enqueue itself.
     let mut sim = Sim::new(37);
     // Fill the starting room (M3 start: 3 villagers + 1 Scout = 4;
     // one trained villager fills it to the cap of 5).
@@ -171,32 +174,37 @@ fn training_stalls_at_cap_and_resumes_after_a_house() {
     assert_eq!(sim.train_queue_len(), 0);
     assert_eq!(sim.train_block_reason(), TrainBlock::Housed);
 
-    // One more order enqueues (food is fine) but cannot *finish*:
-    // training progress is stalled while housed.
+    // One more order is REFUSED while housed (food is fine): it
+    // never enters the queue and charges nothing.
+    let food_before = sim.stockpile().amount(ResourceKind::Food);
     sim.push_command(Command::TrainVillager);
     sim.tick();
-    assert_eq!(sim.train_queue_len(), 1);
+    assert_eq!(sim.train_queue_len(), 0, "housed order entered the queue");
+    assert_eq!(
+        sim.stockpile().amount(ResourceKind::Food),
+        food_before,
+        "refused order charged food"
+    );
     for _ in 0..2500 {
         sim.tick();
-        assert_eq!(
-            sim.villager_count(),
-            4,
-            "a villager completed training while housed"
-        );
-        assert_eq!(sim.train_queue_len(), 1, "stalled queue must keep its place");
+        assert_eq!(sim.villager_count(), 4, "population grew while housed");
+        assert_eq!(sim.train_queue_len(), 0);
     }
     assert_eq!(sim.train_block_reason(), TrainBlock::Housed);
 
-    // Build a house: capacity rises to 10 and the stalled training
-    // resumes on its own, no new order needed.
+    // Build a house: capacity rises to 10, and a fresh order then
+    // trains normally to completion.
     build(&mut sim, 1, BuildingKind::House, 18, 27);
     let housed_no_more = run_until(&mut sim, 20_000, |s| {
         s.buildings().iter().any(|b| b.complete)
     });
     assert!(housed_no_more, "house never completed");
     assert_eq!(sim.population_cap(), 10);
+    sim.push_command(Command::TrainVillager);
+    sim.tick();
+    assert_eq!(sim.train_queue_len(), 1, "order after housing was refused");
     let spawned = run_until(&mut sim, 5_000, |s| s.villager_count() == 5);
-    assert!(spawned, "stalled training did not resume after housing");
+    assert!(spawned, "training after housing did not complete");
     assert_eq!(sim.train_queue_len(), 0);
 }
 

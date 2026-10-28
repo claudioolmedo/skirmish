@@ -703,13 +703,24 @@ fn militia_production_and_population_interplay() {
     });
     assert!(trained, "militia never trained");
     assert_eq!(sim.living_population(), 5);
-    // At the cap (5/5): a second militia enqueues but cannot finish.
+    // At the cap (5/5): a second militia is REFUSED at enqueue
+    // (HOUSED front, 2026-10-27 — it used to enqueue and stall).
+    assert_eq!(
+        sim.train_at_block(bid, EntityKind::Militia),
+        skirmish_sim::TrainBlock::Housed
+    );
+    let (f1, g1) = (
+        sim.stockpile().amount(skirmish_sim::ResourceKind::Food),
+        sim.stockpile().amount(skirmish_sim::ResourceKind::Gold),
+    );
     sim.push_command(Command::TrainAt {
         building: bid,
         kind: EntityKind::Militia,
     });
     sim.tick();
-    assert_eq!(sim.buildings()[0].queue.len(), 1);
+    assert_eq!(sim.buildings()[0].queue.len(), 0, "housed militia was queued");
+    assert_eq!(sim.stockpile().amount(skirmish_sim::ResourceKind::Food), f1);
+    assert_eq!(sim.stockpile().amount(skirmish_sim::ResourceKind::Gold), g1);
     for _ in 0..3000 {
         sim.tick();
         assert_eq!(
@@ -718,11 +729,7 @@ fn militia_production_and_population_interplay() {
             "a militia completed while housed"
         );
     }
-    assert_eq!(
-        sim.train_at_block(bid, EntityKind::Militia),
-        skirmish_sim::TrainBlock::Housed
-    );
-    // A house (the last 25 wood) frees room; production resumes alone.
+    // A house (the last 25 wood) frees room; a fresh order trains.
     let (hx, hy) = cell_point(&sim, 18, 27);
     sim.push_command(Command::Build {
         entity: 2,
@@ -730,10 +737,18 @@ fn militia_production_and_population_interplay() {
         x: hx,
         y: hy,
     });
-    let housed = run_until(&mut sim, 30000, |s| {
+    let housed = run_until(&mut sim, 30000, |s| s.population_cap() == 10);
+    assert!(housed, "house never completed");
+    sim.push_command(Command::TrainAt {
+        building: bid,
+        kind: EntityKind::Militia,
+    });
+    sim.tick();
+    assert_eq!(sim.buildings()[0].queue.len(), 1, "order after housing was refused");
+    let trained2 = run_until(&mut sim, 30000, |s| {
         s.entities().iter().filter(|e| e.kind == EntityKind::Militia).count() == 2
     });
-    assert!(housed, "stalled militia did not resume after housing");
+    assert!(trained2, "militia did not train after housing");
     assert_eq!(sim.living_population(), 6);
 }
 

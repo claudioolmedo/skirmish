@@ -27,6 +27,46 @@ fn node_amount(sim: &Sim, id: u32) -> I16F16 {
     sim.nodes().iter().find(|n| n.id == id).unwrap().amount_left
 }
 
+fn run_until(sim: &mut Sim, cap: u64, mut done: impl FnMut(&Sim) -> bool) -> bool {
+    for _ in 0..cap {
+        if done(sim) {
+            return true;
+        }
+        sim.tick();
+    }
+    done(sim)
+}
+
+/// The first anchor cell near the Town Center where `kind` may be
+/// built by `entity` (the construction tests' ring scan, M7).
+fn open_anchor_near_tc(
+    sim: &Sim,
+    entity: u32,
+    kind: skirmish_sim::BuildingKind,
+) -> (u32, u32) {
+    let tc = sim.town_center();
+    let (tcx, tcy) = sim.grid().world_to_cell(tc.pos_x, tc.pos_y);
+    for r in 2..=12i32 {
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if dx.abs() != r && dy.abs() != r {
+                    continue;
+                }
+                let (ax, ay) = (tcx as i32 + dx, tcy as i32 + dy);
+                if ax < 0 || ay < 0 {
+                    continue;
+                }
+                let (ax, ay) = (ax as u32, ay as u32);
+                let (x, y) = sim.grid().cell_center(ax, ay);
+                if sim.can_build(entity, kind, x, y) {
+                    return (ax, ay);
+                }
+            }
+        }
+    }
+    panic!("no buildable ground near the Town Center");
+}
+
 #[test]
 fn nodes_are_reachable_from_town_center() {
     let sim = Sim::new(3);
@@ -234,7 +274,28 @@ fn train_villager_costs_food_and_spawns_after_1500_ticks() {
 
 #[test]
 fn train_villager_rejected_without_food() {
+    // HOUSED front (2026-10-27): at the starting cap only ONE
+    // villager may queue (4 living + 1 queued = 5), so draining
+    // the stockpile by queueing alone is impossible now — this
+    // test first raises the cap with a House, then queues four
+    // villagers for the whole 200-food stockpile.
     let mut sim = Sim::new(17);
+    let (hx, hy) = open_anchor_near_tc(&sim, 1, skirmish_sim::BuildingKind::House);
+    let (x, y) = sim.grid().cell_center(hx, hy);
+    sim.push_command(Command::Build {
+        entity: 1,
+        kind: skirmish_sim::BuildingKind::House,
+        x,
+        y,
+    });
+    let built = run_until(&mut sim, 30_000, |s| s.population_cap() == 10);
+    assert!(built, "house never completed");
+    assert_eq!(
+        sim.stockpile().amount(ResourceKind::Food),
+        I16F16::from_num(200),
+        "building the house must not touch the food stockpile"
+    );
+
     // Four villagers cost the entire 200-food start stockpile.
     for _ in 0..4 {
         sim.push_command(Command::TrainVillager);

@@ -1136,14 +1136,22 @@ queue record (`ProdEntry`: unit | technology), cap 15, since M6. The
 cancel/refund half lives in TEC-05 and is still open. · *Status:*
 **MATCHES**.
 
-**BLD-10 — The housed rule.** Units may be *queued* at the population
-cap, but production progress stalls while population ≥ cap and resumes
-automatically when room frees (a death, or new support completing). The
-stall is not an error state — it is the rule that makes the two-builder
-opening house urgent (see OPENING-SPEC).
-*Source:* MECHANICS-STUDY §9.4. · *Impl:* shipped —
-`train_blocked_housed()` freezes progress without dropping the queue. ·
-*Status:* **MATCHES**.
+**BLD-10 — The housed rule.** *Amended 2026-10-27 (Claudio's decision,
+bot-loop HOUSED front):* training is **refused at enqueue** when the
+effective population (living + already queued) is at the cap — the
+train button is blocked, the "Housed" warning shows, and no cost is
+charged. A player may queue exactly up to the cap, never beyond it, so
+no unit ever sits in a queue stalled at 0% for lack of a House. The
+progress stall survives only as the cap-drop guard: if support is
+razed while units are queued, a unit head stalls while living
+population ≥ cap and resumes automatically when room frees (a death,
+or new support completing). Research is never gated by population.
+*Source:* MECHANICS-STUDY §9.4 (the pre-amendment queue-and-stall
+reading) + Claudio's live report of 2026-10-24 and his decision of
+2026-10-27. · *Impl:* shipped — `can_train_at` /
+`can_train_villager_at` gate on `population_of < population_cap_of`;
+the economy phase keeps the living-population stall guard. ·
+*Status:* **MATCHES** (as amended).
 
 **BLD-11 — Building stats rise with Age automatically.** A building's HP
 (and, for later ages, armor) follows its owner's Age column in the data

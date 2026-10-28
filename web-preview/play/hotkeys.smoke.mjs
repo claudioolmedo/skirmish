@@ -619,14 +619,16 @@ assert.deepEqual(cmdIds(), ROOT_IDS, 'Back from economic returns to the root too
 console.log('PASS (8) mouse and keyboard share one page state: opener clicks, Back clicks');
 
 // ------------------------------------------------------------- (9)
-// Shift+train x5 (study fix, gap 4): Shift held on a train
-// button — click or hotkey — repeats the train order up to
-// five times, stopping at the first refusal; a plain press is
-// exactly one (case 3's Q -> Queue 1). Food is the binding
-// constraint here: 150 of the starting 200 remains (case 3
-// queued one villager), so the shift run lands exactly three
-// more villagers and stops at the refusal — the repeat count
-// itself (5) is pinned at source level in the lobby smoke.
+// HOUSED front (2026-10-27): case 3's queued villager filled
+// the last population slot (4 living + 1 queued = the cap of
+// 5), so the Train button now stands BLOCKED — disabled, with
+// the Housed warning on its title — and neither a Shift+click
+// (the x5 repeat of gap 4), a plain click, nor the Shift+Q
+// hotkey queues anything or charges anything. (Before this
+// front, the shift run queued three more villagers into a
+// stall at 0%; the repeat count itself (5) is still pinned at
+// source level in the lobby smoke, and the sim-side gate is
+// pinned in sim/src/housed_tests.rs.)
 key('KeyH');
 pump(2);
 const queueLen = () => {
@@ -635,21 +637,23 @@ const queueLen = () => {
 };
 const qBefore = queueLen();
 const trainBtn = cmdBtn('train');
+assert.equal(trainBtn.disabled, true,
+  'at the population cap the Train button is blocked (disabled)');
+assert.ok(trainBtn.title.includes('Housed'),
+  '…and its title carries the Housed warning');
 trainBtn.closest = () => trainBtn;
 grid.dispatch('click', { target: trainBtn, shiftKey: true });
 pump(4);
-assert.equal(queueLen(), qBefore + 3,
-  'Shift+click queued three villagers (150 food), then stopped at the refusal');
+assert.equal(queueLen(), qBefore,
+  'Shift+click on the blocked button queues nothing');
 grid.dispatch('click', { target: trainBtn });
 pump(4);
-assert.equal(queueLen(), qBefore + 3, 'a plain click with no food queues nothing');
-assert.equal(tab.el('toast').textContent, 'Housed — build a House first.',
-  '…and flashes the single-attempt refusal (the sim checks housing first here)');
+assert.equal(queueLen(), qBefore, 'a plain click on the blocked button queues nothing');
 key('KeyQ', { shift: true });
 pump(4);
-assert.equal(queueLen(), qBefore + 3,
-  'Shift+Q on the hotkey path also stops at the first refusal');
-console.log('PASS (9) Shift+train repeats to five attempts, stops at first refusal; plain press is one');
+assert.equal(queueLen(), qBefore,
+  'Shift+Q on the hotkey path is gated by the same blocked button');
+console.log('PASS (9) HOUSED: at the cap the Train button is blocked; click, Shift+click and hotkey all queue nothing');
 
 console.log('HOTKEYS SMOKE: all cases passed');
 process.exit(0);

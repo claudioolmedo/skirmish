@@ -1014,9 +1014,11 @@ pub struct Building {
     /// to `ProdEntry`): units waiting to train and technologies
     /// waiting to research, head first, in one shared FIFO
     /// (TEC-03). Cost is paid on enqueue, like the Town Center's
-    /// queue; unit progress stalls while the population is at
-    /// capacity (the same "housed" rule), research progress does
-    /// not. Any building can hold research (Blacksmith lines, the
+    /// queue; enqueue is refused at the population cap (the
+    /// HOUSED rule, 2026-10-27), and a queued unit's progress
+    /// stalls only if the cap later drops below the living
+    /// population; research progress never stalls. Any building
+    /// can hold research (Blacksmith lines, the
     /// Barracks' Man-at-Arms upgrade); only production buildings
     /// hold units.
     pub queue: Vec<ProdEntry>,

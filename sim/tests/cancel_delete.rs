@@ -306,6 +306,13 @@ fn deleting_a_completed_building_refunds_nothing_and_drops_its_support() {
 fn cancelling_tc_queue_entries_refunds_each_in_full() {
     let mut sim = Sim::new(42);
     let tc = find_id(&sim, OWNER_PLAYER, EntityKind::TownCenter);
+    // HOUSED front (2026-10-27): at the starting cap only one
+    // villager may queue (4 living + 1 queued = 5), so raise the
+    // cap with a House first — this test is about refunds, and it
+    // needs two entries in the queue.
+    let vil = villagers_of(&sim, OWNER_PLAYER)[0];
+    raise_near(&mut sim, OWNER_PLAYER, vil, BuildingKind::House);
+    assert_eq!(sim.population_cap(), 10);
     // Two villagers queued: 200 - 2*50 = 100 food.
     sim.push_command(Command::TrainVillager);
     sim.push_command(Command::TrainVillager);
