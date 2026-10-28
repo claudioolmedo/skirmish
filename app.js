@@ -1190,6 +1190,9 @@ function loadArtSet(art, files, dir) {
 const NODE_ART = { img: {}, settled: {}, loaded: false, settledPromise: null };
 const NODE_ART_FILES = {
   tree: 'tree.png', treeDmg1: 'tree-dmg1.png', treeDmg2: 'tree-dmg2.png',
+  treeSpire: 'tree-spire.png', treeSpireDmg1: 'tree-spire-dmg1.png', treeSpireDmg2: 'tree-spire-dmg2.png',
+  treeBroad: 'tree-broad.png', treeBroadDmg1: 'tree-broad-dmg1.png', treeBroadDmg2: 'tree-broad-dmg2.png',
+  treeRound: 'tree-round.png', treeRoundDmg1: 'tree-round-dmg1.png', treeRoundDmg2: 'tree-round-dmg2.png',
   berry: 'berry-bush.png', gold: 'gold.png', stone: 'stone.png',
 };
 function loadNodeArt() {
@@ -7120,10 +7123,40 @@ function treeTinted(im, bucket) {
   return per[bucket];
 }
 
-function treeStageImage(frac) {
-  if (frac > 2 / 3) return NODE_ART.img.tree;
-  if (frac > 1 / 3) return spriteReady(NODE_ART.img.treeDmg1) ? NODE_ART.img.treeDmg1 : NODE_ART.img.tree;
-  return spriteReady(NODE_ART.img.treeDmg2) ? NODE_ART.img.treeDmg2 : NODE_ART.img.tree;
+// Tree VARIETY (bot-loop front 6, Claudio's order 2026-10-28:
+// "fazer vários tipos diferentes de árvores, para ficar mais
+// parecido ao DE — todas as árvores são iguais"). Four types
+// with distinct silhouettes and baked-in tones (classic layered
+// pine, tall spire, broad flat-topped wall, round dense crown),
+// all generated from our own pine source by
+// tools/art/tree_variants.py on the same 300x393 canvas and the
+// same trunk/anchor contract, so every type still FILLS its
+// tile (front 1, closed) and the draw math is unchanged. The
+// type is PRESENTATION ONLY: assigned deterministically from
+// the position hash, so a tree keeps its type across damage
+// stages and into its fall; the sim, its state and the golden
+// hash never see it.
+const TREE_VARIANTS = [
+  ['tree', 'treeDmg1', 'treeDmg2'],
+  ['treeSpire', 'treeSpireDmg1', 'treeSpireDmg2'],
+  ['treeBroad', 'treeBroadDmg1', 'treeBroadDmg2'],
+  ['treeRound', 'treeRoundDmg1', 'treeRoundDmg2'],
+];
+function treeVariant(x, y) {
+  return Math.floor(treeHash(x, y, 21) * TREE_VARIANTS.length);
+}
+
+function treeStageImage(frac, variant = 0) {
+  const set = TREE_VARIANTS[variant] || TREE_VARIANTS[0];
+  const stage = frac > 2 / 3 ? 0 : frac > 1 / 3 ? 1 : 2;
+  const im = NODE_ART.img[set[stage]];
+  if (spriteReady(im)) return im;
+  // Variant art not loaded yet (or a stage missing): the
+  // classic set is the fallback, exactly as stages fell back
+  // before variety existed.
+  if (stage === 0) return NODE_ART.img.tree;
+  const dmg = stage === 1 ? NODE_ART.img.treeDmg1 : NODE_ART.img.treeDmg2;
+  return spriteReady(dmg) ? dmg : NODE_ART.img.tree;
 }
 
 // Draw one tree image with the pass's transforms: base planted at
@@ -7174,7 +7207,7 @@ function drawTree(sx, sy, frac = 1, wx = 0, wy = 0) {
       wob = Math.sin(age / 22) * 0.08 * d;
     }
   }
-  const im = treeStageImage(frac);
+  const im = treeStageImage(frac, treeVariant(wx, wy));
   if (spriteReady(im)) {
     drawTreeImage(treeTinted(im, bucket), sx, sy, wx, wy,
       { flip, scale, rot: lean + wob, ox });
@@ -7201,7 +7234,7 @@ function drawTree(sx, sy, frac = 1, wx = 0, wy = 0) {
 
 // A falling tree mid-tip-over (spawned by updateTreeTracking).
 function drawFallingTree(f, now) {
-  const im = treeStageImage(f.stage === 0 ? 1 : f.stage === 1 ? 0.5 : 0.2);
+  const im = treeStageImage(f.stage === 0 ? 1 : f.stage === 1 ? 0.5 : 0.2, treeVariant(f.x, f.y));
   if (!spriteReady(im)) return;
   const [sx, sy] = worldToScreen(f.x, f.y);
   const p = Math.min(1, (now - f.t0) / FALL_MS);
