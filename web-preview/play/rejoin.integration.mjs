@@ -385,9 +385,20 @@ for (let cycle = 1; cycle <= 2; cycle++) {
   console.log(`cycle ${cycle}: rebuilt hash == host frontier hash (${frontierHash})`);
 
   // F2: the resumed match must compare clean for WATCH_TURNS turns.
+  // The watch must wait for BOTH peers to reach atTurn + WATCH_TURNS:
+  // the guest anchors its pacing clock when it RECEIVES the resume
+  // frame, which is after the host anchored its own at rebase() time,
+  // so at the instant the host alone reaches the target the guest is
+  // deterministically 2–3 turns behind (TURN_MS ≈ 29.4 ms vs the
+  // relay round-trip). Stopping on the host alone therefore compared
+  // only 147–148 turns with no turn missing and no mismatch — a test
+  // accounting artefact, proven by instrumented runs on 2026-10-28
+  // (bot-loop): after a catch-up wait the same cycles compare the
+  // full 150 turns, 0 mismatches, 0 desyncs.
   const atTurn = guest.resumeInfo.atTurn;
   if (!await drive([host, guest], {
-    until: () => host.session.state().turn >= atTurn + WATCH_TURNS
+    until: () => (host.session.state().turn >= atTurn + WATCH_TURNS
+        && guest.session.state().turn >= atTurn + WATCH_TURNS)
       || host.desyncs.length > 0 || guest.desyncs.length > 0,
     timeoutMs: 120000, label: `cycle ${cycle}: post-resume watch`,
   })) fail(`cycle ${cycle}: post-resume watch timed out`);
