@@ -279,12 +279,17 @@ pub(crate) fn building_spec(kind: BuildingKind, owner_age: crate::tech::Age) -> 
     // BLD-13: wall segments additionally belong to the Walls and
     // Gates class (the reference's membership for the Palisade
     // Wall, on top of All/Standard Buildings).
+    // Castle P3a: the Castle additionally belongs to the Castle
+    // class — the membership its own anti-Castle bonus rows (the
+    // Petard's +100) key on.
     let classes = if kind.is_wall() {
         cls::mask(&[
             cls::ALL_BUILDINGS,
             cls::STANDARD_BUILDINGS,
             cls::WALLS_AND_GATES,
         ])
+    } else if kind == BuildingKind::Castle {
+        cls::mask(&[cls::ALL_BUILDINGS, cls::STANDARD_BUILDINGS, cls::CASTLE])
     } else {
         cls::mask(&[cls::ALL_BUILDINGS, cls::STANDARD_BUILDINGS])
     };
@@ -1091,6 +1096,11 @@ impl Sim {
             if dist <= MELEE_REACH {
                 let atk_elev = self.entity_height(idx);
                 self.apply_hit(attacker_id, owner, (ax, ay), spec.attacks, ti, false, atk_elev);
+                // CMB-17 (Castle P3a): a Petard's landed strike
+                // detonates it at the target.
+                if self.entities[idx].kind == EntityKind::Petard {
+                    self.petard_detonate(idx, (tx, ty), spec.attacks, Some(ti), None);
+                }
             }
         }
         let e = &mut self.entities[idx];
@@ -1523,12 +1533,84 @@ impl Sim {
             if steer::vec_len(ax - qx, ay - qy) <= MELEE_REACH {
                 let atk_elev = self.entity_height(idx);
                 self.damage_building(bid, spec.attacks, atk_elev, owner);
+                // CMB-17 (Castle P3a): a Petard's landed strike
+                // detonates it at the footprint's edge point.
+                if self.entities[idx].kind == EntityKind::Petard {
+                    self.petard_detonate(idx, (qx, qy), spec.attacks, None, Some(bid));
+                }
             }
         }
         let e = &mut self.entities[idx];
         e.strike_tick = None;
         e.next_attack_tick = self.tick + spec.reload_ticks;
         e.attack_engaged = true;
+    }
+
+    /// CMB-17 (Castle P3a): the Petard's detonation. Called from
+    /// both strike resolutions the tick a Petard's melee strike
+    /// LANDS (a whiffed strike — target out of reach at the
+    /// landing tick, CMB-06 — does not detonate it). The primary
+    /// target has already taken the strike itself; the blast then
+    /// applies the same attack table to everyone else within
+    /// `PETARD_BLAST_RADIUS` of the detonation point — every
+    /// living entity (the Petard itself excluded) and every
+    /// placed building whose footprint edge is inside the radius,
+    /// friend or foe alike: the Petard is a blast-flagged weapon
+    /// under CMB-12. Resolution order is the engine's: entities
+    /// in ascending id order, then buildings in ascending id
+    /// order; deaths resolve in the phase's death sweep as usual.
+    /// Finally the Petard is consumed — its HP is set to 0 and
+    /// the death sweep removes it this same tick.
+    fn petard_detonate(
+        &mut self,
+        idx: usize,
+        point: (I16F16, I16F16),
+        attacks: &[(u8, i32)],
+        primary_unit: Option<usize>,
+        primary_building: Option<u32>,
+    ) {
+        let attacker_id = self.entities[idx].id;
+        let owner = self.entities[idx].owner;
+        let atk_elev = self.entity_height(idx);
+        let radius = crate::units::PETARD_BLAST_RADIUS;
+        // Entities in the blast (ascending id = vec order).
+        let victims: Vec<usize> = (0..self.entities.len())
+            .filter(|&vi| {
+                vi != idx
+                    && Some(vi) != primary_unit
+                    && !self.entities[vi].dead
+                    && steer::vec_len(
+                        self.entities[vi].pos_x - point.0,
+                        self.entities[vi].pos_y - point.1,
+                    ) <= radius
+            })
+            .collect();
+        for vi in victims {
+            self.apply_hit(attacker_id, owner, point, attacks, vi, false, atk_elev);
+        }
+        // Buildings in the blast (ascending id = vec order):
+        // distance is measured to the footprint's edge, the
+        // building-geometry convention of the whole module.
+        let bids: Vec<u32> = self
+            .buildings
+            .iter()
+            .filter(|b| {
+                Some(b.id) != primary_building && {
+                    let half = I16F16::from_num(b.kind.footprint_size() as i32 * 2);
+                    let qx = (point.0 - b.pos_x).clamp(-half, half) + b.pos_x;
+                    let qy = (point.1 - b.pos_y).clamp(-half, half) + b.pos_y;
+                    steer::vec_len(point.0 - qx, point.1 - qy) <= radius
+                }
+            })
+            .map(|b| b.id)
+            .collect();
+        for bid in bids {
+            self.damage_building(bid, attacks, atk_elev, owner);
+        }
+        // Consumed by its own detonation.
+        let e = &mut self.entities[idx];
+        e.hp = I16F16::ZERO;
+        e.clear_combat();
     }
 
     /// BLD-18: every armed building's tick, in building-id order.
@@ -1811,21 +1893,30 @@ impl Sim {
         let dist_bits = steer::vec_len(aim.0 - bx, aim.1 - by).to_bits() as i64;
         let speed_bits = w.projectile_speed.to_bits() as i64;
         let flight = ((dist_bits + speed_bits - 1) / speed_bits).max(1) as u64;
-        self.projectiles.push(Projectile {
-            spawn_x: bx,
-            spawn_y: by,
-            impact_x: impact.0,
-            impact_y: impact.1,
-            spawn_tick: tick,
-            impact_tick: tick + flight,
-            intended,
-            intended_building,
-            attacker: crate::build::BUILDING_ATTACKER_ID,
-            attacker_building: Some(bid),
-            owner,
-            attacker_elev: self.height_at_world(bx, by),
-            attacks: w.attacks.to_vec(),
-        });
+        // Castle P3a: the volley — `volley` projectiles share the
+        // release's aim, flight time and attack snapshot (the
+        // Castle's base 5; the tower's 1 makes this loop the old
+        // single push). Accuracy 100 on both armed kinds draws no
+        // per-projectile RNG, so SIM-04's draw discipline is
+        // untouched; a future sub-100 building weapon would draw
+        // per projectile here, in volley order.
+        for _ in 0..w.volley.max(1) {
+            self.projectiles.push(Projectile {
+                spawn_x: bx,
+                spawn_y: by,
+                impact_x: impact.0,
+                impact_y: impact.1,
+                spawn_tick: tick,
+                impact_tick: tick + flight,
+                intended,
+                intended_building,
+                attacker: crate::build::BUILDING_ATTACKER_ID,
+                attacker_building: Some(bid),
+                owner,
+                attacker_elev: self.height_at_world(bx, by),
+                attacks: w.attacks.to_vec(),
+            });
+        }
     }
 
     /// Apply one landed hit's damage to a placed building (M5) and

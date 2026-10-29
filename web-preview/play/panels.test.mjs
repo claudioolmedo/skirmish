@@ -108,7 +108,7 @@ const LAYOUTS = {
     ids: [...PAGE_KINDS.eco.map((k) => `build-${k}`), 'page-back', 'stop', 'delete'],
     cells: {
       Q: 'build-0', W: 'build-4', E: 'build-1',
-      A: 'build-3', S: 'build-5', D: 'build-12', Z: 'build-13', C: 'page-back',
+      A: 'build-3', S: 'build-5', D: 'build-12', Z: 'build-13', X: 'build-15', C: 'page-back',
     },
     unplaced: ['stop', 'delete'],
   },

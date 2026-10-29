@@ -1554,7 +1554,18 @@ the documented values; the remainders are: garrison arrows
 fires more arrows in the reference), Murder Holes (removes the
 minimum range), the Guard Tower upgrade (100 F / 250 W → 1500
 HP, 7 attack), the Castle-Age HP step, and the two
-UNVERIFIED sight figures.
+UNVERIFIED sight figures. *Narrowed 2026-10-29 (Castle P3a):*
+the Castle — this rule's designed second user — now fires on
+the same machinery: 11 pierce (+2 vs Spearmen on the main
+projectile), range 8 (min 1), RoF 2.0 s, accuracy 100%, and a
+**base volley of 5 projectiles**, via the profile's new
+`volley` field (the Watch Tower's stays 1, so its fire is
+unchanged). The Castle building itself: 650 stone, 200 s,
+4×4, 4800 HP, armor 8/11, LoS 11, +20 population support,
+Castle Age with no building prerequisite. Remaining for this
+rule: the Castle's GAR-05 garrison arrows (up to +16 extra on
+the base volley — the P3c garrison package), Murder Holes for
+both armed kinds, and the items above.
 
 ---
 
@@ -1895,6 +1906,38 @@ not a unit stands there. This is also how Onager-line units fell trees
 *Source:* GAP 2.3; wiki, Attack (Mangonel-line behavior). · *Impl:* an
 attack order whose target is a position rather than an entity id, in the
 same order record (tagged union). · *Status:* **MISSING**.
+
+**CMB-17 — The Petard.** The Castle's demolition unit: a suicide
+infantry whose only attack is its own detonation. *The Petard row
+(current DE, Age of Empires II wiki, "Petard", via the Castle Age
+dossier, fetched 2026-10-22):* trained **only at the Castle**,
+65 food / 20 gold, 25 s train, Castle Age; HP 50, speed 0.8,
+LoS 4, armor 0 melee / 2 pierce; attack 25 melee with **+900 vs
+Walls & Gates, +500 vs Buildings (standard), +100 vs Castles,
++60 vs Siege** (the siege row is inert until a siege kind exists
+— Castle P4); **blast radius 0.5 tiles**. Reaching and striking
+its target is its death: the strike lands on the primary target,
+then the detonation applies the same attack table to everyone
+else within the blast radius — the Petard is a blast-flagged
+weapon under CMB-12, so friend and foe alike are hit — and the
+Petard is removed. A strike that whiffs (target out of reach at
+the landing tick, CMB-06) does not detonate it.
+*Impl:* shipped 2026-10-29 (Castle P3a) — `EntityKind::Petard`
+(tag 15, append-only) with its row in `units.rs`;
+`BuildingKind::Castle` (tag 15) is its only trainer
+(`BuildingKind::trains` + the Castle `train_age`);
+`Sim::petard_detonate` in `combat.rs`, called from both melee
+strike resolutions (unit and building targets), applying
+`apply_hit` / `damage_building` in ascending-id order inside
+`PETARD_BLAST_RADIUS` and consuming the Petard (HP 0 — the
+death sweep removes it the same tick). The Castle class
+(`classes::CASTLE`) is the Castle building's membership in
+`building_spec`, beside All/Standard Buildings; `classes::SIEGE`
+ships with no member, as data for P4. Tests:
+`sim/src/castle_p3_tests.rs` (the row, the Castle-only training
+route with exact charges, the bonus table measured through the
+damage formula, the wall kill, the blast's friendly fire).
+· *Status:* **MATCHES**.
 
 ---
 
@@ -3729,6 +3772,17 @@ land in the lockstep client (see the rule's note), so NET-04 moves
 DIFFERS → MATCHES, §17 stands at 11 rules, 7 / 2 / 2 and the book
 at 221 rules, 133 / 27 / 61. The table below equals the body.
 
+updated 2026-10-29 for Castle P3a (bot-loop): the Castle
+building lands (650 stone, 200 s, 4×4, 4800 HP, 8/11 armor,
+LoS 11, +20 population support; villager build panel, original
+blockout art), the BLD-18 building weapon gains its designed
+second user with a base volley of 5 (BLD-18 narrows, status
+unchanged), and the Petard arrives as the new rule CMB-17
+(MATCHES — Castle-only training, the documented bonus table,
+suicide detonation with blast 0.5 under CMB-12), so §8 stands
+at 17 rules, 16 / 0 / 1 and the book at 222 rules,
+134 / 27 / 61. The table below equals the body.
+
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
 | 1 | Simulation & time (SIM) | 12 | 12 | 0 | 0 |
@@ -3738,7 +3792,7 @@ at 221 rules, 133 / 27 / 61. The table below equals the body.
 | 5 | Movement, pathfinding & collision (MOV) | 12 | 5 | 3 | 4 |
 | 6 | Economy & drop-off (ECO) | 17 | 14 | 1 | 2 |
 | 7 | Buildings & placement (BLD) | 20 | 13 | 6 | 1 |
-| 8 | Combat & damage (CMB) | 16 | 15 | 0 | 1 |
+| 8 | Combat & damage (CMB) | 17 | 16 | 0 | 1 |
 | 9 | Projectiles & ballistics (PRJ) | 10 | 5 | 3 | 2 |
 | 10 | Unit classes & counters (CLS) | 8 | 5 | 0 | 3 |
 | 11 | Technologies & age advancement (TEC) | 11 | 5 | 3 | 3 |
@@ -3749,7 +3803,7 @@ at 221 rules, 133 / 27 / 61. The table below equals the body.
 | 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |
 | 17 | Multiplayer determinism (NET) | 11 | 7 | 2 | 2 |
 | 18 | Information rules (INF) | 13 | 9 | 2 | 2 |
-| | **Total** | **221** | **133** | **27** | **61** |
+| | **Total** | **222** | **134** | **27** | **61** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer

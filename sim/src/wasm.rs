@@ -234,6 +234,13 @@ impl WasmSim {
         self.push_train_at(building, EntityKind::CavalryArcher)
     }
 
+    /// Enqueue a Petard at a completed Castle (Castle P3a — the
+    /// Castle is the Petard's only home; `can_train_at` carries
+    /// the Castle Age gate). See `push_train_militia`.
+    pub fn push_train_petard(&mut self, building: u32) -> bool {
+        self.push_train_at(building, EntityKind::Petard)
+    }
+
     fn push_train_at(&mut self, building: u32, kind: EntityKind) -> bool {
         let ok = self.inner.can_train_at(building, kind);
         if ok {
@@ -744,6 +751,13 @@ impl WasmSim {
         self.push_build(entity, BuildingKind::Market, x, y)
     }
 
+    /// Order a villager to build a Castle (650 stone, 4×4;
+    /// Castle Age, no building prerequisite — Castle P3a) — see
+    /// `push_build_house`.
+    pub fn push_build_castle(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build(entity, BuildingKind::Castle, x, y)
+    }
+
     /// Buy one lot (100) of a commodity at a completed Market
     /// (TRD-01..03): `resource_tag` is the `ResourceKind` tag
     /// (food 1, wood 2, stone 4 — gold is never a commodity).
@@ -942,6 +956,12 @@ impl WasmSim {
     /// `push_build_house_queued`.
     pub fn push_build_town_center_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
         self.push_build_queued(entity, BuildingKind::TownCenter, x, y)
+    }
+
+    /// Queue a Castle build (Castle Age — Castle P3a) — see
+    /// `push_build_house_queued`.
+    pub fn push_build_castle_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build_queued(entity, BuildingKind::Castle, x, y)
     }
 
     /// Queue a Market build — see `push_build_house_queued`.

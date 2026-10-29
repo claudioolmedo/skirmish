@@ -115,6 +115,7 @@ pub fn spec(kind: EntityKind) -> &'static UnitSpec {
         EntityKind::Knight => &KNIGHT,
         EntityKind::LightCavalry => &LIGHT_CAVALRY,
         EntityKind::CavalryArcher => &CAVALRY_ARCHER,
+        EntityKind::Petard => &PETARD,
     }
 }
 
@@ -556,6 +557,56 @@ static CAVALRY_ARCHER: UnitSpec = UnitSpec {
     wood_cost: 40,
     gold_cost: 60,
     train_ticks: 2220, // 37 s
+};
+
+/// The Petard's blast radius (Castle P3a, CMB-17): 0.5 tiles —
+/// a landed strike detonates at the target and every enemy unit
+/// or building within this radius of the detonation point takes
+/// the strike's attack table too; the Petard is removed. (The
+/// reference's blast falloff tiers are PRJ-07's siege package;
+/// CMB-17 ships the single documented radius.)
+pub const PETARD_BLAST_RADIUS: I16F16 = I16F16::from_bits(131_072); // 2.0 = 0.5 tiles
+
+/// Petard (Castle P3a, CMB-17; wiki "Petard (Age of Empires II)"
+/// infobox via the Castle Age dossier, fetched 2026-10-22):
+/// HP 50, attack 25 melee with +900 vs Walls & Gates, +500 vs
+/// Buildings (standard), +100 vs Castles, +60 vs Siege (inert —
+/// no siege kind exists until Castle P4), armor 0/2, speed 0.8,
+/// LoS 4. Cost 65 F / 20 G, train 25 s, Castle only
+/// (`BuildingKind::trains` + `EntityKind::train_age`). Suicide
+/// unit: a landed melee strike detonates it — see
+/// `combat::Sim::petard_detonate`. The attack delay and reload
+/// adopt the foot-melee rows' 30 ticks / 2.0 s as recorded
+/// design constants (the strike is single by construction, so
+/// the reload never governs a second shot).
+static PETARD: UnitSpec = UnitSpec {
+    max_hp: 50,
+    attacks: &[
+        (cls::MELEE, 25),
+        (cls::WALLS_AND_GATES, 900),
+        (cls::STANDARD_BUILDINGS, 500),
+        (cls::CASTLE, 100),
+        (cls::SIEGE, 60),
+    ],
+    armor_melee: 0,
+    armor_pierce: 2,
+    classes: cls::mask(&[cls::INFANTRY]),
+    range_max: I16F16::ZERO,
+    range_min: I16F16::ZERO,
+    reload_ticks: 120, // 2.0 s — adopted (see above)
+    attack_delay_ticks: 30, // adopted foot-melee value (see above)
+    accuracy: 100,
+    projectile_speed: I16F16::ZERO,
+    scatter: I16F16::ZERO,
+    speed: I16F16::from_bits(3_495), // 0.8 tiles/s (absolute scale, see header)
+    los: I16F16::from_bits(1_048_576), // 16 (4 tiles)
+    radius: I16F16::from_bits(65_536),
+    carcass_food: 0,
+    carcass_decay_bits: 0,
+    food_cost: 65,
+    wood_cost: 0,
+    gold_cost: 20,
+    train_ticks: 1500, // 25 s
 };
 
 /// Sheep (OPENING-SPEC §2.2): 100 food, speed 0.7, worked at the

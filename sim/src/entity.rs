@@ -85,6 +85,10 @@ pub enum EntityKind {
     /// carries both the ARCHERY and CAVALRY classes, so foot
     /// counters and cavalry counters both apply to it.
     CavalryArcher,
+    /// Castle Age demolition unit (Castle P3a, CMB-17): trained
+    /// only at the Castle — a suicide unit whose landed strike
+    /// detonates (blast radius 0.5 tiles) and removes it.
+    Petard,
 }
 
 impl EntityKind {
@@ -95,7 +99,7 @@ impl EntityKind {
     /// branch's original 9 was taken by the Spearman on main),
     /// 12 = knight, 13 = light cavalry, 14 = cavalry archer
     /// (Castle P2 — appended after the Wolf took 11 on main,
-    /// so no tag moved).
+    /// so no tag moved), 15 = petard (Castle P3a).
     pub fn tag(self) -> u8 {
         match self {
             EntityKind::Villager => 0,
@@ -113,6 +117,7 @@ impl EntityKind {
             EntityKind::Knight => 12,
             EntityKind::LightCavalry => 13,
             EntityKind::CavalryArcher => 14,
+            EntityKind::Petard => 15,
         }
     }
 
@@ -134,6 +139,7 @@ impl EntityKind {
             12 => Some(EntityKind::Knight),
             13 => Some(EntityKind::LightCavalry),
             14 => Some(EntityKind::CavalryArcher),
+            15 => Some(EntityKind::Petard),
             _ => None,
         }
     }
@@ -145,7 +151,9 @@ impl EntityKind {
     pub fn train_age(self) -> crate::tech::Age {
         match self {
             EntityKind::Spearman | EntityKind::Skirmisher => crate::tech::Age::Feudal,
-            EntityKind::Knight | EntityKind::CavalryArcher => crate::tech::Age::Castle,
+            EntityKind::Knight | EntityKind::CavalryArcher | EntityKind::Petard => {
+                crate::tech::Age::Castle
+            }
             _ => crate::tech::Age::Dark,
         }
     }
@@ -172,6 +180,7 @@ impl EntityKind {
                 | EntityKind::Knight
                 | EntityKind::LightCavalry
                 | EntityKind::CavalryArcher
+                | EntityKind::Petard
         )
     }
 
@@ -190,6 +199,7 @@ impl EntityKind {
                 | EntityKind::Skirmisher
                 | EntityKind::Knight
                 | EntityKind::CavalryArcher
+                | EntityKind::Petard
         )
     }
 
@@ -208,6 +218,7 @@ impl EntityKind {
                 | EntityKind::Knight
                 | EntityKind::LightCavalry
                 | EntityKind::CavalryArcher
+                | EntityKind::Petard
         )
     }
 }

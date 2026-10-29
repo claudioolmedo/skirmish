@@ -59,6 +59,16 @@ pub const PREDATOR: u8 = 17;
 /// Monastery slice (Castle P5); the class ships now so those
 /// bonuses are data, exactly like ELEPHANT and SHIP before it.
 pub const MONK: u8 = 18;
+/// Castles (Castle P3a): the membership the Castle building
+/// carries on top of All/Standard Buildings — the class the
+/// Petard's documented +100 bonus row keys on. No other building
+/// kind belongs to it.
+pub const CASTLE: u8 = 19;
+/// Siege weapons (Castle P3a): the target class of the Petard's
+/// documented +60 bonus row. No siege unit exists until Castle
+/// P4; the class ships now so the row is data, exactly like
+/// ELEPHANT and SHIP before it.
+pub const SIEGE: u8 = 20;
 
 /// Membership bit for one class id.
 pub const fn bit(class: u8) -> u64 {

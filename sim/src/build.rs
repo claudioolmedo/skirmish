@@ -172,6 +172,16 @@ pub const SMALL_BUILD_RANGE: I16F16 = I16F16::from_bits(380_109); // 5.8
 pub const TOWN_CENTER_WOOD_COST: I16F16 = I16F16::from_bits(18_022_400); // 275
 /// Town Center construction stone cost: 100 (study §5).
 pub const TOWN_CENTER_STONE_COST: I16F16 = I16F16::from_bits(6_553_600); // 100
+/// Castle stone cost: 650 (Castle P3a; AoE wiki, Castle infobox
+/// via the Castle Age dossier, fetched 2026-10-22) — the first
+/// stone-priced building of the Castle Age, and the largest
+/// single stone spend in the game.
+pub const CASTLE_STONE_COST: I16F16 = I16F16::from_bits(42_598_400); // 650
+/// Castle build time: 200 s at 60 Hz (Castle P3a; same source).
+pub const CASTLE_BUILD_TICKS: u64 = 12000;
+/// Population room from one completed Castle: +20 (Castle P3a;
+/// same source).
+pub const CASTLE_POP_SUPPORT: u32 = 20;
 /// Town Center build time: 150 s at 60 Hz (study §5 — the
 /// player-built figure; the 100 s techtree number is the
 /// non-buildable Dark Age "stack" variant, per the study note).
@@ -244,6 +254,17 @@ pub enum BuildingKind {
     /// Age) is a recorded follow-up — there is no University to
     /// host the research yet (dossier §6).
     StoneWall,
+    /// Castle P3a: the Castle — the Castle Age's namesake
+    /// building. 650 stone (the game's first stone-priced
+    /// building), 200 s build, 4×4, 4800 HP, armor 8/11, LoS 11,
+    /// +20 population support; Castle Age, no building
+    /// prerequisite. It trains the Petard (its only production)
+    /// and fires on its own — the designed second user of the
+    /// BLD-18 building-weapon machinery, with a base volley of
+    /// 5 projectiles (`CASTLE_WEAPON`). Garrison (capacity 20,
+    /// GAR-05 arrow scaling on top of the base volley) is the
+    /// P3c slice, not this one.
+    Castle,
 }
 
 impl BuildingKind {
@@ -252,8 +273,9 @@ impl BuildingKind {
     /// 5 = mining camp, 6 = archery range, 7 = stable, 8 = blacksmith,
     /// 9 = palisade wall, 10 = watch tower, 11 = outpost,
     /// 12 = market, 13 = town center (construction record only —
-    /// see the variant), 14 = stone wall (BLD-20). Tags are an ABI
-    /// contract — append only, never renumber.
+    /// see the variant), 14 = stone wall (BLD-20), 15 = castle
+    /// (Castle P3a). Tags are an ABI contract — append only,
+    /// never renumber.
     pub fn tag(self) -> u8 {
         match self {
             BuildingKind::House => 0,
@@ -271,6 +293,7 @@ impl BuildingKind {
             BuildingKind::Market => 12,
             BuildingKind::TownCenter => 13,
             BuildingKind::StoneWall => 14,
+            BuildingKind::Castle => 15,
         }
     }
 
@@ -292,6 +315,7 @@ impl BuildingKind {
             12 => Some(BuildingKind::Market),
             13 => Some(BuildingKind::TownCenter),
             14 => Some(BuildingKind::StoneWall),
+            15 => Some(BuildingKind::Castle),
             _ => None,
         }
     }
@@ -323,6 +347,8 @@ impl BuildingKind {
             BuildingKind::TownCenter => TOWN_CENTER_WOOD_COST,
             // BLD-20: the Stone Wall's price is all stone.
             BuildingKind::StoneWall => I16F16::ZERO,
+            // Castle P3a: the Castle's price is all stone too.
+            BuildingKind::Castle => I16F16::ZERO,
         }
     }
 
@@ -339,6 +365,8 @@ impl BuildingKind {
             BuildingKind::TownCenter => TOWN_CENTER_STONE_COST,
             // BLD-20: 5 stone per segment (dossier §2).
             BuildingKind::StoneWall => STONE_WALL_STONE_COST,
+            // Castle P3a: 650 stone (dossier §2).
+            BuildingKind::Castle => CASTLE_STONE_COST,
             _ => I16F16::ZERO,
         }
     }
@@ -367,6 +395,7 @@ impl BuildingKind {
             BuildingKind::Market => MARKET_BUILD_TICKS,
             BuildingKind::TownCenter => TOWN_CENTER_BUILD_TICKS,
             BuildingKind::StoneWall => STONE_WALL_BUILD_TICKS,
+            BuildingKind::Castle => CASTLE_BUILD_TICKS,
         }
     }
 
@@ -395,6 +424,8 @@ impl BuildingKind {
     pub fn pop_support(self) -> u32 {
         match self {
             BuildingKind::House => HOUSE_POP_SUPPORT,
+            // Castle P3a: the Castle supports +20 (dossier §2).
+            BuildingKind::Castle => CASTLE_POP_SUPPORT,
             _ => 0,
         }
     }
@@ -421,10 +452,11 @@ impl BuildingKind {
             | BuildingKind::ArcheryRange
             | BuildingKind::Stable
             | BuildingKind::Blacksmith => 3,
-            // The two placed 4×4 kinds: the Market, and the Town
-            // Center construction record (the standing Town Center
-            // is an entity, not a kind — BLD-16).
-            BuildingKind::Market | BuildingKind::TownCenter => 4,
+            // The placed 4×4 kinds: the Market, the Town Center
+            // construction record (the standing Town Center is an
+            // entity, not a kind — BLD-16), and the Castle
+            // (Castle P3a, dossier §2).
+            BuildingKind::Market | BuildingKind::TownCenter | BuildingKind::Castle => 4,
         }
     }
 
@@ -432,10 +464,13 @@ impl BuildingKind {
     /// building (see the range constants for the geometry).
     pub fn build_range(self) -> I16F16 {
         if self == BuildingKind::Market {
-            // The two 4×4 kinds keep their own ranges (Market 15.5,
+            // The 4×4 kinds keep their own ranges (Market 15.5,
             // Town Center 15.0 — see the constants' geometry notes).
             MARKET_BUILD_RANGE
-        } else if self == BuildingKind::TownCenter {
+        } else if self == BuildingKind::TownCenter || self == BuildingKind::Castle {
+            // The Castle is the third 4×4 kind (Castle P3a): the
+            // Town Center's 15.0 covers its ring by the same
+            // geometry (corner ring cell ≈14.1 from the center).
             TOWN_CENTER_BUILD_RANGE
         } else if self.footprint_size() == 3 {
             BARRACKS_BUILD_RANGE
@@ -453,7 +488,10 @@ impl BuildingKind {
     pub fn is_production(self) -> bool {
         matches!(
             self,
-            BuildingKind::Barracks | BuildingKind::ArcheryRange | BuildingKind::Stable
+            BuildingKind::Barracks
+                | BuildingKind::ArcheryRange
+                | BuildingKind::Stable
+                | BuildingKind::Castle
         )
     }
 
@@ -477,6 +515,9 @@ impl BuildingKind {
                 | (BuildingKind::ArcheryRange, EntityKind::CavalryArcher)
                 | (BuildingKind::Stable, EntityKind::ScoutCavalry)
                 | (BuildingKind::Stable, EntityKind::Knight)
+                // Castle P3a: the Petard trains at the Castle
+                // only (the Castle's whole generic roster).
+                | (BuildingKind::Castle, EntityKind::Petard)
         )
     }
 
@@ -490,7 +531,7 @@ impl BuildingKind {
             | BuildingKind::WatchTower
             | BuildingKind::Market
             | BuildingKind::StoneWall => Age::Feudal,
-            BuildingKind::TownCenter => Age::Castle,
+            BuildingKind::TownCenter | BuildingKind::Castle => Age::Castle,
             _ => Age::Dark,
         }
     }
@@ -519,6 +560,9 @@ impl BuildingKind {
             // palisade shipped with the generic building sight 4;
             // this arm gives both wall kinds their DE row.
             BuildingKind::PalisadeWall | BuildingKind::StoneWall => 2,
+            // Castle P3a: the Castle's documented sight is 11
+            // (dossier §2, wiki Castle infobox).
+            BuildingKind::Castle => 11,
             BuildingKind::WatchTower => 10,
             BuildingKind::Outpost => match age {
                 Age::Dark => 6,
@@ -538,6 +582,10 @@ impl BuildingKind {
     pub fn weapon(self) -> Option<BuildingWeapon> {
         match self {
             BuildingKind::WatchTower => Some(WATCH_TOWER_WEAPON),
+            // Castle P3a: the designed second user ships — the
+            // Castle fires its base volley of 5 (GAR-05's extra
+            // garrison arrows layer on in P3c, not here).
+            BuildingKind::Castle => Some(CASTLE_WEAPON),
             _ => None,
         }
     }
@@ -596,6 +644,7 @@ impl BuildingKind {
                 | BuildingKind::ArcheryRange
                 | BuildingKind::Stable
                 | BuildingKind::TownCenter
+                | BuildingKind::Castle
         )
     }
 
@@ -675,6 +724,9 @@ impl BuildingKind {
             // The Town Center entity's own row (study §5): 2400 at
             // every Age — the construction record shares it.
             BuildingKind::TownCenter => 2400,
+            // Castle P3a: 4800 HP (dossier §2, wiki Castle
+            // infobox) — flat; the kind is Castle-born.
+            BuildingKind::Castle => 4800,
         }
     }
 
@@ -740,6 +792,9 @@ impl BuildingKind {
             // BLD-20: stone wall melee armor 8 (wiki Building
             // table; flat across ages).
             BuildingKind::StoneWall => 8,
+            // Castle P3a: the Castle's melee armor is 8
+            // (dossier §2, wiki Castle infobox).
+            BuildingKind::Castle => 8,
             BuildingKind::TownCenter => 3,
             _ => 0,
         }
@@ -781,6 +836,9 @@ impl BuildingKind {
             // BLD-20: stone wall pierce armor 10 (wiki Building
             // table; flat across ages).
             BuildingKind::StoneWall => 10,
+            // Castle P3a: the Castle's pierce armor is 11
+            // (dossier §2, wiki Castle infobox).
+            BuildingKind::Castle => 11,
             BuildingKind::TownCenter => 5,
             _ => 7,
         }
@@ -873,10 +931,11 @@ pub fn repair_rate_hp_per_min(repairers: u32) -> i64 {
 }
 
 /// A building weapon (BLD-18): the static firing profile of a
-/// completed defensive building. Only the Watch Tower carries one
-/// today; the Castle (Castle Age dossier) is the designed second
-/// user — its volley adds garrison projectiles (GAR-05) on top of
-/// the same base machinery.
+/// completed defensive building. The Watch Tower was the first
+/// user; the Castle (Castle P3a) is the second — its base volley
+/// of 5 projectiles rides the `volley` field below, and GAR-05's
+/// garrison projectiles will add on top of the same base
+/// machinery in P3c.
 ///
 /// The Watch Tower's numbers, from the AoE wiki's tower article
 /// and the project study (§2's band table, §5): 5 pierce attack
@@ -923,6 +982,15 @@ pub struct BuildingWeapon {
     pub projectile_speed: I16F16,
     /// Scattered-landing spread on a miss (PRJ-04 design constant).
     pub scatter: I16F16,
+    /// Projectiles loosed per shot (Castle P3a): 1 for the Watch
+    /// Tower; the Castle's BASE volley is 5 (dossier §2). The
+    /// firing loop in `combat::building_weapon_release` looses
+    /// this many projectiles at the standing target on each
+    /// release — same aim, same flight time; accuracy is 100 on
+    /// both armed kinds today, so a volley draws no extra RNG.
+    /// GAR-05's garrison arrows (P3c) raise the count on top of
+    /// this base when the garrison system lands.
+    pub volley: u32,
 }
 
 /// The Watch Tower's base profile (BLD-18; sources in the
@@ -936,6 +1004,29 @@ pub const WATCH_TOWER_WEAPON: BuildingWeapon = BuildingWeapon {
     accuracy: 100,
     projectile_speed: I16F16::from_bits(32_768), // 0.5
     scatter: I16F16::from_bits(131_072),         // 2.0
+    volley: 1,
+};
+
+/// The Castle's base profile (Castle P3a; AoE wiki, Castle
+/// infobox via the Castle Age dossier, fetched 2026-10-22):
+/// 11 pierce attack with +2 vs Spearmen on the main projectile,
+/// range 8 with a 1-tile minimum (the building band, PRJ-08 —
+/// Murder Holes, the University tech that removes the minimum,
+/// is P3b), one volley every 2.0 s, accuracy 100%, and a base
+/// volley of **5 projectiles**. The flight profile reuses the
+/// tower's adopted constants (the Archer's 21-tick delay, the
+/// PRJ-02/PRJ-04 speed/scatter) — the same UNVERIFIED-for-
+/// buildings adoption BLD-18 records for the tower.
+pub const CASTLE_WEAPON: BuildingWeapon = BuildingWeapon {
+    attacks: &[(crate::classes::PIERCE, 11), (crate::classes::SPEARMAN, 2)],
+    range_max: I16F16::from_bits(2_097_152), // 32.0 = 8 tiles
+    range_min: I16F16::from_bits(262_144),   // 4.0 = 1 tile
+    reload_ticks: 120,                       // 2.0 s
+    attack_delay_ticks: 21,
+    accuracy: 100,
+    projectile_speed: I16F16::from_bits(32_768), // 0.5
+    scatter: I16F16::from_bits(131_072),         // 2.0
+    volley: 5,
 };
 
 /// The Watch Tower's attack table with Fletching researched
