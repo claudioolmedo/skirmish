@@ -1343,6 +1343,27 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Enqueue a Cavalry Archer at a completed Archery Range
+     * (Castle P2). See `push_train_militia`.
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_train_cavalry_archer(building) {
+        const ret = wasm.wasmsim_push_train_cavalry_archer(this.__wbg_ptr, building);
+        return ret !== 0;
+    }
+    /**
+     * Enqueue a Knight at a completed Stable (Castle P2 —
+     * `can_train_at` carries the Castle Age gate). See
+     * `push_train_militia`.
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_train_knight(building) {
+        const ret = wasm.wasmsim_push_train_knight(this.__wbg_ptr, building);
+        return ret !== 0;
+    }
+    /**
      * Enqueue a Militia at a completed Barracks (M3). Returns
      * whether the order *would* be accepted (queue room + funds);
      * the cost is deducted when the command is applied next tick.

@@ -41,14 +41,14 @@ const LAYOUTS = {
   },
   'archery range': {
     context: 'range', page: null,
-    ids: ['train-archer', 'train-skirmisher', 'delete-building'],
-    cells: { Q: 'train-archer', W: 'train-skirmisher', C: 'delete-building' },
+    ids: ['train-archer', 'train-skirmisher', 'train-cavalry-archer', 'delete-building'],
+    cells: { Q: 'train-archer', W: 'train-skirmisher', E: 'train-cavalry-archer', C: 'delete-building' },
     unplaced: [],
   },
   stable: {
     context: 'stable', page: null,
-    ids: ['train-scout', 'research-bloodlines', 'delete-building'],
-    cells: { Q: 'train-scout', W: 'research-bloodlines', C: 'delete-building' },
+    ids: ['train-scout', 'train-knight', 'research-lightcavalry', 'research-bloodlines', 'research-husbandry', 'delete-building'],
+    cells: { Q: 'train-scout', W: 'train-knight', A: 'research-lightcavalry', S: 'research-bloodlines', D: 'research-husbandry', C: 'delete-building' },
     unplaced: [],
   },
   blacksmith: {

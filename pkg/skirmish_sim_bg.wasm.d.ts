@@ -112,6 +112,8 @@ export const wasmsim_push_set_rally_tc_of: (a: number, b: number, c: number, d: 
 export const wasmsim_push_set_stance: (a: number, b: number, c: number) => number;
 export const wasmsim_push_stop: (a: number, b: number) => number;
 export const wasmsim_push_train_archer: (a: number, b: number) => number;
+export const wasmsim_push_train_cavalry_archer: (a: number, b: number) => number;
+export const wasmsim_push_train_knight: (a: number, b: number) => number;
 export const wasmsim_push_train_militia: (a: number, b: number) => number;
 export const wasmsim_push_train_scout: (a: number, b: number) => number;
 export const wasmsim_push_train_skirmisher: (a: number, b: number) => number;

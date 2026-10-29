@@ -143,8 +143,8 @@ export const PANEL_BUTTONS = {
     'stop', 'delete'],
   tc: ['train', 'research-loom', 'research-age', 'research-wheelbarrow', 'research-handcart'],
   barracks: ['train-militia', 'train-spearman', 'research-maa'],
-  range: ['train-archer', 'train-skirmisher'],
-  stable: ['train-scout', 'research-bloodlines'],
+  range: ['train-archer', 'train-skirmisher', 'train-cavalry-archer'],
+  stable: ['train-scout', 'train-knight', 'research-lightcavalry', 'research-bloodlines', 'research-husbandry'],
   blacksmith: ['research-fletching', 'research-scalemail', 'research-padded',
     'research-forging', 'research-barding'],
   lumbercamp: ['research-doublebit'],
@@ -228,12 +228,24 @@ export const PANEL_KEYS = {
   range: {
     'train-archer': ['KeyQ', 'Q'],
     'train-skirmisher': ['KeyW', 'W'],
+    // Castle P2: the Cavalry Archer continues the Range's plain
+    // top row (E), like every plain panel's third unit.
+    'train-cavalry-archer': ['KeyE', 'E'],
   },
   stable: {
     'train-scout': ['KeyQ', 'Q'],
-    // Bloodlines (2026-10-22) right of the Scout — the plain
-    // left-to-right grid, as the Barracks pair sits.
-    'research-bloodlines': ['KeyW', 'W'],
+    // Castle P2: the Knight takes the Stable's second top-row
+    // slot (W). The researches drop to the second row, the
+    // arrangement the Barracks (Man-at-Arms A under the Militia)
+    // and the Town Center (Loom A) already use: the Light
+    // Cavalry upgrade under its own unit (A, under the Scout),
+    // Bloodlines under the Knight (S), Husbandry next (D).
+    // (Bloodlines sat at W from 2026-10-22, when the Stable's
+    // top row held the Scout alone.)
+    'train-knight': ['KeyW', 'W'],
+    'research-lightcavalry': ['KeyA', 'A'],
+    'research-bloodlines': ['KeyS', 'S'],
+    'research-husbandry': ['KeyD', 'D'],
   },
   blacksmith: {
     'research-fletching': ['KeyQ', 'Q'],
