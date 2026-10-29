@@ -686,8 +686,18 @@ attacking does not get pushed out of range by collision resolution.
 *Source:* Pottinger via OPENAGE-RESEARCH §2.2; OPENAGE-RESEARCH §5.1 (the
 M3 takeaway). · *Impl:* separation term is skipped for entities in the
 engaged-attack state (M3 attack state machine); formation slots tolerate
-overlap by construction. · *Status:* **MISSING** (no combat state yet;
-separation currently applies to everyone always).
+overlap by construction. · *Status:* **MATCHES** (from MISSING — the
+Status was stale, audited 2026-10-28 by the bot loop: the M3 combat
+state machine shipped this rule — a melee attacker in range sets
+`suppress_separation` for that tick in both attack steps
+(`combat.rs`), the movement phase passes it to `steer::steer` and
+exempts the unit from the idle shove (`lib.rs`), and the behaviour is
+pinned at both levels (`steer.rs`
+`separation_can_be_suppressed_for_an_engaged_attacker`; `sim/tests/
+combat.rs` `separation_is_suppressed_while_a_melee_unit_attacks`).
+The formation half has no instance yet — formations themselves are
+MOV-07, still missing — the same no-instance pattern as CMB-15's
+garrison clause.)
 
 **MOV-05 — Collision radius is unit data.** Units occupy a small circle
 for steering purposes; the documented typical radius is ≈0.2 tiles
@@ -3670,13 +3680,21 @@ DIFFERS → MATCHES, so §17 stands at 11 rules, 6 / 3 / 2 and the
 book at 221 rules, 129 / 30 / 62. The table below equals the
 body.
 
+updated 2026-10-28 for MOV-04 (bot-loop): the M3 combat state
+machine shipped separation suppression for engaged melee attackers
+long ago, but the entry's Status still read MISSING ("no combat
+state yet"); audited against `combat.rs`, `lib.rs`, `steer.rs` and
+the pinning tests this run, MOV-04 moves MISSING → MATCHES, so
+§5 stands at 12 rules, 5 / 3 / 4 and the book at 221 rules,
+130 / 30 / 61. The table below equals the body.
+
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
 | 1 | Simulation & time (SIM) | 12 | 12 | 0 | 0 |
 | 2 | Map, terrain & elevation (MAP) | 12 | 7 | 4 | 1 |
 | 3 | Visibility & exploration (VIS) | 10 | 8 | 1 | 1 |
 | 4 | Selection & orders (SEL) | 17 | 15 | 2 | 0 |
-| 5 | Movement, pathfinding & collision (MOV) | 12 | 4 | 3 | 5 |
+| 5 | Movement, pathfinding & collision (MOV) | 12 | 5 | 3 | 4 |
 | 6 | Economy & drop-off (ECO) | 17 | 14 | 1 | 2 |
 | 7 | Buildings & placement (BLD) | 20 | 13 | 6 | 1 |
 | 8 | Combat & damage (CMB) | 16 | 14 | 1 | 1 |
@@ -3690,7 +3708,7 @@ body.
 | 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |
 | 17 | Multiplayer determinism (NET) | 11 | 6 | 3 | 2 |
 | 18 | Information rules (INF) | 13 | 9 | 2 | 2 |
-| | **Total** | **221** | **129** | **30** | **62** |
+| | **Total** | **221** | **130** | **30** | **61** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer
