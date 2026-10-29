@@ -3091,9 +3091,19 @@ than playing on in two different worlds.
 *Source:* Bettner & Terrano; OPENAGE-RESEARCH §2.6. · *Impl:* the state
 hash is exchanged and compared after every TURN (every 3 ticks); a
 mismatch stops both clients with the turn number and the recorded
-replay as diagnostics. · *Status:* **DIFFERS** (comparison and stop
-match; the cadence is per-turn, not per-tick, and SIM-06's
-per-subsystem diagnostics are not yet produced).
+replay as diagnostics. · *Status:* **MATCHES** (from DIFFERS —
+bot-loop 2026-10-29, fidelity-audit Package B slice: the hash
+message now carries the hash after EVERY tick of the turn plus,
+per tick, the SIM-06 subsystem parts (exposed to the client by a
+new pure-read `state_hash_parts` WASM export, "rng,world,economy,
+targeting,full"); comparison is per tick and a mismatch stops
+both clients with the turn, the exact tick, and the first
+diverging subsystem named (rng / world / economy / targeting /
+tail), shown on the desync card next to the recorded replay.
+Legacy single-hash messages from a cached older client are still
+accepted and compared against the turn's last tick. Pinned by
+`play/netplay.test.mjs` (per-tick catch, subsystem naming, legacy
+comparison, strict codec).)
 
 **NET-05 — No local factor may influence the sim.** Graphics settings,
 adaptive quality tier, hardware speed, frame rate, spare CPU — none may
@@ -3713,6 +3723,12 @@ CMB-14 and AI-01 move DIFFERS → MATCHES, so §8 stands at 16
 rules, 15 / 0 / 1, §15 stands at 9 rules, 8 / 0 / 1 and the book
 at 221 rules, 132 / 28 / 61. The table below equals the body.
 
+updated 2026-10-29 for NET-04 (bot-loop, fidelity-audit Package B
+slice): per-tick hash comparison plus SIM-06 subsystem diagnostics
+land in the lockstep client (see the rule's note), so NET-04 moves
+DIFFERS → MATCHES, §17 stands at 11 rules, 7 / 2 / 2 and the book
+at 221 rules, 133 / 27 / 61. The table below equals the body.
+
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
 | 1 | Simulation & time (SIM) | 12 | 12 | 0 | 0 |
@@ -3731,9 +3747,9 @@ at 221 rules, 132 / 28 / 61. The table below equals the body.
 | 14 | Garrison, transport & repair (GAR) | 10 | 0 | 0 | 10 |
 | 15 | AI behavior & difficulty (AI) | 9 | 8 | 0 | 1 |
 | 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |
-| 17 | Multiplayer determinism (NET) | 11 | 6 | 3 | 2 |
+| 17 | Multiplayer determinism (NET) | 11 | 7 | 2 | 2 |
 | 18 | Information rules (INF) | 13 | 9 | 2 | 2 |
-| | **Total** | **221** | **132** | **28** | **61** |
+| | **Total** | **221** | **133** | **27** | **61** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer

@@ -21,7 +21,13 @@
 //   * The delay adapts up (host proposes, both apply at an agreed
 //     future turn) when too many turns execute late; it never drops
 //     below the initial value mid-match.
-//   * Hash cadence: one hash per turn (after the turn's 3rd tick).
+//   * Hash cadence (NET-04, bot-loop 2026-10-29): one hash per
+//     TICK — each turn's hash message carries the hash after every
+//     one of its ticks, plus the SIM-06 subsystem parts per tick
+//     when the integrator supplies them, so a desync stops with
+//     the exact tick and the first diverging subsystem named.
+//     Legacy single-hash messages (older cached clients) are
+//     still accepted and compared against the turn's last tick.
 //
 // This module is pure protocol/session logic — no DOM, no globals —
 // driven through injected callbacks (send / applyBundle / tickOnce),
@@ -323,8 +329,21 @@ export function decodeMessage(text) {
       if (!validateCommand(c)) return { ok: false, error: 'bad command' };
     }
   }
-  if (msg.type === 'hash' && (!isInt(msg.turn) || typeof msg.hash !== 'string')) {
-    return { ok: false, error: 'bad hash' };
+  if (msg.type === 'hash') {
+    // NET-04: per-tick form {turn, hashes:[hex...], parts?:[[hex...]...]}
+    // or the legacy per-turn form {turn, hash}. Parts, when present,
+    // are SIM-06 subsystem snapshots: one row per tick, one hex
+    // string per subsystem, in HASH_PART_NAMES order.
+    const isHexList = (v) => Array.isArray(v) && v.length >= 1 && v.length <= 8
+      && v.every((h) => typeof h === 'string' && h.length <= 64);
+    const newForm = isHexList(msg.hashes)
+      && (msg.parts === undefined
+        || (Array.isArray(msg.parts) && msg.parts.length === msg.hashes.length
+          && msg.parts.every((row) => isHexList(row) && row.length <= 8)));
+    const legacyForm = typeof msg.hash === 'string' && msg.hash.length <= 64;
+    if (!isInt(msg.turn) || (!newForm && !legacyForm)) {
+      return { ok: false, error: 'bad hash' };
+    }
   }
   if (msg.type === 'delay' && (!isInt(msg.turns) || !isInt(msg.atTurn))) {
     return { ok: false, error: 'bad delay' };
@@ -369,6 +388,11 @@ export function decodeMessage(text) {
 // A pure state machine. app.js (or a test) drives it with pump(now)
 // from its frame loop; inbound messages arrive through receive().
 
+// SIM-06 subsystem names, in HashParts field order — the first
+// part whose snapshot differs at the diverging tick names the
+// subsystem a desync report blames (NET-04 diagnostics).
+export const HASH_PART_NAMES = ['rng', 'world', 'economy', 'targeting'];
+
 export function createSession({
   localSlot,
   turnTicks = TURN_TICKS,
@@ -377,6 +401,7 @@ export function createSession({
   send,
   applyBundle,
   tickOnce,
+  hashParts = null,
   onEvent = () => {},
   onTurn = null,
 }) {
@@ -413,13 +438,57 @@ export function createSession({
     return b;
   }
 
+  // Stored hash entries are {hashes:[per-tick hex], parts:null |
+  // [[per-subsystem hex] per tick]}. A legacy remote entry holds a
+  // single hash, compared against the local turn's LAST tick.
   function checkHash(turn) {
     const local = localHashes.get(turn);
     const remote = remoteHashes.get(turn);
     if (local === undefined || remote === undefined) return;
-    if (local !== remote && phase === 'running') {
+    if (phase !== 'running') return;
+    if (local.legacyLastTick || remote.legacyLastTick) {
+      const l = local.hashes[local.hashes.length - 1];
+      const r = remote.hashes[remote.hashes.length - 1];
+      if (l !== r) {
+        phase = 'desync';
+        onEvent({
+          type: 'desync', turn,
+          tickInTurn: turnTicks - 1, tick: turn * turnTicks + turnTicks - 1,
+          subsystem: null, localHash: l, remoteHash: r,
+          localParts: null, remoteParts: null,
+        });
+      }
+      return;
+    }
+    const n = Math.min(local.hashes.length, remote.hashes.length);
+    for (let k = 0; k < n; k++) {
+      if (local.hashes[k] === remote.hashes[k]) continue;
+      let subsystem = null;
+      const lp = local.parts && local.parts[k];
+      const rp = remote.parts && remote.parts[k];
+      if (lp && rp) {
+        subsystem = 'tail';
+        for (let i = 0; i < Math.min(lp.length, rp.length); i++) {
+          if (lp[i] !== rp[i]) { subsystem = HASH_PART_NAMES[i] || 'tail'; break; }
+        }
+      }
       phase = 'desync';
-      onEvent({ type: 'desync', turn, localHash: local, remoteHash: remote });
+      onEvent({
+        type: 'desync', turn,
+        tickInTurn: k, tick: turn * turnTicks + k, subsystem,
+        localHash: local.hashes[k], remoteHash: remote.hashes[k],
+        localParts: lp || null, remoteParts: rp || null,
+      });
+      return;
+    }
+    if (local.hashes.length !== remote.hashes.length) {
+      phase = 'desync';
+      onEvent({
+        type: 'desync', turn,
+        tickInTurn: n, tick: turn * turnTicks + n, subsystem: null,
+        localHash: local.hashes[n] ?? null, remoteHash: remote.hashes[n] ?? null,
+        localParts: null, remoteParts: null,
+      });
     }
   }
 
@@ -478,10 +547,17 @@ export function createSession({
     const b = bundles.get(turn);
     applyBundle(0, b[0]);
     applyBundle(1, b[1]);
-    let hash;
-    for (let k = 0; k < turnTicks; k++) hash = tickOnce();
-    localHashes.set(turn, hash);
-    send({ type: 'hash', turn, hash });
+    const hashes = [];
+    const parts = hashParts ? [] : null;
+    for (let k = 0; k < turnTicks; k++) {
+      hashes.push(tickOnce());
+      if (parts) parts.push(hashParts());
+    }
+    localHashes.set(turn, { hashes, parts });
+    send(parts
+      ? { type: 'hash', turn, hashes, parts }
+      : { type: 'hash', turn, hashes });
+    const hash = hashes[hashes.length - 1];
     const late = now > execTarget(turn) + TURN_MS;
     lateWindow.push(late);
     if (lateWindow.length > 240) lateWindow.shift();
@@ -558,7 +634,19 @@ export function createSession({
         return true;
       }
       if (msg.type === 'hash') {
-        remoteHashes.set(msg.turn, msg.hash);
+        if (Array.isArray(msg.hashes)) {
+          remoteHashes.set(msg.turn, {
+            hashes: msg.hashes,
+            parts: Array.isArray(msg.parts) ? msg.parts : null,
+          });
+        } else {
+          // Legacy per-turn hash: it is the hash after the turn's
+          // last tick, so it compares against the local last tick
+          // only (store a sparse entry checkHash understands).
+          remoteHashes.set(msg.turn, {
+            hashes: [msg.hash], legacyLastTick: true, parts: null,
+          });
+        }
         checkHash(msg.turn);
         return true;
       }

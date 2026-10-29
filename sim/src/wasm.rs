@@ -1122,6 +1122,18 @@ impl WasmSim {
         self.inner.state_hash_hex()
     }
 
+    /// SIM-06 subsystem hash parts as one comma-separated string
+    /// of 16-char hex values: rng, world, economy, targeting,
+    /// full. Pure read, without advancing the sim — NET-04's
+    /// per-tick desync diagnostics consume the first four.
+    pub fn state_hash_parts(&self) -> String {
+        let p = self.inner.state_hash_parts();
+        format!(
+            "{:016x},{:016x},{:016x},{:016x},{:016x}",
+            p.rng, p.world, p.economy, p.targeting, p.full
+        )
+    }
+
     /// Number of entities (Town Center + villagers).
     pub fn entity_count(&self) -> u32 {
         self.inner.entities().len() as u32

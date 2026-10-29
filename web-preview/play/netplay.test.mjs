@@ -421,6 +421,117 @@ test('desync: a divergent hash stops both sides with the turn number', () => {
   assert.equal(a.state().turn, 8, 'execution stopped at the desync turn');
 });
 
+test('NET-04: a divergence on one tick of a turn is caught at that tick', () => {
+  const simB = fakeSim();
+  const inboxA = [];
+  const inboxB = [];
+  const eventsA = [];
+  const simA = fakeSim();
+  const a = createSession({
+    localSlot: 0,
+    send: (m) => inboxB.push(m),
+    applyBundle: (s, c) => simA.applyBundle(s, c),
+    tickOnce: () => simA.tick(),
+    onEvent: (e) => eventsA.push(e),
+  });
+  let ticksB = 0;
+  const b = createSession({
+    localSlot: 1,
+    send: (m) => inboxA.push(m),
+    applyBundle: (s, c) => simB.applyBundle(s, c),
+    tickOnce: () => {
+      ticksB++;
+      // B diverges on the SECOND tick of turn 5 only; the turn's
+      // first and third tick hashes agree — per-turn comparison
+      // would have missed this entirely.
+      return ticksB === 5 * TURN_TICKS + 2 ? 'hdeadbeef' : simB.tick();
+    },
+    onEvent: () => {},
+  });
+  a.start(0);
+  b.start(0);
+  const pair = { a, b, flush: () => {
+    for (const m of inboxA.splice(0)) a.receive(m);
+    for (const m of inboxB.splice(0)) b.receive(m);
+  } };
+  run(pair, 0, 2000);
+  const dA = eventsA.find((e) => e.type === 'desync');
+  assert.ok(dA, 'the per-tick divergence was detected');
+  assert.equal(dA.turn, 5);
+  assert.equal(dA.tickInTurn, 1);
+  assert.equal(dA.tick, 5 * TURN_TICKS + 1);
+});
+
+test('NET-04: the desync event names the first diverging SIM-06 subsystem', () => {
+  const simB = fakeSim();
+  const inboxA = [];
+  const inboxB = [];
+  const eventsA = [];
+  const simA = fakeSim();
+  let ticksA = 0;
+  let ticksB = 0;
+  const parts = (tickNo, economy) => ['rng' + tickNo, 'world' + tickNo, economy, 'targeting' + tickNo];
+  const a = createSession({
+    localSlot: 0,
+    send: (m) => inboxB.push(m),
+    applyBundle: (s, c) => simA.applyBundle(s, c),
+    tickOnce: () => { ticksA++; return simA.tick(); },
+    hashParts: () => parts(ticksA, 'eco-same'),
+    onEvent: (e) => eventsA.push(e),
+  });
+  const b = createSession({
+    localSlot: 1,
+    send: (m) => inboxA.push(m),
+    applyBundle: (s, c) => simB.applyBundle(s, c),
+    tickOnce: () => {
+      ticksB++;
+      return ticksB === 5 * TURN_TICKS + 2 ? 'hdeadbeef' : simB.tick();
+    },
+    hashParts: () => parts(ticksB, ticksB === 5 * TURN_TICKS + 2 ? 'eco-DIVERGED' : 'eco-same'),
+    onEvent: () => {},
+  });
+  a.start(0);
+  b.start(0);
+  const pair = { a, b, flush: () => {
+    for (const m of inboxA.splice(0)) a.receive(m);
+    for (const m of inboxB.splice(0)) b.receive(m);
+  } };
+  run(pair, 0, 2000);
+  const dA = eventsA.find((e) => e.type === 'desync');
+  assert.ok(dA, 'desync detected');
+  assert.equal(dA.subsystem, 'economy');
+});
+
+test('NET-04: a legacy per-turn hash still compares against the last tick', () => {
+  const pair = linkedPair();
+  pair.a.start(0);
+  pair.b.start(0);
+  // Rewrite every hash message bound for A into the legacy
+  // single-hash form (a cached older client): the match must run
+  // clean — the legacy hash is the turn's last-tick hash.
+  for (let t = 0; t <= 2000; t += 10) {
+    pair.a.pump(t);
+    pair.b.pump(t);
+    for (const m of pair.inboxB.splice(0)) pair.b.receive(m);
+    for (const m of pair.inboxA.splice(0)) {
+      pair.a.receive(m.type === 'hash'
+        ? { type: 'hash', turn: m.turn, hash: m.hashes[m.hashes.length - 1] }
+        : m);
+    }
+  }
+  assert.equal(pair.eventsA.filter((e) => e.type === 'desync').length, 0);
+  assert.ok(pair.a.state().turn > 20, 'turns executed under legacy hashes');
+});
+
+test('NET-04 codec: per-tick hash messages validate strictly', () => {
+  assert.equal(decodeMessage('{"type":"hash","turn":1,"hashes":["ha","hb","hc"]}').ok, true);
+  assert.equal(decodeMessage('{"type":"hash","turn":1,"hashes":["ha"],"parts":[["r","w"]]}').ok, true);
+  assert.equal(decodeMessage('{"type":"hash","turn":1,"hash":"hlast"}').ok, true);
+  assert.equal(decodeMessage('{"type":"hash","turn":1,"hashes":"nope"}').ok, false);
+  assert.equal(decodeMessage('{"type":"hash","turn":1,"hashes":["ha"],"parts":[["r"],["x"]]}').ok, false);
+  assert.equal(decodeMessage('{"type":"hash","turn":1,"hashes":[]}').ok, false);
+});
+
 test('NET-07: exact duplicates within one bundle collapse', () => {
   const pair = linkedPair();
   pair.a.start(0);

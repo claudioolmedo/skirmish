@@ -230,6 +230,7 @@ const EN = {
   // --- desync / peer overlays -----------------------------------------
   'desync.title': 'Desync detected',
   'desync.detail': 'The two clients\' simulations diverged at turn {turn}. The match cannot continue — download the replay to help diagnose it.',
+  'desync.detailTick': 'The two clients\' simulations diverged at turn {turn}, tick {tick} — first differing subsystem: {subsystem}. The match cannot continue — download the replay to help diagnose it.',
   'peer.title': 'Opponent disconnected',
   'peer.detailDefault': 'Your opponent\'s connection dropped.',
   'peer.detailGrace': 'Your opponent\'s connection dropped. If they reopen the same link within {secs} s, the match resumes where it stopped.',
@@ -704,6 +705,7 @@ const PT_BR = {
   // --- desync / peer overlays ------------------------------------------------
   'desync.title': 'Dessincronia detectada',
   'desync.detail': 'As simulações dos dois clientes divergiram no turno {turn}. A partida não pode continuar — baixe o replay para ajudar a diagnosticar.',
+  'desync.detailTick': 'As simulações dos dois clientes divergiram no turno {turn}, tick {tick} — primeiro subsistema diferente: {subsystem}. A partida não pode continuar — baixe o replay para ajudar a diagnosticar.',
   'peer.title': 'Oponente desconectado',
   'peer.detailDefault': 'A conexão do seu oponente caiu.',
   'peer.detailGrace': 'A conexão do seu oponente caiu. Se ele reabrir o mesmo link dentro de {secs} s, a partida continua de onde parou.',
@@ -1178,6 +1180,7 @@ const ES = {
   // --- desync / peer overlays ------------------------------------------------
   'desync.title': 'Desincronización detectada',
   'desync.detail': 'Las simulaciones de los dos clientes divergieron en el turno {turn}. La partida no puede continuar — descarga la repetición para ayudar a diagnosticarla.',
+  'desync.detailTick': 'Las simulaciones de los dos clientes divergieron en el turno {turn}, tick {tick} — primer subsistema diferente: {subsystem}. La partida no puede continuar — descarga la repetición para ayudar a diagnosticarla.',
   'peer.title': 'Oponente desconectado',
   'peer.detailDefault': 'La conexión de tu oponente se cortó.',
   'peer.detailGrace': 'La conexión de tu oponente se cortó. Si reabre el mismo enlace dentro de {secs} s, la partida continúa donde se detuvo.',
