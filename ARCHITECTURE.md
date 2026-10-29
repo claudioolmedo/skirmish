@@ -293,8 +293,10 @@ spec; anything the sources don't pin down is marked UNVERIFIED in
 - **MOV-04.** A melee unit in range of its target with an attack
   engaged is exempt from separation steering, both as the pushed
   and the pusher's problem: it holds its ground mid-swing.
-- **Death is a tombstone (deliberate deviation from CMB-14's
-  letter).** HP is fractional; an entity dies when HP < 1 (CMB-02),
+- **Death is a tombstone (internal representation, registered
+  under CMB-14 — audited 2026-10-29: out of play in every
+  observable way, so CMB-14 reads MATCHES).** HP is fractional;
+  an entity dies when HP < 1 (CMB-02),
   in the death sweep at the end of the combat phase. The entity
   stays in the Vec flagged `dead` — out of play in every observable
   way (no motion, work, targeting, population, rendering), its carry

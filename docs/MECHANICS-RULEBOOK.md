@@ -1864,9 +1864,18 @@ corpse is a client-side cosmetic with a decay timer, not sim state.
 the death sweep (CMB-02) frees population, orders and carry the same
 tick — but the entity record stays as a *tombstone* (ids are never
 reused; the record is hashed state) instead of being removed from the
-Vec: a deliberate deviation from this rule's letter, recorded in
-ARCHITECTURE.md. Garrison effects have no instance (no garrison).
-· *Status:* **DIFFERS**.
+Vec, recorded in ARCHITECTURE.md. Garrison effects have no instance
+(no garrison). · *Status:* **MATCHES** (from DIFFERS — audited
+2026-10-29 by the bot loop, fidelity-audit Package A, on the MOV-04
+precedent: every observable clause of this rule holds — population
+is freed the same tick, orders and carry vanish with the unit, and
+the tombstone is out of play in every observable way (no motion,
+work, targeting, population or rendering; ARCHITECTURE.md). The
+tombstone is an internal representation (stable ids / hashed state),
+not a behavioural difference: it is pinned by
+`sim/tests/combat.rs::villager_dies_to_boar_population_drops_tombstone_stays`
+("death must free the pop slot the same tick"). The garrison clause
+has no instance yet — the same no-instance pattern as CMB-15.)
 
 **CMB-15 — Buildings burn, then free their ground.** A destroyed building
 is removed, its footprint freed for pathing and placement, its queue
@@ -2656,13 +2665,18 @@ human. The simulation neither knows nor cares which seat is human.
 *Source:* GAP §9 (skirmish AI structure); Bettner & Terrano (command
 model). · *Impl:* the AI is a separate crate/process producing `Command`
 lists per tick; the sim has no AI hooks. This also makes AI-vs-AI test
-games and replay verification free. · *Status:* **DIFFERS** (M5,
-2026-10-16: the opponent ships as a deterministic module inside the sim
-crate (`sim/src/ai.rs`), not the separate crate/process the sketch
-above envisions — but the discipline the rule protects holds exactly:
-it issues only ordinary Commands through the same queue, on a fixed
-decision cadence, derived from sim state alone, so AI matches replay
-bit-identically and the sim treats both seats alike.)
+games and replay verification free. · *Status:* **MATCHES** (from
+DIFFERS — audited 2026-10-29 by the bot loop, fidelity-audit
+Package A, on the MOV-04 precedent. The M5 note stands as history:
+the opponent ships as a deterministic module inside the sim crate
+(`sim/src/ai.rs`), not the separate crate/process the sketch above
+envisions — but the discipline the rule protects holds exactly:
+it issues only ordinary Commands through the same queue
+(`sim/src/ai.rs` pushes only `Command` values via
+`sim.push_command`), on a fixed decision cadence, derived from sim
+state alone, so AI matches replay bit-identically and the sim treats
+both seats alike. The crate/process packaging is internal and
+invisible to behaviour, determinism and players.)
 
 **AI-02 — DE-class AI does not cheat resources.** On every difficulty,
 the AI gathers, pays, and trains under the same costs and rules as a
@@ -3688,6 +3702,17 @@ the pinning tests this run, MOV-04 moves MISSING → MATCHES, so
 §5 stands at 12 rules, 5 / 3 / 4 and the book at 221 rules,
 130 / 30 / 61. The table below equals the body.
 
+updated 2026-10-29 for CMB-14 + AI-01 (bot-loop, fidelity-audit
+Package A): both entries' observable behaviour already matched
+the DE; their DIFFERS rested only on internal representation /
+packaging (the CMB-14 tombstone record; the AI living inside the
+sim crate instead of a separate crate/process). Audited
+clause-by-clause against `sim/tests/combat.rs`,
+`sim/src/ai.rs` and ARCHITECTURE.md this run (MOV-04 precedent),
+CMB-14 and AI-01 move DIFFERS → MATCHES, so §8 stands at 16
+rules, 15 / 0 / 1, §15 stands at 9 rules, 8 / 0 / 1 and the book
+at 221 rules, 132 / 28 / 61. The table below equals the body.
+
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
 | 1 | Simulation & time (SIM) | 12 | 12 | 0 | 0 |
@@ -3697,18 +3722,18 @@ the pinning tests this run, MOV-04 moves MISSING → MATCHES, so
 | 5 | Movement, pathfinding & collision (MOV) | 12 | 5 | 3 | 4 |
 | 6 | Economy & drop-off (ECO) | 17 | 14 | 1 | 2 |
 | 7 | Buildings & placement (BLD) | 20 | 13 | 6 | 1 |
-| 8 | Combat & damage (CMB) | 16 | 14 | 1 | 1 |
+| 8 | Combat & damage (CMB) | 16 | 15 | 0 | 1 |
 | 9 | Projectiles & ballistics (PRJ) | 10 | 5 | 3 | 2 |
 | 10 | Unit classes & counters (CLS) | 8 | 5 | 0 | 3 |
 | 11 | Technologies & age advancement (TEC) | 11 | 5 | 3 | 3 |
 | 12 | Monks, conversion & relics (MNK) | 13 | 0 | 0 | 13 |
 | 13 | Trade, market & tribute (TRD) | 8 | 3 | 0 | 5 |
 | 14 | Garrison, transport & repair (GAR) | 10 | 0 | 0 | 10 |
-| 15 | AI behavior & difficulty (AI) | 9 | 7 | 1 | 1 |
+| 15 | AI behavior & difficulty (AI) | 9 | 8 | 0 | 1 |
 | 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |
 | 17 | Multiplayer determinism (NET) | 11 | 6 | 3 | 2 |
 | 18 | Information rules (INF) | 13 | 9 | 2 | 2 |
-| | **Total** | **221** | **130** | **30** | **61** |
+| | **Total** | **221** | **132** | **28** | **61** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer
