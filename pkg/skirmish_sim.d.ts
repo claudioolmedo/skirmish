@@ -743,6 +743,13 @@ export class WasmSim {
      */
     state_hash(): string;
     /**
+     * SIM-06 subsystem hash parts as one comma-separated string
+     * of 16-char hex values: rng, world, economy, targeting,
+     * full. Pure read, without advancing the sim — NET-04's
+     * per-tick desync diagnostics consume the first four.
+     */
+    state_hash_parts(): string;
+    /**
      * Stockpile as `[food, wood, gold, stone]` (f64 at the boundary).
      * The human player's — unchanged since M2; use `stockpile_for`
      * for another seat (M5).
@@ -957,6 +964,7 @@ export interface InitOutput {
     readonly wasmsim_research_block_tc_at: (a: number, b: number, c: number) => number;
     readonly wasmsim_score_for: (a: number, b: number) => [number, number];
     readonly wasmsim_state_hash: (a: number) => [number, number];
+    readonly wasmsim_state_hash_parts: (a: number) => [number, number];
     readonly wasmsim_stockpile: (a: number) => [number, number];
     readonly wasmsim_stockpile_for: (a: number, b: number) => [number, number];
     readonly wasmsim_stone: (a: number) => number;

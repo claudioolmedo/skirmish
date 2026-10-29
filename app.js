@@ -3452,6 +3452,12 @@ function makeNetSession() {
       sim.tick();
       return sim.state_hash();
     },
+    // NET-04: SIM-06 subsystem parts for the tick just run, so a
+    // desync report names the first diverging subsystem. Guarded:
+    // a cached older pkg without the export simply omits parts.
+    hashParts: typeof sim.state_hash_parts === 'function'
+      ? () => sim.state_hash_parts().split(',').slice(0, 4)
+      : null,
     onEvent: (e) => {
       if (!net) return;
       if (e.type === 'desync') onDesync(e);
@@ -3550,8 +3556,11 @@ function netMatchEnd(localMs, opts) {
   updateNetStatus();
   if (opts.desync) {
     if (netUi) {
-      netUi.desyncDetail.textContent =
-        t('desync.detail', { turn: opts.desyncTurn });
+      netUi.desyncDetail.textContent = (opts.desyncTick != null && opts.desyncSubsystem)
+        ? t('desync.detailTick', {
+          turn: opts.desyncTurn, tick: opts.desyncTick, subsystem: opts.desyncSubsystem,
+        })
+        : t('desync.detail', { turn: opts.desyncTurn });
     }
     showOverlay(netUi && netUi.desyncOverlay, true);
     return;
@@ -3562,7 +3571,11 @@ function netMatchEnd(localMs, opts) {
 function onDesync(e) {
   if (!net) return;
   net.desyncs = (net.desyncs || 0) + 1;
-  netMatchEnd(2, { desync: true, desyncTurn: e.turn });
+  netMatchEnd(2, {
+    desync: true, desyncTurn: e.turn,
+    desyncTick: typeof e.tick === 'number' ? e.tick : null,
+    desyncSubsystem: e.subsystem || null,
+  });
 }
 
 /// Tear the whole netplay state down (the caller resets the local

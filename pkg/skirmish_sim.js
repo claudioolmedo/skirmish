@@ -1504,6 +1504,25 @@ export class WasmSim {
         }
     }
     /**
+     * SIM-06 subsystem hash parts as one comma-separated string
+     * of 16-char hex values: rng, world, economy, targeting,
+     * full. Pure read, without advancing the sim — NET-04's
+     * per-tick desync diagnostics consume the first four.
+     * @returns {string}
+     */
+    state_hash_parts() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.wasmsim_state_hash_parts(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
      * Stockpile as `[food, wood, gold, stone]` (f64 at the boundary).
      * The human player's — unchanged since M2; use `stockpile_for`
      * for another seat (M5).

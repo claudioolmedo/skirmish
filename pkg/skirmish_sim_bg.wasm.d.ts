@@ -126,6 +126,7 @@ export const wasmsim_research_block_tc: (a: number, b: number) => number;
 export const wasmsim_research_block_tc_at: (a: number, b: number, c: number) => number;
 export const wasmsim_score_for: (a: number, b: number) => [number, number];
 export const wasmsim_state_hash: (a: number) => [number, number];
+export const wasmsim_state_hash_parts: (a: number) => [number, number];
 export const wasmsim_stockpile: (a: number) => [number, number];
 export const wasmsim_stockpile_for: (a: number, b: number) => [number, number];
 export const wasmsim_stone: (a: number) => number;
