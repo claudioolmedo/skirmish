@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  TURN_TICKS, GAME_SPEED, TICK_MS, TURN_MS, advanceTicks,
+  TURN_TICKS, GAME_SPEED, GAME_SPEEDS, isGameSpeed, turnMsFor, TICK_MS, TURN_MS, advanceTicks,
   INITIAL_DELAY_TURNS, LOAD_TIMEOUT_MS,
   validateCommand, applyCommand, tcIdOf,
   encodeMessage, decodeMessage,
@@ -749,6 +749,56 @@ test('startAt: a session opens at the frontier with an empty delay buffer', () =
 // (DE Normal), drives BOTH places real time becomes ticks —
 // the local frame loop's accumulator (advanceTicks) and the
 // netplay turn pacing (TURN_MS). The sim never sees it.
+// SIM-11 (bot-loop, 2026-10-28): the constant became a SETTING —
+// the same conversion takes the match's chosen speed (GAME_SPEEDS),
+// sessions pace their turns from it, and the default stays 1.7.
+
+test('game speed setting: the DE lobby speeds, standard 1.7', () => {
+  assert.deepEqual(GAME_SPEEDS, [1.0, 1.5, 1.7, 2.0]);
+  for (const s of GAME_SPEEDS) assert.ok(isGameSpeed(s), `${s} is a lobby speed`);
+  for (const bad of [0, 1.2, 3, '1.7', null, undefined, NaN]) {
+    assert.ok(!isGameSpeed(bad), `${bad} is not a lobby speed`);
+  }
+  // Turn wall time scales inversely with the speed; the default
+  // export stays the standard-speed value existing callers pin.
+  assert.equal(turnMsFor(1.7), TURN_MS);
+  assert.ok(Math.abs(turnMsFor(1.0) - 50) < 1e-9, 'at 1.0x a turn is 50 wall ms');
+  assert.ok(Math.abs(turnMsFor(2.0) - 25) < 1e-9, 'at 2.0x a turn is 25 wall ms');
+  assert.equal(turnMsFor(9), TURN_MS, 'an unknown speed falls back to standard');
+});
+
+test('game speed setting: advanceTicks honours the match speed', () => {
+  // One real second at 1.0x runs exactly one game second (60 ticks).
+  let acc = 0; let total = 0;
+  for (let i = 0; i < 60; i++) { const r = advanceTicks(acc, 1000 / 60, 1.0); acc = r.accMs; total += r.ticks; }
+  assert.ok(Math.abs(total - 60) <= 1, `1.0x ticks over 60 frames: ${total}`);
+  // At 2.0x the same wall second runs two game seconds (120 ticks).
+  acc = 0; total = 0;
+  for (let i = 0; i < 60; i++) { const r = advanceTicks(acc, 1000 / 60, 2.0); acc = r.accMs; total += r.ticks; }
+  assert.ok(Math.abs(total - 120) <= 1, `2.0x ticks over 60 frames: ${total}`);
+  // No speed argument = the pre-setting behaviour, bit for bit.
+  assert.deepEqual(advanceTicks(0, 50), advanceTicks(0, 50, 1.7));
+  assert.deepEqual(advanceTicks(0, 50, 9), advanceTicks(0, 50), 'unknown speed falls back');
+});
+
+test('game speed setting: two sessions at 2.0x pace turns at 2.0x, in lockstep', () => {
+  const fast = linkedPair({ speed: 2.0 });
+  fast.a.start(0);
+  fast.b.start(0);
+  run(fast, 0, 1500);
+  const std = linkedPair();
+  std.a.start(0);
+  std.b.start(0);
+  run(std, 0, 1500);
+  assert.equal(fast.a.state().turn, fast.b.state().turn, 'fast pair stays in lockstep');
+  assert.equal(fast.eventsA.filter((e) => e.type === 'desync').length, 0);
+  // 1500 wall ms hold 1500/25 = 60 turns at 2.0x and 1500/29.41 ≈ 51
+  // at the standard 1.7x: the executed-turn counts track the speeds.
+  assert.ok(Math.abs(fast.a.state().turn - 60) <= 2, `2.0x turns: ${fast.a.state().turn}`);
+  assert.ok(Math.abs(std.a.state().turn - 51) <= 2, `1.7x turns: ${std.a.state().turn}`);
+  assert.ok(fast.a.state().turn > std.a.state().turn,
+    'the faster setting executes more turns in the same wall time');
+});
 
 test('game speed: 1.7x drives the turn interval math', () => {
   assert.equal(GAME_SPEED, 1.7, 'DE Normal speed');

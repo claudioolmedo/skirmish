@@ -48,15 +48,34 @@ export const GAME_SPEED = 1.7;
 export const TICK_MS = 1000 / 60; // one sim tick at 1.0x (game ms)
 export const TURN_MS = (TURN_TICKS * TICK_MS) / GAME_SPEED; // ≈29.41 ms of wall time per turn
 
+// SIM-11 (bot-loop, 2026-10-28): the match speed setting. DE lobbies
+// offer 1.0 / 1.5 / 2.0 with 1.7 as the standard ranked speed; the
+// setting multiplies how many game-seconds pass per real second and
+// NOTHING else — per-game-second behaviour is identical at every
+// speed, and the sim never learns the speed. A match carries ONE
+// speed, chosen before it starts (the Create Lobby settings for a
+// hosted match — the host's choice rides the 'start' handshake —
+// or the pause menu's speed row, applied on Restart for a local
+// match), and the replay meta records it so playback paces the
+// match as it was played.
+export const GAME_SPEEDS = [1.0, 1.5, 1.7, 2.0];
+export function isGameSpeed(v) {
+  return typeof v === 'number' && GAME_SPEEDS.includes(v);
+}
+export function turnMsFor(speed) {
+  return (TURN_TICKS * TICK_MS) / (isGameSpeed(speed) ? speed : GAME_SPEED);
+}
+
 /**
- * Advance a tick accumulator by `dtMs` of wall time at
- * GAME_SPEED. The accumulator is kept in GAME milliseconds:
- * pass the previous remainder back in as `accGameMs`. Returns
- * how many whole ticks to run now and the new remainder. Pure —
- * the frame loop, the replay driver and the tests share it.
+ * Advance a tick accumulator by `dtMs` of wall time at `speed`
+ * (default GAME_SPEED, DE Normal). The accumulator is kept in GAME
+ * milliseconds: pass the previous remainder back in as `accGameMs`.
+ * Returns how many whole ticks to run now and the new remainder.
+ * Pure — the frame loop, the replay driver and the tests share it.
  */
-export function advanceTicks(accGameMs, dtMs) {
-  const total = accGameMs + dtMs * GAME_SPEED;
+export function advanceTicks(accGameMs, dtMs, speed = GAME_SPEED) {
+  const s = isGameSpeed(speed) ? speed : GAME_SPEED;
+  const total = accGameMs + dtMs * s;
   const ticks = Math.floor(total / TICK_MS);
   return { ticks, accMs: total - ticks * TICK_MS };
 }
@@ -353,12 +372,17 @@ export function createSession({
   localSlot,
   turnTicks = TURN_TICKS,
   initialDelay = INITIAL_DELAY_TURNS,
+  speed = GAME_SPEED,
   send,
   applyBundle,
   tickOnce,
   onEvent = () => {},
   onTurn = null,
 }) {
+  // SIM-11: this session's pace. Both lockstep clients build their
+  // session from the SAME match speed (the host's, from the 'start'
+  // handshake), so their turn pacing agrees tick for tick.
+  const TURN_MS = turnMsFor(speed);
   let phase = 'idle'; // idle | running | desync | ended
   let anchorTurn = 0; // execution-time anchor: turn -> wall time
   let anchorMs = 0;

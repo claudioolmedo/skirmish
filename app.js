@@ -63,7 +63,7 @@ import {
 import {
   TURN_TICKS as NET_TURN_TICKS, REJOIN_GRACE_MS, LOAD_TIMEOUT_MS,
   PEER_STALL_TIMEOUT_MS,
-  GAME_SPEED, TICK_MS, advanceTicks,
+  GAME_SPEED, GAME_SPEEDS, isGameSpeed, TICK_MS, advanceTicks,
   applyCommand as netApplyCommand, tcIdOf as netTcIdOf,
   createSession, createRecorder, replayEvents, isReplay,
   createRelayClient, probeRegionPing, makeRoomId, buildPlayUrl,
@@ -517,6 +517,15 @@ let matchMode = ['sandbox', 'easy', 'normal'].includes(params.get('mode'))
   ? params.get('mode')
   : 'normal';
 let builtMode = null; // the mode the current sim instance was built with
+// SIM-11 (bot-loop, 2026-10-28): match speed. `matchSpeed` paces the
+// LIVE local match (frame-loop accumulator + the replay meta recorded
+// at match start); `chosenSpeed` is the pause menu's speed-row
+// selection, applied on Restart like the match mode beside it. A
+// hosted match instead takes the Create Lobby setting (net.speed),
+// which the host's 'start' handshake carries to the guest. The sim
+// never sees any of this — only the wall-clock conversion does.
+let matchSpeed = GAME_SPEED;
+let chosenSpeed = GAME_SPEED;
 let matchEnded = false; // the victory/defeat overlay is up; the sim holds
 
 // --- M8: lockstep multiplayer -------------------------------------------
@@ -1765,6 +1774,22 @@ const qualityModeBtns = {
   medium: document.getElementById('q-medium'),
   low: document.getElementById('q-low'),
 };
+
+// SIM-11: the pause menu's game-speed row (keys are the speed value
+// as a string, matching GAME_SPEEDS). The pick is `chosenSpeed`; a
+// local Restart applies it, exactly like the match mode above it.
+const speedBtns = {
+  1: document.getElementById('sp-10'),
+  1.5: document.getElementById('sp-15'),
+  1.7: document.getElementById('sp-17'),
+  2: document.getElementById('sp-20'),
+};
+
+function updateSpeedUi() {
+  for (const [v, btn] of Object.entries(speedBtns)) {
+    if (btn) btn.classList.toggle('active', chosenSpeed === Number(v));
+  }
+}
 
 function updateQualityUi() {
   // No quality readout in the top bar (Claudio, 2026-10-17 — it took
@@ -3266,8 +3291,10 @@ function resetSim(mode = matchMode) {
     : WasmSim.new_match(seed, MODE_TAG[mode]);
   // M8: every local match records its command stream — the end
   // overlay (and the pause menu) can download it as a replay.
+  // SIM-11: a fresh local match takes the pause menu's chosen speed.
+  matchSpeed = chosenSpeed;
   localRecorder = createRecorder({
-    seed, modeTag: MODE_TAG[mode], seats: [0], view: 0,
+    seed, modeTag: MODE_TAG[mode], seats: [0], view: 0, speed: matchSpeed,
   });
   seenBuildings.clear(); // M7: last-known enemy buildings are per-match
   resetEventFeed();
@@ -3408,6 +3435,7 @@ function adoptSim(newSim, owner) {
 function makeNetSession() {
   return createSession({
     localSlot: net.role === 'host' ? 0 : 1,
+    speed: isGameSpeed(net.speed) ? net.speed : GAME_SPEED, // SIM-11
     send: (m) => net.client.send(m),
     applyBundle: (slot, cmds) => {
       const o = slot === 0 ? 0 : 2;
@@ -3795,6 +3823,7 @@ async function hostStartMatch() {
   net.pendingSim = WasmSim.new_match(net.seed, MODE_TAG.online);
   net.client.send({
     type: 'start', seed: net.seed, hash0: net.pendingSim.state_hash(),
+    speed: isGameSpeed(net.speed) ? net.speed : GAME_SPEED, // SIM-11: the host's setting paces both clients
   });
   // The host's own build IS its verification — it is loaded.
   markSelfLoaded();
@@ -3828,6 +3857,9 @@ async function guestHandleStart(msg) {
     return;
   }
   net.seed = msg.seed;
+  // SIM-11: adopt the host's match speed (older hosts send none —
+  // the standard speed stands). Both sessions pace from this value.
+  net.speed = isGameSpeed(msg.speed) ? msg.speed : GAME_SPEED;
   net.pendingSim = candidate;
   markSelfLoaded();
   // start-ack IS the loaded signal (M10): the sim is built and
@@ -3877,6 +3909,7 @@ async function hostStartAiMatch() {
 /// sim becomes a local match under the aiRoom marker.
 function beginAiMatch(mode) {
   const seed = net.seed;
+  const speed = isGameSpeed(net.speed) ? net.speed : GAME_SPEED;
   const candidate = net.pendingSim;
   net.pendingSim = null;
   // The room's life is over: mark it ended BEFORE teardown
@@ -3884,7 +3917,7 @@ function beginAiMatch(mode) {
   // a peer dropping out of the loading phase.
   net.phase = 'ended';
   teardownNet(); // clears the load timer, closes the room socket
-  aiRoom = { mode, seed };
+  aiRoom = { mode, seed, speed };
   adoptAiMatch(candidate, mode, seed);
 }
 
@@ -3896,8 +3929,11 @@ function beginAiMatch(mode) {
 function adoptAiMatch(candidate, mode, seed) {
   adoptSim(candidate, 0);
   builtMode = mode;
+  // SIM-11: the AI-room match paces at the room's chosen speed (the
+  // aiRoom marker carries it; a Restart keeps the same speed).
+  matchSpeed = aiRoom && isGameSpeed(aiRoom.speed) ? aiRoom.speed : GAME_SPEED;
   localRecorder = createRecorder({
-    seed, modeTag: MODE_TAG[mode], seats: [0], view: 0,
+    seed, modeTag: MODE_TAG[mode], seats: [0], view: 0, speed: matchSpeed,
   });
   setInMatch(true); // the match begins: the game appears
   setPaused(false);
@@ -3925,6 +3961,7 @@ function beginOnlineMatch() {
   net.recorder = createRecorder({
     seed: net.seed, modeTag: MODE_TAG.online, region: net.region,
     seats: [0, 2], view: owner,
+    speed: isGameSpeed(net.speed) ? net.speed : GAME_SPEED, // SIM-11
   });
   net.session = makeNetSession();
   net.phase = 'playing';
@@ -3965,7 +4002,7 @@ function roomConfigStrings() {
   return {
     slot: slotStrings(),
     you: t('room.you'),
-    format: (guest) => t('room.config', { guest }),
+    format: (guest, speed) => t('room.config', { guest, speed }),
   };
 }
 function lobbyStrings() {
@@ -4019,6 +4056,7 @@ function renderRoom() {
   if (netUi.roomConfigLine) {
     netUi.roomConfigLine.textContent = roomConfigText({
       guestSlot: slot, selfIsGuest: !isHost,
+      speed: isGameSpeed(net.speed) ? net.speed : GAME_SPEED, // SIM-11
     }, roomConfigStrings());
   }
   // M12: the guest-seat selector is the host's alone, and it
@@ -4148,6 +4186,7 @@ async function rejoinFromResync(msg) {
   net.recorder = createRecorder({
     seed: net.seed, modeTag: MODE_TAG.online, region: net.region,
     seats: [0, 2], view: owner,
+    speed: isGameSpeed(net.speed) ? net.speed : GAME_SPEED,
   });
   net.recorder.seed(msg.events || []);
   net.session = makeNetSession();
@@ -4756,6 +4795,7 @@ function openLobby(join) {
     desyncs: 0, telemetryPosted: false, pingMs: null,
     selectedRegion: null,
     guestSlot: 'open', // M12: the second seat — Open / AI / Closed
+    speed: GAME_SPEED, // SIM-11: the match speed (host's Create Lobby pick)
     // M10 room model. The password lives ONLY in the host
     // client's memory (net.password), set at create time; it is
     // never persisted and never sent anywhere — guests send
@@ -4878,6 +4918,9 @@ function createGame() {
   // seat filled here rides the create connection as listed=0.
   net.guestSlot = guestSlotOf(netUi.createGuestSlot
     ? netUi.createGuestSlot.value : 'open');
+  // SIM-11: the host's game-speed pick from the same settings box.
+  const speedPick = netUi.createSpeed ? Number(netUi.createSpeed.value) : GAME_SPEED;
+  net.speed = isGameSpeed(speedPick) ? speedPick : GAME_SPEED;
   net.region = net.selectedRegion || net.region || regionList[0].id;
   net.room = makeRoomId();
   // The room lives in memory from here — the address bar stays
@@ -5186,10 +5229,13 @@ function drivePlayback(now) {
   }
   if (!playback.last) playback.last = now;
   // Replay playback follows the same pacing as live play — the
-  // advanceTicks conversion at GAME_SPEED — times the viewer's
-  // own speed setting. (playback.acc is a game-ms remainder.)
+  // advanceTicks conversion at the MATCH's recorded speed (SIM-11;
+  // replays recorded before the setting existed carry no speed and
+  // pace at GAME_SPEED) — times the viewer's own speed setting.
+  // (playback.acc is a game-ms remainder.)
   const adv = advanceTicks(
-    playback.acc, Math.min(now - playback.last, 250) * playback.speed);
+    playback.acc, Math.min(now - playback.last, 250) * playback.speed,
+    isGameSpeed(playback.rec.speed) ? playback.rec.speed : GAME_SPEED);
   playback.last = now;
   playback.acc = adv.accMs;
   let n = 0;
@@ -5314,6 +5360,10 @@ function applyStaticStrings() {
   setText('q-medium', 'quality.medium');
   setText('q-low', 'quality.low');
   setText('quality-note', 'pause.qualityNote');
+  setAttr('speed-row', 'aria-label', 'pause.speed');
+  setText('speed-title', 'pause.speed');
+  setText('sp-17', 'speed.standard');
+  setText('speed-note', 'pause.speedNote');
   setAttr('audio-row', 'aria-label', 'audio.title');
   setText('audio-title', 'audio.title');
   setText('audio-enabled-txt', 'audio.enabled');
@@ -5427,6 +5477,10 @@ function applyStaticStrings() {
   };
   setOptions('create-guest-slot', slotOptions);
   setOptions('guest-slot-select', slotOptions);
+  setText('set-speed-name', 'pause.speed');
+  setOptions('create-speed', {
+    1: 'speed.10', 1.5: 'speed.15', 1.7: 'speed.standard', 2: 'speed.20',
+  });
   setText('btn-create-game', 'lobby.create');
   setText('room-title-h', 'room.title');
   setText('slot-control-txt', 'set.guestSlot');
@@ -5729,6 +5783,7 @@ async function main() {
     roomPassword: document.getElementById('room-password'),
     pwSetRow: document.getElementById('pw-set-row'),
     createGuestSlot: document.getElementById('create-guest-slot'),
+    createSpeed: document.getElementById('create-speed'),
     roomSection: document.getElementById('room-section'),
     slotHost: document.getElementById('slot-host'),
     slotGuest: document.getElementById('slot-guest'),
@@ -5975,6 +6030,14 @@ async function main() {
     if (btn) btn.addEventListener('click', () => setQualityMode(mode));
   }
   updateQualityUi();
+  // SIM-11: game-speed row (pause menu) — the pick applies on Restart.
+  for (const [v, btn] of Object.entries(speedBtns)) {
+    if (btn) btn.addEventListener('click', () => {
+      chosenSpeed = Number(v);
+      updateSpeedUi();
+    });
+  }
+  updateSpeedUi();
 
   // Command panel: ONE delegated listener — renderCommands() rebuilds
   // the buttons per selection context, so per-button refs would go
@@ -6887,11 +6950,12 @@ async function main() {
       return;
     }
     if (playing && !paused && !matchEnded) {
-      // Game speed (gap 2): the accumulator converts wall time
-      // to ticks at GAME_SPEED (DE Normal, 1.7x) — advanceTicks
-      // is the one place that conversion lives, shared with the
-      // netplay pacing and replay playback.
-      const adv = advanceTicks(acc, Math.min(now - last, 250));
+      // Game speed (gap 2 + SIM-11): the accumulator converts wall
+      // time to ticks at the MATCH's speed (DE Normal 1.7x unless
+      // the match was set slower/faster) — advanceTicks is the one
+      // place that conversion lives, shared with the netplay
+      // pacing and replay playback.
+      const adv = advanceTicks(acc, Math.min(now - last, 250), matchSpeed);
       acc = adv.accMs;
       const n = Math.min(adv.ticks, MAX_TICKS_PER_FRAME);
       if (adv.ticks > n) acc = 0; // shed the backlog, as the old cap did
