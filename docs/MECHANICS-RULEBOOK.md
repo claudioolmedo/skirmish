@@ -3142,9 +3142,17 @@ display).
 non-command messages (presence, handshake, telemetry) travel beside
 the bundle stream and never enter hashed state; the sim never sees
 them. In-game *effects* of chat-adjacent features (flare position
-INF-04) are client-side rendering. · *Status:* **DIFFERS** (the
-channel discipline is in place and load-bearing since M8; chat and
-taunts themselves are not implemented yet).
+INF-04) are client-side rendering. Chat and taunts themselves
+shipped 2026-10-25 (commit 071eeb9): in-game chat rides its own
+WebRTC data channel beside the command stream (`play/chat.js`) —
+content never touches the relay, storage, telemetry or a replay,
+and the sim never sees it; a bare mapped number sends only the
+taunt code and both clients play their LOCAL generated sound, so
+no chat or taunt ever consumes RNG, alters iteration, or is
+required to reproduce a match (pinned by `play/chat.test.mjs`,
+which proves chat content never appears in a signaling frame, and
+`play/netplay.test.mjs`'s rtc-envelope cases). · *Status:*
+**MATCHES**.
 
 **NET-11 — Diplomacy is match state, not sim physics.** Player stances
 (ally/neutral/enemy) live in a diplomacy table consulted by targeting
@@ -3652,6 +3660,16 @@ earlier the same day (its commit flipped the rule's Status but
 not the table): §17 stands at 11 rules, 5 / 4 / 2 and the book
 at 221 rules, 128 / 31 / 62. The table below equals the body.
 
+updated 2026-10-28 for NET-10 (bot-loop): the P2P in-game chat
+with numbered sound taunts shipped 2026-10-25 (071eeb9) already
+satisfied this rule — chat and taunts travel beside the command
+stream and never enter hashed state — but the entry's Status was
+never updated in that commit; audited clause-by-clause against
+`play/chat.js` and its tests this run, NET-10 moves
+DIFFERS → MATCHES, so §17 stands at 11 rules, 6 / 3 / 2 and the
+book at 221 rules, 129 / 30 / 62. The table below equals the
+body.
+
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
 | 1 | Simulation & time (SIM) | 12 | 12 | 0 | 0 |
@@ -3670,9 +3688,9 @@ at 221 rules, 128 / 31 / 62. The table below equals the body.
 | 14 | Garrison, transport & repair (GAR) | 10 | 0 | 0 | 10 |
 | 15 | AI behavior & difficulty (AI) | 9 | 7 | 1 | 1 |
 | 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |
-| 17 | Multiplayer determinism (NET) | 11 | 5 | 4 | 2 |
+| 17 | Multiplayer determinism (NET) | 11 | 6 | 3 | 2 |
 | 18 | Information rules (INF) | 13 | 9 | 2 | 2 |
-| | **Total** | **221** | **128** | **31** | **62** |
+| | **Total** | **221** | **129** | **30** | **62** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer
