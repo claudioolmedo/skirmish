@@ -221,6 +221,19 @@ impl WasmSim {
         self.push_train_at(building, EntityKind::Skirmisher)
     }
 
+    /// Enqueue a Knight at a completed Stable (Castle P2 —
+    /// `can_train_at` carries the Castle Age gate). See
+    /// `push_train_militia`.
+    pub fn push_train_knight(&mut self, building: u32) -> bool {
+        self.push_train_at(building, EntityKind::Knight)
+    }
+
+    /// Enqueue a Cavalry Archer at a completed Archery Range
+    /// (Castle P2). See `push_train_militia`.
+    pub fn push_train_cavalry_archer(&mut self, building: u32) -> bool {
+        self.push_train_at(building, EntityKind::CavalryArcher)
+    }
+
     fn push_train_at(&mut self, building: u32, kind: EntityKind) -> bool {
         let ok = self.inner.can_train_at(building, kind);
         if ok {

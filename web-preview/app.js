@@ -288,17 +288,20 @@ const KIND_SHEEP = 5;
 // play/i18n.js on every locale switch (refreshNames) — the
 // semantic ids index the string table (unit.<id>, building.<id>).
 const KIND_I18N = ['villager', 'townCenter', 'scout', 'militia', 'archer',
-  'sheep', 'boar', 'deer', 'manAtArms', 'spearman', 'skirmisher', 'wolf'];
+  'sheep', 'boar', 'deer', 'manAtArms', 'spearman', 'skirmisher', 'wolf',
+  'knight', 'lightCavalry', 'cavalryArcher'];
 let KIND_NAME = {
   0: 'Villager', 1: 'Town Center', 2: 'Scout Cavalry', 3: 'Militia',
   4: 'Archer', 5: 'Sheep', 6: 'Boar', 7: 'Deer', 8: 'Man-at-Arms',
   9: 'Spearman', 10: 'Skirmisher', 11: 'Wolf',
+  12: 'Knight', 13: 'Light Cavalry', 14: 'Cavalry Archer',
 };
 // Selection-panel portraits per unit kind (SVG symbol ids in
 // play/index.html).
 const KIND_ICON = {
   0: 'i-villager', 2: 'i-villager', 3: 'i-militia', 4: 'i-archer', 5: 'i-pop',
   8: 'i-militia', 9: 'i-spearman', 10: 'i-skirmisher',
+  12: 'i-villager', 13: 'i-villager', 14: 'i-archer',
 };
 
 // Original PNG icon set (2026-10-19, AI generations via Base44 on
@@ -391,6 +394,7 @@ let TECH_NAME = {
   7: 'Forging', 8: 'Scale Barding Armor', 9: 'Bloodlines',
   10: 'Double-Bit Axe', 11: 'Gold Mining', 12: 'Stone Mining',
   13: 'Horse Collar', 14: 'Castle Age', 15: 'Hand Cart',
+  16: 'Light Cavalry', 17: 'Husbandry',
 };
 // Research-block explanations, indexed by the sim's ResearchBlock
 // tag (0 ok — unused, 1 funds, 2 queue full, 3 already done,
@@ -417,6 +421,7 @@ function refreshNames() {
     9: t('tech.bloodlines'), 10: t('tech.doublebit'),
     11: t('tech.goldmining'), 12: t('tech.stonemining'),
     13: t('tech.horsecollar'), 14: t('age.castle'), 15: t('tech.handcart'),
+    16: t('tech.lightcavalry'), 17: t('tech.husbandry'),
   };
   RESEARCH_BLOCK_TITLES = [
     '', t('block.noResources'), t('block.queueFullTrain'),
@@ -868,7 +873,7 @@ function updateEventFeed() {
   const lines = diffFeedEvents(prev, snap, {
     buildingName: (k) => BUILD_NAME[k],
     unitName: (k) => KIND_NAME[k],
-    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15 }[key]],
+    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15, lightcavalry: 16, husbandry: 17 }[key]],
   }, feedFmt());
   feedPrev = snap;
   for (const text of lines) pushFeedLine(text);
@@ -3232,6 +3237,8 @@ function applyLocalOrder(cmd) {
         : cmd.k === 3 ? sim.push_train_militia(cmd.b)
         : cmd.k === 9 ? sim.push_train_spearman(cmd.b)
         : cmd.k === 10 ? sim.push_train_skirmisher(cmd.b)
+        : cmd.k === 12 ? sim.push_train_knight(cmd.b)
+        : cmd.k === 14 ? sim.push_train_cavalry_archer(cmd.b)
         : sim.push_train_archer(cmd.b);
     case 'train_vil': return sim.push_train_villager_at(cmd.tc != null ? cmd.tc : myTcId);
     case 'research_tc': return sim.push_research_tc_at(cmd.tc != null ? cmd.tc : myTcId, cmd.tech);
@@ -8595,6 +8602,71 @@ function drawScout(i, wx, wy) {
   ctx.stroke();
 }
 
+// Castle P2 cavalry draws (vector only — no art sheets exist
+// for these kinds yet, so no art layer is consulted; the bodies
+// follow drawScout's horse-and-rider construction, with each
+// kind's own silhouette: the Knight in full armor with sword
+// and shield, the Light Cavalry a leaner scout-line rider with
+// a lance, the Cavalry Archer with a bow). Presentation only.
+function drawCavalry(i, wx, wy, variant) {
+  const [sx, sy] = worldToScreen(wx, wy);
+  const u = camS;
+  shadow(sx, sy, 1.2 * u);
+  if (selection.has(i)) drawSelRing(sx, sy, 1.5);
+  legs(sx, sy, u, [-0.75, -0.3, 0.45, 0.85], '#5d4630');
+  ctx.fillStyle = variant === 'knight' ? '#6e6258' : '#8a6844'; // horse body (armored barding tone for the Knight)
+  ctx.beginPath();
+  ctx.ellipse(sx, sy - 0.95 * u, 1.15 * u, 0.55 * u, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = ctx.fillStyle; // neck
+  ctx.lineWidth = 0.5 * u;
+  ctx.beginPath();
+  ctx.moveTo(sx + 0.85 * u, sy - 1.2 * u);
+  ctx.lineTo(sx + 1.3 * u, sy - 1.75 * u);
+  ctx.stroke();
+  ctx.fillStyle = '#77572f'; // head
+  ctx.beginPath();
+  ctx.ellipse(sx + 1.45 * u, sy - 1.8 * u, 0.38 * u, 0.22 * u, 0.5, 0, Math.PI * 2);
+  ctx.fill();
+  const cloth = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e';
+  ctx.fillStyle = variant === 'knight' ? '#b9bec6' : cloth; // rider: steel armor (Knight) or player color
+  ctx.beginPath();
+  ctx.ellipse(sx - 0.05 * u, sy - 1.85 * u, 0.42 * u, 0.55 * u, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = variant === 'knight' ? '#9aa1ab' : '#e8c39a'; // head / helm
+  ctx.beginPath();
+  ctx.arc(sx - 0.05 * u, sy - 2.55 * u, 0.26 * u, 0, Math.PI * 2);
+  ctx.fill();
+  if (variant === 'cavarcher') {
+    ctx.strokeStyle = '#8a6844'; // bow
+    ctx.lineWidth = Math.max(1, 0.13 * u);
+    ctx.beginPath();
+    ctx.arc(sx + 0.75 * u, sy - 1.9 * u, 0.55 * u, -1.1, 1.1);
+    ctx.stroke();
+  } else if (variant === 'knight') {
+    ctx.strokeStyle = '#d8d8d8'; // sword, held diagonal
+    ctx.lineWidth = Math.max(1, 0.16 * u);
+    ctx.beginPath();
+    ctx.moveTo(sx + 0.25 * u, sy - 2.4 * u);
+    ctx.lineTo(sx + 1.0 * u, sy - 1.2 * u);
+    ctx.stroke();
+    ctx.fillStyle = cloth; // shield (player color)
+    ctx.beginPath();
+    ctx.arc(sx - 0.75 * u, sy - 1.6 * u, 0.42 * u, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    ctx.strokeStyle = '#d8d8d8'; // lance, held diagonal (Light Cavalry)
+    ctx.lineWidth = Math.max(1, 0.12 * u);
+    ctx.beginPath();
+    ctx.moveTo(sx + 0.2 * u, sy - 2.6 * u);
+    ctx.lineTo(sx + 1.15 * u, sy - 1.05 * u);
+    ctx.stroke();
+  }
+}
+function drawKnight(i, wx, wy) { drawCavalry(i, wx, wy, 'knight'); }
+function drawLightCavalry(i, wx, wy) { drawCavalry(i, wx, wy, 'lightcav'); }
+function drawCavalryArcher(i, wx, wy) { drawCavalry(i, wx, wy, 'cavarcher'); }
+
 function drawMilitia(i, wx, wy) {
   drawFootman(i, wx, wy, 'militia');
 }
@@ -9484,6 +9556,7 @@ function attemptTrain(id) {
   const kindTag = {
     'train-scout': 2, 'train-militia': 3, 'train-archer': 4,
     'train-spearman': 9, 'train-skirmisher': 10,
+    'train-knight': 12, 'train-cavalry-archer': 14,
   }[id];
   if (kindTag == null) return false;
   return selectedBuilding && selectedBuilding.type === 'building'
@@ -9504,6 +9577,7 @@ function flashTrainRefusal(id) {
     const kindTag = {
       'train-scout': 2, 'train-militia': 3, 'train-archer': 4,
       'train-spearman': 9, 'train-skirmisher': 10,
+      'train-knight': 12, 'train-cavalry-archer': 14,
     }[id];
     const reason = sim.building_train_block(selectedBuilding.id, kindTag);
     flash(['', t('train.noResourcesUnit'),
@@ -9529,7 +9603,8 @@ const SHIFT_TRAIN_COUNT = 5;
 function runCommandButton(id, times = 1) {
   if (id === 'train' || id === 'train-scout'
     || id === 'train-militia' || id === 'train-archer'
-    || id === 'train-spearman' || id === 'train-skirmisher') {
+    || id === 'train-spearman' || id === 'train-skirmisher'
+    || id === 'train-knight' || id === 'train-cavalry-archer') {
     let done = 0;
     while (done < times && attemptTrain(id)) done++;
     if (done === 0) flashTrainRefusal(id);
@@ -9632,6 +9707,7 @@ function runCommandButton(id, times = 1) {
       'research-padded': 4, 'research-maa': 5,
       'research-forging': 7, 'research-barding': 8,
       'research-bloodlines': 9, 'research-doublebit': 10,
+      'research-lightcavalry': 16, 'research-husbandry': 17,
       'research-goldmining': 11, 'research-stonemining': 12,
       'research-horsecollar': 13,
     }[id];
@@ -9765,6 +9841,8 @@ function renderCommands() {
   const blockA = bk && context === 'range' ? sim.building_train_block(bk.id, 4) : -1;
   const blockSk = bk && context === 'range' ? sim.building_train_block(bk.id, 10) : -1;
   const blockS = bk && context === 'stable' ? sim.building_train_block(bk.id, 2) : -1;
+  const blockK = bk && context === 'stable' ? sim.building_train_block(bk.id, 12) : -1;
+  const blockCA = bk && context === 'range' ? sim.building_train_block(bk.id, 14) : -1;
   // Research blocks: the TC set (Loom 0, Feudal 1, Wheelbarrow 6,
   // Castle 14, Hand Cart 15) and the building techs, keyed by
   // tag — Blacksmith (Fletching 2, Scale Mail 3, Padded 4,
@@ -9775,7 +9853,7 @@ function renderCommands() {
     ? [myResearchBlockTc(0), myResearchBlockTc(1), myResearchBlockTc(6),
       myResearchBlockTc(14), myResearchBlockTc(15)] : [-1, -1, -1, -1, -1];
   const RB_TAGS = {
-    blacksmith: [2, 3, 4, 7, 8], barracks: [5], stable: [9],
+    blacksmith: [2, 3, 4, 7, 8], barracks: [5], stable: [9, 16, 17],
     lumbercamp: [10], miningcamp: [11, 12], mill: [13],
   };
   const rbB = bk && RB_TAGS[context]
@@ -9786,7 +9864,7 @@ function renderCommands() {
   const sig = [context, Math.floor(wood), Math.floor(myStock()[0]), Math.floor(myStock()[2]),
     Math.floor(myStock()[3]),
     reason, queue, bk ? bk.id : -1, bk ? bk.queue : -1, bk && bk.complete ? 1 : 0,
-    blockM, blockSp, blockA, blockSk, blockS, age, techMask, rbTc.join('.'), Object.values(rbB).join('.'),
+    blockM, blockSp, blockA, blockSk, blockS, blockK, blockCA, age, techMask, rbTc.join('.'), Object.values(rbB).join('.'),
     tcQueueCodes, bkQueueCodes, buildPage || '', repairArm ? 1 : 0,
     scoutSel ? selScouts.join('.') : -1, scoutAuto ? 1 : 0,
     selMil.length ? selMil.join('.') : -1, milStance, orderArm || '',
@@ -10026,10 +10104,28 @@ function renderCommands() {
           ? t('cmd.underConstruction', { name: KIND_NAME[10], building: BUILD_NAME[6] })
           : t('cmd.trainTitle', { name: KIND_NAME[10], cost: costText([[25, 'food'], [35, 'wood']]) }) + (TRAIN_BLOCK_TITLES[blockSk] ? ' ' + TRAIN_BLOCK_TITLES[blockSk] : ''),
       }),
+      // Castle P2: the Cavalry Archer — DE's Castle-Age Range
+      // unit (third top-row slot, E). The sim's train block
+      // greys it before Castle (train_age), and the title
+      // carries the age requirement until then, like the
+      // Spearman's Feudal gate.
+      cmdButton({
+        id: 'train-cavalry-archer', icon: 'i-archer', label: 'Cavalry Archer',
+        costIcon: 'i-wood', cost: 40, cost2Icon: 'i-gold', cost2: 60,
+        disabled: underConstruction || blockCA === 2 || blockCA === 3,
+        key: badgeForButton({ context, id: 'train-cavalry-archer', index: 2 }),
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: KIND_NAME[14], building: BUILD_NAME[6] })
+          : age < 2
+            ? t('cmd.buildGate', { name: KIND_NAME[14], gate: t('gate.castle') })
+            : t('cmd.trainTitleTime', { name: KIND_NAME[14], cost: costText([[40, 'wood'], [60, 'gold']]), secs: 37 }) + (TRAIN_BLOCK_TITLES[blockCA] ? ' ' + TRAIN_BLOCK_TITLES[blockCA] : ''),
+      }),
     );
   } else if (context === 'stable') {
     const underConstruction = !bk.complete;
     const bloodDone = (techMask & 512) !== 0;
+    const lcDone = (techMask & 65536) !== 0;
+    const husbDone = (techMask & 131072) !== 0;
     cmdGrid.append(
       cmdButton({
         id: 'train-scout', icon: 'i-villager', img: 'scout.png', label: 'Scout Cavalry',
@@ -10040,18 +10136,65 @@ function renderCommands() {
           ? t('cmd.underConstruction', { name: KIND_NAME[2], building: BUILD_NAME[7] })
           : t('cmd.trainTitleTime', { name: KIND_NAME[2], cost: costText([[80, 'food']]), secs: 30 }) + (TRAIN_BLOCK_TITLES[blockS] ? ' ' + TRAIN_BLOCK_TITLES[blockS] : ''),
       }),
+      // Castle P2: the Knight — DE's Castle-Age Stable unit
+      // (second top-row slot, W). Castle gate in the title
+      // until then, like the Spearman's Feudal gate.
+      cmdButton({
+        id: 'train-knight', icon: 'i-villager', label: 'Knight',
+        costIcon: 'i-food', cost: 60, cost2Icon: 'i-gold', cost2: 75,
+        disabled: underConstruction || blockK === 2 || blockK === 3,
+        key: badgeForButton({ context, id: 'train-knight', index: 1 }),
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: KIND_NAME[12], building: BUILD_NAME[7] })
+          : age < 2
+            ? t('cmd.buildGate', { name: KIND_NAME[12], gate: t('gate.castle') })
+            : t('cmd.trainTitleTime', { name: KIND_NAME[12], cost: costText([[60, 'food'], [75, 'gold']]), secs: 30 }) + (TRAIN_BLOCK_TITLES[blockK] ? ' ' + TRAIN_BLOCK_TITLES[blockK] : ''),
+      }),
+      // Castle P2: the Light Cavalry upgrade — the second-row
+      // slot under its own unit (A, under the Scout), the
+      // arrangement the Barracks' Man-at-Arms already uses.
+      // Glyph-only button.
+      cmdButton({
+        id: 'research-lightcavalry', icon: 'i-bloodlines', label: 'Light Cavalry',
+        costIcon: 'i-food', cost: 150, cost2Icon: 'i-gold', cost2: 50,
+        disabled: underConstruction || lcDone || rbB[16] === 2 || rbB[16] === 3,
+        key: badgeForButton({ context, id: 'research-lightcavalry', index: 2 }),
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: TECH_NAME[16], building: BUILD_NAME[7] })
+          : lcDone
+            ? t('cmd.researchDone', { name: TECH_NAME[16] })
+            : age < 2
+              ? t('cmd.buildGate', { name: TECH_NAME[16], gate: t('gate.castle') })
+              : t('cmd.lightcavalryTitle', { name: TECH_NAME[16], cost: costText([[150, 'food'], [50, 'gold']]), secs: 45, scout: KIND_NAME[2] }) + (RESEARCH_BLOCK_TITLES[rbB[16]] ? ' ' + RESEARCH_BLOCK_TITLES[rbB[16]] : ''),
+      }),
       // Bloodlines (2026-10-22): the Stable's Feudal research —
-      // mounted units +20 HP. Glyph-only button.
+      // mounted units +20 HP. Glyph-only button. (Castle P2
+      // moved it to the second row, S — see hotkeys.js.)
       cmdButton({
         id: 'research-bloodlines', icon: 'i-bloodlines', label: 'Bloodlines',
         costIcon: 'i-food', cost: 150, cost2Icon: 'i-gold', cost2: 100,
         disabled: underConstruction || bloodDone || rbB[9] === 2 || rbB[9] === 3,
-        key: badgeForButton({ context, id: 'research-bloodlines', index: 1 }),
+        key: badgeForButton({ context, id: 'research-bloodlines', index: 3 }),
         title: underConstruction
           ? t('cmd.underConstruction', { name: TECH_NAME[9], building: BUILD_NAME[7] })
           : bloodDone
             ? t('cmd.researchDone', { name: TECH_NAME[9] })
             : t('cmd.bloodlinesTitle', { name: TECH_NAME[9], cost: costText([[150, 'food'], [100, 'gold']]), secs: 50 }) + (RESEARCH_BLOCK_TITLES[rbB[9]] ? ' ' + RESEARCH_BLOCK_TITLES[rbB[9]] : ''),
+      }),
+      // Castle P2: Husbandry — mounted units +10% speed.
+      // Glyph-only button, second row (D).
+      cmdButton({
+        id: 'research-husbandry', icon: 'i-bloodlines', label: 'Husbandry',
+        costIcon: 'i-food', cost: 150,
+        disabled: underConstruction || husbDone || rbB[17] === 2 || rbB[17] === 3,
+        key: badgeForButton({ context, id: 'research-husbandry', index: 4 }),
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: TECH_NAME[17], building: BUILD_NAME[7] })
+          : husbDone
+            ? t('cmd.researchDone', { name: TECH_NAME[17] })
+            : age < 2
+              ? t('cmd.buildGate', { name: TECH_NAME[17], gate: t('gate.castle') })
+              : t('cmd.husbandryTitle', { name: TECH_NAME[17], cost: costText([[150, 'food']]), secs: 40 }) + (RESEARCH_BLOCK_TITLES[rbB[17]] ? ' ' + RESEARCH_BLOCK_TITLES[rbB[17]] : ''),
       }),
     );
   } else if (context === 'blacksmith') {
@@ -11067,7 +11210,8 @@ function draw() {
   // an HP bar above it.
   const UNIT_DRAW = [drawVillager, null, drawScout, drawMilitia, drawArcher,
     drawSheep, drawBoar, drawDeer, drawManAtArms, // 8: Man-at-Arms (M6)
-    drawSpearman, drawSkirmisher, drawWolf]; // 9/10: Feudal base units, 11: Wolf (AI-08)
+    drawSpearman, drawSkirmisher, drawWolf, // 9/10: Feudal base units, 11: Wolf (AI-08)
+    drawKnight, drawLightCavalry, drawCavalryArcher]; // 12/13/14: Castle P2 cavalry
   for (let i = 0; i < count; i++) {
     const wx = pos[i * 2];
     const wy = pos[i * 2 + 1];

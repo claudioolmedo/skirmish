@@ -79,6 +79,11 @@ test('panel slot letters run a selected building\u2019s buttons', () => {
   assert.equal(at('range', 'KeyQ').id, 'train-archer');
   assert.equal(at('range', 'KeyW').id, 'train-skirmisher');
   assert.equal(at('stable', 'KeyQ').id, 'train-scout');
+  // Castle P2: the Knight takes the Stable's second top-row
+  // slot (W); the Cavalry Archer continues the Range's top
+  // row (E).
+  assert.equal(at('stable', 'KeyW').id, 'train-knight');
+  assert.equal(at('range', 'KeyE').id, 'train-cavalry-archer');
   assert.equal(at('blacksmith', 'KeyQ').id, 'research-fletching');
   assert.equal(at('blacksmith', 'KeyW').id, 'research-scalemail');
   // Padded Archer Armor sits under Fletching in DE's panel:
@@ -86,12 +91,18 @@ test('panel slot letters run a selected building\u2019s buttons', () => {
   assert.equal(at('blacksmith', 'KeyA').id, 'research-padded');
   // The Feudal completion set (2026-10-22): Forging completes
   // the Blacksmith's top row (E); Scale Barding Armor sits
-  // under Scale Mail (S); Bloodlines runs right of the Scout
-  // at the Stable (W); the camps and the Mill are plain
+  // under Scale Mail (S); the camps and the Mill are plain
   // top-row panels.
   assert.equal(at('blacksmith', 'KeyE').id, 'research-forging');
   assert.equal(at('blacksmith', 'KeyS').id, 'research-barding');
-  assert.equal(at('stable', 'KeyW').id, 'research-bloodlines');
+  // Castle P2 moved the Stable's researches to the second
+  // row (the Barracks/TC convention): the Light Cavalry
+  // upgrade under its own unit (A), Bloodlines under the
+  // Knight (S), Husbandry next (D). Bloodlines sat at W
+  // until the Knight took that slot.
+  assert.equal(at('stable', 'KeyA').id, 'research-lightcavalry');
+  assert.equal(at('stable', 'KeyS').id, 'research-bloodlines');
+  assert.equal(at('stable', 'KeyD').id, 'research-husbandry');
   assert.equal(at('lumbercamp', 'KeyQ').id, 'research-doublebit');
   assert.equal(at('mill', 'KeyQ').id, 'research-horsecollar');
   assert.equal(at('miningcamp', 'KeyQ').id, 'research-goldmining');
