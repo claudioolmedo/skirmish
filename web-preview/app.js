@@ -6240,13 +6240,55 @@ async function main() {
     return best;
   }
 
+  // Canopy pick (bot-loop defect, 2026-10-29; live formals #86,
+  // #87, #88): a tree's sprite is drawn TREE_H world units tall,
+  // rising straight UP the screen from the trunk's ground point
+  // (drawTreeImage), but a click is converted to world coordinates
+  // on the ground plane — screen-up is the (-d, -d) direction in
+  // world axes — so a click on the canopy lands up to ~TREE_H
+  // units north-west of the trunk, far outside nodeAt's 4-unit
+  // radius. The click silently became a ground move: the villager
+  // walked to empty ground beside the forest and idled, and only
+  // a second click on the trunk/base started the chopping. In DE,
+  // clicking any visible part of a tree tasks the villager onto
+  // it (the sheep pick above applies the same visible-body rule).
+  // Decompose the click's offset from each tree's trunk: H is the
+  // height up the sprite the click sits at, dx its screen-x offset
+  // from the trunk's column. The click belongs to the tree when
+  // 0 <= H <= TREE_H and |dx| <= CANOPY_HALF_W (the drawn canopy
+  // half width, from drawTreeImage's own constants). Among
+  // candidates the closest column wins, then the lowest height.
+  // Only trees (kind 0), and only as a fallback when the plain
+  // ground pick missed — ground clicks keep their old meaning
+  // everywhere the canopy does not actually cover them.
+  const CANOPY_HALF_W = TREE_H * 0.76 * TREE_WIDE / 2;
+  function treeCanopyAt(wx, wy) {
+    let best = null;
+    let bestDx = Infinity;
+    let bestH = Infinity;
+    for (const n of nodeList()) {
+      if (n.kind !== 0 || n.amount <= 0) continue;
+      const dxw = wx - n.x;
+      const dyw = wy - n.y;
+      const h = -(dxw + dyw) / 2;
+      const dx = dxw - dyw;
+      if (h < 0 || h > TREE_H || Math.abs(dx) > CANOPY_HALF_W) continue;
+      if (Math.abs(dx) < bestDx || (Math.abs(dx) === bestDx && h < bestH)) {
+        bestDx = Math.abs(dx);
+        bestH = h;
+        best = n;
+      }
+    }
+    return best;
+  }
+
   // The smart order at a point, from the main view OR the minimap
   // (SEL-16): with the Town Center or a Barracks selected, a
   // right-click sets that building's rally point (SEL-13); with
   // units selected it is the context order below. `queued` is the
   // Shift form (SEL-12): the order lines up behind each unit's
   // current one instead of replacing it.
-  function smartOrderAt(wx, wy, queued = false) {
+  function smartOrderAt(wx, wy, queued = false, fromCanvas = false) {
     // CMB-10/11: with order targeting armed, a right-click HERE
     // (the minimap — the canvas right-click disarms instead)
     // issues the armed order at this point.
@@ -6275,7 +6317,7 @@ async function main() {
         return;
       }
     }
-    orderAt(wx, wy, queued);
+    orderAt(wx, wy, queued, fromCanvas);
   }
 
   // Context order at a point (M3): an entity there (Gaia animal or
@@ -6283,7 +6325,7 @@ async function main() {
   // means Gather for villagers and Move for the rest; ground means
   // Move. Goes ONLY to the current selection (AoE2-style) — with an
   // empty selection the order does nothing but flash the hint.
-  function orderAt(wx, wy, queued = false) {
+  function orderAt(wx, wy, queued = false, fromCanvas = false) {
     const targets = selectedUnits();
     if (targets.length === 0) {
       flash(selectedAnimal != null
@@ -6435,6 +6477,11 @@ async function main() {
       if (any) { playAck('villager', 'order'); return; }
     }
     let n = nodeAt(wx, wy);
+    // Canopy fallback (see treeCanopyAt): a main-canvas click on
+    // a tree's drawn canopy names that tree, exactly as a trunk
+    // click does. Canvas only — the minimap draws no tall sprites,
+    // so its pick stays the plain ground pick (SEL-16).
+    if (!n && fromCanvas) n = treeCanopyAt(wx, wy);
     // M7: a node on unexplored ground cannot be ordered — the
     // click is a ground move instead.
     if (n && !cellExploredW(n.x, n.y)) n = null;
@@ -6892,7 +6939,7 @@ async function main() {
       return;
     }
     const [wx, wy] = eventWorld(e);
-    smartOrderAt(wx, wy, e.shiftKey);
+    smartOrderAt(wx, wy, e.shiftKey, true);
   });
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
