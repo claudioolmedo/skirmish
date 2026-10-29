@@ -400,7 +400,20 @@ let TECH_NAME = {
 };
 // Research-block explanations, indexed by the sim's ResearchBlock
 // tag (0 ok — unused, 1 funds, 2 queue full, 3 already done,
-// 4 requirements).
+// 4 requirements). Panel law (bot-loop, 2026-10-29): the HARD
+// blocks (2 queue, 3 done, 4 requirements — age or prerequisite
+// unmet) grey the research button, exactly like the train
+// buttons' queue / housed blocks; the SOFT block (1 funds)
+// stays clickable and flashes its reason on click, again like
+// training's no-food block. Before this, block 4 left age-gated
+// research (Light Cavalry, Husbandry) looking enabled — a click
+// only flashed "Requirements not met yet." and queued nothing.
+// ONE deliberate exception: the age-advance buttons stay active
+// at block 4 — their lock is a building count the player can
+// complete at once, and their refusal explains itself with
+// dedicated text (cmd.feudalNeeds / cmd.castleNeeds, titles
+// cmd.feudalGate / cmd.castleGate; pinned by the hotkeys smoke,
+// case 3: Z's refusal explains itself).
 let RESEARCH_BLOCK_TITLES = [
   '',
   'Not enough resources.',
@@ -10098,7 +10111,7 @@ function renderCommands() {
       cmdButton({
         id: 'research-loom', icon: 'i-loom', img: 'loom.png', label: 'Loom',
         costIcon: 'i-gold', cost: 50,
-        disabled: loomDone || rbTc[0] === 2 || rbTc[0] === 3,
+        disabled: loomDone || rbTc[0] === 2 || rbTc[0] === 3 || rbTc[0] === 4,
         key: badgeForButton({ context, id: 'research-loom', index: 1 }),
         title: loomDone
           ? t('cmd.loomDone', { name: TECH_NAME[0] })
@@ -10148,7 +10161,7 @@ function renderCommands() {
         ? cmdButton({
           id: 'research-handcart', icon: 'i-wheelbarrow', label: 'Hand Cart',
           costIcon: 'i-food', cost: 300, cost2Icon: 'i-wood', cost2: 200,
-          disabled: hcDone || rbTc[4] === 2 || rbTc[4] === 3,
+          disabled: hcDone || rbTc[4] === 2 || rbTc[4] === 3 || rbTc[4] === 4,
           key: badgeForButton({ context, id: 'research-handcart', index: 4 }),
           title: hcDone
             ? t('cmd.handcartDone', { name: TECH_NAME[15] })
@@ -10157,7 +10170,7 @@ function renderCommands() {
         : cmdButton({
           id: 'research-wheelbarrow', icon: 'i-wheelbarrow', label: 'Wheelbarrow',
           costIcon: 'i-food', cost: 175, cost2Icon: 'i-wood', cost2: 50,
-          disabled: rbTc[2] === 2 || rbTc[2] === 3,
+          disabled: rbTc[2] === 2 || rbTc[2] === 3 || rbTc[2] === 4,
           key: badgeForButton({ context, id: 'research-wheelbarrow', index: 3 }),
           title: t('cmd.wheelbarrowTitle', { name: TECH_NAME[6], cost: costText([[175, 'food'], [50, 'wood']]), secs: 75 }) + (RESEARCH_BLOCK_TITLES[rbTc[2]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[2]] : ''),
         }),
@@ -10193,7 +10206,7 @@ function renderCommands() {
       cmdButton({
         id: 'research-maa', icon: 'i-maa', img: 'man-at-arms.png', label: 'Man-at-Arms',
         costIcon: 'i-food', cost: 100, cost2Icon: 'i-gold', cost2: 40,
-        disabled: underConstruction || maaDone || rbB[5] === 2 || rbB[5] === 3,
+        disabled: underConstruction || maaDone || rbB[5] === 2 || rbB[5] === 3 || rbB[5] === 4,
         key: badgeForButton({ context, id: 'research-maa', index: 2 }),
         title: underConstruction
           ? t('cmd.underConstruction', { name: TECH_NAME[5], building: BUILD_NAME[2] })
@@ -10277,7 +10290,7 @@ function renderCommands() {
       cmdButton({
         id: 'research-lightcavalry', icon: 'i-bloodlines', label: 'Light Cavalry',
         costIcon: 'i-food', cost: 150, cost2Icon: 'i-gold', cost2: 50,
-        disabled: underConstruction || lcDone || rbB[16] === 2 || rbB[16] === 3,
+        disabled: underConstruction || lcDone || rbB[16] === 2 || rbB[16] === 3 || rbB[16] === 4,
         key: badgeForButton({ context, id: 'research-lightcavalry', index: 2 }),
         title: underConstruction
           ? t('cmd.underConstruction', { name: TECH_NAME[16], building: BUILD_NAME[7] })
@@ -10293,7 +10306,7 @@ function renderCommands() {
       cmdButton({
         id: 'research-bloodlines', icon: 'i-bloodlines', label: 'Bloodlines',
         costIcon: 'i-food', cost: 150, cost2Icon: 'i-gold', cost2: 100,
-        disabled: underConstruction || bloodDone || rbB[9] === 2 || rbB[9] === 3,
+        disabled: underConstruction || bloodDone || rbB[9] === 2 || rbB[9] === 3 || rbB[9] === 4,
         key: badgeForButton({ context, id: 'research-bloodlines', index: 3 }),
         title: underConstruction
           ? t('cmd.underConstruction', { name: TECH_NAME[9], building: BUILD_NAME[7] })
@@ -10306,7 +10319,7 @@ function renderCommands() {
       cmdButton({
         id: 'research-husbandry', icon: 'i-bloodlines', label: 'Husbandry',
         costIcon: 'i-food', cost: 150,
-        disabled: underConstruction || husbDone || rbB[17] === 2 || rbB[17] === 3,
+        disabled: underConstruction || husbDone || rbB[17] === 2 || rbB[17] === 3 || rbB[17] === 4,
         key: badgeForButton({ context, id: 'research-husbandry', index: 4 }),
         title: underConstruction
           ? t('cmd.underConstruction', { name: TECH_NAME[17], building: BUILD_NAME[7] })
@@ -10345,7 +10358,7 @@ function renderCommands() {
         id, icon, img, label, costIcon: 'i-food', cost,
         cost2Icon: cost2 ? 'i-gold' : undefined, cost2,
         key: badgeForButton({ context, id, index }),
-        disabled: underConstruction || done || rb === 2 || rb === 3,
+        disabled: underConstruction || done || rb === 2 || rb === 3 || rb === 4,
         title: underConstruction
           ? t('cmd.underConstruction', { name: TECH_NAME[tag], building: BUILD_NAME[8] })
           : done
@@ -10415,7 +10428,7 @@ function renderCommands() {
         cost2Icon: pairs[1] ? 'i-' + pairs[1][1] : undefined,
         cost2: pairs[1] ? pairs[1][0] : undefined,
         key: badgeForButton({ context, id, index }),
-        disabled: underConstruction || done || rb === 2 || rb === 3,
+        disabled: underConstruction || done || rb === 2 || rb === 3 || rb === 4,
         title: underConstruction
           ? t('cmd.underConstruction', { name: TECH_NAME[tag], building: BUILD_NAME[bk.kind] })
           : done
