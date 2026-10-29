@@ -3142,7 +3142,25 @@ const myTcProgress = () => sim.tc_progress_for(panelTcId());
 const myTrainQueueLen = () => myTcQueue().length;
 const myIdleVillagers = () => (seatAware() ? sim.idle_villagers_for(localOwner) : sim.idle_villagers());
 const myIdleMilitary = () => (seatAware() ? sim.idle_military_for(localOwner) : sim.idle_military());
-const myFog = () => (seatAware() ? sim.fog_for(localOwner) : sim.fog());
+// NET-08: in replay playback the fog is the VIEWER's choice — a
+// per-player fog (derived from the sim for that seat, never stored)
+// or the fully revealed map. Outside playback this is exactly the
+// local seat's fog, as before.
+let revealedFogCache = null;
+function revealedFog() {
+  const n = GW * GH;
+  if (!revealedFogCache || revealedFogCache.length !== n) {
+    revealedFogCache = new Uint8Array(n).fill(2);
+  }
+  return revealedFogCache;
+}
+const myFog = () => {
+  if (playback) {
+    if (playback.fogView === 'all') return revealedFog();
+    return sim.fog_for(playback.fogView);
+  }
+  return seatAware() ? sim.fog_for(localOwner) : sim.fog();
+};
 
 /// The entity index of the LOCAL player's Town Center.
 function ownTcIndex() {
@@ -5066,6 +5084,28 @@ async function playSoloFromLobby() {
 
 // --- replay playback -----------------------------------------------------------
 
+/// NET-08 fog choice: the playback bar cycles the viewer's fog
+/// through each seat in the recording, then the fully revealed map,
+/// then back. Fog states are derived from the sim per seat on every
+/// frame (myFog), never stored in the replay.
+function playbackFogLabel() {
+  if (!playback) return '';
+  if (playback.fogView === 'all') return t('pb.fogAll');
+  const idx = playback.owners.indexOf(playback.fogView);
+  return t('pb.fogPlayer', { n: idx >= 0 ? idx + 1 : 1 });
+}
+
+function cyclePlaybackFog() {
+  if (!playback) return;
+  const choices = [...playback.owners, 'all'];
+  const cur = choices.indexOf(playback.fogView);
+  playback.fogView = choices[(cur + 1) % choices.length];
+  // Explored-memory (last-seen enemy buildings) belongs to the
+  // previous view's fog; it must not leak into the new view.
+  seenBuildings.clear();
+  if (netUi && netUi.pbFog) netUi.pbFog.textContent = playbackFogLabel();
+}
+
 async function startPlayback(rec) {
   if (net) teardownNet();
   // A replay re-simulates the match, so it needs the game loaded
@@ -5089,6 +5129,7 @@ async function startPlayback(rec) {
   playback = {
     rec, events, idx: 0, owners,
     view: typeof rec.view === 'number' ? rec.view : owners[0],
+    fogView: typeof rec.view === 'number' ? rec.view : owners[0],
     speed: 1, playing: true, acc: 0, last: 0, done: false,
     totalTicks: rec.ticks || 0,
   };
@@ -5104,6 +5145,7 @@ async function startPlayback(rec) {
     });
     netUi.pbToggle.textContent = t('pb.pause');
     netUi.pbSpeed.textContent = '1×';
+    if (netUi.pbFog) netUi.pbFog.textContent = playbackFogLabel();
   }
   playing = true;
   setPaused(false);
@@ -5433,6 +5475,9 @@ function applyLocale(loc) {
     if (playback && netUi.pbToggle) {
       netUi.pbToggle.textContent = playback.playing ? t('pb.pause') : t('pb.play');
     }
+    if (playback && netUi.pbFog) {
+      netUi.pbFog.textContent = playbackFogLabel();
+    }
   }
   syncAudioUi();
 }
@@ -5719,6 +5764,7 @@ async function main() {
     pbLabel: document.getElementById('pb-label'),
     pbToggle: document.getElementById('pb-toggle'),
     pbSpeed: document.getElementById('pb-speed'),
+    pbFog: document.getElementById('pb-fog'),
     pbExit: document.getElementById('pb-exit'),
   };
   const onlineBtn = document.getElementById('btn-online');
@@ -5893,6 +5939,7 @@ async function main() {
       netUi.pbSpeed.textContent = next + '×';
     });
   }
+  if (netUi.pbFog) netUi.pbFog.addEventListener('click', cyclePlaybackFog);
   if (netUi.pbExit) netUi.pbExit.addEventListener('click', exitPlayback);
 
   // M9: the play page OPENS on the Lobby Browser (online-first) —

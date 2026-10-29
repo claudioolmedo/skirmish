@@ -233,6 +233,8 @@ const EN = {
   'pb.pause': 'Pause',
   'pb.play': 'Play',
   'pb.exit': 'Exit replay',
+  'pb.fogPlayer': 'Fog: Player {n}',
+  'pb.fogAll': 'Fog: All revealed',
   // --- lobby browser -----------------------------------------------------
   'lobby.title': 'Lobby Browser',
   'lobby.close': 'Close online play',
@@ -692,6 +694,8 @@ const PT_BR = {
   'pb.pause': 'Pausar',
   'pb.play': 'Reproduzir',
   'pb.exit': 'Sair do replay',
+  'pb.fogPlayer': 'Névoa: Jogador {n}',
+  'pb.fogAll': 'Névoa: Tudo revelado',
   // --- lobby browser -------------------------------------------------------------
   'lobby.title': 'Navegador de Salas',
   'lobby.close': 'Fechar jogo online',
@@ -1151,6 +1155,8 @@ const ES = {
   'pb.pause': 'Pausa',
   'pb.play': 'Reproducir',
   'pb.exit': 'Salir de la repetición',
+  'pb.fogPlayer': 'Niebla: Jugador {n}',
+  'pb.fogAll': 'Niebla: Todo revelado',
   // --- lobby browser -------------------------------------------------------------
   'lobby.title': 'Navegador de Salas',
   'lobby.close': 'Cerrar juego en línea',
