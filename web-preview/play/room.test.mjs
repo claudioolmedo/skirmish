@@ -158,13 +158,16 @@ test('startGate: AI slot starts on the host ready alone', () => {
 
 test('roomConfigText: the configuration summary line', () => {
   assert.equal(roomConfigText({ guestSlot: 'open' }),
-    '1v1 · Arabia · Conquest · Guest: Open');
+    '1v1 · Arabia · Conquest · Guest: Open · Speed: 1.7×');
   assert.equal(roomConfigText({ guestSlot: 'ai-normal' }),
-    '1v1 · Arabia · Conquest · Guest: AI · Normal');
+    '1v1 · Arabia · Conquest · Guest: AI · Normal · Speed: 1.7×');
   assert.equal(roomConfigText({ guestSlot: 'closed' }),
-    '1v1 · Arabia · Conquest · Guest: Closed');
+    '1v1 · Arabia · Conquest · Guest: Closed · Speed: 1.7×');
   // From the guest's own seat the last part reads "You".
   assert.equal(roomConfigText({ guestSlot: 'open', selfIsGuest: true }),
-    '1v1 · Arabia · Conquest · Guest: You');
-  assert.equal(roomConfigText({}), '1v1 · Arabia · Conquest · Guest: Open');
+    '1v1 · Arabia · Conquest · Guest: You · Speed: 1.7×');
+  assert.equal(roomConfigText({}), '1v1 · Arabia · Conquest · Guest: Open · Speed: 1.7×');
+  // SIM-11: a non-standard match speed shows in the summary.
+  assert.equal(roomConfigText({ guestSlot: 'open', speed: 2 }),
+    '1v1 · Arabia · Conquest · Guest: Open · Speed: 2×');
 });

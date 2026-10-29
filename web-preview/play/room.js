@@ -132,9 +132,11 @@ export function slotLabel(slot, s = null) {
 /// shown are the game's fixed facts today (map, victory,
 /// players) plus the guest slot — from the guest's own seat the
 /// last part simply reads "You".
-export function roomConfigText({ guestSlot = 'open', selfIsGuest = false } = {}, s = null) {
+export function roomConfigText({ guestSlot = 'open', selfIsGuest = false, speed = 1.7 } = {}, s = null) {
   const guest = selfIsGuest
     ? ((s && s.you) || 'You')
     : slotLabel(guestSlot, s && s.slot);
-  return s && s.format ? s.format(guest) : `1v1 · Arabia · Conquest · Guest: ${guest}`;
+  // SIM-11: the match speed is part of the configuration summary.
+  const speedTxt = `${speed}×`;
+  return s && s.format ? s.format(guest, speedTxt) : `1v1 · Arabia · Conquest · Guest: ${guest} · Speed: ${speedTxt}`;
 }

@@ -125,11 +125,17 @@ multiplies how many game-seconds pass per real second. Per-game-second
 behavior is identical at every speed.
 *Source:* GAP 8.8; DE lobby conventions. · *Impl:* a client/host concern:
 run more/fewer ticks per real second (fractional accumulator); the sim
-itself never learns the speed. Our preview currently runs exactly 60
-ticks per real second and *slows the game* on a slow machine (max-ticks
-guard) instead of adapting — acceptable single-player behavior, not the
-multiplayer rule (NET-03). · *Status:* **DIFFERS** (no speed setting; no
-1.5×/2×).
+itself never learns the speed. Shipped (bot-loop, 2026-10-28): the
+setting exists at both match doors — the Create Lobby settings box for
+a hosted match (the host's pick rides the 'start' handshake, so both
+lockstep sessions pace their turns from the same value) and the pause
+menu's speed row for a local match (applied on Restart, like the match
+mode). `advanceTicks` and the session's turn interval both take the
+match speed (`GAME_SPEEDS` 1.0 / 1.5 / 1.7 / 2.0 in play/netplay.js);
+the replay meta records it and playback paces from it (pre-setting
+replays pace at the standard 1.7×). The slow-machine max-ticks guard
+still sheds backlog instead of dropping sim time (NET-03's concern,
+unchanged). · *Status:* **MATCHES**.
 
 **SIM-12 — Match identity.** A match is completely identified by (seed,
 settings, command stream). This is what makes replays, saves, and lockstep
@@ -3636,9 +3642,19 @@ read-only display getters, so INF-05 moves DIFFERS → MATCHES,
 §18 stands at 13 rules, 9 / 2 / 2 and the book at 221 rules,
 126 / 33 / 62. The table below equals the body.
 
+updated 2026-10-28 for SIM-11 (bot-loop): the game-speed setting
+ships (Create Lobby settings box for hosted matches, the host's
+pick riding the 'start' handshake; the pause menu's speed row
+for local matches, applied on Restart), so SIM-11 moves
+DIFFERS → MATCHES and §1 stands at 12 rules, 12 / 0 / 0. This
+note also repairs the totals table for the NET-08 landing
+earlier the same day (its commit flipped the rule's Status but
+not the table): §17 stands at 11 rules, 5 / 4 / 2 and the book
+at 221 rules, 128 / 31 / 62. The table below equals the body.
+
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
-| 1 | Simulation & time (SIM) | 12 | 11 | 1 | 0 |
+| 1 | Simulation & time (SIM) | 12 | 12 | 0 | 0 |
 | 2 | Map, terrain & elevation (MAP) | 12 | 7 | 4 | 1 |
 | 3 | Visibility & exploration (VIS) | 10 | 8 | 1 | 1 |
 | 4 | Selection & orders (SEL) | 17 | 15 | 2 | 0 |
@@ -3654,9 +3670,9 @@ read-only display getters, so INF-05 moves DIFFERS → MATCHES,
 | 14 | Garrison, transport & repair (GAR) | 10 | 0 | 0 | 10 |
 | 15 | AI behavior & difficulty (AI) | 9 | 7 | 1 | 1 |
 | 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |
-| 17 | Multiplayer determinism (NET) | 11 | 4 | 5 | 2 |
+| 17 | Multiplayer determinism (NET) | 11 | 5 | 4 | 2 |
 | 18 | Information rules (INF) | 13 | 9 | 2 | 2 |
-| | **Total** | **221** | **126** | **33** | **62** |
+| | **Total** | **221** | **128** | **31** | **62** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer

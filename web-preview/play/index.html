@@ -235,6 +235,16 @@
       <label class="mode-opt"><input type="radio" name="match-mode" value="normal" checked> <span id="mode-normal-txt">AI · Normal</span></label>
     </div>
     <p class="overlay-note" id="mode-note">Pick a mode and press Restart to begin a fresh match in it (same seed).</p>
+    <div class="quality-row" id="speed-row" role="group" aria-label="Game speed">
+      <span class="quality-title" id="speed-title">Game speed</span>
+      <div class="quality-btns">
+        <button id="sp-10" class="btn btn-ghost btn-sm" type="button">1.0×</button>
+        <button id="sp-15" class="btn btn-ghost btn-sm" type="button">1.5×</button>
+        <button id="sp-17" class="btn btn-ghost btn-sm" type="button">1.7× Standard</button>
+        <button id="sp-20" class="btn btn-ghost btn-sm" type="button">2.0×</button>
+      </div>
+    </div>
+    <p class="overlay-note" id="speed-note">Game speed scales time only — the game plays identically at every speed. Applies on Restart.</p>
     <div class="quality-row" id="quality-row" role="group" aria-label="Visual quality">
       <span class="quality-title" id="quality-title">Quality</span>
       <div class="quality-btns">
@@ -447,6 +457,14 @@
                 <option value="ai-easy">AI · Easy</option>
                 <option value="ai-normal">AI · Normal</option>
                 <option value="closed">Closed — no guest</option>
+              </select>
+            </div>
+            <div class="setting-row"><span class="setting-name" id="set-speed-name">Game speed</span>
+              <select id="create-speed" class="slot-select">
+                <option value="1">1.0×</option>
+                <option value="1.5">1.5×</option>
+                <option value="1.7" selected>1.7× Standard</option>
+                <option value="2">2.0×</option>
               </select>
             </div>
           </div>
