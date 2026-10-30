@@ -73,7 +73,7 @@ test('every building research button disables on the Locked block (4)', () => {
 
 test('the shared research-button helpers disable on the Locked block (4)', () => {
   const occurrences = appJs.split('rb === 2 || rb === 3 || rb === 4').length - 1;
-  assert.equal(occurrences, 2, 'blacksmith techBtn + economy campBtn both cover block 4');
+  assert.equal(occurrences, 3, 'blacksmith techBtn + economy campBtn + university techBtn (Castle P3c) all cover block 4');
 });
 
 test('no research button disables on the funds block (1) — it flashes on click', () => {

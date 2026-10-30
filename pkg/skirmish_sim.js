@@ -1025,6 +1025,31 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Order a villager to build a University (200 wood, 4×4;
+     * Castle Age, no building prerequisite — Castle P3c) — see
+     * `push_build_house`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_university(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_university(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Queue a University build (Castle Age — Castle P3c) — see
+     * `push_build_house_queued`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_university_queued(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_university_queued(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
      * Order a villager to raise a dragged line of Palisade Wall
      * segments (BLD-13) from the cell containing `(x0, y0)` to
      * the cell containing `(x1, y1)`: the sim expands the line

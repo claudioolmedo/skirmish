@@ -86,6 +86,8 @@ export const wasmsim_push_build_stone_wall_line: (a: number, b: number, c: numbe
 export const wasmsim_push_build_stone_wall_queued: (a: number, b: number, c: number, d: number) => number;
 export const wasmsim_push_build_town_center: (a: number, b: number, c: number, d: number) => number;
 export const wasmsim_push_build_town_center_queued: (a: number, b: number, c: number, d: number) => number;
+export const wasmsim_push_build_university: (a: number, b: number, c: number, d: number) => number;
+export const wasmsim_push_build_university_queued: (a: number, b: number, c: number, d: number) => number;
 export const wasmsim_push_build_wall_line: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
 export const wasmsim_push_build_watch_tower: (a: number, b: number, c: number, d: number) => number;
 export const wasmsim_push_build_watch_tower_queued: (a: number, b: number, c: number, d: number) => number;

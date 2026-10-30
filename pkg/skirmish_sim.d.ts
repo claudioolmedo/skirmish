@@ -489,6 +489,17 @@ export class WasmSim {
      */
     push_build_town_center_queued(entity: number, x: number, y: number): boolean;
     /**
+     * Order a villager to build a University (200 wood, 4×4;
+     * Castle Age, no building prerequisite — Castle P3c) — see
+     * `push_build_house`.
+     */
+    push_build_university(entity: number, x: number, y: number): boolean;
+    /**
+     * Queue a University build (Castle Age — Castle P3c) — see
+     * `push_build_house_queued`.
+     */
+    push_build_university_queued(entity: number, x: number, y: number): boolean;
+    /**
      * Order a villager to raise a dragged line of Palisade Wall
      * segments (BLD-13) from the cell containing `(x0, y0)` to
      * the cell containing `(x1, y1)`: the sim expands the line
@@ -1027,6 +1038,8 @@ export interface InitOutput {
     readonly wasmsim_push_build_stone_wall_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_town_center: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_town_center_queued: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_university: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_university_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_wall_line: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
     readonly wasmsim_push_build_watch_tower: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_watch_tower_queued: (a: number, b: number, c: number, d: number) => number;
