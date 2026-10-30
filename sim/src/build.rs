@@ -179,6 +179,11 @@ pub const TOWN_CENTER_STONE_COST: I16F16 = I16F16::from_bits(6_553_600); // 100
 pub const CASTLE_STONE_COST: I16F16 = I16F16::from_bits(42_598_400); // 650
 /// Castle build time: 200 s at 60 Hz (Castle P3a; same source).
 pub const CASTLE_BUILD_TICKS: u64 = 12000;
+/// University wood cost: 200 (Castle P3c; AoE wiki, University
+/// infobox via the Castle Age dossier, CASTLE-AGE-SPEC §5.5).
+pub const UNIVERSITY_WOOD_COST: I16F16 = I16F16::from_bits(13_107_200); // 200
+/// University build time: 60 s at 60 Hz (Castle P3c; same source).
+pub const UNIVERSITY_BUILD_TICKS: u64 = 3600;
 /// Population room from one completed Castle: +20 (Castle P3a;
 /// same source).
 pub const CASTLE_POP_SUPPORT: u32 = 20;
@@ -265,6 +270,15 @@ pub enum BuildingKind {
     /// GAR-05 arrow scaling on top of the base volley) is the
     /// P3c slice, not this one.
     Castle,
+    /// Castle P3c: the University — the Castle Age research
+    /// building. 200 wood, 60 s build, 4×4, 2100 HP, armor 2/9,
+    /// LoS 6; Castle Age, no building prerequisite (the Castle
+    /// P3 dossier: CASTLE-AGE-SPEC §5.5 + the building table;
+    /// AoE wiki, University infobox). Research only: it trains
+    /// nothing and fires nothing. It hosts Ballistics, Murder
+    /// Holes, Treadmill Crane, Masonry and the Fortified Wall
+    /// upgrade (TechIds 20–24, `crate::tech`).
+    University,
 }
 
 impl BuildingKind {
@@ -274,8 +288,8 @@ impl BuildingKind {
     /// 9 = palisade wall, 10 = watch tower, 11 = outpost,
     /// 12 = market, 13 = town center (construction record only —
     /// see the variant), 14 = stone wall (BLD-20), 15 = castle
-    /// (Castle P3a). Tags are an ABI contract — append only,
-    /// never renumber.
+    /// (Castle P3a), 16 = university (Castle P3c). Tags are an
+    /// ABI contract — append only, never renumber.
     pub fn tag(self) -> u8 {
         match self {
             BuildingKind::House => 0,
@@ -294,6 +308,7 @@ impl BuildingKind {
             BuildingKind::TownCenter => 13,
             BuildingKind::StoneWall => 14,
             BuildingKind::Castle => 15,
+            BuildingKind::University => 16,
         }
     }
 
@@ -316,6 +331,7 @@ impl BuildingKind {
             13 => Some(BuildingKind::TownCenter),
             14 => Some(BuildingKind::StoneWall),
             15 => Some(BuildingKind::Castle),
+            16 => Some(BuildingKind::University),
             _ => None,
         }
     }
@@ -349,6 +365,8 @@ impl BuildingKind {
             BuildingKind::StoneWall => I16F16::ZERO,
             // Castle P3a: the Castle's price is all stone too.
             BuildingKind::Castle => I16F16::ZERO,
+            // Castle P3c: the University's 200 wood.
+            BuildingKind::University => UNIVERSITY_WOOD_COST,
         }
     }
 
@@ -396,6 +414,7 @@ impl BuildingKind {
             BuildingKind::TownCenter => TOWN_CENTER_BUILD_TICKS,
             BuildingKind::StoneWall => STONE_WALL_BUILD_TICKS,
             BuildingKind::Castle => CASTLE_BUILD_TICKS,
+            BuildingKind::University => UNIVERSITY_BUILD_TICKS,
         }
     }
 
@@ -454,9 +473,13 @@ impl BuildingKind {
             | BuildingKind::Blacksmith => 3,
             // The placed 4×4 kinds: the Market, the Town Center
             // construction record (the standing Town Center is an
-            // entity, not a kind — BLD-16), and the Castle
-            // (Castle P3a, dossier §2).
-            BuildingKind::Market | BuildingKind::TownCenter | BuildingKind::Castle => 4,
+            // entity, not a kind — BLD-16), the Castle
+            // (Castle P3a, dossier §2) and the University
+            // (Castle P3c, dossier §5.5).
+            BuildingKind::Market
+            | BuildingKind::TownCenter
+            | BuildingKind::Castle
+            | BuildingKind::University => 4,
         }
     }
 
@@ -467,10 +490,14 @@ impl BuildingKind {
             // The 4×4 kinds keep their own ranges (Market 15.5,
             // Town Center 15.0 — see the constants' geometry notes).
             MARKET_BUILD_RANGE
-        } else if self == BuildingKind::TownCenter || self == BuildingKind::Castle {
+        } else if self == BuildingKind::TownCenter
+            || self == BuildingKind::Castle
+            || self == BuildingKind::University
+        {
             // The Castle is the third 4×4 kind (Castle P3a): the
             // Town Center's 15.0 covers its ring by the same
             // geometry (corner ring cell ≈14.1 from the center).
+            // The University (Castle P3c) is the fourth.
             TOWN_CENTER_BUILD_RANGE
         } else if self.footprint_size() == 3 {
             BARRACKS_BUILD_RANGE
@@ -538,7 +565,9 @@ impl BuildingKind {
             | BuildingKind::WatchTower
             | BuildingKind::Market
             | BuildingKind::StoneWall => Age::Feudal,
-            BuildingKind::TownCenter | BuildingKind::Castle => Age::Castle,
+            BuildingKind::TownCenter | BuildingKind::Castle | BuildingKind::University => {
+                Age::Castle
+            }
             _ => Age::Dark,
         }
     }
@@ -570,6 +599,9 @@ impl BuildingKind {
             // Castle P3a: the Castle's documented sight is 11
             // (dossier §2, wiki Castle infobox).
             BuildingKind::Castle => 11,
+            // Castle P3c: the University's documented sight is 6
+            // (dossier §5.5 building row, wiki University infobox).
+            BuildingKind::University => 6,
             BuildingKind::WatchTower => 10,
             BuildingKind::Outpost => match age {
                 Age::Dark => 6,
@@ -767,7 +799,11 @@ impl BuildingKind {
     /// Castle-born kind in the current roster; the University,
     /// Siege Workshop and Monastery join this set when they land.
     pub fn counts_toward_imperial(self) -> bool {
-        matches!(self, BuildingKind::Castle)
+        // Castle P3c: the University joins the set, exactly as
+        // this column's doc above anticipated ("the University,
+        // Siege Workshop and Monastery join this set when they
+        // land").
+        matches!(self, BuildingKind::Castle | BuildingKind::University)
     }
 
     /// Hit points of a fresh building of this kind (M5 — buildings
@@ -810,6 +846,9 @@ impl BuildingKind {
             // Castle P3a: 4800 HP (dossier §2, wiki Castle
             // infobox) — flat; the kind is Castle-born.
             BuildingKind::Castle => 4800,
+            // Castle P3c: 2100 HP (dossier §5.5, wiki University
+            // infobox) — flat; the kind is Castle-born.
+            BuildingKind::University => 2100,
         }
     }
 
@@ -878,6 +917,9 @@ impl BuildingKind {
             // Castle P3a: the Castle's melee armor is 8
             // (dossier §2, wiki Castle infobox).
             BuildingKind::Castle => 8,
+            // Castle P3c: the University's melee armor is 2
+            // (dossier §5.5, wiki University infobox).
+            BuildingKind::University => 2,
             BuildingKind::TownCenter => 3,
             _ => 0,
         }
@@ -925,6 +967,9 @@ impl BuildingKind {
             // Castle P3a: the Castle's pierce armor is 11
             // (dossier §2, wiki Castle infobox).
             BuildingKind::Castle => 11,
+            // Castle P3c: the University's pierce armor is 9
+            // (dossier §5.5, wiki University infobox).
+            BuildingKind::University => 9,
             BuildingKind::TownCenter => 5,
             _ => 7,
         }
@@ -1212,6 +1257,15 @@ pub struct Building {
     /// every wood-only kind. Reset to 0 at full HP. Part of the
     /// hashed state (written only while nonzero).
     pub repair_stone_remainder: i64,
+    /// Treadmill Crane construction-rate remainder (Castle P3c,
+    /// TEC-09): the ×6/5 construction scalar does not divide the
+    /// thirds rate evenly, so the sub-third remainder carries
+    /// here (0 ≤ r < 5, in fifths of a third) — each construction
+    /// tick adds `rate × 6 + r`, accrues `(rate × 6 + r) / 5`
+    /// thirds and keeps the rest. Always 0 for an owner without
+    /// Treadmill Crane. Part of the hashed state (written only
+    /// while nonzero).
+    pub build_rate_remainder: i64,
     pub complete: bool,
     /// For a completed Farm: the resource node it became. The building
     /// record stays as the footprint registry until the node depletes,
@@ -1693,6 +1747,7 @@ mod tests {
             repair_hp_remainder: 0,
             repair_cost_remainder: 0,
             repair_stone_remainder: 0,
+            build_rate_remainder: 0,
             complete: false,
             node_id: None,
             queue: Vec::new(),

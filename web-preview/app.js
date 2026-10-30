@@ -337,38 +337,38 @@ function pngIcon(png, cls) {
 // 15 castle (Castle P3a — 0 wood, 650 stone, 4×4).
 // Costs and footprints mirror the sim (MECHANICS-STUDY §5; the
 // palisade row is the current DE wiki row — 3 wood per segment).
-const BUILD_COST = [25, 60, 175, 100, 100, 100, 175, 175, 150, 3, 35, 25, 175, 275, 0, 0];
+const BUILD_COST = [25, 60, 175, 100, 100, 100, 175, 175, 150, 3, 35, 25, 175, 275, 0, 0, 200];
 // Stone paid at placement, by kind tag (BLD-18's two defensive
 // structures, the Town Center, the Stone Wall and the Castle
 // cost stone; every other entry 0).
-const BUILD_COST_STONE = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 125, 5, 0, 100, 5, 650];
+const BUILD_COST_STONE = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 125, 5, 0, 100, 5, 650, 0];
 const BUILD_I18N = ['house', 'farm', 'barracks', 'lumber', 'mill',
   'mining', 'range', 'stable', 'blacksmith', 'palisade', 'watchtower',
-  'outpost', 'market', 'towncenter', 'stonewall', 'castle'];
+  'outpost', 'market', 'towncenter', 'stonewall', 'castle', 'university'];
 let BUILD_NAME = ['House', 'Farm', 'Barracks', 'Lumber Camp', 'Mill',
   'Mining Camp', 'Archery Range', 'Stable', 'Blacksmith', 'Palisade Wall',
-  'Watch Tower', 'Outpost', 'Market', 'Town Center', 'Stone Wall', 'Castle'];
+  'Watch Tower', 'Outpost', 'Market', 'Town Center', 'Stone Wall', 'Castle', 'University'];
 // Farm footprint is 3 (DE-documented; Claudio's decision
 // 2026-10-22, superseding the earlier 2x2 specification).
-const BUILD_SIZE = [2, 3, 3, 2, 2, 2, 3, 3, 3, 1, 1, 1, 4, 4, 1, 4];
+const BUILD_SIZE = [2, 3, 3, 2, 2, 2, 3, 3, 3, 1, 1, 1, 4, 4, 1, 4, 4];
 // The wall kinds (BLD-13 palisade, BLD-20 stone): 1×1 segments
 // placed by dragged lines, not single footprints.
 function isWallKind(kind) { return kind === 9 || kind === 14; }
 const BUILD_ICON = ['i-house', 'i-farm', 'i-tc', 'i-lumber', 'i-mill',
   'i-mining', 'i-range', 'i-stable', 'i-blacksmith', 'i-palisade',
-  'i-watchtower', 'i-outpost', 'i-market', 'i-tc', 'i-stonewall', 'i-castle'];
+  'i-watchtower', 'i-outpost', 'i-market', 'i-tc', 'i-stonewall', 'i-castle', 'i-university'];
 // The PNG set above, per building kind tag (same order as
 // BUILD_ICON): command buttons and building portraits.
 const BUILD_PNG = ['house.png', 'farm.png', 'barracks.png', 'lumber-camp.png',
   'mill.png', 'mining-camp.png', 'archery-range.png', 'stable.png',
   'blacksmith.png', 'palisade-wall.png', 'watchtower.png', 'outpost.png',
-  'market.png', 'town-center.png', 'stone-wall.png', 'castle.png'];
+  'market.png', 'town-center.png', 'stone-wall.png', 'castle.png', 'university.png'];
 // Building max HP by kind tag (the sim's building table, study
 // §5) — for the enemy-building info panel (M5). The palisade
 // entry is its Dark-Age value (150; 250 from Feudal, BLD-13 —
 // the same base-column convention the House's 550 follows here);
 // the Watch Tower's 850 is its pre-Castle value (BLD-18).
-const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200, 150, 850, 500, 1800, 2400, 1080, 4800];
+const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200, 150, 850, 500, 1800, 2400, 1080, 4800, 2100];
 // WASM build commands by kind tag (M6 completes the set; BLD-13
 // adds the palisade's single-segment form — dragged lines go
 // through sim.push_build_wall_line, see attemptPlaceWallLine).
@@ -377,7 +377,7 @@ const PUSH_BUILD = ['push_build_house', 'push_build_farm', 'push_build_barracks'
   'push_build_archery_range', 'push_build_stable', 'push_build_blacksmith',
   'push_build_palisade_wall', 'push_build_watch_tower', 'push_build_outpost',
   'push_build_market', 'push_build_town_center', 'push_build_stone_wall',
-  'push_build_castle'];
+  'push_build_castle', 'push_build_university'];
 const PUSH_BUILD_QUEUED = PUSH_BUILD.map((n) => `${n}_queued`);
 // Own-building minimap colors by kind tag (M6); kinds without an
 // entry keep the minimap's parchment default, the enemy's
@@ -385,7 +385,7 @@ const PUSH_BUILD_QUEUED = PUSH_BUILD.map((n) => `${n}_queued`);
 const BUILDING_MINIMAP_COLOR = {
   3: '#8a6b42', 4: '#e5d9a8', 5: '#b9a24a', 6: '#c98f4e', 7: '#9a6a44', 8: '#6f6f76',
   9: '#7a5a34', 10: '#7a7a72', 11: '#a8843f', 12: '#b03a2e',
-  13: '#d8cf9f', 14: '#8d8578', 15: '#a9a294',
+  13: '#d8cf9f', 14: '#8d8578', 15: '#a9a294', 16: '#7d7466',
 };
 
 // Ages and technologies (M6). Age tags match the sim's Age::tag;
@@ -399,6 +399,8 @@ let TECH_NAME = {
   10: 'Double-Bit Axe', 11: 'Gold Mining', 12: 'Stone Mining',
   13: 'Horse Collar', 14: 'Castle Age', 15: 'Hand Cart',
   16: 'Light Cavalry', 17: 'Husbandry', 18: 'Imperial Age',
+  20: 'Ballistics', 21: 'Murder Holes', 22: 'Treadmill Crane',
+  23: 'Masonry', 24: 'Fortified Wall',
 };
 // Research-block explanations, indexed by the sim's ResearchBlock
 // tag (0 ok — unused, 1 funds, 2 queue full, 3 already done,
@@ -440,6 +442,9 @@ function refreshNames() {
     13: t('tech.horsecollar'), 14: t('age.castle'), 15: t('tech.handcart'),
     16: t('tech.lightcavalry'), 17: t('tech.husbandry'), 18: t('age.imperial'),
     19: t('tech.caravan'),
+    20: t('tech.ballistics'), 21: t('tech.murderholes'),
+    22: t('tech.treadmill'), 23: t('tech.masonry'),
+    24: t('tech.fortifiedwall'),
   };
   RESEARCH_BLOCK_TITLES = [
     '', t('block.noResources'), t('block.queueFullTrain'),
@@ -2075,6 +2080,7 @@ function mirrorValid(kind, cx, cy) {
   if ((kind === 6 || kind === 7 || kind === 8) && myAge() < 1) return false;
   if (kind === 14 && myAge() < 1) return false; // Stone Wall is Feudal (BLD-20)
   if (kind === 15 && myAge() < 2) return false; // Castle is Castle Age (Castle P3a)
+  if (kind === 16 && myAge() < 2) return false; // University is Castle Age (Castle P3c)
   if ((kind === 6 || kind === 7) && !ownDone.some((b) => b.kind === 2)) return false;
   // Any standing building's footprint (square range overlap).
   for (const b of buildings) {
@@ -8523,6 +8529,7 @@ const NEW_BUILDING_STYLE = {
   12: { wall: '#a3763f', wall2: '#82592c', roof: '#b03a2e' }, // Market: timber + red canvas
   13: { wall: '#a08b62', wall2: '#7d6a48', roof: '#5d4630' }, // Town Center: heavy timber + stone
   15: { wall: '#9b9587', wall2: '#7c7668', roof: '#5d564c' }, // Castle: pale stone keep (Castle P3a)
+  16: { wall: '#a89a7c', wall2: '#8a7c60', roof: '#8c3f34' }, // University: ivory stone + deep red roof (Castle P3c)
 };
 
 function drawNewBuilding(b) {
@@ -8637,6 +8644,22 @@ function drawBuildingFeature(kind, sx, sy, hgt) {
     }
     ctx.fillStyle = '#2e2a24';
     ctx.fillRect(sx - 0.22 * u, top + 0.35 * u, 0.44 * u, 0.85 * u);
+  } else if (kind === 16) {
+    // The University's pediment and columns: a gold open book
+    // at the roof point over two pale columns (Castle P3c).
+    ctx.fillStyle = '#d8b34a';
+    ctx.beginPath();
+    ctx.moveTo(sx - 0.5 * u, top - 0.62 * u);
+    ctx.lineTo(sx, top - 0.38 * u);
+    ctx.lineTo(sx + 0.5 * u, top - 0.62 * u);
+    ctx.lineTo(sx + 0.5 * u, top - 0.18 * u);
+    ctx.lineTo(sx, top - 0.42 * u);
+    ctx.lineTo(sx - 0.5 * u, top - 0.18 * u);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#e8e0cc';
+    ctx.fillRect(sx - 1.05 * u, top + 0.1 * u, 0.3 * u, 0.9 * u);
+    ctx.fillRect(sx + 0.75 * u, top + 0.1 * u, 0.3 * u, 0.9 * u);
   } else if (kind === 11) {
     // The outpost's lookout flag.
     ctx.fillStyle = '#3a2c1c';
@@ -10017,6 +10040,9 @@ function runCommandButton(id, times = 1) {
       'research-bloodlines': 9, 'research-doublebit': 10,
       'research-lightcavalry': 16, 'research-husbandry': 17,
       'research-caravan': 19,
+      'research-ballistics': 20, 'research-murderholes': 21,
+      'research-treadmill': 22, 'research-masonry': 23,
+      'research-fortifiedwall': 24,
       'research-goldmining': 11, 'research-stonemining': 12,
       'research-horsecollar': 13,
     }[id];
@@ -10111,7 +10137,7 @@ function renderCommands() {
   // context renders nothing, never command buttons.
   const foeSel = !!selectedBuilding && selectedBuilding.owner === foeOwner();
   // M6: each production/research building gets its own context.
-  const BUILDING_CONTEXT = { 2: 'barracks', 3: 'lumbercamp', 4: 'mill', 5: 'miningcamp', 6: 'range', 7: 'stable', 8: 'blacksmith', 10: 'tower', 11: 'outpost', 12: 'market', 15: 'castle' };
+  const BUILDING_CONTEXT = { 2: 'barracks', 3: 'lumbercamp', 4: 'mill', 5: 'miningcamp', 6: 'range', 7: 'stable', 8: 'blacksmith', 10: 'tower', 11: 'outpost', 12: 'market', 15: 'castle', 16: 'university' };
   const context = selUnits.length > 0
     ? (hasVillager ? 'build' : 'units')
     : selectedBuilding
@@ -10166,6 +10192,7 @@ function renderCommands() {
   const RB_TAGS = {
     blacksmith: [2, 3, 4, 7, 8], barracks: [5], stable: [9, 16, 17],
     lumbercamp: [10], miningcamp: [11, 12], mill: [13], market: [19],
+    university: [20, 21, 22, 23, 24],
   };
   const rbB = bk && RB_TAGS[context]
     ? Object.fromEntries(RB_TAGS[context].map((t) => [t, sim.research_block_at(bk.id, t)]))
@@ -10194,6 +10221,11 @@ function renderCommands() {
   if (sig === cmdSig) return;
   cmdSig = sig;
   cmdGrid.innerHTML = '';
+  // Castle P3c: the military build page carries nine kinds —
+  // its grid grows a fourth row for the University (see
+  // PAGE_KEYS.mil in hotkeys.js); every other panel keeps the
+  // canonical three rows.
+  cmdGrid.classList.toggle('grid-tall', context === 'build' && buildPage === 'mil');
   if (context === 'build') {
     // M6: the full building set. Availability gates mirror the sim:
     // Farms need a completed Mill; the Feudal buildings show locked
@@ -10207,6 +10239,7 @@ function renderCommands() {
     const buildBtn = (kind) => {
       let gate = null;
       if (kind === 15 && age < 2) gate = t('gate.castle');
+      else if (kind === 16 && age < 2) gate = t('gate.castle');
       else if (kind === 13 && age < 2) gate = t('gate.castle');
       else if (kind === 1 && !hasMill) gate = t('gate.mill');
       // The Feudal kinds (BLD-18: the Watch Tower joins them;
@@ -10638,6 +10671,41 @@ function renderCommands() {
             : t('cmd.caravanTitle', { name: TECH_NAME[19], cost: costText([[200, 'food'], [200, 'gold']]), secs: 40 }) + (RESEARCH_BLOCK_TITLES[rbCaravan] ? ' ' + RESEARCH_BLOCK_TITLES[rbCaravan] : ''),
       }),
     );
+  } else if (context === 'university') {
+    // Castle P3c: the University's five researches — glyph-only
+    // buttons like the Blacksmith's Forging line, with the same
+    // research-lock law (fd194a2): blocks 2/3/4 grey the button,
+    // the funds block (1) stays clickable and flashes its reason.
+    // Heated Shot is NOT here: deferred (anti-ship only — this
+    // game has no water domain), never a fake button.
+    const underConstruction = !bk.complete;
+    const techBtn = (id, tag, icon, titleKey, costParts, secs, index) => {
+      const done = (techMask & (1 << tag)) !== 0;
+      const rb = rbB[tag];
+      return cmdButton({
+        id, icon, label: TECH_NAME[tag],
+        key: badgeForButton({ context, id, index }),
+        disabled: underConstruction || done || rb === 2 || rb === 3 || rb === 4,
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: TECH_NAME[tag], building: BUILD_NAME[16] })
+          : done
+            ? t('cmd.researchDone', { name: TECH_NAME[tag] })
+            : t(titleKey, { name: TECH_NAME[tag], cost: costText(costParts), secs })
+              + (RESEARCH_BLOCK_TITLES[rb] ? ' ' + RESEARCH_BLOCK_TITLES[rb] : ''),
+      });
+    };
+    cmdGrid.append(
+      techBtn('research-ballistics', 20, 'i-ballistics', 'cmd.ballisticsTitle',
+        [[300, 'wood'], [175, 'gold']], 60, 0),
+      techBtn('research-murderholes', 21, 'i-murderholes', 'cmd.murderholesTitle',
+        [[200, 'food'], [100, 'stone']], 35, 1),
+      techBtn('research-treadmill', 22, 'i-treadmill', 'cmd.treadmillTitle',
+        [[200, 'wood'], [50, 'stone']], 20, 2),
+      techBtn('research-masonry', 23, 'i-masonry', 'cmd.masonryTitle',
+        [[150, 'food'], [175, 'wood']], 50, 3),
+      techBtn('research-fortifiedwall', 24, 'i-fortifiedwall', 'cmd.fortifiedwallTitle',
+        [[200, 'food'], [100, 'wood']], 50, 4),
+    );
   } else if (context === 'lumbercamp' || context === 'mill' || context === 'miningcamp') {
     // The economy researches (2026-10-22): Double-Bit Axe at the
     // Lumber Camp, Horse Collar at the Mill, Gold / Stone Mining
@@ -10855,7 +10923,9 @@ function updateSelPanel() {
   // the player could not tell the click had worked. As a
   // production building it gets the queue line + cancel chips;
   // its idle line keeps the rates (see the production branch).
-  const PROD_KINDS = [2, 3, 4, 5, 6, 7, 8, 12, 15];
+  // The University (kind 16, Castle P3c) is a pure researcher and
+  // joins the same shape, or its queue line would not render either.
+  const PROD_KINDS = [2, 3, 4, 5, 6, 7, 8, 12, 15, 16];
   const context = selUnits.length > 0 ? 'units'
     : selectedBuilding
       ? (selectedBuilding.type === 'tc'

@@ -361,7 +361,7 @@ fn plan_repair(sim: &mut Sim, cfg: &AiConfig, acted: &mut Vec<u32>) {
         if b.owner != me || !b.complete || b.kind == BuildingKind::Farm {
             continue;
         }
-        let max_hp = b.kind.max_hp_at(sim.age_of(me));
+        let max_hp = sim.building_max_hp(b.kind, me);
         if b.hp >= I16F16::from_num(max_hp) {
             continue;
         }
@@ -1561,7 +1561,7 @@ mod tests {
     fn damage(sim: &mut Sim, bid: u32, amount: i32) -> I16F16 {
         let (bx, by, max_hp) = {
             let b = sim.buildings().iter().find(|b| b.id == bid).unwrap();
-            (b.pos_x, b.pos_y, b.kind.max_hp_at(sim.age_of(b.owner)))
+            (b.pos_x, b.pos_y, sim.building_max_hp(b.kind, b.owner))
         };
         let elev = sim.height_at_world(bx, by);
         let target = I16F16::from_num(max_hp - amount);
@@ -1591,7 +1591,7 @@ mod tests {
         let (mut sim, bid) = staged_barracks(mode);
         let max_hp = {
             let b = sim.buildings().iter().find(|b| b.id == bid).unwrap();
-            I16F16::from_num(b.kind.max_hp_at(sim.age_of(b.owner)))
+            I16F16::from_num(sim.building_max_hp(b.kind, b.owner))
         };
 
         // Phase 1 — funded repair.
@@ -1740,6 +1740,7 @@ mod tests {
             repair_hp_remainder: 0,
             repair_cost_remainder: 0,
             repair_stone_remainder: 0,
+            build_rate_remainder: 0,
             complete: true,
             node_id: None,
             queue: Vec::new(),

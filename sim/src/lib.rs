@@ -65,6 +65,8 @@ mod units;
 #[cfg(test)]
 mod castle_p3_tests;
 #[cfg(test)]
+mod university_p3c_tests;
+#[cfg(test)]
 mod garrison_tests;
 #[cfg(test)]
 mod imperial_tests;
@@ -1468,6 +1470,18 @@ impl Sim {
                 }
                 Age::Dark => {}
             }
+            // Masonry (Castle P3c): the Town Center is a building
+            // for the University tech's purposes (DE includes it;
+            // it is neither wall, gate nor farm) — +10% HP,
+            // +1/+1 armor, +3 building armor, layered over the
+            // Age column exactly as `Sim::building_max_hp` /
+            // `building_armor` layer it for placed buildings.
+            if p.techs & TechId::Masonry.bit() != 0 {
+                s.max_hp = (s.max_hp * 11) / 10;
+                s.armor_melee += 1;
+                s.armor_pierce += 1;
+                s.armor_building += 3;
+            }
         }
         // TEC-04 (Loom): villagers +15 HP, +1 melee / +2 pierce
         // armor, +0.1 tiles/s (RULEBOOK TEC-06/CLS-05 — see the
@@ -1623,7 +1637,75 @@ impl Sim {
             w.attacks = crate::build::WATCH_TOWER_FLETCHING_ATTACKS;
             w.range_max += I16F16::from_num(4); // +1 tile (TEC-06)
         }
+        // Murder Holes (Castle P3c, PRJ-08/BLD-18): the
+        // University tech removes the minimum range of defensive
+        // structures — every armed placed building's dead zone
+        // closes (the Watch Tower's and the Castle's 1 tile).
+        // The Town Center's weapon carries no minimum range to
+        // remove (its profile's range_min is already 0).
+        if self.has_tech(owner, TechId::MurderHoles) {
+            w.range_min = I16F16::ZERO;
+        }
         Some(w)
+    }
+
+    /// The effective maximum HP of a placed building kind for
+    /// `owner` (Castle P3c): the kind's Age column
+    /// (`BuildingKind::max_hp_at`) with the owner's researched
+    /// University patches layered on — the TEC-06 lookup form,
+    /// mirroring `stats_for`. Fortified Wall replaces the Stone
+    /// Wall row outright (3000, BLD-20); Masonry scales every
+    /// other kind except walls and farms by +10% (integer
+    /// ×11/10 over the Age column, truncating — the Wheelbarrow
+    /// scalar's rounding). Every consumer that used to read
+    /// `max_hp_at` for a standing building reads this instead:
+    /// construction ceilings, repair caps and drips, the
+    /// garrison ejection line, damage and the client's HP
+    /// fraction all agree on one maximum.
+    pub fn building_max_hp(&self, kind: BuildingKind, owner: u8) -> i32 {
+        if kind == BuildingKind::StoneWall && self.has_tech(owner, TechId::FortifiedWall) {
+            return 3000; // BLD-20: the Fortified Wall row
+        }
+        let base = kind.max_hp_at(self.age_of(owner));
+        if self.has_tech(owner, TechId::Masonry)
+            && !kind.is_wall()
+            && kind != BuildingKind::Farm
+        {
+            (base * 11) / 10
+        } else {
+            base
+        }
+    }
+
+    /// The effective armor of a placed building kind for `owner`
+    /// (Castle P3c): (melee, pierce, building) — the kind's Age
+    /// column plus the University patches, the same lookup as
+    /// `building_max_hp`. The Fortified Wall row replaces the
+    /// Stone Wall's armor outright (12/12, +8 building armor,
+    /// BLD-20); Masonry adds +1/+1 and +3 building armor to
+    /// every kind except walls, gates and farms (no gate kind
+    /// exists yet — the wall exclusion covers its segments).
+    /// Building armor mitigates the anti-building attack class
+    /// in `combat::damage_sum`.
+    pub fn building_armor(&self, kind: BuildingKind, owner: u8) -> (i32, i32, i32) {
+        let age = self.age_of(owner);
+        if kind == BuildingKind::StoneWall && self.has_tech(owner, TechId::FortifiedWall) {
+            return (12, 12, 8); // BLD-20: the Fortified Wall row
+        }
+        let (mut melee, mut pierce, mut building) = (
+            kind.armor_melee_at(age),
+            kind.armor_pierce_at(age),
+            0,
+        );
+        if self.has_tech(owner, TechId::Masonry)
+            && !kind.is_wall()
+            && kind != BuildingKind::Farm
+        {
+            melee += 1;
+            pierce += 1;
+            building += 3;
+        }
+        (melee, pierce, building)
     }
 
     /// How many completed buildings of `kind` a player owns (M6) —
@@ -2482,6 +2564,86 @@ impl Sim {
                     }
                 }
             }
+            TechId::Masonry => {
+                // Castle P3c: standing buildings keep their HP
+                // FRACTION across the +10% maximum (the DE
+                // behavior for a max-HP research on buildings —
+                // the same proportional rule Horse Collar applies
+                // to farm food): each affected building's current
+                // HP scales by new_max/old_max in fixed-point
+                // bits. Walls and farms are excluded, exactly as
+                // the lookup in `building_max_hp` excludes them.
+                // (Foundations ride the construction ceiling,
+                // which reads the patched maximum every tick, so
+                // only completed buildings need the sweep; a
+                // foundation's HP stays the same distance below
+                // its rising ceiling, per BLD-05.)
+                self.players[slot].techs |= tech.bit();
+                let olds: Vec<(usize, i64, i64)> = self
+                    .buildings
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, b)| {
+                        b.owner == owner
+                            && b.complete
+                            && !b.kind.is_wall()
+                            && b.kind != BuildingKind::Farm
+                    })
+                    .map(|(bi, b)| {
+                        (
+                            bi,
+                            // The pre-research maximum is the bare
+                            // Age column (Masonry is the only patch
+                            // these kinds can carry); the new one
+                            // reads the lookup with the bit now set.
+                            b.kind.max_hp_at(self.age_of(owner)) as i64,
+                            self.building_max_hp(b.kind, owner) as i64,
+                        )
+                    })
+                    .collect();
+                for (bi, old_max, new_max) in olds {
+                    if old_max <= 0 || new_max == old_max {
+                        continue;
+                    }
+                    let b = &mut self.buildings[bi];
+                    let bits = b.hp.to_bits() as i64;
+                    b.hp = I16F16::from_bits((bits * new_max / old_max) as i32);
+                }
+                // The Town Center entity takes the same sweep:
+                // its maximum rises 2400 → 2640 in `stats_for`.
+                for e in &mut self.entities {
+                    if e.owner == owner && e.kind == EntityKind::TownCenter && !e.dead {
+                        let bits = e.hp.to_bits() as i64;
+                        e.hp = I16F16::from_bits((bits * 11 / 10) as i32);
+                    }
+                }
+            }
+            TechId::FortifiedWall => {
+                // Castle P3c (BLD-20): standing Stone Walls
+                // convert in place — their HP scales by
+                // 3000/old_max, keeping the damage fraction (the
+                // Masonry sweep's proportional rule). Foundations
+                // convert through the lookup alone: their ceiling
+                // already reads the Fortified maximum.
+                self.players[slot].techs |= tech.bit();
+                let olds: Vec<(usize, i64)> = self
+                    .buildings
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, b)| {
+                        b.owner == owner && b.complete && b.kind == BuildingKind::StoneWall
+                    })
+                    .map(|(bi, b)| (bi, b.kind.max_hp_at(self.age_of(owner)) as i64))
+                    .collect();
+                for (bi, old_max) in olds {
+                    if old_max <= 0 {
+                        continue;
+                    }
+                    let b = &mut self.buildings[bi];
+                    let bits = b.hp.to_bits() as i64;
+                    b.hp = I16F16::from_bits((bits * 3000 / old_max) as i32);
+                }
+            }
             _ => {
                 self.players[slot].techs |= tech.bit();
             }
@@ -2789,12 +2951,15 @@ impl Sim {
     /// owner's current Age. Read-only, like the entity form.
     pub fn building_display_stats(&self, building: u32) -> Option<(i32, i32, i32)> {
         let b = self.buildings.iter().find(|b| b.id == building)?;
-        let age = self.age_of(b.owner);
         let attack = self
             .building_weapon(b.owner, b.kind)
             .and_then(|w| w.attacks.first().map(|(_, v)| *v))
             .unwrap_or(-1);
-        Some((attack, b.kind.armor_melee_at(age), b.kind.armor_pierce_at(age)))
+        // Castle P3c: the displayed armor is the EFFECTIVE row —
+        // Masonry's +1/+1 and the Fortified Wall's 12/12 included
+        // (via `building_armor`), exactly as combat reads it.
+        let (melee, pierce, _) = self.building_armor(b.kind, b.owner);
+        Some((attack, melee, pierce))
     }
 
     pub fn can_auto_explore(&self, entity: u32) -> bool {
@@ -3261,7 +3426,7 @@ impl Sim {
         let b = &self.buildings[bi];
         b.complete
             && b.owner == e.owner
-            && b.hp < I16F16::from_num(b.kind.max_hp_at(self.age_of(b.owner)))
+            && b.hp < I16F16::from_num(self.building_max_hp(b.kind, b.owner))
     }
 
     /// Would a `Trade` command be accepted right now? (Package D,
@@ -4566,7 +4731,7 @@ impl Sim {
             // HP; the construction phase raises it with
             // progress from here.
             hp: build::construction_hp_ceiling(
-                kind.max_hp_at(self.age_of(builder_owner)),
+                self.building_max_hp(kind, builder_owner),
                 0,
                 kind.build_thirds(),
             ),
@@ -4578,6 +4743,7 @@ impl Sim {
             repair_hp_remainder: 0,
             repair_cost_remainder: 0,
             repair_stone_remainder: 0,
+            build_rate_remainder: 0,
             complete: false,
             node_id: None,
             queue: Vec::new(),
@@ -5832,7 +5998,7 @@ impl Sim {
                     (
                         b.complete,
                         b.hp,
-                        I16F16::from_num(b.kind.max_hp_at(self.age_of(b.owner))),
+                        I16F16::from_num(self.building_max_hp(b.kind, b.owner)),
                         b.pos_x,
                         b.pos_y,
                         b.cell_x,
@@ -5932,14 +6098,28 @@ impl Sim {
                 let b = &self.buildings[bi];
                 (b.kind, b.owner, b.id)
             };
-            let max_hp = kind.max_hp_at(self.age_of(owner));
+            let max_hp = self.building_max_hp(kind, owner);
             let total = kind.build_thirds();
+            let treadmill = self.has_tech(owner, TechId::TreadmillCrane);
             let b = &mut self.buildings[bi];
             let ceiling_before = build::construction_hp_ceiling(max_hp, b.progress_thirds, total);
             if b.progress_thirds == 0 && kind.is_wall() {
                 started_walls.push((b.cell_x, b.cell_y));
             }
-            b.progress_thirds += build::build_rate_thirds(n);
+            // Treadmill Crane (Castle P3c, TEC-09): the owner's
+            // construction runs +20% — the thirds rate × 6/5,
+            // carried exactly by the building's rate remainder
+            // (fifths of a third), so a 5-tick cycle accrues
+            // exactly 6× the base thirds. Repair is NOT scaled:
+            // the repair phase never reads this rate (BLD-07's
+            // flat HP rate is its own rule).
+            if treadmill {
+                let acc = build::build_rate_thirds(n) as i64 * 6 + b.build_rate_remainder;
+                b.progress_thirds += (acc / 5) as u64;
+                b.build_rate_remainder = acc % 5;
+            } else {
+                b.progress_thirds += build::build_rate_thirds(n);
+            }
             let ceiling_after = build::construction_hp_ceiling(max_hp, b.progress_thirds, total);
             if ceiling_after > ceiling_before {
                 b.hp = (b.hp + (ceiling_after - ceiling_before)).min(ceiling_after);
@@ -6025,7 +6205,7 @@ impl Sim {
                 continue;
             }
             let (owner, kind) = (self.buildings[bi].owner, self.buildings[bi].kind);
-            let max_hp_bits = (kind.max_hp_at(self.age_of(owner)) as i64) << 16;
+            let max_hp_bits = (self.building_max_hp(kind, owner) as i64) << 16;
             let hp_bits = self.buildings[bi].hp.to_bits() as i64;
             let missing = max_hp_bits - hp_bits;
             if missing <= 0 {
@@ -6796,6 +6976,16 @@ impl Sim {
                 h.write_u8(0xB7);
                 h.write_u64(b.repair_stone_remainder as u64);
             }
+            // Castle P3c: the Treadmill Crane rate remainder —
+            // written ONLY while nonzero, behind a marker byte
+            // (0xB5 in the building section; the projectile
+            // section's 0xB5 is a different stream position), so
+            // a match whose owner never researches Treadmill
+            // Crane hashes byte-identically to before.
+            if b.build_rate_remainder != 0 {
+                h.write_u8(0xB5);
+                h.write_u64(b.build_rate_remainder as u64);
+            }
             if b.weapon_target.is_some()
                 || b.weapon_target_building.is_some()
                 || b.weapon_strike_tick.is_some()
@@ -7552,6 +7742,7 @@ mod tests {
             repair_hp_remainder: 0,
             repair_cost_remainder: 0,
             repair_stone_remainder: 0,
+            build_rate_remainder: 0,
             complete: false,
             node_id: None,
             queue: Vec::new(),
@@ -7661,6 +7852,7 @@ mod tests {
             repair_hp_remainder: 0,
             repair_cost_remainder: 0,
             repair_stone_remainder: 0,
+            build_rate_remainder: 0,
             complete: true,
             node_id: Some(nid),
             queue: Vec::new(),

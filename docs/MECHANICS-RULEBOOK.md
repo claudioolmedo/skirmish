@@ -1578,6 +1578,19 @@ arrows landed — a garrisoned tower fires up to +4 extra arrows and
 the Castle up to +16 extra over its base volley of 5, from the
 arrow count stored on the building record; the Town Center gained
 its own garrison-only weapon under GAR-06.
+*Narrowed again 2026-10-30 (Castle P3c):* Murder Holes lands at
+the University (TechId 21; 200 F / 100 S, 35 s) — the owner's
+armed placed buildings lose their minimum range entirely
+(`Sim::building_weapon` zeroes the band; the release's PRJ-08
+gate then never blocks a hugging attacker), for the Watch Tower
+and the Castle alike; pinned in `university_p3c_tests` (weapon
+rows for both kinds, and a tower shooting a militia standing
+half a tile from its edge, where before it never fired).
+Remaining for this rule: the Guard Tower upgrade (100 F / 250 W
+→ 1500 HP, 7 attack — deferred by P3c: the fetched sources pin
+no armor row for the upgraded tower, and this package does not
+invent one) and the two UNVERIFIED sight figures. Status
+unchanged.
 
 ---
 
@@ -1622,19 +1635,29 @@ panel art + three construction stages, connectivity-mirrored
 like the palisade (BLD-13's presentation rule). Tests:
 `sim/tests/walls.rs` (age gating, per-segment stone charge,
 truncation, the DE value row).
-*Follow-on (out of scope, recorded):* the **Fortified Wall**
-upgrade — University, Castle Age, 200 food / 100 wood, 50 s
-research; converts every standing Stone Wall in place to
-HP 3000, armor 12/12, +8 building armor (wiki "Fortified Wall"
-+ "Upgrade", retrieved 2026-10-23). It waits for a University
-building to host the research; the Fortified segment build
-time is **UNVERIFIED** (8 s in the AoK changelog vs the master
-table's 10 s). Palisade/stone foundation armor also stays the
-standing armor here (BLD-13's divergence, shared).
+*Follow-on (landed 2026-10-30, Castle P3c):* the **Fortified
+Wall** upgrade — University, Castle Age, 200 food / 100 wood,
+50 s research (TechId 24); converts every standing Stone Wall
+in place to HP 3000, armor 12/12, +8 building armor (wiki
+"Fortified Wall" + "Upgrade", retrieved 2026-10-23). In code:
+`Sim::building_max_hp` / `building_armor` return the Fortified
+row for the owner's Stone Walls once the tech lands (foundations
+and later segments read it through the same lookup), and the
+research-completion sweep scales each standing wall's current
+HP by 3000/old-max, keeping its damage fraction. The Fortified
+segment build time stays the master table's 10 s — the AoK
+changelog's 8 s remains **UNVERIFIED** and is not adopted. The
+foundation half lands with it: an incomplete wall segment —
+palisade or stone — now takes melee armor 0 through
+`damage_building` (update 42848), closing the divergence
+BLD-13's note shares. Pinned in `university_p3c_tests`
+(conversion + proportional HP, the armor row, foundation hits
+through the real damage path).
 *Source:* wiki pages above; dossier in
 `~/workspace/skirmish-study/walls-de/`. · *Status:*
-**DIFFERS** — the segment ships exactly to its DE row; the
-Fortified Wall upgrade and the foundation-armor rule differ.
+**MATCHES** — the segment ships exactly to its DE row, and
+with P3c the Fortified Wall upgrade and the foundation-armor
+rule match as well.
 
 ## 8. Combat & damage
 
@@ -2008,8 +2031,20 @@ Ballistics technology, the aim point is the target's position led by its
 current velocity over the flight time; without it, the aim point is where
 the target stood at release. There is no other target leading.
 *Source:* MECHANICS-STUDY §2.3. · *Impl:* the no-Ballistics half ships
-(M3) — aim is fixed at the target's release-time position, always. The
-Ballistics technology does not exist yet. · *Status:* **DIFFERS**.
+(M3) — aim is fixed at the target's release-time position, always.
+*Closed 2026-10-30 (Castle P3c):* Ballistics lands at the University
+(TechId 20; 300 W / 175 G, 60 s) — `Sim::ballistics_aim` computes the
+led aim point from the target's current velocity over the flight time
+(the release's own distance ÷ projectile speed, ceiling), in fixed
+point, and all three ranged release paths use it when the shooter's
+owner has the tech: entity ranged strikes (`resolve_strike`), placed
+building weapons, and the Town Center's garrison arrows
+(`tc_weapon_release`). A miss scatters around the led aim; building
+targets are never led (they do not move). Without the tech every path
+is byte-identical to before. Pinned by `university_p3c_tests`
+(exact aim math; a Watch Tower's first shot at a crossing scout —
+release-point aim without the tech, a multi-tile eastward lead with
+it). · *Status:* **MATCHES**.
 
 **PRJ-06 — Moving targets dodge geometrically.** A hit on a moving target
 is never re-rolled: if the target has left the impact point (true or
@@ -2322,6 +2357,18 @@ wood gather ×120/100), Gold Mining (Mining Camp, 100 F / 75 W,
 gather lookup (`tech::patched_gather_rate`); cavalry membership
 for Forging / Scale Barding / Bloodlines is read off each row's
 own class mask, so the patches stay row data, never kind lists.
+The University set landed 2026-10-30 (Castle P3c), all as
+lookup-time layers of this same shape: Ballistics and Murder
+Holes (the two ability flags this rule's text already names —
+PRJ-05 / PRJ-08), Masonry (buildings +10% HP, +1/+1 armor,
++3 building armor, walls and farms excluded — layered in
+`Sim::building_max_hp` / `building_armor` and the Town Center's
+`stats_for` row, with a proportional-HP completion sweep for
+standing buildings), Treadmill Crane's construction scalar
+(TEC-09) and Fortified Wall's row replacement (BLD-20).
+Heated Shot is deliberately absent: its only documented
+effect is anti-ship, and this game has no water domain yet —
+no button, no patch, no fake effect.
 · *Status:* **MATCHES**.
 
 **TEC-07 — Techs chain by prerequisites.** Technologies require an age, a
@@ -2364,6 +2411,15 @@ not repair (BLD-07).
 MECHANICS-STUDY §8. · *Impl:* a per-building progress-rate scalar from the
 owner's patch set, multiplied into queue progress and build progress. ·
 *Status:* **MISSING**.
+*Narrowed 2026-10-30 (Castle P3c):* the Treadmill Crane half lands
+at the University (TechId 22; 200 W / 50 S, 20 s) — construction
+progress accrues at ×6/5 for the owner's builders, carried exactly
+by a per-building rate remainder (fifths of a third, hashed only
+while nonzero), so five ticks accrue exactly six times the base
+thirds; repair never reads the scaled rate (BLD-07's flat rate is
+untouched — pinned side by side in `university_p3c_tests`). The
+Conscription half (queue progress at military production
+buildings) does not exist yet, so the rule stays MISSING.
 
 **TEC-10 — Monastery line (rule-relevant subset).** The Monk technologies
 modify §12's rules directly: Redemption (475G, 50 s) unlocks siege/
@@ -3921,6 +3977,24 @@ rung; those remain their own rules. With P3b above, the book
 stands at 222 rules, 143 / 25 / 54. The table below equals
 the body.
 
+updated 2026-10-30 for Castle P3c (bot-loop): the University
+lands (200 W, 60 s, 4×4, 2100 HP, 2/9 armor, LoS 6, Castle Age,
+villager build menu) as a research-only building hosting five
+techs (TechIds 20–24): Ballistics (PRJ-05 moves DIFFERS →
+MATCHES — ranged units, building weapons and the Town Center's
+garrison arrows lead moving targets), Murder Holes (BLD-18
+narrows — the minimum range of both armed kinds is removed;
+the Guard Tower upgrade and the two UNVERIFIED sight figures
+remain), Treadmill Crane (TEC-09 narrows — construction +20%,
+repair untouched; Conscription's half keeps the rule MISSING),
+Masonry (a TEC-06 building patch: +10% HP, +1/+1, +3 building
+armor, walls/farms excluded) and Fortified Wall with the
+foundation melee-armor-0 rule (BLD-20 moves DIFFERS → MATCHES).
+Heated Shot is deferred (anti-ship only; no water domain). §7
+stands at 20 rules, 14 / 5 / 1, §9 at 10 rules, 6 / 2 / 2 and
+the book at 222 rules, 145 / 23 / 54. The table below equals
+the body.
+
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
 | 1 | Simulation & time (SIM) | 12 | 12 | 0 | 0 |
@@ -3929,9 +4003,9 @@ the body.
 | 4 | Selection & orders (SEL) | 17 | 16 | 1 | 0 |
 | 5 | Movement, pathfinding & collision (MOV) | 12 | 5 | 3 | 4 |
 | 6 | Economy & drop-off (ECO) | 17 | 14 | 1 | 2 |
-| 7 | Buildings & placement (BLD) | 20 | 13 | 6 | 1 |
+| 7 | Buildings & placement (BLD) | 20 | 14 | 5 | 1 |
 | 8 | Combat & damage (CMB) | 17 | 16 | 0 | 1 |
-| 9 | Projectiles & ballistics (PRJ) | 10 | 5 | 3 | 2 |
+| 9 | Projectiles & ballistics (PRJ) | 10 | 6 | 2 | 2 |
 | 10 | Unit classes & counters (CLS) | 8 | 5 | 0 | 3 |
 | 11 | Technologies & age advancement (TEC) | 11 | 6 | 2 | 3 |
 | 12 | Monks, conversion & relics (MNK) | 13 | 0 | 0 | 13 |
@@ -3941,7 +4015,7 @@ the body.
 | 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |
 | 17 | Multiplayer determinism (NET) | 11 | 7 | 2 | 2 |
 | 18 | Information rules (INF) | 13 | 9 | 2 | 2 |
-| | **Total** | **222** | **143** | **25** | **54** |
+| | **Total** | **222** | **145** | **23** | **54** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer

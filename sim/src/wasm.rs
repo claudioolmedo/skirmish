@@ -901,6 +901,13 @@ impl WasmSim {
         self.push_build(entity, BuildingKind::Castle, x, y)
     }
 
+    /// Order a villager to build a University (200 wood, 4×4;
+    /// Castle Age, no building prerequisite — Castle P3c) — see
+    /// `push_build_house`.
+    pub fn push_build_university(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build(entity, BuildingKind::University, x, y)
+    }
+
     /// Buy one lot (100) of a commodity at a completed Market
     /// (TRD-01..03): `resource_tag` is the `ResourceKind` tag
     /// (food 1, wood 2, stone 4 — gold is never a commodity).
@@ -1107,6 +1114,12 @@ impl WasmSim {
         self.push_build_queued(entity, BuildingKind::Castle, x, y)
     }
 
+    /// Queue a University build (Castle Age — Castle P3c) — see
+    /// `push_build_house_queued`.
+    pub fn push_build_university_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build_queued(entity, BuildingKind::University, x, y)
+    }
+
     /// Queue a Market build — see `push_build_house_queued`.
     pub fn push_build_market_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
         self.push_build_queued(entity, BuildingKind::Market, x, y)
@@ -1257,9 +1270,21 @@ impl WasmSim {
             out.push(b.queue.len() as f64);
             out.push(I16F16::from_bits(b.train_frac_bits()).to_num::<f64>());
             out.push(b.owner as f64);
-            out.push(
-                I16F16::from_bits(b.hp_frac_bits(self.inner.age_of(b.owner))).to_num::<f64>(),
-            );
+            // Castle P3c: the fraction's denominator is the
+            // EFFECTIVE maximum (Masonry / Fortified Wall
+            // included), computed inline on the same formula as
+            // `Building::hp_frac_bits` — a patched building's HP
+            // can legitimately exceed its bare Age column.
+            {
+                let total = self.inner.building_max_hp(b.kind, b.owner) as i64;
+                let frac = if total <= 0 {
+                    65536
+                } else {
+                    let left = (b.hp.to_bits() as i64).clamp(0, total << 16);
+                    ((left * 65536) / (total << 16)) as i32
+                };
+                out.push(I16F16::from_bits(frac).to_num::<f64>());
+            }
         }
         out
     }

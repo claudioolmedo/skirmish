@@ -172,7 +172,15 @@ fn damage_sum(attacks: &[(u8, i32)], target: &UnitSpec) -> (i32, bool) {
                     continue; // non-member classes contribute exactly zero (CMB-03)
                 }
                 participated = true;
-                0 // no class armor beyond melee/pierce in the M3 tables
+                // Castle P3c: the anti-building class reads the
+                // target's building armor (Masonry's +3, the
+                // Fortified Wall's 8 — DE's "building armor");
+                // every other class still has no class armor.
+                if c == cls::STANDARD_BUILDINGS {
+                    target.armor_building
+                } else {
+                    0
+                }
             }
         };
         total += (value - armor).max(0);
@@ -298,6 +306,12 @@ pub(crate) fn building_spec(kind: BuildingKind, owner_age: crate::tech::Age) -> 
         attacks: &[],
         armor_melee: kind.armor_melee_at(owner_age),
         armor_pierce: kind.armor_pierce_at(owner_age),
+        // Castle P3c: the BASE building armor (0 everywhere until
+        // Masonry / Fortified Wall); `Sim::damage_building`
+        // layers the owner's researched patch over this row via
+        // `Sim::building_armor`, which also owns the patched
+        // max HP — this pure row stays the unpatched table.
+        armor_building: 0,
         classes,
         range_max: I16F16::ZERO,
         range_min: I16F16::ZERO,
@@ -1040,6 +1054,37 @@ impl Sim {
         }
     }
 
+    /// PRJ-05 (Castle P3c): the Ballistics aim point — the
+    /// target's position led by its current velocity over the
+    /// flight time. The flight time is the one the release
+    /// already computes (distance from the shooter to the
+    /// target's CURRENT position ÷ projectile speed, ceiling);
+    /// the lead is one step of that flight at the target's
+    /// standing velocity (`vel_x`/`vel_y`, world units per
+    /// tick) — fixed-point throughout, no float. Without
+    /// Ballistics this helper is never called and the aim stays
+    /// the release-time position (PRJ-05's other half).
+    pub(crate) fn ballistics_aim(
+        sx: I16F16,
+        sy: I16F16,
+        tx: I16F16,
+        ty: I16F16,
+        vx: I16F16,
+        vy: I16F16,
+        projectile_speed: I16F16,
+    ) -> (I16F16, I16F16) {
+        let dist_bits = steer::vec_len(tx - sx, ty - sy).to_bits() as i64;
+        let speed_bits = projectile_speed.to_bits() as i64;
+        if speed_bits <= 0 {
+            return (tx, ty);
+        }
+        let flight = ((dist_bits + speed_bits - 1) / speed_bits).max(1);
+        (
+            tx + I16F16::from_bits((vx.to_bits() as i64 * flight) as i32),
+            ty + I16F16::from_bits((vy.to_bits() as i64 * flight) as i32),
+        )
+    }
+
     /// Land one strike from attacker `idx` on target `ti`: melee
     /// damage now (if still in reach), or a projectile release for a
     /// ranged attacker. Either way the reload restarts from this
@@ -1061,10 +1106,28 @@ impl Sim {
             // happens); the reload still restarts and attack_step
             // repositions the shooter out of the dead zone.
             if steer::vec_len(tx - ax, ty - ay) >= spec.range_min {
+                // PRJ-05 (Castle P3c): with Ballistics the aim
+                // point is the target's position LED by its
+                // current velocity over the flight time; without
+                // it, the aim is where the target stands at
+                // release — decided once, here, either way.
+                let aim = if self.has_tech(owner, crate::tech::TechId::Ballistics) {
+                    Self::ballistics_aim(
+                        ax,
+                        ay,
+                        tx,
+                        ty,
+                        self.entities[ti].vel_x,
+                        self.entities[ti].vel_y,
+                        spec.projectile_speed,
+                    )
+                } else {
+                    (tx, ty)
+                };
                 // Ranged release: the accuracy roll is drawn NOW, at
                 // release, in combat-phase id order (PRJ-03/SIM-04).
                 let roll = self.rng.below(100);
-                let mut impact = (tx, ty);
+                let mut impact = aim;
                 if roll >= spec.accuracy {
                     // Miss: scatter within the weapon's radius — two
                     // further draws, same fixed order (PRJ-04).
@@ -1072,7 +1135,7 @@ impl Sim {
                     let span = (2 * sb + 1) as u32;
                     let dx = self.rng.below(span) as i32 - sb;
                     let dy = self.rng.below(span) as i32 - sb;
-                    impact = (tx + I16F16::from_bits(dx), ty + I16F16::from_bits(dy));
+                    impact = (aim.0 + I16F16::from_bits(dx), aim.1 + I16F16::from_bits(dy));
                 }
                 // Flight time = distance ÷ speed at spawn (PRJ-02),
                 // integer ceiling, at least one tick.
@@ -1888,7 +1951,7 @@ impl Sim {
         } else {
             None
         };
-        let Some((aim, intended, intended_building, edge_d)) = resolved else {
+        let Some((aim0, intended, intended_building, edge_d)) = resolved else {
             return;
         };
         {
@@ -1900,6 +1963,26 @@ impl Sim {
         if edge_d < w.range_min {
             return; // PRJ-08: inside the band — no shot at all.
         }
+        // PRJ-05 (Castle P3c): Ballistics leads a moving UNIT
+        // target for building weapons too (building targets do
+        // not move — their aim stays the center).
+        let aim = match intended {
+            Some(tid) if self.has_tech(owner, crate::tech::TechId::Ballistics) => {
+                match self.entity_index(tid) {
+                    Some(ti) => Self::ballistics_aim(
+                        bx,
+                        by,
+                        aim0.0,
+                        aim0.1,
+                        self.entities[ti].vel_x,
+                        self.entities[ti].vel_y,
+                        w.projectile_speed,
+                    ),
+                    None => aim0,
+                }
+            }
+            _ => aim0,
+        };
         // The accuracy roll (SIM-04: RNG draws happen only here, in
         // the combat phase, in attacker order — buildings draw
         // after every entity). Accuracy 100 draws nothing.
@@ -2169,8 +2252,28 @@ impl Sim {
         } else {
             None
         };
-        let Some((aim, intended, intended_building)) = resolved else {
+        let Some((aim0, intended, intended_building)) = resolved else {
             return;
+        };
+        // PRJ-05 (Castle P3c): the Town Center's garrison arrows
+        // lead a moving unit target under Ballistics, like every
+        // other ranged release.
+        let aim = match intended {
+            Some(tid) if self.has_tech(owner, crate::tech::TechId::Ballistics) => {
+                match self.entity_index(tid) {
+                    Some(ti) => Self::ballistics_aim(
+                        bx,
+                        by,
+                        aim0.0,
+                        aim0.1,
+                        self.entities[ti].vel_x,
+                        self.entities[ti].vel_y,
+                        w.projectile_speed,
+                    ),
+                    None => aim0,
+                }
+            }
+            _ => aim0,
         };
         let arrows = self.tc_states[si].garrison_arrows.max(1);
         {
@@ -2222,10 +2325,30 @@ impl Sim {
             Some(bi) => bi,
             None => return,
         };
-        let spec = building_spec(
+        let mut spec = building_spec(
             self.buildings[bi].kind,
             self.age_of(self.buildings[bi].owner),
         );
+        // Castle P3c: layer the owner's University patches over
+        // the table row (Masonry +1/+1/+3, the Fortified Wall's
+        // 12/12/+8 and 3000 HP — `Sim::building_armor` /
+        // `building_max_hp` own the layering).
+        {
+            let b = &self.buildings[bi];
+            let (melee, pierce, building) = self.building_armor(b.kind, b.owner);
+            spec.armor_melee = melee;
+            spec.armor_pierce = pierce;
+            spec.armor_building = building;
+            spec.max_hp = self.building_max_hp(b.kind, b.owner);
+            // BLD-20's foundation half (DE update 42848): a wall
+            // FOUNDATION — palisade or stone — has melee armor 0;
+            // its standing armor arrives with completion. (This
+            // package's scope is the wall family, the two kinds
+            // the rulebook's BLD-13/BLD-20 notes record.)
+            if !b.complete && b.kind.is_wall() {
+                spec.armor_melee = 0;
+            }
+        }
         // M7: the elevation factor reads the building's own ground
         // (its footprint-center cell) against the attacker's level.
         let b = &self.buildings[bi];

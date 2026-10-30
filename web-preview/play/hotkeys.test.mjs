@@ -214,11 +214,11 @@ test('go-to: Ctrl+letter jumps to a building type, in any context', () => {
 
 test('every building sits on exactly one page, in grid order, with a working badge', () => {
   assert.deepEqual([...PAGE_KINDS.eco, ...PAGE_KINDS.mil].sort((a, b) => a - b),
-    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], 'the two pages partition the sixteen buildings');
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], 'the two pages partition the seventeen buildings');
   // Grid (render) order: the slots run Q W E / A S / ... in order.
   assert.deepEqual(PAGE_KINDS.eco, [0, 4, 1, 3, 5, 12, 13, 15], 'economic: House, Mill, Farm, Lumber, Mining, Market, Town Center, Castle');
-  assert.deepEqual(PAGE_KINDS.mil, [2, 6, 7, 8, 9, 10, 11, 14],
-    'military: Barracks, Range, Stable, Blacksmith, Palisade Wall, Watch Tower, Outpost, Stone Wall');
+  assert.deepEqual(PAGE_KINDS.mil, [2, 6, 7, 8, 9, 10, 11, 14, 16],
+    'military: Barracks, Range, Stable, Blacksmith, Palisade Wall, Watch Tower, Outpost, Stone Wall, University');
   for (const [page, kinds] of Object.entries(PAGE_KINDS)) {
     for (const kind of kinds) {
       assert.equal(PAGE_FOR_KIND[kind], page);

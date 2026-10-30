@@ -59,6 +59,28 @@
 //!   Update 141935 cut the effect from +50% to +20% while raising
 //!   the trade units' base speed by 25%, so the upgraded speed is
 //!   unchanged from the pre-patch game.
+//! - The University set (Castle P3c; all University-hosted,
+//!   Castle Age; wiki Techboxes via the Castle Age dossier,
+//!   CASTLE-AGE-SPEC §5.5, fetched 2026-10-22):
+//!   Ballistics — 300 wood / 175 gold, 60 s: ranged units and
+//!   buildings lead moving targets (PRJ-05; the lead layers at
+//!   projectile release in `combat`, keyed on the shooter's
+//!   owner). Murder Holes — 200 food / 100 stone, 35 s: removes
+//!   the minimum range of defensive structures (PRJ-08's tech;
+//!   layered in `Sim::building_weapon`). Treadmill Crane —
+//!   200 wood / 50 stone, 20 s: construction speed +20%, never
+//!   repair (TEC-09's second half; layered in the construction
+//!   step). Masonry — 150 food / 175 wood, 50 s: buildings
+//!   +10% HP, +1/+1 armor, +3 building armor, excluding walls,
+//!   gates and farms (layered in `Sim::building_max_hp` /
+//!   `Sim::building_armor`; the Town Center entity takes its
+//!   share in `Sim::stats_for`). Fortified Wall — 200 food /
+//!   100 wood, 50 s: the BLD-20 upgrade — standing Stone Walls
+//!   become Fortified Walls (HP 3000, armor 12/12, +8 building
+//!   armor), the same lookup layering. Heated Shot is NOT in
+//!   this set: its only effect is anti-ship, a no-op in a
+//!   land-only game — deferred honestly (P3c scope), never a
+//!   fake button.
 //! - Fletching: 100 food / 50 gold, 30 s — archers +1 attack and
 //!   +1 range (study §8; the study's Castle/Tower/Town Center lines
 //!   have no targets in M6 — no such attacks exist yet).
@@ -187,11 +209,28 @@ pub enum TechId {
     /// Market, Castle: trade units +20% speed (Package D, TRD-08;
     /// renumbered to tag 19 on rebase — ImperialAge holds 18).
     Caravan,
+    /// University, Castle: ranged units/buildings lead moving
+    /// targets (Castle P3c, PRJ-05). Tag 20.
+    Ballistics,
+    /// University, Castle: removes defensive structures' minimum
+    /// range (Castle P3c, PRJ-08/BLD-18). Tag 21.
+    MurderHoles,
+    /// University, Castle: construction speed +20%, never repair
+    /// (Castle P3c, TEC-09). Tag 22.
+    TreadmillCrane,
+    /// University, Castle: buildings +10% HP, +1/+1 armor, +3
+    /// building armor, excl. walls/gates/farms (Castle P3c).
+    /// Tag 23.
+    Masonry,
+    /// University, Castle: the Stone Wall upgrade — standing
+    /// Stone Walls become Fortified Walls, HP 3000, armor 12/12,
+    /// +8 building armor (Castle P3c, BLD-20). Tag 24.
+    FortifiedWall,
 }
 
 impl TechId {
     /// All technologies, in tag order.
-    pub const ALL: [TechId; 20] = [
+    pub const ALL: [TechId; 25] = [
         TechId::Loom,
         TechId::FeudalAge,
         TechId::Fletching,
@@ -212,6 +251,11 @@ impl TechId {
         TechId::Husbandry,
         TechId::ImperialAge,
         TechId::Caravan,
+        TechId::Ballistics,
+        TechId::MurderHoles,
+        TechId::TreadmillCrane,
+        TechId::Masonry,
+        TechId::FortifiedWall,
     ];
 
     /// Stable tag: 0 loom, 1 feudal age, 2 fletching, 3 scale mail,
@@ -228,6 +272,10 @@ impl TechId {
     /// pre-Imperial base; renumbered to 19 on rebase onto the
     /// Imperial tree, bot-loop 2026-10-30. University techs take
     /// 20+ when they land.)
+    /// 20 ballistics, 21 murder holes, 22 treadmill crane,
+    /// 23 masonry, 24 fortified wall (Castle P3c — the
+    /// University set, appended in the dossier's §5.5 table
+    /// order, the Fortified Wall upgrade last.)
     pub fn tag(self) -> u8 {
         match self {
             TechId::Loom => 0,
@@ -250,6 +298,11 @@ impl TechId {
             TechId::Husbandry => 17,
             TechId::ImperialAge => 18,
             TechId::Caravan => 19,
+            TechId::Ballistics => 20,
+            TechId::MurderHoles => 21,
+            TechId::TreadmillCrane => 22,
+            TechId::Masonry => 23,
+            TechId::FortifiedWall => 24,
         }
     }
 
@@ -287,6 +340,12 @@ impl TechId {
             TechId::HorseCollar => TechHost::Building(BuildingKind::Mill),
             TechId::LightCavalry | TechId::Husbandry => TechHost::Building(BuildingKind::Stable),
             TechId::Caravan => TechHost::Building(BuildingKind::Market),
+            // Castle P3c: the University set.
+            TechId::Ballistics
+            | TechId::MurderHoles
+            | TechId::TreadmillCrane
+            | TechId::Masonry
+            | TechId::FortifiedWall => TechHost::Building(BuildingKind::University),
         }
     }
 
@@ -300,6 +359,12 @@ impl TechId {
             TechId::HandCart | TechId::LightCavalry | TechId::Husbandry | TechId::Caravan => {
                 Age::Castle
             }
+            // Castle P3c: the University set is Castle Age research.
+            TechId::Ballistics
+            | TechId::MurderHoles
+            | TechId::TreadmillCrane
+            | TechId::Masonry
+            | TechId::FortifiedWall => Age::Castle,
             _ => Age::Feudal,
         }
     }
@@ -343,6 +408,11 @@ impl TechId {
             TechId::Husbandry => 2400,
             TechId::ImperialAge => 11400, // 190 s (study §7)
             TechId::Caravan => 2400, // 40 s (wiki, Caravan)
+            TechId::Ballistics => 3600, // 60 s (wiki, Ballistics — dossier §5.5)
+            TechId::MurderHoles => 2100, // 35 s (wiki, Murder Holes — dossier §5.5)
+            TechId::TreadmillCrane => 1200, // 20 s (wiki, Treadmill Crane — dossier §5.5)
+            TechId::Masonry => 3000, // 50 s (wiki, Masonry — dossier §5.5)
+            TechId::FortifiedWall => 3000, // 50 s (wiki, Fortified Wall — BLD-20)
         }
     }
 
@@ -370,6 +440,11 @@ impl TechId {
             TechId::Husbandry => (150, 0, 0, 0),
             TechId::ImperialAge => (1000, 0, 800, 0), // study §7
             TechId::Caravan => (200, 0, 200, 0), // wiki, Caravan
+            TechId::Ballistics => (0, 300, 175, 0), // wiki, Ballistics — dossier §5.5
+            TechId::MurderHoles => (200, 0, 0, 100), // wiki, Murder Holes — dossier §5.5
+            TechId::TreadmillCrane => (0, 200, 0, 50), // wiki, Treadmill Crane — dossier §5.5
+            TechId::Masonry => (150, 175, 0, 0), // wiki, Masonry — dossier §5.5
+            TechId::FortifiedWall => (200, 100, 0, 0), // wiki, Fortified Wall — BLD-20
         }
     }
 }
@@ -552,7 +627,49 @@ mod tests {
         for t in TechId::ALL {
             assert_eq!(TechId::from_tag(t.tag()), Some(t));
         }
-        assert_eq!(TechId::from_tag(20), None);
+        assert_eq!(TechId::from_tag(25), None);
+    }
+
+    #[test]
+    fn university_set_matches_the_dossier() {
+        // Castle P3c (CASTLE-AGE-SPEC §5.5, wiki Techboxes,
+        // fetched 2026-10-22): all five are University-hosted,
+        // Castle Age, no tech prerequisite.
+        // Ballistics: 300 W / 175 G, 60 s.
+        assert_eq!(TechId::Ballistics.cost(), (0, 300, 175, 0));
+        assert_eq!(TechId::Ballistics.ticks(), 60 * 60);
+        assert_eq!(TechId::Ballistics.tag(), 20);
+        // Murder Holes: 200 F / 100 S, 35 s.
+        assert_eq!(TechId::MurderHoles.cost(), (200, 0, 0, 100));
+        assert_eq!(TechId::MurderHoles.ticks(), 35 * 60);
+        assert_eq!(TechId::MurderHoles.tag(), 21);
+        // Treadmill Crane: 200 W / 50 S, 20 s.
+        assert_eq!(TechId::TreadmillCrane.cost(), (0, 200, 0, 50));
+        assert_eq!(TechId::TreadmillCrane.ticks(), 20 * 60);
+        assert_eq!(TechId::TreadmillCrane.tag(), 22);
+        // Masonry: 150 F / 175 W, 50 s.
+        assert_eq!(TechId::Masonry.cost(), (150, 175, 0, 0));
+        assert_eq!(TechId::Masonry.ticks(), 50 * 60);
+        assert_eq!(TechId::Masonry.tag(), 23);
+        // Fortified Wall: 200 F / 100 W, 50 s (BLD-20).
+        assert_eq!(TechId::FortifiedWall.cost(), (200, 100, 0, 0));
+        assert_eq!(TechId::FortifiedWall.ticks(), 50 * 60);
+        assert_eq!(TechId::FortifiedWall.tag(), 24);
+        for t in [
+            TechId::Ballistics,
+            TechId::MurderHoles,
+            TechId::TreadmillCrane,
+            TechId::Masonry,
+            TechId::FortifiedWall,
+        ] {
+            assert_eq!(
+                t.host(),
+                TechHost::Building(BuildingKind::University),
+                "{t:?} host"
+            );
+            assert_eq!(t.age_required(), Age::Castle, "{t:?} age");
+            assert_eq!(t.requires_tech(), None, "{t:?} prerequisite");
+        }
     }
 
     #[test]

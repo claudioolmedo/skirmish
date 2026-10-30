@@ -147,6 +147,7 @@ const BUILD_FNS = [
   'push_build_palisade_wall',
   'push_build_watch_tower', 'push_build_outpost', 'push_build_market',
   'push_build_town_center', 'push_build_stone_wall', 'push_build_castle',
+  'push_build_university',
 ];
 const BUILD_FNS_QUEUED = BUILD_FNS.map((n) => n + '_queued');
 const TRAIN_AT_FNS = {
@@ -177,7 +178,7 @@ export function validateCommand(c) {
     // index past the table is junk. (BLD-20 raised it to 14 with
     // the Stone Wall; 13 — the Town Center — was already
     // dispatchable but not validatable, an old inconsistency.)
-    case 'build': return isInt(c.e) && isInt(c.k) && c.k <= 15 && isNum(c.x) && isNum(c.y);
+    case 'build': return isInt(c.e) && isInt(c.k) && c.k <= 16 && isNum(c.x) && isNum(c.y);
     // TRD-01..03: Market trades — a building id and a commodity
     // tag (food 1, wood 2, stone 4; gold is never a commodity).
     case 'mbuy': case 'msell':
@@ -190,7 +191,8 @@ export function validateCommand(c) {
     case 'train_vil': return c.tc === undefined || isInt(c.tc);
     case 'research_tc': return (c.tech === 0 || c.tech === 1 || c.tech === 6
       || c.tech === 14 || c.tech === 15 || c.tech === 18) && (c.tc === undefined || isInt(c.tc));
-    case 'research_at': return isInt(c.b) && isInt(c.tech) && (c.tech <= 13 || c.tech === 16 || c.tech === 17 || c.tech === 19);
+    case 'research_at': return isInt(c.b) && isInt(c.tech) && (c.tech <= 13 || c.tech === 16 || c.tech === 17 || c.tech === 19
+      || (c.tech >= 20 && c.tech <= 24));
     case 'rally_tc': return isNum(c.x) && isNum(c.y) && (c.tc === undefined || isInt(c.tc));
     case 'rally_b': return isInt(c.b) && isNum(c.x) && isNum(c.y);
     case 'force_dep': return isInt(c.e);

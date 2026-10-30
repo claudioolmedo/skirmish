@@ -47,6 +47,14 @@ pub struct UnitSpec {
     pub attacks: &'static [(u8, i32)],
     pub armor_melee: i32,
     pub armor_pierce: i32,
+    /// Armor against the anti-building attack class
+    /// (STANDARD_BUILDINGS pairs — the Petard's +500 today):
+    /// DE's "building armor". 0 on every unit row; placed
+    /// buildings and the Town Center carry theirs through
+    /// `Sim::building_armor` / the Town Center patch in
+    /// `Sim::stats_for` (Masonry's +3, the Fortified Wall's 8 —
+    /// Castle P3c).
+    pub armor_building: i32,
     /// Armor-class membership mask (see `classes`).
     pub classes: u64,
     /// Maximum attack range in world units; 0 = melee (the melee
@@ -185,6 +193,7 @@ static VILLAGER: UnitSpec = UnitSpec {
     attacks: &[(cls::MELEE, 3)],
     armor_melee: 0,
     armor_pierce: 0,
+    armor_building: 0,
     classes: cls::mask(&[cls::VILLAGER]),
     range_max: I16F16::ZERO,
     range_min: I16F16::ZERO,
@@ -212,6 +221,7 @@ static TOWN_CENTER: UnitSpec = UnitSpec {
     attacks: NO_ATTACKS,
     armor_melee: 3,
     armor_pierce: 5,
+    armor_building: 0,
     classes: cls::mask(&[cls::ALL_BUILDINGS, cls::STANDARD_BUILDINGS]),
     range_max: I16F16::ZERO,
     range_min: I16F16::ZERO,
@@ -246,6 +256,7 @@ static SCOUT_CAVALRY: UnitSpec = UnitSpec {
     attacks: &[(cls::MELEE, 3), (cls::MONK, 6)],
     armor_melee: 0,
     armor_pierce: 2,
+    armor_building: 0,
     classes: cls::mask(&[cls::CAVALRY]),
     range_max: I16F16::ZERO,
     range_min: I16F16::ZERO,
@@ -278,6 +289,7 @@ static MILITIA: UnitSpec = UnitSpec {
     attacks: &[(cls::MELEE, 4)],
     armor_melee: 0,
     armor_pierce: 1,
+    armor_building: 0,
     classes: cls::mask(&[cls::INFANTRY]),
     range_max: I16F16::ZERO,
     range_min: I16F16::ZERO,
@@ -307,6 +319,7 @@ static ARCHER: UnitSpec = UnitSpec {
     attacks: &[(cls::PIERCE, 4), (cls::SPEARMAN, 3)],
     armor_melee: 0,
     armor_pierce: 0,
+    armor_building: 0,
     classes: cls::mask(&[cls::ARCHERY]),
     range_max: I16F16::from_bits(1_048_576), // 16 (4 tiles)
     range_min: I16F16::ZERO,
@@ -345,6 +358,7 @@ static MAN_AT_ARMS: UnitSpec = UnitSpec {
     ],
     armor_melee: 0,
     armor_pierce: 1,
+    armor_building: 0,
     classes: cls::mask(&[cls::INFANTRY]),
     range_max: I16F16::ZERO,
     range_min: I16F16::ZERO,
@@ -395,6 +409,7 @@ static SPEARMAN: UnitSpec = UnitSpec {
     ],
     armor_melee: 0,
     armor_pierce: 0,
+    armor_building: 0,
     classes: cls::mask(&[cls::INFANTRY, cls::SPEARMAN]),
     range_max: I16F16::ZERO,
     range_min: I16F16::ZERO,
@@ -433,6 +448,7 @@ static SKIRMISHER: UnitSpec = UnitSpec {
     attacks: &[(cls::PIERCE, 2), (cls::ARCHERY, 3), (cls::SPEARMAN, 3)],
     armor_melee: 0,
     armor_pierce: 3,
+    armor_building: 0,
     classes: cls::mask(&[cls::ARCHERY, cls::SKIRMISHER]),
     range_max: I16F16::from_bits(1_048_576), // 16 (4 tiles)
     range_min: I16F16::from_bits(262_144),  // 4 (1 tile — PRJ-08)
@@ -465,6 +481,7 @@ static KNIGHT: UnitSpec = UnitSpec {
     attacks: &[(cls::MELEE, 10)],
     armor_melee: 2,
     armor_pierce: 2,
+    armor_building: 0,
     classes: cls::mask(&[cls::CAVALRY]),
     range_max: I16F16::ZERO,
     range_min: I16F16::ZERO,
@@ -503,6 +520,7 @@ static LIGHT_CAVALRY: UnitSpec = UnitSpec {
     attacks: &[(cls::MELEE, 7), (cls::MONK, 10)],
     armor_melee: 0,
     armor_pierce: 2,
+    armor_building: 0,
     classes: cls::mask(&[cls::CAVALRY]),
     range_max: I16F16::ZERO,
     range_min: I16F16::ZERO,
@@ -541,6 +559,7 @@ static CAVALRY_ARCHER: UnitSpec = UnitSpec {
     attacks: &[(cls::PIERCE, 6), (cls::SPEARMAN, 2)],
     armor_melee: 0,
     armor_pierce: 0,
+    armor_building: 0,
     classes: cls::mask(&[cls::ARCHERY, cls::CAVALRY]),
     range_max: I16F16::from_bits(1_048_576), // 16 (4 tiles)
     range_min: I16F16::ZERO,
@@ -591,6 +610,7 @@ static PETARD: UnitSpec = UnitSpec {
     ],
     armor_melee: 0,
     armor_pierce: 2,
+    armor_building: 0,
     classes: cls::mask(&[cls::INFANTRY]),
     range_max: I16F16::ZERO,
     range_min: I16F16::ZERO,
@@ -629,6 +649,7 @@ static TRADE_CART: UnitSpec = UnitSpec {
     attacks: NO_ATTACKS,
     armor_melee: 0,
     armor_pierce: 0,
+    armor_building: 0,
     classes: 0,
     range_max: I16F16::ZERO,
     range_min: I16F16::ZERO,
@@ -664,6 +685,7 @@ static SHEEP: UnitSpec = UnitSpec {
     attacks: NO_ATTACKS,
     armor_melee: 0,
     armor_pierce: 0,
+    armor_building: 0,
     classes: cls::mask(&[cls::HERDABLE]),
     range_max: I16F16::ZERO,
     range_min: I16F16::ZERO,
@@ -698,6 +720,7 @@ static BOAR: UnitSpec = UnitSpec {
     ],
     armor_melee: 0,
     armor_pierce: 0,
+    armor_building: 0,
     classes: cls::mask(&[cls::BOAR_HUNTED]),
     range_max: I16F16::ZERO,
     range_min: I16F16::ZERO,
@@ -739,6 +762,7 @@ static WOLF: UnitSpec = UnitSpec {
     attacks: &[(cls::MELEE, 3)],
     armor_melee: 0,
     armor_pierce: 0,
+    armor_building: 0,
     classes: cls::mask(&[cls::PREDATOR]),
     range_max: I16F16::ZERO,
     range_min: I16F16::ZERO,
@@ -769,6 +793,7 @@ static DEER: UnitSpec = UnitSpec {
     attacks: NO_ATTACKS,
     armor_melee: 0,
     armor_pierce: 0,
+    armor_building: 0,
     classes: cls::mask(&[cls::BOAR_HUNTED]),
     range_max: I16F16::ZERO,
     range_min: I16F16::ZERO,

@@ -36,6 +36,7 @@ fn market_at(sim: &Sim, id: u32, owner: u8, cell: (u32, u32), complete: bool) ->
         repair_hp_remainder: 0,
         repair_cost_remainder: 0,
         repair_stone_remainder: 0,
+        build_rate_remainder: 0,
         complete,
         node_id: None,
         queue: Vec::new(),

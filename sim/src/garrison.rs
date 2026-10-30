@@ -68,7 +68,7 @@ impl Sim {
             GarrisonRef::Building(bid) => {
                 let bi = self.building_index(bid)?;
                 let b = &self.buildings[bi];
-                let max = b.kind.max_hp_at(self.age_of(b.owner)) as i64;
+                let max = self.building_max_hp(b.kind, b.owner) as i64;
                 Some((b.hp.to_bits() as i64, max << 16))
             }
             GarrisonRef::TownCenter(tc) => {

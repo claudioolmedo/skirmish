@@ -80,7 +80,8 @@
 //       5 Mining Camp, 6 Archery Range, 7 Stable, 8 Blacksmith,
 //       9 Palisade Wall, 10 Watch Tower, 11 Outpost (BLD-18),
 //       12 Market (BLD-19), 14 Stone Wall (BLD-20), 15 Castle
-//       (Castle P3a; the tags are the sim's — append only).
+//       (Castle P3a), 16 University (Castle P3c; the tags are
+//       the sim's — append only).
 // PAGE_KINDS is the pages' GRID (render) order: slot 0 first.
 // Kind 13 (Town Center, Castle Age) closes the economic page —
 // DE's villager panel keeps the TC with the economic buildings,
@@ -88,13 +89,13 @@
 // beside it: the military page already fills all nine cells.
 export const PAGE_KINDS = {
   eco: [0, 4, 1, 3, 5, 12, 13, 15],
-  mil: [2, 6, 7, 8, 9, 10, 11, 14],
+  mil: [2, 6, 7, 8, 9, 10, 11, 14, 16],
 };
 
 /** Which build page a building kind belongs to ('eco' | 'mil'). */
 export const PAGE_FOR_KIND = {
   0: 'eco', 1: 'eco', 3: 'eco', 4: 'eco', 5: 'eco', 12: 'eco', 13: 'eco', 15: 'eco',
-  2: 'mil', 6: 'mil', 7: 'mil', 8: 'mil', 9: 'mil', 10: 'mil', 11: 'mil', 14: 'mil',
+  2: 'mil', 6: 'mil', 7: 'mil', 8: 'mil', 9: 'mil', 10: 'mil', 11: 'mil', 14: 'mil', 16: 'mil',
 };
 
 /**
@@ -124,6 +125,7 @@ export const PAGE_KEYS = {
     KeyD: 10, // Watch Tower — slot 5 (BLD-18; next free slot — S is the wall's)
     KeyZ: 11, // Outpost — slot 6 (BLD-18)
     KeyX: 14, // Stone Wall — slot 7 (BLD-20; the defensive row's second wall, beside the Palisade as in DE)
+    KeyV: 16, // University — slot 8 (Castle P3c; the page's nine kinds overflow the 3×3, so the University opens a fourth row under the Barracks — V, the free letter under the page's first column. Its DE page is this one; the Castle precedent (overflow to the eco page) is exhausted — that page is full too.)
     KeyC: 'back', // Back — the last slot
   },
 };
@@ -131,7 +133,7 @@ export const PAGE_KEYS = {
 /** The one letter shown as a button's key badge on an armed page. */
 export const PAGE_BADGE = {
   eco: { 0: 'Q', 4: 'W', 1: 'E', 3: 'A', 5: 'S', 12: 'D', 13: 'Z', 15: 'X' },
-  mil: { 2: 'Q', 6: 'W', 7: 'E', 8: 'A', 9: 'S', 10: 'D', 11: 'Z', 14: 'X' },
+  mil: { 2: 'Q', 6: 'W', 7: 'E', 8: 'A', 9: 'S', 10: 'D', 11: 'Z', 14: 'X', 16: 'V' },
 };
 
 /** Panel contexts whose buttons answer to position keys, in order. */
@@ -162,6 +164,12 @@ export const PANEL_BUTTONS = {
   market: ['trade-sell-food', 'trade-sell-wood', 'trade-sell-stone',
     'trade-buy-food', 'trade-buy-wood', 'trade-buy-stone',
     'train-trade-cart', 'research-caravan'],
+  // Castle P3c: the University's five researches, in render
+  // order (the tech table's order: Ballistics, Murder Holes,
+  // Treadmill Crane, Masonry, Fortified Wall). Heated Shot is
+  // absent on purpose — deferred (anti-ship only, no water).
+  university: ['research-ballistics', 'research-murderholes', 'research-treadmill',
+    'research-masonry', 'research-fortifiedwall'],
 };
 
 // The slot letter of every button on every building panel
@@ -300,6 +308,15 @@ export const PANEL_KEYS = {
     'train-trade-cart': ['KeyZ', 'Z'],
     'research-caravan': ['KeyX', 'X'],
   },
+  // Castle P3c: the University — the plain positional grid over
+  // its five researches (top row Q W E, second row A S).
+  university: {
+    'research-ballistics': ['KeyQ', 'Q'],
+    'research-murderholes': ['KeyW', 'W'],
+    'research-treadmill': ['KeyE', 'E'],
+    'research-masonry': ['KeyA', 'A'],
+    'research-fortifiedwall': ['KeyS', 'S'],
+  },
 };
 export const POSITION_CODES = ['KeyQ', 'KeyW', 'KeyE'];
 export const POSITION_LETTERS = ['Q', 'W', 'E'];
@@ -409,6 +426,10 @@ export const GRID_CELLS = {
   Q: [1, 1], W: [1, 2], E: [1, 3],
   A: [2, 1], S: [2, 2], D: [2, 3],
   Z: [3, 1], X: [3, 2], C: [3, 3],
+  // Castle P3c: the military build page's fourth row (see
+  // PAGE_KEYS.mil) — only the University's V lives there; the
+  // renderer adds the fourth row only for that page.
+  V: [4, 1],
 };
 
 /**
