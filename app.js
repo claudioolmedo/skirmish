@@ -10847,7 +10847,15 @@ function updateSelPanel() {
   // M6: the production/research buildings share one info shape.
   // The camps and the Mill joined with their researches
   // (2026-10-22): their queues carry research entries only.
-  const PROD_KINDS = [2, 3, 4, 5, 6, 7, 8, 15];
+  // The Market joined 2026-10-30 (bot-loop): Package D made it a
+  // producer/researcher (Trade Cart + Caravan), but it still fell
+  // into the plain 'building' shape, whose info line is only the
+  // exchange rates — a live session (fc61130d) trained a cart and
+  // researched Caravan with NO queue/progress line ever shown, so
+  // the player could not tell the click had worked. As a
+  // production building it gets the queue line + cancel chips;
+  // its idle line keeps the rates (see the production branch).
+  const PROD_KINDS = [2, 3, 4, 5, 6, 7, 8, 12, 15];
   const context = selUnits.length > 0 ? 'units'
     : selectedBuilding
       ? (selectedBuilding.type === 'tc'
@@ -10857,7 +10865,7 @@ function updateSelPanel() {
       : selectedAnimal != null ? 'animal'
       : 'none';
   const singleHp = selUnits.length === 1 ? Math.floor(st.hp[selUnits[0] * 2]) : -1;
-  const TRAINS_TAG = { 2: 3, 6: 4, 7: 2, 15: 15 };
+  const TRAINS_TAG = { 2: 3, 6: 4, 7: 2, 12: 16, 15: 15 };
   const bkBlock = bk && TRAINS_TAG[bk.kind] != null
     ? sim.building_train_block(bk.id, TRAINS_TAG[bk.kind]) : -1;
   const tcQueueCodes = myTcQueue().join('.');
@@ -11003,9 +11011,18 @@ function updateSelPanel() {
     } else {
       selInfo.textContent = bk.kind === 8
         ? t('sel.blacksmithIdle')
-        : (bk.kind === 3 || bk.kind === 4 || bk.kind === 5)
-          ? t('sel.researchIdle')
-          : t('sel.productionIdle');
+        : bk.kind === 12
+          // The Market's idle line is its exchange rates — the
+          // prices ARE its state (TRD-01..03), as in the plain
+          // building shape it had before joining PROD_KINDS.
+          ? t('sel.marketRates', {
+            sf: sim.market_prices()[0], bf: sim.market_prices()[1],
+            sw: sim.market_prices()[2], bw: sim.market_prices()[3],
+            ss: sim.market_prices()[4], bs: sim.market_prices()[5],
+          })
+          : (bk.kind === 3 || bk.kind === 4 || bk.kind === 5)
+            ? t('sel.researchIdle')
+            : t('sel.productionIdle');
     }
   } else if (context === 'animal') {
     // An animal that is not ours: portrait, name, hit points, and
