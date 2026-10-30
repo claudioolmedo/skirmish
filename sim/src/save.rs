@@ -390,6 +390,30 @@ impl W {
                 self.u8(34);
                 self.u32(tc);
             }
+            // Combo landing (bot-loop 2026-10-30): the save codec
+            // predates Castle P4a and Package K — their commands
+            // append here, tags 35-37, append-only like the enum.
+            Command::GarrisonUnit { entity, host } => {
+                self.u8(35);
+                self.u32(entity);
+                self.u32(host);
+            }
+            Command::UngarrisonUnit { host } => {
+                self.u8(36);
+                self.u32(host);
+            }
+            Command::Tribute {
+                sender,
+                recipient,
+                resource,
+                amount,
+            } => {
+                self.u8(37);
+                self.u8(sender);
+                self.u8(recipient);
+                self.u8(resource.tag());
+                self.i32(amount);
+            }
         }
     }
 }
@@ -476,6 +500,7 @@ impl Sim {
             w.i64(b.repair_hp_remainder);
             w.i64(b.repair_cost_remainder);
             w.i64(b.repair_stone_remainder);
+            w.i64(b.build_rate_remainder);
             w.bool(b.complete);
             w.opt_u32(b.node_id);
             w.prod_queue(&b.queue);
@@ -562,6 +587,10 @@ impl Sim {
             w.opt_u32(e.trade_home);
             w.opt_u32(e.trade_target);
             w.bool(e.trade_loaded);
+            w.usize(e.garrison.len());
+            for id in &e.garrison {
+                w.u32(*id);
+            }
         }
         // --- projectiles ---
         w.usize(self.projectiles.len());
@@ -695,6 +724,7 @@ impl<'a> R<'a> {
             0 => Some(None),
             1 => Some(Some(GarrisonRef::Building(self.u32()?))),
             2 => Some(Some(GarrisonRef::TownCenter(self.u32()?))),
+            3 => Some(Some(GarrisonRef::Unit(self.u32()?))),
             _ => None,
         }
     }
@@ -926,6 +956,17 @@ impl<'a> R<'a> {
             }),
             33 => Some(Command::UngarrisonTc { tc: self.u32()? }),
             34 => Some(Command::TownBell { tc: self.u32()? }),
+            35 => Some(Command::GarrisonUnit {
+                entity: self.u32()?,
+                host: self.u32()?,
+            }),
+            36 => Some(Command::UngarrisonUnit { host: self.u32()? }),
+            37 => Some(Command::Tribute {
+                sender: self.u8()?,
+                recipient: self.u8()?,
+                resource: ResourceKind::from_tag(self.u8()?)?,
+                amount: self.i32()?,
+            }),
             _ => None,
         }
     }
@@ -1076,6 +1117,7 @@ impl Sim {
             let repair_hp_remainder = r.i64()?;
             let repair_cost_remainder = r.i64()?;
             let repair_stone_remainder = r.i64()?;
+            let build_rate_remainder = r.i64()?;
             let complete = r.bool()?;
             let node_id = r.opt_u32()?;
             let queue = r.prod_queue()?;
@@ -1106,6 +1148,7 @@ impl Sim {
                 repair_hp_remainder,
                 repair_cost_remainder,
                 repair_stone_remainder,
+                build_rate_remainder,
                 complete,
                 node_id,
                 queue,
@@ -1189,6 +1232,11 @@ impl Sim {
             let trade_home = r.opt_u32()?;
             let trade_target = r.opt_u32()?;
             let trade_loaded = r.bool()?;
+            let n_g = r.count(4)?;
+            let mut garrison = Vec::with_capacity(n_g);
+            for _ in 0..n_g {
+                garrison.push(r.u32()?);
+            }
             entities.push(Entity {
                 id,
                 kind,
@@ -1243,6 +1291,7 @@ impl Sim {
                 trade_home,
                 trade_target,
                 trade_loaded,
+                garrison,
             });
         }
         let n_p = r.count(50)?;
