@@ -493,8 +493,18 @@ impl HumanScript {
         if !self.pushing {
             // Rally home while (re)massing: fresh troops gather at
             // the home Town Center instead of streaming to the front.
+            // GAR-08 adaptation (2026-10-30, bot-loop): the rally
+            // point can no longer be the TC's own center — since
+            // Castle P3b, a rally point inside a garrisonable host's
+            // footprint is a rally-GARRISON order (DE-faithful,
+            // GAR-08 MATCHES), so troops rallied to the center now
+            // shelter inside the TC and can never be ordered out to
+            // push (scripted_siege timed out on exactly this). The
+            // gather point moves two half-extents east of the TC —
+            // beside it, on open start-clearing ground — which is
+            // what a human player massing at home clicks.
             let tc = sim.town_center();
-            let (hx, hy) = (tc.pos_x, tc.pos_y);
+            let (hx, hy) = (tc.pos_x + I16F16::from_num(16), tc.pos_y);
             let home_bids: Vec<u32> = sim
                 .buildings()
                 .iter()
