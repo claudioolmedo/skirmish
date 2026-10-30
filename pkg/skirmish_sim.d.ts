@@ -142,6 +142,15 @@ export class WasmSim {
      */
     entity_stance(): Uint8Array;
     /**
+     * Per-entity trade state in entity-id order (Package D,
+     * TRD-05): 0 = not trading, 1 = tasked and travelling empty
+     * (or waiting loaded for a home Market to stand), 2 = loaded
+     * and returning home. Read-only presentation glue — the
+     * renderer draws the gold load on a loaded cart on the sim's
+     * own word, exactly like `entity_carry`.
+     */
+    entity_trade(): Uint8Array;
+    /**
      * The LOCAL player's fog-of-war grid (M7, VIS-01): flat
      * row-major bytes, one per cell — 0 unexplored, 1 explored,
      * 2 currently visible. The client renders strictly from this:
@@ -707,6 +716,16 @@ export class WasmSim {
      */
     push_town_bell(tc: number): boolean;
     /**
+     * Task a Trade Cart to a foreign Market (Package D, TRD-05):
+     * the cart runs the empty/loaded round trip until re-tasked,
+     * stopped or killed, crediting its owner the TRD-06 gold on
+     * each arrival home. Returns whether the order *would* be
+     * accepted (a living player Trade Cart; a completed Market of
+     * another player — TRD-07); the sim re-validates when the
+     * command applies next tick.
+     */
+    push_trade(entity: number, building: number): boolean;
+    /**
      * Enqueue an Archer at a completed Archery Range (M6 — the
      * Range is the Archer's home since M6; in M3 the Barracks
      * trained them by brief). See `push_train_militia`.
@@ -751,6 +770,12 @@ export class WasmSim {
      * `push_train_militia`.
      */
     push_train_spearman(building: number): boolean;
+    /**
+     * Enqueue a Trade Cart at a completed Market (Package D,
+     * TRD-05 — the Market is the cart's only home; `can_train_at`
+     * carries the Feudal Age gate). See `push_train_militia`.
+     */
+    push_train_trade_cart(building: number): boolean;
     /**
      * Enqueue a villager at a SPECIFIC Town Center (any seat):
      * `push_train_villager` for an explicit Town Center.
@@ -939,6 +964,7 @@ export interface InitOutput {
     readonly wasmsim_entity_owners: (a: number) => [number, number];
     readonly wasmsim_entity_path: (a: number, b: number) => [number, number];
     readonly wasmsim_entity_stance: (a: number) => [number, number];
+    readonly wasmsim_entity_trade: (a: number) => [number, number];
     readonly wasmsim_fog: (a: number) => [number, number];
     readonly wasmsim_fog_for: (a: number, b: number) => [number, number];
     readonly wasmsim_food: (a: number) => number;
@@ -1036,6 +1062,7 @@ export interface InitOutput {
     readonly wasmsim_push_set_stance: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_stop: (a: number, b: number) => number;
     readonly wasmsim_push_town_bell: (a: number, b: number) => number;
+    readonly wasmsim_push_trade: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_train_archer: (a: number, b: number) => number;
     readonly wasmsim_push_train_cavalry_archer: (a: number, b: number) => number;
     readonly wasmsim_push_train_knight: (a: number, b: number) => number;
@@ -1044,6 +1071,7 @@ export interface InitOutput {
     readonly wasmsim_push_train_scout: (a: number, b: number) => number;
     readonly wasmsim_push_train_skirmisher: (a: number, b: number) => number;
     readonly wasmsim_push_train_spearman: (a: number, b: number) => number;
+    readonly wasmsim_push_train_trade_cart: (a: number, b: number) => number;
     readonly wasmsim_push_train_villager: (a: number) => number;
     readonly wasmsim_push_train_villager_at: (a: number, b: number) => number;
     readonly wasmsim_push_ungarrison_building: (a: number, b: number) => number;

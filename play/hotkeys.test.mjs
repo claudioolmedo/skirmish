@@ -147,7 +147,7 @@ test('Town Center letters are DE’s own: Villager Q, Loom A, Age Z, the Wheelba
   assert.equal(badgeForButton({ context: 'range', id: 'train-skirmisher', index: 1 }), 'W');
 });
 
-test('market panel: sells on Q W E, buys on A S D (TRD-01..03)', () => {
+test('market panel: sells on Q W E, buys on A S D (TRD-01..03); Package D bottom row', () => {
   const at = (code) => resolveHotkey({ context: 'market', page: null, code });
   assert.deepEqual(at('KeyQ'), { type: 'button', id: 'trade-sell-food' });
   assert.deepEqual(at('KeyW'), { type: 'button', id: 'trade-sell-wood' });
@@ -155,9 +155,14 @@ test('market panel: sells on Q W E, buys on A S D (TRD-01..03)', () => {
   assert.deepEqual(at('KeyA'), { type: 'button', id: 'trade-buy-food' });
   assert.deepEqual(at('KeyS'), { type: 'button', id: 'trade-buy-wood' });
   assert.deepEqual(at('KeyD'), { type: 'button', id: 'trade-buy-stone' });
-  assert.equal(at('KeyZ'), null, 'no third row on the market panel');
+  // Package D (TRD-05/08): the bottom row the exchange never
+  // used — Train Trade Cart on Z, Caravan on X.
+  assert.deepEqual(at('KeyZ'), { type: 'button', id: 'train-trade-cart' });
+  assert.deepEqual(at('KeyX'), { type: 'button', id: 'research-caravan' });
   assert.equal(badgeForButton({ context: 'market', id: 'trade-sell-food' }), 'Q');
   assert.equal(badgeForButton({ context: 'market', id: 'trade-buy-stone' }), 'D');
+  assert.equal(badgeForButton({ context: 'market', id: 'train-trade-cart' }), 'Z');
+  assert.equal(badgeForButton({ context: 'market', id: 'research-caravan' }), 'X');
 });
 
 test('no hotkeys in empty / enemy contexts — WASD keeps panning', () => {

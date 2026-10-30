@@ -49,6 +49,15 @@ test('validateCommand accepts the full vocabulary and rejects junk', () => {
     { t: 'research_tc', tech: 1 },
     { t: 'research_tc', tech: 14, tc: 4 },
     { t: 'research_tc', tech: 15 },
+    // Imperial Age (tech 18) is a TC research (bot-loop rider,
+    // 2026-10-30: the wire validator omitted it on the Imperial
+    // tree, so netplay rejected what the TC panel issues).
+    { t: 'research_tc', tech: 18 },
+    // Package D: Caravan is tech 19 at the Market (renumbered
+    // from the builder's 18 on rebase — 18 is Imperial).
+    { t: 'research_at', b: 3, tech: 19 },
+    { t: 'train_at', b: 3, k: 16 },
+    { t: 'trade', e: 4, b: 9 },
     { t: 'rally_tc', x: 1, y: 2, tc: 4 },
     { t: 'research_at', b: 3, tech: 5 },
     { t: 'rally_tc', x: 1, y: 2 },
@@ -94,6 +103,12 @@ test('validateCommand accepts the full vocabulary and rejects junk', () => {
     { t: 'train_at', b: 1, k: 5 },
     { t: 'research_tc', tech: 2 },
     { t: 'research_tc', tech: 9 },
+    // Caravan (19) is not a TC research; Imperial (18) is not a
+    // building research (Package D renumber pins, 2026-10-30).
+    { t: 'research_tc', tech: 19 },
+    { t: 'research_at', b: 3, tech: 18 },
+    { t: 'trade', e: 4 },
+    { t: 'trade', b: 9 },
     { t: 'train_vil', tc: -1 },
     { t: 'gather', e: 1 },
     { t: 'auto_explore', e: 4 },

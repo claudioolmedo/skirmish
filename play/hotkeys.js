@@ -157,8 +157,11 @@ export const PANEL_BUTTONS = {
   miningcamp: ['research-goldmining', 'research-stonemining'],
   // TRD-01..03: the Market's exchange, in render order — the
   // sell row over the buy row, food / wood / stone across.
+  // Package D adds the bottom row: Train Trade Cart (Z) and
+  // Caravan (X) — the exchange grid itself does not move.
   market: ['trade-sell-food', 'trade-sell-wood', 'trade-sell-stone',
-    'trade-buy-food', 'trade-buy-wood', 'trade-buy-stone'],
+    'trade-buy-food', 'trade-buy-wood', 'trade-buy-stone',
+    'train-trade-cart', 'research-caravan'],
 };
 
 // The slot letter of every button on every building panel
@@ -284,7 +287,9 @@ export const PANEL_KEYS = {
     'train-petard': ['KeyQ', 'Q'],
   },
   // The Market (TRD-01..03): the plain positional grid over the
-  // two rendered rows — sells Q W E, buys A S D.
+  // two rendered rows — sells Q W E, buys A S D. Package D: the
+  // bottom row takes Train Trade Cart at Z and Caravan at X (the
+  // two cells the exchange never used).
   market: {
     'trade-sell-food': ['KeyQ', 'Q'],
     'trade-sell-wood': ['KeyW', 'W'],
@@ -292,6 +297,8 @@ export const PANEL_KEYS = {
     'trade-buy-food': ['KeyA', 'A'],
     'trade-buy-wood': ['KeyS', 'S'],
     'trade-buy-stone': ['KeyD', 'D'],
+    'train-trade-cart': ['KeyZ', 'Z'],
+    'research-caravan': ['KeyX', 'X'],
   },
 };
 export const POSITION_CODES = ['KeyQ', 'KeyW', 'KeyE'];

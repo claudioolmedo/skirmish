@@ -153,7 +153,7 @@ const TRAIN_AT_FNS = {
   2: 'push_train_scout', 3: 'push_train_militia', 4: 'push_train_archer',
   9: 'push_train_spearman', 10: 'push_train_skirmisher',
   12: 'push_train_knight', 14: 'push_train_cavalry_archer',
-  15: 'push_train_petard',
+  15: 'push_train_petard', 16: 'push_train_trade_cart',
 };
 
 const isInt = (v) => Number.isInteger(v) && v >= 0;
@@ -169,6 +169,9 @@ export function validateCommand(c) {
     case 'attack': return isInt(c.e) && isInt(c.tg);
     case 'attackb': return isInt(c.e) && isInt(c.b);
     case 'repair': return isInt(c.e) && isInt(c.b);
+    // Package D (TRD-05): a Trade Cart tasked to a foreign
+    // Market — an entity id and a building id, like repair.
+    case 'trade': return isInt(c.e) && isInt(c.b);
     // The cap is the build table's own length (BUILD_FNS): every
     // kind the applier can dispatch is wire-legal, the first
     // index past the table is junk. (BLD-20 raised it to 14 with
@@ -183,11 +186,11 @@ export function validateCommand(c) {
     // absent — the pre-BLD-20 wire form — or 14 stone wall).
     case 'buildline': return isInt(c.e) && isNum(c.x0) && isNum(c.y0) && isNum(c.x1) && isNum(c.y1)
       && (c.k === undefined || c.k === 9 || c.k === 14);
-    case 'train_at': return isInt(c.b) && (c.k === 2 || c.k === 3 || c.k === 4 || c.k === 9 || c.k === 10 || c.k === 12 || c.k === 14 || c.k === 15);
+    case 'train_at': return isInt(c.b) && (c.k === 2 || c.k === 3 || c.k === 4 || c.k === 9 || c.k === 10 || c.k === 12 || c.k === 14 || c.k === 15 || c.k === 16);
     case 'train_vil': return c.tc === undefined || isInt(c.tc);
     case 'research_tc': return (c.tech === 0 || c.tech === 1 || c.tech === 6
-      || c.tech === 14 || c.tech === 15) && (c.tc === undefined || isInt(c.tc));
-    case 'research_at': return isInt(c.b) && isInt(c.tech) && (c.tech <= 13 || c.tech === 16 || c.tech === 17);
+      || c.tech === 14 || c.tech === 15 || c.tech === 18) && (c.tc === undefined || isInt(c.tc));
+    case 'research_at': return isInt(c.b) && isInt(c.tech) && (c.tech <= 13 || c.tech === 16 || c.tech === 17 || c.tech === 19);
     case 'rally_tc': return isNum(c.x) && isNum(c.y) && (c.tc === undefined || isInt(c.tc));
     case 'rally_b': return isInt(c.b) && isNum(c.x) && isNum(c.y);
     case 'force_dep': return isInt(c.e);
@@ -263,6 +266,10 @@ export function applyCommand(sim, cmd, owner, tcOf) {
     case 'deleteb': return sim.push_delete_building(cmd.b);
     case 'cancel_tc': return sim.push_cancel_queue_tc(cmd.tc, cmd.i);
     case 'cancel_b': return sim.push_cancel_queue_building(cmd.b, cmd.i);
+    // Package D (TRD-05): task a Trade Cart to a foreign Market
+    // — the sim derives validity from the cart and the depot, so
+    // one form serves both seats (as repair).
+    case 'trade': return sim.push_trade(cmd.e, cmd.b);
     // TRD-01..03: Market trades — the sim derives the owner from
     // the building, so one form serves both seats (as research_at).
     case 'mbuy': return sim.push_market_buy(cmd.b, cmd.r);

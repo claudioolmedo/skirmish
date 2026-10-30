@@ -276,6 +276,21 @@ export class WasmSim {
         return v1;
     }
     /**
+     * Per-entity trade state in entity-id order (Package D,
+     * TRD-05): 0 = not trading, 1 = tasked and travelling empty
+     * (or waiting loaded for a home Market to stand), 2 = loaded
+     * and returning home. Read-only presentation glue — the
+     * renderer draws the gold load on a loaded cart on the sim's
+     * own word, exactly like `entity_carry`.
+     * @returns {Uint8Array}
+     */
+    entity_trade() {
+        const ret = wasm.wasmsim_entity_trade(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
      * The LOCAL player's fog-of-war grid (M7, VIS-01): flat
      * row-major bytes, one per cell — 0 unexplored, 1 explored,
      * 2 currently visible. The client renders strictly from this:
@@ -1433,6 +1448,22 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Task a Trade Cart to a foreign Market (Package D, TRD-05):
+     * the cart runs the empty/loaded round trip until re-tasked,
+     * stopped or killed, crediting its owner the TRD-06 gold on
+     * each arrival home. Returns whether the order *would* be
+     * accepted (a living player Trade Cart; a completed Market of
+     * another player — TRD-07); the sim re-validates when the
+     * command applies next tick.
+     * @param {number} entity
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_trade(entity, building) {
+        const ret = wasm.wasmsim_push_trade(this.__wbg_ptr, entity, building);
+        return ret !== 0;
+    }
+    /**
      * Enqueue an Archer at a completed Archery Range (M6 — the
      * Range is the Archer's home since M6; in M3 the Barracks
      * trained them by brief). See `push_train_militia`.
@@ -1515,6 +1546,17 @@ export class WasmSim {
      */
     push_train_spearman(building) {
         const ret = wasm.wasmsim_push_train_spearman(this.__wbg_ptr, building);
+        return ret !== 0;
+    }
+    /**
+     * Enqueue a Trade Cart at a completed Market (Package D,
+     * TRD-05 — the Market is the cart's only home; `can_train_at`
+     * carries the Feudal Age gate). See `push_train_militia`.
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_train_trade_cart(building) {
+        const ret = wasm.wasmsim_push_train_trade_cart(this.__wbg_ptr, building);
         return ret !== 0;
     }
     /**
