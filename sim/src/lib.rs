@@ -67,6 +67,8 @@ mod castle_p3_tests;
 #[cfg(test)]
 mod garrison_tests;
 #[cfg(test)]
+mod imperial_tests;
+#[cfg(test)]
 mod housed_tests;
 #[cfg(test)]
 mod market_tests;

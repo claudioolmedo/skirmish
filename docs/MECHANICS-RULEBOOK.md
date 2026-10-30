@@ -2218,7 +2218,7 @@ at exactly these numbers — 800 food + 200 gold, 160 s, pinned by
 `sim/tests/castle_age.rs`; the Castle → Imperial rung shipped
 2026-10-29 in the bot-loop TEC-01 package at exactly these numbers —
 1000 food + 800 gold, 190 s, TechId tag 18 appended, pinned by
-`imperial_age_gates_cost_timing_and_steps` in the same suite: gate
+`imperial_age_gates_cost_timing_and_steps` in `sim/src/imperial_tests.rs`: gate
 Locked without the TEC-02 Imperial qualification, exact charge,
 exact 11400-tick timing, age flip at completion).
 
