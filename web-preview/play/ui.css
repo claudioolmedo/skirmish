@@ -483,6 +483,12 @@ body.in-match #chat-log { display: flex; }
   font: 700 10.5px/1 ui-monospace, Menlo, monospace;
   color: var(--ui-ink-dim);
 }
+/* Group-selection portrait cells are buttons: clicking one
+   narrows the selection to that unit (DE behaviour). Reset the
+   button chrome so the cell keeps the span's look. */
+button.sel-cell { cursor: pointer; font: inherit; padding: 0; }
+button.sel-cell:hover { background: rgba(61, 42, 18, 0.30); }
+
 /* TEC-05: queue-cancel chips — one per queued entry in the
    selection panel; clicking cancels that entry (full refund). */
 .sel-cell.qchip {

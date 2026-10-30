@@ -3406,7 +3406,11 @@ per-Age armor rows for placed buildings), so the displayed
 numbers are the very numbers combat uses, tech patches included;
 the stats join the panel's render signature, so a completed
 research refreshes them the tick it lands. Unarmed selections
-show armor only. · *Status:* **MATCHES**.
+show armor only. The group grid's portraits are clickable, as in
+DE: clicking one narrows the selection to just that unit
+(bot-loop fix 2026-10-30 — the cells were inert spans; two live
+sessions on the 726e8ed build reported the dead click). ·
+*Status:* **MATCHES**.
 
 **INF-06 — The command panel is the tech tree's front door.** A selected
 unit/building's panel shows exactly its available actions (build menu,

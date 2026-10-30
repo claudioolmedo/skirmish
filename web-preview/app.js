@@ -10768,11 +10768,23 @@ function updateSelPanel() {
       selInfo.textContent = t('sel.groupInfo');
       const shown = selUnits.slice(0, 12);
       for (let i = 0; i < shown.length; i++) {
-        const cell = document.createElement('span');
+        // INF-05 / DE selection panel: clicking one portrait in a
+        // group selection narrows the selection to just that unit
+        // (bot-loop defect, live-reported 2026-10-30 by two
+        // independent sessions: the cells were inert spans and the
+        // click did nothing). A button, like the queue cancel
+        // chips, so it is focusable and clickable.
+        const cell = document.createElement('button');
+        cell.type = 'button';
         cell.className = 'sel-cell';
         cell.innerHTML = KIND_PNG[kind]
           ? pngIcon(KIND_PNG[kind], 'ui-icon')
           : '<svg class="ui-icon"><use href="#i-villager"/></svg>';
+        const cellId = shown[i];
+        cell.addEventListener('click', () => {
+          selectUnits(new Set([cellId]));
+          selSig = ''; // the selection changed under the panel: re-render
+        });
         selGrid.append(cell);
       }
       if (selUnits.length > shown.length) {
