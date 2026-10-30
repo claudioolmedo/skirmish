@@ -986,6 +986,47 @@ impl WasmSim {
         true
     }
 
+    /// Tribute resources to another player (Package K, TRD-04):
+    /// the sender pays `amount` plus its tribute fee (30%, 20%
+    /// with Coinage, 0% with Banking — fee rounded up) and the
+    /// recipient receives the full amount. `resource_tag` is the
+    /// `ResourceKind` tag (food 1, wood 2, gold 3, stone 4).
+    /// Returns false (and queues nothing) when the sim would
+    /// reject the tribute: same or unknown seat, nothing sent,
+    /// the sender holding under 30 of the resource or short of
+    /// amount + fee.
+    pub fn push_tribute(
+        &mut self,
+        sender: u32,
+        recipient: u32,
+        resource_tag: u32,
+        amount: i32,
+    ) -> bool {
+        let Some(resource) = ResourceKind::from_tag(resource_tag as u8) else {
+            return false;
+        };
+        if !self
+            .inner
+            .can_tribute(sender as u8, recipient as u8, resource, amount)
+        {
+            return false;
+        }
+        self.inner.push_command(Command::Tribute {
+            sender: sender as u8,
+            recipient: recipient as u8,
+            resource,
+            amount,
+        });
+        true
+    }
+
+    /// A player's current tribute fee, in percent (TRD-04):
+    /// 30 by default, 20 with Coinage, 0 with Banking. Behind the
+    /// diplomacy screen's fee line.
+    pub fn tribute_fee_pct_for(&self, owner: u32) -> i32 {
+        self.inner.tribute_fee_pct_of(owner as u8)
+    }
+
     /// The match's global exchange rates (gold per 100) in
     /// canonical commodity order: [food, wood, stone] (TRD-02).
     pub fn market_rates(&self) -> Vec<i32> {

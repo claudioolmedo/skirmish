@@ -186,6 +186,10 @@ const resStone = document.getElementById('res-stone');
 const resPop = document.getElementById('res-pop');
 const resAge = document.getElementById('res-age'); // M6: the player's age
 const pauseBtn = document.getElementById('pause-btn');
+// Diplomacy (Package K): the top-bar button and its overlay —
+// the overlay is a live panel, never a pause (see refreshDiplo).
+const diploBtn = document.getElementById('diplo-btn');
+const diploOverlay = document.getElementById('diplo-overlay');
 // Fullscreen toggle (Claudio, 2026-10-19): a top-bar button and
 // a pause-menu entry, both driving the one toggleFullscreen().
 const fullscreenBtn = document.getElementById('fullscreen-btn');
@@ -403,8 +407,9 @@ let TECH_NAME = {
   10: 'Double-Bit Axe', 11: 'Gold Mining', 12: 'Stone Mining',
   13: 'Horse Collar', 14: 'Castle Age', 15: 'Hand Cart',
   16: 'Light Cavalry', 17: 'Husbandry', 18: 'Imperial Age',
-  20: 'Ballistics', 21: 'Murder Holes', 22: 'Treadmill Crane',
-  23: 'Masonry', 24: 'Fortified Wall',
+  19: 'Caravan', 20: 'Ballistics', 21: 'Murder Holes', 22: 'Treadmill Crane',
+  23: 'Masonry', 24: 'Fortified Wall', 25: 'Coinage', 26: 'Banking',
+  27: 'Town Watch', 28: 'Town Patrol',
 };
 // Research-block explanations, indexed by the sim's ResearchBlock
 // tag (0 ok — unused, 1 funds, 2 queue full, 3 already done,
@@ -449,6 +454,8 @@ function refreshNames() {
     20: t('tech.ballistics'), 21: t('tech.murderholes'),
     22: t('tech.treadmill'), 23: t('tech.masonry'),
     24: t('tech.fortifiedwall'),
+    19: t('tech.caravan'), 25: t('tech.coinage'), 26: t('tech.banking'),
+    27: t('tech.townwatch'), 28: t('tech.townpatrol'),
   };
   RESEARCH_BLOCK_TITLES = [
     '', t('block.noResources'), t('block.queueFullTrain'),
@@ -638,6 +645,87 @@ function renderEndScore() {
     if (y) y.textContent = String(you[i]);
     if (f) f.textContent = String(foe[i]);
   });
+}
+
+/// Diplomacy (Package K, TRD-04 + INF-07): the screen shows
+/// what is always public in-match — every player's stance, Age,
+/// score (VIC-04) and population — and hosts tribute. It never
+/// shows the other player's stockpile, queue contents or
+/// research in progress: INF-07's private half holds by
+/// construction, because this panel reads only the public
+/// per-player fields, the same lens the end card uses. Opening
+/// it never pauses the match (online, nothing may).
+const DIPLO_RES = [
+  { key: 'food', tag: 1, icon: 'i-food', idx: 0 },
+  { key: 'wood', tag: 2, icon: 'i-wood', idx: 1 },
+  { key: 'gold', tag: 3, icon: 'i-gold', idx: 2 },
+  { key: 'stone', tag: 4, icon: 'i-stone', idx: 3 },
+];
+let diploBuilt = false;
+function buildDiplo() {
+  if (diploBuilt) return;
+  diploBuilt = true;
+  const grid = document.getElementById('diplo-tribute-grid');
+  if (!grid) return;
+  for (const res of DIPLO_RES) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-ghost diplo-send';
+    btn.id = `diplo-send-${res.key}`;
+    btn.innerHTML = `<svg class="ui-icon"><use href="#${res.icon}"/></svg> <span></span>`;
+    btn.addEventListener('click', (ev) => {
+      const amount = ev.shiftKey ? 500 : 100;
+      if (!issue({ t: 'tribute', to: foeOwner(), r: res.tag, a: amount })) {
+        flash(t('diplo.notEnough', { res: t('res.' + res.key) }));
+        return;
+      }
+      playAudioCue('orderBuilding');
+      flash(t('diplo.sent', { amount, res: t('res.' + res.key) }));
+      refreshDiplo();
+    });
+    grid.append(btn);
+  }
+}
+
+/// Repaint the diplomacy screen from the sim's public fields:
+/// both rows (stance, Age, score total, population) and the
+/// tribute desk (the local fee, and each resource's send button
+/// armed exactly when the sim would accept a 100 tribute —
+/// holdings ≥ 30 and ≥ amount + fee; the sim re-validates at
+/// apply time regardless).
+function refreshDiplo() {
+  if (!sim || !diploOverlay || diploOverlay.style.display === 'none') return;
+  buildDiplo();
+  const youScore = sim.score_for(localOwner);
+  const foeScore = sim.score_for(foeOwner());
+  const set = (id, v) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = String(v);
+  };
+  set('diplo-you-age', AGE_NAMES[myAge()] || AGE_NAMES[0]);
+  set('diplo-you-score', youScore[4]);
+  set('diplo-you-pop', myPop());
+  set('diplo-foe-age', AGE_NAMES[sim.age_for(foeOwner())] || AGE_NAMES[0]);
+  set('diplo-foe-score', foeScore[4]);
+  set('diplo-foe-pop', sim.population_for(foeOwner()));
+  const fee = sim.tribute_fee_pct_for(localOwner);
+  set('diplo-fee-note', t('diplo.feeNote', { pct: fee }));
+  const stock = myStock();
+  const cost100 = 100 + Math.ceil((100 * fee) / 100);
+  for (const res of DIPLO_RES) {
+    const btn = document.getElementById(`diplo-send-${res.key}`);
+    if (!btn) continue;
+    btn.disabled = stock[res.idx] < 30 || stock[res.idx] < cost100;
+    btn.title = t('diplo.sendTitle', { res: t('res.' + res.key) });
+    const label = btn.querySelector('span');
+    if (label) label.textContent = t('res.' + res.key);
+  }
+}
+
+function setDiplo(open) {
+  if (!diploOverlay) return;
+  diploOverlay.style.display = open ? 'flex' : 'none';
+  if (open) refreshDiplo();
 }
 
 /// Paint the feedback block for a freshly ended match: hidden
@@ -901,7 +989,7 @@ function updateEventFeed() {
   const lines = diffFeedEvents(prev, snap, {
     buildingName: (k) => BUILD_NAME[k],
     unitName: (k) => KIND_NAME[k],
-    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15, lightcavalry: 16, husbandry: 17, caravan: 19 }[key]],
+    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15, lightcavalry: 16, husbandry: 17, caravan: 19, coinage: 25, banking: 26, townwatch: 27, townpatrol: 28 }[key]],
   }, feedFmt());
   feedPrev = snap;
   for (const text of lines) pushFeedLine(text);
@@ -3348,6 +3436,10 @@ function applyLocalOrder(cmd) {
     // client's).
     case 'mbuy': return sim.push_market_buy(cmd.b, cmd.r);
     case 'msell': return sim.push_market_sell(cmd.b, cmd.r);
+    // Package K (TRD-04): a tribute — locally the sender is this
+    // client's seat; online the same command rides the bundle and
+    // netplay's applier names the sender from the bundle's owner.
+    case 'tribute': return sim.push_tribute(localOwner, cmd.to, cmd.r, cmd.a);
     default: return false;
   }
 }
@@ -5436,6 +5528,22 @@ function applyStaticStrings() {
   // the whitespace node before the banner icon, which painted
   // the word twice ("Menu [banner] Menu", Claudio 2026-10-20).
   setText('pause-btn-label', 'top.menu');
+  // Diplomacy (Package K): the top-bar door and the screen's
+  // statics; its live values are refreshDiplo's.
+  setTitle('diplo-btn', 'top.diplomacyTitle');
+  setText('diplo-btn-label', 'top.diplomacy');
+  setText('diplo-title', 'diplo.title');
+  setAttr('diplo-close', 'aria-label', 'diplo.close');
+  setText('diplo-col-player', 'diplo.player');
+  setText('diplo-col-stance', 'diplo.stance');
+  setText('diplo-col-age', 'diplo.age');
+  setText('diplo-col-score', 'diplo.score');
+  setText('diplo-col-pop', 'diplo.population');
+  setText('diplo-you-name', 'diplo.you');
+  setText('diplo-foe-name', 'diplo.opponent');
+  setText('diplo-foe-stance', 'diplo.enemy');
+  setText('diplo-tribute-title', 'diplo.tribute');
+  setText('diplo-tribute-note', 'diplo.tributeNote');
   setAttr('cmd-panel', 'aria-label', 'panel.commands');
   setAttr('sel-panel', 'aria-label', 'panel.selection');
   setAttr('minimap-wrap', 'aria-label', 'panel.minimap');
@@ -5677,6 +5785,11 @@ async function main() {
   // the menu is fully Menu-button-driven; Escape never shows
   // it (see the keydown handler).
   pauseBtn.addEventListener('click', () => setPaused(!paused));
+  // Diplomacy (Package K): its own top-bar door, toggling like
+  // the Menu button — and, unlike the menu, it never pauses.
+  if (diploBtn) diploBtn.addEventListener('click', () => setDiplo(diploOverlay.style.display === 'none'));
+  const diploClose = document.getElementById('diplo-close');
+  if (diploClose) diploClose.addEventListener('click', () => setDiplo(false));
   if (fullscreenBtn) fullscreenBtn.addEventListener('click', toggleFullscreen);
   if (pauseFullscreenBtn) pauseFullscreenBtn.addEventListener('click', toggleFullscreen);
   document.addEventListener('fullscreenchange', onFullscreenChange);
@@ -9799,6 +9912,8 @@ let lastAttackAlert = null; // INF-01: { x, y, at } of the latest located alert
 let audioHousedPrev = false;
 
 function updateTopBar() {
+  // Diplomacy (Package K): an open diplomacy screen stays live.
+  if (diploOverlay && diploOverlay.style.display !== 'none') refreshDiplo();
   const [food, wood, gold, stone] = myStock();
   resFood.textContent = Math.floor(food);
   resWood.textContent = Math.floor(wood);
@@ -10107,13 +10222,17 @@ function runCommandButton(id, times = 1) {
     // right-click, re-clicking the building — lands back on the
     // page the building came from; only a further Esc, a
     // right-click on the open page, or Back returns to the root.
-  } else if (id === 'research-loom' || id === 'research-age' || id === 'research-wheelbarrow' || id === 'research-handcart') {
+  } else if (id === 'research-loom' || id === 'research-age' || id === 'research-wheelbarrow' || id === 'research-handcart' || id === 'research-townwatch' || id === 'research-townpatrol') {
     // M6: Town Center research (shared queue with training).
     // The age button is dynamic (DE's single advance slot): from
     // Dark it researches Feudal (tag 1), from Feudal Castle (7).
+    // Package K (VIS-03): the Town Watch line rides the same
+    // branch — Town Watch (27), then Town Patrol (28) in its cell.
     const tag = id === 'research-loom' ? 0
       : id === 'research-wheelbarrow' ? 6
       : id === 'research-handcart' ? 15
+      : id === 'research-townwatch' ? 27
+      : id === 'research-townpatrol' ? 28
       : myAge() >= 2 ? 18
       : myAge() >= 1 ? 14 : 1;
     const ok = issue({ t: 'research_tc', tc: panelTcId(), tech: tag });
@@ -10143,6 +10262,7 @@ function runCommandButton(id, times = 1) {
       'research-ballistics': 20, 'research-murderholes': 21,
       'research-treadmill': 22, 'research-masonry': 23,
       'research-fortifiedwall': 24,
+      'research-coinage': 25, 'research-banking': 26,
       'research-goldmining': 11, 'research-stonemining': 12,
       'research-horsecollar': 13,
     }[id];
@@ -10289,10 +10409,11 @@ function renderCommands() {
   // (Gold 11, Stone 12), Mill (Horse Collar 13).
   const rbTc = context === 'tc'
     ? [myResearchBlockTc(0), myResearchBlockTc(1), myResearchBlockTc(6),
-      myResearchBlockTc(14), myResearchBlockTc(15), myResearchBlockTc(18)] : [-1, -1, -1, -1, -1, -1];
+      myResearchBlockTc(14), myResearchBlockTc(15), myResearchBlockTc(18),
+      myResearchBlockTc(27), myResearchBlockTc(28)] : [-1, -1, -1, -1, -1, -1, -1, -1];
   const RB_TAGS = {
     blacksmith: [2, 3, 4, 7, 8], barracks: [5], stable: [9, 16, 17],
-    lumbercamp: [10], miningcamp: [11, 12], mill: [13], market: [19],
+    lumbercamp: [10], miningcamp: [11, 12], mill: [13], market: [19, 25, 26],
     university: [20, 21, 22, 23, 24],
   };
   const rbB = bk && RB_TAGS[context]
@@ -10512,6 +10633,34 @@ function renderCommands() {
           disabled: rbTc[2] === 2 || rbTc[2] === 3 || rbTc[2] === 4,
           key: badgeForButton({ context, id: 'research-wheelbarrow', index: 3 }),
           title: t('cmd.wheelbarrowTitle', { name: TECH_NAME[6], cost: costText([[175, 'food'], [50, 'wood']]), secs: 75 }) + (RESEARCH_BLOCK_TITLES[rbTc[2]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[2]] : ''),
+        }),
+    );
+    // Package K (VIS-03): the Town Watch line is ONE cell of the
+    // TC panel (D, right of the Wheelbarrow cell — the reference
+    // panel keeps Town Watch at D), chained like the Wheelbarrow
+    // line: Town Watch (Feudal: buildings +4 LoS) until it is
+    // researched, then Town Patrol (Castle: a further +4) in the
+    // very same cell. Walls, Farms and gates never gain the
+    // bonus — the sim's sight table holds the exclusions.
+    const twDone = (techMask & (1 << 27)) !== 0;
+    const tpDone = (techMask & (1 << 28)) !== 0;
+    cmdGrid.append(
+      twDone
+        ? cmdButton({
+          id: 'research-townpatrol', icon: 'i-townpatrol', label: 'Town Patrol',
+          costIcon: 'i-food', cost: 300, cost2Icon: 'i-gold', cost2: 100,
+          disabled: tpDone || rbTc[7] === 2 || rbTc[7] === 3 || rbTc[7] === 4,
+          key: badgeForButton({ context, id: 'research-townpatrol', index: 6 }),
+          title: tpDone
+            ? t('cmd.researchDone', { name: TECH_NAME[28] })
+            : t('cmd.townpatrolTitle', { name: TECH_NAME[28], cost: costText([[300, 'food'], [100, 'gold']]), secs: 40 }) + (RESEARCH_BLOCK_TITLES[rbTc[7]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[7]] : ''),
+        })
+        : cmdButton({
+          id: 'research-townwatch', icon: 'i-townwatch', label: 'Town Watch',
+          costIcon: 'i-food', cost: 75,
+          disabled: rbTc[6] === 2 || rbTc[6] === 3 || rbTc[6] === 4,
+          key: badgeForButton({ context, id: 'research-townwatch', index: 5 }),
+          title: t('cmd.townwatchTitle', { name: TECH_NAME[27], cost: costText([[75, 'food']]), secs: 25 }) + (RESEARCH_BLOCK_TITLES[rbTc[6]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[6]] : ''),
         }),
     );
   } else if (context === 'barracks') {
@@ -10798,6 +10947,41 @@ function renderCommands() {
             ? t('cmd.researchDone', { name: TECH_NAME[19] })
             : t('cmd.caravanTitle', { name: TECH_NAME[19], cost: costText([[200, 'food'], [200, 'gold']]), secs: 40 }) + (RESEARCH_BLOCK_TITLES[rbCaravan] ? ' ' + RESEARCH_BLOCK_TITLES[rbCaravan] : ''),
       }),
+    );
+    // Package K (TRD-04): the fee line — Coinage (Castle:
+    // tribute fee 30% → 20%) until it is researched, then
+    // Banking (Imperial: the fee falls to 0%) in its place (the
+    // chained arrangement, like the Town Center's lines). The
+    // Market's nine grid cells are all spoken for — the
+    // exchange, the cart, Caravan, and Delete at C — so, like
+    // the garrison buttons, this one renders UNBADGED after the
+    // grid and answers to the mouse; no letter is invented for
+    // it. The research button mirrors Caravan's, disabled flag
+    // included.
+    const coinageDone = (techMask & (1 << 25)) !== 0;
+    const bankingDone = (techMask & (1 << 26)) !== 0;
+    cmdGrid.append(
+      coinageDone
+        ? cmdButton({
+          id: 'research-banking', icon: 'i-banking', label: 'Banking',
+          costIcon: 'i-food', cost: 300, cost2Icon: 'i-gold', cost2: 200,
+          disabled: underConstruction || bankingDone || rbB[26] === 2 || rbB[26] === 3 || rbB[26] === 4,
+          key: null,
+          title: underConstruction
+            ? t('cmd.underConstruction', { name: TECH_NAME[26], building: BUILD_NAME[12] })
+            : bankingDone
+              ? t('cmd.researchDone', { name: TECH_NAME[26] })
+              : t('cmd.bankingTitle', { name: TECH_NAME[26], cost: costText([[300, 'food'], [200, 'gold']]), secs: 70 }) + (RESEARCH_BLOCK_TITLES[rbB[26]] ? ' ' + RESEARCH_BLOCK_TITLES[rbB[26]] : ''),
+        })
+        : cmdButton({
+          id: 'research-coinage', icon: 'i-coinage', label: 'Coinage',
+          costIcon: 'i-food', cost: 200, cost2Icon: 'i-gold', cost2: 100,
+          disabled: underConstruction || rbB[25] === 2 || rbB[25] === 3 || rbB[25] === 4,
+          key: null,
+          title: underConstruction
+            ? t('cmd.underConstruction', { name: TECH_NAME[25], building: BUILD_NAME[12] })
+            : t('cmd.coinageTitle', { name: TECH_NAME[25], cost: costText([[200, 'food'], [100, 'gold']]), secs: 70 }) + (RESEARCH_BLOCK_TITLES[rbB[25]] ? ' ' + RESEARCH_BLOCK_TITLES[rbB[25]] : ''),
+        }),
     );
   } else if (context === 'university') {
     // Castle P3c: the University's five researches — glyph-only

@@ -311,15 +311,24 @@ LoS (Town Watch +4, Town Patrol +4).
 *Source:* MECHANICS-STUDY §3, §8; Technology wiki. · *Impl:* shipped in
 part (M7) — the unit tables carry a `los` column (world units, tiles ×
 4) and fog reads the owner's *effective* row, so the Scout's Feudal
-LoS rise applies (TEC-06). Building LoS: the Town Center's is the
-reference's documented **8 tiles** (public building tables; study
-2's exploration lesson is anchored on the TC's sight disc) —
-shipped 2026-10-21, replacing the adopted 6. Other buildings use
-one **adopted constant — 4 tiles — flagged UNVERIFIED**: the
-project docs do not pin it. Town Watch / Town Patrol (+4) are not
-implemented, and no other tech patches LoS yet. · *Status:*
-**DIFFERS** (the unimplemented LoS techs and the unverified
-non-TC building value).
+LoS rise applies (TEC-06). Building LoS completed 2026-10-30
+(Package K): the sight table is per-kind — the Town Center's
+documented **8 tiles** (public building tables; shipped 2026-10-21,
+replacing the adopted 6), the walls' 2, the Castle's 11, and the
+House's 2 (derived from the Town Watch article itself, whose +4
+"triples" the House); the ordinary production/economy kinds keep
+the **adopted constant 4 as explicit per-kind rows, still flagged
+UNVERIFIED** (the project docs do not pin them), and the BLD-18
+rows (Watch Tower 10, Outpost 6→8) keep their own adopted flags.
+Town Watch (Feudal, TC, 75F, 25 s) and Town Patrol (Castle, TC,
+300F/100G, 40 s, chained from Town Watch) are implemented: each
+raises every building's sight by 4 — the Town Center entity
+included — EXCEPT walls, gates, Farms and Fish Traps (gates and
+Fish Traps do not exist as kinds yet; the exclusion is recorded
+in the table for when they land). The 20-tile cap (VIS-04) is
+enforced at stamp time for every source. · *Status:* **MATCHES**
+(the ordinary kinds' base 4 and the BLD-18 rows remain adopted
+values, flagged as such in the table — the CLS-03 precedent).
 
 **VIS-04 — LoS is capped at 20 tiles.** No unit or building sees farther
 than 20 tiles, whatever its stats or technologies say.
@@ -2645,11 +2654,19 @@ amount of any resource to any player (allies, and in DE even enemies).
 The sender pays the amount plus the tribute fee: 30% by default, 20%
 with Coinage, 0% with Banking; the recipient receives the full amount.
 *Source:* wiki, Tribute; Technology wiki (Coinage/Banking entries);
-GAP 3.12. · *Impl:* a diplomacy-screen command validated against the
-sender's stockpile for amount × (1 + fee) — integer math, fee rounded
-per the market convention (the exact rounding is UNVERIFIED; adopt
-"round the fee up to whole resources", the conservative reading). ·
-*Status:* **MISSING**.
+GAP 3.12. · *Impl:* shipped 2026-10-30 (Package K) — `Command::Tribute`
+(names both seats; no target implies the actor), validated whole
+against the sender's stockpile for amount + fee before anything moves:
+integer math, the fee rounded UP to whole resources (the adopted
+reading above, now the implemented one), and the sender must hold at
+least 30 of the resource (the wave-2 audit's adopted gate). The fee
+ladder is read from the sender's researched set at apply time:
+Coinage (Castle, Market, 200F/100G, 70 s) drops it to 20%, Banking
+(Imperial, Market, 300F/200G, 70 s, chained from Coinage) to 0%. The
+diplomacy screen (top bar) hosts the sending — click a resource for
+100, Shift+click for 500 — and the wire form rides the lockstep
+bundles like every order (NET-07's validation covers it). ·
+*Status:* **MATCHES**.
 
 **TRD-05 — Trade units run a perpetual two-leg route.** A Trade Cart
 (Market↔Market) or Trade Cog (Dock↔Dock) tasked to a foreign depot
@@ -3355,9 +3372,21 @@ an order every 1.5–2 s). · *Impl:* shipped in M8's bundle assembly:
 exact duplicates within one bundle collapse, bundle size is capped
 (256), and every inbound command is structurally validated before it
 can reach the sim — the sim still executes what it is given.
-· *Status:* **DIFFERS** (the accidental double-issue case and the
-volume bound match; there is no cross-turn dedup or per-player rate
-limit beyond the turn structure itself).
+Completed 2026-10-30 (Package K, the wave-2 audit's minimal build):
+the per-player command budget is documented at the cap itself
+(BUNDLE_CAP per player per turn; the sender drops the excess,
+counted, and the codec rejects an oversized inbound bundle whole),
+and network REDELIVERY is idempotent by construction — bundles
+live in a Map keyed by turn, a redelivered bundle finds its slot
+already filled (or its turn below the rebase floor) and is
+discarded, never applied twice; those discards are now counted
+explicitly (`droppedRedelivered`, beside the in-bundle
+`droppedDupes` / `droppedOverflow`). Each turn executes exactly
+once (monotone `nextExec`). The stricter reading — deduplicating
+a player's repeated orders across turns — is rejected on the
+audit's evidence: in DE, issuing the same order twice is
+legitimate play; what the source protects against is transport
+redelivery, which is idempotent here. · *Status:* **MATCHES**.
 
 **NET-08 — A replay is the match.** (Seed, settings, command stream) is
 a complete recording (SIM-12); playing it back re-simulates the match,
@@ -3540,8 +3569,17 @@ stances and hosts tribute (TRD-04).
 *Source:* GAP 11.7; wiki, Score (live visibility). · *Impl:* the ABI
 exposes per-player public fields only; even in single-player the client
 should read through that lens so multiplayer needs no information rework
-(VIS-09's discipline applied to stats). · *Status:* **MISSING** (one
-player; nothing to hide yet).
+(VIS-09's discipline applied to stats). Completed 2026-10-30
+(Package K, as the wave-2 audit recommended — a documented
+consequence of TRD-04): the diplomacy screen now ships (top-bar
+door, never pausing) showing every player's stance, current Age,
+score (VIC-04) and population, and it hosts tribute. The private
+half holds by construction: no surface reads the other player's
+stockpile, queue contents or research in progress — foe
+selections have carried info-only contexts since M5/M6, and the
+diplomacy screen reads only the public per-player fields
+(`score_for`, `age_for`, `population_for`). · *Status:*
+**MATCHES**.
 
 **INF-08 — The game clock counts game time.** The displayed clock is
 elapsed *game* time (ticks ÷ 60), formatted mm:ss (h:mm:ss past an hour),

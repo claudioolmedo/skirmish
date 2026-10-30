@@ -608,9 +608,13 @@ impl BuildingKind {
     }
 
     /// Line of sight in tiles, keyed on the OWNER's age (VIS-01's
-    /// building stamp): the generic placed building reads the
-    /// study-adopted `BUILDING_SIGHT_TILES` (4); the two BLD-18
-    /// structures are the exceptions their designs call for.
+    /// building stamp): the per-kind table (VIS-03's data pass,
+    /// Package K). Documented rows: the Town Center's 8 (public
+    /// building tables — the entity stamps the same figure via
+    /// `TC_SIGHT_TILES`), the walls' 2 (BLD-20), the Castle's 11
+    /// (P3a), and the House's 2 — derived from the Town Watch
+    /// article itself, whose +4 "triples" the House's sight
+    /// (2 → 6). The two BLD-18 structures keep their adopted rows:
     ///
     /// - Watch Tower 10: ADOPTED — UNVERIFIED. The fetched tower
     ///   sources pin range 8 but no sight figure; 10 follows the
@@ -624,6 +628,10 @@ impl BuildingKind {
     ///   already out-sees every ordinary building (its whole
     ///   purpose) and the Feudal step matches the Town Center's
     ///   documented 8.
+    ///
+    /// The ordinary production/economy kinds keep the adopted
+    /// constant 4 — now as explicit per-kind rows, still flagged
+    /// ADOPTED — UNVERIFIED: the project docs do not pin them.
     pub fn sight_tiles_at(self, age: Age) -> u32 {
         match self {
             // BLD-20: walls see 2 tiles in DE (the wiki Wall
@@ -648,7 +656,42 @@ impl BuildingKind {
                 // Castle rung exists since Castle Age P1).
                 Age::Feudal | Age::Castle | Age::Imperial => 8,
             },
-            _ => crate::BUILDING_SIGHT_TILES,
+            // VIS-03: the Town Watch article's +4 "triples" the
+            // House — its base sight is 2.
+            BuildingKind::House => 2,
+            // The Town Center's documented 8 (the standing TC is
+            // an entity and stamps `TC_SIGHT_TILES`; this row
+            // covers the construction record of an additional TC).
+            BuildingKind::TownCenter => 8,
+            // ADOPTED — UNVERIFIED (see the doc comment): the
+            // ordinary kinds' explicit rows.
+            BuildingKind::Mill
+            | BuildingKind::LumberCamp
+            | BuildingKind::MiningCamp
+            | BuildingKind::Barracks
+            | BuildingKind::ArcheryRange
+            | BuildingKind::Stable
+            | BuildingKind::Blacksmith
+            | BuildingKind::Market
+            | BuildingKind::Farm => crate::BUILDING_SIGHT_TILES,
+        }
+    }
+
+    /// The effective sight of a standing building whose owner
+    /// holds the researched set `techs` (VIS-03): the base row
+    /// plus +4 per LoS technology (Town Watch, Town Patrol) —
+    /// EXCEPT walls, gates, Farms and Fish Traps, which those
+    /// technologies never raise (wiki, Town Watch; Town Patrol).
+    /// Gates and Fish Traps do not exist as building kinds yet;
+    /// the exclusion is named here so the rule lands whole when
+    /// they do. The 20-tile cap (VIS-04) applies at stamp time.
+    pub fn sight_tiles_with_techs(self, age: Age, techs: u64) -> u32 {
+        let base = self.sight_tiles_at(age);
+        match self {
+            BuildingKind::PalisadeWall
+            | BuildingKind::StoneWall
+            | BuildingKind::Farm => base,
+            _ => base + crate::tech::building_los_bonus(techs),
         }
     }
 
@@ -1674,7 +1717,7 @@ mod tests {
         assert!(op.weapon().is_none());
         // Sight (VIS-01): the generic building reads 4; the two
         // BLD-18 structures carry their adopted discs.
-        assert_eq!(BuildingKind::House.sight_tiles_at(Age::Dark), 4);
+        assert_eq!(BuildingKind::House.sight_tiles_at(Age::Dark), 2);
         assert_eq!(wt.sight_tiles_at(Age::Feudal), 10);
         assert_eq!(op.sight_tiles_at(Age::Dark), 6);
         assert_eq!(op.sight_tiles_at(Age::Feudal), 8);

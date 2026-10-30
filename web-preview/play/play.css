@@ -339,6 +339,38 @@ html, body {
   border-top: 1px solid rgba(61, 42, 18, 0.35);
   font-weight: 700;
 }
+/* Diplomacy (Package K, TRD-04 + INF-07): the live public
+   ledger — stance, Age, score, population per player — over the
+   tribute desk. Same parchment table language as the end card. */
+.diplo-card { min-width: min(520px, 92vw); }
+.diplo-table {
+  margin: 0 auto 14px;
+  border-collapse: collapse;
+  font: 14px/1.35 Georgia, 'Times New Roman', serif;
+  color: #43300f;
+}
+.diplo-table th, .diplo-table td {
+  padding: 2px 12px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.diplo-table thead th { font-weight: 700; }
+.diplo-table .diplo-name { text-align: left; font-weight: 700; }
+.diplo-sub {
+  margin: 10px 0 4px;
+  font: 700 15px/1.3 Georgia, 'Times New Roman', serif;
+  color: #43300f;
+  text-align: center;
+}
+.diplo-tribute-grid {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin: 8px 0;
+}
+.diplo-send { display: inline-flex; align-items: center; gap: 6px; }
+.diplo-send:disabled { opacity: 0.45; }
 /* 2026-10-24: the lobby profile row (your name) and the
    report/contribute form — all in the existing parchment
    language, nothing new to learn. */

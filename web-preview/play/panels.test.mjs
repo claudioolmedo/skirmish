@@ -33,6 +33,18 @@ const LAYOUTS = {
     cells: { Q: 'train', A: 'research-loom', Z: 'research-age', S: 'research-handcart', C: 'delete-building' },
     unplaced: [],
   },
+  'town center (Package K — Town Watch takes the D cell the reference keeps for it)': {
+    context: 'tc', page: null,
+    ids: ['train', 'research-loom', 'research-age', 'research-wheelbarrow', 'research-townwatch', 'delete-building'],
+    cells: { Q: 'train', A: 'research-loom', Z: 'research-age', S: 'research-wheelbarrow', D: 'research-townwatch', C: 'delete-building' },
+    unplaced: [],
+  },
+  'town center (Package K — Town Patrol takes the Town Watch cell, DE chain rule)': {
+    context: 'tc', page: null,
+    ids: ['train', 'research-loom', 'research-age', 'research-handcart', 'research-townpatrol', 'delete-building'],
+    cells: { Q: 'train', A: 'research-loom', Z: 'research-age', S: 'research-handcart', D: 'research-townpatrol', C: 'delete-building' },
+    unplaced: [],
+  },
   barracks: {
     context: 'barracks', page: null,
     ids: ['train-militia', 'train-spearman', 'research-maa', 'delete-building'],
@@ -87,6 +99,16 @@ const LAYOUTS = {
       Z: 'train-trade-cart', X: 'research-caravan',
     },
     unplaced: [],
+  },
+  'market (Package K — the fee line rides unplaced: the grid is full, Delete holds C)': {
+    context: 'market', page: null,
+    ids: ['trade-sell-food', 'trade-sell-wood', 'trade-sell-stone', 'trade-buy-food', 'trade-buy-wood', 'trade-buy-stone', 'train-trade-cart', 'research-caravan', 'research-coinage', 'delete-building'],
+    cells: {
+      Q: 'trade-sell-food', W: 'trade-sell-wood', E: 'trade-sell-stone',
+      A: 'trade-buy-food', S: 'trade-buy-wood', D: 'trade-buy-stone', C: 'delete-building',
+      Z: 'train-trade-cart', X: 'research-caravan',
+    },
+    unplaced: ['research-coinage'],
   },
   'military units (attack-move sits in the Q cell, badged with DE’s dedicated R)': {
     context: 'units', page: null,

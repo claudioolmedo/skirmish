@@ -80,6 +80,8 @@ mod market_tests;
 mod new_units_tests;
 #[cfg(test)]
 mod trade_tests;
+#[cfg(test)]
+mod tribute_vision_tests;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
@@ -486,6 +488,21 @@ pub enum Command {
     /// GAR-10): every passenger steps out at the ring around the
     /// Ram's current position, idle and unharmed.
     UngarrisonUnit { host: u32 },
+    /// Tribute resources to another player (Package K, TRD-04):
+    /// the sender pays `amount` plus the tribute fee (30%, 20%
+    /// with Coinage, 0% with Banking — the fee rounded up to
+    /// whole resources) and the recipient receives the full
+    /// `amount`. Both seats are named explicitly: unlike the
+    /// building commands, no target implies the actor. Invalid
+    /// tributes (same or unknown seat, nothing sent, the sender
+    /// holding under 30 of the resource or short of amount + fee)
+    /// are ignored whole — never a partial spend.
+    Tribute {
+        sender: u8,
+        recipient: u8,
+        resource: ResourceKind,
+        amount: i32,
+    },
 }
 
 /// Why Town Center training cannot currently proceed (M2.5). The
@@ -1031,7 +1048,11 @@ impl Sim {
                     continue;
                 }
                 let r = if e.kind == EntityKind::TownCenter {
-                    TC_SIGHT_TILES
+                    // VIS-03: the Town Center is a building for
+                    // the LoS technologies — Town Watch / Town
+                    // Patrol raise its documented 8 like any other
+                    // non-excluded building's sight.
+                    TC_SIGHT_TILES + crate::tech::building_los_bonus(self.tech_mask_of(owner))
                 } else {
                     let los = self.unit_stats(idx).los;
                     (los / CELL_SIZE).to_num::<i32>().clamp(0, MAX_SIGHT_TILES as i32) as u32
@@ -1047,12 +1068,18 @@ impl Sim {
                 if b.owner != owner {
                     continue;
                 }
-                // BLD-18: the sight radius is the kind's own —
-                // the generic 4 for ordinary buildings (unchanged),
-                // the tower's and outpost's larger discs for the
-                // two structures that exist to see.
+                // VIS-03: the sight radius is the kind's own row
+                // of the per-kind table, raised by the owner's LoS
+                // technologies where they apply (walls and Farms
+                // never rise — `sight_tiles_with_techs`).
                 let (cx, cy) = self.grid.world_to_cell(b.pos_x, b.pos_y);
-                self.stamp_sight(slot, cx, cy, b.kind.sight_tiles_at(self.age_of(owner)));
+                self.stamp_sight(
+                    slot,
+                    cx,
+                    cy,
+                    b.kind
+                        .sight_tiles_with_techs(self.age_of(owner), self.tech_mask_of(owner)),
+                );
             }
         }
     }
@@ -1060,7 +1087,10 @@ impl Sim {
     /// Stamp one sight disc (radius `r` tiles, integer disc) as
     /// visible for a player slot.
     fn stamp_sight(&mut self, slot: usize, cx: u32, cy: u32, r: u32) {
-        let r = r as i32;
+        // VIS-04: no source sees farther than 20 tiles, whatever
+        // its stats or technologies say — clamped here, at stamp
+        // time, so every sight source obeys it by construction.
+        let r = (r.min(MAX_SIGHT_TILES)) as i32;
         for dy in -r..=r {
             for dx in -r..=r {
                 if dx * dx + dy * dy > r * r {
@@ -1257,6 +1287,61 @@ impl Sim {
             self.stockpile_mut(owner)
                 .add(ResourceKind::Gold, I16F16::from_num(price));
             self.market.apply_sell(resource);
+        }
+    }
+
+    /// The tribute fee percentage `owner` currently pays (TRD-04):
+    /// 30 by default, 20 with Coinage, 0 with Banking — read from
+    /// the owner's researched set at lookup time.
+    pub fn tribute_fee_pct_of(&self, owner: u8) -> i32 {
+        crate::tech::tribute_fee_pct(self.tech_mask_of(owner))
+    }
+
+    /// Whether a `Tribute` command would execute right now
+    /// (TRD-04): two distinct real seats, a positive amount, and
+    /// the sender holding at least 30 of the resource and enough
+    /// to cover amount + fee (the fee rounded up to whole
+    /// resources — the rulebook's adopted reading). The 30 floor
+    /// is the audit's adopted gate (fidelity audit wave 2, Package
+    /// K): the diplomacy screen never offers a tribute out of a
+    /// smaller holding.
+    pub fn can_tribute(
+        &self,
+        sender: u8,
+        recipient: u8,
+        resource: ResourceKind,
+        amount: i32,
+    ) -> bool {
+        if player_slot(sender).is_none() || player_slot(recipient).is_none() {
+            return false;
+        }
+        if sender == recipient || amount <= 0 {
+            return false;
+        }
+        let held = self.stockpile_of(sender).amount(resource).to_num::<i64>();
+        if held < 30 {
+            return false;
+        }
+        let fee = tribute_fee_whole(amount, self.tribute_fee_pct_of(sender));
+        held >= amount as i64 + fee
+    }
+
+    /// Apply a `Tribute` command (TRD-04): atomic — amount + fee
+    /// out of the sender, the full amount into the recipient — or
+    /// nothing at all.
+    fn issue_tribute(&mut self, sender: u8, recipient: u8, resource: ResourceKind, amount: i32) {
+        if !self.can_tribute(sender, recipient, resource, amount) {
+            return;
+        }
+        let fee = tribute_fee_whole(amount, self.tribute_fee_pct_of(sender));
+        let total = amount + fee as i32;
+        let paid = self
+            .stockpile_mut(sender)
+            .spend(resource, I16F16::from_num(total));
+        debug_assert!(paid);
+        if paid {
+            self.stockpile_mut(recipient)
+                .add(resource, I16F16::from_num(amount));
         }
     }
 
@@ -3774,6 +3859,12 @@ impl Sim {
                     self.issue_garrison_unit(entity, host)
                 }
                 Command::UngarrisonUnit { host } => self.issue_ungarrison_unit(host),
+                Command::Tribute {
+                    sender,
+                    recipient,
+                    resource,
+                    amount,
+                } => self.issue_tribute(sender, recipient, resource, amount),
             }
         }
 
@@ -7438,6 +7529,15 @@ fn player_slot(owner: u8) -> Option<usize> {
         entity::OWNER_OPPONENT => Some(1),
         _ => None,
     }
+}
+
+/// The whole-resource tribute fee for sending `amount` at
+/// `pct` percent (TRD-04): the fee rounded UP to whole resources
+/// (the rulebook's adopted reading — the conservative one).
+/// i64 throughout so an absurd amount can never overflow before
+/// the affordability check rejects it.
+fn tribute_fee_whole(amount: i32, pct: i32) -> i64 {
+    (amount as i64 * pct as i64 + 99) / 100
 }
 
 /// Clamp a world coordinate into [-99, 99] without floats.

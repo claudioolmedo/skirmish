@@ -226,11 +226,26 @@ pub enum TechId {
     /// Stone Walls become Fortified Walls, HP 3000, armor 12/12,
     /// +8 building armor (Castle P3c, BLD-20). Tag 24.
     FortifiedWall,
+    /// Market, Castle: the tribute fee drops 30% → 20% (Package K,
+    /// TRD-04). Tag 25 — tags 20–24 are reserved for the University
+    /// package (Castle P3c) in flight on another branch, so this
+    /// package appends after them and no tag moves at rebase.
+    Coinage,
+    /// Market, Imperial: the tribute fee drops to 0% (Package K,
+    /// TRD-04; chains from Coinage, TEC-07). Tag 26.
+    Banking,
+    /// Town Center, Feudal: buildings +4 line of sight, except
+    /// walls, gates, Farms and Fish Traps (Package K, VIS-03).
+    /// Tag 27.
+    TownWatch,
+    /// Town Center, Castle: a second +4 on the same terms (Package
+    /// K, VIS-03; chains from Town Watch, TEC-07). Tag 28.
+    TownPatrol,
 }
 
 impl TechId {
     /// All technologies, in tag order.
-    pub const ALL: [TechId; 25] = [
+    pub const ALL: [TechId; 29] = [
         TechId::Loom,
         TechId::FeudalAge,
         TechId::Fletching,
@@ -256,6 +271,10 @@ impl TechId {
         TechId::TreadmillCrane,
         TechId::Masonry,
         TechId::FortifiedWall,
+        TechId::Coinage,
+        TechId::Banking,
+        TechId::TownWatch,
+        TechId::TownPatrol,
     ];
 
     /// Stable tag: 0 loom, 1 feudal age, 2 fletching, 3 scale mail,
@@ -276,6 +295,9 @@ impl TechId {
     /// 23 masonry, 24 fortified wall (Castle P3c — the
     /// University set, appended in the dossier's §5.5 table
     /// order, the Fortified Wall upgrade last.)
+    /// 25 coinage, 26 banking, 27 town watch, 28 town patrol
+    /// (Package K, TRD-04/VIS-03 — appended after the University
+    /// block 20–24 reserved by Castle P3c, so no tag moved.)
     pub fn tag(self) -> u8 {
         match self {
             TechId::Loom => 0,
@@ -303,6 +325,10 @@ impl TechId {
             TechId::TreadmillCrane => 22,
             TechId::Masonry => 23,
             TechId::FortifiedWall => 24,
+            TechId::Coinage => 25,
+            TechId::Banking => 26,
+            TechId::TownWatch => 27,
+            TechId::TownPatrol => 28,
         }
     }
 
@@ -325,6 +351,8 @@ impl TechId {
             | TechId::Wheelbarrow
             | TechId::CastleAge
             | TechId::ImperialAge
+            | TechId::TownWatch
+            | TechId::TownPatrol
             | TechId::HandCart => TechHost::TownCenter,
             TechId::Fletching
             | TechId::ScaleMail
@@ -339,7 +367,9 @@ impl TechId {
             }
             TechId::HorseCollar => TechHost::Building(BuildingKind::Mill),
             TechId::LightCavalry | TechId::Husbandry => TechHost::Building(BuildingKind::Stable),
-            TechId::Caravan => TechHost::Building(BuildingKind::Market),
+            TechId::Caravan | TechId::Coinage | TechId::Banking => {
+                TechHost::Building(BuildingKind::Market)
+            }
             // Castle P3c: the University set.
             TechId::Ballistics
             | TechId::MurderHoles
@@ -356,11 +386,15 @@ impl TechId {
             TechId::Loom | TechId::FeudalAge => Age::Dark,
             TechId::CastleAge => Age::Feudal,
             TechId::ImperialAge => Age::Castle,
-            TechId::HandCart | TechId::LightCavalry | TechId::Husbandry | TechId::Caravan => {
-                Age::Castle
-            }
+            TechId::Banking => Age::Imperial,
+            TechId::HandCart
+            | TechId::LightCavalry
+            | TechId::Husbandry
+            | TechId::Caravan
+            | TechId::Coinage
+            | TechId::TownPatrol
             // Castle P3c: the University set is Castle Age research.
-            TechId::Ballistics
+            | TechId::Ballistics
             | TechId::MurderHoles
             | TechId::TreadmillCrane
             | TechId::Masonry
@@ -378,6 +412,12 @@ impl TechId {
     pub fn requires_tech(self) -> Option<TechId> {
         match self {
             TechId::HandCart => Some(TechId::Wheelbarrow),
+            // Package K: the fee ladder and the LoS ladder are
+            // chains like ECO-03's — Banking is the further upgrade
+            // of Coinage, Town Patrol of Town Watch (wiki,
+            // technology table).
+            TechId::Banking => Some(TechId::Coinage),
+            TechId::TownPatrol => Some(TechId::TownWatch),
             _ => None,
         }
     }
@@ -413,6 +453,10 @@ impl TechId {
             TechId::TreadmillCrane => 1200, // 20 s (wiki, Treadmill Crane — dossier §5.5)
             TechId::Masonry => 3000, // 50 s (wiki, Masonry — dossier §5.5)
             TechId::FortifiedWall => 3000, // 50 s (wiki, Fortified Wall — BLD-20)
+            TechId::Coinage => 4200,   // 70 s (wiki, Coinage)
+            TechId::Banking => 4200,   // 70 s (wiki, Banking)
+            TechId::TownWatch => 1500, // 25 s (wiki, Town Watch)
+            TechId::TownPatrol => 2400, // 40 s (wiki, Town Patrol)
         }
     }
 
@@ -445,8 +489,43 @@ impl TechId {
             TechId::TreadmillCrane => (0, 200, 0, 50), // wiki, Treadmill Crane — dossier §5.5
             TechId::Masonry => (150, 175, 0, 0), // wiki, Masonry — dossier §5.5
             TechId::FortifiedWall => (200, 100, 0, 0), // wiki, Fortified Wall — BLD-20
+            TechId::Coinage => (200, 0, 100, 0), // wiki, Coinage
+            TechId::Banking => (300, 0, 200, 0), // wiki, Banking
+            TechId::TownWatch => (75, 0, 0, 0),  // wiki, Town Watch
+            TechId::TownPatrol => (300, 0, 100, 0), // wiki, Town Patrol
         }
     }
+}
+
+/// The tribute fee, in percent of the amount sent, for a player
+/// holding the researched set `techs` (TRD-04): 30% by default,
+/// 20% with Coinage, 0% with Banking (wiki, Tribute; Coinage;
+/// Banking). Read at tribute time from the sender's mask — no
+/// stored per-player fee (TEC-06's lookup discipline).
+pub fn tribute_fee_pct(techs: u64) -> i32 {
+    if techs & TechId::Banking.bit() != 0 {
+        0
+    } else if techs & TechId::Coinage.bit() != 0 {
+        20
+    } else {
+        30
+    }
+}
+
+/// The building line-of-sight bonus, in tiles, granted by the
+/// LoS technologies in the researched set `techs` (VIS-03):
+/// +4 for Town Watch and a further +4 for Town Patrol (wiki,
+/// Town Watch; Town Patrol). Which building kinds the bonus may
+/// raise is the building table's call (`sight_tiles_with_techs`).
+pub fn building_los_bonus(techs: u64) -> u32 {
+    let mut bonus = 0;
+    if techs & TechId::TownWatch.bit() != 0 {
+        bonus += 4;
+    }
+    if techs & TechId::TownPatrol.bit() != 0 {
+        bonus += 4;
+    }
+    bonus
 }
 
 /// The gather rate of a node kind for a villager whose owner has

@@ -148,7 +148,8 @@ export const PANEL_BUTTONS = {
   // build context's special buttons get outside these tables.
   units: ['attack-move', 'patrol', 'stance-0', 'stance-1', 'stance-2', 'stance-3',
     'stop', 'delete'],
-  tc: ['train', 'research-loom', 'research-age', 'research-wheelbarrow', 'research-handcart'],
+  tc: ['train', 'research-loom', 'research-age', 'research-wheelbarrow', 'research-handcart',
+    'research-townwatch', 'research-townpatrol'],
   barracks: ['train-militia', 'train-spearman', 'research-maa'],
   range: ['train-archer', 'train-skirmisher', 'train-cavalry-archer'],
   stable: ['train-scout', 'train-knight', 'research-lightcavalry', 'research-bloodlines', 'research-husbandry'],
@@ -234,6 +235,13 @@ export const PANEL_KEYS = {
     // reference panel keeps Town Watch, a tech we do not have.)
     'research-wheelbarrow': ['KeyS', 'S'],
     'research-handcart': ['KeyS', 'S'],
+    // Package K (VIS-03): the Town Watch line takes D — the
+    // cell the reference panel keeps for it (the Castle P1 note
+    // above already named it: "D is where the reference panel
+    // keeps Town Watch"). Town Patrol is the SAME cell's next
+    // rung, like Hand Cart over Wheelbarrow at S.
+    'research-townwatch': ['KeyD', 'D'],
+    'research-townpatrol': ['KeyD', 'D'],
   },
   barracks: {
     'train-militia': ['KeyQ', 'Q'],
@@ -316,6 +324,11 @@ export const PANEL_KEYS = {
     'trade-buy-stone': ['KeyD', 'D'],
     'train-trade-cart': ['KeyZ', 'Z'],
     'research-caravan': ['KeyX', 'X'],
+    // Package K (TRD-04): Coinage / Banking are NOT in this
+    // table — the Market's nine cells are all spoken for (the
+    // exchange, the cart, Caravan, and Delete at C), so the fee
+    // line renders unbadged after the grid and answers to the
+    // mouse, exactly like the garrison buttons (app.js).
   },
   // Castle P3c: the University — the plain positional grid over
   // its five researches (top row Q W E, second row A S).

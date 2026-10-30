@@ -87,7 +87,15 @@ export function advanceTicks(accGameMs, dtMs, speed = GAME_SPEED) {
 }
 export const INITIAL_DELAY_TURNS = 4;
 export const MAX_DELAY_TURNS = 10;
-export const BUNDLE_CAP = 256; // NET-07: per-turn command volume bound
+// NET-07's per-player command budget: a player may contribute
+// at most BUNDLE_CAP commands to any one turn. The sender drops
+// the excess (counted in the session's droppedOverflow) and the
+// codec rejects an inbound bundle past twice the cap whole —
+// command volume per player is bounded by the transport, never
+// by the sim's patience. 256 is far above real play (Bettner &
+// Terrano: an order every 1.5–2 s against several turns a
+// second), so the cap only ever bites spam.
+export const BUNDLE_CAP = 256;
 export const REJOIN_GRACE_MS = 90_000;
 // Peer-loss detection fallback (2026-10-22, rejoin fix F1): the
 // relay (v6+) originates a 'peer-left' frame the moment a room
@@ -191,9 +199,18 @@ export function validateCommand(c) {
     case 'train_at': return isInt(c.b) && (c.k === 2 || c.k === 3 || c.k === 4 || c.k === 9 || c.k === 10 || c.k === 12 || c.k === 14 || c.k === 15 || c.k === 16 || c.k === 17);
     case 'train_vil': return c.tc === undefined || isInt(c.tc);
     case 'research_tc': return (c.tech === 0 || c.tech === 1 || c.tech === 6
-      || c.tech === 14 || c.tech === 15 || c.tech === 18) && (c.tc === undefined || isInt(c.tc));
+      || c.tech === 14 || c.tech === 15 || c.tech === 18
+      || c.tech === 27 || c.tech === 28) && (c.tc === undefined || isInt(c.tc));
     case 'research_at': return isInt(c.b) && isInt(c.tech) && (c.tech <= 13 || c.tech === 16 || c.tech === 17 || c.tech === 19
-      || (c.tech >= 20 && c.tech <= 24));
+      || (c.tech >= 20 && c.tech <= 26));
+    // Package K (TRD-04): a tribute names the recipient's owner
+    // tag (0 or 2 — the only seats), a ResourceKind tag (food 1,
+    // wood 2, gold 3, stone 4) and a positive amount. The amount
+    // ceiling is a sanity bound only; the sim's own validation
+    // (holdings, the fee, the 30 floor) decides acceptance.
+    case 'tribute': return (c.to === 0 || c.to === 2)
+      && isInt(c.r) && c.r >= 1 && c.r <= 4
+      && isInt(c.a) && c.a >= 1 && c.a <= 100000;
     case 'rally_tc': return isNum(c.x) && isNum(c.y) && (c.tc === undefined || isInt(c.tc));
     case 'rally_b': return isInt(c.b) && isNum(c.x) && isNum(c.y);
     case 'force_dep': return isInt(c.e);
@@ -283,6 +300,10 @@ export function applyCommand(sim, cmd, owner, tcOf) {
     // the building, so one form serves both seats (as research_at).
     case 'mbuy': return sim.push_market_buy(cmd.b, cmd.r);
     case 'msell': return sim.push_market_sell(cmd.b, cmd.r);
+    // Package K (TRD-04): a tribute — the sender is the bundle's
+    // owner (applyCommand's contract), the recipient rides in
+    // the command; the sim validates both seats.
+    case 'tribute': return sim.push_tribute(owner, cmd.to, cmd.r, cmd.a);
     default: return false;
   }
 }
@@ -454,6 +475,12 @@ export function createSession({
   let lateWindow = []; // booleans: did each recent turn execute late?
   let droppedDupes = 0;
   let droppedOverflow = 0;
+  // NET-07: bundles the network delivered twice (or after their
+  // turn finalized) and the session discarded — a redelivery is
+  // idempotent here (the turn's slot is already filled, or below
+  // the rebase floor), and this counter makes the discarding
+  // explicit instead of silent.
+  let droppedRedelivered = 0;
 
   const execTarget = (turn) => anchorMs + (turn - anchorTurn + 1) * TURN_MS;
 
@@ -655,10 +682,22 @@ export function createSession({
     receive(msg) {
       if (!msg || typeof msg !== 'object') return false;
       if (msg.type === 'bundle') {
-        if (msg.turn < floorTurn) return true;
+        if (msg.turn < floorTurn) {
+          // NET-07: a redelivery for a finalized turn — counted
+          // and discarded; the turn already executed exactly once.
+          droppedRedelivered++;
+          return true;
+        }
         const b = bundleFor(msg.turn);
         const remoteSlot = 1 - localSlot;
-        if (b[remoteSlot] === null) b[remoteSlot] = msg.cmds;
+        if (b[remoteSlot] === null) {
+          b[remoteSlot] = msg.cmds;
+        } else {
+          // NET-07: a redelivery of a bundle already held — the
+          // slot keeps the first copy; the duplicate is counted
+          // and discarded, never applied twice.
+          droppedRedelivered++;
+        }
         return true;
       }
       if (msg.type === 'hash') {
@@ -779,6 +818,7 @@ export function createSession({
         waiting,
         droppedDupes,
         droppedOverflow,
+        droppedRedelivered,
       };
     },
   };
