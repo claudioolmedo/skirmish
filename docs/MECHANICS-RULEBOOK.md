@@ -4096,11 +4096,27 @@ the amplification in tests. §14 stands at 10 rules, 8 / 0 / 2
 and the book at 222 rules, 146 / 23 / 53. The table below
 equals the body.
 
+updated 2026-10-30 for Packages K + L (bot-loop combo landing,
+on top of P4a above): Package K lands tribute with the
+Coinage/Banking fee ladder (TRD-04 moves to MATCHES), Town
+Watch / Town Patrol with the per-kind sight table (VIS-03
+moves to MATCHES), the counted redelivery drop (NET-07 moves
+to MATCHES) and the public-only diplomacy screen (INF-07
+moves to MATCHES). Package L lands authored cliffs (MAP-07
+moves to MATCHES — the golden hash re-pins to 3e199a9573417af3
+inside that commit, probe-attributed to the authored cliff
+heights alone) and save/restore (NET-09 moves to MATCHES).
+Together with P4a the book stands at 222 rules, 156 / 21 / 45
+(recounted mechanically over the Status tags; the P3c/P4a
+paragraphs above kept their packages' own stale tallies and
+are superseded by this count). The table below equals the
+body.
+
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
 | 1 | Simulation & time (SIM) | 12 | 12 | 0 | 0 |
-| 2 | Map, terrain & elevation (MAP) | 12 | 7 | 4 | 1 |
-| 3 | Visibility & exploration (VIS) | 10 | 8 | 1 | 1 |
+| 2 | Map, terrain & elevation (MAP) | 12 | 8 | 4 | 0 |
+| 3 | Visibility & exploration (VIS) | 10 | 9 | 0 | 1 |
 | 4 | Selection & orders (SEL) | 17 | 16 | 1 | 0 |
 | 5 | Movement, pathfinding & collision (MOV) | 12 | 5 | 3 | 4 |
 | 6 | Economy & drop-off (ECO) | 17 | 14 | 1 | 2 |
@@ -4110,13 +4126,13 @@ equals the body.
 | 10 | Unit classes & counters (CLS) | 8 | 5 | 0 | 3 |
 | 11 | Technologies & age advancement (TEC) | 11 | 6 | 2 | 3 |
 | 12 | Monks, conversion & relics (MNK) | 13 | 0 | 0 | 13 |
-| 13 | Trade, market & tribute (TRD) | 8 | 3 | 0 | 5 |
+| 13 | Trade, market & tribute (TRD) | 8 | 8 | 0 | 0 |
 | 14 | Garrison, transport & repair (GAR) | 10 | 8 | 0 | 2 |
 | 15 | AI behavior & difficulty (AI) | 9 | 8 | 0 | 1 |
 | 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |
-| 17 | Multiplayer determinism (NET) | 11 | 7 | 2 | 2 |
-| 18 | Information rules (INF) | 13 | 9 | 2 | 2 |
-| | **Total** | **222** | **146** | **23** | **53** |
+| 17 | Multiplayer determinism (NET) | 11 | 9 | 1 | 1 |
+| 18 | Information rules (INF) | 13 | 10 | 2 | 1 |
+| | **Total** | **222** | **156** | **21** | **45** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer
