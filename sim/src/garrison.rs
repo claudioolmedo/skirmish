@@ -844,7 +844,11 @@ impl Sim {
                 continue;
             }
             let half = I16F16::from_num(b.kind.footprint_size() as i32 * 2);
-            if (rx - b.pos_x).abs() > half || (ry - b.pos_y).abs() > half {
+            // Boundary is NOT inside: a rally point exactly on the
+            // footprint edge is open ground (a walk, SEL-13) — the
+            // pre-P3b TC rally test rallies exactly 8 units east of
+            // the TC, on its footprint edge, and must keep walking.
+            if (rx - b.pos_x).abs() >= half || (ry - b.pos_y).abs() >= half {
                 continue;
             }
             let host = GarrisonRef::Building(b.id);
@@ -860,7 +864,7 @@ impl Sim {
                 None => continue,
             };
             let half = I16F16::from_num(8);
-            if (rx - bx).abs() > half || (ry - by).abs() > half {
+            if (rx - bx).abs() >= half || (ry - by).abs() >= half {
                 continue;
             }
             if self.can_garrison(id, host, false) {
