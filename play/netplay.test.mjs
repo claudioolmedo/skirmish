@@ -54,6 +54,15 @@ test('validateCommand accepts the full vocabulary and rejects junk', () => {
     { t: 'rally_tc', x: 1, y: 2 },
     { t: 'rally_b', b: 3, x: 1, y: 2 },
     { t: 'force_dep', e: 7 },
+    // Castle P3b: the garrison vocabulary.
+    { t: 'garrison_b', e: 1, b: 4 },
+    { t: 'garrison_tc', e: 1, tc: 4 },
+    { t: 'garrison_tc', e: 1 },
+    { t: 'ungarrison_b', b: 4 },
+    { t: 'ungarrison_tc', tc: 4 },
+    { t: 'ungarrison_tc' },
+    { t: 'town_bell', tc: 4 },
+    { t: 'town_bell' },
     { t: 'auto_explore', e: 4, on: true },
     { t: 'auto_explore', e: 4, on: false },
     { t: 'attackmove', e: 4, x: 10, y: -2 },
@@ -101,6 +110,12 @@ test('validateCommand accepts the full vocabulary and rejects junk', () => {
     { t: 'cancel_tc', tc: 2, i: 16 },
     { t: 'cancel_tc', tc: 2 },
     { t: 'cancel_b', b: 3, i: -1 },
+    { t: 'garrison_b', e: 1 },
+    { t: 'garrison_b', b: 4 },
+    { t: 'garrison_tc', e: -1 },
+    { t: 'ungarrison_b' },
+    { t: 'ungarrison_tc', tc: -1 },
+    { t: 'town_bell', tc: 1.5 },
   ];
   for (const c of bad) assert.equal(validateCommand(c), false, JSON.stringify(c));
 });
@@ -248,6 +263,14 @@ test('applyCommand maps semantic commands to the per-seat sim calls', () => {
   applyCommand(sim, { t: 'patrol', e: 5, x: 9, y: 10 }, 0, tcOf);
   applyCommand(sim, { t: 'patrol', e: 5, x: 9, y: 10, q: true }, 0, tcOf);
   applyCommand(sim, { t: 'stance', e: 5, s: 2 }, 0, tcOf);
+  // Castle P3b: the garrison orders; the TC forms resolve the
+  // issuer's TC when the command carries none.
+  applyCommand(sim, { t: 'garrison_b', e: 5, b: 9 }, 0, tcOf);
+  applyCommand(sim, { t: 'garrison_tc', e: 5, tc: 3 }, 0, tcOf);
+  applyCommand(sim, { t: 'garrison_tc', e: 5 }, 2, tcOf);
+  applyCommand(sim, { t: 'ungarrison_b', b: 9 }, 0, tcOf);
+  applyCommand(sim, { t: 'ungarrison_tc' }, 2, tcOf);
+  applyCommand(sim, { t: 'town_bell' }, 0, tcOf);
   assert.deepEqual(calls, [
     ['push_move', 5, 1, 2],
     ['push_move_queued', 5, 1, 2],
@@ -268,6 +291,12 @@ test('applyCommand maps semantic commands to the per-seat sim calls', () => {
     ['push_patrol', 5, 9, 10],
     ['push_patrol_queued', 5, 9, 10],
     ['push_set_stance', 5, 2],
+    ['push_garrison_building', 5, 9],
+    ['push_garrison_tc', 5, 3],
+    ['push_garrison_tc', 5, 40],
+    ['push_ungarrison_building', 9],
+    ['push_ungarrison_tc', 40],
+    ['push_town_bell', 0],
   ]);
 });
 

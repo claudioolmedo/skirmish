@@ -191,6 +191,12 @@ export function validateCommand(c) {
     case 'rally_tc': return isNum(c.x) && isNum(c.y) && (c.tc === undefined || isInt(c.tc));
     case 'rally_b': return isInt(c.b) && isNum(c.x) && isNum(c.y);
     case 'force_dep': return isInt(c.e);
+    // Castle P3b: garrison orders, ungarrison, Town Bell.
+    case 'garrison_b': return isInt(c.e) && isInt(c.b);
+    case 'garrison_tc': return isInt(c.e) && (c.tc == null || isInt(c.tc));
+    case 'ungarrison_b': return isInt(c.b);
+    case 'ungarrison_tc': return c.tc == null || isInt(c.tc);
+    case 'town_bell': return c.tc == null || isInt(c.tc);
     case 'auto_explore': return isInt(c.e) && typeof c.on === 'boolean';
     case 'attackmove': return isInt(c.e) && isNum(c.x) && isNum(c.y);
     case 'patrol': return isInt(c.e) && isNum(c.x) && isNum(c.y);
@@ -239,6 +245,11 @@ export function applyCommand(sim, cmd, owner, tcOf) {
     case 'rally_tc': return sim.push_set_rally_tc_of(cmd.tc != null ? cmd.tc : tcOf(owner), cmd.x, cmd.y);
     case 'rally_b': return sim.push_set_rally_building(cmd.b, cmd.x, cmd.y);
     case 'force_dep': return sim.push_force_deposit(cmd.e);
+    case 'garrison_b': return sim.push_garrison_building(cmd.e, cmd.b);
+    case 'garrison_tc': return sim.push_garrison_tc(cmd.e, cmd.tc != null ? cmd.tc : tcOf(owner));
+    case 'ungarrison_b': return sim.push_ungarrison_building(cmd.b);
+    case 'ungarrison_tc': return sim.push_ungarrison_tc(cmd.tc != null ? cmd.tc : tcOf(owner));
+    case 'town_bell': return sim.push_town_bell(cmd.tc != null ? cmd.tc : tcOf(owner));
     case 'auto_explore': return sim.push_auto_explore(cmd.e, cmd.on);
     case 'attackmove': return cmd.q
       ? sim.push_attack_move_queued(cmd.e, cmd.x, cmd.y)

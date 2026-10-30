@@ -68,6 +68,7 @@ const EN_FEED_FMT = {
   research: (name) => `${name} Research Complete`,
   feudal: 'Feudal Age Research Complete',
   castle: 'Castle Age Research Complete',
+  imperial: 'Imperial Age Research Complete',
   sheep: 'Sheep Found',
 };
 
@@ -86,7 +87,7 @@ export function diffFeedEvents(prev, next, names, fmt = EN_FEED_FMT) {
     }
   }
   if ((next.age ?? 0) > (prev.age ?? 0)) {
-    out.push(next.age >= 2 ? (fmt.castle || EN_FEED_FMT.castle) : fmt.feudal);
+    out.push(next.age >= 3 ? (fmt.imperial || EN_FEED_FMT.imperial) : next.age >= 2 ? (fmt.castle || EN_FEED_FMT.castle) : fmt.feudal);
   }
   for (const [key, label] of TECH_LINES) {
     if (next.techs && next.techs[key] && !(prev.techs && prev.techs[key])) {

@@ -22,6 +22,14 @@ export class WasmSim {
      */
     building_display_stats(building: number): Int32Array;
     /**
+     * A placed building's current total arrows per volley (GAR-05).
+     */
+    building_garrison_arrows(building: number): number;
+    /**
+     * Entities garrisoned in a placed building (GAR-01).
+     */
+    building_garrison_count(building: number): number;
+    /**
      * A placed building's queue as flat entry codes (M6) — see
      * `tc_queue`.
      */
@@ -88,6 +96,12 @@ export class WasmSim {
      * Attack is -1 for kinds with no attack.
      */
     entity_display_stats(entity: number): Int32Array;
+    /**
+     * Per-entity garrison flags (GAR-02): 1 while the entity is
+     * garrisoned inside a building or Town Center (the renderer
+     * hides those entities — they are out of the field).
+     */
+    entity_garrisoned(): Uint8Array;
     /**
      * Per-entity hit points as flat `[hp, max_hp, …]` pairs in id
      * order (M3). An entity with hp < 1 is dead (the CMB-02 rule) —
@@ -524,6 +538,18 @@ export class WasmSim {
      */
     push_force_deposit(entity: number): boolean;
     /**
+     * Order a unit to garrison in an own placed defensive
+     * building (Castle P3b, GAR-01/SEL-11): it walks there and
+     * enters on arrival. Returns whether the order *would* be
+     * accepted against the current state.
+     */
+    push_garrison_building(entity: number, building: number): boolean;
+    /**
+     * Order a unit to garrison in an own Town Center (Castle P3b,
+     * GAR-01/SEL-11). See `push_garrison_building`.
+     */
+    push_garrison_tc(entity: number, tc: number): boolean;
+    /**
      * Order a villager to work a resource node (gather → haul → deposit
      * → repeat). Ids only — no floats cross this boundary here.
      */
@@ -618,6 +644,12 @@ export class WasmSim {
      */
     push_research_hand_cart(): boolean;
     /**
+     * Enqueue the Imperial Age advancement at the Town Center
+     * (1000 food, 800 gold, 190 s; needs a Castle or two
+     * completed Castle-Age buildings — TEC-01 Imperial rung).
+     */
+    push_research_imperial_age(): boolean;
+    /**
      * Enqueue Loom at the Town Center (50 gold, 25 s). Returns
      * whether the order *would* be accepted against current state.
      */
@@ -667,6 +699,13 @@ export class WasmSim {
      * the command is applied.
      */
     push_stop(entity: number): boolean;
+    /**
+     * Ring a Town Center's Town Bell (Castle P3b, GAR-07): the
+     * first ring shelters nearby villagers; the second sends them
+     * back to their snapshotted work. Returns whether the TC can
+     * ring.
+     */
+    push_town_bell(tc: number): boolean;
     /**
      * Enqueue an Archer at a completed Archery Range (M6 — the
      * Range is the Archer's home since M6; in M3 the Barracks
@@ -725,6 +764,16 @@ export class WasmSim {
      */
     push_train_villager(): boolean;
     /**
+     * Voluntarily ungarrison a placed building (Castle P3b,
+     * GAR-03): every unit inside is placed at the exit point,
+     * idle. Returns whether anyone was inside.
+     */
+    push_ungarrison_building(building: number): boolean;
+    /**
+     * Voluntarily ungarrison a Town Center (Castle P3b, GAR-03).
+     */
+    push_ungarrison_tc(tc: number): boolean;
+    /**
      * All rally points as a flat array, four values per entry —
      * `[x, y, node, has]` — entry 0 is the Town Center, entries
      * 1.. follow `buildings()` order. `node` is the snapped resource
@@ -778,6 +827,18 @@ export class WasmSim {
      */
     stockpile_for(owner: number): Float64Array;
     stone(): number;
+    /**
+     * Whether a Town Center's bell is currently rung (GAR-07).
+     */
+    tc_bell_active(tc: number): boolean;
+    /**
+     * A Town Center's current arrow total (GAR-05/06).
+     */
+    tc_garrison_arrows(tc: number): number;
+    /**
+     * Entities garrisoned in a Town Center (GAR-01).
+     */
+    tc_garrison_count(tc: number): number;
     /**
      * Progress on the Town Center queue's head entry, 0..1 (M6).
      */
@@ -860,6 +921,8 @@ export interface InitOutput {
     readonly wasmsim_age: (a: number) => number;
     readonly wasmsim_age_for: (a: number, b: number) => number;
     readonly wasmsim_building_display_stats: (a: number, b: number) => [number, number];
+    readonly wasmsim_building_garrison_arrows: (a: number, b: number) => number;
+    readonly wasmsim_building_garrison_count: (a: number, b: number) => number;
     readonly wasmsim_building_queue: (a: number, b: number) => [number, number];
     readonly wasmsim_building_train_block: (a: number, b: number, c: number) => number;
     readonly wasmsim_buildings: (a: number) => [number, number];
@@ -869,6 +932,7 @@ export interface InitOutput {
     readonly wasmsim_entity_carry: (a: number) => [number, number];
     readonly wasmsim_entity_count: (a: number) => number;
     readonly wasmsim_entity_display_stats: (a: number, b: number) => [number, number];
+    readonly wasmsim_entity_garrisoned: (a: number) => [number, number];
     readonly wasmsim_entity_hp: (a: number) => [number, number];
     readonly wasmsim_entity_kinds: (a: number) => [number, number];
     readonly wasmsim_entity_order_route: (a: number, b: number) => [number, number];
@@ -945,6 +1009,8 @@ export interface InitOutput {
     readonly wasmsim_push_delete: (a: number, b: number) => number;
     readonly wasmsim_push_delete_building: (a: number, b: number) => number;
     readonly wasmsim_push_force_deposit: (a: number, b: number) => number;
+    readonly wasmsim_push_garrison_building: (a: number, b: number, c: number) => number;
+    readonly wasmsim_push_garrison_tc: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_gather: (a: number, b: number, c: number) => void;
     readonly wasmsim_push_gather_queued: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_market_buy: (a: number, b: number, c: number) => number;
@@ -960,6 +1026,7 @@ export interface InitOutput {
     readonly wasmsim_push_research_castle_age: (a: number) => number;
     readonly wasmsim_push_research_feudal: (a: number) => number;
     readonly wasmsim_push_research_hand_cart: (a: number) => number;
+    readonly wasmsim_push_research_imperial_age: (a: number) => number;
     readonly wasmsim_push_research_loom: (a: number) => number;
     readonly wasmsim_push_research_tc_at: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_research_wheelbarrow: (a: number) => number;
@@ -968,6 +1035,7 @@ export interface InitOutput {
     readonly wasmsim_push_set_rally_tc_of: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_set_stance: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_stop: (a: number, b: number) => number;
+    readonly wasmsim_push_town_bell: (a: number, b: number) => number;
     readonly wasmsim_push_train_archer: (a: number, b: number) => number;
     readonly wasmsim_push_train_cavalry_archer: (a: number, b: number) => number;
     readonly wasmsim_push_train_knight: (a: number, b: number) => number;
@@ -978,6 +1046,8 @@ export interface InitOutput {
     readonly wasmsim_push_train_spearman: (a: number, b: number) => number;
     readonly wasmsim_push_train_villager: (a: number) => number;
     readonly wasmsim_push_train_villager_at: (a: number, b: number) => number;
+    readonly wasmsim_push_ungarrison_building: (a: number, b: number) => number;
+    readonly wasmsim_push_ungarrison_tc: (a: number, b: number) => number;
     readonly wasmsim_rally_points: (a: number) => [number, number];
     readonly wasmsim_research_block_at: (a: number, b: number, c: number) => number;
     readonly wasmsim_research_block_tc: (a: number, b: number) => number;
@@ -988,6 +1058,9 @@ export interface InitOutput {
     readonly wasmsim_stockpile: (a: number) => [number, number];
     readonly wasmsim_stockpile_for: (a: number, b: number) => [number, number];
     readonly wasmsim_stone: (a: number) => number;
+    readonly wasmsim_tc_bell_active: (a: number, b: number) => number;
+    readonly wasmsim_tc_garrison_arrows: (a: number, b: number) => number;
+    readonly wasmsim_tc_garrison_count: (a: number, b: number) => number;
     readonly wasmsim_tc_progress: (a: number) => number;
     readonly wasmsim_tc_progress_for: (a: number, b: number) => number;
     readonly wasmsim_tc_queue: (a: number) => [number, number];

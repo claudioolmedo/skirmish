@@ -389,14 +389,14 @@ const BUILDING_MINIMAP_COLOR = {
 // Ages and technologies (M6). Age tags match the sim's Age::tag;
 // tech tags match TechId::tag. Costs/times mirror the sim's table
 // (study §8, OPENING-SPEC §2.6–2.7).
-let AGE_NAMES = ['Dark Age', 'Feudal Age', 'Castle Age'];
+let AGE_NAMES = ['Dark Age', 'Feudal Age', 'Castle Age', 'Imperial Age'];
 let TECH_NAME = {
   0: 'Loom', 1: 'Feudal Age', 2: 'Fletching', 3: 'Scale Mail Armor',
   4: 'Padded Archer Armor', 5: 'Man-at-Arms', 6: 'Wheelbarrow',
   7: 'Forging', 8: 'Scale Barding Armor', 9: 'Bloodlines',
   10: 'Double-Bit Axe', 11: 'Gold Mining', 12: 'Stone Mining',
   13: 'Horse Collar', 14: 'Castle Age', 15: 'Hand Cart',
-  16: 'Light Cavalry', 17: 'Husbandry',
+  16: 'Light Cavalry', 17: 'Husbandry', 18: 'Imperial Age',
 };
 // Research-block explanations, indexed by the sim's ResearchBlock
 // tag (0 ok — unused, 1 funds, 2 queue full, 3 already done,
@@ -428,7 +428,7 @@ function refreshNames() {
   KIND_I18N.forEach((id, tag) => { kn[tag] = t('unit.' + id); });
   KIND_NAME = kn;
   BUILD_NAME = BUILD_I18N.map((id) => t('building.' + id));
-  AGE_NAMES = [t('age.dark'), t('age.feudal'), t('age.castle')];
+  AGE_NAMES = [t('age.dark'), t('age.feudal'), t('age.castle'), t('age.imperial')];
   TECH_NAME = {
     0: t('tech.loom'), 1: t('age.feudal'), 2: t('tech.fletching'),
     3: t('tech.scalemail'), 4: t('tech.padded'), 5: t('tech.maa'),
@@ -436,7 +436,7 @@ function refreshNames() {
     9: t('tech.bloodlines'), 10: t('tech.doublebit'),
     11: t('tech.goldmining'), 12: t('tech.stonemining'),
     13: t('tech.horsecollar'), 14: t('age.castle'), 15: t('tech.handcart'),
-    16: t('tech.lightcavalry'), 17: t('tech.husbandry'),
+    16: t('tech.lightcavalry'), 17: t('tech.husbandry'), 18: t('age.imperial'),
   };
   RESEARCH_BLOCK_TITLES = [
     '', t('block.noResources'), t('block.queueFullTrain'),
@@ -872,6 +872,7 @@ function feedFmt() {
     research: (name) => t('feed.research', { name }),
     feudal: t('feed.feudal'),
     castle: t('feed.castle'),
+    imperial: t('feed.imperial'),
     sheep: t('feed.sheep'),
   };
 }
@@ -900,7 +901,7 @@ function updateEventFeed() {
   if (seatAware()) {
     const foeAge = sim.age_for(foeOwner());
     if (feedFoeAge >= 0 && foeAge > feedFoeAge) {
-      pushFeedLine(t(foeAge >= 2 ? 'feed.foeCastle' : 'feed.foeFeudal'));
+      pushFeedLine(t(foeAge >= 3 ? 'feed.foeImperial' : foeAge >= 2 ? 'feed.foeCastle' : 'feed.foeFeudal'));
       playAudioCue('ageAdvance');
     }
     feedFoeAge = foeAge;
@@ -2008,12 +2009,17 @@ function entityState() {
     hp: sim.entity_hp(),
     pos: sim.positions(),
     count: sim.entity_count(),
+    // Castle P3b (GAR-02): 1 while the entity is garrisoned — it
+    // is out of the field (not drawn, not selectable).
+    garrisoned: typeof sim.entity_garrisoned === 'function'
+      ? sim.entity_garrisoned() : [],
   };
 }
 // A living unit of ours: player-owned, not the Town Center, hp >= 1
 // (the sim's death rule is hp < 1).
 const isOwnUnit = (st, i) =>
-  st.owners[i] === localOwner && st.kinds[i] !== KIND_TC && st.hp[i * 2] >= 1;
+  st.owners[i] === localOwner && st.kinds[i] !== KIND_TC && st.hp[i * 2] >= 1
+  && !(st.garrisoned && st.garrisoned[i]);
 
 // Every selectable unit of ours (for box select / double-click).
 function ownUnitIds() {
@@ -2534,7 +2540,7 @@ function panelContext() {
   }
   if (selectedBuilding.type === 'tc') return 'tc';
   const bk = buildingList().find((b) => b.id === selectedBuilding.id);
-  return (bk && { 2: 'barracks', 3: 'lumbercamp', 4: 'mill', 5: 'miningcamp', 6: 'range', 7: 'stable', 8: 'blacksmith', 15: 'castle' }[bk.kind]) || 'none';
+  return (bk && { 2: 'barracks', 3: 'lumbercamp', 4: 'mill', 5: 'miningcamp', 6: 'range', 7: 'stable', 8: 'blacksmith', 10: 'tower', 11: 'outpost', 15: 'castle' }[bk.kind]) || 'none';
 }
 
 /// AutoExplore toggle (SEL-17): flips the mode on the LOCAL
@@ -3268,6 +3274,13 @@ function applyLocalOrder(cmd) {
     case 'rally_tc': return sim.push_set_rally_tc_of(cmd.tc != null ? cmd.tc : myTcId, cmd.x, cmd.y);
     case 'rally_b': return sim.push_set_rally_building(cmd.b, cmd.x, cmd.y);
     case 'force_dep': return sim.push_force_deposit(cmd.e);
+    // Castle P3b (GAR-01/03/07): garrison orders, voluntary
+    // ungarrison, and the Town Bell.
+    case 'garrison_b': return sim.push_garrison_building(cmd.e, cmd.b);
+    case 'garrison_tc': return sim.push_garrison_tc(cmd.e, cmd.tc);
+    case 'ungarrison_b': return sim.push_ungarrison_building(cmd.b);
+    case 'ungarrison_tc': return sim.push_ungarrison_tc(cmd.tc);
+    case 'town_bell': return sim.push_town_bell(cmd.tc);
     case 'auto_explore': return sim.push_auto_explore(cmd.e, cmd.on);
     case 'attackmove': return cmd.q
       ? sim.push_attack_move_queued(cmd.e, cmd.x, cmd.y)
@@ -6496,6 +6509,29 @@ async function main() {
         }
         if (any) { playAck('villager', 'order'); return; }
       }
+    }
+    // Garrison (Castle P3b, GAR-01/SEL-11): a right-click on an
+    // OWN garrisonable building — the Town Center, a tower, the
+    // Castle — with eligible units selected is a garrison order:
+    // they walk there and enter on arrival. One exception rides
+    // the older gesture: a LOADED villager clicking the Town
+    // Center still drops off first (the block below), so loaded
+    // villagers are skipped here and fall through to it.
+    if (tcT != null && st.owners[tcT] === localOwner) {
+      let any = false;
+      for (const id of targets) {
+        if (st.kinds[id] === 0 && carryKind.has(id)) continue;
+        if (issue({ t: 'garrison_tc', e: id, tc: tcT })) any = true;
+      }
+      if (any) { orderAck('order'); flash(t('flash.garrisoned')); return; }
+    }
+    if (bT && bT.owner === localOwner && bT.complete
+        && (bT.kind === 10 || bT.kind === 11 || bT.kind === 15)) {
+      let any = false;
+      for (const id of targets) {
+        if (issue({ t: 'garrison_b', e: id, b: bT.id })) any = true;
+      }
+      if (any) { orderAck('order'); flash(t('flash.garrisoned')); return; }
     }
     // Force drop-off (M6, ECO-07): the click lands on OUR Town
     // Center or one of our camps — every selected villager the
@@ -9781,6 +9817,17 @@ function runCommandButton(id, times = 1) {
       if (issue({ t: 'stance', e: uid, s: tag })) any = true;
     }
     if (any) playAudioCue('click');
+  } else if (id === 'town-bell') {
+    // GAR-07: ring the selected Town Center's bell (the sim holds
+    // the rung state; the second ring sends everyone back).
+    if (issue({ t: 'town_bell', tc: panelTcId() })) playAudioCue('orderBuilding');
+  } else if (id === 'ungarrison') {
+    // GAR-03: voluntary ungarrison of the selected building or TC.
+    if (selectedBuilding && selectedBuilding.type === 'tc') {
+      if (issue({ t: 'ungarrison_tc', tc: panelTcId() })) playAudioCue('orderBuilding');
+    } else if (selectedBuilding && selectedBuilding.type === 'building') {
+      if (issue({ t: 'ungarrison_b', b: selectedBuilding.id })) playAudioCue('orderBuilding');
+    }
   } else if (id === 'stop') {
     // SEL-14: halt every selected unit where it stands.
     stopSelectedUnits();
@@ -9817,6 +9864,7 @@ function runCommandButton(id, times = 1) {
     const tag = id === 'research-loom' ? 0
       : id === 'research-wheelbarrow' ? 6
       : id === 'research-handcart' ? 15
+      : myAge() >= 2 ? 18
       : myAge() >= 1 ? 14 : 1;
     const ok = issue({ t: 'research_tc', tc: panelTcId(), tech: tag });
     if (!ok) {
@@ -9825,7 +9873,9 @@ function runCommandButton(id, times = 1) {
         ? t('cmd.feudalNeeds')
         : tag === 14 && rb === 4
           ? t('cmd.castleNeeds')
-          : RESEARCH_BLOCK_TITLES[rb] || t('block.cannotResearch'));
+          : tag === 18 && rb === 4
+            ? t('cmd.imperialNeeds')
+            : RESEARCH_BLOCK_TITLES[rb] || t('block.cannotResearch'));
     } else {
       playAudioCue('orderBuilding');
     }
@@ -9933,7 +9983,7 @@ function renderCommands() {
   // context renders nothing, never command buttons.
   const foeSel = !!selectedBuilding && selectedBuilding.owner === foeOwner();
   // M6: each production/research building gets its own context.
-  const BUILDING_CONTEXT = { 2: 'barracks', 3: 'lumbercamp', 4: 'mill', 5: 'miningcamp', 6: 'range', 7: 'stable', 8: 'blacksmith', 12: 'market', 15: 'castle' };
+  const BUILDING_CONTEXT = { 2: 'barracks', 3: 'lumbercamp', 4: 'mill', 5: 'miningcamp', 6: 'range', 7: 'stable', 8: 'blacksmith', 10: 'tower', 11: 'outpost', 12: 'market', 15: 'castle' };
   const context = selUnits.length > 0
     ? (hasVillager ? 'build' : 'units')
     : selectedBuilding
@@ -9983,7 +10033,7 @@ function renderCommands() {
   // (Gold 11, Stone 12), Mill (Horse Collar 13).
   const rbTc = context === 'tc'
     ? [myResearchBlockTc(0), myResearchBlockTc(1), myResearchBlockTc(6),
-      myResearchBlockTc(14), myResearchBlockTc(15)] : [-1, -1, -1, -1, -1];
+      myResearchBlockTc(14), myResearchBlockTc(15), myResearchBlockTc(18)] : [-1, -1, -1, -1, -1, -1];
   const RB_TAGS = {
     blacksmith: [2, 3, 4, 7, 8], barracks: [5], stable: [9, 16, 17],
     lumbercamp: [10], miningcamp: [11, 12], mill: [13],
@@ -9998,6 +10048,11 @@ function renderCommands() {
     reason, queue, bk ? bk.id : -1, bk ? bk.queue : -1, bk && bk.complete ? 1 : 0,
     blockM, blockSp, blockA, blockSk, blockS, blockK, blockCA, blockP, age, techMask, rbTc.join('.'), Object.values(rbB).join('.'),
     tcQueueCodes, bkQueueCodes, buildPage || '', repairArm ? 1 : 0,
+    // Castle P3b: the garrison counts and the bell state are panel
+    // state (button faces + disabled states read them).
+    context === 'tc' ? sim.tc_garrison_count(panelTcId()) : -1,
+    context === 'tc' ? (sim.tc_bell_active(panelTcId()) ? 1 : 0) : -1,
+    bk ? sim.building_garrison_count(bk.id) : -1,
     scoutSel ? selScouts.join('.') : -1, scoutAuto ? 1 : 0,
     selMil.length ? selMil.join('.') : -1, milStance, orderArm || '',
     placement ? placement.kind : -1,
@@ -10096,6 +10151,7 @@ function renderCommands() {
     const loomDone = (techMask & 1) !== 0;
     const feudalDone = age >= 1;
     const castleDone = age >= 2;
+    const imperialDone = age >= 3;
     const wbDone = (techMask & 64) !== 0;
     const hcDone = (techMask & 32768) !== 0;
     cmdGrid.append(
@@ -10121,14 +10177,24 @@ function renderCommands() {
       // the NEXT Age — Feudal from Dark, Castle from Feudal —
       // and settles into the done state at Castle (Imperial is
       // not in the game yet).
-      age >= 2
+      age >= 3
         ? cmdButton({
-          id: 'research-age', icon: 'i-feudal', img: 'feudal.png', label: AGE_NAMES[2],
+          id: 'research-age', icon: 'i-feudal', img: 'feudal.png', label: AGE_NAMES[3],
           disabled: true,
           key: badgeForButton({ context, id: 'research-age', index: 2 }),
-          title: t('cmd.feudalDone', { age: AGE_NAMES[2] }),
+          title: t('cmd.feudalDone', { age: AGE_NAMES[3] }),
         })
-        : age >= 1
+        : age >= 2
+          ? cmdButton({
+            id: 'research-age', icon: 'i-feudal', img: 'feudal.png', label: AGE_NAMES[3],
+            costIcon: 'i-food', cost: 1000, cost2Icon: 'i-gold', cost2: 800,
+            disabled: rbTc[5] === 2 || rbTc[5] === 3,
+            key: badgeForButton({ context, id: 'research-age', index: 2 }),
+            title: rbTc[5] === 4
+              ? t('cmd.imperialGate', { age: AGE_NAMES[3] })
+              : t('cmd.imperialTitle', { age: AGE_NAMES[3], cost: costText([[1000, 'food'], [800, 'gold']]), secs: 190 }) + (RESEARCH_BLOCK_TITLES[rbTc[5]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[5]] : ''),
+          })
+          : age >= 1
           ? cmdButton({
             id: 'research-age', icon: 'i-feudal', img: 'feudal.png', label: AGE_NAMES[2],
             costIcon: 'i-food', cost: 800, cost2Icon: 'i-gold', cost2: 200,
@@ -10452,6 +10518,33 @@ function renderCommands() {
       );
     }
   }
+  // Castle P3b (GAR-03/07): the garrison buttons ride along on
+  // every garrison-host panel — Town Bell + Ungarrison on the TC,
+  // Ungarrison on the towers, the Castle and the production
+  // buildings (production garrisons are eject-only). Icon-only
+  // faces per the panel law; names/counts live in the titles.
+  // The buttons carry NO grid letter: the pinned DE panels
+  // leave these cells to other occupants (the TC's W/E are not
+  // letters at all in the reference), so — like the building
+  // Delete — they render unbadged and answer to the mouse.
+  const GAR_PANEL = ['tc', 'castle', 'tower', 'outpost', 'barracks', 'range', 'stable'];
+  if (GAR_PANEL.includes(context)) {
+    const gCount = context === 'tc' ? sim.tc_garrison_count(panelTcId())
+      : (bk ? sim.building_garrison_count(bk.id) : 0);
+    if (context === 'tc') {
+      const bellOn = sim.tc_bell_active(panelTcId());
+      cmdGrid.append(cmdButton({
+        id: 'town-bell', icon: 'i-bell', label: t('cmd.townBell'),
+        active: bellOn, key: null,
+        title: t(bellOn ? 'cmd.townBellBackTitle' : 'cmd.townBellTitle'),
+      }));
+    }
+    cmdGrid.append(cmdButton({
+      id: 'ungarrison', icon: 'i-ungarrison', label: t('cmd.ungarrison'),
+      disabled: gCount === 0, key: null,
+      title: gCount > 0 ? t('cmd.ungarrisonTitle', { n: gCount }) : t('cmd.ungarrisonNone'),
+    }));
+  }
   if (context === 'units' && selMil.length) {
     // CMB-10/11: Attack Move (R — DE's dedicated key) and Patrol
     // arm order targeting; the click that follows names the
@@ -10641,7 +10734,12 @@ function updateSelPanel() {
     // TRD-01..03: a selected Market's info line carries the live
     // global prices — they move on ANY player's trade, so they
     // join the signature while a Market is selected.
-    bk && bk.kind === 12 ? sim.market_prices().join('.') : ''].join('|');
+    bk && bk.kind === 12 ? sim.market_prices().join('.') : '',
+    // Castle P3b: the selected host's garrison count is panel
+    // state (the info line carries it).
+    selectedBuilding && selectedBuilding.type === 'tc'
+      ? sim.tc_garrison_count(selectedBuilding.id)
+      : bk ? sim.building_garrison_count(bk.id) : -1].join('|');
   if (sig === selSig) return;
   selSig = sig;
 
@@ -10792,6 +10890,24 @@ function updateSelPanel() {
     selPortrait.innerHTML = pngIcon('villager.png', 'ui-icon');
     selName.textContent = t('sel.none');
     selInfo.textContent = t('sel.noneInfo');
+  }
+  // Castle P3b: a garrison host's info line carries its garrison
+  // count — and, for the armed shelters, the live arrows per
+  // volley (the sim's own stored counts, never recomputed here).
+  if ((context === 'tc' || context === 'production' || context === 'building')
+      && selectedBuilding) {
+    const isTc = selectedBuilding.type === 'tc';
+    const gN = isTc ? sim.tc_garrison_count(selectedBuilding.id)
+      : (bk ? sim.building_garrison_count(bk.id) : 0);
+    if (gN > 0) {
+      const cap = isTc ? 15 : ({ 10: 5, 11: 5, 15: 20 }[bk.kind] ?? 10);
+      let line = t('sel.garrisonLine', { n: gN, cap });
+      const arrows = isTc ? sim.tc_garrison_arrows(selectedBuilding.id)
+        : (bk && (bk.kind === 10 || bk.kind === 11 || bk.kind === 15))
+          ? sim.building_garrison_arrows(bk.id) : 0;
+      if (arrows > 0) line += ' · ' + t('sel.garrisonArrows', { n: arrows });
+      selInfo.textContent = selInfo.textContent ? `${selInfo.textContent} · ${line}` : line;
+    }
   }
   // INF-05: append the attack/armor stats to the single-selection
   // info line (computed above, through the sim's own getters, so
@@ -11391,7 +11507,7 @@ function draw() {
           }
         },
       });
-    } else if (st.hp[i * 2] >= 1) {
+    } else if (st.hp[i * 2] >= 1 && !(st.garrisoned && st.garrisoned[i])) {
       // M7 (VIS-01): enemy and Gaia UNITS draw only in currently
       // visible cells — explored memory remembers buildings, never
       // units (VIS-06).

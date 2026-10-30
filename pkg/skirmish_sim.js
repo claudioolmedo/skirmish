@@ -51,6 +51,24 @@ export class WasmSim {
         return v1;
     }
     /**
+     * A placed building's current total arrows per volley (GAR-05).
+     * @param {number} building
+     * @returns {number}
+     */
+    building_garrison_arrows(building) {
+        const ret = wasm.wasmsim_building_garrison_arrows(this.__wbg_ptr, building);
+        return ret >>> 0;
+    }
+    /**
+     * Entities garrisoned in a placed building (GAR-01).
+     * @param {number} building
+     * @returns {number}
+     */
+    building_garrison_count(building) {
+        const ret = wasm.wasmsim_building_garrison_count(this.__wbg_ptr, building);
+        return ret >>> 0;
+    }
+    /**
      * A placed building's queue as flat entry codes (M6) — see
      * `tc_queue`.
      * @param {number} building
@@ -166,6 +184,18 @@ export class WasmSim {
         const ret = wasm.wasmsim_entity_display_stats(this.__wbg_ptr, entity);
         var v1 = getArrayI32FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * Per-entity garrison flags (GAR-02): 1 while the entity is
+     * garrisoned inside a building or Town Center (the renderer
+     * hides those entities — they are out of the field).
+     * @returns {Uint8Array}
+     */
+    entity_garrisoned() {
+        const ret = wasm.wasmsim_entity_garrisoned(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
         return v1;
     }
     /**
@@ -1088,6 +1118,30 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Order a unit to garrison in an own placed defensive
+     * building (Castle P3b, GAR-01/SEL-11): it walks there and
+     * enters on arrival. Returns whether the order *would* be
+     * accepted against the current state.
+     * @param {number} entity
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_garrison_building(entity, building) {
+        const ret = wasm.wasmsim_push_garrison_building(this.__wbg_ptr, entity, building);
+        return ret !== 0;
+    }
+    /**
+     * Order a unit to garrison in an own Town Center (Castle P3b,
+     * GAR-01/SEL-11). See `push_garrison_building`.
+     * @param {number} entity
+     * @param {number} tc
+     * @returns {boolean}
+     */
+    push_garrison_tc(entity, tc) {
+        const ret = wasm.wasmsim_push_garrison_tc(this.__wbg_ptr, entity, tc);
+        return ret !== 0;
+    }
+    /**
      * Order a villager to work a resource node (gather → haul → deposit
      * → repeat). Ids only — no floats cross this boundary here.
      * @param {number} entity
@@ -1262,6 +1316,16 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Enqueue the Imperial Age advancement at the Town Center
+     * (1000 food, 800 gold, 190 s; needs a Castle or two
+     * completed Castle-Age buildings — TEC-01 Imperial rung).
+     * @returns {boolean}
+     */
+    push_research_imperial_age() {
+        const ret = wasm.wasmsim_push_research_imperial_age(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * Enqueue Loom at the Town Center (50 gold, 25 s). Returns
      * whether the order *would* be accepted against current state.
      * @returns {boolean}
@@ -1354,6 +1418,18 @@ export class WasmSim {
      */
     push_stop(entity) {
         const ret = wasm.wasmsim_push_stop(this.__wbg_ptr, entity);
+        return ret !== 0;
+    }
+    /**
+     * Ring a Town Center's Town Bell (Castle P3b, GAR-07): the
+     * first ring shelters nearby villagers; the second sends them
+     * back to their snapshotted work. Returns whether the TC can
+     * ring.
+     * @param {number} tc
+     * @returns {boolean}
+     */
+    push_town_bell(tc) {
+        const ret = wasm.wasmsim_push_town_bell(this.__wbg_ptr, tc);
         return ret !== 0;
     }
     /**
@@ -1460,6 +1536,26 @@ export class WasmSim {
      */
     push_train_villager() {
         const ret = wasm.wasmsim_push_train_villager(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * Voluntarily ungarrison a placed building (Castle P3b,
+     * GAR-03): every unit inside is placed at the exit point,
+     * idle. Returns whether anyone was inside.
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_ungarrison_building(building) {
+        const ret = wasm.wasmsim_push_ungarrison_building(this.__wbg_ptr, building);
+        return ret !== 0;
+    }
+    /**
+     * Voluntarily ungarrison a Town Center (Castle P3b, GAR-03).
+     * @param {number} tc
+     * @returns {boolean}
+     */
+    push_ungarrison_tc(tc) {
+        const ret = wasm.wasmsim_push_ungarrison_tc(this.__wbg_ptr, tc);
         return ret !== 0;
     }
     /**
@@ -1588,6 +1684,33 @@ export class WasmSim {
     stone() {
         const ret = wasm.wasmsim_stone(this.__wbg_ptr);
         return ret;
+    }
+    /**
+     * Whether a Town Center's bell is currently rung (GAR-07).
+     * @param {number} tc
+     * @returns {boolean}
+     */
+    tc_bell_active(tc) {
+        const ret = wasm.wasmsim_tc_bell_active(this.__wbg_ptr, tc);
+        return ret !== 0;
+    }
+    /**
+     * A Town Center's current arrow total (GAR-05/06).
+     * @param {number} tc
+     * @returns {number}
+     */
+    tc_garrison_arrows(tc) {
+        const ret = wasm.wasmsim_tc_garrison_arrows(this.__wbg_ptr, tc);
+        return ret >>> 0;
+    }
+    /**
+     * Entities garrisoned in a Town Center (GAR-01).
+     * @param {number} tc
+     * @returns {number}
+     */
+    tc_garrison_count(tc) {
+        const ret = wasm.wasmsim_tc_garrison_count(this.__wbg_ptr, tc);
+        return ret >>> 0;
     }
     /**
      * Progress on the Town Center queue's head entry, 0..1 (M6).
