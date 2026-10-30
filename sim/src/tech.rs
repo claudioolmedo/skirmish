@@ -706,7 +706,10 @@ mod tests {
         for t in TechId::ALL {
             assert_eq!(TechId::from_tag(t.tag()), Some(t));
         }
-        assert_eq!(TechId::from_tag(25), None);
+        // 25-28 are Package K's Coinage/Banking/Town Watch/Town
+        // Patrol (combo landing, bot-loop 2026-10-30); the next
+        // free tag is 29.
+        assert_eq!(TechId::from_tag(29), None);
     }
 
     #[test]
