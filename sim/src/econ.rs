@@ -276,6 +276,21 @@ impl Stockpile {
         Stockpile { amounts }
     }
 
+    /// Death Match start (Package I, VIC-09): 20,000 food /
+    /// 20,000 wood / 10,000 gold / 5,000 stone — the DE preset
+    /// (wiki, Deathmatch + Random map: the "Ultra High" starting
+    /// resources are exactly the Death Match stockpile).
+    pub fn death_match() -> Self {
+        Stockpile {
+            amounts: [
+                I16F16::from_num(20_000),
+                I16F16::from_num(20_000),
+                I16F16::from_num(10_000),
+                I16F16::from_num(5_000),
+            ],
+        }
+    }
+
     pub fn amount(&self, kind: ResourceKind) -> I16F16 {
         self.amounts[kind.index()]
     }

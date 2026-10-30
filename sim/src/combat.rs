@@ -2880,6 +2880,13 @@ impl Sim {
             Some(bi) => bi,
             None => return,
         };
+        // Package I: the Monument cannot be attacked or
+        // destroyed (wiki, Monument) — every damage path ends
+        // here, so no strike, blast or building weapon can ever
+        // move its HP or raze it.
+        if self.buildings[bi].kind == BuildingKind::Monument {
+            return;
+        }
         let mut spec = building_spec(
             self.buildings[bi].kind,
             self.age_of(self.buildings[bi].owner),

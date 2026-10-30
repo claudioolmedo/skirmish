@@ -3569,8 +3569,17 @@ KotH Monument is a Gaia building that belongs to the team with the most
 units close to it — ownership flips automatically by presence, with no
 attack or conversion involved (VIC-08).
 *Source:* wiki, Conversion (Gaia structures auto-conversion note). ·
-*Impl:* a periodic majority-count sweep like AI-06, with its own radius
-constant. · *Status:* **MISSING**.
+*Impl:* shipped (Package I, 2026-10-30) — `Sim::koth_tick` runs a
+presence sweep after combat each tick, on the AI-06 pattern: mobile
+player-owned units (herdables never hold ground) within
+`KOTH_CAPTURE_RANGE` = 24.0 world units = 6 tiles of the Monument's
+center (ADOPTED constant — the wiki names no number; this note leaves
+the radius to the implementation). The owner keeps the Monument while
+any of its units remain in range; an emptied Monument falls to the
+foe's presence; from Gaia the strictly greater presence takes it and
+an exact tie leaves it wild. The Monument cannot be attacked, deleted
+or player-built (wiki, Monument: it cannot be attacked or destroyed).
+· *Status:* **MATCHES**.
 
 ---
 
@@ -3744,20 +3753,71 @@ way. · *Status:* **MATCHES**.
 the map-size countdown to win; losing majority presence at the Monument
 loses the hold and the countdown.
 *Source:* GAP 8.6; wiki, Conversion (Monument capture note). · *Impl:*
-VIC-02's countdown machinery keyed to AI-09's ownership state. ·
-*Status:* **MISSING**.
+shipped (Package I, 2026-10-30) — a Gaia Monument
+(`BuildingKind::Monument`, tag 21, 4×4 — renumbered at the landing:
+the builder tree's 16 was already the University on current main;
+the wiki gives the Monument
+the Wonder's appearance and no separate footprint; HP 4800 nominal,
+never damaged; sight 8 per wiki, Monument, DE update 141935) is
+placed at the map center at construction, and ownership follows
+AI-09's presence rule. The countdown is VIC-02's size table at this
+game's 120×120 = Tiny map: 100 years × 5 s = 30,000 ticks, running
+only while a player owns the Monument; on capture with under the
+100-year floor remaining it resets to the floor (wiki, Monument — on
+Tiny the floor equals the full countdown, so every capture restarts
+it). The wiki King of the Hill article's 550 years is its classic
+default-map figure; this note keys the countdown to VIC-02's table
+and the table governs. Expiry sets a sticky winner folded into the
+match state's elimination checks. Recorded remainders, outside this
+note's text: the Monument's resource trickle (wiki, Monument:
+0.8/s = 48/min per resource, against the KotH article's 50/min —
+the sources conflict and neither rule note carries it) and DE's
+no-building zone around the Monument. · *Status:* **MATCHES**.
 
 **VIC-09 — Death Match is a settings delta.** Same rules as Conquest/
 Standard, but players start with very large stockpiles and the economy
 begins effectively post-Dark-Age. No rule in this book changes.
-*Source:* GAP 8.6. · *Impl:* match settings override ECO-17's stockpile.
-· *Status:* **MISSING** (settings framework pending M8).
+*Source:* GAP 8.6. · *Impl:* shipped (Package I, 2026-10-30) — the
+`death_match` flag on `VictorySettings` (bit 3 of the
+`new_match_victory` flags word — the builder tree's bit 2 was taken
+by VIC-03's relic victory on current main; shifted at the landing)
+replaces both players' opening
+stockpiles with the mode's documented DE figures: 20,000 food /
+20,000 wood / 10,000 gold / 5,000 stone, applied last in construction
+so it wins over the Empire Wars start if the flags combine. The
+opening is otherwise standard (Dark Age, 3 villagers, Scout).
+Recorded: DE's Post-Imperial starting-age default is NOT assumed —
+the wave-2 audit flagged it for the cycle rather than the package,
+and it awaits its own ruling. · *Status:* **MATCHES**.
 
 **VIC-10 — Empire Wars is a start delta.** Players start in the Feudal
 Age with a pre-built working economy (villagers already distributed on
 resources, basic buildings placed) instead of the standard opening.
-*Source:* GAP 8.6. · *Impl:* an alternative start-package generator
-beside OPENING-SPEC's standard one. · *Status:* **MISSING**.
+*Source:* GAP 8.6. · *Impl:* shipped (Package I, 2026-10-30) — the
+`empire_wars` flag on `VictorySettings` (bit 4, shifted at the
+landing like VIC-09's) runs an alternative
+start package for both players at construction: Feudal Age with Loom
+researched (the mode's documented starting conditions — official DE
+announcement and starting-conditions list), resources stay ECO-17
+standard 200/200/100/200, and a completed town is placed by a
+deterministic anchor search on the placement rules: Mill beside the
+berry patch, Mining Camp beside the main gold cluster, 3 Lumber
+Camps spread along the woodline, Barracks, 6 Houses, 5 Farms around
+the Mill; 27 villagers tasked in id order (population 28/35).
+**27-vs-28 resolution:** the wiki Empire Wars article declares 27
+villagers and lists 4+12+6+6 = 28; the declared total governs (two
+further sources state "27 Villagers + 1 Scout" outright). Within the
+list, gold 4 is corroborated by the article's update-42848 changelog
+(one additional villager on gold, from 3), wood 12 by the three-camp
+structure, and the idle 6 by an independent build guide ("the 6
+Villagers that spawn there"); the food line is the only figure no
+second source reaches, so it carries the slip: 5 on food = 2 on
+Farms (kept) + 3 on Berry Bushes (4 → 3). No neutral herdables are
+placed (holds by construction — this generator places herdables only
+inside start packages); the boar/sheep layout is untouched (the
+current article pins no boar removal; the 2019 announcement's "no
+wild boars" is stale against the current article).
+· *Status:* **MATCHES**.
 
 **VIC-11 — Resignation leaves ruins.** When a player resigns (or is
 eliminated), their units are removed, but their buildings remain

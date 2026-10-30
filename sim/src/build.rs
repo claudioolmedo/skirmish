@@ -381,6 +381,20 @@ pub enum BuildingKind {
     /// It does not fire — no `BuildingWeapon`. It is the one
     /// building that can never be converted (MNK-08).
     Monastery,
+    /// Package I (AI-09 / VIC-08): the King of the Hill Monument —
+    /// an unconstructible Gaia building placed at the map center
+    /// when a match opens under the King of the Hill setting. It
+    /// cannot be attacked or destroyed (wiki, Monument: "cannot
+    /// be attacked or destroyed" — `damage_building` refuses it
+    /// and `validate_build` refuses to place one), holds no
+    /// production, no drop-off and no population support, and its
+    /// `owner` field is the capture state AI-09's presence sweep
+    /// flips between Gaia and the players. Its HP row is nominal
+    /// (adopted at the Castle's 4800): the value is never reached,
+    /// because no damage path lands on the kind. Cost rows read 0
+    /// — it is never bought, so VIC-04's surviving-value and
+    /// razing terms stay 0 for it, as its table presence requires.
+    Monument,
 }
 
 impl BuildingKind {
@@ -394,7 +408,9 @@ impl BuildingKind {
     /// workshop (Castle P4a), 18 = palisade gate, 19 = stone
     /// gate (Package J, BLD-13), 20 = monastery (Castle P5a —
     /// renumbered at the bot-loop landing: the builder's 18 was
-    /// already the Palisade Gate here). Tags are an ABI
+    /// already the Palisade Gate here), 21 = monument (Package I —
+    /// renumbered at this landing: the builder's 16 was already
+    /// the University here). Tags are an ABI
     /// contract — append only, never renumber.
     pub fn tag(self) -> u8 {
         match self {
@@ -419,6 +435,7 @@ impl BuildingKind {
             BuildingKind::PalisadeGate => 18,
             BuildingKind::StoneGate => 19,
             BuildingKind::Monastery => 20,
+            BuildingKind::Monument => 21,
         }
     }
 
@@ -446,6 +463,7 @@ impl BuildingKind {
             18 => Some(BuildingKind::PalisadeGate),
             19 => Some(BuildingKind::StoneGate),
             20 => Some(BuildingKind::Monastery),
+            21 => Some(BuildingKind::Monument),
             _ => None,
         }
     }
@@ -509,6 +527,10 @@ impl BuildingKind {
             BuildingKind::StoneGate => I16F16::ZERO,
             // Castle P5a: the Monastery's 175 wood.
             BuildingKind::Monastery => MONASTERY_WOOD_COST,
+            // Package I: the Monument is unconstructible — no
+            // price exists; the row reads 0 so cost sums (repair,
+            // VIC-04 value) never invent one.
+            BuildingKind::Monument => I16F16::ZERO,
         }
     }
 
@@ -563,6 +585,10 @@ impl BuildingKind {
             BuildingKind::PalisadeGate => PALISADE_GATE_BUILD_TICKS,
             BuildingKind::StoneGate => STONE_GATE_BUILD_TICKS,
             BuildingKind::Monastery => MONASTERY_BUILD_TICKS,
+            // Package I: never built — the record is placed
+            // complete at match creation. The row exists only so
+            // the placed record's full-progress value is defined.
+            BuildingKind::Monument => 1,
         }
     }
 
@@ -644,7 +670,11 @@ impl BuildingKind {
             | BuildingKind::TownCenter
             | BuildingKind::Castle
             | BuildingKind::University
-            | BuildingKind::SiegeWorkshop => 4,
+            | BuildingKind::SiegeWorkshop
+            // Package I: the Monument stands in the game's 4×4
+            // class (adopted — the wiki gives the Monument the
+            // Wonder's appearance and no separate footprint).
+            | BuildingKind::Monument => 4,
         }
     }
 
@@ -814,6 +844,10 @@ impl BuildingKind {
             // Castle P5a: the Monastery's documented sight is 6
             // (dossier §5.6, wiki Monastery infobox).
             BuildingKind::Monastery => 6,
+            // Package I: the Monument's line of sight is 8
+            // (wiki, Monument — DE update 141935 raised it from
+            // the original 4).
+            BuildingKind::Monument => 8,
             BuildingKind::WatchTower => 10,
             BuildingKind::Outpost => match age {
                 Age::Dark => 6,
@@ -1134,6 +1168,11 @@ impl BuildingKind {
             // per-Age split; `max_hp_at` falls through to this
             // row at every Age).
             BuildingKind::Monastery => 2100,
+            // Package I: nominal — the Monument cannot be
+            // damaged (see the variant), so no source value is
+            // ever consulted in play; adopted at the Castle's
+            // row rather than invented at another number.
+            BuildingKind::Monument => 4800,
         }
     }
 

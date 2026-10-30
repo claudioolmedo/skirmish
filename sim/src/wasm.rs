@@ -103,16 +103,20 @@ impl WasmSim {
     }
 
     /// Create a match under explicit victory settings (Package C:
-    /// VIC-05/06/07): `new_match` plus the conditions chosen at
-    /// setup. `time_limit_ticks` is the match clock in 60 Hz ticks
-    /// (0 = none), `score_target` the VIC-04 total that wins on
-    /// reaching it (0 = none), and `flags` packs the mode switches
-    /// — bit 0 = Regicide (VIC-06), bit 1 = Sudden Death (VIC-07),
-    /// bit 2 = Relic victory (VIC-03, added by that package; bits
-    /// 0/1 keep their Package C meanings).
-    /// All-zeros settings are exactly `new_match` (plain Conquest).
-    /// In Sandbox mode the settings are inert, like the mode's
-    /// other match machinery.
+    /// VIC-05/06/07; VIC-03 and Package I add the rest): `new_match`
+    /// plus the conditions chosen at setup. `time_limit_ticks` is
+    /// the match clock in 60 Hz ticks (0 = none), `score_target`
+    /// the VIC-04 total that wins on reaching it (0 = none), and
+    /// `flags` packs the mode switches — bit 0 = Regicide
+    /// (VIC-06), bit 1 = Sudden Death (VIC-07), bit 2 = Relic
+    /// victory (VIC-03), bit 3 = Death Match (VIC-09), bit 4 =
+    /// Empire Wars (VIC-10), bit 5 = King of the Hill (VIC-08).
+    /// (Package I's builder tree packed its three modes at bits
+    /// 2/3/4; bit 2 was taken by VIC-03 on current main, so the
+    /// landing shifts them to 3/4/5 — bits 0/1/2 keep their
+    /// meanings.) All-zeros settings are exactly `new_match`
+    /// (plain Conquest). In Sandbox mode the settings are inert,
+    /// like the mode's other match machinery.
     #[wasm_bindgen]
     pub fn new_match_victory(
         seed: u32,
@@ -128,6 +132,9 @@ impl WasmSim {
             regicide: flags & 1 != 0,
             sudden_death: flags & 2 != 0,
             relic_victory: flags & 4 != 0,
+            death_match: flags & 8 != 0,
+            empire_wars: flags & 16 != 0,
+            king_of_the_hill: flags & 32 != 0,
         };
         WasmSim {
             inner: Sim::with_settings(seed as u64, mode, victory),
@@ -155,6 +162,26 @@ impl WasmSim {
             Some((_, left)) => left as u32,
             None => 0,
         }
+    }
+
+    /// Package I's Monument holder for the client's readout: the
+    /// owner byte of the player currently holding the Monument
+    /// (0 = first player, 2 = opponent), the Gaia tag while it
+    /// stands wild, or -1 while no Monument exists (setting off,
+    /// Sandbox). Landing addition, mirroring the VIC-03 pair
+    /// above — the builder tree shipped the sim accessors only.
+    pub fn koth_owner(&self) -> i32 {
+        match self.inner.monument_owner() {
+            Some(owner) => owner as i32,
+            None => -1,
+        }
+    }
+
+    /// Package I's KotH clock for the client's readout: ticks
+    /// left on the Monument countdown (the full countdown while
+    /// nobody holds it; it only runs while a player holds).
+    pub fn koth_ticks_left(&self) -> u32 {
+        self.inner.koth_ticks_left() as u32
     }
 
     /// The match mode this sim was created with (M5): 0 sandbox,

@@ -191,6 +191,33 @@ const START_SCOUT_OFFSET: (i32, i32) = (5, 5);
 /// same mirror the opponent start applies to every other offset.
 const KING_SPAWN_OFFSET: (i32, i32) = (-5, -5);
 
+/// Package I (VIC-08): the King of the Hill countdown, in game
+/// years — VIC-02's map-size table at this game's size (the
+/// 120×120 grid is DE's Tiny): 100 years. One game year is 5 s
+/// (VIC-02), so the full countdown is 500 s = 30,000 ticks. (The
+/// wiki's King of the Hill article quotes 550 years for the
+/// mode's classic default map; VIC-08's note keys the countdown
+/// to VIC-02's size table, and the table governs here.)
+pub const KOTH_COUNTDOWN_YEARS: u64 = 100;
+/// Ticks per game year (VIC-02: 5 s at 60 ticks/s).
+pub const TICKS_PER_GAME_YEAR: u64 = 5 * TICKS_PER_SECOND;
+/// The full King of the Hill countdown in ticks.
+pub const KOTH_COUNTDOWN_TICKS: u64 = KOTH_COUNTDOWN_YEARS * TICKS_PER_GAME_YEAR;
+/// The capture floor (wiki, Monument): when a player captures
+/// the Monument with fewer than 100 years left on the timer, the
+/// timer resets to 100 years; at 100 or more it continues where
+/// it left off. On this game's Tiny map the floor equals the
+/// full countdown, so every capture restarts the full 100 years.
+pub const KOTH_RESET_FLOOR_TICKS: u64 = 100 * TICKS_PER_GAME_YEAR;
+/// AI-09's capture radius around the Monument's center, in world
+/// units (24.0 = 6 tiles: the 4×4 Monument's own ground plus the
+/// surrounding apron the wiki calls the capture area). ADOPTED —
+/// the wiki names no number; the constant is the rule note's
+/// "own radius constant", chosen on the AI-06 pattern
+/// (`CAPTURE_RANGE` is 1 tile around a sheep; the Monument's
+/// area is the building's apron).
+pub const KOTH_CAPTURE_RANGE: I16F16 = I16F16::from_bits(1_572_864); // 24.0
+
 /// Fog of war recomputation interval, in ticks (M7, VIS-01): the
 /// per-player visibility grids are rebuilt from scratch this often
 /// (and once at match creation) — never per tick — so the cost is
@@ -821,7 +848,9 @@ impl MatchState {
 }
 
 /// The victory conditions a match runs under (Package C: VIC-05,
-/// VIC-06, VIC-07). Plain Conquest — the default — is all fields
+/// VIC-06, VIC-07; Package I adds the VIC-09 / VIC-10 / VIC-08
+/// mode deltas on the same framework). Plain Conquest — the
+/// default — is all fields
 /// off: elimination by VIC-01 alone, no clock, no score target.
 /// The settings are part of the match's definition from tick 0:
 /// like the mode, they enter through the constructor (and, in
@@ -850,6 +879,21 @@ pub struct VictorySettings {
     /// expires wins, losing any one cancels it. Opt-in, like
     /// every Package C condition: off in plain Conquest.
     pub relic_victory: bool,
+    /// VIC-09 (Package I): Death Match — the match opens with
+    /// the Death Match stockpiles (20,000 / 20,000 / 10,000 /
+    /// 5,000) in place of ECO-17's standard ones. A pure
+    /// stockpile delta: no other rule changes.
+    pub death_match: bool,
+    /// VIC-10 (Package I): Empire Wars — the match opens in the
+    /// Feudal Age with the pre-built town and the 27 tasked
+    /// villagers of the documented start package, in place of
+    /// the standard opening.
+    pub empire_wars: bool,
+    /// VIC-08 + AI-09 (Package I): King of the Hill — a Gaia
+    /// Monument stands at the map center; holding it by presence
+    /// runs the map-size countdown, and the holder when it
+    /// expires wins.
+    pub king_of_the_hill: bool,
 }
 
 impl VictorySettings {
@@ -858,18 +902,49 @@ impl VictorySettings {
         Self::default()
     }
 
+    /// Death Match (VIC-09): the stockpile delta alone.
+    pub fn death_match() -> Self {
+        Self {
+            death_match: true,
+            ..Self::default()
+        }
+    }
+
+    /// Empire Wars (VIC-10): the start delta alone.
+    pub fn empire_wars() -> Self {
+        Self {
+            empire_wars: true,
+            ..Self::default()
+        }
+    }
+
+    /// King of the Hill (VIC-08): the Monument mode alone.
+    pub fn king_of_the_hill() -> Self {
+        Self {
+            king_of_the_hill: true,
+            ..Self::default()
+        }
+    }
+
     /// Whether these are the plain Conquest settings.
     pub fn is_default(&self) -> bool {
         *self == Self::default()
     }
 
     /// The mode booleans as hash bits (bit 0 regicide, bit 1
-    /// sudden death, bit 2 relic victory) — the same packing the
-    /// WASM ABI uses. Bits 0/1 keep their Package C meanings.
+    /// sudden death, bit 2 relic victory, bit 3 death match,
+    /// bit 4 empire wars, bit 5 king of the hill) — the same
+    /// packing the WASM ABI uses. Bits 0/1 keep their Package C
+    /// meanings and bit 2 VIC-03's; Package I's builder tree
+    /// packed its modes at bits 2/3/4, shifted to 3/4/5 at this
+    /// landing because bit 2 was taken.
     fn flags(&self) -> u8 {
         (self.regicide as u8)
             | ((self.sudden_death as u8) << 1)
             | ((self.relic_victory as u8) << 2)
+            | ((self.death_match as u8) << 3)
+            | ((self.empire_wars as u8) << 4)
+            | ((self.king_of_the_hill as u8) << 5)
     }
 }
 
@@ -1115,6 +1190,19 @@ pub struct Sim {
     /// byte-identical.
     relic_holder: Option<u8>,
     relic_hold_ticks: u64,
+    /// Package I (VIC-08): the King of the Hill countdown still
+    /// to run, in ticks. Starts at `KOTH_COUNTDOWN_TICKS` and
+    /// decreases only while a player owns the Monument; a
+    /// capture below the 100-year floor resets it to the floor
+    /// (see `koth_tick`). Inert state in every other mode —
+    /// hashed only in King of the Hill matches.
+    koth_ticks_left: u64,
+    /// Package I (VIC-08): the player whose hold ran the
+    /// countdown to zero, once it happens. Sticky — the match
+    /// is decided the tick the timer expires (the wiki's "hold
+    /// it until the countdown expires"), and `match_state`
+    /// reads it as the mode's ending. `None` while undecided.
+    koth_winner: Option<u8>,
     /// All entities, always sorted by `id`. Never a HashMap.
     /// Entity 0 is the human Town Center; in a match the opponent's
     /// Town Center and start follow the standard layout.
@@ -1297,6 +1385,8 @@ impl Sim {
             victory,
             relic_holder: None,
             relic_hold_ticks: 0,
+            koth_ticks_left: KOTH_COUNTDOWN_TICKS,
+            koth_winner: None,
             entities,
             commands: Vec::new(),
             stockpiles: [Stockpile::starting(), Stockpile::starting()],
@@ -1358,6 +1448,23 @@ impl Sim {
         if mode.is_match() && victory.regicide {
             sim.spawn_regicide_kings();
         }
+        // Package I: the mode deltas reshape the opening after
+        // both starts exist. Empire Wars replaces the standard
+        // start package (VIC-10); Death Match then overrides the
+        // stockpiles (VIC-09 — applied last so the stockpile
+        // delta wins if both are ever combined); King of the
+        // Hill plants the Monument (AI-09). None of them runs in
+        // Sandbox or plain Conquest, whose openings stay
+        // byte-identical to the pre-Package-I ones.
+        if mode.is_match() && victory.empire_wars {
+            sim.apply_empire_wars_start(&map);
+        }
+        if mode.is_match() && victory.death_match {
+            sim.apply_death_match_stockpiles();
+        }
+        if mode.is_match() && victory.king_of_the_hill {
+            sim.place_monument();
+        }
         // VIS-07: a match starts nearly blind — only each start's
         // surroundings are known, from this first computation.
         sim.recompute_visibility();
@@ -1396,6 +1503,607 @@ impl Sim {
     /// The victory conditions this match runs under (Package C).
     pub fn victory_settings(&self) -> VictorySettings {
         self.victory
+    }
+
+    /// VIC-09 (Package I): the Death Match stockpile delta —
+    /// both players open on the Death Match stockpile instead of
+    /// ECO-17's standard one. Nothing else about the opening
+    /// changes (the DE preset's Post-Imperial age default is a
+    /// lobby composition, not part of this rule's delta — the
+    /// wave-2 audit flagged it for the cycle, unassumed here).
+    fn apply_death_match_stockpiles(&mut self) {
+        self.stockpiles = [Stockpile::death_match(), Stockpile::death_match()];
+    }
+
+    /// The King of the Hill Monument's current owner (Package I,
+    /// AI-09): `None` in a match without one, otherwise the
+    /// building record's owner — Gaia until a player's presence
+    /// captures it.
+    pub fn monument_owner(&self) -> Option<u8> {
+        self.buildings
+            .iter()
+            .find(|b| b.kind == BuildingKind::Monument)
+            .map(|b| b.owner)
+    }
+
+    /// The King of the Hill countdown still to run, in ticks
+    /// (Package I, VIC-08) — the client's timer reads this.
+    pub fn koth_ticks_left(&self) -> u64 {
+        self.koth_ticks_left
+    }
+
+    /// AI-09 (Package I): plant the Monument at the map center.
+    /// The anchor search starts at the exact center and walks
+    /// outward in a fixed order, so the placement is a pure
+    /// function of the generated map (a mid-map forest can push
+    /// it a few cells off center, never onto a node or a tree).
+    fn place_monument(&mut self) {
+        let size = BuildingKind::Monument.footprint_size() as i32;
+        let c = (GRID_DIM / 2) as i32;
+        if let Some((ax, ay)) =
+            self.find_start_anchor(c - size / 2, c - size / 2, size as u32, 0, 12)
+        {
+            self.place_start_building(entity::OWNER_GAIA, BuildingKind::Monument, ax, ay);
+        }
+    }
+
+    /// VIC-08 + AI-09 (Package I): the Monument's presence sweep
+    /// and countdown, run once per tick after combat (the
+    /// AI-06 discipline — `capture_sheep` is the model, with the
+    /// Monument's own radius constant):
+    ///
+    /// - Presence counts each player's mobile units within
+    ///   `KOTH_CAPTURE_RANGE` of the Monument's center (herdables
+    ///   never hold ground, as in AI-06).
+    /// - The owner keeps the Monument while any of its units
+    ///   remain in range; when the owner's presence empties and
+    ///   the foe has units in range, the Monument flips (from
+    ///   Gaia, the player with the strictly greater presence
+    ///   takes it; an exact tie leaves it wild).
+    /// - A capture with less than the 100-year floor left on
+    ///   the timer resets the timer to the floor (wiki,
+    ///   Monument); at or above it, the timer continues where
+    ///   it left off.
+    /// - While a player owns the Monument the countdown runs;
+    ///   the owner when it reaches zero wins (sticky).
+    fn koth_tick(&mut self) {
+        if !self.victory.king_of_the_hill || !self.mode.is_match() {
+            return;
+        }
+        let Some(bi) = self
+            .buildings
+            .iter()
+            .position(|b| b.kind == BuildingKind::Monument)
+        else {
+            return;
+        };
+        // Presence per player slot (slot 0 = human, 1 = foe).
+        let (mx, my) = (self.buildings[bi].pos_x, self.buildings[bi].pos_y);
+        let mut near = [0u32; 2];
+        for e in &self.entities {
+            if e.dead || e.kind == EntityKind::Sheep || !e.kind.is_mobile() {
+                continue;
+            }
+            let Some(slot) = player_slot(e.owner) else {
+                continue;
+            };
+            if steer::vec_len(e.pos_x - mx, e.pos_y - my) <= KOTH_CAPTURE_RANGE {
+                near[slot] += 1;
+            }
+        }
+        let cur = self.buildings[bi].owner;
+        let next = if cur == entity::OWNER_GAIA {
+            if near[0] > near[1] {
+                Some(entity::OWNER_PLAYER)
+            } else if near[1] > near[0] {
+                Some(entity::OWNER_OPPONENT)
+            } else {
+                None
+            }
+        } else if let Some(cur_slot) = player_slot(cur) {
+            if near[cur_slot] == 0 && near[1 - cur_slot] > 0 {
+                Some(if cur_slot == 0 {
+                    entity::OWNER_OPPONENT
+                } else {
+                    entity::OWNER_PLAYER
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        if let Some(owner) = next {
+            self.buildings[bi].owner = owner;
+            // The capture floor: a fresh capture late in the
+            // countdown restarts it at 100 years (on this map
+            // size, the full countdown — see the constant).
+            if self.koth_ticks_left < KOTH_RESET_FLOOR_TICKS {
+                self.koth_ticks_left = KOTH_RESET_FLOOR_TICKS;
+            }
+        }
+        if self.koth_winner.is_none() {
+            let owner = self.buildings[bi].owner;
+            if entity::is_player_owner(owner) && self.koth_ticks_left > 0 {
+                self.koth_ticks_left -= 1;
+                if self.koth_ticks_left == 0 {
+                    self.koth_winner = Some(owner);
+                }
+            }
+        }
+    }
+
+    /// Whether a start-package footprint may stand at anchor
+    /// (`ax`, `ay`): the placement half of `validate_build`'s
+    /// cell rules, without a builder or a price — inside the
+    /// grid, off the blocking layers, off every living Town
+    /// Center's reserved 4×4 (BLD-16), off live nodes and living
+    /// units, and clear of every standing building's footprint.
+    /// Used only at match creation (Package I's start packages
+    /// and the Monument), where placement is the match's
+    /// definition rather than a player's order.
+    fn start_footprint_free(&self, ax: u32, ay: u32, size: u32) -> bool {
+        if ax + size > GRID_DIM || ay + size > GRID_DIM {
+            return false;
+        }
+        // Living Town Centers' reserved ground (BLD-16).
+        let mut reserved = [(0u32, 0u32); 32];
+        let mut reserved_len = 0usize;
+        for e in &self.entities {
+            if e.kind == EntityKind::TownCenter && !e.dead {
+                let (tx, ty) = self.grid.world_to_cell(e.pos_x, e.pos_y);
+                for dy in -1i32..=2 {
+                    for dx in -1i32..=2 {
+                        let (rx, ry) = (tx as i32 + dx, ty as i32 + dy);
+                        if rx >= 0 && ry >= 0 && reserved_len < reserved.len() {
+                            reserved[reserved_len] = (rx as u32, ry as u32);
+                            reserved_len += 1;
+                        }
+                    }
+                }
+            }
+        }
+        for (cx, cy) in build::footprint_cells(ax, ay, size) {
+            if self.grid.is_blocked(cx, cy) {
+                return false;
+            }
+            if reserved[..reserved_len].contains(&(cx, cy)) {
+                return false;
+            }
+            for n in &self.nodes {
+                if !n.is_depleted() && self.grid.world_to_cell(n.pos_x, n.pos_y) == (cx, cy) {
+                    return false;
+                }
+            }
+            for e in &self.entities {
+                if !e.dead && self.grid.world_to_cell(e.pos_x, e.pos_y) == (cx, cy) {
+                    return false;
+                }
+            }
+        }
+        for b in &self.buildings {
+            let bs = b.kind.footprint_size();
+            if ax < b.cell_x + bs && b.cell_x < ax + size && ay < b.cell_y + bs && b.cell_y < ay + size
+            {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Find a start-package anchor: Chebyshev rings around the
+    /// target cell, from `min_ring` to `max_ring`, each ring in
+    /// (dy, dx) ascending order — the first footprint that may
+    /// stand wins. A pure function of the map and what already
+    /// stands, so both peers (and the mirror start) agree.
+    fn find_start_anchor(
+        &self,
+        tx: i32,
+        ty: i32,
+        size: u32,
+        min_ring: u32,
+        max_ring: u32,
+    ) -> Option<(u32, u32)> {
+        for r in min_ring..=max_ring {
+            let r = r as i32;
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    if dx.abs().max(dy.abs()) != r {
+                        continue;
+                    }
+                    let (ax, ay) = (tx + dx, ty + dy);
+                    if ax < 0 || ay < 0 {
+                        continue;
+                    }
+                    if self.start_footprint_free(ax as u32, ay as u32, size) {
+                        return Some((ax as u32, ay as u32));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Place one completed start-package building (Package I):
+    /// the record stands finished — full progress, full HP at
+    /// the owner's age column — with its footprint registered
+    /// in the blocking grid, and a Farm gets its food node
+    /// exactly as `complete_building` creates it. No cost: a
+    /// start package is the match's definition, not a purchase.
+    /// Returns the building id.
+    fn place_start_building(
+        &mut self,
+        owner: u8,
+        kind: BuildingKind,
+        cell_x: u32,
+        cell_y: u32,
+    ) -> Option<u32> {
+        let id = self.next_building_id;
+        self.next_building_id += 1;
+        let (pos_x, pos_y) = build::footprint_center(cell_x, cell_y, kind.footprint_size());
+        let mut building = Building {
+            id,
+            kind,
+            owner,
+            hp: I16F16::from_num(kind.max_hp_at(self.age_of(owner))),
+            cell_x,
+            cell_y,
+            pos_x,
+            pos_y,
+            progress_thirds: kind.build_thirds(),
+            repair_hp_remainder: 0,
+            repair_cost_remainder: 0,
+            repair_stone_remainder: 0,
+            // Landing: the fields the Building record gained on
+            // main since Package I's base (build-rate remainder,
+            // gate orientation, queue-rate remainder, the two
+            // garrison slots, the Monastery's relic slots) — all
+            // at their fresh-placement values, exactly as the
+            // placement constructor leaves them.
+            build_rate_remainder: 0,
+            gate_along_x: true,
+            queue_rate_remainder: 0,
+            complete: true,
+            node_id: None,
+            queue: Vec::new(),
+            train_progress: 0,
+            rally: None,
+            rally_node: None,
+            weapon_target: None,
+            weapon_target_building: None,
+            weapon_strike_tick: None,
+            weapon_next_tick: 0,
+            weapon_engaged: false,
+            garrison: Vec::new(),
+            garrison_arrows: 0,
+            relics: Vec::new(),
+            relic_gold_remainder: 0,
+        };
+        if kind.blocks_footprint() {
+            for (cx, cy) in building.footprint_cells() {
+                self.grid.set_dynamic(cx, cy, true);
+            }
+        }
+        if kind == BuildingKind::Farm {
+            let nid = self.nodes.len() as u32;
+            self.nodes.push(ResourceNode::placed(nid, NodeKind::Farm, pos_x, pos_y));
+            building.node_id = Some(nid);
+        }
+        self.buildings.push(building);
+        Some(id)
+    }
+
+    /// The node of `kind` standing on cell (`cx`, `cy`), if any.
+    fn node_at_cell(&self, kind: NodeKind, cx: u32, cy: u32) -> Option<u32> {
+        self.nodes
+            .iter()
+            .find(|n| n.kind == kind && self.grid.world_to_cell(n.pos_x, n.pos_y) == (cx, cy))
+            .map(|n| n.id)
+    }
+
+    /// VIC-10 (Package I): replace the standard opening with the
+    /// Empire Wars start package, for both players — Feudal Age
+    /// with Loom researched (the mode's documented starting
+    /// conditions), the pre-built town (Mill, 3 Lumber Camps,
+    /// Mining Camp, 6 Houses, 5 Farms, Barracks) placed around
+    /// each start's own resources, and 27 villagers already
+    /// tasked: 4 on gold, 12 on wood (4 at each Lumber Camp),
+    /// 5 on food (2 on Farms, 3 on Berry Bushes) and 6 idle
+    /// around a herdable under the Town Center. Starting
+    /// resources stay ECO-17's standard ones, which are exactly
+    /// the mode's documented 200 / 200 / 100 / 200.
+    ///
+    /// The 27-vs-28 resolution: the wiki article declares 27
+    /// villagers and then lists a distribution summing to 28
+    /// (4 + 12 + 6 + 6). The declared total governs — it is the
+    /// figure two further sources state outright (the official
+    /// DE announcement and the official starting-conditions
+    /// list, both "27 Villagers + 1 Scout"). Within the
+    /// distribution, gold (4) is corroborated by the article's
+    /// own update-42848 changelog (one additional villager on
+    /// gold, from 3), wood (12) by the three-camp structure it
+    /// names, and the idle group (6) by an independent build
+    /// guide ("the 6 Villagers that spawn there"); the food
+    /// line is the only figure no second source reaches, so it
+    /// carries the article's arithmetic slip: 5 on food — the
+    /// documented 2 on Farms kept, berries 4 → 3.
+    ///
+    /// The generated map's dressing is untouched: herdables
+    /// exist only inside the start packages in this generator,
+    /// so the article's "no neutral herdable animals" already
+    /// holds by construction.
+    fn apply_empire_wars_start(&mut self, map: &mapgen::GeneratedMap) {
+        for (i, pkg) in map.starts.iter().enumerate() {
+            let owner = if i == 0 {
+                entity::OWNER_PLAYER
+            } else {
+                entity::OWNER_OPPONENT
+            };
+            self.empire_wars_start_for(owner, pkg);
+        }
+    }
+
+    /// One player's Empire Wars start package (see
+    /// `apply_empire_wars_start`).
+    fn empire_wars_start_for(&mut self, owner: u8, pkg: &mapgen::StartPackage) {
+        let slot = player_slot(owner).expect("a player's start package");
+        self.players[slot].age = Age::Feudal;
+        self.players[slot].techs |= TechId::Loom.bit();
+        let (tcx, tcy) = (pkg.tc_cell.0 as i32, pkg.tc_cell.1 as i32);
+        let cells_of = |kind: NodeKind| -> Vec<(u32, u32)> {
+            pkg.nodes
+                .iter()
+                .filter(|&&(k, _, _)| k == kind)
+                .map(|&(_, x, y)| (x, y))
+                .collect()
+        };
+        let centroid = |cells: &[(u32, u32)]| -> (i32, i32) {
+            if cells.is_empty() {
+                return (tcx, tcy);
+            }
+            let n = cells.len() as i32;
+            (
+                cells.iter().map(|c| c.0 as i32).sum::<i32>() / n,
+                cells.iter().map(|c| c.1 as i32).sum::<i32>() / n,
+            )
+        };
+        let cheb = |a: (u32, u32), b: (u32, u32)| -> u32 {
+            (a.0 as i32 - b.0 as i32)
+                .unsigned_abs()
+                .max((a.1 as i32 - b.1 as i32).unsigned_abs())
+        };
+
+        // The Mill beside the berry patch.
+        let berries = cells_of(NodeKind::BerryBush);
+        let bc = centroid(&berries);
+        let mill_anchor = self.find_start_anchor(bc.0, bc.1, BuildingKind::Mill.footprint_size(), 0, 10);
+        if let Some((ax, ay)) = mill_anchor {
+            self.place_start_building(owner, BuildingKind::Mill, ax, ay);
+        }
+
+        // The Mining Camp beside the main gold cluster: the
+        // gold nearest the Town Center and its neighbours.
+        let golds = cells_of(NodeKind::GoldMine);
+        let gold_cluster: Vec<(u32, u32)> = match golds.iter().min_by_key(|&&c| (cheb(c, pkg.tc_cell), c.1, c.0)) {
+            Some(&nearest) => golds
+                .iter()
+                .copied()
+                .filter(|&c| cheb(c, nearest) <= 3)
+                .collect(),
+            None => Vec::new(),
+        };
+        let gc = centroid(&gold_cluster);
+        if let Some((ax, ay)) =
+            self.find_start_anchor(gc.0, gc.1, BuildingKind::MiningCamp.footprint_size(), 0, 10)
+        {
+            self.place_start_building(owner, BuildingKind::MiningCamp, ax, ay);
+        }
+
+        // Three Lumber Camps spread along the woodline: target
+        // trees at the near / middle / far thirds of the forest
+        // (sorted by distance from the Town Center), each camp
+        // anchored on the first free ground its search reaches.
+        let mut trees = cells_of(NodeKind::Tree);
+        trees.sort_by_key(|&c| (cheb(c, pkg.tc_cell), c.1, c.0));
+        let mut camp_centers: Vec<(I16F16, I16F16)> = Vec::new();
+        if !trees.is_empty() {
+            for k in 0..3 {
+                let start = k * trees.len() / 3;
+                let mut placed = None;
+                for j in 0..trees.len() {
+                    let (tx, ty) = trees[(start + j) % trees.len()];
+                    if let Some(a) = self.find_start_anchor(
+                        tx as i32,
+                        ty as i32,
+                        BuildingKind::LumberCamp.footprint_size(),
+                        0,
+                        8,
+                    ) {
+                        placed = Some(a);
+                        break;
+                    }
+                }
+                if let Some((ax, ay)) = placed {
+                    if self
+                        .place_start_building(owner, BuildingKind::LumberCamp, ax, ay)
+                        .is_some()
+                    {
+                        camp_centers.push(build::footprint_center(
+                            ax,
+                            ay,
+                            BuildingKind::LumberCamp.footprint_size(),
+                        ));
+                    }
+                }
+            }
+        }
+
+        // The Barracks, then the six Houses, around the Town
+        // Center (outside its reserved ground, by the footprint
+        // rules themselves).
+        if let Some((ax, ay)) =
+            self.find_start_anchor(tcx, tcy, BuildingKind::Barracks.footprint_size(), 3, 12)
+        {
+            self.place_start_building(owner, BuildingKind::Barracks, ax, ay);
+        }
+        for _ in 0..6 {
+            if let Some((ax, ay)) =
+                self.find_start_anchor(tcx, tcy, BuildingKind::House.footprint_size(), 2, 12)
+            {
+                self.place_start_building(owner, BuildingKind::House, ax, ay);
+            }
+        }
+
+        // Five Farms around the Mill (or the Town Center if the
+        // Mill somehow found no ground).
+        let farm_target = mill_anchor
+            .map(|(ax, ay)| (ax as i32, ay as i32))
+            .unwrap_or((tcx, tcy));
+        let mut farm_nodes: Vec<u32> = Vec::new();
+        for _ in 0..5 {
+            if let Some((ax, ay)) = self.find_start_anchor(
+                farm_target.0,
+                farm_target.1,
+                BuildingKind::Farm.footprint_size(),
+                2,
+                12,
+            ) {
+                if let Some(bid) = self.place_start_building(owner, BuildingKind::Farm, ax, ay) {
+                    if let Some(nid) = self.buildings.iter().find(|b| b.id == bid).and_then(|b| b.node_id) {
+                        farm_nodes.push(nid);
+                    }
+                }
+            }
+        }
+
+        // The villagers: the generated three, topped up to 27,
+        // then tasked in id order — gold, wood by camp, farms,
+        // berries, and the idle group by the herdable.
+        let mut vil_idx: Vec<usize> = self
+            .entities
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.owner == owner && e.kind == EntityKind::Villager && !e.dead)
+            .map(|(i, _)| i)
+            .collect();
+        let (tc_x, tc_y) = {
+            let tc = self.tc_entity_of(owner).expect("the start's Town Center");
+            (tc.pos_x, tc.pos_y)
+        };
+        while vil_idx.len() < 27 {
+            let id = self.entities.len() as u32;
+            self.entities.push(Entity::spawned(
+                id,
+                EntityKind::Villager,
+                owner,
+                tc_x,
+                tc_y,
+            ));
+            vil_idx.push(self.entities.len() - 1);
+        }
+
+        // The assignment plan: one node (or none, for the idle
+        // group) per villager, in villager order.
+        let mut plan: Vec<Option<u32>> = Vec::with_capacity(27);
+        // 4 on gold, round-robin over the main cluster's nodes.
+        let gold_nodes: Vec<u32> = gold_cluster
+            .iter()
+            .filter_map(|&(cx, cy)| self.node_at_cell(NodeKind::GoldMine, cx, cy))
+            .collect();
+        for j in 0..4 {
+            plan.push(gold_nodes.get(j % gold_nodes.len().max(1)).copied());
+        }
+        // 12 on wood: 4 at each Lumber Camp, on the trees
+        // nearest that camp (a node serves one villager here;
+        // a camp short of fresh trees wraps to any unassigned
+        // tree of this start).
+        let mut assigned: Vec<u32> = plan.iter().flatten().copied().collect();
+        let tree_nodes: Vec<u32> = trees
+            .iter()
+            .filter_map(|&(cx, cy)| self.node_at_cell(NodeKind::Tree, cx, cy))
+            .collect();
+        for camp in 0..3 {
+            let mut by_near: Vec<u32> = tree_nodes.clone();
+            if let Some(&(ccx, ccy)) = camp_centers.get(camp) {
+                by_near.sort_by_key(|&nid| {
+                    let n = &self.nodes[nid as usize];
+                    let d = steer::vec_len(n.pos_x - ccx, n.pos_y - ccy);
+                    (d.to_bits(), nid)
+                });
+            }
+            let mut given = 0;
+            for &nid in by_near.iter().chain(tree_nodes.iter()) {
+                if given >= 4 {
+                    break;
+                }
+                if assigned.contains(&nid) {
+                    continue;
+                }
+                assigned.push(nid);
+                plan.push(Some(nid));
+                given += 1;
+            }
+            while given < 4 {
+                plan.push(tree_nodes.first().copied());
+                given += 1;
+            }
+        }
+        // 5 on food: 2 on the first Farms, 3 on Berry Bushes.
+        for j in 0..2 {
+            plan.push(farm_nodes.get(j).copied());
+        }
+        let berry_nodes: Vec<u32> = berries
+            .iter()
+            .filter_map(|&(cx, cy)| self.node_at_cell(NodeKind::BerryBush, cx, cy))
+            .collect();
+        for j in 0..3 {
+            plan.push(berry_nodes.get(j % berry_nodes.len().max(1)).copied());
+        }
+        // 6 idle around a herdable under the Town Center.
+        for _ in 0..6 {
+            plan.push(None);
+        }
+
+        let sheep_pos = pkg
+            .animals
+            .iter()
+            .find(|&&(k, _, _)| k == EntityKind::Sheep)
+            .map(|&(_, cx, cy)| self.grid.cell_center(cx, cy))
+            .unwrap_or((tc_x, tc_y));
+        const IDLE_OFFSETS: [(i32, i32); 6] = [(3, 0), (-3, 0), (0, 3), (0, -3), (3, 3), (-3, -3)];
+        for (j, &idx) in vil_idx.iter().enumerate() {
+            match plan.get(j).copied().flatten() {
+                Some(nid) => {
+                    let (nx, ny) = {
+                        let n = &self.nodes[nid as usize];
+                        (n.pos_x, n.pos_y)
+                    };
+                    // Stand beside the node (a small per-villager
+                    // stagger; the gather machinery takes it from
+                    // here — `begin_gather` issues the walk).
+                    let ox = ((j % 5) as i32 - 2) * 2;
+                    let oy = (((j / 5) % 3) as i32 - 1) * 2;
+                    self.entities[idx].pos_x = nx + I16F16::from_num(ox);
+                    self.entities[idx].pos_y = ny + I16F16::from_num(oy);
+                    self.begin_gather(idx, nid);
+                }
+                None => {
+                    // The idle group stands by the herdable; its
+                    // plan slots are the last six (21..27), so
+                    // `j - 21` indexes the offsets. (A tasked slot
+                    // whose node lookup failed — no such resource
+                    // in the package — also lands here, idle by
+                    // the Town Center rather than lost.)
+                    let (ox, oy) = if j >= 21 {
+                        IDLE_OFFSETS[j - 21]
+                    } else {
+                        IDLE_OFFSETS[j % IDLE_OFFSETS.len()]
+                    };
+                    self.entities[idx].pos_x = sheep_pos.0 + I16F16::from_num(ox);
+                    self.entities[idx].pos_y = sheep_pos.1 + I16F16::from_num(oy);
+                }
+            }
+        }
     }
 
     /// The opponent's start (M5, generated in M7): package 1 of the
@@ -2862,17 +3570,28 @@ impl Sim {
     /// VIC-04 totals — the target the moment it is reached, the
     /// clock at expiry. The score read runs only when a score
     /// setting is on, so a plain Conquest read never pays for it.
+    ///
+    /// Package I folds King of the Hill (VIC-08) into the same
+    /// two checks, alongside `mode_out`: the foe's expired
+    /// countdown is a defeat on the first check, the human's a
+    /// victory on the second — both ahead of the score endings.
     pub fn match_state(&self) -> MatchState {
         if !self.mode.is_match() {
             return MatchState::Ongoing;
         }
-        if self.eliminated(entity::OWNER_PLAYER) || self.mode_out(entity::OWNER_PLAYER) {
+        if self.eliminated(entity::OWNER_PLAYER)
+            || self.mode_out(entity::OWNER_PLAYER)
+            || self.koth_winner == Some(entity::OWNER_OPPONENT)
+        {
             return MatchState::Defeat;
         }
         if self.ai_resigned() {
             return MatchState::Victory;
         }
-        if self.eliminated(entity::OWNER_OPPONENT) || self.mode_out(entity::OWNER_OPPONENT) {
+        if self.eliminated(entity::OWNER_OPPONENT)
+            || self.mode_out(entity::OWNER_OPPONENT)
+            || self.koth_winner == Some(entity::OWNER_PLAYER)
+        {
             return MatchState::Victory;
         }
         if let Some(human_won) = self.relic_outcome() {
@@ -3967,6 +4686,12 @@ impl Sim {
             Some(i) => i,
             None => return,
         };
+        // Package I: the Monument cannot be destroyed (wiki,
+        // Monument) — not by damage (`damage_building` refuses
+        // it) and not by its current owner's Delete either.
+        if self.buildings[bi].kind == BuildingKind::Monument {
+            return;
+        }
         let (complete, owner, wood, stone) = {
             let b = &self.buildings[bi];
             (b.complete, b.owner, b.kind.wood_cost(), b.kind.stone_cost())
@@ -4602,6 +5327,13 @@ impl Sim {
         if !entity::is_player_owner(a.owner) || units::spec(a.kind).attacks.is_empty() {
             return false;
         }
+        // Package I: the Monument cannot be attacked (wiki,
+        // Monument) — before capture its Gaia owner already
+        // fails the player-owner test below; after a capture
+        // this gate is what keeps it true.
+        if self.buildings[bi].kind == BuildingKind::Monument {
+            return false;
+        }
         self.buildings[bi].owner != a.owner
             && entity::is_player_owner(self.buildings[bi].owner)
     }
@@ -5212,6 +5944,12 @@ impl Sim {
         // re-derives every surviving gate after the movement and
         // deaths above).
         self.refresh_gate_blocking();
+
+        // 3.5. King of the Hill (Package I, VIC-08 / AI-09): the
+        //    Monument's presence sweep and countdown, read from
+        //    this tick's post-combat positions. A no-op in every
+        //    other mode.
+        self.koth_tick();
 
         // 4. Economy: carcass decay, training (Town Center + Barracks),
         //    then villager work cycles and construction.
@@ -7239,6 +7977,14 @@ impl Sim {
         if self.entities[idx].kind != EntityKind::Villager || self.entities[idx].dead {
             return BuildVerdict::Reject;
         }
+        // Package I: the Monument is unconstructible (wiki,
+        // Monument) — it enters the map only as a King of the
+        // Hill match's definition, never as a build order (its
+        // cost rows read 0, so without this gate it would be a
+        // free building).
+        if kind == BuildingKind::Monument {
+            return BuildVerdict::Reject;
+        }
         let size = kind.footprint_size();
         let (ax, ay) = self.grid.world_to_cell(x, y);
         // Resume before placement checks: the footprint of a standing
@@ -9162,6 +9908,21 @@ impl Sim {
             h.write_u8(0xC1);
             h.write_u8(self.relic_holder.unwrap_or(0));
             h.write_u64(self.relic_hold_ticks);
+        }
+        // Package I (VIC-08): the King of the Hill countdown and
+        // its decided winner join the hash in KotH matches only —
+        // the Monument building itself (owner included) is
+        // already hashed with the buildings below, since it only
+        // exists in those matches. Every other stream, the
+        // golden scenario included, stays byte-identical. (No
+        // marker byte: the settings block above already separates
+        // a KotH stream from every other, since its flags differ.)
+        if self.victory.king_of_the_hill {
+            h.write_u64(self.koth_ticks_left);
+            h.write_u64(match self.koth_winner {
+                None => 0,
+                Some(owner) => owner as u64 + 1,
+            });
         }
         // M6: per-player progression — age and the researched-tech
         // mask, in slot order. New hashed state (TEC-06: research is

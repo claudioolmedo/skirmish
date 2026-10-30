@@ -97,7 +97,20 @@ const MAGIC: &[u8; 4] = b"SKSV";
 /// speed cap — a save taken mid-group-move restores the clamp,
 /// and its hash (the stamp is hashed state, marker 0xC2) still
 /// verifies at load.
-const SAVE_VERSION: u32 = 13;
+/// Version 14: Package I — the victory flags gain bits 3/4/5
+/// (Death Match / Empire Wars / King of the Hill, shifted at
+/// this landing from the builder tree's 2/3/4 because VIC-03
+/// took bit 2), and a match under the King of the Hill flag
+/// carries its countdown state (ticks left + decided winner)
+/// right after VIC-03's block in the world section; the block
+/// is present only while the flag is on, which the flags byte
+/// itself tells the reader, so a non-KotH v14 save is laid out
+/// exactly as v13 was apart from the version word. (Package
+/// I's builder tree wrote no save delta at all — its base
+/// predated the v11 settings round-trip; without this block a
+/// mid-KotH save could never pass the load-time hash check,
+/// the countdown being hashed state in KotH matches.)
+const SAVE_VERSION: u32 = 14;
 
 /// Little-endian byte writer over a growable buffer.
 struct W {
@@ -591,6 +604,18 @@ impl Sim {
                 w.u8(holder);
             }
             w.u64(self.relic_hold_ticks);
+        }
+        // Format v14: Package I's King of the Hill countdown
+        // state, present only while the KotH flag (bit 5 above)
+        // is on — hashed in KotH matches, so a save taken
+        // mid-countdown must carry it for the load-time hash
+        // check to pass.
+        if self.victory.king_of_the_hill {
+            w.u64(self.koth_ticks_left);
+            w.bool(self.koth_winner.is_some());
+            if let Some(winner) = self.koth_winner {
+                w.u8(winner);
+            }
         }
         w.u32(self.grid.width());
         w.u32(self.grid.height());
@@ -1316,6 +1341,9 @@ impl Sim {
         // Regicide, bit 1 Sudden Death — the WASM ABI packing).
         // Format v12: bit 2 is VIC-03's relic victory, and its
         // countdown state follows when the bit is on.
+        // Format v14: bits 3/4/5 are Package I's Death Match /
+        // Empire Wars / King of the Hill, and the KotH countdown
+        // state follows VIC-03's block when bit 5 is on.
         let victory = {
             let time_limit_ticks = r.u64()?;
             let score_target = r.u64()? as i64;
@@ -1326,6 +1354,9 @@ impl Sim {
                 regicide: flags & 1 != 0,
                 sudden_death: flags & 2 != 0,
                 relic_victory: flags & 4 != 0,
+                death_match: flags & 8 != 0,
+                empire_wars: flags & 16 != 0,
+                king_of_the_hill: flags & 32 != 0,
             }
         };
         let (relic_holder, relic_hold_ticks) = if victory.relic_victory {
@@ -1333,6 +1364,13 @@ impl Sim {
             (holder, r.u64()?)
         } else {
             (None, 0)
+        };
+        let (koth_ticks_left, koth_winner) = if victory.king_of_the_hill {
+            let left = r.u64()?;
+            let winner = if r.bool()? { Some(r.u8()?) } else { None };
+            (left, winner)
+        } else {
+            (crate::KOTH_COUNTDOWN_TICKS, None)
         };
         // World: the grid is the fixed rulebook size; the stored
         // dimensions must agree before any layer is read.
@@ -1745,6 +1783,8 @@ impl Sim {
             victory,
             relic_holder,
             relic_hold_ticks,
+            koth_ticks_left,
+            koth_winner,
             entities,
             commands,
             stockpiles,

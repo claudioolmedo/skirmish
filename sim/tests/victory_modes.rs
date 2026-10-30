@@ -104,6 +104,12 @@ fn victory_settings_round_trip_and_are_hashed_state() {
         regicide: true,
         sudden_death: true,
         relic_victory: false,
+        // Package I: the mode-delta fields ride the same
+        // round-trip (off here — this test's subject is the
+        // Package C conditions).
+        death_match: false,
+        empire_wars: false,
+        king_of_the_hill: false,
     };
     let sim = Sim::new_match_victory(42, MatchMode::TwoPlayer, settings);
     assert_eq!(sim.victory_settings(), settings);
