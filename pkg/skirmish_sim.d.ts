@@ -329,6 +329,17 @@ export class WasmSim {
      */
     push_build_blacksmith_queued(entity: number, x: number, y: number): boolean;
     /**
+     * Order a villager to build a Castle (650 stone, 4×4;
+     * Castle Age, no building prerequisite — Castle P3a) — see
+     * `push_build_house`.
+     */
+    push_build_castle(entity: number, x: number, y: number): boolean;
+    /**
+     * Queue a Castle build (Castle Age — Castle P3a) — see
+     * `push_build_house_queued`.
+     */
+    push_build_castle_queued(entity: number, x: number, y: number): boolean;
+    /**
      * Order a villager to build a Farm (60 wood) — see
      * `push_build_house`.
      */
@@ -680,6 +691,12 @@ export class WasmSim {
      */
     push_train_militia(building: number): boolean;
     /**
+     * Enqueue a Petard at a completed Castle (Castle P3a — the
+     * Castle is the Petard's only home; `can_train_at` carries
+     * the Castle Age gate). See `push_train_militia`.
+     */
+    push_train_petard(building: number): boolean;
+    /**
      * Enqueue a Scout Cavalry at a completed Stable (M6). See
      * `push_train_militia`.
      */
@@ -895,6 +912,8 @@ export interface InitOutput {
     readonly wasmsim_push_build_barracks_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_blacksmith: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_blacksmith_queued: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_castle: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_castle_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_farm: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_farm_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_house: (a: number, b: number, c: number, d: number) => number;
@@ -953,6 +972,7 @@ export interface InitOutput {
     readonly wasmsim_push_train_cavalry_archer: (a: number, b: number) => number;
     readonly wasmsim_push_train_knight: (a: number, b: number) => number;
     readonly wasmsim_push_train_militia: (a: number, b: number) => number;
+    readonly wasmsim_push_train_petard: (a: number, b: number) => number;
     readonly wasmsim_push_train_scout: (a: number, b: number) => number;
     readonly wasmsim_push_train_skirmisher: (a: number, b: number) => number;
     readonly wasmsim_push_train_spearman: (a: number, b: number) => number;

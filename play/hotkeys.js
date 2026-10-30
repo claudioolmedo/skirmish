@@ -79,19 +79,21 @@
 // kind: 0 House, 1 Farm, 2 Barracks, 3 Lumber Camp, 4 Mill,
 //       5 Mining Camp, 6 Archery Range, 7 Stable, 8 Blacksmith,
 //       9 Palisade Wall, 10 Watch Tower, 11 Outpost (BLD-18),
-//       12 Market (BLD-19), 14 Stone Wall (BLD-20; the tags are
-//       the sim's — append only).
+//       12 Market (BLD-19), 14 Stone Wall (BLD-20), 15 Castle
+//       (Castle P3a; the tags are the sim's — append only).
 // PAGE_KINDS is the pages' GRID (render) order: slot 0 first.
 // Kind 13 (Town Center, Castle Age) closes the economic page —
-// DE's villager panel keeps the TC with the economic buildings.
+// DE's villager panel keeps the TC with the economic buildings,
+// and kind 15 (the Castle) takes the page's last free cell
+// beside it: the military page already fills all nine cells.
 export const PAGE_KINDS = {
-  eco: [0, 4, 1, 3, 5, 12, 13],
+  eco: [0, 4, 1, 3, 5, 12, 13, 15],
   mil: [2, 6, 7, 8, 9, 10, 11, 14],
 };
 
 /** Which build page a building kind belongs to ('eco' | 'mil'). */
 export const PAGE_FOR_KIND = {
-  0: 'eco', 1: 'eco', 3: 'eco', 4: 'eco', 5: 'eco', 12: 'eco', 13: 'eco',
+  0: 'eco', 1: 'eco', 3: 'eco', 4: 'eco', 5: 'eco', 12: 'eco', 13: 'eco', 15: 'eco',
   2: 'mil', 6: 'mil', 7: 'mil', 8: 'mil', 9: 'mil', 10: 'mil', 11: 'mil', 14: 'mil',
 };
 
@@ -110,6 +112,7 @@ export const PAGE_KEYS = {
     KeyS: 5, KeyG: 5, // Mining Camp — slot 4 (alias: its go-to G)
     KeyD: 12, KeyM: 12, // Market — slot 5 (D is DE's build letter; alias M, its go-to)
     KeyZ: 13, // Town Center — slot 6 (Castle Age; Z is DE's own TC build letter — the wiki's DE build table — and slot 6 IS the Z cell. The old T "initial" badge and the Lumber Camp's silent Z alias (its go-to letter) both died here: the cell's letter rules.)
+    KeyX: 15, // Castle — slot 7 (Castle P3a; the page's last free cell — the Military page is full at 8 kinds + Back, so the Castle closes the Economic page beside the Town Center, the other Castle-Age build)
     KeyC: 'back', // Back — the last slot
   },
   mil: {
@@ -127,7 +130,7 @@ export const PAGE_KEYS = {
 
 /** The one letter shown as a button's key badge on an armed page. */
 export const PAGE_BADGE = {
-  eco: { 0: 'Q', 4: 'W', 1: 'E', 3: 'A', 5: 'S', 12: 'D', 13: 'Z' },
+  eco: { 0: 'Q', 4: 'W', 1: 'E', 3: 'A', 5: 'S', 12: 'D', 13: 'Z', 15: 'X' },
   mil: { 2: 'Q', 6: 'W', 7: 'E', 8: 'A', 9: 'S', 10: 'D', 11: 'Z', 14: 'X' },
 };
 
@@ -145,6 +148,8 @@ export const PANEL_BUTTONS = {
   barracks: ['train-militia', 'train-spearman', 'research-maa'],
   range: ['train-archer', 'train-skirmisher', 'train-cavalry-archer'],
   stable: ['train-scout', 'train-knight', 'research-lightcavalry', 'research-bloodlines', 'research-husbandry'],
+  // Castle P3a: the Castle's whole panel — Train Petard.
+  castle: ['train-petard'],
   blacksmith: ['research-fletching', 'research-scalemail', 'research-padded',
     'research-forging', 'research-barding'],
   lumbercamp: ['research-doublebit'],
@@ -272,6 +277,11 @@ export const PANEL_KEYS = {
   miningcamp: {
     'research-goldmining': ['KeyQ', 'Q'],
     'research-stonemining': ['KeyW', 'W'],
+  },
+  // Castle P3a: the Castle's single train button takes the
+  // plain panel's first slot, like every production panel.
+  castle: {
+    'train-petard': ['KeyQ', 'Q'],
   },
   // The Market (TRD-01..03): the plain positional grid over the
   // two rendered rows — sells Q W E, buys A S D.

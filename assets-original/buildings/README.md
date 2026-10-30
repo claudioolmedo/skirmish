@@ -300,3 +300,9 @@ door-like shutter windows, invented chimney), AA1/AA3/AA4
 (wall bands 0.98×/0.86×/0.97× — batch 1, before the over-draw).
 Iteration 5's winner Z1 is backed up as
 `town-center-horseshoe-v4-backup.png` in the staging area.
+
+## Castle (Castle P3a, 2026-10-29)
+
+| File | Building |
+|---|---|
+| `castle.png` | Castle (finished) — **original programmatic blockout** drawn in code for this package (flat-shaded stone keep, twin towers, battlements, gate; palette matched to the client's vector fallback), not an AI generation. Placeholder-grade art in the BLD-18 complete-art-only contract: no stage frames; construction clip-reveals the finished art. A generated art pass can replace it file-for-file later. |

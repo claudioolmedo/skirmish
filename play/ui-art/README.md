@@ -57,3 +57,4 @@ Where a PNG exists it replaces the older SVG symbol in command
 buttons and selection portraits (`BUILD_PNG` / `KIND_PNG` /
 `pngIcon` in `app.js`); the symbols remain for resources, animals,
 and anything unmapped. Set size ≈ 427 KB.
+| `icons/castle.png` | Build Castle command + Castle portrait (Castle P3a, 2026-10-29) — original programmatic pictogram drawn in code for this package (stone keep on dark walnut, gold frame), matching this set's language; not an AI generation. |

@@ -146,13 +146,14 @@ const BUILD_FNS = [
   'push_build_archery_range', 'push_build_stable', 'push_build_blacksmith',
   'push_build_palisade_wall',
   'push_build_watch_tower', 'push_build_outpost', 'push_build_market',
-  'push_build_town_center', 'push_build_stone_wall',
+  'push_build_town_center', 'push_build_stone_wall', 'push_build_castle',
 ];
 const BUILD_FNS_QUEUED = BUILD_FNS.map((n) => n + '_queued');
 const TRAIN_AT_FNS = {
   2: 'push_train_scout', 3: 'push_train_militia', 4: 'push_train_archer',
   9: 'push_train_spearman', 10: 'push_train_skirmisher',
   12: 'push_train_knight', 14: 'push_train_cavalry_archer',
+  15: 'push_train_petard',
 };
 
 const isInt = (v) => Number.isInteger(v) && v >= 0;
@@ -173,7 +174,7 @@ export function validateCommand(c) {
     // index past the table is junk. (BLD-20 raised it to 14 with
     // the Stone Wall; 13 — the Town Center — was already
     // dispatchable but not validatable, an old inconsistency.)
-    case 'build': return isInt(c.e) && isInt(c.k) && c.k <= 14 && isNum(c.x) && isNum(c.y);
+    case 'build': return isInt(c.e) && isInt(c.k) && c.k <= 15 && isNum(c.x) && isNum(c.y);
     // TRD-01..03: Market trades — a building id and a commodity
     // tag (food 1, wood 2, stone 4; gold is never a commodity).
     case 'mbuy': case 'msell':
@@ -182,7 +183,7 @@ export function validateCommand(c) {
     // absent — the pre-BLD-20 wire form — or 14 stone wall).
     case 'buildline': return isInt(c.e) && isNum(c.x0) && isNum(c.y0) && isNum(c.x1) && isNum(c.y1)
       && (c.k === undefined || c.k === 9 || c.k === 14);
-    case 'train_at': return isInt(c.b) && (c.k === 2 || c.k === 3 || c.k === 4 || c.k === 9 || c.k === 10 || c.k === 12 || c.k === 14);
+    case 'train_at': return isInt(c.b) && (c.k === 2 || c.k === 3 || c.k === 4 || c.k === 9 || c.k === 10 || c.k === 12 || c.k === 14 || c.k === 15);
     case 'train_vil': return c.tc === undefined || isInt(c.tc);
     case 'research_tc': return (c.tech === 0 || c.tech === 1 || c.tech === 6
       || c.tech === 14 || c.tech === 15) && (c.tc === undefined || isInt(c.tc));

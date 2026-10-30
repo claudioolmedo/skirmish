@@ -57,6 +57,8 @@ export const wasmsim_push_build_barracks: (a: number, b: number, c: number, d: n
 export const wasmsim_push_build_barracks_queued: (a: number, b: number, c: number, d: number) => number;
 export const wasmsim_push_build_blacksmith: (a: number, b: number, c: number, d: number) => number;
 export const wasmsim_push_build_blacksmith_queued: (a: number, b: number, c: number, d: number) => number;
+export const wasmsim_push_build_castle: (a: number, b: number, c: number, d: number) => number;
+export const wasmsim_push_build_castle_queued: (a: number, b: number, c: number, d: number) => number;
 export const wasmsim_push_build_farm: (a: number, b: number, c: number, d: number) => number;
 export const wasmsim_push_build_farm_queued: (a: number, b: number, c: number, d: number) => number;
 export const wasmsim_push_build_house: (a: number, b: number, c: number, d: number) => number;
@@ -115,6 +117,7 @@ export const wasmsim_push_train_archer: (a: number, b: number) => number;
 export const wasmsim_push_train_cavalry_archer: (a: number, b: number) => number;
 export const wasmsim_push_train_knight: (a: number, b: number) => number;
 export const wasmsim_push_train_militia: (a: number, b: number) => number;
+export const wasmsim_push_train_petard: (a: number, b: number) => number;
 export const wasmsim_push_train_scout: (a: number, b: number) => number;
 export const wasmsim_push_train_skirmisher: (a: number, b: number) => number;
 export const wasmsim_push_train_spearman: (a: number, b: number) => number;

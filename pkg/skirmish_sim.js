@@ -666,6 +666,31 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Order a villager to build a Castle (650 stone, 4×4;
+     * Castle Age, no building prerequisite — Castle P3a) — see
+     * `push_build_house`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_castle(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_castle(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Queue a Castle build (Castle Age — Castle P3a) — see
+     * `push_build_house_queued`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_castle_queued(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_castle_queued(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
      * Order a villager to build a Farm (60 wood) — see
      * `push_build_house`.
      * @param {number} entity
@@ -1372,6 +1397,17 @@ export class WasmSim {
      */
     push_train_militia(building) {
         const ret = wasm.wasmsim_push_train_militia(this.__wbg_ptr, building);
+        return ret !== 0;
+    }
+    /**
+     * Enqueue a Petard at a completed Castle (Castle P3a — the
+     * Castle is the Petard's only home; `can_train_at` carries
+     * the Castle Age gate). See `push_train_militia`.
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_train_petard(building) {
+        const ret = wasm.wasmsim_push_train_petard(this.__wbg_ptr, building);
         return ret !== 0;
     }
     /**

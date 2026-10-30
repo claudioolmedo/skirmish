@@ -358,7 +358,7 @@ const cmdBtn = (id) => cmdButtons().find((b) => b.id === id);
 // The DE page model (UI FIX 4 addendum): root = the two openers;
 // a page = its buildings + Back in the last slot.
 const ROOT_IDS = ['page-eco', 'page-mil', 'repair', 'stop', 'delete']; // + Repair (BLD-17); Stop/Delete ride along (SEL-14)
-const ECO_IDS = ['build-0', 'build-4', 'build-1', 'build-3', 'build-5', 'build-12', 'build-13', 'page-back', 'stop', 'delete']; // + Market (12) and Town Center (Castle P1, tag 13); Stop/Delete ride along (SEL-14)
+const ECO_IDS = ['build-0', 'build-4', 'build-1', 'build-3', 'build-5', 'build-12', 'build-13', 'build-15', 'page-back', 'stop', 'delete']; // + Market (12), Town Center (Castle P1, tag 13) and Castle (P3a, tag 15 — the military page's grid is full); Stop/Delete ride along (SEL-14)
 const MIL_IDS = ['build-2', 'build-6', 'build-7', 'build-8', 'build-9', 'build-10', 'build-11', 'build-14', 'page-back', 'stop', 'delete']; // Stop/Delete ride along (SEL-14); build-14 = Stone Wall (BLD-20)
 
 pump(3);
@@ -380,7 +380,7 @@ assert.ok(cmdBtn('repair').innerHTML.includes('<span class=\"cmd-key\">E</span>'
   'the Repair button is badged E (BLD-17)');
 
 key('KeyQ');
-assert.deepEqual(cmdIds(), ECO_IDS, 'Q arms the economic page — its seven buildings + Back');
+assert.deepEqual(cmdIds(), ECO_IDS, 'Q arms the economic page — its eight buildings + Back');
 assert.ok(cmdBtn('build-0').innerHTML.includes('<span class="cmd-key">Q</span>'),
   'the House button is badged Q (its grid slot)');
 assert.ok(cmdBtn('build-4').innerHTML.includes('<span class="cmd-key">W</span>'),
