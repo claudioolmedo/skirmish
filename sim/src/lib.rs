@@ -53,6 +53,7 @@ mod classes;
 mod combat;
 mod econ;
 mod entity;
+mod garrison;
 mod grid;
 mod hash;
 mod mapgen;
@@ -63,6 +64,8 @@ mod tech;
 mod units;
 #[cfg(test)]
 mod castle_p3_tests;
+#[cfg(test)]
+mod garrison_tests;
 #[cfg(test)]
 mod housed_tests;
 #[cfg(test)]
@@ -81,7 +84,7 @@ pub use build::{
     FARM_BUILD_TICKS, FARM_WOOD_COST, FOOTPRINT_CELLS,
     HOUSE_BUILD_TICKS, HOUSE_POP_SUPPORT, HOUSE_WOOD_COST, REPAIR_COST_FRACTION,
     REPAIR_HP_PER_MIN_EXTRA, REPAIR_HP_PER_MIN_FIRST, STABLE_BUILD_TICKS, STABLE_WOOD_COST,
-    TOWN_CENTER_POP_SUPPORT,
+    TOWN_CENTER_POP_SUPPORT, TOWN_CENTER_WEAPON,
 };
 pub use combat::{
     compute_damage, compute_damage_elev, compute_damage_hit, elevation_factor, Projectile,
@@ -94,8 +97,8 @@ pub use econ::{
     TREE_STAND_INSET, VILLAGER_FOOD_COST, VILLAGER_TRAIN_TICKS,
 };
 pub use entity::{
-    is_player_owner, Dropoff, Entity, EntityKind, MoveOrder, QueuedOrder, Stance, Task,
-    OWNER_GAIA, OWNER_OPPONENT, OWNER_PLAYER,
+    is_player_owner, BellSnapshot, Dropoff, Entity, EntityKind, GarrisonRef, MoveOrder,
+    QueuedOrder, Stance, Task, OWNER_GAIA, OWNER_OPPONENT, OWNER_PLAYER,
 };
 pub use grid::{Grid, CELL_SIZE, GRID_DIM, TERRAIN_LAND, TERRAIN_WATER, WORLD_HALF};
 pub use mapgen::GeneratedMap;
@@ -115,6 +118,15 @@ pub const TICKS_PER_SECOND: u64 = 60;
 /// constant: the M7 generator places it (see `mapgen`), mirrored
 /// for the opponent, different on every seed.
 pub const TOWN_CENTER_ID: u32 = 0;
+
+/// Town Center garrison capacity (Castle P3b, GAR-01): 15, foot
+/// units only (the resolved per-building data column).
+pub const TC_GARRISON_CAPACITY: u32 = 15;
+/// Town Center shelter healing (Castle P3b, GAR-04 base):
+/// 0.1 HP/s = 6 HP/min (the tower rate; the Castle heals 12/min).
+pub const TC_GARRISON_HEAL_HP_PER_MIN: i64 = 6;
+/// Town Bell radius (Castle P3b, GAR-07): 23 tiles.
+pub const TOWN_BELL_RADIUS: I16F16 = I16F16::from_bits(6_029_312); // 92.0 = 23 tiles
 /// Starting villagers: 3, placed at fixed offsets from the Town Center.
 pub const START_VILLAGER_COUNT: u32 = 3;
 const START_VILLAGER_OFFSETS: [(i32, i32); 3] = [(5, 0), (-5, 0), (0, 5)];
@@ -422,6 +434,31 @@ pub enum Command {
     /// (TEC-05): the same rule as the Town Center form, against
     /// the building's owner.
     CancelQueueBuilding { building: u32, index: u32 },
+    /// Garrison a unit in an own placed building (Castle P3b,
+    /// GAR-01/SEL-11): the unit walks to the building and enters on
+    /// arrival. Valid only for defensive garrisons (towers, the
+    /// Castle) with an eligible unit kind and room inside, and
+    /// never while the building stands at ≤20% HP (GAR-03's
+    /// re-garrison block). Production buildings reject this command
+    /// — their garrison is entered only on creation (GAR-08).
+    GarrisonBuilding { entity: u32, building: u32 },
+    /// Garrison a unit in an own Town Center (Castle P3b, GAR-01):
+    /// the Town Center form of `GarrisonBuilding` (the TC is an
+    /// entity in this architecture). Foot units only, capacity 15.
+    GarrisonTc { entity: u32, tc: u32 },
+    /// Voluntarily ungarrison a placed building (Castle P3b,
+    /// GAR-03): every unit inside is placed at the building's exit
+    /// point, idle and unharmed.
+    UngarrisonBuilding { building: u32 },
+    /// Voluntarily ungarrison a Town Center (Castle P3b, GAR-03):
+    /// the Town Center form of `UngarrisonBuilding`.
+    UngarrisonTc { tc: u32 },
+    /// Ring a Town Center's Town Bell (Castle P3b, GAR-07): the
+    /// first ring sends every own villager within 23 tiles to
+    /// garrison in the nearest shelter, snapshotting each one's
+    /// task and position; the second ring ("back to work")
+    /// ungarrisons them and restores each snapshot.
+    TownBell { tc: u32 },
 }
 
 /// Why Town Center training cannot currently proceed (M2.5). The
@@ -569,6 +606,24 @@ struct TcState {
     /// any: the new villager gathers it instead of walking.
     rally: Option<(I16F16, I16F16)>,
     rally_node: Option<u32>,
+    // --- Castle P3b: garrison + Town Bell + TC weapon state ---
+    /// Entities garrisoned inside this Town Center, entry order
+    /// (GAR-01; capacity `TC_GARRISON_CAPACITY`, foot only).
+    garrison: Vec<u32>,
+    /// Current total arrows per volley (GAR-05/06): 0 while the
+    /// garrison is empty (the TC fires only while garrisoned).
+    garrison_arrows: u32,
+    /// TC weapon state (GAR-06), mirroring the placed buildings'
+    /// BLD-18 fields: engaged unit / placed building, pending
+    /// first-strike tick, reload gate, engagement flag.
+    weapon_target: Option<u32>,
+    weapon_target_building: Option<u32>,
+    weapon_strike_tick: Option<u64>,
+    weapon_next_tick: u64,
+    weapon_engaged: bool,
+    /// Town Bell state (GAR-07): true between the ring that sends
+    /// villagers to shelter and the ring that sends them back.
+    bell_active: bool,
 }
 
 impl TcState {
@@ -825,6 +880,14 @@ impl Sim {
                 progress: 0,
                 rally: None,
                 rally_node: None,
+                garrison: Vec::new(),
+                garrison_arrows: 0,
+                weapon_target: None,
+                weapon_target_building: None,
+                weapon_strike_tick: None,
+                weapon_next_tick: 0,
+                weapon_engaged: false,
+                bell_active: false,
             }],
             buildings: Vec::new(),
             next_building_id: 0,
@@ -868,6 +931,14 @@ impl Sim {
             progress: 0,
             rally: None,
             rally_node: None,
+            garrison: Vec::new(),
+            garrison_arrows: 0,
+            weapon_target: None,
+            weapon_target_building: None,
+            weapon_strike_tick: None,
+            weapon_next_tick: 0,
+            weapon_engaged: false,
+            bell_active: false,
         });
         // Villagers and Scout at the mirrored start offsets (the
         // generator keeps the Town Center's 3×3 clear for them).
@@ -929,7 +1000,7 @@ impl Sim {
             }
             for idx in 0..self.entities.len() {
                 let e = &self.entities[idx];
-                if e.dead || e.owner != owner {
+                if e.dead || e.owner != owner || e.garrisoned_in.is_some() {
                     continue;
                 }
                 let r = if e.kind == EntityKind::TownCenter {
@@ -3320,6 +3391,7 @@ impl Sim {
                     && e.order.is_none()
                     && e.attack_target.is_none()
                     && e.attack_building.is_none()
+                    && e.garrisoned_in.is_none()
             })
             .map(|e| e.id)
             .collect()
@@ -3349,6 +3421,7 @@ impl Sim {
                     && e.attack_building.is_none()
                     && e.attack_move.is_none()
                     && e.patrol.is_empty()
+                    && e.garrisoned_in.is_none()
             })
             .map(|e| e.id)
             .collect()
@@ -3419,6 +3492,15 @@ impl Sim {
                 Command::AttackMove { entity, x, y } => self.issue_attack_move(entity, x, y),
                 Command::Patrol { entity, x, y } => self.issue_patrol(entity, x, y),
                 Command::SetStance { entity, stance } => self.issue_set_stance(entity, stance),
+                Command::GarrisonBuilding { entity, building } => {
+                    self.issue_garrison_building(entity, building)
+                }
+                Command::GarrisonTc { entity, tc } => self.issue_garrison_tc(entity, tc),
+                Command::UngarrisonBuilding { building } => {
+                    self.issue_ungarrison_building(building)
+                }
+                Command::UngarrisonTc { tc } => self.issue_ungarrison_tc(tc),
+                Command::TownBell { tc } => self.issue_town_bell(tc),
             }
         }
 
@@ -3434,7 +3516,7 @@ impl Sim {
         let snapshot: Vec<steer::SnapshotEntry> = self
             .entities
             .iter()
-            .filter(|e| e.kind.is_mobile() && !e.dead)
+            .filter(|e| e.kind.is_mobile() && !e.dead && e.garrisoned_in.is_none())
             .map(|e| (e.pos_x, e.pos_y, units::spec(e.kind).radius))
             .collect();
         // Entity index -> index into the snapshot.
@@ -3442,7 +3524,7 @@ impl Sim {
         {
             let mut k = 0;
             for (i, e) in self.entities.iter().enumerate() {
-                if e.kind.is_mobile() && !e.dead {
+                if e.kind.is_mobile() && !e.dead && e.garrisoned_in.is_none() {
                     snap_idx[i] = k;
                     k += 1;
                 }
@@ -3528,7 +3610,7 @@ impl Sim {
         //    column). No living unit ends a tick inside a blocked
         //    cell: it is displaced to the nearest open cell.
         for idx in 0..self.entities.len() {
-            if self.entities[idx].dead {
+            if self.entities[idx].dead || self.entities[idx].garrisoned_in.is_some() {
                 continue;
             }
             let cell = self
@@ -3547,6 +3629,14 @@ impl Sim {
         // 4. Economy: carcass decay, training (Town Center + Barracks),
         //    then villager work cycles and construction.
         self.economy_tick();
+
+        // 4.5 Garrison (Castle P3b, GAR-01..08): arrivals enter
+        //     their hosts, shelter healing accrues, and the ≤20% HP
+        //     ejection rule (GAR-03) is enforced. After combat (a
+        //     building dropped to ≤20% this tick ejects now) and
+        //     after economy (a unit that entered this tick is out
+        //     of the field from the next tick's systems on).
+        self.garrison_tick();
 
         // 5. Order queues (M4, SEL-12): an entity that became fully
         //    idle this tick starts its next queued order, so a chain
@@ -3614,7 +3704,9 @@ impl Sim {
     /// orders; herdables are driven by capture logic instead.
     fn orderable(&self, idx: usize) -> bool {
         let e = &self.entities[idx];
-        !e.dead && e.owner != entity::OWNER_GAIA && e.kind.is_mobile()
+        // GAR-02: a garrisoned unit takes no orders — it is out of
+        // the field until it ejects or is ungarrisoned.
+        !e.dead && e.owner != entity::OWNER_GAIA && e.kind.is_mobile() && e.garrisoned_in.is_none()
     }
 
     /// Apply a `Move` command: clamp the target into the world, recompute
@@ -4186,6 +4278,8 @@ impl Sim {
             weapon_strike_tick: None,
             weapon_next_tick: 0,
             weapon_engaged: false,
+            garrison: Vec::new(),
+            garrison_arrows: 0,
         };
         if kind.blocks_footprint() && !kind.is_wall() {
             for (cx, cy) in building.footprint_cells() {
@@ -4394,6 +4488,7 @@ impl Sim {
             {
                 let e = &self.entities[idx];
                 if e.dead
+                    || e.garrisoned_in.is_some()
                     || e.order_queue.is_empty()
                     || e.task != Task::Idle
                     || e.order.is_some()
@@ -4576,6 +4671,16 @@ impl Sim {
             Some(p) => p,
             None => return,
         };
+        // GAR-08 (Castle P3b): a rally point sitting ON a
+        // garrisonable building sends the new unit to garrison
+        // inside it on arrival instead of walking to the point —
+        // for a production host this spawn path is the ONLY entry
+        // (production garrison); for a defensive host the unit
+        // must be eligible for that host.
+        if let Some(host) = self.rally_garrison_host(idx, rx, ry) {
+            self.apply_garrison_order(idx, host, self.host_is_production(host));
+            return;
+        }
         if self.entities[idx].kind == EntityKind::Villager {
             if let Some(nid) = rally_node {
                 if self.live_node_pos(nid).is_some() {
@@ -5011,7 +5116,10 @@ impl Sim {
             }
         }
         for idx in 0..self.entities.len() {
-            if self.entities[idx].kind == EntityKind::Villager && !self.entities[idx].dead {
+            if self.entities[idx].kind == EntityKind::Villager
+                && !self.entities[idx].dead
+                && self.entities[idx].garrisoned_in.is_none()
+            {
                 self.work_tick(idx);
             }
         }
@@ -5726,6 +5834,14 @@ impl Sim {
             progress: 0,
             rally: None,
             rally_node: None,
+            garrison: Vec::new(),
+            garrison_arrows: 0,
+            weapon_target: None,
+            weapon_target_building: None,
+            weapon_strike_tick: None,
+            weapon_next_tick: 0,
+            weapon_engaged: false,
+            bell_active: false,
         });
     }
 
@@ -6238,6 +6354,49 @@ impl Sim {
                     h.write_u32(n);
                 }
             }
+            // Castle P3b: the TC's garrison (GAR-01) and its arrow
+            // count (GAR-05/06) — written unconditionally, so the
+            // golden hash deliberately moves on this coverage (see
+            // determinism.rs's P3b attribution note).
+            h.write_u32(s.garrison.len() as u32);
+            for &g in &s.garrison {
+                h.write_u32(g);
+            }
+            h.write_u32(s.garrison_arrows);
+            if s.bell_active {
+                h.write_u8(0xBE);
+            }
+            if s.weapon_target.is_some()
+                || s.weapon_target_building.is_some()
+                || s.weapon_strike_tick.is_some()
+                || s.weapon_next_tick != 0
+                || s.weapon_engaged
+            {
+                h.write_u8(0xB8);
+                match s.weapon_target {
+                    None => h.write_u8(0),
+                    Some(t) => {
+                        h.write_u8(1);
+                        h.write_u32(t);
+                    }
+                }
+                match s.weapon_target_building {
+                    None => h.write_u8(0),
+                    Some(t) => {
+                        h.write_u8(1);
+                        h.write_u32(t);
+                    }
+                }
+                match s.weapon_strike_tick {
+                    None => h.write_u8(0),
+                    Some(t) => {
+                        h.write_u8(1);
+                        h.write_u64(t);
+                    }
+                }
+                h.write_u64(s.weapon_next_tick);
+                h.write_u8(u8::from(s.weapon_engaged));
+            }
         }
         // M2.5: buildings (id order), construction state included.
         // M3: production queues join.
@@ -6289,6 +6448,14 @@ impl Sim {
                     h.write_u32(n);
                 }
             }
+            // Castle P3b: the building's garrison (GAR-01) and its
+            // arrow count (GAR-05) — written unconditionally, so
+            // the golden hash deliberately moves on this coverage.
+            h.write_u32(b.garrison.len() as u32);
+            for &g in &b.garrison {
+                h.write_u32(g);
+            }
+            h.write_u32(b.garrison_arrows);
             // BLD-18: the building-weapon state and the repair
             // stone accumulator — written ONLY while non-default,
             // behind a marker byte (the destroyed_value /
@@ -6557,6 +6724,61 @@ impl Sim {
                     h.write_i32(px.to_bits());
                     h.write_i32(py.to_bits());
                 }
+            }
+            // Castle P3b: garrison state (GAR-01..08) — written
+            // ONLY while any of it is in play (marker 0xB9), on the
+            // SEL-17/CMB-09 conditional pattern: the host the unit
+            // sits in, the host it walks to, the production-entry
+            // flag, its Town Bell snapshot, and its shelter-heal
+            // remainder.
+            if e.garrisoned_in.is_some()
+                || e.garrison_target.is_some()
+                || e.bell_snapshot.is_some()
+                || e.garrison_heal_remainder != 0
+            {
+                h.write_u8(0xB9);
+                match e.garrisoned_in {
+                    None => h.write_u8(0),
+                    Some(g) => {
+                        h.write_u8(g.tag());
+                        h.write_u32(g.id());
+                    }
+                }
+                match e.garrison_target {
+                    None => h.write_u8(0),
+                    Some(g) => {
+                        h.write_u8(g.tag());
+                        h.write_u32(g.id());
+                    }
+                }
+                h.write_u8(u8::from(e.garrison_prod_entry));
+                match e.bell_snapshot {
+                    None => h.write_u8(0),
+                    Some(b) => {
+                        h.write_u8(1);
+                        h.write_i32(b.pos_x.to_bits());
+                        h.write_i32(b.pos_y.to_bits());
+                        h.write_u8(b.task.tag());
+                        if let Task::Repair { building } = b.task {
+                            h.write_u32(building);
+                        }
+                        match b.task_node {
+                            None => h.write_u8(0),
+                            Some(n) => {
+                                h.write_u8(1);
+                                h.write_u32(n);
+                            }
+                        }
+                        match b.task_building {
+                            None => h.write_u8(0),
+                            Some(bb) => {
+                                h.write_u8(1);
+                                h.write_u32(bb);
+                            }
+                        }
+                    }
+                }
+                h.write_u64(e.garrison_heal_remainder as u64);
             }
         }
         // M3: projectiles in flight, in spawn order.
@@ -6985,6 +7207,8 @@ mod tests {
             weapon_strike_tick: None,
             weapon_next_tick: 0,
             weapon_engaged: false,
+            garrison: Vec::new(),
+            garrison_arrows: 0,
         }
     }
 
@@ -7092,6 +7316,8 @@ mod tests {
             weapon_strike_tick: None,
             weapon_next_tick: 0,
             weapon_engaged: false,
+            garrison: Vec::new(),
+            garrison_arrows: 0,
         });
         sim.apply_research(OWNER_PLAYER, TechId::HorseCollar);
         let after = sim

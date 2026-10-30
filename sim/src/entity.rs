@@ -203,6 +203,35 @@ impl EntityKind {
         )
     }
 
+    /// Foot units that may garrison in a defensive building
+    /// (Castle P3b, GAR-01): villagers, infantry, foot archers and
+    /// monks. Monks do not exist as a kind yet (Castle P5); the
+    /// Petard is foot-shaped but is a siege/suicide unit and is
+    /// NOT garrisonable (scope resolution 2026-10-29).
+    pub fn is_foot_garrisonable(self) -> bool {
+        matches!(
+            self,
+            EntityKind::Villager
+                | EntityKind::Militia
+                | EntityKind::ManAtArms
+                | EntityKind::Spearman
+                | EntityKind::Archer
+                | EntityKind::Skirmisher
+        )
+    }
+
+    /// Mounted units (Castle P3b, GAR-01): these may garrison ONLY
+    /// in a Castle (defensive) — never in a Town Center or tower.
+    pub fn is_mounted_garrisonable(self) -> bool {
+        matches!(
+            self,
+            EntityKind::ScoutCavalry
+                | EntityKind::LightCavalry
+                | EntityKind::Knight
+                | EntityKind::CavalryArcher
+        )
+    }
+
     /// Military kinds for the idle-military query (SEL-09): the
     /// fighting units. Villagers have their own idle query (SEL-08)
     /// and herdables are livestock, not military.
@@ -277,6 +306,43 @@ impl Default for Stance {
     fn default() -> Self {
         Stance::Aggressive
     }
+}
+
+/// A garrison host (Castle P3b, GAR-01): a placed building, or a
+/// Town Center (an entity in this architecture, BLD-16). The two
+/// id spaces are distinct, so the host reference names its space.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GarrisonRef {
+    Building(u32),
+    TownCenter(u32),
+}
+
+impl GarrisonRef {
+    /// Stable tag for the state hash: 1 = building, 2 = town center
+    /// (0 is the hash's "no host" marker, written by the caller).
+    pub fn tag(self) -> u8 {
+        match self {
+            GarrisonRef::Building(_) => 1,
+            GarrisonRef::TownCenter(_) => 2,
+        }
+    }
+    pub fn id(self) -> u32 {
+        match self {
+            GarrisonRef::Building(id) | GarrisonRef::TownCenter(id) => id,
+        }
+    }
+}
+
+/// A Town Bell snapshot (Castle P3b, GAR-07): a villager's task and
+/// position at the moment the bell rang, restored by the second ring
+/// ("back to work"). Plain data — part of the hashed state while set.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BellSnapshot {
+    pub pos_x: I16F16,
+    pub pos_y: I16F16,
+    pub task: Task,
+    pub task_node: Option<u32>,
+    pub task_building: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -627,6 +693,34 @@ pub struct Entity {
     pub patrol: Vec<(I16F16, I16F16)>,
     /// Index into `patrol` of the leg the unit heads to next.
     pub patrol_next: usize,
+
+    // --- Garrison state (Castle P3b, GAR-01..08) ---
+    /// The host this unit is garrisoned inside, if any. While set,
+    /// the unit is out of the field entirely (GAR-02): it is skipped
+    /// by spatial iteration, targeting, damage, conversion, monk
+    /// healing and the idle counts, and it does not move. Its stored
+    /// position stays where it entered (beside the host), so ejection
+    /// placement starts from a sane point. Part of the hashed state.
+    pub garrisoned_in: Option<GarrisonRef>,
+    /// The host this unit is walking to garrison in, if any: the
+    /// garrison order's target, entered on arrival (the garrison
+    /// tick). Part of the hashed state.
+    pub garrison_target: Option<GarrisonRef>,
+    /// Whether `garrison_target` is a production-garrison entry
+    /// (GAR-08's rally/newly-trained case): production buildings
+    /// accept entry ONLY this way — manual orders to them are
+    /// rejected, and their garrison can never be re-entered.
+    pub garrison_prod_entry: bool,
+    /// Town Bell snapshot (GAR-07) while the bell holds this
+    /// villager: set by the ring that sent it to shelter, consumed
+    /// by the ring that sends it back to work.
+    pub bell_snapshot: Option<BellSnapshot>,
+    /// Shelter-healing fractional accumulator (GAR-04), in the
+    /// BLD-07 repair pattern: per tick the heal adds
+    /// `rate_hp_per_min × 65536` to a conceptual accumulator whose
+    /// quotient over 3600 is the HP bits restored; this holds the
+    /// remainder (0 ≤ r < 3600). Reset on garrison entry/exit.
+    pub garrison_heal_remainder: i64,
 }
 
 impl Entity {
@@ -679,6 +773,11 @@ impl Entity {
             attack_move: None,
             patrol: Vec::new(),
             patrol_next: 0,
+            garrisoned_in: None,
+            garrison_target: None,
+            garrison_prod_entry: false,
+            bell_snapshot: None,
+            garrison_heal_remainder: 0,
         }
     }
 

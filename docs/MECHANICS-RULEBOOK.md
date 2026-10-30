@@ -500,9 +500,12 @@ damaged building — BLD-17) and, since the 2026-10-21/22 night run,
 build-resume — a right-click on an own foundation sends every
 selected villager to construct it (the sim's Build order resumes a
 standing foundation, never a second charge; the order's cell may be
-any cell of its footprint, not only the anchor). Still open: the
-garrison context — no garrison system exists (the GAR entries wait).
-· *Status:* **DIFFERS** (garrison context only).
+any cell of its footprint, not only the anchor). The last context
+closed 2026-10-29 (Castle P3b): the garrison context — a
+right-click on an own Town Center, tower or Castle with eligible
+units selected issues the garrison order (a loaded villager
+clicking the Town Center still drops off first — the ECO-07
+gesture keeps its priority). · *Status:* **MATCHES**.
 
 **SEL-12 — Queued orders (waypoints).** Holding Shift while issuing orders
 *appends* them to each unit's order queue instead of replacing it; the
@@ -1563,9 +1566,12 @@ projectile), range 8 (min 1), RoF 2.0 s, accuracy 100%, and a
 unchanged). The Castle building itself: 650 stone, 200 s,
 4×4, 4800 HP, armor 8/11, LoS 11, +20 population support,
 Castle Age with no building prerequisite. Remaining for this
-rule: the Castle's GAR-05 garrison arrows (up to +16 extra on
-the base volley — the P3c garrison package), Murder Holes for
-both armed kinds, and the items above.
+rule: Murder Holes for both armed kinds, and the items above.
+*Narrowed again 2026-10-29 (Castle P3b):* the GAR-05 garrison
+arrows landed — a garrisoned tower fires up to +4 extra arrows and
+the Castle up to +16 extra over its base volley of 5, from the
+arrow count stored on the building record; the Town Center gained
+its own garrison-only weapon under GAR-06.
 
 ---
 
@@ -2605,21 +2611,37 @@ trade kinds. · *Status:* **MISSING**.
 
 ## 14. Garrison, transport & repair
 
-**GAR-01 — Garrison capacities and eligibility.** Town Center 15, towers
-5, Castle 20, other production buildings 10. Only foot units may garrison
-in buildings: villagers, infantry, archers, monks. Cavalry and siege
-never garrison in buildings (their containers are GAR-10/11).
-*Source:* MECHANICS-STUDY §9.3; GAP 4.16. · *Impl:* capacity + eligible-
-class columns in the building table; garrisoned units are a list on the
-building record (hashed), removed from the field and from pathing. ·
-*Status:* **MISSING**.
+**GAR-01 — Garrison capacities and eligibility.** Town Center 15
+(foot units only), towers 5 (foot units only), Castle 20 (foot AND
+mounted units), other production buildings 10. Foot units: villagers,
+infantry, foot archers. Mounted units garrison only in the Castle.
+Siege never garrisons in buildings (their containers are GAR-10/11),
+and the Petard is not garrisonable. Production buildings garrison
+ONLY their own newly trained units, arriving via the rally point
+(GAR-08) — entry after that is eject-only, with no re-entry.
+(Eligibility RESOLVED 2026-10-29 against the Castle Age dossier's
+per-building data column in `castle-age/P3-EXECUTION-PLAN.md` §1.3 —
+this supersedes the earlier blanket "only foot units / cavalry
+never" reading, which the Castle's own row contradicts.)
+*Source:* MECHANICS-STUDY §9.3; GAP 4.16; Castle Age dossier §1.3.
+· *Impl:* shipped 2026-10-29 (Castle P3b) — capacity + eligibility
+columns on `BuildingKind` and the Town Center record
+(`sim/src/garrison.rs`); the garrisoned list lives on the host
+record (hashed) and the garrisoned flag on the entity removes it
+from the field and from pathing. · *Status:* **MATCHES**.
 
 **GAR-02 — Garrisoned units are untouchable.** While inside, a unit
 cannot be damaged, converted, or healed by monks (it heals by GAR-04
 instead), and does not count as idle for SEL-08/09.
 *Source:* MECHANICS-STUDY §9.3. · *Impl:* garrisoned entities are skipped
 by every field system (targeting, blast, conversion) by construction —
-they are not in the spatial iteration at all. · *Status:* **MISSING**.
+they are not in the spatial iteration at all. · *Impl (shipped
+2026-10-29, Castle P3b):* the `garrisoned_in` flag excludes the
+entity from the movement snapshot, work tick, visibility stamps,
+idle lists, orderability, acquisition (as attacker and as target)
+and every damage path (hits, projectiles, Petard blast), by
+construction plus per-site guards pinned by tests. · *Status:*
+**MATCHES**.
 
 **GAR-03 — Ejection keeps the garrison alive.** If a building is
 destroyed, converted, or drops to ≤20% HP, its garrison is ejected
@@ -2628,14 +2650,24 @@ building's ungarrison point, idle.
 *Source:* MECHANICS-STUDY §9.3. · *Impl:* ejection runs in the building-
 removal path (CMB-15) and the HP-threshold check in the combat phase;
 spawn positions use the building's ring cells (the same helper as trained-
-unit spawn). · *Status:* **MISSING**.
+unit spawn). · *Impl (shipped 2026-10-29, Castle P3b):* ejection
+runs in `destroy_building`, in the Town Center death path, and in
+the garrison tick's ≤20% HP check; re-garrison is refused while
+the host is at ≤20% HP; the panel Ungarrison button ejects at the
+same ring exit points, idle. · *Status:* **MATCHES**.
 
 **GAR-04 — Shelter heals.** Units garrisoned in a Town Center or tower
 heal at 0.1 HP/s; in a Castle, 0.2 HP/s. Herbal Medicine multiplies
 garrison healing ×6. Healing inside other buildings/docks: none.
 *Source:* MECHANICS-STUDY §9.3; Technology wiki (Herbal Medicine: "6×
 faster" garrison healing). · *Impl:* a per-building heal-rate column
-folded into the garrison record tick. · *Status:* **MISSING**.
+folded into the garrison record tick. *Narrowed 2026-10-29 (Castle
+P3b):* the base shelter healing SHIPPED — 0.1 HP/s in the Town
+Center and towers, 0.2 HP/s in the Castle, none in production
+buildings, via a per-entity remainder accumulator in the garrison
+tick. What remains is the Herbal Medicine ×6 multiplier, which
+rides the Monastery technology package (P5). · *Status:*
+**MISSING** (base rates shipped; the ×6 tech multiplier remains).
 
 **GAR-05 — Garrison adds arrows by DPS, with caps.** Only villagers and
 archer-type units add firepower to a defensive building. Each contributes
@@ -2646,7 +2678,12 @@ total, a Castle at most +16 extra arrows.
 *Source:* MECHANICS-STUDY §9.3 (formula and caps pinned). · *Impl:*
 recomputed when the garrison changes (event, not per tick): store the
 arrow count on the building record; each arrow is an ordinary projectile
-(PRJ-01) from the building's weapon row. · *Status:* **MISSING**.
+(PRJ-01) from the building's weapon row. · *Impl (shipped 2026-10-29,
+Castle P3b):* `recompute_garrison_arrows` runs on every garrison
+change; foot archers contribute their effective ranged DPS through
+the shared stats path, mounted units contribute 0; the stored
+total volley feeds the building-weapon release (and the Town
+Center weapon, GAR-06). · *Status:* **MATCHES**.
 
 **GAR-06 — The Town Center fires only when garrisoned.** Towers and
 Castles shoot on their own (their base volley, GAR-05 adds to it). A Town
@@ -2655,7 +2692,13 @@ holds a garrison, with the arrow count from GAR-05 (minimum one arrow
 while garrisoned).
 *Source:* MECHANICS-STUDY §5 (TC row note), §9.3. · *Impl:* the building
 attack state machine checks (has-weapon × garrison-present) for the TC
-kind; towers/castles check has-weapon alone. · *Status:* **MISSING**.
+kind; towers/castles check has-weapon alone. *Shipped 2026-10-29
+(Castle P3b):* the Town Center weapon state lives on the TC record
+(`TOWN_CENTER_WEAPON`: 5 pierce, range 6, RoF 2.0, the adopted
+21-tick delay of BLD-18) and its step runs in the combat phase
+under the CMB-08 chain, gated on a non-empty garrison; the volley
+is the GAR-05 count (minimum 1 while garrisoned). · *Status:*
+**MATCHES**.
 
 **GAR-07 — Town Bell.** Ringing a Town Center's bell sends every villager
 within 23 tiles to garrison in the nearest shelter; their current tasks
@@ -2665,14 +2708,23 @@ them and restores each villager to its snapshot task and location.
 bell is a TC command that sweeps own villagers in radius (id order) into
 a bell-snapshot record per villager; the second press replays it. The
 snapshot record is exactly what makes this implementable in our task
-model. · *Status:* **MISSING**.
+model. *Shipped 2026-10-29 (Castle P3b):* the snapshot rides the
+villager (`BellSnapshot`: position + task + node/building ids);
+the second ring ejects the bell's own villagers and restores the
+gather/build/repair task when its target still stands, else walks
+the villager back to the snapshot position. · *Status:*
+**MATCHES**.
 
 **GAR-08 — Rally-garrison on creation.** If a production building's rally
 point is set on a garrisonable building (SEL-13), newly trained units
 walk there and garrison inside automatically on arrival.
 *Source:* wiki, Gather Point (rally behavior); GAP 4.16. · *Impl:* the
 spawn logic (SEL-13) issues a garrison task instead of a move task when
-the rally target is a garrisonable building. · *Status:* **MISSING**.
+the rally target is a garrisonable building. *Shipped 2026-10-29
+(Castle P3b):* `apply_spawn_rally` resolves a rally point inside a
+garrisonable host's footprint to a garrison order (production
+hosts accept entry ONLY on this path — GAR-01). · *Status:*
+**MATCHES**.
 
 **GAR-09 — Transports carry anyone, and cargo dies with the ship.** A
 Transport Ship loads land units up to its capacity (5) at a shoreline and
@@ -3783,12 +3835,28 @@ suicide detonation with blast 0.5 under CMB-12), so §8 stands
 at 17 rules, 16 / 0 / 1 and the book at 222 rules,
 134 / 27 / 61. The table below equals the body.
 
+updated 2026-10-29 for Castle P3b (bot-loop): the GAR core
+lands — garrison state and orders (GAR-01, with the eligibility
+text amended to the dossier's resolved per-building column),
+untouchable garrisons (GAR-02), ejection (GAR-03), the DPS arrow
+formula with its caps (GAR-05), the garrison-only Town Center
+weapon (GAR-06), the Town Bell with task snapshots (GAR-07) and
+rally-garrison on creation (GAR-08) — and SEL-11's last open
+context (garrison) closes with them. GAR-04 narrows (the base
+shelter rates shipped; the Herbal Medicine ×6 waits for the
+Monastery package) and BLD-18 narrows again (its garrison-arrow
+remainder is GAR-05's, now shipped), both without status change.
+§14 stands at 10 rules, 7 / 0 / 3, §4 at 17 rules, 16 / 1 / 0
+and the book at 222 rules, 142 / 26 / 54 (recounted
+mechanically over the Status tags). The table below equals the
+body.
+
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
 | 1 | Simulation & time (SIM) | 12 | 12 | 0 | 0 |
 | 2 | Map, terrain & elevation (MAP) | 12 | 7 | 4 | 1 |
 | 3 | Visibility & exploration (VIS) | 10 | 8 | 1 | 1 |
-| 4 | Selection & orders (SEL) | 17 | 15 | 2 | 0 |
+| 4 | Selection & orders (SEL) | 17 | 16 | 1 | 0 |
 | 5 | Movement, pathfinding & collision (MOV) | 12 | 5 | 3 | 4 |
 | 6 | Economy & drop-off (ECO) | 17 | 14 | 1 | 2 |
 | 7 | Buildings & placement (BLD) | 20 | 13 | 6 | 1 |
@@ -3798,19 +3866,19 @@ at 17 rules, 16 / 0 / 1 and the book at 222 rules,
 | 11 | Technologies & age advancement (TEC) | 11 | 5 | 3 | 3 |
 | 12 | Monks, conversion & relics (MNK) | 13 | 0 | 0 | 13 |
 | 13 | Trade, market & tribute (TRD) | 8 | 3 | 0 | 5 |
-| 14 | Garrison, transport & repair (GAR) | 10 | 0 | 0 | 10 |
+| 14 | Garrison, transport & repair (GAR) | 10 | 7 | 0 | 3 |
 | 15 | AI behavior & difficulty (AI) | 9 | 8 | 0 | 1 |
 | 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |
 | 17 | Multiplayer determinism (NET) | 11 | 7 | 2 | 2 |
 | 18 | Information rules (INF) | 13 | 9 | 2 | 2 |
-| | **Total** | **222** | **134** | **27** | **61** |
+| | **Total** | **222** | **142** | **26** | **54** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer
 (§11) with M6, and the world itself (§2/§3: generated maps, terrain,
 elevation, fog) with M7, so the remaining greenfield is concentrated
 in the systems whose content has not been built yet — monks (§12),
-trade (§13), garrison (§14), the water domain (ships, docks,
+trade (§13), garrison's transports and rams (§14 remainder), the water domain (ships, docks,
 fishing), and cliffs. Multiplayer's transport (§17) landed with M8;
 its remaining gaps are snapshots (NET-09) and diplomacy (NET-11).
 

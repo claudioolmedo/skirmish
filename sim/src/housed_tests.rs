@@ -43,6 +43,8 @@ fn placed(sim: &Sim, id: u32, kind: BuildingKind, cell: (u32, u32)) -> Building 
         weapon_strike_tick: None,
         weapon_next_tick: 0,
         weapon_engaged: false,
+        garrison: Vec::new(),
+        garrison_arrows: 0,
     }
 }
 

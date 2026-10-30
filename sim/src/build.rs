@@ -590,6 +590,72 @@ impl BuildingKind {
         }
     }
 
+    /// Garrison capacity (Castle P3b, GAR-01 — the resolved
+    /// per-building data column, scope 2026-10-29): Town Centers
+    /// hold 15 (the TC is an entity — its capacity lives in
+    /// `crate::TC_GARRISON_CAPACITY`); towers 5; the Castle 20;
+    /// production buildings 10 (production garrison only — entry
+    /// solely as the rally/newly-trained case, GAR-08). `None` =
+    /// not garrisonable at all.
+    pub fn garrison_capacity(self) -> Option<u32> {
+        match self {
+            BuildingKind::WatchTower | BuildingKind::Outpost => Some(5),
+            BuildingKind::Castle => Some(20),
+            BuildingKind::Barracks
+            | BuildingKind::ArcheryRange
+            | BuildingKind::Stable => Some(10),
+            _ => None,
+        }
+    }
+
+    /// Whether this kind's garrison is a DEFENSIVE garrison
+    /// (Castle P3b, GAR-01): units may be ordered inside and may
+    /// re-enter. Production buildings are the other type: eject
+    /// freely, never re-enter (GAR-08).
+    pub fn is_defensive_garrison(self) -> bool {
+        matches!(
+            self,
+            BuildingKind::WatchTower | BuildingKind::Outpost | BuildingKind::Castle
+        )
+    }
+
+    /// Whether this kind's garrison is production-only (GAR-08).
+    pub fn is_production_garrison(self) -> bool {
+        matches!(
+            self,
+            BuildingKind::Barracks | BuildingKind::ArcheryRange | BuildingKind::Stable
+        )
+    }
+
+    /// Whether a unit kind may garrison in this building as a
+    /// DEFENSIVE garrison (Castle P3b, GAR-01): foot units in
+    /// towers; foot + mounted in the Castle. Production buildings
+    /// answer false here — their entry is the rally case, checked
+    /// separately (`garrison_capacity` + the spawn path).
+    pub fn admits_defensive(self, kind: crate::entity::EntityKind) -> bool {
+        match self {
+            BuildingKind::WatchTower | BuildingKind::Outpost => kind.is_foot_garrisonable(),
+            BuildingKind::Castle => {
+                kind.is_foot_garrisonable() || kind.is_mounted_garrisonable()
+            }
+            _ => false,
+        }
+    }
+
+    /// Shelter healing rate inside this building, HP per minute
+    /// (Castle P3b, GAR-04 base): towers 0.1 HP/s = 6/min; the
+    /// Castle 0.2 HP/s = 12/min; production garrisons heal nothing
+    /// ("healing inside other buildings: none" — GAR-04). The Town
+    /// Center's 6/min lives with its weapon/capacity constants in
+    /// lib.rs. Herbal Medicine's ×6 is Castle P5.
+    pub fn garrison_heal_hp_per_min(self) -> i64 {
+        match self {
+            BuildingKind::WatchTower | BuildingKind::Outpost => 6,
+            BuildingKind::Castle => 12,
+            _ => 0,
+        }
+    }
+
     /// A building that must already stand *completed* before this
     /// kind can be placed (BLD-15's chain; study §5): the Archery
     /// Range and the Stable both require a Barracks.
@@ -1029,6 +1095,29 @@ pub const CASTLE_WEAPON: BuildingWeapon = BuildingWeapon {
     volley: 5,
 };
 
+/// The Town Center's weapon (Castle P3b, GAR-06): 5 pierce,
+/// range 6 tiles, RoF 2.0 s — it fires ONLY while the Town Center
+/// holds a garrison, with the GAR-05 arrow count (minimum one
+/// arrow while garrisoned). The flight profile reuses the armed
+/// buildings' adopted constants (the Archer's 21-tick delay, the
+/// PRJ-02/PRJ-04 speed/scatter), the same UNVERIFIED-for-buildings
+/// adoption BLD-18 records. Range is measured from the TC
+/// footprint's edge like every building weapon (PRJ-08's building
+/// form); no minimum range is documented for the TC, so none is
+/// applied. The `volley` field is the ungarrisoned placeholder 1 —
+/// the TC weapon step always looses the stored GAR-05 count.
+pub const TOWN_CENTER_WEAPON: BuildingWeapon = BuildingWeapon {
+    attacks: &[(crate::classes::PIERCE, 5)],
+    range_max: I16F16::from_bits(1_572_864), // 24.0 = 6 tiles
+    range_min: I16F16::ZERO,
+    reload_ticks: 120,                       // 2.0 s
+    attack_delay_ticks: 21,
+    accuracy: 100,
+    projectile_speed: I16F16::from_bits(32_768), // 0.5
+    scatter: I16F16::from_bits(131_072),         // 2.0
+    volley: 1,
+};
+
 /// The Watch Tower's attack table with Fletching researched
 /// (TEC-06's tower line: +1 attack — the pierce component; the
 /// +1 range layers in `Sim::building_weapon`).
@@ -1148,6 +1237,19 @@ pub struct Building {
     /// target (the attack delay applies only to an engagement's
     /// first shot).
     pub weapon_engaged: bool,
+    // --- Castle P3b: garrison state (GAR-01..05) ---
+    /// The entities garrisoned inside this building, in entry order
+    /// (hashed list of entity ids — GAR-01's impl note). Empty for
+    /// non-garrisonable kinds. The Town Center's garrison lives on
+    /// its `TcState` instead (the TC is an entity, BLD-16).
+    pub garrison: Vec<u32>,
+    /// The building's current total arrows per volley (GAR-05):
+    /// recomputed on every garrison change (event, not per tick) —
+    /// base volley + capped extra arrows for armed kinds; 0 for
+    /// unarmed kinds and for an ungarrisoned state on kinds whose
+    /// count is purely the base (towers/Castle store their base
+    /// volley here once computed; see `Sim::recompute_garrison_arrows`).
+    pub garrison_arrows: u32,
 }
 
 impl Building {
@@ -1554,6 +1656,8 @@ mod tests {
             weapon_strike_tick: None,
             weapon_next_tick: 0,
             weapon_engaged: false,
+            garrison: Vec::new(),
+            garrison_arrows: 0,
         };
         assert_eq!(b.progress_frac_bits(), 0);
         b.progress_thirds = 2250; // half of 4500

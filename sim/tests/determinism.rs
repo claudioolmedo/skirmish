@@ -321,11 +321,23 @@ fn golden_hash_regression() {
     // generation draws regenerate the second start's package
     // downstream (the MAP-09 mechanism), so the step is the
     // mapgen change entire, with no other package inside it.
+    //
+    // Castle P3b (2026-10-29, deliberate update):
+    // 607d975bdd71e8eb -> 77bebfe5bb56356b. Step attribution: the
+    // ONLY change entering this scenario is the garrison coverage
+    // in hash_state — the per-building and per-Town-Center
+    // garrison lists and arrow counts (GAR-01/05), written
+    // unconditionally (empty lists and zero counts in this
+    // no-command scenario). Probe: with ONLY those two blocks
+    // disabled, the golden returns to exactly 607d975bdd71e8eb;
+    // every other P3b state (entity garrison flags, bell
+    // snapshots, TC weapon state) is hashed conditionally behind
+    // markers and never enters this scenario.
     let mut sim = Sim::new(42);
     let mut hash = 0;
     for _ in 0..360 {
         hash = sim.tick();
     }
     assert_eq!(sim.tick_count(), 360);
-    assert_eq!(format!("{:016x}", hash), "607d975bdd71e8eb");
+    assert_eq!(format!("{:016x}", hash), "77bebfe5bb56356b");
 }

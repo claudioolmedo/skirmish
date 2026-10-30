@@ -345,6 +345,9 @@ impl Sim {
         // order) — RNG draws for accuracy happen here, after all
         // entity draws, keeping the phase's draw discipline total.
         self.building_weapon_step_all();
+        // Castle P3b (GAR-06): Town Centers fire — only while
+        // garrisoned — after the placed buildings, in TC order.
+        self.tc_weapon_step_all();
         self.projectile_step();
         self.death_sweep();
     }
@@ -374,6 +377,7 @@ impl Sim {
                     || u.kind == EntityKind::Sheep
                     || !u.kind.is_mobile()
                     || !is_player_owner(u.owner)
+                    || u.garrisoned_in.is_some()
                 {
                     continue;
                 }
@@ -754,6 +758,7 @@ impl Sim {
         for idx in 0..self.entities.len() {
             let e = &self.entities[idx];
             if e.dead
+                || e.garrisoned_in.is_some()
                 || !is_player_owner(e.owner)
                 || !matches!(
                     e.kind,
@@ -785,7 +790,7 @@ impl Sim {
             let (px, py) = (e.pos_x, e.pos_y);
             let mut best: Option<(i64, u32)> = None; // (distance² bits, id)
             for t in &self.entities {
-                if t.dead || t.id == e.id {
+                if t.dead || t.id == e.id || t.garrisoned_in.is_some() {
                     continue;
                 }
                 let qualifies = t.kind == EntityKind::Boar
@@ -883,6 +888,9 @@ impl Sim {
     /// their ground (order cleared) and suppress separation (MOV-04).
     fn attack_step(&mut self, idx: usize) {
         let tick = self.tick;
+        if self.entities[idx].garrisoned_in.is_some() {
+            return; // GAR-02: a garrisoned unit does not fight
+        }
         let tid = match self.entities[idx].attack_target {
             Some(t) if !self.entities[idx].dead => t,
             _ => return,
@@ -895,7 +903,7 @@ impl Sim {
             return;
         }
         let ti = match self.entity_index(tid) {
-            Some(i) if !self.entities[i].dead => i,
+            Some(i) if !self.entities[i].dead && self.entities[i].garrisoned_in.is_none() => i,
             _ => {
                 self.entities[idx].clear_combat();
                 return;
@@ -1126,6 +1134,9 @@ impl Sim {
         mishit: bool,
         atk_elev: u8,
     ) {
+        if self.entities[ti].garrisoned_in.is_some() {
+            return; // GAR-02: garrisoned units cannot be damaged
+        }
         // M6: damage reads the target's *effective* armor — Loom's
         // +1/+2 and the Blacksmith armor lines land here (CMB-01
         // against the patched row, TEC-06). M7: the elevation
@@ -1579,6 +1590,7 @@ impl Sim {
                 vi != idx
                     && Some(vi) != primary_unit
                     && !self.entities[vi].dead
+                    && self.entities[vi].garrisoned_in.is_none()
                     && steer::vec_len(
                         self.entities[vi].pos_x - point.0,
                         self.entities[vi].pos_y - point.1,
@@ -1669,7 +1681,7 @@ impl Sim {
         let mut edge_dist: Option<I16F16> = None;
         if let Some(tid) = target_unit {
             match self.entity_index(tid) {
-                Some(ti) if !self.entities[ti].dead => {
+                Some(ti) if !self.entities[ti].dead && self.entities[ti].garrisoned_in.is_none() => {
                     let t = &self.entities[ti];
                     let d = Self::footprint_edge_dist(bx, by, half, t.pos_x, t.pos_y);
                     if d > w.range_max {
@@ -1720,7 +1732,7 @@ impl Sim {
             // huntables never qualify (see the step docs).
             let mut best: Option<(i64, u32, I16F16)> = None;
             for e in &self.entities {
-                if e.dead || e.kind == EntityKind::TownCenter {
+                if e.dead || e.kind == EntityKind::TownCenter || e.garrisoned_in.is_some() {
                     continue;
                 }
                 let hostile_unit = is_player_owner(e.owner) && e.owner != owner;
@@ -1808,13 +1820,20 @@ impl Sim {
             return;
         }
         let b = &self.buildings[bi];
+        // GAR-05: the stored garrison arrow count overrides the
+        // profile's base volley while it is set (towers/Castle).
+        let volley = if b.garrison_arrows > 0 {
+            b.garrison_arrows
+        } else {
+            w.volley
+        };
         if let Some(st) = b.weapon_strike_tick {
             if tick >= st {
-                self.building_weapon_release(bi, &w);
+                self.building_weapon_release(bi, &w, volley);
             }
         } else if tick >= b.weapon_next_tick {
             if b.weapon_engaged {
-                self.building_weapon_release(bi, &w);
+                self.building_weapon_release(bi, &w, volley);
             } else {
                 self.buildings[bi].weapon_strike_tick = Some(tick + w.attack_delay_ticks);
             }
@@ -1828,7 +1847,12 @@ impl Sim {
     /// distance/speed rounded up, and the reload restarts from this
     /// tick even when the shot is skipped because the target has
     /// slipped inside the minimum range (PRJ-08's resolve rule).
-    fn building_weapon_release(&mut self, bi: usize, w: &crate::build::BuildingWeapon) {
+    fn building_weapon_release(
+        &mut self,
+        bi: usize,
+        w: &crate::build::BuildingWeapon,
+        volley: u32,
+    ) {
         let tick = self.tick;
         let b = &self.buildings[bi];
         let (bid, owner, bx, by, size) = (b.id, b.owner, b.pos_x, b.pos_y, b.kind.footprint_size());
@@ -1837,7 +1861,7 @@ impl Sim {
         let resolved = if let Some(tid) = b.weapon_target {
             self.entity_index(tid).and_then(|ti| {
                 let t = &self.entities[ti];
-                if t.dead {
+                if t.dead || t.garrisoned_in.is_some() {
                     None
                 } else {
                     Some((
@@ -1900,7 +1924,7 @@ impl Sim {
         // per-projectile RNG, so SIM-04's draw discipline is
         // untouched; a future sub-100 building weapon would draw
         // per projectile here, in volley order.
-        for _ in 0..w.volley.max(1) {
+        for _ in 0..volley.max(1) {
             self.projectiles.push(Projectile {
                 spawn_x: bx,
                 spawn_y: by,
@@ -1912,6 +1936,267 @@ impl Sim {
                 intended_building,
                 attacker: crate::build::BUILDING_ATTACKER_ID,
                 attacker_building: Some(bid),
+                owner,
+                attacker_elev: self.height_at_world(bx, by),
+                attacks: w.attacks.to_vec(),
+            });
+        }
+    }
+
+    /// GAR-06 (Castle P3b): every Town Center's weapon tick, in
+    /// TC order — after the placed buildings' weapon steps.
+    fn tc_weapon_step_all(&mut self) {
+        let tc_ids: Vec<u32> = self.tc_states.iter().map(|s| s.tc_id).collect();
+        for tc in tc_ids {
+            self.tc_weapon_step(tc);
+        }
+    }
+
+    /// GAR-06: one Town Center's weapon tick. The TC fires ONLY
+    /// while it holds a garrison (GAR-06); its arrow count is the
+    /// stored GAR-05 total (minimum one while garrisoned — the
+    /// recompute guarantees it). Acquisition and the firing
+    /// discipline mirror the placed buildings' step (CMB-08 chain,
+    /// CMB-04/05 delay/reload), with range measured from the TC
+    /// footprint's edge and no minimum range.
+    fn tc_weapon_step(&mut self, tc: u32) {
+        let tick = self.tick;
+        let si = match self.tc_states.iter().position(|s| s.tc_id == tc) {
+            Some(si) => si,
+            None => return,
+        };
+        let ei = match self.entity_index(tc) {
+            Some(ei) if !self.entities[ei].dead => ei,
+            _ => return,
+        };
+        let (owner, bx, by) = {
+            let e = &self.entities[ei];
+            (e.owner, e.pos_x, e.pos_y)
+        };
+        let half = I16F16::from_num(8); // the TC's 4x4 footprint
+        if self.tc_states[si].garrison.is_empty() {
+            // No garrison, no fire — and no held engagement.
+            let st = &mut self.tc_states[si];
+            st.weapon_target = None;
+            st.weapon_target_building = None;
+            st.weapon_strike_tick = None;
+            st.weapon_engaged = false;
+            return;
+        }
+        let w = crate::TOWN_CENTER_WEAPON;
+
+        // --- validate the standing target -------------------------
+        let mut target_unit = self.tc_states[si].weapon_target;
+        let mut target_bld = self.tc_states[si].weapon_target_building;
+        let mut edge_dist: Option<I16F16> = None;
+        if let Some(tid) = target_unit {
+            match self.entity_index(tid) {
+                Some(ti)
+                    if !self.entities[ti].dead
+                        && self.entities[ti].garrisoned_in.is_none() =>
+                {
+                    let t = &self.entities[ti];
+                    let d = Self::footprint_edge_dist(bx, by, half, t.pos_x, t.pos_y);
+                    if d > w.range_max {
+                        target_unit = None;
+                    } else {
+                        edge_dist = Some(d);
+                    }
+                }
+                _ => target_unit = None,
+            }
+        }
+        if target_unit.is_none() {
+            if let Some(tbid) = target_bld {
+                match self.building_index(tbid) {
+                    Some(tbi) => {
+                        let tb = &self.buildings[tbi];
+                        let thalf =
+                            I16F16::from_num(tb.kind.footprint_size() as i32 * 2);
+                        let dx = ((tb.pos_x - bx).abs() - (half + thalf)).max(I16F16::ZERO);
+                        let dy = ((tb.pos_y - by).abs() - (half + thalf)).max(I16F16::ZERO);
+                        let d = steer::vec_len(dx, dy);
+                        if d > w.range_max {
+                            target_bld = None;
+                        } else {
+                            edge_dist = Some(d);
+                        }
+                    }
+                    None => target_bld = None,
+                }
+            }
+        }
+        if target_unit.is_none() && target_bld.is_none() {
+            if self.tc_states[si].weapon_target.is_some()
+                || self.tc_states[si].weapon_target_building.is_some()
+            {
+                let st = &mut self.tc_states[si];
+                st.weapon_target = None;
+                st.weapon_target_building = None;
+                st.weapon_strike_tick = None;
+                st.weapon_engaged = false;
+            }
+            // --- acquire (the CMB-08 chain, as for towers) -------
+            let mut best: Option<(i64, u32, I16F16)> = None;
+            for e in &self.entities {
+                if e.dead || e.kind == EntityKind::TownCenter || e.garrisoned_in.is_some() {
+                    continue;
+                }
+                let hostile_unit = is_player_owner(e.owner) && e.owner != owner;
+                if !hostile_unit && e.kind != EntityKind::Boar {
+                    continue;
+                }
+                if e.kind == EntityKind::Sheep || e.kind == EntityKind::Deer {
+                    continue;
+                }
+                let d = Self::footprint_edge_dist(bx, by, half, e.pos_x, e.pos_y);
+                if d > w.range_max {
+                    continue;
+                }
+                let key = d.to_bits() as i64 * (d.to_bits() as i64);
+                let better = match best {
+                    None => true,
+                    Some((bd, bid2, _)) => (key, e.id) < (bd, bid2),
+                };
+                if better {
+                    best = Some((key, e.id, d));
+                }
+            }
+            if let Some((_, id, d)) = best {
+                target_unit = Some(id);
+                edge_dist = Some(d);
+            } else {
+                for e in &self.entities {
+                    if e.dead || e.kind != EntityKind::TownCenter {
+                        continue;
+                    }
+                    if !is_player_owner(e.owner) || e.owner == owner {
+                        continue;
+                    }
+                    let d = Self::footprint_edge_dist(bx, by, half, e.pos_x, e.pos_y);
+                    if d <= w.range_max {
+                        target_unit = Some(e.id);
+                        edge_dist = Some(d);
+                        break;
+                    }
+                }
+            }
+            if target_unit.is_none() {
+                let mut bestb: Option<(i64, u32, I16F16)> = None;
+                for ob in &self.buildings {
+                    if ob.owner == owner || ob.kind == BuildingKind::Farm {
+                        continue;
+                    }
+                    let thalf = I16F16::from_num(ob.kind.footprint_size() as i32 * 2);
+                    let dx = ((ob.pos_x - bx).abs() - (half + thalf)).max(I16F16::ZERO);
+                    let dy = ((ob.pos_y - by).abs() - (half + thalf)).max(I16F16::ZERO);
+                    let d = steer::vec_len(dx, dy);
+                    if d > w.range_max {
+                        continue;
+                    }
+                    let key = d.to_bits() as i64 * (d.to_bits() as i64);
+                    let better = match bestb {
+                        None => true,
+                        Some((bd, bid2, _)) => (key, ob.id) < (bd, bid2),
+                    };
+                    if better {
+                        bestb = Some((key, ob.id, d));
+                    }
+                }
+                if let Some((_, id, d)) = bestb {
+                    target_bld = Some(id);
+                    edge_dist = Some(d);
+                }
+            }
+            if target_unit.is_some() || target_bld.is_some() {
+                let st = &mut self.tc_states[si];
+                st.weapon_target = target_unit;
+                st.weapon_target_building = target_bld;
+            }
+        }
+
+        // --- the firing discipline (CMB-04/05) --------------------
+        let Some(_d) = edge_dist else { return };
+        let st = &self.tc_states[si];
+        if let Some(stk) = st.weapon_strike_tick {
+            if tick >= stk {
+                self.tc_weapon_release(tc, &w);
+            }
+        } else if tick >= st.weapon_next_tick {
+            if st.weapon_engaged {
+                self.tc_weapon_release(tc, &w);
+            } else {
+                self.tc_states[si].weapon_strike_tick = Some(tick + w.attack_delay_ticks);
+            }
+        }
+    }
+
+    /// Loose the Town Center's garrison arrows at its standing
+    /// target (GAR-06): the GAR-05 stored count of ordinary
+    /// projectiles, attributed to the TC's owner with no shooting
+    /// building (the TC is an entity; `attacker_building` stays
+    /// None and the kill credit rides the projectile's owner).
+    fn tc_weapon_release(&mut self, tc: u32, w: &crate::build::BuildingWeapon) {
+        let tick = self.tick;
+        let si = match self.tc_states.iter().position(|s| s.tc_id == tc) {
+            Some(si) => si,
+            None => return,
+        };
+        let ei = match self.entity_index(tc) {
+            Some(ei) if !self.entities[ei].dead => ei,
+            _ => return,
+        };
+        let (owner, bx, by) = {
+            let e = &self.entities[ei];
+            (e.owner, e.pos_x, e.pos_y)
+        };
+        let half = I16F16::from_num(8);
+        let st = &self.tc_states[si];
+        let resolved = if let Some(tid) = st.weapon_target {
+            self.entity_index(tid).and_then(|ti| {
+                let t = &self.entities[ti];
+                if t.dead || t.garrisoned_in.is_some() {
+                    None
+                } else {
+                    Some(((t.pos_x, t.pos_y), Some(tid), None))
+                }
+            })
+        } else if let Some(tbid) = st.weapon_target_building {
+            self.building_index(tbid).map(|tbi| {
+                let tb = &self.buildings[tbi];
+                ((tb.pos_x, tb.pos_y), None, Some(tbid))
+            })
+        } else {
+            None
+        };
+        let Some((aim, intended, intended_building)) = resolved else {
+            return;
+        };
+        let arrows = self.tc_states[si].garrison_arrows.max(1);
+        {
+            let st = &mut self.tc_states[si];
+            st.weapon_strike_tick = None;
+            st.weapon_next_tick = tick + w.reload_ticks;
+            st.weapon_engaged = true;
+        }
+        let _ = half;
+        // Accuracy 100 (the TC profile): no RNG draw, as with the
+        // armed buildings.
+        let dist_bits = steer::vec_len(aim.0 - bx, aim.1 - by).to_bits() as i64;
+        let speed_bits = w.projectile_speed.to_bits() as i64;
+        let flight = ((dist_bits + speed_bits - 1) / speed_bits).max(1) as u64;
+        for _ in 0..arrows {
+            self.projectiles.push(Projectile {
+                spawn_x: bx,
+                spawn_y: by,
+                impact_x: aim.0,
+                impact_y: aim.1,
+                spawn_tick: tick,
+                impact_tick: tick + flight,
+                intended,
+                intended_building,
+                attacker: crate::build::BUILDING_ATTACKER_ID,
+                attacker_building: None,
                 owner,
                 attacker_elev: self.height_at_world(bx, by),
                 attacks: w.attacks.to_vec(),
@@ -1975,6 +2260,9 @@ impl Sim {
             Some(bi) => bi,
             None => return,
         };
+        // GAR-03 (Castle P3b): the garrison ejects unharmed beside
+        // the building before the record is removed.
+        self.eject_host(crate::entity::GarrisonRef::Building(bid));
         let b = self.buildings.remove(bi);
         if b.kind.blocks_footprint() {
             for (cx, cy) in b.footprint_cells() {
@@ -2049,7 +2337,7 @@ impl Sim {
         }
         if let Some(tid) = p.intended {
             if let Some(ti) = self.entity_index(tid) {
-                if !self.entities[ti].dead {
+                if !self.entities[ti].dead && self.entities[ti].garrisoned_in.is_none() {
                     let tspec = units::spec(self.entities[ti].kind);
                     let d = steer::vec_len(
                         self.entities[ti].pos_x - p.impact_x,
@@ -2065,7 +2353,11 @@ impl Sim {
         // Mishit scan, ascending id: no friendly fire (archer flag).
         for ti in 0..self.entities.len() {
             let e = &self.entities[ti];
-            if e.dead || e.kind == EntityKind::TownCenter || e.owner == p.owner {
+            if e.dead
+                || e.kind == EntityKind::TownCenter
+                || e.owner == p.owner
+                || e.garrisoned_in.is_some()
+            {
                 continue;
             }
             let tspec = units::spec(e.kind);
@@ -2083,6 +2375,16 @@ impl Sim {
     /// the villager credited with the kill starts harvesting it.
     fn death_sweep(&mut self) {
         for idx in 0..self.entities.len() {
+            // GAR-03 (Castle P3b): a dying Town Center ejects its
+            // garrison unharmed beside it, like a destroyed building
+            // (before the immutable borrow below is taken).
+            if !self.entities[idx].dead
+                && self.entities[idx].hp < I16F16::from_num(1)
+                && self.entities[idx].kind == EntityKind::TownCenter
+            {
+                let tc_id = self.entities[idx].id;
+                self.eject_host(crate::entity::GarrisonRef::TownCenter(tc_id));
+            }
             let e = &self.entities[idx];
             if e.dead || e.hp >= I16F16::from_num(1) {
                 continue;

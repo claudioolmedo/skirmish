@@ -1751,6 +1751,8 @@ mod tests {
             weapon_strike_tick: None,
             weapon_next_tick: 0,
             weapon_engaged: false,
+            garrison: Vec::new(),
+            garrison_arrows: 0,
         }
     }
 

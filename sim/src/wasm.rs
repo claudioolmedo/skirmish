@@ -188,6 +188,98 @@ impl WasmSim {
         ok
     }
 
+    /// Order a unit to garrison in an own placed defensive
+    /// building (Castle P3b, GAR-01/SEL-11): it walks there and
+    /// enters on arrival. Returns whether the order *would* be
+    /// accepted against the current state.
+    pub fn push_garrison_building(&mut self, entity: u32, building: u32) -> bool {
+        let ok = self.inner.can_garrison_building(entity, building);
+        if ok {
+            self.inner
+                .push_command(Command::GarrisonBuilding { entity, building });
+        }
+        ok
+    }
+
+    /// Order a unit to garrison in an own Town Center (Castle P3b,
+    /// GAR-01/SEL-11). See `push_garrison_building`.
+    pub fn push_garrison_tc(&mut self, entity: u32, tc: u32) -> bool {
+        let ok = self.inner.can_garrison_tc(entity, tc);
+        if ok {
+            self.inner.push_command(Command::GarrisonTc { entity, tc });
+        }
+        ok
+    }
+
+    /// Voluntarily ungarrison a placed building (Castle P3b,
+    /// GAR-03): every unit inside is placed at the exit point,
+    /// idle. Returns whether anyone was inside.
+    pub fn push_ungarrison_building(&mut self, building: u32) -> bool {
+        let ok = self.inner.garrison_count_building(building) > 0;
+        if ok {
+            self.inner
+                .push_command(Command::UngarrisonBuilding { building });
+        }
+        ok
+    }
+
+    /// Voluntarily ungarrison a Town Center (Castle P3b, GAR-03).
+    pub fn push_ungarrison_tc(&mut self, tc: u32) -> bool {
+        let ok = self.inner.garrison_count_tc(tc) > 0;
+        if ok {
+            self.inner.push_command(Command::UngarrisonTc { tc });
+        }
+        ok
+    }
+
+    /// Ring a Town Center's Town Bell (Castle P3b, GAR-07): the
+    /// first ring shelters nearby villagers; the second sends them
+    /// back to their snapshotted work. Returns whether the TC can
+    /// ring.
+    pub fn push_town_bell(&mut self, tc: u32) -> bool {
+        let ok = self.inner.can_town_bell(tc);
+        if ok {
+            self.inner.push_command(Command::TownBell { tc });
+        }
+        ok
+    }
+
+    /// Entities garrisoned in a placed building (GAR-01).
+    pub fn building_garrison_count(&self, building: u32) -> u32 {
+        self.inner.garrison_count_building(building)
+    }
+
+    /// A placed building's current total arrows per volley (GAR-05).
+    pub fn building_garrison_arrows(&self, building: u32) -> u32 {
+        self.inner.garrison_arrows_building(building)
+    }
+
+    /// Entities garrisoned in a Town Center (GAR-01).
+    pub fn tc_garrison_count(&self, tc: u32) -> u32 {
+        self.inner.garrison_count_tc(tc)
+    }
+
+    /// A Town Center's current arrow total (GAR-05/06).
+    pub fn tc_garrison_arrows(&self, tc: u32) -> u32 {
+        self.inner.garrison_arrows_tc(tc)
+    }
+
+    /// Whether a Town Center's bell is currently rung (GAR-07).
+    pub fn tc_bell_active(&self, tc: u32) -> bool {
+        self.inner.tc_bell_active(tc)
+    }
+
+    /// Per-entity garrison flags (GAR-02): 1 while the entity is
+    /// garrisoned inside a building or Town Center (the renderer
+    /// hides those entities — they are out of the field).
+    pub fn entity_garrisoned(&self) -> Vec<u8> {
+        self.inner
+            .entities()
+            .iter()
+            .map(|e| u8::from(e.garrisoned_in.is_some()))
+            .collect()
+    }
+
     /// Enqueue a Militia at a completed Barracks (M3). Returns
     /// whether the order *would* be accepted (queue room + funds);
     /// the cost is deducted when the command is applied next tick.
