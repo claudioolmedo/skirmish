@@ -83,6 +83,25 @@ impl WasmSim {
         }
     }
 
+    /// NET-09: serialize the full sim state as a save file
+    /// (magic + version + body + the state's SIM-05 hash — see
+    /// `Sim::save_game`). The client offers this in the pause
+    /// menu as a download; no renderer state is included.
+    pub fn save_game(&self) -> Vec<u8> {
+        self.inner.save_game()
+    }
+
+    /// NET-09: rebuild a sim from `save_game`'s bytes. Returns
+    /// `None` (JS `undefined`) for anything that is not an intact
+    /// save of a known version — the sim verifies the restored
+    /// state's hash against the file's trailer before accepting
+    /// it. The restored sim re-enters lockstep from the saved
+    /// tick, exactly as if the match had never paused.
+    #[wasm_bindgen]
+    pub fn load_game(bytes: &[u8]) -> Option<WasmSim> {
+        Sim::load_game(bytes).map(|inner| WasmSim { inner })
+    }
+
     /// The match mode this sim was created with (M5): 0 sandbox,
     /// 1 AI Easy, 2 AI Normal.
     pub fn mode(&self) -> u32 {

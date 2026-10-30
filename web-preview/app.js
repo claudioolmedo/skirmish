@@ -5478,6 +5478,82 @@ function currentReplay() {
   return null;
 }
 
+/// NET-09: download the current sim state as a .sk2save file —
+/// the pause menu's Save game button. The bytes are the sim's
+/// own serialization (Sim::save_game): the full state plus its
+/// verifying hash, no renderer data. Local matches only: an
+/// online match belongs to two clients at once, and its restore
+/// path is rejoin (re-simulation), not a snapshot.
+function downloadSave() {
+  if (!sim || playback || builtMode === 'online') {
+    flash(t('flash.saveUnavailable'));
+    return;
+  }
+  const blob = new Blob([sim.save_game()], { type: 'application/octet-stream' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `skirmish2-save-tick${sim.tick_count()}.sk2save`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  flash(t('flash.gameSaved'));
+}
+
+/// NET-09: adopt a restored sim as THE match (the pause menu's
+/// Load): the same per-match client resets resetSim performs,
+/// for a sim that arrives whole from a save file instead of
+/// being built from a seed. The save carries no command stream,
+/// so the restored match has no replay to download
+/// (localRecorder stays null, exactly like an online match) —
+/// the game itself continues from the saved tick, bit-identical
+/// to the match that was saved.
+function adoptLoadedSim(loaded) {
+  const tag = loaded.mode();
+  const mode = tag === 1 ? 'easy' : tag === 2 ? 'normal' : 'sandbox';
+  matchMode = mode;
+  builtMode = mode;
+  matchEnded = false;
+  endOverlay.style.display = 'none';
+  localOwner = 0; // a loaded save is always played from the first seat
+  playback = null;
+  if (typeof netUi !== 'undefined' && netUi && netUi.playbackBar) {
+    netUi.playbackBar.hidden = true;
+  }
+  sim = loaded;
+  localRecorder = null;
+  // The pause menu's mode radios must agree with the loaded
+  // match — Restart applies the checked one.
+  for (const inp of modeInputs) inp.checked = inp.value === mode;
+  seenBuildings.clear(); // last-known enemy buildings are per-match
+  resetEventFeed();
+  resetAudioWorldState();
+  refreshWorldLayers();
+  vilAnim.clear();
+  prevPos.clear();
+  lastNodeKind.clear();
+  carryKind.clear();
+  atNodeNow.clear();
+  archerShoot.clear();
+  seenProjKeys.clear();
+  for (const k of Object.keys(UNIT_POSE_STATE)) delete UNIT_POSE_STATE[k];
+  selectUnits(new Set()); // also clears any building selection
+  placement = null;
+  controlGroups.clear();
+  groupTaps.reset();
+  idleCycleVil = -1;
+  idleCycleMil = -1;
+
+  // Camera: centered on the Town Center, like a fresh match.
+  const kinds = sim.entity_kinds();
+  const pos = sim.positions();
+  const tc = kinds.indexOf(KIND_TC);
+  myTcId = tc;
+  camS = INITIAL_S;
+  const [ox, oy] = centerCamera(
+    pos[tc * 2], pos[tc * 2 + 1], camS, canvas.width, canvas.height);
+  camOx = ox;
+  camOy = oy;
+}
+
 // --- i18n: static strings + the language switch -------------------
 // applyStaticStrings re-voices every static element of the page
 // from the string table (play/i18n.js). applyLocale is the ONE
@@ -5560,6 +5636,8 @@ function applyStaticStrings() {
   setText('btn-resign', 'pause.resign');
   setText('btn-download-replay', 'end.downloadReplay');
   setText('btn-watch-replay', 'pause.watchReplay');
+  setText('btn-save-game', 'pause.saveGame');
+  setText('btn-load-game', 'pause.loadGame');
   setAttr('mode-row', 'aria-label', 'pause.matchMode');
   setText('mode-sandbox-txt', 'mode.sandbox');
   setText('mode-easy-txt', 'mode.aiEasy');
@@ -6192,6 +6270,40 @@ async function main() {
         startPlayback(rec);
       } catch {
         flash(t('flash.notReplay'));
+      }
+    });
+  }
+  // NET-09: pause-menu Save / Load (local matches — see
+  // downloadSave). Load refuses anything the sim's own verifier
+  // refuses, a two-player save (its restore path is the online
+  // rejoin), and any load attempted over a live online match or
+  // a replay playback.
+  const saveBtn = document.getElementById('btn-save-game');
+  if (saveBtn) {
+    saveBtn.addEventListener('click', () => downloadSave());
+  }
+  const saveFile = document.getElementById('save-file');
+  if (saveFile) {
+    saveFile.addEventListener('change', async () => {
+      enterGameCapture();
+      const f = saveFile.files && saveFile.files[0];
+      saveFile.value = '';
+      if (!f) return;
+      try {
+        if (playback || (net && net.session && net.phase === 'playing')) {
+          throw new Error('busy');
+        }
+        const loaded = WasmSim.load_game(new Uint8Array(await f.arrayBuffer()));
+        if (!loaded || loaded.mode() === 3) throw new Error('not a save');
+        setPaused(false);
+        adoptLoadedSim(loaded);
+        setInMatch(true);
+        playing = true;
+        flash(t('flash.gameLoaded'));
+      } catch (err) {
+        flash(t(err && err.message === 'busy'
+          ? 'flash.saveUnavailable'
+          : 'flash.notSave'));
       }
     });
   }
@@ -11892,6 +12004,21 @@ function draw() {
       if (hgt > 0) {
         // The step: the level below shows as a darker tread.
         diamond(cx, cy + ELEV_LIFT * camS, hw, hh, shade(base, -0.25));
+        // MAP-07: a cliff face — a neighbor CLIFF_STEP (3) or
+        // more levels lower — stacks a darker tread per level
+        // down toward the low ground, so the sheer drop reads
+        // as a rock face instead of a floating step. Gentle
+        // steps (≤ 2) draw exactly as before.
+        let lowN = hgt;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = gx + dx, ny = gy + dy;
+          if (nx >= 0 && ny >= 0 && nx < GW && ny < GH) {
+            lowN = Math.min(lowN, HEIGHTS[ny * GW + nx]);
+          }
+        }
+        for (let k = 2; k <= hgt - lowN - 1; k++) {
+          diamond(cx, cy + k * ELEV_LIFT * camS, hw, hh, shade(base, -0.25 - 0.08 * (k - 1)));
+        }
         diamond(cx, cy, hw, hh, shade(base, hgt * 0.09));
       } else {
         diamond(cx, cy, hw, hh, base);

@@ -107,6 +107,12 @@ impl Market {
         self.rates
     }
 
+    /// Rebuild the rates from a saved triple (NET-09
+    /// save/restore — the inverse of `rates`).
+    pub fn from_rates(rates: [i32; 3]) -> Self {
+        Market { rates }
+    }
+
     /// What a player receives for selling one lot of `resource`
     /// right now.
     pub fn sell_price(&self, resource: ResourceKind) -> i32 {

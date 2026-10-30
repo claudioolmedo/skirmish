@@ -333,11 +333,23 @@ fn golden_hash_regression() {
     // every other P3b state (entity garrison flags, bell
     // snapshots, TC weapon state) is hashed conditionally behind
     // markers and never enters this scenario.
+    //
+    // Package L (2026-10-30, deliberate update):
+    // 77bebfe5bb56356b -> 3e199a9573417af3. Step attribution: the
+    // ONLY change entering this scenario is MAP-07's authored
+    // cliff line on the generated map — seed 42's height field
+    // gains the cliff shelf and its mirror, and heights are
+    // hashed world state. Probe: with ONLY `author_cliffs`
+    // disabled in mapgen, the golden returns to exactly
+    // 77bebfe5bb56356b. Nothing else in the package enters this
+    // scenario: no commands are issued (the movement cliff guard
+    // and the CMB-01 across-cliff default never fire on an idle
+    // map), and NET-09's save format is not hash coverage.
     let mut sim = Sim::new(42);
     let mut hash = 0;
     for _ in 0..360 {
         hash = sim.tick();
     }
     assert_eq!(sim.tick_count(), 360);
-    assert_eq!(format!("{:016x}", hash), "77bebfe5bb56356b");
+    assert_eq!(format!("{:016x}", hash), "3e199a9573417af3");
 }

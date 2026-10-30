@@ -59,6 +59,7 @@ mod hash;
 mod mapgen;
 mod market;
 mod rng;
+mod save;
 mod steer;
 mod tech;
 mod units;
@@ -3961,6 +3962,27 @@ impl Sim {
                 } else {
                     (ox, oy)
                 };
+                // MAP-07: continuous movement may not cross a cliff
+                // border either — steering and the separation shove
+                // can push a unit sideways across a border its A*
+                // path would never cross, which would silently
+                // unseal the face. Same axis-slide shape as the
+                // tree rule: the full move, then each axis alone,
+                // else the unit holds its ground this tick.
+                let crosses_cliff = |x: I16F16, y: I16F16| {
+                    let a = grid.world_to_cell(ox, oy);
+                    let b = grid.world_to_cell(x, y);
+                    a != b && grid.move_crosses_cliff(a, b)
+                };
+                let (fx, fy) = if !crosses_cliff(fx, fy) {
+                    (fx, fy)
+                } else if !crosses_cliff(fx, oy) {
+                    (fx, oy)
+                } else if !crosses_cliff(ox, fy) {
+                    (ox, fy)
+                } else {
+                    (ox, oy)
+                };
                 e.pos_x = fx;
                 e.pos_y = fy;
             }
@@ -5368,6 +5390,20 @@ impl Sim {
             }
         }
         let cells = build::footprint_cells(ax, ay, size);
+        // MAP-07: a footprint may not straddle a cliff border —
+        // the reference game refuses foundations on a cliff edge,
+        // and a building spanning the face would stand on two
+        // levels at once (and offer its garrison an exit on the
+        // far side). Only borders *between footprint cells* are
+        // tested; a building may stand flush against a face.
+        for &(cx, cy) in &cells {
+            for (dx, dy) in [(1u32, 0u32), (0u32, 1u32)] {
+                let (nx, ny) = (cx + dx, cy + dy);
+                if cells.contains(&(nx, ny)) && self.grid.is_cliff_between(cx, cy, nx, ny) {
+                    return BuildVerdict::Reject;
+                }
+            }
+        }
         for &(cx, cy) in &cells {
             // Walls and already-blocking buildings.
             if self.grid.is_blocked(cx, cy) {

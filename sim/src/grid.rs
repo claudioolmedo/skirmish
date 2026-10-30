@@ -41,6 +41,15 @@ pub const TERRAIN_WATER: u8 = 1;
 /// reference's per-tile height byte has 7 levels; Skirmish's Arabia
 /// hills use 0..=4 — see `mapgen`).
 pub const MAX_HEIGHT: u8 = 4;
+/// MAP-07: a height step of this many levels or more between two
+/// cells is a *cliff* — a discontinuous elevation break that land
+/// units can never cross, whatever the heights on either side.
+/// Generator hills step by at most 2 between neighbors, so every
+/// step of `CLIFF_STEP` or more is an authored cliff border (see
+/// `mapgen::author_cliffs`); the sim derives cliffness from the
+/// height layer alone, which is already hashed state, so a cliff
+/// needs no layer of its own.
+pub const CLIFF_STEP: u8 = 3;
 
 /// A* step costs: orthogonal = 10, diagonal = 14 (≈ 10·√2, integer).
 const COST_ORTHO: i64 = 10;
@@ -60,8 +69,9 @@ pub struct Grid {
     /// row-major. Set once by the generator; never changes in play.
     terrain: Vec<u8>,
     /// Per-cell elevation level, 0..=`MAX_HEIGHT`, row-major.
-    /// Data only (MAP-06's combat factor reads it); it never gates
-    /// movement — AoE elevation does not slow or block land units.
+    /// MAP-06's combat factor reads it; gentle elevation never
+    /// slows or blocks land units — only a discontinuous step
+    /// (MAP-07's cliff, `CLIFF_STEP` or more) gates movement.
     height: Vec<u8>,
     /// Cells blocked by a live tree node (MAP-04), row-major 0/1.
     /// Set at generation / farm growth, cleared the moment the tree
@@ -180,6 +190,80 @@ impl Grid {
         }
         let i = Self::idx(x, y);
         self.height[i] = level;
+    }
+
+    /// MAP-07: whether the border between two cells is a cliff —
+    /// the height changes discontinuously across it (a step of
+    /// `CLIFF_STEP` levels or more). Symmetric in its arguments;
+    /// meaningful for any pair, used with adjacent ones.
+    pub fn is_cliff_between(&self, ax: u32, ay: u32, bx: u32, by: u32) -> bool {
+        self.height_at(ax, ay).abs_diff(self.height_at(bx, by)) >= CLIFF_STEP
+    }
+
+    /// MAP-07: whether a direct step from cell `a` to an adjacent
+    /// cell `b` (orthogonal or diagonal) crosses a cliff border.
+    /// An orthogonal step crosses exactly when its own border is a
+    /// cliff. A diagonal step is barred when the diagonal pair is
+    /// itself a cliff or when any of the four side borders around
+    /// the shared corner is one — the corner of a cliff face is
+    /// still the face, so a path may not slip diagonally around
+    /// the end cell of a cliff line.
+    pub fn move_crosses_cliff(&self, a: (u32, u32), b: (u32, u32)) -> bool {
+        if a == b {
+            return false;
+        }
+        if self.is_cliff_between(a.0, a.1, b.0, b.1) {
+            return true;
+        }
+        let dx = b.0 as i32 - a.0 as i32;
+        let dy = b.1 as i32 - a.1 as i32;
+        if dx != 0 && dy != 0 {
+            let o1 = ((a.0 as i32 + dx) as u32, a.1);
+            let o2 = (a.0, (a.1 as i32 + dy) as u32);
+            return self.is_cliff_between(a.0, a.1, o1.0, o1.1)
+                || self.is_cliff_between(a.0, a.1, o2.0, o2.1)
+                || self.is_cliff_between(b.0, b.1, o1.0, o1.1)
+                || self.is_cliff_between(b.0, b.1, o2.0, o2.1);
+        }
+        false
+    }
+
+    /// MAP-07: whether the straight segment between two world
+    /// points crosses any cliff border. Sampled at one-world-unit
+    /// steps (a quarter cell), so consecutive samples sit in the
+    /// same or an adjacent cell and every border the segment
+    /// crosses is tested with `move_crosses_cliff` — the same
+    /// predicate pathing obeys. Fixed-point throughout, so the
+    /// answer is identical on every platform. CMB-01's
+    /// across-cliff default reads this (a shot or strike whose
+    /// line crosses a cliff face).
+    pub fn segment_crosses_cliff(&self, from: (I16F16, I16F16), to: (I16F16, I16F16)) -> bool {
+        let mut prev = self.world_to_cell(from.0, from.1);
+        if prev == self.world_to_cell(to.0, to.1) {
+            return false;
+        }
+        let dx = to.0 - from.0;
+        let dy = to.1 - from.1;
+        // One step per world unit of the dominant axis: each step
+        // moves at most one unit per axis (a quarter cell), so no
+        // cell border can be skipped over.
+        let steps = dx.abs().max(dy.abs()).to_num::<i32>().max(1);
+        let step_x = dx / I16F16::from_num(steps);
+        let step_y = dy / I16F16::from_num(steps);
+        for i in 1..=steps {
+            let p = (
+                from.0 + step_x * I16F16::from_num(i),
+                from.1 + step_y * I16F16::from_num(i),
+            );
+            let cell = self.world_to_cell(p.0, p.1);
+            if cell != prev {
+                if self.move_crosses_cliff(prev, cell) {
+                    return true;
+                }
+                prev = cell;
+            }
+        }
+        false
     }
 
     /// Whether a live tree blocks this cell (the node-block layer
@@ -399,6 +483,12 @@ impl Grid {
                 if self.is_blocked(nx, ny) {
                     continue;
                 }
+                // MAP-07: a cliff border is impassable — the step
+                // may not cross one, diagonally included (the
+                // corner rule inside `move_crosses_cliff`).
+                if self.move_crosses_cliff((cx, cy), (nx, ny)) {
+                    continue;
+                }
                 // Corner cutting: a diagonal step is barred by a
                 // HARD corner — water or a building on either
                 // orthogonal neighbor. A tree is not a wall, it is
@@ -532,5 +622,76 @@ mod tests {
         let b = g.find_path(from, to);
         assert_eq!(a, b);
         assert!(a.is_some());
+    }
+
+    /// A hand-built cliff shelf: row 40 at height 4, row 41 at
+    /// height 1 (a step of 3 across the whole map width), gentle
+    /// ramps elsewhere. MAP-07's predicates and pathing seals.
+    fn cliff_grid() -> Grid {
+        let mut g = Grid::new();
+        for x in 0..GRID_DIM {
+            g.set_height(x, 40, 4);
+            g.set_height(x, 41, 1);
+        }
+        g
+    }
+
+    #[test]
+    fn cliff_predicates_match_map_07() {
+        let g = cliff_grid();
+        // The 4|1 border is a cliff; gentle borders are not.
+        assert!(g.is_cliff_between(60, 40, 60, 41));
+        assert!(g.is_cliff_between(60, 41, 60, 40), "symmetric");
+        assert!(!g.is_cliff_between(60, 41, 60, 42));
+        // The fixture's default-0 row against the height-4 shelf
+        // is a step of 4 — also a cliff.
+        assert!(g.is_cliff_between(60, 39, 60, 40));
+        // A step of exactly 2 never is; exactly 3 always is.
+        let mut g2 = Grid::new();
+        g2.set_height(10, 10, 2);
+        assert!(!g2.is_cliff_between(10, 10, 11, 10));
+        g2.set_height(10, 10, 3);
+        assert!(g2.is_cliff_between(10, 10, 11, 10));
+        // Orthogonal crossing predicate.
+        assert!(g.move_crosses_cliff((60, 40), (60, 41)));
+        assert!(!g.move_crosses_cliff((60, 41), (60, 42)));
+        // Diagonal around the cliff corner: from the plateau cell
+        // (60,40) diagonally to (61,41) — the side border into
+        // (60,41) is the face, so the diagonal is barred.
+        assert!(g.move_crosses_cliff((60, 40), (61, 41)));
+        assert!(g.move_crosses_cliff((61, 41), (60, 40)), "both directions");
+        // A diagonal wholly on gentle ground is free.
+        assert!(!g.move_crosses_cliff((60, 41), (61, 42)));
+    }
+
+    #[test]
+    fn astar_never_crosses_a_cliff() {
+        let g = cliff_grid();
+        // The shelf spans the whole width: no path from below to
+        // above exists at all.
+        let from = g.cell_center(60, 60);
+        let to = g.cell_center(60, 30);
+        assert!(g.find_path(from, to).is_none(), "cliff must seal the shelf");
+        // Same-side travel is unaffected.
+        let along = g.find_path(g.cell_center(20, 60), g.cell_center(100, 60));
+        assert!(along.is_some());
+        // A path right up to the face stops on its own side: order
+        // the cell just across the border; A* must refuse (the
+        // goal cell itself is open land — only the border seals).
+        assert!(g.find_path(g.cell_center(60, 41), g.cell_center(60, 40)).is_none());
+    }
+
+    #[test]
+    fn segment_crosses_cliff_detection() {
+        let g = cliff_grid();
+        let below = g.cell_center(60, 45);
+        let above = g.cell_center(60, 35);
+        assert!(g.segment_crosses_cliff(below, above));
+        assert!(g.segment_crosses_cliff(above, below), "symmetric");
+        // A segment running along one side never crosses.
+        assert!(!g.segment_crosses_cliff(g.cell_center(20, 45), g.cell_center(100, 45)));
+        // A segment inside one cell never crosses.
+        let c = g.cell_center(60, 45);
+        assert!(!g.segment_crosses_cliff(c, c));
     }
 }

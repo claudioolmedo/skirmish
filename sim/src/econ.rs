@@ -251,6 +251,12 @@ impl Stockpile {
         }
     }
 
+    /// Rebuild a stockpile from its four amounts in canonical
+    /// order (NET-09 save/restore — the inverse of `amounts`).
+    pub fn from_amounts(amounts: [I16F16; 4]) -> Self {
+        Stockpile { amounts }
+    }
+
     pub fn amount(&self, kind: ResourceKind) -> I16F16 {
         self.amounts[kind.index()]
     }

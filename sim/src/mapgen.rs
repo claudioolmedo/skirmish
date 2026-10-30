@@ -37,8 +37,11 @@
 //! Generation *validates* deterministically before a map is accepted
 //! (see `validate`): a land path connects the two starts, every
 //! package node and animal stands on land reachable from its start,
-//! floods prove no start is enclosed, heights step by at most 2
-//! between neighbors, and no water touches a start's ground. A
+//! floods prove no start is enclosed, and no water touches a
+//! start's ground. Heights are gentle (steps of at most 2) except
+//! for one authored cliff line and its mirror (MAP-07, see
+//! `author_cliffs`), whose sheer face the flood respects exactly
+//! as A* does. A
 //! failed candidate is discarded and the next deterministic
 //! sub-seed (seed ⊕ attempt) generates the next; after
 //! `MAX_ATTEMPTS` failures a fixed hand-authored template — built
@@ -205,6 +208,13 @@ fn build(sub_seed: u64) -> Option<GeneratedMap> {
     flatten_start(&mut g.height, tc_a, level_a, &g.nodes_a);
     flatten_start(&mut g.height, tc_b, level_a, &pkg_b.nodes);
 
+    // MAP-07: author one cliff line (and its rotational mirror) on
+    // the finished height field — a raised shelf with one sheer
+    // face, placed clear of both starts and every package element.
+    // Runs last among the height operations: nothing flattens or
+    // blurs after this, so the authored face survives intact.
+    author_cliffs(&mut g, tc_a, tc_b);
+
     // Materialize the grid: terrain, heights, and the tree blocks
     // (MAP-04: every tree node blocks its cell).
     let mut grid = Grid::new();
@@ -263,7 +273,9 @@ pub fn validate(map: &GeneratedMap) -> bool {
             }
             let (nx, ny) = (nx as u32, ny as u32);
             let i = idx(nx, ny);
-            if !seen[i] && !grid.is_water(nx, ny) {
+            // MAP-07: the flood is land movement — a cliff border
+            // seals it, exactly as it seals A*.
+            if !seen[i] && !grid.is_water(nx, ny) && !grid.is_cliff_between(x, y, nx, ny) {
                 seen[i] = true;
                 stack.push((nx, ny));
             }
@@ -310,23 +322,12 @@ pub fn validate(map: &GeneratedMap) -> bool {
             }
         }
     }
-    // Heights step gently: never more than 2 levels between
-    // neighbors (no cliff faces in Arabia v1; height never blocks
-    // movement regardless — this is a look-and-feel guarantee).
-    for y in 0..GRID_DIM {
-        for x in 0..GRID_DIM {
-            let h = grid.height_at(x, y);
-            for (dx, dy) in [(1i32, 0i32), (0, 1)] {
-                let (nx, ny) = (x as i32 + dx, y as i32 + dy);
-                if nx < GRID_DIM as i32 && ny < GRID_DIM as i32 {
-                    let nh = grid.height_at(nx as u32, ny as u32);
-                    if h.abs_diff(nh) > 2 {
-                        return false;
-                    }
-                }
-            }
-        }
-    }
+    // Height steps: the blurred hills step by at most 2 between
+    // neighbors; a step of 3 or more is an authored cliff border
+    // (MAP-07, see `author_cliffs`) — legal by design, so there
+    // is nothing left to reject here. The flood above already
+    // proved every package element stands on the shared landmass
+    // under the cliff seal.
     true
 }
 
@@ -499,6 +500,150 @@ fn flatten_start(
             }
         }
     }
+}
+
+/// MAP-07 cliff authoring: stamp one cliff line onto the finished
+/// height field, plus its 180° rotational mirror (the map's
+/// fairness symmetry). The shape, in (along, across) coordinates
+/// with the face running along `u`:
+///
+/// ```text
+///   v=0  falloff      2 2 2 2 … 2 2   (gentle step up to the shelf)
+///   v=1  shelf        2 4 4 4 … 4 2
+///   v=2  shelf        2 4 4 4 … 4 2   ← the face: 4 against 1
+///   v=3  low strip      1 1 1 … 1     (end columns unforced)
+///   v=4  low falloff    2 2 2 … 2     (end columns unforced)
+/// ```
+///
+/// Every border inside the shape steps by at most 2 except the
+/// face itself (4 against 1 — a step of 3, a cliff by
+/// `grid::CLIFF_STEP`); every border between the shape and the
+/// untouched field also steps by at most 2 (the falloff value 2
+/// is within 2 of every legal height 0..=4), so the face is the
+/// ONLY cliff the stamp creates. The shelf is enterable from the
+/// falloff side and around both ends (the end columns step 2 → 4
+/// onto the shelf); it is sealed across the face alone, exactly
+/// like the reference's cliff lines, which end and can be walked
+/// around.
+///
+/// Site discipline: the whole rectangle — and its mirror — must
+/// be unclaimed dry land (no package element, animal, pond or
+/// neutral dressing stands on it) at Chebyshev distance ≥ 26
+/// from both Town Centers, outside the flattened start discs, so
+/// the openings are untouched. Candidates are scanned on a fixed
+/// lattice in a fixed order with alternating orientation; the
+/// first fit wins, and no RNG is drawn, so the rest of
+/// generation is unaffected. A candidate whose lattice finds no
+/// site simply carries no cliff line (validation never requires
+/// one; the hand-authored fallback has none).
+fn author_cliffs(g: &mut Gen, tc_a: (u32, u32), tc_b: (u32, u32)) {
+    /// Face length in cells.
+    const LEN: i32 = 8;
+    /// Chebyshev clearance from either Town Center.
+    const CLEAR: u32 = 26;
+    let mut n = 0i32;
+    for ay in (8..GRID_DIM as i32 - 8).step_by(3) {
+        for ax in (8..GRID_DIM as i32 - 8).step_by(3) {
+            n += 1;
+            if try_cliff(g, ax, ay, LEN, n % 2 == 0, tc_a, tc_b, CLEAR) {
+                return;
+            }
+        }
+    }
+}
+
+/// The height `author_cliffs` forces at shape coordinate
+/// (u, v), or `None` to leave the cell's natural height (the two
+/// end columns of the low rows, whose exact value the seal does
+/// not depend on — see the shape comment).
+fn cliff_value(u: i32, v: i32, len: i32) -> Option<u8> {
+    match v {
+        0 => Some(2),
+        1 | 2 => Some(if u == -1 || u == len { 2 } else { 4 }),
+        3 => {
+            if u == -1 || u == len {
+                None
+            } else {
+                Some(1)
+            }
+        }
+        4 => {
+            if u == -1 || u == len {
+                None
+            } else {
+                Some(2)
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Try one cliff site: anchor (ax, ay) is the shape's (u=-1, v=0)
+/// corner; `vertical` transposes the shape. On success the shape
+/// and its rotational mirror are stamped and `true` returned.
+fn try_cliff(
+    g: &mut Gen,
+    ax: i32,
+    ay: i32,
+    len: i32,
+    vertical: bool,
+    tc_a: (u32, u32),
+    tc_b: (u32, u32),
+    clear: u32,
+) -> bool {
+    let cell = |u: i32, v: i32| -> (i32, i32) {
+        if vertical {
+            (ax + v, ay + u)
+        } else {
+            (ax + u, ay + v)
+        }
+    };
+    // The full rectangle (both orientations span u -1..=len,
+    // v 0..=4): every cell must be claimable ground for a cliff —
+    // in bounds, dry, unclaimed, and clear of both starts.
+    let mut rect: Vec<(u32, u32)> = Vec::new();
+    let mut forced: Vec<((u32, u32), u8)> = Vec::new();
+    for v in 0..=4i32 {
+        for u in -1..=len {
+            let (x, y) = cell(u, v);
+            if !g.in_bounds(x, y) {
+                return false;
+            }
+            let (x, y) = (x as u32, y as u32);
+            if g.terrain[idx(x, y)] != TERRAIN_LAND || g.occ[idx(x, y)] != 0 {
+                return false;
+            }
+            if chebyshev(x, y, tc_a.0, tc_a.1) < clear
+                || chebyshev(x, y, tc_b.0, tc_b.1) < clear
+            {
+                return false;
+            }
+            rect.push((x, y));
+            if let Some(h) = cliff_value(u, v, len) {
+                forced.push(((x, y), h));
+            }
+        }
+    }
+    // The mirror rectangle must satisfy the same discipline and
+    // the two rectangles must not overlap (the mirror's stamp
+    // would otherwise overwrite this one's heights).
+    let mut mirror_forced: Vec<((u32, u32), u8)> = Vec::new();
+    for &(x, y) in &rect {
+        let (mx, my) = rot(x, y);
+        if rect.contains(&(mx, my)) {
+            return false;
+        }
+        if g.terrain[idx(mx, my)] != TERRAIN_LAND || g.occ[idx(mx, my)] != 0 {
+            return false;
+        }
+    }
+    for &((x, y), h) in &forced {
+        mirror_forced.push((rot(x, y), h));
+    }
+    for &((x, y), h) in forced.iter().chain(mirror_forced.iter()) {
+        g.height[idx(x, y)] = h;
+    }
+    true
 }
 
 /// One box-blur pass over the height field (3×3 mean, edges clamped,
@@ -1014,6 +1159,81 @@ mod tests {
             c.grid.height_bytes(),
             "different seeds, identical height fields"
         );
+    }
+
+    /// Count cliff borders (adjacent pairs stepping by
+    /// `crate::grid::CLIFF_STEP` or more) on a generated map.
+    fn cliff_borders(m: &GeneratedMap) -> usize {
+        let mut n = 0;
+        for y in 0..GRID_DIM {
+            for x in 0..GRID_DIM {
+                for (dx, dy) in [(1i32, 0i32), (0, 1)] {
+                    let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                    if nx < GRID_DIM as i32
+                        && ny < GRID_DIM as i32
+                        && m.grid.is_cliff_between(x, y, nx as u32, ny as u32)
+                    {
+                        n += 1;
+                    }
+                }
+            }
+        }
+        n
+    }
+
+    #[test]
+    fn cliffs_are_authored_and_sealed_over_seeds() {
+        // MAP-07 soak: across a spread of seeds, generated maps
+        // carry authored cliff faces, and no A* path ever crosses
+        // a cliff border (the seal — diagonal corner rule
+        // included). Every map still validates (starts connected
+        // under the seal).
+        for seed in [1u64, 2, 3, 7, 42, 99, 1234, 31337, 555, 2026] {
+            let m = generate(seed);
+            assert!(validate(&m), "seed {seed}: map invalid with cliffs");
+            let borders = cliff_borders(&m);
+            assert!(
+                borders >= 8,
+                "seed {seed}: expected an authored cliff line (two faces of 8), found {borders} cliff borders"
+            );
+            // Path from start A's TC to start B's TC crosses no
+            // cliff border, cell step by cell step.
+            let a = m.grid.cell_center(m.starts[0].tc_cell.0, m.starts[0].tc_cell.1);
+            let b = m.grid.cell_center(m.starts[1].tc_cell.0, m.starts[1].tc_cell.1);
+            let path = m.grid.find_path(a, b).expect("starts must stay connected");
+            let mut prev = m.starts[0].tc_cell;
+            for &(wx, wy) in &path {
+                let cell = m.grid.world_to_cell(wx, wy);
+                if cell != prev {
+                    assert!(
+                        !m.grid.move_crosses_cliff(prev, cell),
+                        "seed {seed}: path crosses a cliff from {prev:?} to {cell:?}"
+                    );
+                    prev = cell;
+                }
+            }
+            // And a direct order across a face is refused outright:
+            // for the first cliff border found, the two cells
+            // cannot be pathed between *directly* — any route must
+            // detour around the line's end (or not exist).
+            'outer: for y in 0..GRID_DIM - 1 {
+                for x in 0..GRID_DIM {
+                    if m.grid.is_cliff_between(x, y, x, y + 1) {
+                        let p = m.grid.find_path(m.grid.cell_center(x, y), m.grid.cell_center(x, y + 1));
+                        if let Some(p) = p {
+                            assert!(
+                                p.len() > 2,
+                                "seed {seed}: path stepped straight across the cliff at ({x},{y})"
+                            );
+                        }
+                        break 'outer;
+                    }
+                }
+            }
+        }
+        // The hand-authored fallback stays cliff-free by
+        // construction (flat level-1 ground).
+        assert_eq!(cliff_borders(&fallback()), 0);
     }
 
     #[test]

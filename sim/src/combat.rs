@@ -1251,11 +1251,30 @@ impl Sim {
         // the target's level where it stands now.
         let tspec = self.unit_stats(ti);
         let tgt_elev = self.entity_height(ti);
+        // MAP-07 × CMB-01 (the working default the rulebook
+        // declares for the sources' ambiguity): across a cliff
+        // the downhill bonus applies but the uphill penalty does
+        // not — an attacker striking *up* a cliff face fights at
+        // factor 1, never ×0.75. "Across a cliff" is the hit's
+        // own line: from the threat point (the melee attacker's
+        // position, or a projectile's release point) to the
+        // target's ground. Clamp the target's effective elevation
+        // to the attacker's in exactly that case; every other
+        // pairing reads its heights plainly.
+        let eff_tgt_elev = if atk_elev < tgt_elev
+            && self.grid.segment_crosses_cliff(
+                threat,
+                (self.entities[ti].pos_x, self.entities[ti].pos_y),
+            ) {
+            atk_elev
+        } else {
+            tgt_elev
+        };
         // CMB-13 composition (verified 2026-10-22): the mishit ½ is
         // one of the multipliers INSIDE the minimum-1 clamp, not a
         // division after it — `compute_damage_hit` composes
         // elevation × mishit × Σ and clamps once, at the end.
-        let dmg = compute_damage_hit(attacks, &tspec, atk_elev, tgt_elev, mishit);
+        let dmg = compute_damage_hit(attacks, &tspec, atk_elev, eff_tgt_elev, mishit);
         {
             let t = &mut self.entities[ti];
             t.hp -= dmg;

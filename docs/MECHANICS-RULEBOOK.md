@@ -212,12 +212,30 @@ cross it, whatever the heights. (Whether the uphill damage penalty applies
 across cliffs is AMBIGUOUS in the sources — MECHANICS-STUDY §1.4; the
 working default is that the downhill bonus applies, the uphill penalty
 does not.)
-*Source:* OPENAGE-RESEARCH §2.3; MECHANICS-STUDY §1.4. · *Impl:* not
-built (M7) — the generator caps adjacent-cell height deltas at 2 and
-flattens starts, so no cliff-like breaks exist to cross; until cliffs
-are authored, the damage default from the study applies everywhere
-(both the downhill bonus and the uphill penalty, via CMB-01). ·
-*Status:* **MISSING**.
+*Source:* OPENAGE-RESEARCH §2.3; MECHANICS-STUDY §1.4. · *Impl:*
+built (Package L, 2026-10-30) — the generator authors one cliff
+line per map plus its rotational mirror (`mapgen::author_cliffs`:
+a height-4 shelf against a height-1 low strip, with height-2
+falloffs, sited on unclaimed dry land ≥ 26 tiles from both Town
+Centers, after the start flattening). Cliffness is derived from
+the height layer alone — a border stepping by 3+ levels
+(`grid::CLIFF_STEP`) is a cliff, so no extra state exists to
+hash. Pathing treats the border as impassable (A* refuses the
+step, diagonals included via the corner rule in
+`Grid::move_crosses_cliff`); continuous movement slides along
+or holds at the face instead of being shoved across; building
+footprints may not straddle a cliff border; generation
+validation floods under the same seal. The damage default is
+implemented in `combat::apply_hit`: when the hit's own line
+crosses a cliff face (`Grid::segment_crosses_cliff`), the
+downhill bonus applies and the uphill penalty does not (an
+uphill attacker fights at factor 1); every other pairing reads
+its heights plainly, as before. Tests: grid unit tests
+(predicates, A* seal, segment detection), a mapgen soak over 10
+seeds (cliff faces present, paths never cross, maps validate),
+and the determinism golden re-pinned with step attribution
+(77bebfe5bb56356b → 3e199a9573417af3; probe-verified as the
+authored heights alone). · *Status:* **MATCHES**.
 
 **MAP-08 — Water belongs to ships.** Deep water admits only ships;
 shallows admit ships (and, in the reference, nothing else — there is no
@@ -3408,11 +3426,24 @@ explored-memory. · *Status:* **MATCHES** (from DIFFERS).
 serialization of sim state; its hash (SIM-05) verifies the snapshot, and
 restoring re-enters lockstep from that tick as if the match had never
 paused.
-*Source:* GAP 10.6. · *Impl:* the canonical serialization behind
-`state_hash()` is the save format's core (plus a version header); no
-renderer state is saved. · *Status:* **MISSING** (hash serialization
-exists; no save/load API — M8's rejoin restores matches by
-re-simulation from the recorded stream, a different mechanism).
+*Source:* GAP 10.6. · *Impl:* built (Package L, 2026-10-30) —
+`Sim::save_game` / `Sim::load_game` (`sim/src/save.rs`): a
+versioned full-state serialization whose body follows the hash's
+own field order, extended with the behavioral fields the hash
+omits (`next_building_id`, the AutoExplore pair, the pending
+command queue); the state's SIM-05 hash trailers the file and
+`load_game` verifies the restored state against it before
+accepting — corrupt, truncated, foreign or wrong-version bytes
+are refused whole. No renderer state is saved (fog visibility
+lists are rebuilt from the fog grids). WASM exposes
+`save_game`/`load_game`, and the client's pause menu carries
+Save game / Load game (a `.sk2save` download / file pick) for
+local matches; online matches keep M8's rejoin (re-simulation)
+as their restore path. Tests (`sim/tests/save_restore.rs`):
+round-trip with hash equality mid-match, byte-identical
+re-save, and a restored match continuing bit-identically under
+the same commands for 1200 ticks; corruption cases refused. ·
+*Status:* **MATCHES**.
 
 **NET-10 — Chat and taunts never enter hashed state.** In-game chat,
 taunts, and flares-as-messages travel beside the command stream; they

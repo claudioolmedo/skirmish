@@ -71,6 +71,13 @@ impl Pcg32 {
     pub fn state_words(&self) -> (u64, u64) {
         (self.state, self.inc)
     }
+
+    /// Rebuild a generator from raw words (NET-09 save/restore):
+    /// the exact inverse of `state_words` — a restored generator
+    /// continues the stream bit-for-bit.
+    pub fn from_words(state: u64, inc: u64) -> Self {
+        Pcg32 { state, inc }
+    }
 }
 
 #[cfg(test)]
