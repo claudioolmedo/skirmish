@@ -134,6 +134,13 @@ pub enum EntityKind {
     /// steers, pushes or is pushed; while carried, the relic
     /// step copies its carrier's position each tick.
     Relic,
+    /// The Regicide king (VIC-06): never trained — one is spawned
+    /// beside each Town Center when a match opens in Regicide
+    /// mode. Attack-less and unconvertible; its death eliminates
+    /// its owner on the spot, whatever else they own. The mode
+    /// lives in the unit row's `regicide_unit` flag (CLS-06), not
+    /// in special code paths beyond the death sweep's flag check.
+    King,
 }
 
 impl EntityKind {
@@ -147,7 +154,10 @@ impl EntityKind {
     /// so no tag moved), 15 = petard (Castle P3a), 16 = trade
     /// cart (Package D), 17 = battering ram (Castle P4a),
     /// 18 = mangonel (Castle P4b), 19 = scorpion (Castle P4c),
-    /// 20 = monk (Castle P5a), 21 = relic (Castle P5d).
+    /// 20 = monk (Castle P5a), 21 = relic (Castle P5d),
+    /// 22 = king (VIC-06 — the builder tree's 21 collided with
+    /// the Relic on current main; renumbered 21 -> 22 at this
+    /// landing, appended after the Relic, so no tag moved).
     pub fn tag(self) -> u8 {
         match self {
             EntityKind::Villager => 0,
@@ -172,6 +182,7 @@ impl EntityKind {
             EntityKind::Scorpion => 19,
             EntityKind::Monk => 20,
             EntityKind::Relic => 21,
+            EntityKind::King => 22,
         }
     }
 
@@ -200,6 +211,7 @@ impl EntityKind {
             19 => Some(EntityKind::Scorpion),
             20 => Some(EntityKind::Monk),
             21 => Some(EntityKind::Relic),
+            22 => Some(EntityKind::King),
             _ => None,
         }
     }
@@ -258,6 +270,7 @@ impl EntityKind {
                 | EntityKind::Mangonel
                 | EntityKind::Scorpion
                 | EntityKind::Monk
+                | EntityKind::King
         )
     }
 

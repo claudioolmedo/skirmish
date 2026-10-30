@@ -2406,7 +2406,12 @@ units) regenerate HP and are conversion-immune (MNK-08). Both are data
 flags, not kinds with special code paths beyond those two rules.
 *Source:* GAP 5.4; wiki, Conversion (hero immunity). · *Impl:* flags in
 the unit row: `regicide_unit`, `immune_conversion`, `regenerates`
-(rate column). · *Status:* **MISSING**.
+(rate column). The columns and the King's row shipped with Package C
+(the VIC-06 slice, 2026-10-29); the rule stays open on heroes — no
+hero exists in the game, the hero regeneration rate is unfixed in the
+sources, and nothing reads `regenerates` or `immune_conversion` yet
+(conversion itself lands with the Castle P5 monks). · *Status:*
+**MISSING**.
 
 **CLS-07 — Ships are a separate combat ecology.** Ship classes (Ships,
 Fire Ship, Turtle Ship, …) interact through their own bonus rows; ship
@@ -3590,19 +3595,44 @@ produces from this game's data).
 time limit, the highest score at expiry wins. In score-target mode, the
 first player to reach the target score wins immediately.
 *Source:* wiki, Score (the two modes where score is decisive); GAP 8.6.
-· *Impl:* the win checker reads VIC-04's live total on the same cadence.
-· *Status:* **MISSING**.
+· *Impl:* shipped (Package C, 2026-10-29) — the match carries
+`VictorySettings` (`time_limit_ticks`, `score_target`) from
+construction, and `match_state` reads both players' live VIC-04 totals
+when a score setting is on (and only then, so a plain Conquest read
+never pays for the scan): the target ends the match the moment it is
+reached, the clock at expiry. Two readings recorded (the sources pin
+neither): the winner is the higher total in both modes — a target both
+players have reached on the same read goes to the higher total — and
+on an exact tie there is no winner yet, so a tied match plays on, past
+its limit if need be, until the tie breaks. · *Status:* **MATCHES**.
 
 **VIC-06 — Regicide.** Each player starts with a King unit (CLS-06). A
 player whose King dies is eliminated immediately, whatever else they
 own.
-*Source:* GAP 8.4. · *Impl:* the death sweep checks the `regicide_unit`
-flag and routes to elimination. · *Status:* **MISSING**.
+*Source:* GAP 8.4. · *Impl:* shipped (Package C, 2026-10-29) — the King
+is a unit row (wiki, King: 75 HP, no attack, armor 0/0, speed 1.32
+tiles/s, Line of Sight 6, occupies 1 population slot; the CLS-06 flags
+`regicide_unit` and `immune_conversion` set, `regenerates` 0 — kings
+do not regenerate, unlike heroes); one King spawns beside each Town
+Center when a match opens with the Regicide setting, and the death
+sweep checks the row's flag and routes to elimination, as this note
+prescribes. Kings are also excluded from wolf prey (wiki, King: not
+attacked by predators). Recorded gap, outside this note's text: DE's
+Regicide opening also grants each player a Castle — a start-package
+delta (cf. VIC-10), not implemented here; it awaits its own ruling.
+· *Status:* **MATCHES**.
 
 **VIC-07 — Sudden Death.** Losing your (last) Town Center eliminates
 you. No rebuild window.
-*Source:* GAP 8.5. · *Impl:* elimination predicate variant evaluated on
-TC destruction events. · *Status:* **MISSING**.
+*Source:* GAP 8.5. · *Impl:* shipped (Package C, 2026-10-29) —
+evaluated on Town Center destruction events in the death sweep (the
+shipped form of this note's predicate variant): in a Sudden Death
+match, a Town Center entity's death flags its owner out when no other
+living Town Center entity of theirs stands. A Town Center under
+construction is a building record, not the entity, and does not save
+the player (the note's "no rebuild window"); deleting your own last
+Town Center (SEL-14's path) is the same event and eliminates the same
+way. · *Status:* **MATCHES**.
 
 **VIC-08 — King of the Hill.** Hold the central Monument (AI-09) for
 the map-size countdown to win; losing majority presence at the Monument

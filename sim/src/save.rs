@@ -35,7 +35,7 @@ use crate::grid::{Grid, GRID_DIM};
 use crate::market::Market;
 use crate::rng::Pcg32;
 use crate::tech::{Age, ProdEntry, TechId};
-use crate::{Command, MatchMode, PlayerState, Sim, TcState};
+use crate::{Command, MatchMode, PlayerState, Sim, TcState, VictorySettings};
 
 /// File magic: "SKSV" (Skirmish Save).
 const MAGIC: &[u8; 4] = b"SKSV";
@@ -73,7 +73,16 @@ const MAGIC: &[u8; 4] = b"SKSV";
 /// building record gains the Monastery relic store and its
 /// ECO-16 trickle remainder, and the command codec gains
 /// `PickupRelic` (tag 46) and `DepositRelic` (tag 47).
-const SAVE_VERSION: u32 = 10;
+/// Version 11: Package C landing combined with P5d — this
+/// version carries BOTH deltas on one layout: all of v10's P5d
+/// fields exactly as above, PLUS the world section carries the
+/// victory settings (Package C: VIC-05/06/07) after the mode
+/// tag, and each player record carries the `mode_out` flag; a
+/// non-default settings block is hashed, so without it a
+/// Regicide / Sudden Death / timed save could never pass the
+/// load-time hash check. (The builder tree numbered its own
+/// victory-only delta v10 as well; the combined format is v11.)
+const SAVE_VERSION: u32 = 11;
 
 /// Little-endian byte writer over a growable buffer.
 struct W {
@@ -543,6 +552,11 @@ impl Sim {
         w.u64(rng_inc);
         // --- world: mode + the grid's four layers ---
         w.u8(self.mode.tag());
+        // Format v11: the victory settings (Package C) — hashed
+        // while non-default, so they must round-trip exactly.
+        w.u64(self.victory.time_limit_ticks);
+        w.u64(self.victory.score_target as u64);
+        w.u8(self.victory.flags());
         w.u32(self.grid.width());
         w.u32(self.grid.height());
         w.bytes(self.grid.terrain_bytes());
@@ -565,6 +579,8 @@ impl Sim {
             }
             w.u32(p.reseed_queue);
             w.bool(p.auto_reseed);
+            // Format v11: the mode-elimination flag (Package C).
+            w.bool(p.mode_out);
         }
         for s in &self.stockpiles {
             for a in s.amounts() {
@@ -1249,6 +1265,20 @@ impl Sim {
         let tick = r.u64()?;
         let rng = Pcg32::from_words(r.u64()?, r.u64()?);
         let mode = MatchMode::from_tag(r.u8()?)?;
+        // Format v11: the victory settings (Package C), packed
+        // exactly as `save_game` wrote them (flags: bit 0
+        // Regicide, bit 1 Sudden Death — the WASM ABI packing).
+        let victory = {
+            let time_limit_ticks = r.u64()?;
+            let score_target = r.u64()? as i64;
+            let flags = r.u8()?;
+            VictorySettings {
+                time_limit_ticks,
+                score_target,
+                regicide: flags & 1 != 0,
+                sudden_death: flags & 2 != 0,
+            }
+        };
         // World: the grid is the fixed rulebook size; the stored
         // dimensions must agree before any layer is read.
         if r.u32()? != GRID_DIM || r.u32()? != GRID_DIM {
@@ -1283,6 +1313,7 @@ impl Sim {
             }
             p.reseed_queue = r.u32()?;
             p.auto_reseed = r.bool()?;
+            p.mode_out = r.bool()?;
         }
         let mut stockpiles = [Stockpile::starting(), Stockpile::starting()];
         for s in &mut stockpiles {
@@ -1654,6 +1685,7 @@ impl Sim {
             rng,
             grid,
             mode,
+            victory,
             entities,
             commands,
             stockpiles,

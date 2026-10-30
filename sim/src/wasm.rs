@@ -50,7 +50,7 @@ use crate::econ::ResourceKind;
 use crate::entity::EntityKind;
 use crate::grid;
 use crate::tech::TechId;
-use crate::{Command, MatchMode, QueuedOrder, Sim, Stance};
+use crate::{Command, MatchMode, QueuedOrder, Sim, Stance, VictorySettings};
 
 /// A `Sim` owned by JavaScript. One instance per match.
 #[wasm_bindgen]
@@ -100,6 +100,35 @@ impl WasmSim {
     #[wasm_bindgen]
     pub fn load_game(bytes: &[u8]) -> Option<WasmSim> {
         Sim::load_game(bytes).map(|inner| WasmSim { inner })
+    }
+
+    /// Create a match under explicit victory settings (Package C:
+    /// VIC-05/06/07): `new_match` plus the conditions chosen at
+    /// setup. `time_limit_ticks` is the match clock in 60 Hz ticks
+    /// (0 = none), `score_target` the VIC-04 total that wins on
+    /// reaching it (0 = none), and `flags` packs the mode switches
+    /// — bit 0 = Regicide (VIC-06), bit 1 = Sudden Death (VIC-07).
+    /// All-zeros settings are exactly `new_match` (plain Conquest).
+    /// In Sandbox mode the settings are inert, like the mode's
+    /// other match machinery.
+    #[wasm_bindgen]
+    pub fn new_match_victory(
+        seed: u32,
+        mode_tag: u32,
+        time_limit_ticks: u32,
+        score_target: i32,
+        flags: u32,
+    ) -> WasmSim {
+        let mode = MatchMode::from_tag(mode_tag as u8).unwrap_or(MatchMode::Sandbox);
+        let victory = VictorySettings {
+            time_limit_ticks: time_limit_ticks as u64,
+            score_target: score_target as i64,
+            regicide: flags & 1 != 0,
+            sudden_death: flags & 2 != 0,
+        };
+        WasmSim {
+            inner: Sim::with_settings(seed as u64, mode, victory),
+        }
     }
 
     /// The match mode this sim was created with (M5): 0 sandbox,

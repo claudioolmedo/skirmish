@@ -123,6 +123,21 @@ pub struct UnitSpec {
     pub gold_cost: i32,
     /// Production time in ticks; 0 = not trainable.
     pub train_ticks: u64,
+    /// CLS-06: kings and heroes are data flags in the unit row,
+    /// not kinds with special code paths. `regicide_unit`: the
+    /// death sweep eliminates this unit's owner when it dies
+    /// (VIC-06). Only the King's row sets it.
+    pub regicide_unit: bool,
+    /// CLS-06: the unit can never be converted (VIC-06's King;
+    /// heroes likewise). Read by the conversion eligibility gate
+    /// (`Sim::eligible_target`, MNK-08) since the Package C
+    /// landing put the King on a roster where conversion exists.
+    pub immune_conversion: bool,
+    /// CLS-06: hit points regenerated per second (the heroes'
+    /// rate column). 0 = no regeneration. The King does NOT
+    /// regenerate (wiki, King) — only heroes do, and no hero
+    /// exists in the game yet, so no code path reads this yet.
+    pub regenerates: i32,
 }
 
 const NO_ATTACKS: &[(u8, i32)] = &[];
@@ -152,6 +167,7 @@ pub fn spec(kind: EntityKind) -> &'static UnitSpec {
         EntityKind::Scorpion => &SCORPION,
         EntityKind::Monk => &MONK,
         EntityKind::Relic => &RELIC,
+        EntityKind::King => &KING,
     }
 }
 
@@ -241,6 +257,9 @@ static VILLAGER: UnitSpec = UnitSpec {
     wood_cost: 0,
     gold_cost: 0,
     train_ticks: 1500,
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
 };
 
 /// Town Center (study §5, Dark Age row): HP 2400, armor 3/5.
@@ -272,6 +291,9 @@ static TOWN_CENTER: UnitSpec = UnitSpec {
     wood_cost: 0,
     gold_cost: 0,
     train_ticks: 0,
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
 };
 
 /// Scout Cavalry, Dark Age row (study §3.5): HP 45, attack 3, armor
@@ -310,6 +332,9 @@ static SCOUT_CAVALRY: UnitSpec = UnitSpec {
     wood_cost: 0,
     gold_cost: 0,
     train_ticks: 1800,
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
 };
 
 /// Militia (study §3.2): HP 40, attack 4 melee, armor 0/1, RoF 2.0 s,
@@ -346,6 +371,9 @@ static MILITIA: UnitSpec = UnitSpec {
     wood_cost: 0,
     gold_cost: 20,
     train_ticks: 1260, // 21 s
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
 };
 
 /// Archer (study §3.3): HP 30, attack 4 pierce, +3 vs Spearmen,
@@ -379,6 +407,9 @@ static ARCHER: UnitSpec = UnitSpec {
     wood_cost: 25,
     gold_cost: 45,
     train_ticks: 2100, // 35 s
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
 };
 
 /// Man-at-Arms (M6, study §3.2): the Militia line's Feudal tier —
@@ -421,6 +452,9 @@ static MAN_AT_ARMS: UnitSpec = UnitSpec {
     wood_cost: 0,
     gold_cost: 20,
     train_ticks: 1260, // inert (upgrade-only kind); mirrors Militia
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
 };
 
 /// Spearman (study §3.3; wiki "Spearman (Age of Empires II)"
@@ -475,6 +509,9 @@ static SPEARMAN: UnitSpec = UnitSpec {
     wood_cost: 25,
     gold_cost: 0,
     train_ticks: 1320, // 22 s
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
 };
 
 /// Skirmisher (study §3.5; wiki "Skirmisher (Age of Empires II)"
@@ -517,6 +554,9 @@ static SKIRMISHER: UnitSpec = UnitSpec {
     wood_cost: 35,
     gold_cost: 0,
     train_ticks: 1560, // 26 s (update 153015 — see above)
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
 };
 
 /// Knight (Castle P2; wiki "Knight (Age of Empires II)" infobox,
@@ -553,6 +593,9 @@ static KNIGHT: UnitSpec = UnitSpec {
     wood_cost: 0,
     gold_cost: 75,
     train_ticks: 1800, // 30 s
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
 };
 
 /// Light Cavalry (Castle P2; wiki "Light Cavalry (Age of Empires
@@ -595,6 +638,9 @@ static LIGHT_CAVALRY: UnitSpec = UnitSpec {
     wood_cost: 0,
     gold_cost: 0,
     train_ticks: 1800, // inert (upgrade-only kind); mirrors Scout Cavalry
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
 };
 
 /// Cavalry Archer (Castle P2; wiki "Cavalry Archer (Age of
@@ -637,6 +683,9 @@ static CAVALRY_ARCHER: UnitSpec = UnitSpec {
     wood_cost: 40,
     gold_cost: 60,
     train_ticks: 2220, // 37 s
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
 };
 
 /// The Petard's blast radius (Castle P3a, CMB-17): 0.5 tiles —
@@ -691,6 +740,50 @@ static PETARD: UnitSpec = UnitSpec {
     wood_cost: 0,
     gold_cost: 20,
     train_ticks: 1500, // 25 s
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
+};
+
+/// King (VIC-06; wiki, "King (Age of Empires II)", fetched
+/// 2026-10-29): HP 75, no attack, armor 0/0, speed 1.32 tiles/s,
+/// Line of Sight 6 tiles, occupies 1 population slot (the
+/// `counts_population` membership in `entity.rs`), cannot be
+/// converted and does not regenerate (unlike heroes — the CLS-06
+/// distinction). Class mask empty: no class membership is pinned
+/// by the study, and no attack row in the game keys a bonus off a
+/// King class. Costs are inert — the King is never trained; one
+/// is spawned per player by the Regicide opening (see
+/// `Sim::with_settings`).
+static KING: UnitSpec = UnitSpec {
+    max_hp: 75,
+    attacks: NO_ATTACKS,
+    armor_melee: 0,
+    armor_pierce: 0,
+    armor_building: 0,
+    classes: cls::mask(&[]),
+    range_max: I16F16::ZERO,
+    range_min: I16F16::ZERO,
+    reload_ticks: 0,
+    attack_delay_ticks: 0,
+    accuracy: 100,
+    projectile_speed: I16F16::ZERO,
+    scatter: I16F16::ZERO,
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
+    speed: I16F16::from_bits(5_767), // 1.32 tiles/s (absolute scale, see header)
+    los: I16F16::from_bits(1_572_864), // 24 (6 tiles)
+    radius: I16F16::from_bits(65_536), // 1.0 (villager-like; unpinned)
+    carcass_food: 0,
+    carcass_decay_bits: 0,
+    food_cost: 0,
+    wood_cost: 0,
+    gold_cost: 0,
+    train_ticks: 0,
+    regicide_unit: true,
+    immune_conversion: true,
+    regenerates: 0,
 };
 
 /// Trade Cart (Package D, TRD-05..08; wiki, "Trade Cart (Age of
@@ -733,6 +826,9 @@ static TRADE_CART: UnitSpec = UnitSpec {
     wood_cost: 100,
     gold_cost: 50,
     train_ticks: 3060, // 51 s
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
 };
 
 /// Battering Ram (Castle P4a, GAR-10; wiki "Battering Ram (Age
@@ -787,6 +883,9 @@ static BATTERING_RAM: UnitSpec = UnitSpec {
     wood_cost: 160,
     gold_cost: 75,
     train_ticks: 2160, // 36 s
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
 };
 
 /// Mangonel (Castle P4b, PRJ-07 + CMB-16; wiki "Mangonel (Age
@@ -843,6 +942,9 @@ static MANGONEL: UnitSpec = UnitSpec {
     wood_cost: 160,
     gold_cost: 135,
     train_ticks: 2760, // 46 s
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
 };
 
 /// Scorpion (Castle P4c, PRJ-09; wiki "Scorpion (Age of
@@ -911,6 +1013,9 @@ static SCORPION: UnitSpec = UnitSpec {
     wood_cost: 75,
     gold_cost: 75,
     train_ticks: 1800, // 30 s
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
 };
 
 /// Monk (Castle P5a, MNK-01/10; wiki "Monk (Age of Empires
@@ -958,6 +1063,9 @@ static MONK: UnitSpec = UnitSpec {
     wood_cost: 0,
     gold_cost: 100,
     train_ticks: 3060, // 51 s
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
 };
 
 /// Relic (Castle P5d, MNK-09): the Gaia object monks carry.
@@ -1001,6 +1109,9 @@ static RELIC: UnitSpec = UnitSpec {
     wood_cost: 0,
     gold_cost: 0,
     train_ticks: 0,
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
 };
 
 /// Sheep (OPENING-SPEC §2.2): 100 food, speed 0.7, worked at the
@@ -1040,6 +1151,9 @@ static SHEEP: UnitSpec = UnitSpec {
     wood_cost: 0,
     gold_cost: 0,
     train_ticks: 0,
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
 };
 
 /// Wild Boar (OPENING-SPEC §2.2, study §3.10): HP 75, 340 food,
@@ -1078,6 +1192,9 @@ static BOAR: UnitSpec = UnitSpec {
     wood_cost: 0,
     gold_cost: 0,
     train_ticks: 0,
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
 };
 
 /// The boar's chase speed while it has an aggro target: its
@@ -1123,6 +1240,9 @@ static WOLF: UnitSpec = UnitSpec {
     wood_cost: 0,
     gold_cost: 0,
     train_ticks: 0,
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
 };
 
 /// Deer (OPENING-SPEC §2.2): 140 food, passive, flees when attacked,
@@ -1157,6 +1277,9 @@ static DEER: UnitSpec = UnitSpec {
     wood_cost: 0,
     gold_cost: 0,
     train_ticks: 0,
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
 };
 
 #[cfg(test)]

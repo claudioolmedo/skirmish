@@ -253,13 +253,14 @@ impl Sim {
 
     /// MNK-08 eligibility of the target at `ti` for a monk of
     /// `monk_owner` — the complete P5b function (plan §3.3.6):
-    /// heroes and Kings are never convertible (no such kinds
-    /// exist in this roster yet — the CLS-01 flags they will
-    /// carry are what a future kind is refused by; the kinds that
-    /// DO exist from DE's never-list are refused here: Town
-    /// Centers, and by the siege gate below everything Redemption
-    /// would unlock, which includes Castles/Monasteries/walls as
-    /// placed buildings — building conversion itself is P5c);
+    /// heroes and Kings are never convertible — refused by the
+    /// CLS-06 `immune_conversion` flag on the unit row (the King
+    /// kind landed with Package C / VIC-06 and sets it); the
+    /// kinds that DO exist from DE's never-list are refused
+    /// here: Town Centers, and by the siege gate below
+    /// everything Redemption would unlock, which includes
+    /// Castles/Monasteries/walls as placed buildings — building
+    /// conversion itself is P5c);
     /// animals and herdables are not conversion targets at all;
     /// enemy monks require Atonement; siege-class units require
     /// Redemption (closed until P5c); villagers and ordinary
@@ -280,6 +281,9 @@ impl Sim {
             | EntityKind::Deer
             | EntityKind::Wolf => return false,
             _ => {}
+        }
+        if crate::units::spec(t.kind).immune_conversion {
+            return false; // CLS-06: the King (VIC-06) — never convertible.
         }
         if t.kind == EntityKind::Monk && !self.has_tech(monk_owner, TechId::Atonement) {
             return false;

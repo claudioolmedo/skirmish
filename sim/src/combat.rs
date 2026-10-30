@@ -378,17 +378,21 @@ pub fn compute_damage_hit(
 /// wolf hunts on sight. The wiki's exception list (Wolf article):
 /// Scout Cavalry, Monks, Trade Carts, and siege weapons are never
 /// attacked on sight — of those, only the Scout exists here yet;
-/// the rest join this test when their kinds land. Gaia's own are
-/// never prey (wolves hunting wild animals was a cut feature, per
-/// the same article's trivia), and herdables are not "units" for
-/// this rule (a captured sheep is livestock — the CMB-08
-/// exclusion's same reasoning). Being *attacked* overrides the
-/// exceptions: retaliation is `apply_hit`'s Wolf arm, not this
-/// test.
+/// the rest join this test when their kinds land. The King joins
+/// the exceptions from the King article (VIC-06): kings are not
+/// attacked by predators. Gaia's own are never prey (wolves
+/// hunting wild animals was a cut feature, per the same article's
+/// trivia), and herdables are not "units" for this rule (a
+/// captured sheep is livestock — the CMB-08 exclusion's same
+/// reasoning). Being *attacked* overrides the exceptions:
+/// retaliation is `apply_hit`'s Wolf arm, not this test.
 fn wolf_prey(t: &Entity) -> bool {
     is_player_owner(t.owner)
         && t.kind.is_mobile()
-        && !matches!(t.kind, EntityKind::ScoutCavalry | EntityKind::Sheep)
+        && !matches!(
+            t.kind,
+            EntityKind::ScoutCavalry | EntityKind::Sheep | EntityKind::King
+        )
 }
 
 /// The damage-table view of a placed building kind (M5): HP and
@@ -446,6 +450,9 @@ pub(crate) fn building_spec(kind: BuildingKind, owner_age: crate::tech::Age) -> 
         wood_cost: 0,
         gold_cost: 0,
         train_ticks: 0,
+        regicide_unit: false,
+        immune_conversion: false,
+        regenerates: 0,
     }
 }
 
@@ -3308,6 +3315,30 @@ impl Sim {
             // see `Sim::note_entity_death` for the discipline.
             self.note_entity_death(killer_owner, victim_owner, kind);
             let spec = units::spec(kind);
+            // Package C — the mode eliminations ride this same
+            // sweep, so every death path (combat, a Delete, a
+            // blast) routes here exactly once:
+            // VIC-06: a dying `regicide_unit` — the flag on the
+            // King's row (CLS-06) — eliminates its owner on the
+            // spot, whatever else they own.
+            if spec.regicide_unit {
+                self.set_mode_out(victim_owner);
+            }
+            // VIC-07: in a Sudden Death match, a Town Center's
+            // death eliminates its owner when no other living Town
+            // Center of theirs stands. The dying one is already
+            // flagged dead above, so `tc_entity_of` sees only the
+            // survivors. No rebuild window: a Town Center under
+            // construction is a building record, not this entity,
+            // and does not save the player. Deleting your own last
+            // Town Center arrives through this same path (SEL-14)
+            // and eliminates the same way.
+            if kind == EntityKind::TownCenter
+                && self.victory.sudden_death
+                && self.tc_entity_of(victim_owner).is_none()
+            {
+                self.set_mode_out(victim_owner);
+            }
             if spec.carcass_food > 0 {
                 let node_kind = if kind == EntityKind::Sheep {
                     NodeKind::CarcassHerd

@@ -177,6 +177,12 @@ const TRAIN_SPAWN_OFFSETS: [(i32, i32); 8] = [
 /// §2.1). Diagonal, so it never shares a villager's spawn point.
 const START_SCOUT_OFFSET: (i32, i32) = (5, 5);
 
+/// VIC-06: the Regicide King's spawn offset from its owner's Town
+/// Center — the one start diagonal the villagers and the scout do
+/// not take. The opponent's King stands at the negated offset, the
+/// same mirror the opponent start applies to every other offset.
+const KING_SPAWN_OFFSET: (i32, i32) = (-5, -5);
+
 /// Fog of war recomputation interval, in ticks (M7, VIS-01): the
 /// per-player visibility grids are rebuilt from scratch this often
 /// (and once at match creation) — never per tick — so the cost is
@@ -748,6 +754,49 @@ impl MatchState {
     }
 }
 
+/// The victory conditions a match runs under (Package C: VIC-05,
+/// VIC-06, VIC-07). Plain Conquest — the default — is all fields
+/// off: elimination by VIC-01 alone, no clock, no score target.
+/// The settings are part of the match's definition from tick 0:
+/// like the mode, they enter through the constructor (and, in
+/// netplay, the handshake), never change mid-match, and join the
+/// state hash only when non-default — a Conquest stream stays
+/// byte-identical to the pre-Package-C stream (the VIC-04 /
+/// TRD-02 conditional-write precedent in `hash_parts`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct VictorySettings {
+    /// VIC-05: the match clock, in ticks; 0 = no time limit. At
+    /// expiry the higher VIC-04 total wins.
+    pub time_limit_ticks: u64,
+    /// VIC-05: the score that wins the moment it is reached;
+    /// 0 = no score target.
+    pub score_target: i64,
+    /// VIC-06: Regicide — each player opens with a King; losing
+    /// it eliminates the owner immediately.
+    pub regicide: bool,
+    /// VIC-07: Sudden Death — losing the last Town Center
+    /// eliminates the owner immediately, no rebuild window.
+    pub sudden_death: bool,
+}
+
+impl VictorySettings {
+    /// Plain Conquest: every condition off (the default).
+    pub fn conquest() -> Self {
+        Self::default()
+    }
+
+    /// Whether these are the plain Conquest settings.
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// The two mode booleans as hash bits (bit 0 regicide,
+    /// bit 1 sudden death) — the same packing the WASM ABI uses.
+    fn flags(&self) -> u8 {
+        (self.regicide as u8) | ((self.sudden_death as u8) << 1)
+    }
+}
+
 /// One Town Center's production state (M5): its production queue,
 /// progress, and rally point. Before M5 these lived as loose fields
 /// on `Sim` for the single Town Center; a match has two Town Centers
@@ -868,6 +917,14 @@ struct PlayerState {
     /// pre-payment, charging the 60 wood at that moment (and
     /// only when the wood is there; MECHANICS-STUDY §6.3).
     auto_reseed: bool,
+    /// Package C: the mode-elimination flag (VIC-06 / VIC-07).
+    /// Set once, by the death sweep, when this player's King dies
+    /// (VIC-06) or — in a Sudden Death match — their last Town
+    /// Center falls (VIC-07); `match_state` then reads it as
+    /// elimination whatever else the player still owns. Sticky:
+    /// elimination is monotonic. Hashed conditionally, like
+    /// `destroyed_value`, so Conquest streams stay byte-identical.
+    mode_out: bool,
 }
 
 /// One player's match statistics (INF-11): the run counters the
@@ -943,6 +1000,10 @@ pub struct Sim {
     /// the scripted AI at one of the two behavior profiles. Set at
     /// construction; a match's definition is (seed, mode, commands).
     mode: MatchMode,
+    /// The victory conditions in force (Package C): plain
+    /// Conquest unless the match was opened with other settings.
+    /// Set at construction alongside `mode`; never changes.
+    victory: VictorySettings,
     /// All entities, always sorted by `id`. Never a HashMap.
     /// Entity 0 is the human Town Center; in a match the opponent's
     /// Town Center and start follow the standard layout.
@@ -1018,6 +1079,21 @@ impl Sim {
         Self::with_mode(seed, mode)
     }
 
+    /// Create a match under explicit victory settings (Package C):
+    /// the mode plus the VIC-05/06/07 conditions chosen when the
+    /// match was set up. `VictorySettings::conquest()` here is
+    /// exactly `new_match`.
+    pub fn new_match_victory(seed: u64, mode: MatchMode, victory: VictorySettings) -> Self {
+        debug_assert!(mode.is_match());
+        Self::with_settings(seed, mode, victory)
+    }
+
+    /// Plain-Conquest construction: `with_settings` with the
+    /// default victory settings.
+    pub fn with_mode(seed: u64, mode: MatchMode) -> Self {
+        Self::with_settings(seed, mode, VictorySettings::conquest())
+    }
+
     /// The shared constructor (M7): the map comes from the seeded
     /// Arabia generator (`mapgen::generate` — terrain, heights and
     /// both starts' packages), the human start spawns from package
@@ -1026,7 +1102,7 @@ impl Sim {
     /// before and feeds only gameplay draws — generation runs on
     /// its own derived stream, so combat's draw sequence is
     /// untouched by however many candidates generation tried.
-    pub fn with_mode(seed: u64, mode: MatchMode) -> Self {
+    pub fn with_settings(seed: u64, mode: MatchMode, victory: VictorySettings) -> Self {
         let rng = Pcg32::new(seed);
         let map = mapgen::generate(seed);
         let grid = map.grid.clone();
@@ -1094,6 +1170,7 @@ impl Sim {
             rng,
             grid,
             mode,
+            victory,
             entities,
             commands: Vec::new(),
             stockpiles: [Stockpile::starting(), Stockpile::starting()],
@@ -1127,12 +1204,13 @@ impl Sim {
         if mode.is_match() {
             sim.spawn_opponent_start(&map.starts[1]);
         }
-        // MAP-13 (Castle P5d): the map's five relics spawn LAST —
-        // Gaia-owned entities on the generator's relic cells, in
-        // both Sandbox and match modes (they are map objects,
-        // MAP-12). Spawning last keeps every historical entity id
-        // unmoved: relics take the next five ids in placement
-        // order, after both starts' full populations.
+        // MAP-13 (Castle P5d): the map's five relics spawn after
+        // both starts — Gaia-owned entities on the generator's
+        // relic cells, in both Sandbox and match modes (they are
+        // map objects, MAP-12). Spawning them here keeps every
+        // historical entity id unmoved and the relic ids identical
+        // in every mode: relics take the next five ids in
+        // placement order, after both starts' full populations.
         for &(cx, cy) in &map.relics {
             let (pos_x, pos_y) = sim.grid.cell_center(cx, cy);
             let id = sim.entities.len() as u32;
@@ -1144,10 +1222,52 @@ impl Sim {
                 pos_y,
             ));
         }
+        // VIC-06: a Regicide match opens with one King per player.
+        // The Kings spawn last of all, after both starts and the
+        // relics exist, so every pre-existing entity keeps its
+        // historical id in every mode — and a Conquest match never
+        // spawns one at all.
+        if mode.is_match() && victory.regicide {
+            sim.spawn_regicide_kings();
+        }
         // VIS-07: a match starts nearly blind — only each start's
         // surroundings are known, from this first computation.
         sim.recompute_visibility();
         sim
+    }
+
+    /// VIC-06's opening pair: one King beside each Town Center, at
+    /// the start diagonal no villager or scout takes (the opponent
+    /// mirrored, as its whole start is). The King is an ordinary
+    /// entity from here on — it moves, holds orders and dies
+    /// through the same paths as any unit; only its unit row's
+    /// `regicide_unit` flag (CLS-06) makes its death an
+    /// elimination, in the death sweep.
+    fn spawn_regicide_kings(&mut self) {
+        for owner in [entity::OWNER_PLAYER, entity::OWNER_OPPONENT] {
+            let Some(tc) = self.tc_entity_of(owner) else {
+                continue;
+            };
+            let (tc_x, tc_y) = (tc.pos_x, tc.pos_y);
+            let (ox, oy) = if owner == entity::OWNER_PLAYER {
+                KING_SPAWN_OFFSET
+            } else {
+                (-KING_SPAWN_OFFSET.0, -KING_SPAWN_OFFSET.1)
+            };
+            let id = self.entities.len() as u32;
+            self.entities.push(Entity::spawned(
+                id,
+                EntityKind::King,
+                owner,
+                tc_x + I16F16::from_num(ox),
+                tc_y + I16F16::from_num(oy),
+            ));
+        }
+    }
+
+    /// The victory conditions this match runs under (Package C).
+    pub fn victory_settings(&self) -> VictorySettings {
+        self.victory
     }
 
     /// The opponent's start (M5, generated in M7): package 1 of the
@@ -2602,20 +2722,82 @@ impl Sim {
     /// AI's resignation). The AI also resigns earlier (AI-05):
     /// no Town Center and no villagers means no path to rebuild.
     /// Sandbox is always `Ongoing`.
+    ///
+    /// Package C layers the mode endings on the same read, after
+    /// Conquest elimination (which keeps its precedence — the
+    /// human's elimination is checked first, ties against the
+    /// human): a player flagged out by a mode event (VIC-06's King
+    /// death, VIC-07's last-Town-Center loss) has lost whatever
+    /// else they own; then VIC-05's score endings read the live
+    /// VIC-04 totals — the target the moment it is reached, the
+    /// clock at expiry. The score read runs only when a score
+    /// setting is on, so a plain Conquest read never pays for it.
     pub fn match_state(&self) -> MatchState {
         if !self.mode.is_match() {
             return MatchState::Ongoing;
         }
-        if self.eliminated(entity::OWNER_PLAYER) {
+        if self.eliminated(entity::OWNER_PLAYER) || self.mode_out(entity::OWNER_PLAYER) {
             return MatchState::Defeat;
         }
         if self.ai_resigned() {
             return MatchState::Victory;
         }
-        if self.eliminated(entity::OWNER_OPPONENT) {
+        if self.eliminated(entity::OWNER_OPPONENT) || self.mode_out(entity::OWNER_OPPONENT) {
             return MatchState::Victory;
         }
+        if let Some(human_won) = self.score_outcome() {
+            return if human_won {
+                MatchState::Victory
+            } else {
+                MatchState::Defeat
+            };
+        }
         MatchState::Ongoing
+    }
+
+    /// Whether `owner` has been eliminated by a mode event
+    /// (VIC-06 / VIC-07): the death sweep set their `mode_out`
+    /// flag. Gaia is never out.
+    fn mode_out(&self, owner: u8) -> bool {
+        player_slot(owner).map(|s| self.players[s].mode_out).unwrap_or(false)
+    }
+
+    /// Flag `owner` as eliminated by a mode event (VIC-06 /
+    /// VIC-07). Called only from the death sweep; sticky, like
+    /// every elimination.
+    pub(crate) fn set_mode_out(&mut self, owner: u8) {
+        if let Some(slot) = player_slot(owner) {
+            self.players[slot].mode_out = true;
+        }
+    }
+
+    /// VIC-05's endings, from the live VIC-04 totals: `Some(true)`
+    /// the human wins on score, `Some(false)` the opponent does,
+    /// `None` no score ending applies yet. The score target ends
+    /// the match the moment a player reaches it; the time limit
+    /// ends it at expiry. Both readings award the higher total —
+    /// on an exact tie the match plays on (the target reading: the
+    /// first to *reach* it has not happened for either; the clock
+    /// reading: no highest score exists yet), so a tied match runs
+    /// past its limit until the tie breaks.
+    fn score_outcome(&self) -> Option<bool> {
+        let target = self.victory.score_target;
+        let limit = self.victory.time_limit_ticks;
+        if target <= 0 && limit == 0 {
+            return None;
+        }
+        let human = self.score_for(entity::OWNER_PLAYER).total;
+        let foe = self.score_for(entity::OWNER_OPPONENT).total;
+        if human == foe {
+            return None;
+        }
+        if target > 0 && (human >= target || foe >= target) {
+            return Some(human > foe);
+        }
+        if limit > 0 && self.tick >= limit {
+            return Some(human > foe);
+        }
+        None
     }
 
     /// AI-05 resignation: the opponent has no Town Center and no
@@ -8488,6 +8670,17 @@ impl Sim {
         // M5: the match mode — a sandbox and a match with identical
         // openings must never share a hash stream.
         h.write_u8(self.mode.tag());
+        // Package C: the victory settings join the hash only when
+        // non-default (the VIC-04 / TRD-02 conditional-write
+        // precedent), so a Conquest stream — the golden scenario
+        // included — stays byte-identical to the pre-Package-C
+        // stream, and two matches under different victory settings
+        // can never silently agree.
+        if !self.victory.is_default() {
+            h.write_u64(self.victory.time_limit_ticks);
+            h.write_u64(self.victory.score_target as u64);
+            h.write_u8(self.victory.flags());
+        }
         // M6: per-player progression — age and the researched-tech
         // mask, in slot order. New hashed state (TEC-06: research is
         // state, so replays diverge the tick a research lands — as
@@ -8530,6 +8723,13 @@ impl Sim {
                 }
                 h.write_u32(p.reseed_queue);
                 h.write_u8(u8::from(p.auto_reseed));
+            }
+            // Package C: the mode-elimination flag (VIC-06 /
+            // VIC-07), written only while set — the same
+            // conditional write, so a match nobody has been
+            // mode-eliminated in stays byte-identical.
+            if p.mode_out {
+                h.write_u8(1);
             }
         }
         // TRD-02: the global exchange rates join the hash once any
@@ -9675,6 +9875,127 @@ mod tests {
         assert_eq!(sim.match_state(), MatchState::Defeat);
         // Both gone on the same read: the human loses the tie.
         wipe_units(&mut sim, entity::OWNER_OPPONENT);
+        assert_eq!(sim.match_state(), MatchState::Defeat);
+    }
+
+    // ---- Package C: victory modes (VIC-05/06/07) ------------------
+    //
+    // Mode elimination is an *event* the death sweep records, not a
+    // derived predicate like VIC-01's — so these tests zero the HP
+    // and let one real tick's sweep perform the death (the raze
+    // path), instead of tombstoning the entity the way `wipe_units`
+    // does. The end-to-end paths (combat kills, Deletes, scores)
+    // are covered through the public API in tests/victory_modes.rs.
+
+    /// Zero one entity's HP without flagging it dead: the next
+    /// tick's death sweep performs the death (and its hooks).
+    fn zero_hp(sim: &mut Sim, id: u32) {
+        let idx = sim.entity_index(id).expect("entity exists");
+        sim.entities[idx].hp = I16F16::ZERO;
+    }
+
+    fn tc_id_of(sim: &Sim, owner: u8) -> u32 {
+        sim.entities()
+            .iter()
+            .find(|e| e.owner == owner && e.kind == EntityKind::TownCenter)
+            .expect("a Town Center")
+            .id
+    }
+
+    fn sudden_death_match(seed: u64) -> Sim {
+        Sim::new_match_victory(
+            seed,
+            MatchMode::TwoPlayer,
+            VictorySettings {
+                sudden_death: true,
+                ..VictorySettings::conquest()
+            },
+        )
+    }
+
+    #[test]
+    fn sudden_death_tc_raze_eliminates_through_the_sweep() {
+        // The foe loses their only Town Center: out, although every
+        // villager still stands (VIC-07 — elimination whatever else
+        // they own).
+        let mut sim = sudden_death_match(11);
+        let foe_tc = tc_id_of(&sim, entity::OWNER_OPPONENT);
+        zero_hp(&mut sim, foe_tc);
+        // Not yet: elimination is the sweep's event, not the HP.
+        assert_eq!(sim.match_state(), MatchState::Ongoing);
+        sim.tick();
+        assert_eq!(sim.match_state(), MatchState::Victory);
+        // Mirror: the human's Town Center razed is a Defeat.
+        let mut sim = sudden_death_match(11);
+        let human_tc = tc_id_of(&sim, entity::OWNER_PLAYER);
+        zero_hp(&mut sim, human_tc);
+        sim.tick();
+        assert_eq!(sim.match_state(), MatchState::Defeat);
+    }
+
+    #[test]
+    fn sudden_death_second_town_center_saves_the_player() {
+        let mut sim = sudden_death_match(11);
+        let foe_tc = tc_id_of(&sim, entity::OWNER_OPPONENT);
+        let (tx, ty) = {
+            let e = sim.entities().iter().find(|e| e.id == foe_tc).unwrap();
+            (e.pos_x, e.pos_y)
+        };
+        // A second living Town Center entity for the foe (appended
+        // with a fresh id, keeping the entities sorted-by-id rule).
+        sim.entities.push(Entity::spawned(
+            900,
+            EntityKind::TownCenter,
+            entity::OWNER_OPPONENT,
+            tx,
+            ty,
+        ));
+        zero_hp(&mut sim, foe_tc);
+        sim.tick();
+        assert_eq!(sim.match_state(), MatchState::Ongoing);
+        zero_hp(&mut sim, 900);
+        sim.tick();
+        assert_eq!(sim.match_state(), MatchState::Victory);
+    }
+
+    #[test]
+    fn conquest_tc_raze_alone_does_not_eliminate() {
+        // The control: under plain Conquest the same raze is not an
+        // event at all — VIC-01's derived predicate still sees the
+        // foe's villagers and keeps the match alive.
+        let mut sim = Sim::new_match(11, MatchMode::TwoPlayer);
+        let foe_tc = tc_id_of(&sim, entity::OWNER_OPPONENT);
+        zero_hp(&mut sim, foe_tc);
+        sim.tick();
+        assert_eq!(sim.match_state(), MatchState::Ongoing);
+    }
+
+    #[test]
+    fn regicide_king_raze_eliminates_through_the_sweep() {
+        let settings = VictorySettings {
+            regicide: true,
+            ..VictorySettings::conquest()
+        };
+        let mut sim = Sim::new_match_victory(11, MatchMode::TwoPlayer, settings);
+        let foe_king = sim
+            .entities()
+            .iter()
+            .find(|e| e.owner == entity::OWNER_OPPONENT && e.kind == EntityKind::King)
+            .expect("a foe King")
+            .id;
+        zero_hp(&mut sim, foe_king);
+        sim.tick();
+        assert_eq!(sim.match_state(), MatchState::Victory);
+        // Mirror: the human's King razed is a Defeat.
+        let mut sim = Sim::new_match_victory(11, MatchMode::TwoPlayer, settings);
+        let human_king = sim
+            .entities()
+            .iter()
+            .find(|e| e.owner == entity::OWNER_PLAYER && e.kind == EntityKind::King)
+            .expect("a human King")
+            .id;
+        zero_hp(&mut sim, human_king);
+        sim.tick();
         assert_eq!(sim.match_state(), MatchState::Defeat);
     }
 
