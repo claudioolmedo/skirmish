@@ -289,12 +289,13 @@ const KIND_SHEEP = 5;
 // semantic ids index the string table (unit.<id>, building.<id>).
 const KIND_I18N = ['villager', 'townCenter', 'scout', 'militia', 'archer',
   'sheep', 'boar', 'deer', 'manAtArms', 'spearman', 'skirmisher', 'wolf',
-  'knight', 'lightCavalry', 'cavalryArcher', 'petard'];
+  'knight', 'lightCavalry', 'cavalryArcher', 'petard', 'tradeCart'];
 let KIND_NAME = {
   0: 'Villager', 1: 'Town Center', 2: 'Scout Cavalry', 3: 'Militia',
   4: 'Archer', 5: 'Sheep', 6: 'Boar', 7: 'Deer', 8: 'Man-at-Arms',
   9: 'Spearman', 10: 'Skirmisher', 11: 'Wolf',
   12: 'Knight', 13: 'Light Cavalry', 14: 'Cavalry Archer', 15: 'Petard',
+  16: 'Trade Cart',
 };
 // Selection-panel portraits per unit kind (SVG symbol ids in
 // play/index.html).
@@ -302,6 +303,7 @@ const KIND_ICON = {
   0: 'i-villager', 2: 'i-villager', 3: 'i-militia', 4: 'i-archer', 5: 'i-pop',
   8: 'i-militia', 9: 'i-spearman', 10: 'i-skirmisher',
   12: 'i-villager', 13: 'i-villager', 14: 'i-archer', 15: 'i-petard',
+  16: 'i-trade-cart',
 };
 
 // Original PNG icon set (2026-10-19, AI generations via Base44 on
@@ -437,6 +439,7 @@ function refreshNames() {
     11: t('tech.goldmining'), 12: t('tech.stonemining'),
     13: t('tech.horsecollar'), 14: t('age.castle'), 15: t('tech.handcart'),
     16: t('tech.lightcavalry'), 17: t('tech.husbandry'), 18: t('age.imperial'),
+    19: t('tech.caravan'),
   };
   RESEARCH_BLOCK_TITLES = [
     '', t('block.noResources'), t('block.queueFullTrain'),
@@ -889,7 +892,7 @@ function updateEventFeed() {
   const lines = diffFeedEvents(prev, snap, {
     buildingName: (k) => BUILD_NAME[k],
     unitName: (k) => KIND_NAME[k],
-    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15, lightcavalry: 16, husbandry: 17 }[key]],
+    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15, lightcavalry: 16, husbandry: 17, caravan: 19 }[key]],
   }, feedFmt());
   feedPrev = snap;
   for (const text of lines) pushFeedLine(text);
@@ -2196,6 +2199,31 @@ function carryResOf(i) {
   return trueCarryRes.get(i) ?? null;
 }
 
+// --- Trade state (the sim's own word, Package D) -------------------
+// A Trade Cart's visible load follows the sim's route state via
+// the WASM ABI's entity_trade (0 = not trading, 1 = travelling
+// empty, 2 = loaded with gold), cached per sim tick + instance
+// exactly like the carry sheet above: the gold sacks appear the
+// tick the cart loads at the foreign depot and vanish the tick
+// the credit lands at home.
+let tradeCacheSim = null;
+let tradeCacheTick = -1;
+const trueTradeState = new Map(); // entity idx -> 1 | 2
+function tradeStateOf(i) {
+  if (!sim || typeof sim.entity_trade !== 'function') return 0;
+  const t = sim.tick_count();
+  if (sim !== tradeCacheSim || t !== tradeCacheTick) {
+    tradeCacheSim = sim;
+    tradeCacheTick = t;
+    trueTradeState.clear();
+    const tags = sim.entity_trade();
+    for (let j = 0; j < tags.length; j++) {
+      if (tags[j] !== 0) trueTradeState.set(j, tags[j]);
+    }
+  }
+  return trueTradeState.get(i) ?? 0;
+}
+
 function updateCarry(nodes, tcPos, pos, kinds, hp) {
   for (let i = 0; i < kinds.length; i++) {
     if (kinds[i] !== 0) continue; // villagers only — animals/military carry nothing
@@ -3267,7 +3295,10 @@ function applyLocalOrder(cmd) {
         : cmd.k === 12 ? sim.push_train_knight(cmd.b)
         : cmd.k === 14 ? sim.push_train_cavalry_archer(cmd.b)
         : cmd.k === 15 ? sim.push_train_petard(cmd.b)
+        : cmd.k === 16 ? sim.push_train_trade_cart(cmd.b)
         : sim.push_train_archer(cmd.b);
+    // Package D (TRD-05): task a Trade Cart to a foreign Market.
+    case 'trade': return sim.push_trade(cmd.e, cmd.b);
     case 'train_vil': return sim.push_train_villager_at(cmd.tc != null ? cmd.tc : myTcId);
     case 'research_tc': return sim.push_research_tc_at(cmd.tc != null ? cmd.tc : myTcId, cmd.tech);
     case 'research_at': return sim.push_research_at(cmd.b, cmd.tech);
@@ -6463,10 +6494,27 @@ async function main() {
       // Nobody could attack (e.g. only sheep selected): fall through
       // to a plain move toward the point.
     }
+    const bT = buildingAt(wx, wy);
+    // Trade tasking (Package D, TRD-05/07): a Trade Cart clicked
+    // onto a foreign Market — ANY other player's completed
+    // Market, the enemy's included: trade never consults
+    // diplomacy, only ownership. Ahead of the attack order below
+    // because the cart has no attack and this click is its whole
+    // purpose; explored ground only, like every object order
+    // (VIS-06). No queued form — the order replaces, like
+    // AttackBuilding.
+    if (bT && bT.kind === 12 && bT.complete && bT.owner !== localOwner
+        && cellExploredW(bT.x, bT.y)) {
+      let any = false;
+      for (const id of targets) {
+        if (st.kinds[id] !== 16) continue;
+        if (issue({ t: 'trade', e: id, b: bT.id })) any = true;
+      }
+      if (any) { orderAck('order'); return; }
+    }
     // An enemy building (M5): attack it via the building order.
     // (No queued form in M5 — the order replaces, like a fresh
     // right-click should.)
-    const bT = buildingAt(wx, wy);
     if (bT && bT.owner === foeOwner() && cellExploredW(bT.x, bT.y)) {
       let any = false;
       for (const id of targets) {
@@ -8831,6 +8879,85 @@ function drawPetard(i, wx, wy) {
   ctx.fill();
 }
 
+// The Trade Cart (Package D, TRD-05): original vector figure —
+// a horse hauling a two-wheeled cart. The load is the sim's own
+// word (entity_trade): empty canvas on the outbound leg, gold
+// sacks heaped on the return — the player reads the route's
+// state off the cart, as in the reference game.
+function drawTradeCart(i, wx, wy) {
+  const [sx, sy] = worldToScreen(wx, wy);
+  const u = camS;
+  shadow(sx, sy, 1.5 * u);
+  if (selection.has(i)) drawSelRing(sx, sy, 1.6);
+  const loaded = tradeStateOf(i) === 2;
+  // The horse, ahead of the cart (facing right, like every
+  // figure's neutral pose): body, neck and head, four legs.
+  ctx.fillStyle = '#6d4c33';
+  ctx.beginPath();
+  ctx.ellipse(sx + 0.95 * u, sy - 1.05 * u, 0.62 * u, 0.42 * u, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#6d4c33';
+  ctx.lineWidth = Math.max(1, 0.16 * u);
+  for (const dx of [0.62, 0.82, 1.08, 1.28]) {
+    ctx.beginPath();
+    ctx.moveTo(sx + dx * u, sy - 0.75 * u);
+    ctx.lineTo(sx + dx * u, sy - 0.12 * u);
+    ctx.stroke();
+  }
+  ctx.beginPath(); // neck + head
+  ctx.moveTo(sx + 1.42 * u, sy - 1.28 * u);
+  ctx.lineTo(sx + 1.78 * u, sy - 1.62 * u);
+  ctx.stroke();
+  ctx.fillStyle = '#5d4030';
+  ctx.beginPath();
+  ctx.arc(sx + 1.84 * u, sy - 1.66 * u, 0.17 * u, 0, Math.PI * 2);
+  ctx.fill();
+  // The shafts from horse to cart.
+  ctx.strokeStyle = '#8a6844';
+  ctx.lineWidth = Math.max(1, 0.09 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx + 0.42 * u, sy - 0.95 * u);
+  ctx.lineTo(sx - 0.28 * u, sy - 0.9 * u);
+  ctx.stroke();
+  // The cart bed and its two spoked wheels.
+  ctx.fillStyle = '#8a6844';
+  ctx.fillRect(sx - 1.35 * u, sy - 1.28 * u, 1.35 * u, 0.5 * u);
+  ctx.fillStyle = '#4a3826';
+  for (const dx of [-1.08, -0.28]) {
+    ctx.beginPath();
+    ctx.arc(sx + dx * u, sy - 0.42 * u, 0.3 * u, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#c9a227';
+    ctx.lineWidth = Math.max(1, 0.06 * u);
+    ctx.beginPath();
+    ctx.arc(sx + dx * u, sy - 0.42 * u, 0.3 * u, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  // The load: plain canvas empty, gold sacks loaded.
+  if (loaded) {
+    ctx.fillStyle = '#c9a227';
+    for (const [dx, dy] of [[-1.12, -1.5], [-0.72, -1.62], [-0.34, -1.5]]) {
+      ctx.beginPath();
+      ctx.ellipse(sx + dx * u, sy + dy * u, 0.24 * u, 0.2 * u, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else {
+    ctx.fillStyle = '#b8a888';
+    ctx.beginPath();
+    ctx.ellipse(sx - 0.68 * u, sy - 1.38 * u, 0.6 * u, 0.22 * u, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // The driver, seated at the front of the bed (player color).
+  ctx.fillStyle = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e';
+  ctx.beginPath();
+  ctx.ellipse(sx - 0.12 * u, sy - 1.52 * u, 0.26 * u, 0.36 * u, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#e8c39a';
+  ctx.beginPath();
+  ctx.arc(sx - 0.12 * u, sy - 2.02 * u, 0.16 * u, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 function drawMilitia(i, wx, wy) {
   drawFootman(i, wx, wy, 'militia');
 }
@@ -9721,7 +9848,7 @@ function attemptTrain(id) {
     'train-scout': 2, 'train-militia': 3, 'train-archer': 4,
     'train-spearman': 9, 'train-skirmisher': 10,
     'train-knight': 12, 'train-cavalry-archer': 14,
-    'train-petard': 15,
+    'train-petard': 15, 'train-trade-cart': 16,
   }[id];
   if (kindTag == null) return false;
   return selectedBuilding && selectedBuilding.type === 'building'
@@ -9743,7 +9870,7 @@ function flashTrainRefusal(id) {
       'train-scout': 2, 'train-militia': 3, 'train-archer': 4,
       'train-spearman': 9, 'train-skirmisher': 10,
       'train-knight': 12, 'train-cavalry-archer': 14,
-      'train-petard': 15,
+      'train-petard': 15, 'train-trade-cart': 16,
     }[id];
     const reason = sim.building_train_block(selectedBuilding.id, kindTag);
     flash(['', t('train.noResourcesUnit'),
@@ -9771,7 +9898,7 @@ function runCommandButton(id, times = 1) {
     || id === 'train-militia' || id === 'train-archer'
     || id === 'train-spearman' || id === 'train-skirmisher'
     || id === 'train-knight' || id === 'train-cavalry-archer'
-    || id === 'train-petard') {
+    || id === 'train-petard' || id === 'train-trade-cart') {
     let done = 0;
     while (done < times && attemptTrain(id)) done++;
     if (done === 0) flashTrainRefusal(id);
@@ -9889,6 +10016,7 @@ function runCommandButton(id, times = 1) {
       'research-forging': 7, 'research-barding': 8,
       'research-bloodlines': 9, 'research-doublebit': 10,
       'research-lightcavalry': 16, 'research-husbandry': 17,
+      'research-caravan': 19,
       'research-goldmining': 11, 'research-stonemining': 12,
       'research-horsecollar': 13,
     }[id];
@@ -10025,6 +10153,7 @@ function renderCommands() {
   const blockK = bk && context === 'stable' ? sim.building_train_block(bk.id, 12) : -1;
   const blockCA = bk && context === 'range' ? sim.building_train_block(bk.id, 14) : -1;
   const blockP = bk && context === 'castle' ? sim.building_train_block(bk.id, 15) : -1;
+  const blockTC = bk && context === 'market' ? sim.building_train_block(bk.id, 16) : -1;
   // Research blocks: the TC set (Loom 0, Feudal 1, Wheelbarrow 6,
   // Castle 14, Hand Cart 15) and the building techs, keyed by
   // tag — Blacksmith (Fletching 2, Scale Mail 3, Padded 4,
@@ -10036,7 +10165,7 @@ function renderCommands() {
       myResearchBlockTc(14), myResearchBlockTc(15), myResearchBlockTc(18)] : [-1, -1, -1, -1, -1, -1];
   const RB_TAGS = {
     blacksmith: [2, 3, 4, 7, 8], barracks: [5], stable: [9, 16, 17],
-    lumbercamp: [10], miningcamp: [11, 12], mill: [13],
+    lumbercamp: [10], miningcamp: [11, 12], mill: [13], market: [19],
   };
   const rbB = bk && RB_TAGS[context]
     ? Object.fromEntries(RB_TAGS[context].map((t) => [t, sim.research_block_at(bk.id, t)]))
@@ -10046,7 +10175,7 @@ function renderCommands() {
   const sig = [context, Math.floor(wood), Math.floor(myStock()[0]), Math.floor(myStock()[2]),
     Math.floor(myStock()[3]),
     reason, queue, bk ? bk.id : -1, bk ? bk.queue : -1, bk && bk.complete ? 1 : 0,
-    blockM, blockSp, blockA, blockSk, blockS, blockK, blockCA, blockP, age, techMask, rbTc.join('.'), Object.values(rbB).join('.'),
+    blockM, blockSp, blockA, blockSk, blockS, blockK, blockCA, blockP, blockTC, age, techMask, rbTc.join('.'), Object.values(rbB).join('.'),
     tcQueueCodes, bkQueueCodes, buildPage || '', repairArm ? 1 : 0,
     // Castle P3b: the garrison counts and the bell state are panel
     // state (button faces + disabled states read them).
@@ -10478,6 +10607,36 @@ function renderCommands() {
       tradeBtn('buy', 'food', 0, 1, 'i-buy-food', 3),
       tradeBtn('buy', 'wood', 1, 3, 'i-buy-wood', 4),
       tradeBtn('buy', 'stone', 3, 5, 'i-buy-stone', 5),
+    );
+    // Package D (TRD-05/08): the Market's bottom row — Train
+    // Trade Cart (the cart that runs the route this panel's
+    // exchange prices) and Caravan, its speed research. The
+    // train button mirrors the Castle's single-production shape;
+    // the research button mirrors the Stable's tech buttons,
+    // disabled flag included (the 13:22 lesson).
+    const caravanDone = (techMask & (1 << 19)) !== 0;
+    const rbCaravan = rbB[19];
+    cmdGrid.append(
+      cmdButton({
+        id: 'train-trade-cart', icon: 'i-trade-cart', label: 'Trade Cart',
+        costIcon: 'i-wood', cost: 100, cost2Icon: 'i-gold', cost2: 50,
+        disabled: underConstruction || blockTC === 2 || blockTC === 3,
+        key: badgeForButton({ context, id: 'train-trade-cart', index: 6 }),
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: KIND_NAME[16], building: BUILD_NAME[12] })
+          : t('cmd.trainTitleTime', { name: KIND_NAME[16], cost: costText([[100, 'wood'], [50, 'gold']]), secs: 51 }) + (TRAIN_BLOCK_TITLES[blockTC] ? ' ' + TRAIN_BLOCK_TITLES[blockTC] : ''),
+      }),
+      cmdButton({
+        id: 'research-caravan', icon: 'i-caravan', label: 'Caravan',
+        costIcon: 'i-food', cost: 200, cost2Icon: 'i-gold', cost2: 200,
+        disabled: underConstruction || caravanDone || rbCaravan === 2 || rbCaravan === 3 || rbCaravan === 4,
+        key: badgeForButton({ context, id: 'research-caravan', index: 7 }),
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: TECH_NAME[19], building: BUILD_NAME[12] })
+          : caravanDone
+            ? t('cmd.researchDone', { name: TECH_NAME[19] })
+            : t('cmd.caravanTitle', { name: TECH_NAME[19], cost: costText([[200, 'food'], [200, 'gold']]), secs: 40 }) + (RESEARCH_BLOCK_TITLES[rbCaravan] ? ' ' + RESEARCH_BLOCK_TITLES[rbCaravan] : ''),
+      }),
     );
   } else if (context === 'lumbercamp' || context === 'mill' || context === 'miningcamp') {
     // The economy researches (2026-10-22): Double-Bit Axe at the
@@ -11489,7 +11648,8 @@ function draw() {
     drawSheep, drawBoar, drawDeer, drawManAtArms, // 8: Man-at-Arms (M6)
     drawSpearman, drawSkirmisher, drawWolf, // 9/10: Feudal base units, 11: Wolf (AI-08)
     drawKnight, drawLightCavalry, drawCavalryArcher, // 12/13/14: Castle P2 cavalry
-    drawPetard]; // 15: Petard (Castle P3a)
+    drawPetard, // 15: Petard (Castle P3a)
+    drawTradeCart]; // 16: Trade Cart (Package D)
   for (let i = 0; i < count; i++) {
     const wx = pos[i * 2];
     const wy = pos[i * 2 + 1];

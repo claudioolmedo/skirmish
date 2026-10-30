@@ -2595,7 +2595,18 @@ or killed. A trade unit generates nothing one-way.
 *Source:* wiki, Market / Gold; GAP 3.10. · *Impl:* the route is a task
 state machine like the gather loop (ECO-04) with two waypoints and a
 gold-credit event at the home-deposit moment; gold per trip computed by
-TRD-06 at credit time from the depot positions. · *Status:* **MISSING**.
+TRD-06 at credit time from the depot positions. · *Impl (2026-10-29,
+Package D):* shipped for the Trade Cart — `Command::Trade`,
+`Sim::trade_step` in the economy phase beside the work machine,
+arrival measured at the depot footprint's apron; the home depot is the
+producing Market, stamped at spawn, re-resolved to the owner's
+farthest standing Market when it falls (the reference's longest-route
+preference, update 34699); a loaded cart whose owner has no Market
+standing waits at the foreign depot. The Trade Cog is the same machine
+on the Dock depot kind and lands with BLD-14 (the Dock/water domain is
+not in the game yet). Pinned by `sim/src/trade_tests.rs` (loop credit,
+one-way silence, stop/move re-task, home re-resolution). · *Status:*
+**MATCHES**.
 
 **TRD-06 — Trade gold scales ~quadratically with distance.** Gold per
 trip = 0.46 × d × (d / map_size + 0.3), where map_size is the map's edge
@@ -2606,7 +2617,14 @@ corner-to-corner routes yield ≈0.58 gold/s averaged over the round trip.
 *Source:* wiki, Gold (formula and constants pinned). · *Impl:* computed
 in fixed-point at credit time from the two depot anchor positions; since
 depots are static, the per-route value can be cached in the task record
-and recomputed only on re-tasking. · *Status:* **MISSING**.
+and recomputed only on re-tasking. · *Impl (2026-10-29, Package D):*
+shipped as written — `econ::trade_gold_per_trip`, evaluated at the
+credit tick from the two depots' center positions (per-axis deltas
+reduced by the 5-tile inset, floored per axis at 0, distance floored
+at 0.1); fractional gold accumulates in the stockpile, never rounded.
+Pinned by the formula unit test (45-tile route = 11.6533, inset floor,
+corner route, map-size term) and the loop integration test. · *Status:*
+**MATCHES**.
 
 **TRD-07 — Anyone's depot is a valid trade target.** Trade works with
 any player's Market/Dock regardless of diplomacy state — ally, neutral,
@@ -2615,14 +2633,30 @@ gains and loses nothing; their units may still kill your carts per
 stance rules.
 *Source:* wiki, Gold (trade target rules). · *Impl:* trade tasking never
 consults the diplomacy table for validity, only for the combat exposure
-that follows from it. · *Status:* **MISSING**.
+that follows from it. · *Impl (2026-10-29, Package D):* shipped —
+`Sim::can_trade` validates only kind/liveness on the cart and
+kind/completeness/foreign ownership on the depot (another player's
+Market; one's own Market is refused — gold comes from *another*
+player's Market, wiki "Trade Cart"). With no Dock in the game the
+depot set is Markets. Pinned by `trade_tests` (enemy depot valid in a
+1v1 staging, own depot refused, depot owner's stockpile untouched
+across a full round trip). · *Status:* **MATCHES**.
 
-**TRD-08 — Caravan speeds trade units.** The Caravan technology (Feudal,
+**TRD-08 — Caravan speeds trade units.** The Caravan technology (Castle,
 Market) raises Trade Cart and Trade Cog speed by 20% (an ordinary MOV-01
 percentage patch — which, via the round-trip time, also raises gold/s:
 TRD-06's constant absorbs the *base* speed only).
 *Source:* Technology wiki (Caravan). · *Impl:* TEC-06 patch on the two
-trade kinds. · *Status:* **MISSING**.
+trade kinds. · *Impl (2026-10-29, Package D):* shipped — TechId 18,
+Market host, 200 food / 200 gold, 40 s, and a ×6/5 speed patch on the
+Trade Cart in `Sim::stats_for`; the Trade Cog joins the same patch when
+BLD-14 lands. Two corrections against this note's earlier draft, per
+the wiki Caravan article (fetched 2026-10-29): the generic technology
+is a **Castle Age** research (only the Burgundians hold it an Age
+early, as a civilization bonus), so the parenthetical above now reads
+Castle; and the +20% is the current value — update 141935 cut it from
++50% while raising the trade units' base speed 1 → 1.25, which the
+Trade Cart's table row also adopts. · *Status:* **MATCHES**.
 
 ---
 

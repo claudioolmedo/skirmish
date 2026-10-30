@@ -80,10 +80,11 @@ const LAYOUTS = {
   },
   market: {
     context: 'market', page: null,
-    ids: ['trade-sell-food', 'trade-sell-wood', 'trade-sell-stone', 'trade-buy-food', 'trade-buy-wood', 'trade-buy-stone', 'delete-building'],
+    ids: ['trade-sell-food', 'trade-sell-wood', 'trade-sell-stone', 'trade-buy-food', 'trade-buy-wood', 'trade-buy-stone', 'train-trade-cart', 'research-caravan', 'delete-building'],
     cells: {
       Q: 'trade-sell-food', W: 'trade-sell-wood', E: 'trade-sell-stone',
       A: 'trade-buy-food', S: 'trade-buy-wood', D: 'trade-buy-stone', C: 'delete-building',
+      Z: 'train-trade-cart', X: 'research-caravan',
     },
     unplaced: [],
   },
@@ -181,6 +182,9 @@ test('train badge costs match the sim table', () => {
   assert.deepEqual(badgeCost('train-archer'), { wood: 25, gold: 45 });
   assert.deepEqual(badgeCost('train-skirmisher'), { food: 25, wood: 35 });
   assert.deepEqual(badgeCost('train-scout'), { food: 80 });
+  // Package D: the Trade Cart's badge must read the sim's price
+  // (100 wood / 50 gold — units.rs TRADE_CART).
+  assert.deepEqual(badgeCost('train-trade-cart'), { wood: 100, gold: 50 });
 });
 
 test('Castle P3b: the garrison buttons ride the host panels, unbadged', () => {

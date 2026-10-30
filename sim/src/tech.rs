@@ -49,6 +49,16 @@
 //!   +10% speed — a class-keyed percentage patch in
 //!   `Sim::stats_for` (any row carrying the CAVALRY class), the
 //!   same scalar shape as Wheelbarrow's.
+//! - Caravan (Package D, TRD-08): 200 food / 200 gold, 40 s,
+//!   Market, Castle Age (wiki, "Caravan (Age of Empires II)",
+//!   fetched 2026-10-29 — the generic technology is a Castle Age
+//!   research; only the Burgundians hold it an Age early, as a
+//!   civilization bonus). Effect: Trade Carts (and Trade Cogs,
+//!   when the Dock exists) +20% speed — a kind-keyed percentage
+//!   patch in `Sim::stats_for`, the same scalar shape again.
+//!   Update 141935 cut the effect from +50% to +20% while raising
+//!   the trade units' base speed by 25%, so the upgraded speed is
+//!   unchanged from the pre-patch game.
 //! - Fletching: 100 food / 50 gold, 30 s — archers +1 attack and
 //!   +1 range (study §8; the study's Castle/Tower/Town Center lines
 //!   have no targets in M6 — no such attacks exist yet).
@@ -174,11 +184,14 @@ pub enum TechId {
     Husbandry,
     /// Town Center: the Imperial Age advancement itself (TEC-01).
     ImperialAge,
+    /// Market, Castle: trade units +20% speed (Package D, TRD-08;
+    /// renumbered to tag 19 on rebase — ImperialAge holds 18).
+    Caravan,
 }
 
 impl TechId {
     /// All technologies, in tag order.
-    pub const ALL: [TechId; 19] = [
+    pub const ALL: [TechId; 20] = [
         TechId::Loom,
         TechId::FeudalAge,
         TechId::Fletching,
@@ -198,6 +211,7 @@ impl TechId {
         TechId::LightCavalry,
         TechId::Husbandry,
         TechId::ImperialAge,
+        TechId::Caravan,
     ];
 
     /// Stable tag: 0 loom, 1 feudal age, 2 fletching, 3 scale mail,
@@ -210,6 +224,10 @@ impl TechId {
     /// after P1 took 14/15, so no tag moved either).
     /// 18 imperial age (bot-loop TEC-01, 2026-10-29 — appended
     /// after P2 took 16/17, so no tag moved either).
+    /// 19 caravan (Package D, TRD-08 — the builder took 18 on its
+    /// pre-Imperial base; renumbered to 19 on rebase onto the
+    /// Imperial tree, bot-loop 2026-10-30. University techs take
+    /// 20+ when they land.)
     pub fn tag(self) -> u8 {
         match self {
             TechId::Loom => 0,
@@ -231,6 +249,7 @@ impl TechId {
             TechId::LightCavalry => 16,
             TechId::Husbandry => 17,
             TechId::ImperialAge => 18,
+            TechId::Caravan => 19,
         }
     }
 
@@ -267,6 +286,7 @@ impl TechId {
             }
             TechId::HorseCollar => TechHost::Building(BuildingKind::Mill),
             TechId::LightCavalry | TechId::Husbandry => TechHost::Building(BuildingKind::Stable),
+            TechId::Caravan => TechHost::Building(BuildingKind::Market),
         }
     }
 
@@ -277,7 +297,9 @@ impl TechId {
             TechId::Loom | TechId::FeudalAge => Age::Dark,
             TechId::CastleAge => Age::Feudal,
             TechId::ImperialAge => Age::Castle,
-            TechId::HandCart | TechId::LightCavalry | TechId::Husbandry => Age::Castle,
+            TechId::HandCart | TechId::LightCavalry | TechId::Husbandry | TechId::Caravan => {
+                Age::Castle
+            }
             _ => Age::Feudal,
         }
     }
@@ -320,6 +342,7 @@ impl TechId {
             TechId::LightCavalry => 2700,
             TechId::Husbandry => 2400,
             TechId::ImperialAge => 11400, // 190 s (study §7)
+            TechId::Caravan => 2400, // 40 s (wiki, Caravan)
         }
     }
 
@@ -346,6 +369,7 @@ impl TechId {
             TechId::LightCavalry => (150, 0, 50, 0),
             TechId::Husbandry => (150, 0, 0, 0),
             TechId::ImperialAge => (1000, 0, 800, 0), // study §7
+            TechId::Caravan => (200, 0, 200, 0), // wiki, Caravan
         }
     }
 }
@@ -506,6 +530,18 @@ mod tests {
         assert_eq!(TechId::ImperialAge.host(), TechHost::TownCenter);
         assert_eq!(TechId::ImperialAge.age_required(), Age::Castle);
         assert_eq!(TechId::ImperialAge.tag(), 18);
+        // Caravan: 200 F / 200 G, 40 s, Market, Castle Age
+        // (Package D, TRD-08; wiki, "Caravan" — fetched
+        // 2026-10-29; tag renumbered 18 -> 19 on rebase).
+        assert_eq!(TechId::Caravan.cost(), (200, 0, 200, 0));
+        assert_eq!(TechId::Caravan.ticks(), 40 * 60);
+        assert_eq!(
+            TechId::Caravan.host(),
+            TechHost::Building(BuildingKind::Market)
+        );
+        assert_eq!(TechId::Caravan.age_required(), Age::Castle);
+        assert_eq!(TechId::Caravan.requires_tech(), None);
+        assert_eq!(TechId::Caravan.tag(), 19);
         // Age tags: 0 Dark, 1 Feudal, 2 Castle, 3 Imperial.
         assert_eq!(Age::Dark.tag(), 0);
         assert_eq!(Age::Feudal.tag(), 1);
@@ -516,7 +552,7 @@ mod tests {
         for t in TechId::ALL {
             assert_eq!(TechId::from_tag(t.tag()), Some(t));
         }
-        assert_eq!(TechId::from_tag(19), None);
+        assert_eq!(TechId::from_tag(20), None);
     }
 
     #[test]

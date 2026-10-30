@@ -89,6 +89,12 @@ pub enum EntityKind {
     /// only at the Castle — a suicide unit whose landed strike
     /// detonates (blast radius 0.5 tiles) and removes it.
     Petard,
+    /// The trade unit (Package D, TRD-05..08): trained at the
+    /// Market from the Feudal Age — it hauls no resources itself;
+    /// it travels empty to another player's Market and returns
+    /// loaded, and its owner is credited gold per completed round
+    /// trip by the TRD-06 formula. No attack: a civilian hull.
+    TradeCart,
 }
 
 impl EntityKind {
@@ -99,7 +105,8 @@ impl EntityKind {
     /// branch's original 9 was taken by the Spearman on main),
     /// 12 = knight, 13 = light cavalry, 14 = cavalry archer
     /// (Castle P2 — appended after the Wolf took 11 on main,
-    /// so no tag moved), 15 = petard (Castle P3a).
+    /// so no tag moved), 15 = petard (Castle P3a), 16 = trade
+    /// cart (Package D).
     pub fn tag(self) -> u8 {
         match self {
             EntityKind::Villager => 0,
@@ -118,6 +125,7 @@ impl EntityKind {
             EntityKind::LightCavalry => 13,
             EntityKind::CavalryArcher => 14,
             EntityKind::Petard => 15,
+            EntityKind::TradeCart => 16,
         }
     }
 
@@ -140,6 +148,7 @@ impl EntityKind {
             13 => Some(EntityKind::LightCavalry),
             14 => Some(EntityKind::CavalryArcher),
             15 => Some(EntityKind::Petard),
+            16 => Some(EntityKind::TradeCart),
             _ => None,
         }
     }
@@ -150,7 +159,11 @@ impl EntityKind {
     /// in the Dark Age but its Spearman is a Feudal unit).
     pub fn train_age(self) -> crate::tech::Age {
         match self {
-            EntityKind::Spearman | EntityKind::Skirmisher => crate::tech::Age::Feudal,
+            // The Trade Cart is a Feudal unit (wiki, Feudal Age
+            // article's available-units list: at the Market).
+            EntityKind::Spearman | EntityKind::Skirmisher | EntityKind::TradeCart => {
+                crate::tech::Age::Feudal
+            }
             EntityKind::Knight | EntityKind::CavalryArcher | EntityKind::Petard => {
                 crate::tech::Age::Castle
             }
@@ -181,6 +194,7 @@ impl EntityKind {
                 | EntityKind::LightCavalry
                 | EntityKind::CavalryArcher
                 | EntityKind::Petard
+                | EntityKind::TradeCart
         )
     }
 
@@ -200,6 +214,7 @@ impl EntityKind {
                 | EntityKind::Knight
                 | EntityKind::CavalryArcher
                 | EntityKind::Petard
+                | EntityKind::TradeCart
         )
     }
 
@@ -721,6 +736,28 @@ pub struct Entity {
     /// quotient over 3600 is the HP bits restored; this holds the
     /// remainder (0 ≤ r < 3600). Reset on garrison entry/exit.
     pub garrison_heal_remainder: i64,
+    // --- Trade state (Package D, TRD-05..08; Trade Cart only,
+    // inert defaults on every other kind) ---
+    /// The home depot: the Market this cart returns its gold to —
+    /// the Market that trained it, stamped at spawn (TRD-05). If
+    /// that Market falls, the trade step re-resolves home to the
+    /// owner's remaining completed Market farthest from the
+    /// target (the reference's longest-route preference); with no
+    /// home standing, a loaded cart waits at the foreign depot.
+    /// Plain data — part of the hashed state (written only while
+    /// any trade field is non-default).
+    pub trade_home: Option<u32>,
+    /// The foreign depot this cart is tasked to: a completed
+    /// Market owned by *another* player (TRD-07 — ally, neutral
+    /// or enemy; the sim never consults diplomacy for validity).
+    /// `None` = not trading. Plain data — part of the hashed
+    /// state, on the same conditional write as `trade_home`.
+    pub trade_target: Option<u32>,
+    /// The leg the cart is on: `false` = travelling empty toward
+    /// the foreign depot, `true` = returning loaded. The gold is
+    /// credited to the owner's stockpile at the moment the loaded
+    /// cart arrives home (TRD-05) — never on the one-way leg.
+    pub trade_loaded: bool,
 }
 
 impl Entity {
@@ -778,6 +815,9 @@ impl Entity {
             garrison_prod_entry: false,
             bell_snapshot: None,
             garrison_heal_remainder: 0,
+            trade_home: None,
+            trade_target: None,
+            trade_loaded: false,
         }
     }
 

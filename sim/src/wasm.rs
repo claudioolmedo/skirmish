@@ -333,6 +333,28 @@ impl WasmSim {
         self.push_train_at(building, EntityKind::Petard)
     }
 
+    /// Enqueue a Trade Cart at a completed Market (Package D,
+    /// TRD-05 — the Market is the cart's only home; `can_train_at`
+    /// carries the Feudal Age gate). See `push_train_militia`.
+    pub fn push_train_trade_cart(&mut self, building: u32) -> bool {
+        self.push_train_at(building, EntityKind::TradeCart)
+    }
+
+    /// Task a Trade Cart to a foreign Market (Package D, TRD-05):
+    /// the cart runs the empty/loaded round trip until re-tasked,
+    /// stopped or killed, crediting its owner the TRD-06 gold on
+    /// each arrival home. Returns whether the order *would* be
+    /// accepted (a living player Trade Cart; a completed Market of
+    /// another player — TRD-07); the sim re-validates when the
+    /// command applies next tick.
+    pub fn push_trade(&mut self, entity: u32, building: u32) -> bool {
+        let ok = self.inner.can_trade(entity, building);
+        if ok {
+            self.inner.push_command(Command::Trade { entity, building });
+        }
+        ok
+    }
+
     fn push_train_at(&mut self, building: u32, kind: EntityKind) -> bool {
         let ok = self.inner.can_train_at(building, kind);
         if ok {
@@ -658,6 +680,28 @@ impl WasmSim {
             .map(|e| match e.carry_kind {
                 Some(kind) => kind.index() as u8,
                 None => 255,
+            })
+            .collect()
+    }
+
+    /// Per-entity trade state in entity-id order (Package D,
+    /// TRD-05): 0 = not trading, 1 = tasked and travelling empty
+    /// (or waiting loaded for a home Market to stand), 2 = loaded
+    /// and returning home. Read-only presentation glue — the
+    /// renderer draws the gold load on a loaded cart on the sim's
+    /// own word, exactly like `entity_carry`.
+    pub fn entity_trade(&self) -> Vec<u8> {
+        self.inner
+            .entities()
+            .iter()
+            .map(|e| {
+                if e.trade_target.is_none() {
+                    0
+                } else if e.trade_loaded {
+                    2
+                } else {
+                    1
+                }
             })
             .collect()
     }

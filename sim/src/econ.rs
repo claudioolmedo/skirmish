@@ -326,6 +326,50 @@ pub const RETARGET_RADIUS: I16F16 = I16F16::from_bits(786_432); // 12.0
 /// right-click node pick radius (4 world units).
 pub const RALLY_NODE_SNAP_RADIUS: I16F16 = I16F16::from_bits(262_144); // 4.0
 
+/// TRD-06's per-axis inset (tiles): the depot-to-depot axis deltas
+/// are each reduced by this much before the distance is measured —
+/// the documented reason two Markets must stand at least 5 tiles
+/// apart to yield a full gold piece (wiki, "Trade Cart": "the two
+/// Markets used for trade need to be at least 5 tiles away").
+pub const TRADE_INSET_TILES: I16F16 = I16F16::from_bits(327_680); // 5
+/// TRD-06's distance floor (tiles): the measured distance never
+/// reads below this, so even a minimal route yields its fractional
+/// gold (the wiki's trade works in fractional gold).
+pub const TRADE_MIN_DISTANCE: I16F16 = I16F16::from_bits(6_554); // ≈0.1
+/// TRD-06's leading constant: 0.46 (the trade work rate doubled —
+/// the round trip's two legs price into the one credit).
+pub const TRADE_GOLD_FACTOR: I16F16 = I16F16::from_bits(30_147); // ≈0.46
+/// TRD-06's additive constant inside the size term.
+pub const TRADE_GOLD_BASE: I16F16 = I16F16::from_bits(19_661); // ≈0.3
+
+/// Gold credited for one completed trade round trip (TRD-06):
+/// `0.46 × d × (d / map_size + 0.3)`, where `d` is the
+/// depot-to-depot distance in tiles between the two buildings'
+/// centers, each axis delta first reduced by the 5-tile inset
+/// (floored at 0 per axis) and the result floored at 0.1 tiles.
+/// `map_size` is the map edge in tiles. Computed in fixed point at
+/// credit time from the two depots' anchor (center) positions, in
+/// world units; positions on the cell grid differ by whole cells,
+/// so the world→tile conversion (÷4) is exact. Fractional gold is
+/// real: the stockpile accumulates it (the wiki's note).
+pub fn trade_gold_per_trip(
+    home: (I16F16, I16F16),
+    foreign: (I16F16, I16F16),
+    map_size_tiles: u32,
+) -> I16F16 {
+    let tile = I16F16::from_num(4); // CELL_SIZE: one tile = 4 world units
+    let dx = (home.0 - foreign.0).abs() / tile;
+    let dy = (home.1 - foreign.1).abs() / tile;
+    let ax = (dx - TRADE_INSET_TILES).max(I16F16::ZERO);
+    let ay = (dy - TRADE_INSET_TILES).max(I16F16::ZERO);
+    let mut d = crate::steer::vec_len(ax, ay);
+    if d < TRADE_MIN_DISTANCE {
+        d = TRADE_MIN_DISTANCE;
+    }
+    let map = I16F16::from_num(map_size_tiles as i32);
+    TRADE_GOLD_FACTOR * d * (d / map + TRADE_GOLD_BASE)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -375,6 +419,48 @@ mod tests {
                 "{kind:?} rate off target: {per_sec}/s"
             );
         }
+    }
+
+    #[test]
+    fn trade_gold_formula_matches_trd06() {
+        // Positions are building centers in world units (4 = 1
+        // tile); the home depot sits at the origin throughout.
+        let gold = |hx: i32, hy: i32, fx: i32, fy: i32| {
+            trade_gold_per_trip(
+                (I16F16::from_num(hx), I16F16::from_num(hy)),
+                (I16F16::from_num(fx), I16F16::from_num(fy)),
+                120,
+            )
+            .to_num::<f64>()
+        };
+        // A 45-tile axis run: inset leaves d = 40 exactly, so gold
+        // = 0.46 × 40 × (40/120 + 0.3) = 11.6533…
+        let g = gold(0, 0, 45 * 4, 0);
+        assert!((g - 11.6533).abs() < 0.01, "45-tile route: {g}");
+        // The same run on the other axis prices identically.
+        let g2 = gold(0, 0, 0, 45 * 4);
+        assert!((g2 - g).abs() < 0.001, "axis symmetry: {g2} vs {g}");
+        // Depots 5 tiles apart on both axes: the inset eats the
+        // whole delta, d floors at 0.1, and the yield is the
+        // documented fractional minimum 0.46 × 0.1 × (0.1/120 + 0.3)
+        // ≈ 0.01384 — fractional gold is real, never rounded away.
+        let g3 = gold(0, 0, 5 * 4, 5 * 4);
+        assert!((g3 - 0.01384).abs() < 0.001, "inset floor: {g3}");
+        // Corner-to-corner on the 120 map (centers 116 tiles
+        // apart per axis): inset leaves 111 per axis, d ≈ 156.98,
+        // gold ≈ 116.1.
+        let g4 = gold(0, 0, 116 * 4, 116 * 4);
+        assert!((g4 - 116.1).abs() < 0.75, "corner route: {g4}");
+        // A bigger map pays less for the same physical route (the
+        // d / map_size term): the 45-tile run on a 200-tile map
+        // yields 0.46 × 40 × (40/200 + 0.3) = 9.2.
+        let g5 = trade_gold_per_trip(
+            (I16F16::ZERO, I16F16::ZERO),
+            (I16F16::from_num(45 * 4), I16F16::ZERO),
+            200,
+        )
+        .to_num::<f64>();
+        assert!((g5 - 9.2).abs() < 0.01, "map-size term: {g5}");
     }
 
     #[test]

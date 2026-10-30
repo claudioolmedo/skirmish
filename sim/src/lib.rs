@@ -74,6 +74,8 @@ mod housed_tests;
 mod market_tests;
 #[cfg(test)]
 mod new_units_tests;
+#[cfg(test)]
+mod trade_tests;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
@@ -198,7 +200,7 @@ pub const ORDER_QUEUE_CAP: usize = 16;
 /// Center shorthand) and `AttackBuilding`; M6 adds the research
 /// commands (`ResearchTc`, `ResearchTcAt`, `ResearchAt`) and
 /// `ForceDeposit` (the force-drop-off gesture, ECO-07); the repair
-/// milestone (BLD-07) adds `Repair`.
+/// milestone (BLD-07) adds `Repair`; Package D adds `Trade`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
     /// Does nothing. Exists so the command pipeline is exercised.
@@ -346,6 +348,16 @@ pub enum Command {
     /// stockpile cannot cover a tick's drip, the repairer stops
     /// and goes idle (the documented DE behavior).
     Repair { entity: u32, building: u32 },
+    /// Task a Trade Cart to a foreign depot (Package D, TRD-05):
+    /// the cart travels empty to the named Market — which must be
+    /// completed and owned by *another* player (TRD-07: ally,
+    /// neutral or enemy; diplomacy is never consulted) — loads,
+    /// returns to its home Market, and credits its owner the
+    /// TRD-06 gold on arrival home, looping until re-tasked,
+    /// stopped or killed. Like `AttackBuilding` it has no queued
+    /// form: the order replaces, as a fresh right-click should.
+    /// Invalid carts and depots are ignored (see `Sim::can_trade`).
+    Trade { entity: u32, building: u32 },
     /// Buy one lot (100) of a commodity at a completed Market
     /// (TRD-01..03): the building's owner pays the current buy
     /// price in gold and receives 100 of the commodity; the global
@@ -1574,6 +1586,15 @@ impl Sim {
         {
             s.speed = I16F16::from_bits(((s.speed.to_bits() as i64 * 11) / 10) as i32);
         }
+        // Caravan (Package D, TRD-08): trade units +20% speed —
+        // an ordinary MOV-01 percentage patch on the trade kinds
+        // (TEC-06), in the same integer-scalar shape: speed × 6/5
+        // over the base row. Keyed on the kind, not a class: the
+        // Trade Cart is the only trade kind until the Dock lands
+        // (BLD-14), when the Trade Cog joins this same patch.
+        if kind == EntityKind::TradeCart && p.techs & TechId::Caravan.bit() != 0 {
+            s.speed = I16F16::from_bits(((s.speed.to_bits() as i64 * 6) / 5) as i32);
+        }
         s
     }
 
@@ -2540,6 +2561,10 @@ impl Sim {
         e.attack_move = None;
         e.patrol.clear();
         e.patrol_next = 0;
+        // Package D: Stop also ends a trade route (SEL-14's
+        // "work task" for the cart is its route).
+        e.trade_target = None;
+        e.trade_loaded = false;
     }
 
     /// Would a `DeleteEntity` command be accepted right now?
@@ -3239,6 +3264,31 @@ impl Sim {
             && b.hp < I16F16::from_num(b.kind.max_hp_at(self.age_of(b.owner)))
     }
 
+    /// Would a `Trade` command be accepted right now? (Package D,
+    /// TRD-05/07.) The entity must be a living, player-owned Trade
+    /// Cart and the building a *complete* Market owned by another
+    /// player — ally, neutral, enemy, even a resigned player's:
+    /// trade tasking never consults the diplomacy table for
+    /// validity, only for the combat exposure that follows, and
+    /// the depot's owner gains and loses nothing. A cart cannot
+    /// trade with its own player's Market (the reference's rule:
+    /// gold comes from *another* player's Market — wiki, "Trade
+    /// Cart"). A pure query mirroring `issue_trade`'s validation,
+    /// for UI affordances; the command path re-validates at apply
+    /// time.
+    pub fn can_trade(&self, entity: u32, building: u32) -> bool {
+        let (Some(idx), Some(bi)) = (self.entity_index(entity), self.building_index(building))
+        else {
+            return false;
+        };
+        let e = &self.entities[idx];
+        if e.kind != EntityKind::TradeCart || e.dead || e.owner == entity::OWNER_GAIA {
+            return false;
+        }
+        let b = &self.buildings[bi];
+        b.kind == BuildingKind::Market && b.complete && b.owner != e.owner
+    }
+
     /// Would a `Queue` command be accepted right now? (M4, SEL-12.)
     /// Light validation only — the order re-validates fully when it
     /// *executes*, because the world can change while it waits: a
@@ -3510,6 +3560,7 @@ impl Sim {
                 Command::ResearchTcAt { tc, tech } => self.issue_research_tc_at(tc, tech),
                 Command::ResearchAt { building, tech } => self.issue_research_at(building, tech),
                 Command::Repair { entity, building } => self.issue_repair(entity, building),
+                Command::Trade { entity, building } => self.issue_trade(entity, building),
                 Command::MarketBuy { building, resource } => {
                     self.issue_market_buy(building, resource)
                 }
@@ -3808,6 +3859,11 @@ impl Sim {
             e.attack_move = None;
             e.patrol.clear();
             e.patrol_next = 0;
+            // Package D: a plain move also ends a trade route —
+            // the cart is re-tasked by hand (TRD-05: the cycle
+            // runs "until re-tasked"). Its home stamp stays.
+            e.trade_target = None;
+            e.trade_loaded = false;
         }
         // CMB-09: a Defensive unit's post follows its explicit
         // move orders — the post is the resolved destination.
@@ -3938,6 +3994,219 @@ impl Sim {
         self.entities[idx].order_queue.clear();
         self.entities[idx].order_from_queue = false;
         self.apply_repair(idx, building);
+    }
+
+    /// Apply a `Trade` command (Package D, TRD-05): validate (the
+    /// `can_trade` rules), cancel the cart's current orders, and
+    /// set its route. The first leg's move order is issued by the
+    /// trade step in the same tick's economy phase. A non-queued
+    /// `Trade` also clears the cart's order queue (M4, SEL-12:
+    /// replace semantics); a rejected one changes nothing at all.
+    fn issue_trade(&mut self, entity: u32, building: u32) {
+        if !self.can_trade(entity, building) {
+            return;
+        }
+        let idx = self.entity_index(entity).expect("validated");
+        self.entities[idx].order_queue.clear();
+        self.entities[idx].order_from_queue = false;
+        let e = &mut self.entities[idx];
+        e.clear_combat();
+        e.attack_move = None;
+        e.patrol.clear();
+        e.patrol_next = 0;
+        e.auto_explore = false;
+        e.auto_target = None;
+        e.trade_target = Some(building);
+        e.trade_loaded = false;
+        e.order = None;
+        e.vel_x = I16F16::ZERO;
+        e.vel_y = I16F16::ZERO;
+    }
+
+    /// The cart's standing home depot (TRD-05): the Market stamped
+    /// at spawn while it still stands complete and the owner's;
+    /// otherwise re-resolved to the owner's completed Market
+    /// *farthest* from the trade target — the reference's
+    /// longest-route preference (update 34699: carts seek the
+    /// longest route, returning to the home Market closest to a
+    /// 100-tile displacement from the destination; on this game's
+    /// fixed 120-tile map the farthest standing home is that
+    /// rule's shape). Distance ties break toward the lowest
+    /// building id (buildings iterate in id order and only a
+    /// strictly greater distance replaces), so the choice is a
+    /// pure function of state. `None` while the owner has no
+    /// completed Market standing.
+    fn trade_home_of(&self, idx: usize) -> Option<u32> {
+        let e = &self.entities[idx];
+        let standing = |bid: u32| {
+            self.building_index(bid)
+                .map(|bi| {
+                    let b = &self.buildings[bi];
+                    b.kind == BuildingKind::Market && b.complete && b.owner == e.owner
+                })
+                .unwrap_or(false)
+        };
+        if let Some(h) = e.trade_home {
+            if standing(h) {
+                return Some(h);
+            }
+        }
+        let (tx, ty) = match e.trade_target.and_then(|t| self.building_index(t)) {
+            Some(bi) => (self.buildings[bi].pos_x, self.buildings[bi].pos_y),
+            None => (e.pos_x, e.pos_y),
+        };
+        let mut best: Option<(u32, I16F16)> = None;
+        for b in &self.buildings {
+            if b.kind != BuildingKind::Market || !b.complete || b.owner != e.owner {
+                continue;
+            }
+            let d = steer::vec_len(b.pos_x - tx, b.pos_y - ty);
+            match best {
+                Some((_, bd)) if d <= bd => {}
+                _ => best = Some((b.id, d)),
+            }
+        }
+        best.map(|(id, _)| id)
+    }
+
+    /// Has the unit arrived at a placed building's apron (Package
+    /// D)? Measured against the footprint's *edge*, not its
+    /// center: within 1 tile of the footprint rectangle — a ring
+    /// stand point sits 0.5 tiles past the edge orthogonally,
+    /// ≈0.7 diagonally. With the move order spent, the apron
+    /// widens to 1.5 tiles (the crowded case: separation can hold
+    /// a cart slightly off its stand, the same two-tier arrival
+    /// the work machine grants at a tree, MAP-04).
+    fn at_building(&self, idx: usize, bi: usize) -> bool {
+        let b = &self.buildings[bi];
+        let half = I16F16::from_num(b.kind.footprint_size() as i32 * 2);
+        let e = &self.entities[idx];
+        let dx = ((e.pos_x - b.pos_x).abs() - half).max(I16F16::ZERO);
+        let dy = ((e.pos_y - b.pos_y).abs() - half).max(I16F16::ZERO);
+        let edge = steer::vec_len(dx, dy);
+        edge <= I16F16::from_num(4)
+            || (e.order.is_none() && edge <= I16F16::from_num(6))
+    }
+
+    /// Issue a cart's move order toward a depot's ring stand point
+    /// (the builders' `approach_point`). False when no stand point
+    /// is reachable — the caller ends the route instead of
+    /// re-pathing every tick (the M6 perf rule).
+    fn trade_approach(&mut self, idx: usize, bi: usize) -> bool {
+        let (ax, ay, size) = {
+            let b = &self.buildings[bi];
+            (b.cell_x, b.cell_y, b.kind.footprint_size())
+        };
+        match self.approach_point(idx, ax, ay, size) {
+            Some((px, py)) => {
+                self.set_move_order(idx, px, py);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// End a cart's route (Package D): target and load cleared,
+    /// the cart idles where it stands. The home stamp is kept —
+    /// it is the cart's identity, re-resolved by `trade_home_of`
+    /// whenever it stops standing.
+    fn stop_trade(&mut self, idx: usize) {
+        let e = &mut self.entities[idx];
+        e.trade_target = None;
+        e.trade_loaded = false;
+        e.order = None;
+        e.vel_x = I16F16::ZERO;
+        e.vel_y = I16F16::ZERO;
+    }
+
+    /// One Trade Cart's route step (Package D, TRD-05): the
+    /// two-waypoint loop that runs beside the villager work
+    /// machine in the economy phase. The cart travels empty to
+    /// the foreign depot, loads on arrival, returns loaded, and
+    /// its owner is credited the TRD-06 gold at the home-arrival
+    /// moment — a trade unit generates nothing one-way. The cycle
+    /// repeats until the cart is re-tasked, stopped or killed, or
+    /// either depot falls. Transitions trigger on arrival
+    /// (`at_building`); a leg's move order is (re)issued only
+    /// while the cart has none, the work machine's discipline.
+    fn trade_step(&mut self, idx: usize) {
+        let target = match self.entities[idx].trade_target {
+            Some(t) => t,
+            None => return,
+        };
+        // The foreign depot must still stand, complete, a Market:
+        // if it fell mid-route the route is over — the cart stands
+        // down where it is (the reference's stranded cart).
+        let tbi = match self.building_index(target) {
+            Some(bi)
+                if self.buildings[bi].kind == BuildingKind::Market
+                    && self.buildings[bi].complete =>
+            {
+                bi
+            }
+            _ => {
+                self.stop_trade(idx);
+                return;
+            }
+        };
+        if !self.entities[idx].trade_loaded {
+            if self.at_building(idx, tbi) {
+                // Loaded: turn for home in the same step, so the
+                // round trip has no dead tick at the depot.
+                let e = &mut self.entities[idx];
+                e.trade_loaded = true;
+                e.order = None;
+                e.vel_x = I16F16::ZERO;
+                e.vel_y = I16F16::ZERO;
+            } else {
+                if self.entities[idx].order.is_none() && !self.trade_approach(idx, tbi) {
+                    self.stop_trade(idx);
+                }
+                return;
+            }
+        }
+        // The loaded leg: home must stand to receive the gold.
+        let home = match self.trade_home_of(idx) {
+            Some(h) => h,
+            None => {
+                // No home Market stands: the loaded cart waits at
+                // the foreign depot until one completes — target
+                // and load kept, and the re-check each tick is a
+                // scan, never a path.
+                let e = &mut self.entities[idx];
+                e.order = None;
+                e.vel_x = I16F16::ZERO;
+                e.vel_y = I16F16::ZERO;
+                return;
+            }
+        };
+        if self.entities[idx].trade_home != Some(home) {
+            self.entities[idx].trade_home = Some(home);
+        }
+        let hbi = self.building_index(home).expect("resolved home stands");
+        if self.at_building(idx, hbi) {
+            // The credit moment (TRD-05/06): gold exists only
+            // here, computed from the two depots' centers at this
+            // tick. The foreign depot's owner gains and loses
+            // nothing (TRD-07).
+            let (hx, hy) = (self.buildings[hbi].pos_x, self.buildings[hbi].pos_y);
+            let (fx, fy) = (self.buildings[tbi].pos_x, self.buildings[tbi].pos_y);
+            let gold = econ::trade_gold_per_trip((hx, hy), (fx, fy), GRID_DIM);
+            let owner = self.entities[idx].owner;
+            self.stockpile_mut(owner).add(ResourceKind::Gold, gold);
+            let e = &mut self.entities[idx];
+            e.trade_loaded = false;
+            e.order = None;
+            e.vel_x = I16F16::ZERO;
+            e.vel_y = I16F16::ZERO;
+            // The cycle repeats forever (TRD-05): head straight
+            // back out, no dead tick at home either.
+            if !self.trade_approach(idx, tbi) {
+                self.stop_trade(idx);
+            }
+        } else if self.entities[idx].order.is_none() && !self.trade_approach(idx, hbi) {
+            self.stop_trade(idx);
+        }
     }
 
     /// The mechanics of a repair order, shared by the `Repair`
@@ -5073,6 +5342,7 @@ impl Sim {
     /// The economy phase of a tick: carcass decay (M3), training
     /// progress at the Town Center and the production buildings, then
     /// every living villager's work state machine, in id order, then
+    /// every tasked Trade Cart's route step (Package D), then
     /// construction progress (M2.5).
     fn economy_tick(&mut self) {
         // Carcass decay (ECO-12): carcasses — and only carcasses —
@@ -5165,6 +5435,17 @@ impl Sim {
                 self.work_tick(idx);
             }
         }
+        // Trade routes (Package D, TRD-05): every living Trade
+        // Cart with a tasking runs its two-waypoint loop, in id
+        // order like the work machine above.
+        for idx in 0..self.entities.len() {
+            if self.entities[idx].kind == EntityKind::TradeCart
+                && !self.entities[idx].dead
+                && self.entities[idx].trade_target.is_some()
+            {
+                self.trade_step(idx);
+            }
+        }
         self.construction_tick();
         self.repair_tick();
     }
@@ -5236,6 +5517,13 @@ impl Sim {
         let idx = self.entities.len() - 1;
         let max_hp = self.unit_stats(idx).max_hp;
         self.entities[idx].hp = I16F16::from_num(max_hp);
+        // Package D (TRD-05): a Trade Cart's home depot is the
+        // Market that trained it, stamped at spawn — the depot it
+        // returns its gold to for its whole life (re-resolved by
+        // `trade_home_of` only if that Market falls).
+        if kind == EntityKind::TradeCart {
+            self.entities[idx].trade_home = Some(building);
+        }
         // Rally (M4, SEL-13): the new unit walks to the building's
         // rally point (military units just walk — only villagers can
         // be sent straight to a node, and Barracks train none).
@@ -6821,6 +7109,32 @@ impl Sim {
                     }
                 }
                 h.write_u64(e.garrison_heal_remainder as u64);
+            }
+            // Package D: trade state (TRD-05) — written ONLY while
+            // any trade field is non-default, behind marker 0xB8
+            // (the entity section's 0xB0–0xB4 and the projectile
+            // section's 0xB5 precede it), so a match with no Trade
+            // Cart ever stamped or tasked hashes byte-identically
+            // to before — the golden stream is untouched; a trading
+            // stream is fully covered, since home, target and the
+            // loaded leg are all state a replay must reproduce.
+            if e.trade_home.is_some() || e.trade_target.is_some() || e.trade_loaded {
+                h.write_u8(0xB8);
+                match e.trade_home {
+                    None => h.write_u8(0),
+                    Some(b) => {
+                        h.write_u8(1);
+                        h.write_u32(b);
+                    }
+                }
+                match e.trade_target {
+                    None => h.write_u8(0),
+                    Some(b) => {
+                        h.write_u8(1);
+                        h.write_u32(b);
+                    }
+                }
+                h.write_u8(u8::from(e.trade_loaded));
             }
         }
         // M3: projectiles in flight, in spawn order.

@@ -116,6 +116,7 @@ pub fn spec(kind: EntityKind) -> &'static UnitSpec {
         EntityKind::LightCavalry => &LIGHT_CAVALRY,
         EntityKind::CavalryArcher => &CAVALRY_ARCHER,
         EntityKind::Petard => &PETARD,
+        EntityKind::TradeCart => &TRADE_CART,
     }
 }
 
@@ -607,6 +608,44 @@ static PETARD: UnitSpec = UnitSpec {
     wood_cost: 0,
     gold_cost: 20,
     train_ticks: 1500, // 25 s
+};
+
+/// Trade Cart (Package D, TRD-05..08; wiki, "Trade Cart (Age of
+/// Empires II)", fetched 2026-10-29, cross-checked against the
+/// Aoe2Sheet unit overview): HP 70, armor 0/0, no attack, LoS 7,
+/// cost 100 W / 50 G, train 51 s at the Market, Feudal Age
+/// (`BuildingKind::trains` + `EntityKind::train_age`). Speed is
+/// the CURRENT Definitive Edition row: update 141935 raised the
+/// base speed 1 → 1.25 tiles/s and cut Caravan to +20% in the
+/// same patch, so a Caravan cart (1.5) matches the pre-patch
+/// upgraded speed exactly (the wiki's changelog note). Radius
+/// 0.25 tiles (the trade-formula study's cart radius; update
+/// 125283 set the collision multiplier to 0.25). The row carries
+/// no armor-class membership: nothing in the current roster's
+/// attack tables keys on a trade class (CLS-01 data discipline —
+/// a membership ships when a documented bonus row needs it).
+static TRADE_CART: UnitSpec = UnitSpec {
+    max_hp: 70,
+    attacks: NO_ATTACKS,
+    armor_melee: 0,
+    armor_pierce: 0,
+    classes: 0,
+    range_max: I16F16::ZERO,
+    range_min: I16F16::ZERO,
+    reload_ticks: 0,
+    attack_delay_ticks: 0,
+    accuracy: 100,
+    projectile_speed: I16F16::ZERO,
+    scatter: I16F16::ZERO,
+    speed: I16F16::from_bits(5_461), // 1.25 tiles/s (update 141935; absolute scale, see header)
+    los: I16F16::from_bits(1_835_008), // 28 (7 tiles)
+    radius: I16F16::from_bits(65_536), // 1.0 (0.25 tiles)
+    carcass_food: 0,
+    carcass_decay_bits: 0,
+    food_cost: 0,
+    wood_cost: 100,
+    gold_cost: 50,
+    train_ticks: 3060, // 51 s
 };
 
 /// Sheep (OPENING-SPEC §2.2): 100 food, speed 0.7, worked at the

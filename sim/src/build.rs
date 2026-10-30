@@ -484,7 +484,10 @@ impl BuildingKind {
     }
 
     /// Whether this building trains units (a production building —
-    /// it also holds a rally point, SEL-13).
+    /// it also holds a rally point, SEL-13). The Market joins with
+    /// Package D: it trains the Trade Cart (TRD-05), and the
+    /// reference game's Markets hold rally points like every other
+    /// producing building.
     pub fn is_production(self) -> bool {
         matches!(
             self,
@@ -492,6 +495,7 @@ impl BuildingKind {
                 | BuildingKind::ArcheryRange
                 | BuildingKind::Stable
                 | BuildingKind::Castle
+                | BuildingKind::Market
         )
     }
 
@@ -518,6 +522,9 @@ impl BuildingKind {
                 // Castle P3a: the Petard trains at the Castle
                 // only (the Castle's whole generic roster).
                 | (BuildingKind::Castle, EntityKind::Petard)
+                // Package D: the Trade Cart trains at the Market
+                // only (TRD-05; wiki, "Trade Cart").
+                | (BuildingKind::Market, EntityKind::TradeCart)
         )
     }
 
@@ -1632,6 +1639,15 @@ mod tests {
         assert!(BuildingKind::ArcheryRange.trains(EntityKind::Skirmisher));
         assert!(!BuildingKind::ArcheryRange.trains(EntityKind::Spearman));
         assert!(BuildingKind::Stable.trains(EntityKind::ScoutCavalry));
+        // Package D: the Market trains the Trade Cart (TRD-05)
+        // and is a production building (queue + rally); it does
+        // NOT join `produces_units` in this package — the VIC-01
+        // elimination predicate is a separate rule's surface and
+        // stays exactly as the Castle P3a front left it.
+        assert!(BuildingKind::Market.trains(EntityKind::TradeCart));
+        assert!(!BuildingKind::Market.trains(EntityKind::Militia));
+        assert!(BuildingKind::Market.is_production());
+        assert!(!BuildingKind::Barracks.trains(EntityKind::TradeCart));
     }
 
     #[test]
