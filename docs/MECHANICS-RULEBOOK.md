@@ -1101,7 +1101,11 @@ Barracks/Range/Stable/Blacksmith), and the Farm moved from 2×2 to
 the reference's 3×3 on 2026-10-22 (Claudio's decision, ECO-14).
 One divergence remains: the TC is an entity rather than a placed
 building: its 4×4 footprint is placement-reserved but, per BLD-16,
-passable to units instead of blocking pathing. · *Status:* **DIFFERS**.
+passable to units instead of blocking pathing. The Castle-Age set's
+footprints completed on 2026-10-30 (Castle P4a): the Siege Workshop
+takes its documented 4×4 (the study §5 row is explicit — not the
+3×3 a first pass might guess), the Castle set's last 4×4. ·
+*Status:* **DIFFERS**.
 
 **BLD-07 — Repair.** Villagers repair damaged buildings, ships, and siege.
 Restoring a building from 1 HP to full costs 50% of its original build
@@ -1394,7 +1398,11 @@ record like any other; on completion it converts into the TC entity
 (the entity-spawn path BLD-16's reserve already assumed), standing
 on the footprint's (1,1) cell so its BLD-16 reserve is exactly the
 placed 4×4. Buildings not yet in the game
-(Market, Monastery, …) arrive with their milestones. · *Status:*
+(Market, Monastery, …) arrive with their milestones. Extended
+2026-10-30 (Castle P4a): the Siege Workshop joins the chain — Castle
+Age, requiring a completed Blacksmith, the same (age, built-set)
+evaluation in `validate_build`, mirrored by the client's ghost and
+build menu (age gate, then the Blacksmith gate). · *Status:*
 **MATCHES**.
 
 **BLD-16 — The Town Center's footprint is passable but reserved.**
@@ -2853,7 +2861,16 @@ any garrison (GAR-02) and eject alive if the ram is destroyed.
 *Source:* MECHANICS-STUDY §3.9 (garrison effects pinned). · *Impl:* the
 ram's effective speed/anti-building attack are derived from its passenger
 count at lookup time (like GAR-05) — no per-passenger state beyond the
-list. · *Status:* **MISSING**.
+list. Shipped 2026-10-30 (Castle P4a): the Battering Ram is the garrison
+core's first mobile host — `GarrisonRef` gains a `Unit` variant, the
+passenger list rides the host entity, and the static-footprint host
+helpers re-read against the live position (circle edge distance,
+compass approach points, re-approach as the host moves); the death
+sweep ejects the passengers before tombstoning. The ≤20%-HP re-entry
+block (GAR-01's building rule) does not apply to the Ram — DE garrisons
+into rams freely — and the Ram heals nobody; the negative melee armor
+(−3) is data the CMB-01 formula amplifies through, audited and pinned
+in P4a (no clamp defect found). · *Status:* **MATCHES**.
 
 *(Repair is a building-system rule: see BLD-07.)*
 
@@ -3995,6 +4012,21 @@ stands at 20 rules, 14 / 5 / 1, §9 at 10 rules, 6 / 2 / 2 and
 the book at 222 rules, 145 / 23 / 54. The table below equals
 the body.
 
+updated 2026-10-30 for Castle P4a: the Siege Workshop lands
+(200 W, 40 s, 4×4, 1800/2100 HP, 2/9 armor, LoS 6, Castle Age,
+requires a completed Blacksmith — BLD-15's chain extended,
+BLD-06's note extended: the Castle set's last 4×4) and the
+Battering Ram (175 HP, −3/180 armor, 2/+150 buildings/+40
+siege, 5.0 s reload, 160 W 75 G, 36 s at the workshop) as the
+garrison core's first mobile host: GAR-10 moves MISSING →
+MATCHES (6 foot passengers, +0.05 tiles/s and +10 vs buildings
+per passenger derived at lookup, destruction ejection, no
+healing, no ≤20%-HP re-entry block); the negative-armor audit
+found no clamp defect in CMB-01's three damage paths and pins
+the amplification in tests. §14 stands at 10 rules, 8 / 0 / 2
+and the book at 222 rules, 146 / 23 / 53. The table below
+equals the body.
+
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
 | 1 | Simulation & time (SIM) | 12 | 12 | 0 | 0 |
@@ -4010,19 +4042,19 @@ the body.
 | 11 | Technologies & age advancement (TEC) | 11 | 6 | 2 | 3 |
 | 12 | Monks, conversion & relics (MNK) | 13 | 0 | 0 | 13 |
 | 13 | Trade, market & tribute (TRD) | 8 | 3 | 0 | 5 |
-| 14 | Garrison, transport & repair (GAR) | 10 | 7 | 0 | 3 |
+| 14 | Garrison, transport & repair (GAR) | 10 | 8 | 0 | 2 |
 | 15 | AI behavior & difficulty (AI) | 9 | 8 | 0 | 1 |
 | 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |
 | 17 | Multiplayer determinism (NET) | 11 | 7 | 2 | 2 |
 | 18 | Information rules (INF) | 13 | 9 | 2 | 2 |
-| | **Total** | **222** | **145** | **23** | **54** |
+| | **Total** | **222** | **146** | **23** | **53** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer
 (§11) with M6, and the world itself (§2/§3: generated maps, terrain,
 elevation, fog) with M7, so the remaining greenfield is concentrated
 in the systems whose content has not been built yet — monks (§12),
-trade (§13), garrison's transports and rams (§14 remainder), the water domain (ships, docks,
+trade (§13), garrison's transports (§14 remainder), the water domain (ships, docks,
 fishing), and cliffs. Multiplayer's transport (§17) landed with M8;
 its remaining gaps are snapshots (NET-09) and diplomacy (NET-11).
 

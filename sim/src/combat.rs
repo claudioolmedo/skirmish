@@ -193,6 +193,36 @@ fn damage_sum(attacks: &[(u8, i32)], target: &UnitSpec) -> (i32, bool) {
 /// Pure — unit-tested directly. Returns 0 only when no attack pair
 /// participates (an attacker with no applicable class at all);
 /// any participating attack deals at least 1.
+/// GAR-10 (Castle P4a): the attack table a Battering Ram
+/// strikes a building with — its spec table with +10 per
+/// passenger added to the buildings pair ONLY (the base
+/// 2 melee and the +40 vs Siege never scale). Derived from
+/// the passenger count at strike time (the GAR-05 lookup
+/// pattern); every other attacker — and an empty Ram —
+/// borrows its table unchanged.
+pub fn ram_building_attacks(
+    kind: EntityKind,
+    passengers: usize,
+    attacks: &[(u8, i32)],
+) -> std::borrow::Cow<'_, [(u8, i32)]> {
+    if kind != EntityKind::BatteringRam || passengers == 0 {
+        return std::borrow::Cow::Borrowed(attacks);
+    }
+    let bonus = 10 * passengers as i32;
+    std::borrow::Cow::Owned(
+        attacks
+            .iter()
+            .map(|&(c, v)| {
+                if c == cls::STANDARD_BUILDINGS {
+                    (c, v + bonus)
+                } else {
+                    (c, v)
+                }
+            })
+            .collect(),
+    )
+}
+
 pub fn compute_damage(attacks: &[(u8, i32)], target: &UnitSpec) -> i32 {
     let (total, participated) = damage_sum(attacks, target);
     if participated {
@@ -1166,7 +1196,20 @@ impl Sim {
             let dist = steer::vec_len(tx - ax, ty - ay);
             if dist <= MELEE_REACH {
                 let atk_elev = self.entity_height(idx);
-                self.apply_hit(attacker_id, owner, (ax, ay), spec.attacks, ti, false, atk_elev);
+                // GAR-10 (Castle P4a): against the Town Center —
+                // an entity in this architecture (BLD-16) but a
+                // building for damage — the Ram's passenger bonus
+                // applies exactly as against a placed building.
+                let attacks = if self.entities[ti].kind == EntityKind::TownCenter {
+                    ram_building_attacks(
+                        self.entities[idx].kind,
+                        self.entities[idx].garrison.len(),
+                        spec.attacks,
+                    )
+                } else {
+                    std::borrow::Cow::Borrowed(spec.attacks)
+                };
+                self.apply_hit(attacker_id, owner, (ax, ay), &attacks, ti, false, atk_elev);
                 // CMB-17 (Castle P3a): a Petard's landed strike
                 // detonates it at the target.
                 if self.entities[idx].kind == EntityKind::Petard {
@@ -1606,7 +1649,12 @@ impl Sim {
             let qy = (ay - by).clamp(-half, half) + by;
             if steer::vec_len(ax - qx, ay - qy) <= MELEE_REACH {
                 let atk_elev = self.entity_height(idx);
-                self.damage_building(bid, spec.attacks, atk_elev, owner);
+                let attacks = ram_building_attacks(
+                    self.entities[idx].kind,
+                    self.entities[idx].garrison.len(),
+                    spec.attacks,
+                );
+                self.damage_building(bid, &attacks, atk_elev, owner);
                 // CMB-17 (Castle P3a): a Petard's landed strike
                 // detonates it at the footprint's edge point.
                 if self.entities[idx].kind == EntityKind::Petard {
@@ -2507,6 +2555,21 @@ impl Sim {
             {
                 let tc_id = self.entities[idx].id;
                 self.eject_host(crate::entity::GarrisonRef::TownCenter(tc_id));
+            }
+            // GAR-10 (Castle P4a): a dying Battering Ram ejects
+            // its passengers ALIVE at the ring around its final
+            // position, before the corpse is marked — the mobile
+            // host's destruction ejection (the only forced
+            // ejection a Ram ever performs). The host record is
+            // still alive at this point of the sweep, so the exit
+            // ring reads its position normally.
+            if !self.entities[idx].dead
+                && self.entities[idx].hp < I16F16::from_num(1)
+                && self.entities[idx].kind == EntityKind::BatteringRam
+                && !self.entities[idx].garrison.is_empty()
+            {
+                let ram_id = self.entities[idx].id;
+                self.eject_host(crate::entity::GarrisonRef::Unit(ram_id));
             }
             let e = &self.entities[idx];
             if e.dead || e.hp >= I16F16::from_num(1) {

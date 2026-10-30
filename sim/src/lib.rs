@@ -65,6 +65,8 @@ mod units;
 #[cfg(test)]
 mod castle_p3_tests;
 #[cfg(test)]
+mod siege_p4a_tests;
+#[cfg(test)]
 mod university_p3c_tests;
 #[cfg(test)]
 mod garrison_tests;
@@ -93,9 +95,8 @@ pub use build::{
     TOWN_CENTER_POP_SUPPORT, TOWN_CENTER_WEAPON,
 };
 pub use combat::{
-    compute_damage, compute_damage_elev, compute_damage_hit, elevation_factor, Projectile,
-    DEFENSIVE_LEASH,
-    MELEE_REACH,
+    compute_damage, compute_damage_elev, compute_damage_hit, elevation_factor,
+    ram_building_attacks, Projectile, DEFENSIVE_LEASH, MELEE_REACH,
 };
 pub use econ::{
     NodeKind, ResourceKind, ResourceNode, Stockpile, CARRY_CAPACITY, DEPOSIT_RANGE, GATHER_RANGE,
@@ -475,6 +476,16 @@ pub enum Command {
     /// task and position; the second ring ("back to work")
     /// ungarrisons them and restores each snapshot.
     TownBell { tc: u32 },
+    /// Garrison a unit inside an own Battering Ram (Castle P4a,
+    /// GAR-10): the Ram form of `GarrisonBuilding` — a MOBILE
+    /// host. The unit walks to the Ram's current position and
+    /// enters on arrival. Foot units only, capacity 6; no
+    /// production-style (rally) entry exists for Rams.
+    GarrisonUnit { entity: u32, host: u32 },
+    /// Voluntarily ungarrison a Battering Ram (Castle P4a,
+    /// GAR-10): every passenger steps out at the ring around the
+    /// Ram's current position, idle and unharmed.
+    UngarrisonUnit { host: u32 },
 }
 
 /// Why Town Center training cannot currently proceed (M2.5). The
@@ -3759,6 +3770,10 @@ impl Sim {
                 }
                 Command::UngarrisonTc { tc } => self.issue_ungarrison_tc(tc),
                 Command::TownBell { tc } => self.issue_town_bell(tc),
+                Command::GarrisonUnit { entity, host } => {
+                    self.issue_garrison_unit(entity, host)
+                }
+                Command::UngarrisonUnit { host } => self.issue_ungarrison_unit(host),
             }
         }
 
@@ -3950,6 +3965,12 @@ impl Sim {
         let e = &self.entities[idx];
         if e.kind == EntityKind::Boar && e.attack_target.is_some() {
             return units::BOAR_CHASE_SPEED;
+        }
+        // GAR-10 (Castle P4a): a Battering Ram's speed is derived
+        // from its passenger count at lookup — 0.6 tiles/s empty,
+        // +0.05 per passenger to the 0.9 cap at 6 (`garrison.rs`).
+        if e.kind == EntityKind::BatteringRam {
+            return crate::garrison::ram_speed(e.garrison.len() as u32);
         }
         // M6: the owner's effective row — Loom's villager speed and
         // the Scout's Feudal speed enter movement here (TEC-06).
@@ -7299,6 +7320,17 @@ impl Sim {
                     }
                 }
                 h.write_u64(e.garrison_heal_remainder as u64);
+            }
+            // Castle P4a: the Ram's passenger list (GAR-10) —
+            // written ONLY while non-empty, behind marker 0xBA:
+            // a match with no loaded Ram (every historical
+            // replay) hashes bit-identically to before.
+            if !e.garrison.is_empty() {
+                h.write_u8(0xBA);
+                h.write_u32(e.garrison.len() as u32);
+                for &gid in &e.garrison {
+                    h.write_u32(gid);
+                }
             }
             // Package D: trade state (TRD-05) — written ONLY while
             // any trade field is non-default, behind marker 0xB8

@@ -95,6 +95,13 @@ pub enum EntityKind {
     /// loaded, and its owner is credited gold per completed round
     /// trip by the TRD-06 formula. No attack: a civilian hull.
     TradeCart,
+    /// Castle Age siege engine (Castle P4a, GAR-10): trained at
+    /// the Siege Workshop — a mobile armored container that
+    /// carries up to 6 foot units inside, each passenger making
+    /// it faster and harder-hitting against buildings. Its
+    /// −3 melee armor is real DE data: melee hits against it
+    /// AMPLIFY (CMB-01's formula has no clamp that eats it).
+    BatteringRam,
 }
 
 impl EntityKind {
@@ -106,7 +113,7 @@ impl EntityKind {
     /// 12 = knight, 13 = light cavalry, 14 = cavalry archer
     /// (Castle P2 — appended after the Wolf took 11 on main,
     /// so no tag moved), 15 = petard (Castle P3a), 16 = trade
-    /// cart (Package D).
+    /// cart (Package D), 17 = battering ram (Castle P4a).
     pub fn tag(self) -> u8 {
         match self {
             EntityKind::Villager => 0,
@@ -126,6 +133,7 @@ impl EntityKind {
             EntityKind::CavalryArcher => 14,
             EntityKind::Petard => 15,
             EntityKind::TradeCart => 16,
+            EntityKind::BatteringRam => 17,
         }
     }
 
@@ -149,6 +157,7 @@ impl EntityKind {
             14 => Some(EntityKind::CavalryArcher),
             15 => Some(EntityKind::Petard),
             16 => Some(EntityKind::TradeCart),
+            17 => Some(EntityKind::BatteringRam),
             _ => None,
         }
     }
@@ -164,9 +173,10 @@ impl EntityKind {
             EntityKind::Spearman | EntityKind::Skirmisher | EntityKind::TradeCart => {
                 crate::tech::Age::Feudal
             }
-            EntityKind::Knight | EntityKind::CavalryArcher | EntityKind::Petard => {
-                crate::tech::Age::Castle
-            }
+            EntityKind::Knight
+            | EntityKind::CavalryArcher
+            | EntityKind::Petard
+            | EntityKind::BatteringRam => crate::tech::Age::Castle,
             _ => crate::tech::Age::Dark,
         }
     }
@@ -195,6 +205,7 @@ impl EntityKind {
                 | EntityKind::CavalryArcher
                 | EntityKind::Petard
                 | EntityKind::TradeCart
+                | EntityKind::BatteringRam
         )
     }
 
@@ -215,6 +226,7 @@ impl EntityKind {
                 | EntityKind::CavalryArcher
                 | EntityKind::Petard
                 | EntityKind::TradeCart
+                | EntityKind::BatteringRam
         )
     }
 
@@ -326,24 +338,30 @@ impl Default for Stance {
 /// A garrison host (Castle P3b, GAR-01): a placed building, or a
 /// Town Center (an entity in this architecture, BLD-16). The two
 /// id spaces are distinct, so the host reference names its space.
+/// Castle P4a adds the third host kind (GAR-10): a Battering Ram
+/// — a MOBILE host; its entity id lives in the entity id space,
+/// like the Town Center's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GarrisonRef {
     Building(u32),
     TownCenter(u32),
+    Unit(u32),
 }
 
 impl GarrisonRef {
-    /// Stable tag for the state hash: 1 = building, 2 = town center
-    /// (0 is the hash's "no host" marker, written by the caller).
+    /// Stable tag for the state hash: 1 = building, 2 = town
+    /// center, 3 = unit (a Battering Ram, Castle P4a) — 0 is the
+    /// hash's "no host" marker, written by the caller.
     pub fn tag(self) -> u8 {
         match self {
             GarrisonRef::Building(_) => 1,
             GarrisonRef::TownCenter(_) => 2,
+            GarrisonRef::Unit(_) => 3,
         }
     }
     pub fn id(self) -> u32 {
         match self {
-            GarrisonRef::Building(id) | GarrisonRef::TownCenter(id) => id,
+            GarrisonRef::Building(id) | GarrisonRef::TownCenter(id) | GarrisonRef::Unit(id) => id,
         }
     }
 }
@@ -736,6 +754,16 @@ pub struct Entity {
     /// quotient over 3600 is the HP bits restored; this holds the
     /// remainder (0 ≤ r < 3600). Reset on garrison entry/exit.
     pub garrison_heal_remainder: i64,
+    /// The passenger list of a garrison HOST entity (Castle P4a,
+    /// GAR-10): the Battering Ram is the only entity kind that
+    /// hosts — this holds the ids of the foot units inside it,
+    /// mirroring `Building.garrison` on the placed-building side.
+    /// Empty on every other kind and on an empty Ram. The Ram's
+    /// effective speed and anti-building attack are DERIVED from
+    /// this list's length at lookup time (GAR-10's prescription)
+    /// — no cached counters. Part of the hashed state, written
+    /// only while non-empty.
+    pub garrison: Vec<u32>,
     // --- Trade state (Package D, TRD-05..08; Trade Cart only,
     // inert defaults on every other kind) ---
     /// The home depot: the Market this cart returns its gold to —
@@ -815,6 +843,7 @@ impl Entity {
             garrison_prod_entry: false,
             bell_snapshot: None,
             garrison_heal_remainder: 0,
+            garrison: Vec::new(),
             trade_home: None,
             trade_target: None,
             trade_loaded: false,

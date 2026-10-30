@@ -125,6 +125,7 @@ pub fn spec(kind: EntityKind) -> &'static UnitSpec {
         EntityKind::CavalryArcher => &CAVALRY_ARCHER,
         EntityKind::Petard => &PETARD,
         EntityKind::TradeCart => &TRADE_CART,
+        EntityKind::BatteringRam => &BATTERING_RAM,
     }
 }
 
@@ -667,6 +668,54 @@ static TRADE_CART: UnitSpec = UnitSpec {
     wood_cost: 100,
     gold_cost: 50,
     train_ticks: 3060, // 51 s
+};
+
+/// Battering Ram (Castle P4a, GAR-10; wiki "Battering Ram (Age
+/// of Empires II)" infobox via the Castle Age dossier, fetched
+/// 2026-10-22): HP 175, attack 2 melee with +150 vs Buildings
+/// (standard) and +40 vs Siege, armor **−3 / 180** — the melee
+/// armor is NEGATIVE in the reference: CMB-01's formula
+/// (Σ max(0, atk − armor)) amplifies melee hits against it
+/// (a 10-melee strike lands 13), and the pierce armor makes
+/// arrows a minimum-damage nuisance only. RoF 5.0 s, speed 0.6
+/// tiles/s (the EMPTY speed — each garrisoned passenger adds
+/// +0.05 to a 0.9 cap, derived at lookup in `garrison.rs`),
+/// LoS 5. Cost 160 W / 75 G, train 36 s, Siege Workshop only
+/// (`BuildingKind::trains` + `EntityKind::train_age`). Its
+/// classes carry SIEGE — the membership the Petard's +60 row
+/// (Castle P3a) waited for. The attack delay adopts the
+/// foot-melee rows' 30 ticks as a recorded design constant
+/// (the dossier pins no separate ram frame value). The radius
+/// adopts the largest shipped row's 1.2 (the Boar's bulk) as an
+/// implementation constant — the dossier gives no ram radius —
+/// never presented as DE data.
+static BATTERING_RAM: UnitSpec = UnitSpec {
+    max_hp: 175,
+    attacks: &[
+        (cls::MELEE, 2),
+        (cls::STANDARD_BUILDINGS, 150),
+        (cls::SIEGE, 40),
+    ],
+    armor_melee: -3,
+    armor_pierce: 180,
+    armor_building: 0,
+    classes: cls::mask(&[cls::SIEGE]),
+    range_max: I16F16::ZERO,
+    range_min: I16F16::ZERO,
+    reload_ticks: 300,       // 5.0 s
+    attack_delay_ticks: 30,  // adopted foot-melee value (see above)
+    accuracy: 100,
+    projectile_speed: I16F16::ZERO,
+    scatter: I16F16::ZERO,
+    speed: I16F16::from_bits(2_621), // 0.6 tiles/s, empty (see above)
+    los: I16F16::from_bits(1_310_720), // 20 (5 tiles)
+    radius: I16F16::from_bits(78_643), // 1.2 — adopted (see above)
+    carcass_food: 0,
+    carcass_decay_bits: 0,
+    food_cost: 0,
+    wood_cost: 160,
+    gold_cost: 75,
+    train_ticks: 2160, // 36 s
 };
 
 /// Sheep (OPENING-SPEC §2.2): 100 food, speed 0.7, worked at the

@@ -184,6 +184,13 @@ pub const CASTLE_BUILD_TICKS: u64 = 12000;
 pub const UNIVERSITY_WOOD_COST: I16F16 = I16F16::from_bits(13_107_200); // 200
 /// University build time: 60 s at 60 Hz (Castle P3c; same source).
 pub const UNIVERSITY_BUILD_TICKS: u64 = 3600;
+/// Siege Workshop wood cost: 200 (Castle P4a; AoE wiki, Siege
+/// Workshop infobox via the Castle Age dossier, fetched
+/// 2026-10-22).
+pub const SIEGE_WORKSHOP_WOOD_COST: I16F16 = I16F16::from_bits(13_107_200); // 200
+/// Siege Workshop build time: 40 s at 60 Hz (Castle P4a; same
+/// source).
+pub const SIEGE_WORKSHOP_BUILD_TICKS: u64 = 2400;
 /// Population room from one completed Castle: +20 (Castle P3a;
 /// same source).
 pub const CASTLE_POP_SUPPORT: u32 = 20;
@@ -279,6 +286,17 @@ pub enum BuildingKind {
     /// Holes, Treadmill Crane, Masonry and the Fortified Wall
     /// upgrade (TechIds 20–24, `crate::tech`).
     University,
+    /// Castle P4a: the Siege Workshop — the Castle Age's siege
+    /// production building. 200 wood, 40 s build, **4×4** (the
+    /// DE footprint is 4×4, not 3×3 — RISKS R8), 1800 HP in the
+    /// Castle column (2100 Imperial), armor 2/9, LoS 6; Castle
+    /// Age, and it requires a completed Blacksmith (BLD-15's
+    /// chain). It trains the Battering Ram (the Mangonel and
+    /// Scorpion join its roster in the P4b/P4c slices) and,
+    /// like every production building, holds a production
+    /// garrison of 10 (GAR-08). It does not fire — no
+    /// `BuildingWeapon`.
+    SiegeWorkshop,
 }
 
 impl BuildingKind {
@@ -288,8 +306,9 @@ impl BuildingKind {
     /// 9 = palisade wall, 10 = watch tower, 11 = outpost,
     /// 12 = market, 13 = town center (construction record only —
     /// see the variant), 14 = stone wall (BLD-20), 15 = castle
-    /// (Castle P3a), 16 = university (Castle P3c). Tags are an
-    /// ABI contract — append only, never renumber.
+    /// (Castle P3a), 16 = university (Castle P3c), 17 = siege
+    /// workshop (Castle P4a). Tags are an ABI contract — append
+    /// only, never renumber.
     pub fn tag(self) -> u8 {
         match self {
             BuildingKind::House => 0,
@@ -309,6 +328,7 @@ impl BuildingKind {
             BuildingKind::StoneWall => 14,
             BuildingKind::Castle => 15,
             BuildingKind::University => 16,
+            BuildingKind::SiegeWorkshop => 17,
         }
     }
 
@@ -332,6 +352,7 @@ impl BuildingKind {
             14 => Some(BuildingKind::StoneWall),
             15 => Some(BuildingKind::Castle),
             16 => Some(BuildingKind::University),
+            17 => Some(BuildingKind::SiegeWorkshop),
             _ => None,
         }
     }
@@ -367,6 +388,8 @@ impl BuildingKind {
             BuildingKind::Castle => I16F16::ZERO,
             // Castle P3c: the University's 200 wood.
             BuildingKind::University => UNIVERSITY_WOOD_COST,
+            // Castle P4a: the Siege Workshop's 200 wood.
+            BuildingKind::SiegeWorkshop => SIEGE_WORKSHOP_WOOD_COST,
         }
     }
 
@@ -415,6 +438,7 @@ impl BuildingKind {
             BuildingKind::StoneWall => STONE_WALL_BUILD_TICKS,
             BuildingKind::Castle => CASTLE_BUILD_TICKS,
             BuildingKind::University => UNIVERSITY_BUILD_TICKS,
+            BuildingKind::SiegeWorkshop => SIEGE_WORKSHOP_BUILD_TICKS,
         }
     }
 
@@ -474,12 +498,14 @@ impl BuildingKind {
             // The placed 4×4 kinds: the Market, the Town Center
             // construction record (the standing Town Center is an
             // entity, not a kind — BLD-16), the Castle
-            // (Castle P3a, dossier §2) and the University
-            // (Castle P3c, dossier §5.5).
+            // (Castle P3a, dossier §2), the University
+            // (Castle P3c, dossier §5.5) and the Siege Workshop
+            // (Castle P4a, RISKS R8: the DE footprint is 4×4).
             BuildingKind::Market
             | BuildingKind::TownCenter
             | BuildingKind::Castle
-            | BuildingKind::University => 4,
+            | BuildingKind::University
+            | BuildingKind::SiegeWorkshop => 4,
         }
     }
 
@@ -493,11 +519,13 @@ impl BuildingKind {
         } else if self == BuildingKind::TownCenter
             || self == BuildingKind::Castle
             || self == BuildingKind::University
+            || self == BuildingKind::SiegeWorkshop
         {
             // The Castle is the third 4×4 kind (Castle P3a): the
             // Town Center's 15.0 covers its ring by the same
             // geometry (corner ring cell ≈14.1 from the center).
-            // The University (Castle P3c) is the fourth.
+            // The University (Castle P3c) is the fourth, the
+            // Siege Workshop (Castle P4a) the fifth.
             TOWN_CENTER_BUILD_RANGE
         } else if self.footprint_size() == 3 {
             BARRACKS_BUILD_RANGE
@@ -523,6 +551,7 @@ impl BuildingKind {
                 | BuildingKind::Stable
                 | BuildingKind::Castle
                 | BuildingKind::Market
+                | BuildingKind::SiegeWorkshop
         )
     }
 
@@ -552,6 +581,11 @@ impl BuildingKind {
                 // Package D: the Trade Cart trains at the Market
                 // only (TRD-05; wiki, "Trade Cart").
                 | (BuildingKind::Market, EntityKind::TradeCart)
+                // Castle P4a: the Battering Ram trains at the
+                // Siege Workshop only (the Mangonel and Scorpion
+                // join this roster in the P4b/P4c slices, when
+                // their kinds exist).
+                | (BuildingKind::SiegeWorkshop, EntityKind::BatteringRam)
         )
     }
 
@@ -565,9 +599,10 @@ impl BuildingKind {
             | BuildingKind::WatchTower
             | BuildingKind::Market
             | BuildingKind::StoneWall => Age::Feudal,
-            BuildingKind::TownCenter | BuildingKind::Castle | BuildingKind::University => {
-                Age::Castle
-            }
+            BuildingKind::TownCenter
+            | BuildingKind::Castle
+            | BuildingKind::University
+            | BuildingKind::SiegeWorkshop => Age::Castle,
             _ => Age::Dark,
         }
     }
@@ -602,6 +637,9 @@ impl BuildingKind {
             // Castle P3c: the University's documented sight is 6
             // (dossier §5.5 building row, wiki University infobox).
             BuildingKind::University => 6,
+            // Castle P4a: the Siege Workshop's documented sight
+            // is 6 (dossier §2, wiki Siege Workshop infobox).
+            BuildingKind::SiegeWorkshop => 6,
             BuildingKind::WatchTower => 10,
             BuildingKind::Outpost => match age {
                 Age::Dark => 6,
@@ -642,7 +680,8 @@ impl BuildingKind {
             BuildingKind::Castle => Some(20),
             BuildingKind::Barracks
             | BuildingKind::ArcheryRange
-            | BuildingKind::Stable => Some(10),
+            | BuildingKind::Stable
+            | BuildingKind::SiegeWorkshop => Some(10),
             _ => None,
         }
     }
@@ -662,7 +701,10 @@ impl BuildingKind {
     pub fn is_production_garrison(self) -> bool {
         matches!(
             self,
-            BuildingKind::Barracks | BuildingKind::ArcheryRange | BuildingKind::Stable
+            BuildingKind::Barracks
+                | BuildingKind::ArcheryRange
+                | BuildingKind::Stable
+                | BuildingKind::SiegeWorkshop
         )
     }
 
@@ -703,6 +745,9 @@ impl BuildingKind {
             BuildingKind::ArcheryRange | BuildingKind::Stable => Some(BuildingKind::Barracks),
             // BLD-15's chain: the Mill gates the Market.
             BuildingKind::Market => Some(BuildingKind::Mill),
+            // Castle P4a (BLD-15 extension): the Siege Workshop
+            // requires a completed Blacksmith (dossier §2).
+            BuildingKind::SiegeWorkshop => Some(BuildingKind::Blacksmith),
             _ => None,
         }
     }
@@ -750,6 +795,7 @@ impl BuildingKind {
                 | BuildingKind::Stable
                 | BuildingKind::TownCenter
                 | BuildingKind::Castle
+                | BuildingKind::SiegeWorkshop
         )
     }
 
@@ -802,8 +848,12 @@ impl BuildingKind {
         // Castle P3c: the University joins the set, exactly as
         // this column's doc above anticipated ("the University,
         // Siege Workshop and Monastery join this set when they
-        // land").
-        matches!(self, BuildingKind::Castle | BuildingKind::University)
+        // land"). Castle P4a: the Siege Workshop joins it the
+        // same way; the Monastery remains.
+        matches!(
+            self,
+            BuildingKind::Castle | BuildingKind::University | BuildingKind::SiegeWorkshop
+        )
     }
 
     /// Hit points of a fresh building of this kind (M5 — buildings
@@ -849,6 +899,10 @@ impl BuildingKind {
             // Castle P3c: 2100 HP (dossier §5.5, wiki University
             // infobox) — flat; the kind is Castle-born.
             BuildingKind::University => 2100,
+            // Castle P4a: the Castle column, 1800 HP (dossier
+            // §2, wiki Siege Workshop infobox); the Imperial
+            // step to 2100 lives in `max_hp_at`.
+            BuildingKind::SiegeWorkshop => 1800,
         }
     }
 
@@ -888,6 +942,9 @@ impl BuildingKind {
             // update 61321), Market 1800 → 2100 (Market infobox).
             (BuildingKind::WatchTower, Age::Castle | Age::Imperial) => 1020,
             (BuildingKind::Market, Age::Castle | Age::Imperial) => 2100,
+            // Castle P4a: the Siege Workshop's Imperial step
+            // (dossier §2: 1800 Castle / 2100 Imperial).
+            (BuildingKind::SiegeWorkshop, Age::Imperial) => 2100,
             _ => self.max_hp(),
         }
     }
@@ -920,6 +977,9 @@ impl BuildingKind {
             // Castle P3c: the University's melee armor is 2
             // (dossier §5.5, wiki University infobox).
             BuildingKind::University => 2,
+            // Castle P4a: the Siege Workshop's melee armor is 2
+            // (dossier §2, wiki Siege Workshop infobox).
+            BuildingKind::SiegeWorkshop => 2,
             BuildingKind::TownCenter => 3,
             _ => 0,
         }
@@ -970,6 +1030,9 @@ impl BuildingKind {
             // Castle P3c: the University's pierce armor is 9
             // (dossier §5.5, wiki University infobox).
             BuildingKind::University => 9,
+            // Castle P4a: the Siege Workshop's pierce armor is
+            // 9 (dossier §2, wiki Siege Workshop infobox).
+            BuildingKind::SiegeWorkshop => 9,
             BuildingKind::TownCenter => 5,
             _ => 7,
         }

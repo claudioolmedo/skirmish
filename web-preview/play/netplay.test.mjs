@@ -73,6 +73,12 @@ test('validateCommand accepts the full vocabulary and rejects junk', () => {
     { t: 'ungarrison_tc' },
     { t: 'town_bell', tc: 4 },
     { t: 'town_bell' },
+    // Castle P4a: build kind 17 (Siege Workshop), train kind 17
+    // (Battering Ram) and the Ram garrison vocabulary.
+    { t: 'build', e: 1, k: 17, x: 0, y: 0 },
+    { t: 'train_at', b: 3, k: 17 },
+    { t: 'garrison_u', e: 1, host: 4 },
+    { t: 'ungarrison_u', host: 4 },
     { t: 'auto_explore', e: 4, on: true },
     { t: 'auto_explore', e: 4, on: false },
     { t: 'attackmove', e: 4, x: 10, y: -2 },
@@ -92,7 +98,7 @@ test('validateCommand accepts the full vocabulary and rejects junk', () => {
     null, 42, {}, { t: 'nope' },
     { t: 'move', e: -1, x: 0, y: 0 },
     { t: 'move', e: 1, x: NaN, y: 0 },
-    { t: 'build', e: 1, k: 17, x: 0, y: 0 },
+    { t: 'build', e: 1, k: 18, x: 0, y: 0 },
     { t: 'mbuy', b: 3, r: 3 },
     { t: 'mbuy', b: 3, r: 0 },
     { t: 'msell', r: 1 },
@@ -132,6 +138,11 @@ test('validateCommand accepts the full vocabulary and rejects junk', () => {
     { t: 'ungarrison_b' },
     { t: 'ungarrison_tc', tc: -1 },
     { t: 'town_bell', tc: 1.5 },
+    { t: 'garrison_u', e: 1 },
+    { t: 'garrison_u', host: 4 },
+    { t: 'garrison_u', e: 1, host: -1 },
+    { t: 'ungarrison_u' },
+    { t: 'ungarrison_u', host: 1.5 },
   ];
   for (const c of bad) assert.equal(validateCommand(c), false, JSON.stringify(c));
 });

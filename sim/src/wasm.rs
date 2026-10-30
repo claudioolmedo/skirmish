@@ -232,6 +232,31 @@ impl WasmSim {
         ok
     }
 
+    /// Order a unit to garrison inside an own Battering Ram
+    /// (Castle P4a, GAR-10/SEL-11): it walks to the Ram's current
+    /// position and enters on arrival. Returns whether the order
+    /// *would* be accepted against the current state.
+    pub fn push_garrison_unit(&mut self, entity: u32, host: u32) -> bool {
+        let ok = self.inner.can_garrison_unit(entity, host);
+        if ok {
+            self.inner
+                .push_command(Command::GarrisonUnit { entity, host });
+        }
+        ok
+    }
+
+    /// Voluntarily ungarrison a Battering Ram (Castle P4a,
+    /// GAR-10): every passenger steps out at the ring around the
+    /// Ram's current position, idle. Returns whether anyone was
+    /// inside.
+    pub fn push_ungarrison_unit(&mut self, host: u32) -> bool {
+        let ok = self.inner.garrison_count_unit(host) > 0;
+        if ok {
+            self.inner.push_command(Command::UngarrisonUnit { host });
+        }
+        ok
+    }
+
     /// Ring a Town Center's Town Bell (Castle P3b, GAR-07): the
     /// first ring shelters nearby villagers; the second sends them
     /// back to their snapshotted work. Returns whether the TC can
@@ -257,6 +282,12 @@ impl WasmSim {
     /// Entities garrisoned in a Town Center (GAR-01).
     pub fn tc_garrison_count(&self, tc: u32) -> u32 {
         self.inner.garrison_count_tc(tc)
+    }
+
+    /// Entities garrisoned in a Battering Ram (Castle P4a,
+    /// GAR-10).
+    pub fn unit_garrison_count(&self, host: u32) -> u32 {
+        self.inner.garrison_count_unit(host)
     }
 
     /// A Town Center's current arrow total (GAR-05/06).
@@ -331,6 +362,14 @@ impl WasmSim {
     /// the Castle Age gate). See `push_train_militia`.
     pub fn push_train_petard(&mut self, building: u32) -> bool {
         self.push_train_at(building, EntityKind::Petard)
+    }
+
+    /// Enqueue a Battering Ram at a completed Siege Workshop
+    /// (Castle P4a — the workshop is the Ram's only home;
+    /// `can_train_at` carries the Castle Age gate). See
+    /// `push_train_militia`.
+    pub fn push_train_battering_ram(&mut self, building: u32) -> bool {
+        self.push_train_at(building, EntityKind::BatteringRam)
     }
 
     /// Enqueue a Trade Cart at a completed Market (Package D,
@@ -908,6 +947,13 @@ impl WasmSim {
         self.push_build(entity, BuildingKind::University, x, y)
     }
 
+    /// Order a villager to build a Siege Workshop (200 wood, 4×4;
+    /// Castle Age, requires a completed Blacksmith — Castle
+    /// P4a) — see `push_build_house`.
+    pub fn push_build_siege_workshop(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build(entity, BuildingKind::SiegeWorkshop, x, y)
+    }
+
     /// Buy one lot (100) of a commodity at a completed Market
     /// (TRD-01..03): `resource_tag` is the `ResourceKind` tag
     /// (food 1, wood 2, stone 4 — gold is never a commodity).
@@ -1118,6 +1164,12 @@ impl WasmSim {
     /// `push_build_house_queued`.
     pub fn push_build_university_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
         self.push_build_queued(entity, BuildingKind::University, x, y)
+    }
+
+    /// Queue a Siege Workshop build (Castle Age — Castle P4a) —
+    /// see `push_build_house_queued`.
+    pub fn push_build_siege_workshop_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build_queued(entity, BuildingKind::SiegeWorkshop, x, y)
     }
 
     /// Queue a Market build — see `push_build_house_queued`.

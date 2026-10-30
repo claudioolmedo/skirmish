@@ -515,6 +515,22 @@ fn plan_build(sim: &mut Sim, cfg: &AiConfig, acted: &mut Vec<u32>) {
             && wood >= BuildingKind::ArcheryRange.wood_cost()
         {
             Some((BuildingKind::ArcheryRange, (tc_x, tc_y)))
+        } else if !have(BuildingKind::Blacksmith)
+            && sim.age_of(me) >= crate::tech::Age::Castle
+            && wood >= BuildingKind::Blacksmith.wood_cost()
+        {
+            // Castle P4a (AI-04 extension): the Blacksmith is the
+            // Siege Workshop's prerequisite (BLD-15) — a Castle-Age
+            // AI raises it on the way to siege, like a player.
+            Some((BuildingKind::Blacksmith, (tc_x, tc_y)))
+        } else if !have(BuildingKind::SiegeWorkshop)
+            && sim.age_of(me) >= crate::tech::Age::Castle
+            && sim.completed_buildings(me, BuildingKind::Blacksmith) > 0
+            && wood >= BuildingKind::SiegeWorkshop.wood_cost()
+        {
+            // Castle P4a: the siege program's home — without it
+            // the AI fields no Rams and razes nothing in Castle.
+            Some((BuildingKind::SiegeWorkshop, (tc_x, tc_y)))
         } else if pop + 1 >= cap && !house_in_progress && wood >= BuildingKind::House.wood_cost() {
             Some((BuildingKind::House, (tc_x, tc_y)))
         } else if !have(BuildingKind::Mill)
@@ -740,6 +756,42 @@ fn plan_train_military(sim: &mut Sim, cfg: &AiConfig) {
             }
         }
     }
+    // Siege (Castle P4a, AI-04 extension): in the Castle Age a
+    // standing Siege Workshop keeps a small ram corps alongside
+    // the composition army — Rams are not a MIX kind (they are
+    // siege, not a share of the foot army), so they are counted
+    // and produced on their own line: living plus queued, capped
+    // at RAM_TARGET, one enqueue at a time like every other host.
+    if sim.age_of(me) >= crate::tech::Age::Castle {
+        let rams = count_kind(sim, me, EntityKind::BatteringRam)
+            + sim
+                .buildings()
+                .iter()
+                .filter(|b| b.owner == me)
+                .flat_map(|b| b.queue.iter())
+                .filter(|entry| {
+                    matches!(
+                        entry,
+                        crate::tech::ProdEntry::Unit(EntityKind::BatteringRam)
+                    )
+                })
+                .count() as u32;
+        if rams < RAM_TARGET {
+            if let Some(host) = sim.buildings().iter().find(|b| {
+                b.owner == me && b.complete && b.kind == BuildingKind::SiegeWorkshop
+            }) {
+                if host.queue.is_empty()
+                    && sim.can_train_at(host.id, EntityKind::BatteringRam)
+                {
+                    sim.push_command(Command::TrainAt {
+                        building: host.id,
+                        kind: EntityKind::BatteringRam,
+                    });
+                    return;
+                }
+            }
+        }
+    }
     let army = military(sim, me).len() as u32;
     if army >= cfg.army_target {
         return;
@@ -807,6 +859,11 @@ fn plan_train_military(sim: &mut Sim, cfg: &AiConfig) {
         }
     }
 }
+
+/// The Battering Ram corps the siege step keeps (Castle P4a):
+/// two rams — enough to crack a building line, few enough that
+/// the composition army still gets its wood and gold.
+const RAM_TARGET: u32 = 2;
 
 /// The four kinds the composition plan trains, in weight order
 /// (`AiConfig::mix_weights` indexes this array).
@@ -1316,6 +1373,9 @@ fn plan_wave(sim: &mut Sim, cfg: &AiConfig, acted: &mut Vec<u32>) {
                         | EntityKind::Spearman
                         | EntityKind::Archer
                         | EntityKind::Skirmisher
+                        // Castle P4a: Rams march with the wave —
+                        // they are its building-crackers.
+                        | EntityKind::BatteringRam
                 )
                 && is_idle(sim, e.id)
                 && !acted.contains(&e.id)
@@ -1342,6 +1402,16 @@ fn plan_wave(sim: &mut Sim, cfg: &AiConfig, acted: &mut Vec<u32>) {
             .find(|e| e.id == *mid)
             .map(|e| (e.pos_x, e.pos_y))
             .unwrap_or((I16F16::ZERO, I16F16::ZERO));
+        // Castle P4a: a Ram is a building weapon — it skips the
+        // visible-unit hunt below and goes straight to the Town
+        // Center / building targeting (the ordinary Attack and
+        // AttackBuilding paths; no AI-only orders, AI-01).
+        let is_ram = sim
+            .entities()
+            .iter()
+            .find(|e| e.id == *mid)
+            .map(|e| e.kind == EntityKind::BatteringRam)
+            .unwrap_or(false);
         // Nearest human population unit the AI can currently see
         // *and* actually reach. A target standing inside a building
         // footprint (or behind a plugged chokepoint) has no path;
@@ -1350,20 +1420,23 @@ fn plan_wave(sim: &mut Sim, cfg: &AiConfig, acted: &mut Vec<u32>) {
         // reachability probe is one A* per candidate per soldier,
         // once per wave — affordable, and deterministic like every
         // other path query.
-        let mut candidates: Vec<(i64, u32, I16F16, I16F16)> = sim
-            .entities()
-            .iter()
-            .filter(|e| e.owner == OWNER_PLAYER && !e.dead && e.kind.counts_population())
-            .filter(|e| {
-                let (cx, cy) = sim.grid().world_to_cell(e.pos_x, e.pos_y);
-                sim.cell_visible_to(me, cx, cy)
-            })
-            .map(|e| {
-                let d = steer::vec_len(e.pos_x - mx, e.pos_y - my);
-                let db = d.to_bits() as i64;
-                (db * db, e.id, e.pos_x, e.pos_y)
-            })
-            .collect();
+        let mut candidates: Vec<(i64, u32, I16F16, I16F16)> = if is_ram {
+            Vec::new()
+        } else {
+            sim.entities()
+                .iter()
+                .filter(|e| e.owner == OWNER_PLAYER && !e.dead && e.kind.counts_population())
+                .filter(|e| {
+                    let (cx, cy) = sim.grid().world_to_cell(e.pos_x, e.pos_y);
+                    sim.cell_visible_to(me, cx, cy)
+                })
+                .map(|e| {
+                    let d = steer::vec_len(e.pos_x - mx, e.pos_y - my);
+                    let db = d.to_bits() as i64;
+                    (db * db, e.id, e.pos_x, e.pos_y)
+                })
+                .collect()
+        };
         candidates.sort();
         let reachable = |sim: &Sim, x: I16F16, y: I16F16| {
             sim.grid().find_path((mx, my), (x, y)).is_some()

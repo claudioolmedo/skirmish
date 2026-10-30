@@ -11,12 +11,41 @@
 //! Castle 20 foot + mounted; production buildings 10, entered ONLY
 //! as the rally/newly-trained case and never re-entered; siege
 //! never; the Petard (a siege/suicide unit) never.
+//!
+//! Castle P4a adds the third host kind (GAR-10): the Battering
+//! Ram — a MOBILE host. Every host helper below carries a `Unit`
+//! arm, and the moving case is handled by reading the host's
+//! position LIVE at every call (geometry, exit ring, arrival
+//! distance), never caching it. The differences from a building
+//! host are GAR-10's own text: capacity 6 foot-only, NO ≤20%-HP
+//! forced ejection or re-entry block (destruction ejection only),
+//! NO shelter healing (rate 0), and no arrow scaling (the Ram has
+//! no weapon — its garrison instead feeds its derived speed and
+//! anti-building attack, read at lookup in `ram_speed` and in
+//! `combat.rs`'s building-strike path).
 
 use fixed::types::I16F16;
 
 use crate::build::BuildingKind;
 use crate::entity::{EntityKind, GarrisonRef, Task};
 use crate::{Sim, TC_GARRISON_CAPACITY, TC_GARRISON_HEAL_HP_PER_MIN, TOWN_BELL_RADIUS};
+
+/// GAR-10: a Battering Ram carries at most 6 foot units.
+pub const RAM_GARRISON_CAPACITY: u32 = 6;
+
+/// GAR-10's derived speed: an empty Ram moves at 0.6 tiles/s and
+/// each passenger adds +0.05 tiles/s, to a 0.9 tiles/s maximum —
+/// reached exactly at the 6-passenger capacity. Computed in
+/// milli-tiles/s through the unit table's conversion
+/// (tiles/s × 4 × 65536 / 60 bits), so the empty value is the
+/// spec row's own 2621 bits and the cap is 3932 bits; derived
+/// from the passenger count at lookup time (GAR-10's Impl
+/// prescription, the GAR-05 pattern), never cached.
+pub fn ram_speed(passengers: u32) -> I16F16 {
+    let n = passengers.min(RAM_GARRISON_CAPACITY) as i64;
+    let milli_tiles = 600 + 50 * n;
+    I16F16::from_bits(((milli_tiles * 262_144) / 60_000) as i32)
+}
 
 /// Distance from a host's footprint edge at which a walking unit
 /// is counted as arrived and enters (world units): a unit steered
@@ -49,6 +78,19 @@ impl Sim {
                 }
                 Some((e.owner, e.pos_x, e.pos_y, 4))
             }
+            GarrisonRef::Unit(uid) => {
+                // GAR-10: the Ram's geometry is its LIVE position
+                // — the host moves, so every caller re-reads it.
+                // The size reads 1 (a single-cell presence); the
+                // precise arrival distance is the circle test in
+                // `host_edge_dist`, not this footprint.
+                let ei = self.entity_index(uid)?;
+                let e = &self.entities[ei];
+                if e.dead || e.kind != EntityKind::BatteringRam {
+                    return None;
+                }
+                Some((e.owner, e.pos_x, e.pos_y, 1))
+            }
         }
     }
 
@@ -58,7 +100,10 @@ impl Sim {
                 Some(bi) => self.buildings[bi].complete,
                 None => false,
             },
-            GarrisonRef::TownCenter(_) => self.host_geometry(host).is_some(),
+            // An entity host is "complete" while it stands (alive).
+            GarrisonRef::TownCenter(_) | GarrisonRef::Unit(_) => {
+                self.host_geometry(host).is_some()
+            }
         }
     }
 
@@ -75,6 +120,17 @@ impl Sim {
                 let ei = self.entity_index(tc)?;
                 let e = &self.entities[ei];
                 let max = self.stats_for(e.owner, EntityKind::TownCenter).max_hp as i64;
+                Some((e.hp.to_bits() as i64, max << 16))
+            }
+            GarrisonRef::Unit(uid) => {
+                // Queries/display only — GAR-10 applies no
+                // ≤20%-HP rule to the Ram (§1.3 of the P4 plan).
+                let ei = self.entity_index(uid)?;
+                let e = &self.entities[ei];
+                if e.dead || e.kind != EntityKind::BatteringRam {
+                    return None;
+                }
+                let max = self.stats_for(e.owner, e.kind).max_hp as i64;
                 Some((e.hp.to_bits() as i64, max << 16))
             }
         }
@@ -96,6 +152,15 @@ impl Sim {
                 self.buildings[bi].kind.garrison_capacity()
             }
             GarrisonRef::TownCenter(_) => Some(TC_GARRISON_CAPACITY),
+            GarrisonRef::Unit(uid) => match self.entity_index(uid) {
+                Some(ei)
+                    if !self.entities[ei].dead
+                        && self.entities[ei].kind == EntityKind::BatteringRam =>
+                {
+                    Some(RAM_GARRISON_CAPACITY)
+                }
+                _ => None,
+            },
         }
     }
 
@@ -105,7 +170,7 @@ impl Sim {
                 Some(bi) => self.buildings[bi].kind.is_production_garrison(),
                 None => false,
             },
-            GarrisonRef::TownCenter(_) => false,
+            GarrisonRef::TownCenter(_) | GarrisonRef::Unit(_) => false,
         }
     }
 
@@ -119,6 +184,10 @@ impl Sim {
                 Some(si) => self.tc_states[si].garrison.clone(),
                 None => Vec::new(),
             },
+            GarrisonRef::Unit(uid) => match self.entity_index(uid) {
+                Some(ei) => self.entities[ei].garrison.clone(),
+                None => Vec::new(),
+            },
         }
     }
 
@@ -129,12 +198,27 @@ impl Sim {
                 None => 0,
             },
             GarrisonRef::TownCenter(_) => TC_GARRISON_HEAL_HP_PER_MIN,
+            // GAR-10: no shelter healing inside a Ram — GAR-04's
+            // rates name the TC, towers and the Castle only.
+            GarrisonRef::Unit(_) => 0,
         }
     }
 
     /// Distance from a point to the host's footprint edge (0 when
     /// beside or inside it) — PRJ-08's building geometry.
     fn host_edge_dist(&self, host: GarrisonRef, px: I16F16, py: I16F16) -> Option<I16F16> {
+        if let GarrisonRef::Unit(uid) = host {
+            // GAR-10: a unit host has no footprint — the distance
+            // is to its collision CIRCLE around its live position.
+            let ei = self.entity_index(uid)?;
+            let e = &self.entities[ei];
+            if e.dead || e.kind != EntityKind::BatteringRam {
+                return None;
+            }
+            let d = crate::steer::vec_len(px - e.pos_x, py - e.pos_y);
+            let r = crate::units::spec(e.kind).radius;
+            return Some(if d > r { d - r } else { I16F16::ZERO });
+        }
         let (_, bx, by, size) = self.host_geometry(host)?;
         let half = I16F16::from_num(size as i32 * 2);
         let qx = (px - bx).clamp(-half, half) + bx;
@@ -169,6 +253,20 @@ impl Sim {
                         e.pos_x,
                         e.pos_y,
                     )
+                }
+                None => return Vec::new(),
+            },
+            GarrisonRef::Unit(uid) => match self.entity_index(uid) {
+                Some(ei) => {
+                    // GAR-10: the exit ring is parameterized on
+                    // the Ram's CURRENT cell — the ring logic
+                    // below is shared; only the anchor moves.
+                    let e = &self.entities[ei];
+                    if e.dead || e.kind != EntityKind::BatteringRam {
+                        return Vec::new();
+                    }
+                    let (ux, uy) = self.grid.world_to_cell(e.pos_x, e.pos_y);
+                    ((ux, uy), 1, e.pos_x, e.pos_y)
                 }
                 None => return Vec::new(),
             },
@@ -230,6 +328,12 @@ impl Sim {
     /// Town Center 10 arrows TOTAL, minimum 1 while garrisoned
     /// (GAR-06). Unarmed and production hosts store 0.
     pub(crate) fn recompute_garrison_arrows(&mut self, host: GarrisonRef) {
+        // GAR-10: a Ram stores no arrow count — it has no weapon;
+        // its garrison feeds speed and anti-building attack
+        // instead, both derived at lookup. Nothing to recompute.
+        if let GarrisonRef::Unit(_) = host {
+            return;
+        }
         let (owner, kind_tag) = match host {
             GarrisonRef::Building(bid) => match self.building_index(bid) {
                 Some(bi) => (self.buildings[bi].owner, Some(self.buildings[bi].kind)),
@@ -239,6 +343,7 @@ impl Sim {
                 Some(ei) => (self.entities[ei].owner, None),
                 None => return,
             },
+            GarrisonRef::Unit(_) => unreachable!("returned above"),
         };
         let ids = self.host_garrison(host);
         let mut contributed: i64 = 0;
@@ -297,6 +402,7 @@ impl Sim {
                     self.tc_states[si].garrison_arrows = total;
                 }
             }
+            GarrisonRef::Unit(_) => unreachable!("returned above"),
         }
     }
 
@@ -345,6 +451,11 @@ impl Sim {
                     None => return false,
                 },
                 GarrisonRef::TownCenter(_) => e.kind.is_foot_garrisonable(),
+                // GAR-10: a Ram takes foot units only — the same
+                // eligibility column as a tower's (villagers,
+                // infantry, foot archers; mounted and siege are
+                // refused by the data, not by a branch).
+                GarrisonRef::Unit(_) => e.kind.is_foot_garrisonable(),
             };
             if !admits {
                 return false;
@@ -359,7 +470,10 @@ impl Sim {
         if howner != e.owner || !self.host_complete(host) {
             return false;
         }
-        if self.host_at_or_below_fifth(host) {
+        // GAR-03's ≤20% block is building-scoped text: a Ram
+        // accepts passengers at any HP (GAR-10 promises only
+        // destruction ejection), so the check skips unit hosts.
+        if !matches!(host, GarrisonRef::Unit(_)) && self.host_at_or_below_fifth(host) {
             return false;
         }
         match self.host_capacity(host) {
@@ -375,6 +489,10 @@ impl Sim {
                 None => false,
             },
             GarrisonRef::TownCenter(_) => true,
+            // A Ram is not a defensive building (it matters only
+            // for the production-entry path, which must refuse
+            // unit hosts: a Ram is entered by direct order only).
+            GarrisonRef::Unit(_) => false,
         }
     }
 
@@ -418,6 +536,9 @@ impl Sim {
                 }
                 None => None,
             },
+            // The Town Center: walk to a ring point around it.
+            // The points are recomputed every call, so the walker
+            // meets the host where it stands.
             GarrisonRef::TownCenter(_) => self
                 .host_exit_points(host)
                 .into_iter()
@@ -425,6 +546,11 @@ impl Sim {
                     let (px, py) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
                     self.grid.find_path((px, py), *p).is_some()
                 }),
+            // GAR-10: the Ram is met at a point beside its LIVE
+            // position (see `ram_approach_point`) — ring cells
+            // around its cell would leave the walker up to a
+            // diagonal cell away, outside the arrival radius.
+            GarrisonRef::Unit(_) => self.ram_approach_point(idx, host),
         };
         match approach {
             Some((px, py)) => {
@@ -443,6 +569,60 @@ impl Sim {
         true
     }
 
+    /// A standing point beside a Battering Ram's LIVE position
+    /// for the walker at entity-index `idx` (GAR-10): the four
+    /// compass points at (radius + 1.0) from the Ram's center, in
+    /// fixed order (east, west, south, north), the first whose
+    /// cell is unblocked and reachable; failing all four, the
+    /// point on the walker's own approach line at the same
+    /// distance. Standing there, the walker's distance to the
+    /// Ram's collision circle is ~1.0 — inside the arrival
+    /// radius by construction, wherever the Ram has driven to.
+    fn ram_approach_point(
+        &self,
+        idx: usize,
+        host: GarrisonRef,
+    ) -> Option<(I16F16, I16F16)> {
+        let uid = match host {
+            GarrisonRef::Unit(uid) => uid,
+            _ => return None,
+        };
+        let ei = self.entity_index(uid)?;
+        let ram = &self.entities[ei];
+        if ram.dead || ram.kind != EntityKind::BatteringRam {
+            return None;
+        }
+        let (rx, ry) = (ram.pos_x, ram.pos_y);
+        let reach = crate::units::spec(EntityKind::BatteringRam).radius + I16F16::from_num(1);
+        let (px, py) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
+        for (ox, oy) in [
+            (reach, I16F16::ZERO),
+            (-reach, I16F16::ZERO),
+            (I16F16::ZERO, reach),
+            (I16F16::ZERO, -reach),
+        ] {
+            let p = (rx + ox, ry + oy);
+            let (cx, cy) = self.grid.world_to_cell(p.0, p.1);
+            if cx < crate::GRID_DIM
+                && cy < crate::GRID_DIM
+                && !self.grid.is_blocked(cx, cy)
+                && self.grid.find_path((px, py), p).is_some()
+            {
+                return Some(p);
+            }
+        }
+        // Fallback: the point on the walker's own line at the
+        // same reach (the move-order machinery snaps or fails
+        // it, and the garrison tick re-approaches next tick).
+        let (dx, dy) = (px - rx, py - ry);
+        let len = crate::steer::vec_len(dx, dy);
+        if len == I16F16::ZERO {
+            return Some((rx + reach, ry));
+        }
+        let k = reach / len;
+        Some((rx + dx * k, ry + dy * k))
+    }
+
     pub(crate) fn issue_garrison_building(&mut self, entity: u32, building: u32) {
         if let Some(idx) = self.entity_index(entity) {
             self.apply_garrison_order(idx, GarrisonRef::Building(building), false);
@@ -452,6 +632,15 @@ impl Sim {
     pub(crate) fn issue_garrison_tc(&mut self, entity: u32, tc: u32) {
         if let Some(idx) = self.entity_index(entity) {
             self.apply_garrison_order(idx, GarrisonRef::TownCenter(tc), false);
+        }
+    }
+
+    /// GAR-10: order a foot unit to garrison inside an own
+    /// Battering Ram. Direct orders only — production-style
+    /// (rally) entry does not exist for Rams.
+    pub(crate) fn issue_garrison_unit(&mut self, entity: u32, host: u32) {
+        if let Some(idx) = self.entity_index(entity) {
+            self.apply_garrison_order(idx, GarrisonRef::Unit(host), false);
         }
     }
 
@@ -502,6 +691,11 @@ impl Sim {
                     self.tc_states[si].garrison.clear();
                 }
             }
+            GarrisonRef::Unit(uid) => {
+                if let Some(ei) = self.entity_index(uid) {
+                    self.entities[ei].garrison.clear();
+                }
+            }
         }
         for (slot, id) in ids.iter().enumerate() {
             if let Some(idx) = self.entity_index(*id) {
@@ -534,6 +728,11 @@ impl Sim {
                     self.tc_states[si].garrison.retain(|&g| g != id);
                 }
             }
+            GarrisonRef::Unit(uid) => {
+                if let Some(ei) = self.entity_index(uid) {
+                    self.entities[ei].garrison.retain(|&g| g != id);
+                }
+            }
         }
         self.place_at_exit(idx, host, 0);
         self.recompute_garrison_arrows(host);
@@ -545,6 +744,13 @@ impl Sim {
 
     pub(crate) fn issue_ungarrison_tc(&mut self, tc: u32) {
         self.eject_host(GarrisonRef::TownCenter(tc));
+    }
+
+    /// GAR-10: voluntarily ungarrison a Battering Ram — every
+    /// passenger steps out at the ring around its current
+    /// position, idle and unharmed.
+    pub(crate) fn issue_ungarrison_unit(&mut self, host: u32) {
+        self.eject_host(GarrisonRef::Unit(host));
     }
 
     // ---- the garrison tick ---------------------------------------
@@ -584,9 +790,25 @@ impl Sim {
                 .unwrap_or(false);
             if arrived {
                 self.enter_garrison(idx, host);
+            } else if matches!(host, GarrisonRef::Unit(_))
+                && self.entities[idx].order.is_none()
+            {
+                // GAR-10: the Ram moved while the walker walked
+                // (or its path failed) — re-approach from the
+                // Ram's CURRENT position instead of standing
+                // forever beside where it used to be. The walk
+                // re-issues only once the previous one finished,
+                // so a walker still en route is left alone.
+                if let Some((gx, gy)) = self.ram_approach_point(idx, host) {
+                    self.set_move_order(idx, gx, gy);
+                }
             }
         }
-        // ≤20% HP ejection (GAR-03).
+        // ≤20% HP ejection (GAR-03). Building and Town Center
+        // hosts only, deliberately: GAR-10 gives the Ram NO
+        // ≤20% rule — its passengers eject only on destruction
+        // (the death sweep in `combat.rs`) or on a voluntary
+        // ungarrison order.
         let mut hosts: Vec<GarrisonRef> = Vec::new();
         for b in &self.buildings {
             if !b.garrison.is_empty() {
@@ -643,6 +865,11 @@ impl Sim {
             GarrisonRef::TownCenter(tc) => {
                 if let Some(si) = self.tc_state_index(tc) {
                     self.tc_states[si].garrison.push(id);
+                }
+            }
+            GarrisonRef::Unit(uid) => {
+                if let Some(ei) = self.entity_index(uid) {
+                    self.entities[ei].garrison.push(id);
                 }
             }
         }
@@ -887,6 +1114,12 @@ impl Sim {
         self.host_garrison(GarrisonRef::TownCenter(tc)).len() as u32
     }
 
+    /// Entities garrisoned in a Battering Ram (0 if unknown)
+    /// (Castle P4a, GAR-10).
+    pub fn garrison_count_unit(&self, host: u32) -> u32 {
+        self.host_garrison(GarrisonRef::Unit(host)).len() as u32
+    }
+
     /// A placed building's stored GAR-05 arrow total.
     pub fn garrison_arrows_building(&self, building: u32) -> u32 {
         match self.building_index(building) {
@@ -921,6 +1154,13 @@ impl Sim {
     /// Center (the client's garrison-order gate, SEL-11).
     pub fn can_garrison_tc(&self, entity: u32, tc: u32) -> bool {
         self.can_garrison(entity, GarrisonRef::TownCenter(tc), false)
+    }
+
+    /// Whether the unit may be ordered to garrison in the
+    /// Battering Ram `host` (Castle P4a, GAR-10 — the client's
+    /// garrison-order gate, SEL-11).
+    pub fn can_garrison_unit(&self, entity: u32, host: u32) -> bool {
+        self.can_garrison(entity, GarrisonRef::Unit(host), false)
     }
 
     /// Whether a Town Bell ring would take effect at this TC.

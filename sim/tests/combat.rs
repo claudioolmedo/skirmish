@@ -1022,3 +1022,68 @@ fn cmb08_idle_militia_acquires_enemy_town_center() {
     });
     assert!(dented, "the acquired Town Center took no damage");
 }
+
+// ------------------------------------------------------------------
+// Castle P4a: NEGATIVE ARMOR audit (RISKS R4). The Battering
+// Ram's −3 melee armor is real DE data, and CMB-01's formula —
+// Σ max(0, atk − armor), multipliers composed, minimum 1 applied
+// last — must AMPLIFY melee hits against it, not clamp them.
+// These pins cover all three damage paths the audit read:
+// `compute_damage` (level ground), `compute_damage_hit` (the
+// elevation/mishit composition), and the building path
+// (`damage_building` runs the same sum against a building spec;
+// the Ram's own strike table is pinned through
+// `ram_building_attacks`).
+
+#[test]
+fn negative_armor_amplifies_melee_on_every_path() {
+    let ram = skirmish_sim::unit_spec(EntityKind::BatteringRam);
+    // Level ground: a 10-melee strike lands 10 − (−3) = 13;
+    // a villager's 3 lands 6. The amplification is per-pair,
+    // before the sum (a 6-melee strike lands 9).
+    assert_eq!(skirmish_sim::compute_damage(&[(0, 10)], &ram), 13);
+    assert_eq!(skirmish_sim::compute_damage(&[(0, 3)], &ram), 6);
+    assert_eq!(skirmish_sim::compute_damage(&[(0, 6)], &ram), 9);
+    // Pierce against 180 armor: the pair participates (pierce
+    // always does) but contributes max(0, 5 − 180) = 0 — the hit
+    // still deals the minimum 1, and never more.
+    assert_eq!(skirmish_sim::compute_damage(&[(1, 5)], &ram), 1);
+    assert_eq!(skirmish_sim::compute_damage(&[(1, 12)], &ram), 1);
+    // Elevation (compute_damage_hit): the factor multiplies the
+    // AMPLIFIED sum — uphill 13 × 1.25 = 16.25, downhill
+    // 13 × 0.75 = 9.75, and the minimum-1 rule applies after.
+    let up = skirmish_sim::compute_damage_hit(&[(0, 10)], &ram, 2, 1, false);
+    assert_eq!(f(up), 16.25);
+    let down = skirmish_sim::compute_damage_hit(&[(0, 10)], &ram, 1, 2, false);
+    assert_eq!(f(down), 9.75);
+    let level = skirmish_sim::compute_damage_hit(&[(0, 10)], &ram, 1, 1, false);
+    assert_eq!(f(level), 13.0);
+    // The mishit half cannot push a landed pierce hit below 1,
+    // and a non-participating table stays 0 (no invented damage):
+    let mishit = skirmish_sim::compute_damage_hit(&[(1, 5)], &ram, 1, 1, true);
+    assert_eq!(f(mishit), 1.0);
+    assert_eq!(skirmish_sim::compute_damage(&[(2, 40)], &ram), 0);
+}
+
+#[test]
+fn ram_building_attacks_scales_only_the_buildings_pair() {
+    // GAR-10's derived strike table: +10 per passenger on the
+    // STANDARD_BUILDINGS pair (class 8) only — the base melee
+    // (class 0) and the +40 vs Siege (class 20) never scale.
+    let table = skirmish_sim::unit_spec(EntityKind::BatteringRam).attacks;
+    let empty = skirmish_sim::ram_building_attacks(EntityKind::BatteringRam, 0, table);
+    assert_eq!(&*empty, table);
+    let one = skirmish_sim::ram_building_attacks(EntityKind::BatteringRam, 1, table);
+    assert_eq!(&*one, &[(0, 2), (8, 160), (20, 40)]);
+    let full = skirmish_sim::ram_building_attacks(EntityKind::BatteringRam, 6, table);
+    assert_eq!(&*full, &[(0, 2), (8, 210), (20, 40)]);
+    // A non-Ram attacker's table is never rewritten.
+    let militia = skirmish_sim::unit_spec(EntityKind::Militia).attacks;
+    let other = skirmish_sim::ram_building_attacks(EntityKind::Militia, 6, militia);
+    assert_eq!(&*other, militia);
+    // The Petard's +60 vs Siege row (Castle P3a) goes live on
+    // the Ram: SIEGE membership is the Ram's only class.
+    let petard = skirmish_sim::unit_spec(EntityKind::Petard);
+    let ram = skirmish_sim::unit_spec(EntityKind::BatteringRam);
+    assert_eq!(skirmish_sim::compute_damage(petard.attacks, &ram), 25 + 3 + 60);
+}

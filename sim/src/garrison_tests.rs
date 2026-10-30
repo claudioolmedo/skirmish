@@ -351,6 +351,10 @@ fn stage_garrison(sim: &mut Sim, host: GarrisonRef, ids: &[u32]) {
             let si = sim.tc_states.iter().position(|s| s.tc_id == tc).unwrap();
             sim.tc_states[si].garrison = ids.to_vec();
         }
+        GarrisonRef::Unit(uid) => {
+            let ei = sim.entities.iter().position(|e| e.id == uid).unwrap();
+            sim.entities[ei].garrison = ids.to_vec();
+        }
     }
     sim.recompute_garrison_arrows(host);
 }
@@ -563,4 +567,309 @@ fn gar08_rally_garrison_into_a_tower_and_a_production_building() {
     sim.tick();
     assert_eq!(sim.garrison_count_building(901), 0);
     assert!(!sim.can_garrison_building(scout_id, 901));
+}
+
+// ------------------------------------------------------------------
+// GAR-10 (Castle P4a): the Battering Ram — a mobile garrison host.
+
+#[test]
+fn gar10_eligibility_matrix() {
+    let mut sim = Sim::new(7);
+    spawn(&mut sim, 900, EntityKind::BatteringRam, OWNER_PLAYER, (58, 58));
+    spawn(&mut sim, 901, EntityKind::BatteringRam, OWNER_OPPONENT, (80, 80));
+    // Foot units are admitted: villagers, infantry, foot archers.
+    for (i, kind) in [
+        EntityKind::Villager,
+        EntityKind::Militia,
+        EntityKind::ManAtArms,
+        EntityKind::Spearman,
+        EntityKind::Archer,
+        EntityKind::Skirmisher,
+    ]
+    .iter()
+    .enumerate()
+    {
+        spawn(&mut sim, 910 + i as u32, *kind, OWNER_PLAYER, (56, 62));
+        assert!(
+            sim.can_garrison_unit(910 + i as u32, 900),
+            "{kind:?} refused by a Ram"
+        );
+    }
+    // The discriminating refusals: mounted and siege never enter.
+    for (i, kind) in [
+        EntityKind::Knight,
+        EntityKind::CavalryArcher,
+        EntityKind::ScoutCavalry,
+        EntityKind::Petard,
+        EntityKind::TradeCart,
+        EntityKind::BatteringRam,
+    ]
+    .iter()
+    .enumerate()
+    {
+        spawn(&mut sim, 920 + i as u32, *kind, OWNER_PLAYER, (56, 64));
+        assert!(
+            !sim.can_garrison_unit(920 + i as u32, 900),
+            "{kind:?} admitted by a Ram"
+        );
+    }
+    // An enemy Ram is never a shelter; a Ram is not a building
+    // or TC passenger either (siege never garrisons, GAR-01).
+    let vil = own_villager(&sim);
+    assert!(!sim.can_garrison_unit(vil, 901));
+    let tc = sim.town_center().id;
+    assert!(!sim.can_garrison_tc(900, tc));
+    assert!(!sim.can_garrison_building(900, 900));
+    // A Siege Workshop is a production garrison of 10 (GAR-08).
+    assert_eq!(BuildingKind::SiegeWorkshop.garrison_capacity(), Some(10));
+    assert!(BuildingKind::SiegeWorkshop.is_production_garrison());
+}
+
+#[test]
+fn gar10_capacity_six_is_a_hard_stop() {
+    let mut sim = Sim::new(7);
+    spawn(&mut sim, 900, EntityKind::BatteringRam, OWNER_PLAYER, (58, 58));
+    for i in 0..7u32 {
+        spawn(&mut sim, 910 + i, EntityKind::Militia, OWNER_PLAYER, (56 + i, 62));
+        sim.push_command(Command::GarrisonUnit {
+            entity: 910 + i,
+            host: 900,
+        });
+    }
+    run_until(&mut sim, 30_000, |s| s.garrison_count_unit(900) >= 6);
+    for _ in 0..600 {
+        sim.tick();
+    }
+    assert_eq!(sim.garrison_count_unit(900), 6);
+    let inside = (910..917)
+        .filter(|&id| ent(&sim, id).garrisoned_in == Some(GarrisonRef::Unit(900)))
+        .count();
+    assert_eq!(inside, 6, "a seventh passenger slipped inside");
+    // And the query agrees the Ram is full.
+    spawn(&mut sim, 920, EntityKind::Archer, OWNER_PLAYER, (56, 64));
+    assert!(!sim.can_garrison_unit(920, 900));
+}
+
+#[test]
+fn gar10_derived_speed_values_and_live_movement() {
+    // The derived table itself: 0.6 / 0.65 / 0.9 tiles/s at
+    // 0 / 1 / 6 passengers, in the unit table's bit conversion.
+    assert_eq!(crate::garrison::ram_speed(0).to_bits(), 2_621);
+    assert_eq!(crate::garrison::ram_speed(1).to_bits(), 2_839);
+    assert_eq!(crate::garrison::ram_speed(6).to_bits(), 3_932);
+    // The cap is structural: a (hypothetical) seventh passenger
+    // could not push past 0.9.
+    assert_eq!(crate::garrison::ram_speed(7).to_bits(), 3_932);
+    // Live: over the same 10 s on the same ground, a full Ram
+    // covers ~1.5x the empty one's distance.
+    let travel = |passengers: u32| -> f64 {
+        let mut sim = Sim::new(7);
+        spawn(&mut sim, 900, EntityKind::BatteringRam, OWNER_PLAYER, (20, 60));
+        if passengers > 0 {
+            let mut ids = Vec::new();
+            for i in 0..passengers {
+                spawn(
+                    &mut sim,
+                    910 + i,
+                    EntityKind::Militia,
+                    OWNER_PLAYER,
+                    (24, 60),
+                );
+                ids.push(910 + i);
+            }
+            stage_garrison(&mut sim, GarrisonRef::Unit(900), &ids);
+        }
+        let (sx, sy) = (ent(&sim, 900).pos_x, ent(&sim, 900).pos_y);
+        sim.push_command(Command::Move {
+            entity: 900,
+            x: sx + I16F16::from_num(200),
+            y: sy,
+        });
+        for _ in 0..600 {
+            sim.tick();
+        }
+        f(ent(&sim, 900).pos_x - sx)
+    };
+    let empty = travel(0);
+    let full = travel(6);
+    assert!(empty > 15.0, "empty Ram barely moved: {empty}");
+    assert!(
+        full > empty * 1.4,
+        "loaded Ram ({full}) not clearly faster than empty ({empty})"
+    );
+}
+
+#[test]
+fn gar10_derived_building_attack_per_passenger() {
+    // One landed strike against a staged enemy House, measured
+    // in-sim: the House's Dark column (melee armor −2, building
+    // armor 0) makes the arithmetic exact — melee pair
+    // 2 − (−2) = 4, buildings pair 150 (+10 per passenger).
+    let strike_damage = |passengers: u32| -> f64 {
+        let mut sim = Sim::new(7);
+        sim.buildings.push(placed(
+            &sim,
+            900,
+            BuildingKind::House,
+            OWNER_OPPONENT,
+            (60, 60),
+        ));
+        spawn(&mut sim, 900, EntityKind::BatteringRam, OWNER_PLAYER, (58, 61));
+        if passengers > 0 {
+            let mut ids = Vec::new();
+            for i in 0..passengers {
+                spawn(
+                    &mut sim,
+                    910 + i,
+                    EntityKind::Militia,
+                    OWNER_PLAYER,
+                    (50, 50),
+                );
+                ids.push(910 + i);
+            }
+            stage_garrison(&mut sim, GarrisonRef::Unit(900), &ids);
+        }
+        let before = sim
+            .buildings()
+            .iter()
+            .find(|b| b.id == 900)
+            .unwrap()
+            .hp;
+        sim.push_command(Command::AttackBuilding {
+            entity: 900,
+            building: 900,
+        });
+        // Ids collide by design in this fixture style (building
+        // 900, ram 900 — separate id spaces, as in the engine).
+        let mut delta = 0.0;
+        for _ in 0..20_000 {
+            sim.tick();
+            let now = sim
+                .buildings()
+                .iter()
+                .find(|b| b.id == 900)
+                .map(|b| b.hp);
+            match now {
+                Some(hp) if hp < before => {
+                    delta = f(before - hp);
+                    break;
+                }
+                None => break,
+                _ => {}
+            }
+        }
+        delta
+    };
+    assert_eq!(strike_damage(0), 154.0, "empty Ram strike");
+    assert_eq!(strike_damage(1), 164.0, "one-passenger Ram strike");
+    assert_eq!(strike_damage(6), 214.0, "full Ram strike");
+}
+
+#[test]
+fn gar10_passengers_survive_the_rams_destruction() {
+    let mut sim = Sim::new(7);
+    spawn(&mut sim, 900, EntityKind::BatteringRam, OWNER_PLAYER, (58, 58));
+    let mut ids = Vec::new();
+    for i in 0..3u32 {
+        spawn(&mut sim, 910 + i, EntityKind::Militia, OWNER_PLAYER, (50, 50));
+        ids.push(910 + i);
+    }
+    stage_garrison(&mut sim, GarrisonRef::Unit(900), &ids);
+    // While the Ram is beaten on, the passengers are untouchable
+    // (GAR-02): an enemy Militia lands its amplified strikes on
+    // the Ram alone (13 a hit vs the −3 melee armor).
+    spawn(&mut sim, 920, EntityKind::Militia, OWNER_OPPONENT, (59, 58));
+    sim.push_command(Command::Attack {
+        entity: 920,
+        target: 900,
+    });
+    for _ in 0..600 {
+        sim.tick();
+    }
+    let militia_full = crate::units::spec(EntityKind::Militia).max_hp as f64;
+    for &id in &ids {
+        assert_eq!(
+            f(ent(&sim, id).hp),
+            militia_full,
+            "passenger {id} was hurt inside"
+        );
+    }
+    assert!(f(ent(&sim, 900).hp) < 175.0, "the Ram took no damage");
+    // Destruction: the passengers eject ALIVE at the ring around
+    // the Ram's final position (GAR-10's only forced ejection).
+    let ri = sim.entities.iter().position(|e| e.id == 900).unwrap();
+    sim.entities[ri].hp = I16F16::ZERO;
+    sim.tick();
+    assert!(ent(&sim, 900).dead);
+    let (rx, ry) = (ent(&sim, 900).pos_x, ent(&sim, 900).pos_y);
+    for &id in &ids {
+        let p = ent(&sim, id);
+        assert!(!p.dead, "passenger {id} died with the Ram");
+        assert!(p.garrisoned_in.is_none());
+        let d = crate::steer::vec_len(p.pos_x - rx, p.pos_y - ry);
+        assert!(f(d) < 8.0, "passenger {id} ejected far from the wreck");
+    }
+}
+
+#[test]
+fn gar10_no_healing_and_no_low_hp_rule_inside_a_ram() {
+    let mut sim = Sim::new(7);
+    spawn(&mut sim, 900, EntityKind::BatteringRam, OWNER_PLAYER, (58, 58));
+    spawn(&mut sim, 910, EntityKind::Militia, OWNER_PLAYER, (50, 50));
+    let mi = sim.entities.iter().position(|e| e.id == 910).unwrap();
+    sim.entities[mi].hp = I16F16::from_num(10);
+    stage_garrison(&mut sim, GarrisonRef::Unit(900), &[910]);
+    // The Ram at 17% HP: GAR-03's ≤20% ejection and re-entry
+    // block are building-scoped — neither applies to a Ram.
+    let ri = sim.entities.iter().position(|e| e.id == 900).unwrap();
+    sim.entities[ri].hp = I16F16::from_num(30);
+    spawn(&mut sim, 911, EntityKind::Archer, OWNER_PLAYER, (56, 62));
+    assert!(
+        sim.can_garrison_unit(911, 900),
+        "a sub-20% Ram refused a passenger (GAR-03 does not apply)"
+    );
+    for _ in 0..1200 {
+        sim.tick();
+    }
+    assert_eq!(
+        sim.garrison_count_unit(900),
+        1,
+        "the passenger was ejected at low HP"
+    );
+    // GAR-04 names no Ram rate: twenty seconds inside heal nothing.
+    assert_eq!(f(ent(&sim, 910).hp), 10.0, "a passenger healed inside a Ram");
+}
+
+#[test]
+fn gar10_a_moving_ram_still_loads_and_ungarrisons_where_it_stands() {
+    let mut sim = Sim::new(7);
+    spawn(&mut sim, 900, EntityKind::BatteringRam, OWNER_PLAYER, (58, 58));
+    spawn(&mut sim, 910, EntityKind::Militia, OWNER_PLAYER, (52, 58));
+    sim.push_command(Command::GarrisonUnit {
+        entity: 910,
+        host: 900,
+    });
+    // Mid-walk, the Ram drives ten cells east: the passenger must
+    // still load (the approach reads the live position).
+    for _ in 0..30 {
+        sim.tick();
+    }
+    let (rx, ry) = (ent(&sim, 900).pos_x, ent(&sim, 900).pos_y);
+    sim.push_command(Command::Move {
+        entity: 900,
+        x: rx + I16F16::from_num(40),
+        y: ry,
+    });
+    let loaded = run_until(&mut sim, 40_000, |s| s.garrison_count_unit(900) == 1);
+    assert!(loaded, "the passenger never loaded into the moved Ram");
+    // Voluntary ungarrison: out at the ring around the Ram's
+    // CURRENT position, not where it loaded.
+    let (rx, ry) = (ent(&sim, 900).pos_x, ent(&sim, 900).pos_y);
+    sim.push_command(Command::UngarrisonUnit { host: 900 });
+    sim.tick();
+    assert_eq!(sim.garrison_count_unit(900), 0);
+    let p = ent(&sim, 910);
+    assert!(p.garrisoned_in.is_none());
+    let d = crate::steer::vec_len(p.pos_x - rx, p.pos_y - ry);
+    assert!(f(d) < 8.0, "ungarrisoned far from the Ram's position");
 }

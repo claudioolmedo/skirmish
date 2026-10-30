@@ -147,7 +147,7 @@ const BUILD_FNS = [
   'push_build_palisade_wall',
   'push_build_watch_tower', 'push_build_outpost', 'push_build_market',
   'push_build_town_center', 'push_build_stone_wall', 'push_build_castle',
-  'push_build_university',
+  'push_build_university', 'push_build_siege_workshop',
 ];
 const BUILD_FNS_QUEUED = BUILD_FNS.map((n) => n + '_queued');
 const TRAIN_AT_FNS = {
@@ -155,6 +155,7 @@ const TRAIN_AT_FNS = {
   9: 'push_train_spearman', 10: 'push_train_skirmisher',
   12: 'push_train_knight', 14: 'push_train_cavalry_archer',
   15: 'push_train_petard', 16: 'push_train_trade_cart',
+  17: 'push_train_battering_ram',
 };
 
 const isInt = (v) => Number.isInteger(v) && v >= 0;
@@ -178,7 +179,7 @@ export function validateCommand(c) {
     // index past the table is junk. (BLD-20 raised it to 14 with
     // the Stone Wall; 13 — the Town Center — was already
     // dispatchable but not validatable, an old inconsistency.)
-    case 'build': return isInt(c.e) && isInt(c.k) && c.k <= 16 && isNum(c.x) && isNum(c.y);
+    case 'build': return isInt(c.e) && isInt(c.k) && c.k <= 17 && isNum(c.x) && isNum(c.y);
     // TRD-01..03: Market trades — a building id and a commodity
     // tag (food 1, wood 2, stone 4; gold is never a commodity).
     case 'mbuy': case 'msell':
@@ -187,7 +188,7 @@ export function validateCommand(c) {
     // absent — the pre-BLD-20 wire form — or 14 stone wall).
     case 'buildline': return isInt(c.e) && isNum(c.x0) && isNum(c.y0) && isNum(c.x1) && isNum(c.y1)
       && (c.k === undefined || c.k === 9 || c.k === 14);
-    case 'train_at': return isInt(c.b) && (c.k === 2 || c.k === 3 || c.k === 4 || c.k === 9 || c.k === 10 || c.k === 12 || c.k === 14 || c.k === 15 || c.k === 16);
+    case 'train_at': return isInt(c.b) && (c.k === 2 || c.k === 3 || c.k === 4 || c.k === 9 || c.k === 10 || c.k === 12 || c.k === 14 || c.k === 15 || c.k === 16 || c.k === 17);
     case 'train_vil': return c.tc === undefined || isInt(c.tc);
     case 'research_tc': return (c.tech === 0 || c.tech === 1 || c.tech === 6
       || c.tech === 14 || c.tech === 15 || c.tech === 18) && (c.tc === undefined || isInt(c.tc));
@@ -202,6 +203,10 @@ export function validateCommand(c) {
     case 'ungarrison_b': return isInt(c.b);
     case 'ungarrison_tc': return c.tc == null || isInt(c.tc);
     case 'town_bell': return c.tc == null || isInt(c.tc);
+    // Castle P4a: the Ram garrison vocabulary — an entity id
+    // and a host (Ram) entity id, like garrison_b's shape.
+    case 'garrison_u': return isInt(c.e) && isInt(c.host);
+    case 'ungarrison_u': return isInt(c.host);
     case 'auto_explore': return isInt(c.e) && typeof c.on === 'boolean';
     case 'attackmove': return isInt(c.e) && isNum(c.x) && isNum(c.y);
     case 'patrol': return isInt(c.e) && isNum(c.x) && isNum(c.y);
@@ -255,6 +260,8 @@ export function applyCommand(sim, cmd, owner, tcOf) {
     case 'ungarrison_b': return sim.push_ungarrison_building(cmd.b);
     case 'ungarrison_tc': return sim.push_ungarrison_tc(cmd.tc != null ? cmd.tc : tcOf(owner));
     case 'town_bell': return sim.push_town_bell(cmd.tc != null ? cmd.tc : tcOf(owner));
+    case 'garrison_u': return sim.push_garrison_unit(cmd.e, cmd.host);
+    case 'ungarrison_u': return sim.push_ungarrison_unit(cmd.host);
     case 'auto_explore': return sim.push_auto_explore(cmd.e, cmd.on);
     case 'attackmove': return cmd.q
       ? sim.push_attack_move_queued(cmd.e, cmd.x, cmd.y)
