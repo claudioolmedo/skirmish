@@ -389,14 +389,14 @@ const BUILDING_MINIMAP_COLOR = {
 // Ages and technologies (M6). Age tags match the sim's Age::tag;
 // tech tags match TechId::tag. Costs/times mirror the sim's table
 // (study §8, OPENING-SPEC §2.6–2.7).
-let AGE_NAMES = ['Dark Age', 'Feudal Age', 'Castle Age'];
+let AGE_NAMES = ['Dark Age', 'Feudal Age', 'Castle Age', 'Imperial Age'];
 let TECH_NAME = {
   0: 'Loom', 1: 'Feudal Age', 2: 'Fletching', 3: 'Scale Mail Armor',
   4: 'Padded Archer Armor', 5: 'Man-at-Arms', 6: 'Wheelbarrow',
   7: 'Forging', 8: 'Scale Barding Armor', 9: 'Bloodlines',
   10: 'Double-Bit Axe', 11: 'Gold Mining', 12: 'Stone Mining',
   13: 'Horse Collar', 14: 'Castle Age', 15: 'Hand Cart',
-  16: 'Light Cavalry', 17: 'Husbandry',
+  16: 'Light Cavalry', 17: 'Husbandry', 18: 'Imperial Age',
 };
 // Research-block explanations, indexed by the sim's ResearchBlock
 // tag (0 ok — unused, 1 funds, 2 queue full, 3 already done,
@@ -428,7 +428,7 @@ function refreshNames() {
   KIND_I18N.forEach((id, tag) => { kn[tag] = t('unit.' + id); });
   KIND_NAME = kn;
   BUILD_NAME = BUILD_I18N.map((id) => t('building.' + id));
-  AGE_NAMES = [t('age.dark'), t('age.feudal'), t('age.castle')];
+  AGE_NAMES = [t('age.dark'), t('age.feudal'), t('age.castle'), t('age.imperial')];
   TECH_NAME = {
     0: t('tech.loom'), 1: t('age.feudal'), 2: t('tech.fletching'),
     3: t('tech.scalemail'), 4: t('tech.padded'), 5: t('tech.maa'),
@@ -436,7 +436,7 @@ function refreshNames() {
     9: t('tech.bloodlines'), 10: t('tech.doublebit'),
     11: t('tech.goldmining'), 12: t('tech.stonemining'),
     13: t('tech.horsecollar'), 14: t('age.castle'), 15: t('tech.handcart'),
-    16: t('tech.lightcavalry'), 17: t('tech.husbandry'),
+    16: t('tech.lightcavalry'), 17: t('tech.husbandry'), 18: t('age.imperial'),
   };
   RESEARCH_BLOCK_TITLES = [
     '', t('block.noResources'), t('block.queueFullTrain'),
@@ -872,6 +872,7 @@ function feedFmt() {
     research: (name) => t('feed.research', { name }),
     feudal: t('feed.feudal'),
     castle: t('feed.castle'),
+    imperial: t('feed.imperial'),
     sheep: t('feed.sheep'),
   };
 }
@@ -900,7 +901,7 @@ function updateEventFeed() {
   if (seatAware()) {
     const foeAge = sim.age_for(foeOwner());
     if (feedFoeAge >= 0 && foeAge > feedFoeAge) {
-      pushFeedLine(t(foeAge >= 2 ? 'feed.foeCastle' : 'feed.foeFeudal'));
+      pushFeedLine(t(foeAge >= 3 ? 'feed.foeImperial' : foeAge >= 2 ? 'feed.foeCastle' : 'feed.foeFeudal'));
       playAudioCue('ageAdvance');
     }
     feedFoeAge = foeAge;
@@ -9863,6 +9864,7 @@ function runCommandButton(id, times = 1) {
     const tag = id === 'research-loom' ? 0
       : id === 'research-wheelbarrow' ? 6
       : id === 'research-handcart' ? 15
+      : myAge() >= 2 ? 18
       : myAge() >= 1 ? 14 : 1;
     const ok = issue({ t: 'research_tc', tc: panelTcId(), tech: tag });
     if (!ok) {
@@ -9871,7 +9873,9 @@ function runCommandButton(id, times = 1) {
         ? t('cmd.feudalNeeds')
         : tag === 14 && rb === 4
           ? t('cmd.castleNeeds')
-          : RESEARCH_BLOCK_TITLES[rb] || t('block.cannotResearch'));
+          : tag === 18 && rb === 4
+            ? t('cmd.imperialNeeds')
+            : RESEARCH_BLOCK_TITLES[rb] || t('block.cannotResearch'));
     } else {
       playAudioCue('orderBuilding');
     }
@@ -10029,7 +10033,7 @@ function renderCommands() {
   // (Gold 11, Stone 12), Mill (Horse Collar 13).
   const rbTc = context === 'tc'
     ? [myResearchBlockTc(0), myResearchBlockTc(1), myResearchBlockTc(6),
-      myResearchBlockTc(14), myResearchBlockTc(15)] : [-1, -1, -1, -1, -1];
+      myResearchBlockTc(14), myResearchBlockTc(15), myResearchBlockTc(18)] : [-1, -1, -1, -1, -1, -1];
   const RB_TAGS = {
     blacksmith: [2, 3, 4, 7, 8], barracks: [5], stable: [9, 16, 17],
     lumbercamp: [10], miningcamp: [11, 12], mill: [13],
@@ -10147,6 +10151,7 @@ function renderCommands() {
     const loomDone = (techMask & 1) !== 0;
     const feudalDone = age >= 1;
     const castleDone = age >= 2;
+    const imperialDone = age >= 3;
     const wbDone = (techMask & 64) !== 0;
     const hcDone = (techMask & 32768) !== 0;
     cmdGrid.append(
@@ -10172,14 +10177,24 @@ function renderCommands() {
       // the NEXT Age — Feudal from Dark, Castle from Feudal —
       // and settles into the done state at Castle (Imperial is
       // not in the game yet).
-      age >= 2
+      age >= 3
         ? cmdButton({
-          id: 'research-age', icon: 'i-feudal', img: 'feudal.png', label: AGE_NAMES[2],
+          id: 'research-age', icon: 'i-feudal', img: 'feudal.png', label: AGE_NAMES[3],
           disabled: true,
           key: badgeForButton({ context, id: 'research-age', index: 2 }),
-          title: t('cmd.feudalDone', { age: AGE_NAMES[2] }),
+          title: t('cmd.feudalDone', { age: AGE_NAMES[3] }),
         })
-        : age >= 1
+        : age >= 2
+          ? cmdButton({
+            id: 'research-age', icon: 'i-feudal', img: 'feudal.png', label: AGE_NAMES[3],
+            costIcon: 'i-food', cost: 1000, cost2Icon: 'i-gold', cost2: 800,
+            disabled: rbTc[5] === 2 || rbTc[5] === 3,
+            key: badgeForButton({ context, id: 'research-age', index: 2 }),
+            title: rbTc[5] === 4
+              ? t('cmd.imperialGate', { age: AGE_NAMES[3] })
+              : t('cmd.imperialTitle', { age: AGE_NAMES[3], cost: costText([[1000, 'food'], [800, 'gold']]), secs: 190 }) + (RESEARCH_BLOCK_TITLES[rbTc[5]] ? ' ' + RESEARCH_BLOCK_TITLES[rbTc[5]] : ''),
+          })
+          : age >= 1
           ? cmdButton({
             id: 'research-age', icon: 'i-feudal', img: 'feudal.png', label: AGE_NAMES[2],
             costIcon: 'i-food', cost: 800, cost2Icon: 'i-gold', cost2: 200,

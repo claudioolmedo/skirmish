@@ -1199,8 +1199,14 @@ than invented, UNVERIFIED. The Town Center is an entity with a
 single 2400 HP row in the study, not a placed building in this
 rule's table — but its armor follows the same per-age lookup
 through `stats_for`: melee 3/4/5, pierce 5/6/7 across
-Dark/Feudal/Castle (the Imperial 6/8 waits with its age), pinned by
-the same test. · *Status:* **MATCHES** (for the shipped ages).
+Dark/Feudal/Castle, pinned by the same test. The Imperial columns
+landed 2026-10-29 with the Imperial Age (bot-loop TEC-01 package):
+the Town Center reads 6/8, the Market its BLD-19 step of 3/10, and
+every other kind carries its Castle column into Imperial (the
+fetched rows that name both ages read them equal — House HP
+550/750/900/900, Stone Wall 1800 Castle / 1800 Imperial); no
+Imperial-specific value was invented for any other kind.
+· *Status:* **MATCHES**.
 
 **BLD-12 — Farms do not block; other buildings do.** A placed farm never
 enters the obstacle grid (its farmer walks and stands on it). Every other
@@ -1581,8 +1587,9 @@ building requiring a completed Mill (BLD-15's chain): 175 wood,
 armor in its Feudal column. It hosts the commodity exchange
 (TRD-01..03) — no production queue, no research in the generic
 game. The Castle table step (2100 HP, 2/9 armor) landed with
-the Castle Age P1 merge; the Imperial step (3/10) waits for
-the Imperial Age. (BLD-18 is reserved for
+the Castle Age P1 merge; the Imperial step (3/10) landed
+2026-10-29 with the Imperial Age (bot-loop TEC-01 package).
+(BLD-18 is reserved for
 the Castle dossier's building-weapons rule.)
 *Source:* AoE wiki, Market infobox (fetched 2026-10-22). ·
 *Impl:* shipped 2026-10-22 — `BuildingKind::Market` (tag 9) in
@@ -2204,11 +2211,16 @@ Castle → Imperial: 1000 food + 800 gold, 190 s. Age research happens at
 the Town Center.
 *Source:* MECHANICS-STUDY §7. · *Impl:* the age ladder is a tiny data
 table keyed by (from-age); the TC queue holds an "age research" entry
-like any other (TEC-03). · *Status:* **DIFFERS** (the Dark → Feudal
+like any other (TEC-03). · *Status:* **MATCHES** (the Dark → Feudal
 rung ships with M6 at exactly these numbers — 500 food, 130 s; the
 Feudal → Castle rung shipped 2026-10-22 in the Castle Age P1 package
 at exactly these numbers — 800 food + 200 gold, 160 s, pinned by
-`sim/tests/castle_age.rs`; only the Imperial rung still waits).
+`sim/tests/castle_age.rs`; the Castle → Imperial rung shipped
+2026-10-29 in the bot-loop TEC-01 package at exactly these numbers —
+1000 food + 800 gold, 190 s, TechId tag 18 appended, pinned by
+`imperial_age_gates_cost_timing_and_steps` in the same suite: gate
+Locked without the TEC-02 Imperial qualification, exact charge,
+exact 11400-tick timing, age flip at completion).
 
 **TEC-02 — Age-up requires two qualifying buildings.** Advancing requires
 owning any two buildings of the *current* age's tier, with exclusions:
@@ -2228,8 +2240,13 @@ Feudal-born kinds (Archery Range, Stable, Blacksmith) — the study's
 a player for Castle than Houses qualify one for Feudal) — with the
 staged gate pinned by test (0 after Mill + Lumber Camp, still 0
 after a Barracks, 1 after a Blacksmith, 2 after an Archery Range).
-The Imperial rung arrives with its age. · *Status:*
-**MATCHES**.
+The Imperial rung arrived 2026-10-29 with its age (bot-loop
+TEC-01 package): `BuildingKind::counts_toward_imperial` holds the
+Castle-born kinds (the Castle alone today; the University, Siege
+Workshop and Monastery join the set when they land) and
+`Sim::imperial_gate_met` applies this rule's clause verbatim — a
+completed Castle suffices, or any two Castle-Age buildings.
+· *Status:* **MATCHES**.
 
 **TEC-03 — Age research occupies the Town Center.** While an Age is
 researching, the TC's queue is busy: villager production queued behind it
@@ -3851,6 +3868,21 @@ and the book at 222 rules, 142 / 26 / 54 (recounted
 mechanically over the Status tags). The table below equals the
 body.
 
+updated 2026-10-29 for the Imperial Age rung (bot-loop TEC-01
+package, landed on top of P3b in the same publish): the
+Castle → Imperial advancement lands at the pinned numbers
+(1000 food + 800 gold, 190 s, Town Center; TEC-02 gate: a
+Castle alone, or any two Castle-Age buildings), so TEC-01
+moves DIFFERS → MATCHES and §11 stands at 11 rules, 6 / 2 / 3.
+The documented Imperial stat steps land with it: Town Center
+armor 6/8 (BLD-11), the Market's 3/10 (BLD-19), the Scout
+line's +2 LoS per-advance step to 10 tiles (CLS-04); every
+other building carries its Castle column into Imperial — no
+Imperial content (units, techs, buildings) ships with the
+rung; those remain their own rules. With P3b above, the book
+stands at 222 rules, 143 / 25 / 54. The table below equals
+the body.
+
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
 | 1 | Simulation & time (SIM) | 12 | 12 | 0 | 0 |
@@ -3863,7 +3895,7 @@ body.
 | 8 | Combat & damage (CMB) | 17 | 16 | 0 | 1 |
 | 9 | Projectiles & ballistics (PRJ) | 10 | 5 | 3 | 2 |
 | 10 | Unit classes & counters (CLS) | 8 | 5 | 0 | 3 |
-| 11 | Technologies & age advancement (TEC) | 11 | 5 | 3 | 3 |
+| 11 | Technologies & age advancement (TEC) | 11 | 6 | 2 | 3 |
 | 12 | Monks, conversion & relics (MNK) | 13 | 0 | 0 | 13 |
 | 13 | Trade, market & tribute (TRD) | 8 | 3 | 0 | 5 |
 | 14 | Garrison, transport & repair (GAR) | 10 | 7 | 0 | 3 |
@@ -3871,7 +3903,7 @@ body.
 | 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |
 | 17 | Multiplayer determinism (NET) | 11 | 7 | 2 | 2 |
 | 18 | Information rules (INF) | 13 | 9 | 2 | 2 |
-| | **Total** | **222** | **142** | **26** | **54** |
+| | **Total** | **222** | **143** | **25** | **54** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer

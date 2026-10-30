@@ -103,7 +103,8 @@ use crate::units;
 use fixed::types::I16F16;
 
 /// The ages a player can stand in (M6 ships the first step of the
-/// TEC-01 ladder; Castle/Imperial are later milestones). Ordered:
+/// TEC-01 ladder; Castle landed in Castle P1, Imperial in the
+/// bot-loop TEC-01 package, 2026-10-29). Ordered:
 /// `Dark < Feudal`, so age requirements are plain comparisons.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Age {
@@ -112,16 +113,19 @@ pub enum Age {
     Feudal,
     /// The Castle Age (Castle P1, 2026-10-22).
     Castle,
+    /// The Imperial Age (TEC-01's last rung, bot-loop 2026-10-29).
+    Imperial,
 }
 
 impl Age {
     /// Stable tag for the state hash and the WASM ABI:
-    /// 0 = Dark Age, 1 = Feudal Age, 2 = Castle Age.
+    /// 0 = Dark Age, 1 = Feudal Age, 2 = Castle Age, 3 = Imperial Age.
     pub fn tag(self) -> u8 {
         match self {
             Age::Dark => 0,
             Age::Feudal => 1,
             Age::Castle => 2,
+            Age::Imperial => 3,
         }
     }
 }
@@ -168,11 +172,13 @@ pub enum TechId {
     LightCavalry,
     /// Stable, Castle: mounted units +10% speed (Castle P2).
     Husbandry,
+    /// Town Center: the Imperial Age advancement itself (TEC-01).
+    ImperialAge,
 }
 
 impl TechId {
     /// All technologies, in tag order.
-    pub const ALL: [TechId; 18] = [
+    pub const ALL: [TechId; 19] = [
         TechId::Loom,
         TechId::FeudalAge,
         TechId::Fletching,
@@ -191,6 +197,7 @@ impl TechId {
         TechId::HandCart,
         TechId::LightCavalry,
         TechId::Husbandry,
+        TechId::ImperialAge,
     ];
 
     /// Stable tag: 0 loom, 1 feudal age, 2 fletching, 3 scale mail,
@@ -201,6 +208,8 @@ impl TechId {
     /// Feudal-completion package took 7–13, so no tag moved).
     /// 16 light cavalry, 17 husbandry (Castle P2 — appended
     /// after P1 took 14/15, so no tag moved either).
+    /// 18 imperial age (bot-loop TEC-01, 2026-10-29 — appended
+    /// after P2 took 16/17, so no tag moved either).
     pub fn tag(self) -> u8 {
         match self {
             TechId::Loom => 0,
@@ -221,6 +230,7 @@ impl TechId {
             TechId::HandCart => 15,
             TechId::LightCavalry => 16,
             TechId::Husbandry => 17,
+            TechId::ImperialAge => 18,
         }
     }
 
@@ -242,6 +252,7 @@ impl TechId {
             | TechId::FeudalAge
             | TechId::Wheelbarrow
             | TechId::CastleAge
+            | TechId::ImperialAge
             | TechId::HandCart => TechHost::TownCenter,
             TechId::Fletching
             | TechId::ScaleMail
@@ -265,6 +276,7 @@ impl TechId {
         match self {
             TechId::Loom | TechId::FeudalAge => Age::Dark,
             TechId::CastleAge => Age::Feudal,
+            TechId::ImperialAge => Age::Castle,
             TechId::HandCart | TechId::LightCavalry | TechId::Husbandry => Age::Castle,
             _ => Age::Feudal,
         }
@@ -307,6 +319,7 @@ impl TechId {
             TechId::HandCart => 3300,       // 55 s (wiki, Hand Cart)
             TechId::LightCavalry => 2700,
             TechId::Husbandry => 2400,
+            TechId::ImperialAge => 11400, // 190 s (study §7)
         }
     }
 
@@ -332,6 +345,7 @@ impl TechId {
             TechId::HandCart => (300, 200, 0, 0),    // wiki, Hand Cart
             TechId::LightCavalry => (150, 0, 50, 0),
             TechId::Husbandry => (150, 0, 0, 0),
+            TechId::ImperialAge => (1000, 0, 800, 0), // study §7
         }
     }
 }
@@ -485,16 +499,24 @@ mod tests {
             TechHost::Building(BuildingKind::Stable)
         );
         assert_eq!(TechId::Husbandry.age_required(), Age::Castle);
-        // Age tags: 0 Dark, 1 Feudal, 2 Castle.
+        // Imperial Age: 1000 F / 800 G, 190 s, Town Center,
+        // researched from the Castle Age (TEC-01; study §7).
+        assert_eq!(TechId::ImperialAge.cost(), (1000, 0, 800, 0));
+        assert_eq!(TechId::ImperialAge.ticks(), 190 * 60);
+        assert_eq!(TechId::ImperialAge.host(), TechHost::TownCenter);
+        assert_eq!(TechId::ImperialAge.age_required(), Age::Castle);
+        assert_eq!(TechId::ImperialAge.tag(), 18);
+        // Age tags: 0 Dark, 1 Feudal, 2 Castle, 3 Imperial.
         assert_eq!(Age::Dark.tag(), 0);
         assert_eq!(Age::Feudal.tag(), 1);
         assert_eq!(Age::Castle.tag(), 2);
-        assert!(Age::Dark < Age::Feudal && Age::Feudal < Age::Castle);
+        assert_eq!(Age::Imperial.tag(), 3);
+        assert!(Age::Dark < Age::Feudal && Age::Feudal < Age::Castle && Age::Castle < Age::Imperial);
         // Tags are stable and round-trip.
         for t in TechId::ALL {
             assert_eq!(TechId::from_tag(t.tag()), Some(t));
         }
-        assert_eq!(TechId::from_tag(18), None);
+        assert_eq!(TechId::from_tag(19), None);
     }
 
     #[test]

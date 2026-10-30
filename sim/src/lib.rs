@@ -1358,6 +1358,9 @@ impl Sim {
         if tech == TechId::CastleAge {
             return self.age_of(owner) >= Age::Castle;
         }
+        if tech == TechId::ImperialAge {
+            return self.age_of(owner) >= Age::Imperial;
+        }
         match player_slot(owner) {
             Some(slot) => self.players[slot].techs & tech.bit() != 0,
             None => false,
@@ -1378,6 +1381,9 @@ impl Sim {
         }
         if self.age_of(owner) >= Age::Castle {
             mask |= TechId::CastleAge.bit();
+        }
+        if self.age_of(owner) >= Age::Imperial {
+            mask |= TechId::ImperialAge.bit();
         }
         mask
     }
@@ -1418,6 +1424,12 @@ impl Sim {
         if kind == EntityKind::ScoutCavalry && p.age >= Age::Castle {
             s.los = I16F16::from_bits(2_097_152); // 32 (8 tiles)
         }
+        // The same per-advance step at Imperial (TEC-01's last
+        // rung): the scout line's LoS rises +2 per Age advance,
+        // so Imperial reads 10 tiles.
+        if kind == EntityKind::ScoutCavalry && p.age >= Age::Imperial {
+            s.los = I16F16::from_bits(2_621_440); // 40 (10 tiles)
+        }
         // BLD-11 for the Town Center entity: its armor follows
         // the owner's Age column (study §5: melee 3/4/5, pierce
         // 5/6/7 in Dark/Feudal/Castle; HP is 2400 at every Age).
@@ -1433,6 +1445,12 @@ impl Sim {
                 Age::Castle => {
                     s.armor_melee = 5;
                     s.armor_pierce = 7;
+                }
+                // BLD-11: the Imperial step (6/8) the rulebook
+                // recorded as waiting with its age.
+                Age::Imperial => {
+                    s.armor_melee = 6;
+                    s.armor_pierce = 8;
                 }
                 Age::Dark => {}
             }
@@ -1617,6 +1635,22 @@ impl Sim {
             .iter()
             .filter(|b| b.owner == owner && b.complete && b.kind.counts_toward_castle())
             .count() as u32
+    }
+
+    /// How many completed Castle-Age buildings a player owns
+    /// (see `BuildingKind::counts_toward_imperial`).
+    pub fn imperial_building_count(&self, owner: u8) -> u32 {
+        self.buildings
+            .iter()
+            .filter(|b| b.owner == owner && b.complete && b.kind.counts_toward_imperial())
+            .count() as u32
+    }
+
+    /// TEC-02's Imperial gate: a completed Castle alone suffices,
+    /// or any two completed Castle-Age buildings.
+    pub fn imperial_gate_met(&self, owner: u8) -> bool {
+        self.has_completed_building(owner, BuildingKind::Castle)
+            || self.imperial_building_count(owner) >= 2
     }
 
     /// A Town Center's production state, by Town Center entity id.
@@ -2220,6 +2254,9 @@ impl Sim {
         if tech == TechId::CastleAge && self.castle_building_count(owner) < 2 {
             return ResearchBlock::Locked;
         }
+        if tech == TechId::ImperialAge && !self.imperial_gate_met(owner) {
+            return ResearchBlock::Locked;
+        }
         // TEC-07: a tech→tech prerequisite unmet locks the
         // research (Hand Cart behind Wheelbarrow — the first
         // link of this kind).
@@ -2357,6 +2394,9 @@ impl Sim {
             }
             TechId::CastleAge => {
                 self.players[slot].age = Age::Castle;
+            }
+            TechId::ImperialAge => {
+                self.players[slot].age = Age::Imperial;
             }
             TechId::Loom => {
                 self.players[slot].techs |= tech.bit();

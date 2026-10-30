@@ -382,6 +382,13 @@ impl WasmSim {
         self.push_research_tc(TechId::CastleAge)
     }
 
+    /// Enqueue the Imperial Age advancement at the Town Center
+    /// (1000 food, 800 gold, 190 s; needs a Castle or two
+    /// completed Castle-Age buildings — TEC-01 Imperial rung).
+    pub fn push_research_imperial_age(&mut self) -> bool {
+        self.push_research_tc(TechId::ImperialAge)
+    }
+
     /// Enqueue Hand Cart at the Town Center (300 food, 200 wood,
     /// 55 s; Castle Age, requires Wheelbarrow — ECO-03).
     pub fn push_research_hand_cart(&mut self) -> bool {

@@ -569,7 +569,7 @@ impl BuildingKind {
                 // Castle holds the Feudal step (ADOPTED — the
                 // article's per-Age numbers stay UNVERIFIED; the
                 // Castle rung exists since Castle Age P1).
-                Age::Feudal | Age::Castle => 8,
+                Age::Feudal | Age::Castle | Age::Imperial => 8,
             },
             _ => crate::BUILDING_SIGHT_TILES,
         }
@@ -753,6 +753,16 @@ impl BuildingKind {
         )
     }
 
+    /// Whether this kind counts toward the Imperial Age research
+    /// requirement (TEC-02's Imperial clause): the Castle-born
+    /// kinds. TEC-02's gate itself is "a Castle alone suffices,
+    /// or any two Castle-Age buildings" — the Castle is the only
+    /// Castle-born kind in the current roster; the University,
+    /// Siege Workshop and Monastery join this set when they land.
+    pub fn counts_toward_imperial(self) -> bool {
+        matches!(self, BuildingKind::Castle)
+    }
+
     /// Hit points of a fresh building of this kind (M5 — buildings
     /// take damage now; study §5, Dark Age row where the value is
     /// age-keyed). Death is HP < 1, the entity rule (CMB-02).
@@ -811,7 +821,7 @@ impl BuildingKind {
     pub fn max_hp_at(self, age: Age) -> i32 {
         match (self, age) {
             (BuildingKind::House, Age::Feudal) => 750,
-            (BuildingKind::House, Age::Castle) => 900,
+            (BuildingKind::House, Age::Castle | Age::Imperial) => 900,
             (BuildingKind::Barracks, Age::Feudal) => 1500,
             // BLD-13: 150 HP in the Dark Age, 250 from Feudal on
             // (wiki Palisade Wall row 150/250/250/250 — the step
@@ -823,15 +833,15 @@ impl BuildingKind {
             (BuildingKind::PalisadeWall, age) if age != Age::Dark => 250,
             // BLD-20: the Stone Wall's Castle step (wiki row
             // 1080 Feudal / 1800 Castle+).
-            (BuildingKind::StoneWall, Age::Castle) => 1800,
-            (BuildingKind::Barracks, Age::Castle) => 1800,
-            (BuildingKind::ArcheryRange, Age::Castle) => 1800,
-            (BuildingKind::Stable, Age::Castle) => 1800,
+            (BuildingKind::StoneWall, Age::Castle | Age::Imperial) => 1800,
+            (BuildingKind::Barracks, Age::Castle | Age::Imperial) => 1800,
+            (BuildingKind::ArcheryRange, Age::Castle | Age::Imperial) => 1800,
+            (BuildingKind::Stable, Age::Castle | Age::Imperial) => 1800,
             // The Castle steps BLD-18/BLD-19 deferred to this
             // package: Watch Tower 850 → 1020 (tower article,
             // update 61321), Market 1800 → 2100 (Market infobox).
-            (BuildingKind::WatchTower, Age::Castle) => 1020,
-            (BuildingKind::Market, Age::Castle) => 2100,
+            (BuildingKind::WatchTower, Age::Castle | Age::Imperial) => 1020,
+            (BuildingKind::Market, Age::Castle | Age::Imperial) => 2100,
             _ => self.max_hp(),
         }
     }
@@ -875,15 +885,18 @@ impl BuildingKind {
     pub fn armor_melee_at(self, age: Age) -> i32 {
         match (self, age) {
             (BuildingKind::House, Age::Feudal) => -1,
-            (BuildingKind::House, Age::Castle) => 1,
+            (BuildingKind::House, Age::Castle | Age::Imperial) => 1,
             (BuildingKind::Barracks, Age::Feudal) => 1,
-            (BuildingKind::Barracks, Age::Castle) => 2,
-            (BuildingKind::ArcheryRange, Age::Castle) => 2,
-            (BuildingKind::Stable, Age::Castle) => 2,
+            (BuildingKind::Barracks, Age::Castle | Age::Imperial) => 2,
+            (BuildingKind::ArcheryRange, Age::Castle | Age::Imperial) => 2,
+            (BuildingKind::Stable, Age::Castle | Age::Imperial) => 2,
             // Market Castle step (BLD-19's deferred column: 2/9).
             (BuildingKind::Market, Age::Castle) => 2,
             (BuildingKind::TownCenter, Age::Feudal) => 4,
             (BuildingKind::TownCenter, Age::Castle) => 5,
+            // BLD-19: the Market's Imperial step (3 melee).
+            (BuildingKind::Market, Age::Imperial) => 3,
+            (BuildingKind::TownCenter, Age::Imperial) => 6,
             _ => self.armor_melee(),
         }
     }
@@ -917,15 +930,18 @@ impl BuildingKind {
     pub fn armor_pierce_at(self, age: Age) -> i32 {
         match (self, age) {
             (BuildingKind::House, Age::Feudal) => 8,
-            (BuildingKind::House, Age::Castle) => 9,
+            (BuildingKind::House, Age::Castle | Age::Imperial) => 9,
             (BuildingKind::Barracks, Age::Feudal) => 8,
-            (BuildingKind::Barracks, Age::Castle) => 9,
-            (BuildingKind::ArcheryRange, Age::Castle) => 9,
-            (BuildingKind::Stable, Age::Castle) => 9,
+            (BuildingKind::Barracks, Age::Castle | Age::Imperial) => 9,
+            (BuildingKind::ArcheryRange, Age::Castle | Age::Imperial) => 9,
+            (BuildingKind::Stable, Age::Castle | Age::Imperial) => 9,
             // Market Castle step (BLD-19's deferred column: 2/9).
             (BuildingKind::Market, Age::Castle) => 9,
             (BuildingKind::TownCenter, Age::Feudal) => 6,
             (BuildingKind::TownCenter, Age::Castle) => 7,
+            // BLD-19: the Market's Imperial step (10 pierce).
+            (BuildingKind::Market, Age::Imperial) => 10,
+            (BuildingKind::TownCenter, Age::Imperial) => 8,
             _ => self.armor_pierce(),
         }
     }
@@ -1584,6 +1600,22 @@ mod tests {
         assert_eq!(BuildingKind::ArcheryRange.armor_melee_at(Age::Castle), 2);
         assert_eq!(BuildingKind::Stable.armor_pierce_at(Age::Castle), 9);
         assert_eq!(BuildingKind::TownCenter.max_hp_at(Age::Castle), 2400);
+        // Imperial columns (TEC-01's last rung): the documented
+        // Castle/Imperial-equal rows carry over (House 900,
+        // Stone Wall 1800), the TC step is 6/8 (BLD-11) and the
+        // Market step is 3/10 (BLD-19).
+        assert_eq!(BuildingKind::House.max_hp_at(Age::Imperial), 900);
+        assert_eq!(BuildingKind::StoneWall.max_hp_at(Age::Imperial), 1800);
+        assert_eq!(BuildingKind::Barracks.max_hp_at(Age::Imperial), 1800);
+        assert_eq!(BuildingKind::House.armor_melee_at(Age::Imperial), 1);
+        assert_eq!(BuildingKind::House.armor_pierce_at(Age::Imperial), 9);
+        assert_eq!(BuildingKind::TownCenter.armor_melee_at(Age::Imperial), 6);
+        assert_eq!(BuildingKind::TownCenter.armor_pierce_at(Age::Imperial), 8);
+        assert_eq!(BuildingKind::Market.armor_melee_at(Age::Imperial), 3);
+        assert_eq!(BuildingKind::Market.armor_pierce_at(Age::Imperial), 10);
+        assert!(BuildingKind::Castle.counts_toward_imperial());
+        assert!(!BuildingKind::ArcheryRange.counts_toward_imperial());
+        assert!(!BuildingKind::TownCenter.counts_toward_imperial());
         assert_eq!(BuildingKind::TownCenter.armor_melee_at(Age::Feudal), 4);
         assert_eq!(BuildingKind::TownCenter.armor_pierce_at(Age::Castle), 7);
         assert_eq!(BuildingKind::Mill.max_hp_at(Age::Castle), 550);

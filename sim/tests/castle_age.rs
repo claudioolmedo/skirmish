@@ -658,3 +658,117 @@ fn town_center_buildable_in_castle_age() {
     let trained = run_until(&mut sim, 10_000, |s| my_villagers(s).len() == before + 1);
     assert!(trained, "the new Town Center never trained a villager");
 }
+
+#[test]
+fn imperial_age_gates_cost_timing_and_steps() {
+    // TEC-01's last rung (bot-loop, 2026-10-29): Imperial Age —
+    // 1000 food / 800 gold, 190 s at the Town Center, gated by
+    // TEC-02's Imperial clause (a Castle alone suffices, or any
+    // two Castle-Age buildings).
+    let mut sim = Sim::new(61);
+    reach_castle_ready(&mut sim);
+    sim.push_command(Command::ResearchTc {
+        tech: TechId::CastleAge,
+    });
+    let up = run_until(&mut sim, 30_000, |s| s.age_of(OWNER_PLAYER) == Age::Castle);
+    assert!(up, "never reached Castle");
+
+    // In Castle Age with NO Castle standing and no other
+    // Castle-Age building, the Imperial gate is Locked.
+    assert_eq!(sim.imperial_building_count(OWNER_PLAYER), 0);
+    assert!(!sim.imperial_gate_met(OWNER_PLAYER));
+    assert_eq!(
+        sim.research_block_tc(TechId::ImperialAge),
+        ResearchBlock::Locked
+    );
+    assert!(!sim.can_research_tc(TechId::ImperialAge));
+
+    // Stock a resource with the whole village, re-tasking idlers
+    // onto the first live node of the kind every 600 ticks (a
+    // node depletes under a full crew; the crew walks to the
+    // next one, exactly as a player re-clicks the next mine).
+    fn stock_with_village(sim: &mut Sim, kinds: &[NodeKind], res: ResourceKind, want: i32) {
+        for step in 0..200_000u64 {
+            if stock(sim, res) >= I16F16::from_num(want) {
+                return;
+            }
+            if step % 600 == 0 {
+                if let Some(n) = kinds.iter().find_map(|k| {
+                    sim.nodes()
+                        .iter()
+                        .find(|n| n.kind == *k && n.amount_left > I16F16::from_num(0))
+                }) {
+                    let nid = n.id;
+                    for id in my_villagers(sim) {
+                        if villager(sim, id).task == Task::Idle {
+                            gather(sim, id, nid);
+                        }
+                    }
+                }
+            }
+            sim.tick();
+        }
+        panic!("never stocked {want} {res:?}");
+    }
+
+    // Mine stone for the Castle (650) behind a Mining Camp, then
+    // raise the Castle itself.
+    let vils = my_villagers(&sim);
+    wait_stock(&mut sim, ResourceKind::Wood, 100);
+    raise_scan(&mut sim, vils[2], BuildingKind::MiningCamp);
+    park_all(&mut sim);
+    stock_with_village(&mut sim, &[NodeKind::StoneMine], ResourceKind::Stone, 660);
+    park_all(&mut sim);
+    let vils = my_villagers(&sim);
+    raise_scan(&mut sim, vils[0], BuildingKind::Castle);
+    assert!(sim.imperial_gate_met(OWNER_PLAYER));
+    assert_eq!(sim.imperial_building_count(OWNER_PLAYER), 1);
+
+    // Bank the click: gold first, then food off the farm nodes
+    // (re-laying a farm whenever the village idles food-less and
+    // wood allows — the DE boom answer the Castle suite uses).
+    park_all(&mut sim);
+    stock_with_village(&mut sim, &[NodeKind::GoldMine], ResourceKind::Gold, 810);
+    park_all(&mut sim);
+    stock_with_village(&mut sim, &[NodeKind::Farm, NodeKind::BerryBush], ResourceKind::Food, 1010);
+
+    // Exact charge and exact timing (1000 F / 800 G, 11400 ticks).
+    park_all(&mut sim);
+    let (food0, gold0) = (stock(&sim, ResourceKind::Food), stock(&sim, ResourceKind::Gold));
+    assert!(food0 >= I16F16::from_num(1000) && gold0 >= I16F16::from_num(800));
+    assert!(sim.can_research_tc(TechId::ImperialAge));
+    let t0 = sim.tick_count();
+    sim.push_command(Command::ResearchTc {
+        tech: TechId::ImperialAge,
+    });
+    sim.tick();
+    assert_eq!(sim.tc_queue().len(), 1);
+    assert_eq!(stock(&sim, ResourceKind::Food), food0 - I16F16::from_num(1000));
+    assert_eq!(stock(&sim, ResourceKind::Gold), gold0 - I16F16::from_num(800));
+    for _ in 0..11398 {
+        sim.tick();
+    }
+    assert_eq!(sim.age_of(OWNER_PLAYER), Age::Castle, "not yet Imperial");
+    sim.tick();
+    assert_eq!(sim.tick_count() - t0, 11400);
+    assert_eq!(sim.age_of(OWNER_PLAYER), Age::Imperial);
+    assert!(sim.has_tech(OWNER_PLAYER, TechId::ImperialAge));
+    assert!(sim.tech_mask_of(OWNER_PLAYER) & TechId::ImperialAge.bit() != 0);
+    assert_eq!(
+        sim.research_block_tc(TechId::ImperialAge),
+        ResearchBlock::AlreadyDone
+    );
+
+    // The documented Imperial steps land with the age: the Town
+    // Center's armor reads 6/8 (BLD-11), the Market's 3/10
+    // (BLD-19), a standing House keeps the Castle ceiling of 900
+    // (its row is Castle/Imperial-equal), and the Scout line's
+    // LoS takes its per-advance step to 10 tiles (CLS-04).
+    let tc_stats = sim.stats_for(OWNER_PLAYER, EntityKind::TownCenter);
+    assert_eq!((tc_stats.armor_melee, tc_stats.armor_pierce), (6, 8));
+    assert_eq!(BuildingKind::Market.armor_melee_at(Age::Imperial), 3);
+    assert_eq!(BuildingKind::Market.armor_pierce_at(Age::Imperial), 10);
+    assert_eq!(BuildingKind::House.max_hp_at(Age::Imperial), 900);
+    let scout = sim.stats_for(OWNER_PLAYER, EntityKind::ScoutCavalry);
+    assert_eq!(scout.los, I16F16::from_bits(2_621_440)); // 40 wu = 10 tiles
+}
