@@ -354,11 +354,34 @@ fn ai_repairs_its_own_town_center() {
         entity: scout,
         target: ai_tc,
     });
+    // Package J landing note (bot-loop, 2026-10-30): the dent is
+    // delivered by the human's WHOLE starting force — the Scout
+    // plus its three villagers, all through ordinary Attack
+    // orders. On Package J's own base a lone Scout sufficed, but
+    // after the combo landing (P4a + K + L) the same seed's AI
+    // economy funds its BLD-17 TC repair continuously, and the
+    // repair out-heals a lone Scout: measured on this seed, the
+    // TC never fell below 2393/2400 in 240,000 ticks and the
+    // Scout died at ~65k with the dent never past −7. The repair
+    // itself is the documented behaviour under test (it must not
+    // be weakened to save the scenario), so the scenario's dent
+    // force grows instead — the combined minimum-damage rate of
+    // four attackers out-paces the wood-drip-limited repair.
+    let attackers = villagers_of(&sim, OWNER_PLAYER);
+    for vil in &attackers {
+        sim.push_command(Command::Attack {
+            entity: *vil,
+            target: ai_tc,
+        });
+    }
     let dented = run_until(&mut sim, 240_000, |s| tc_hp(s, OWNER_OPPONENT) <= full - 25.0);
-    assert!(dented, "human Scout never dented the AI Town Center");
-    // Withdraw the attacker for good (the human deletes its own
-    // Scout — an ordinary SEL-14 order).
+    assert!(dented, "human starting force never dented the AI Town Center");
+    // Withdraw the attackers for good (the human deletes its own
+    // units — an ordinary SEL-14 order).
     sim.push_command(Command::DeleteEntity { entity: scout });
+    for vil in &attackers {
+        sim.push_command(Command::DeleteEntity { entity: *vil });
+    }
     // The AI's script must pick the repair up: some AI villager
     // takes RepairTc duty, and the Town Center returns to full.
     let mut saw_repairer = false;
