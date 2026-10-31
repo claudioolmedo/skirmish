@@ -376,6 +376,11 @@ pub struct BellSnapshot {
     pub task: Task,
     pub task_node: Option<u32>,
     pub task_building: Option<u32>,
+    /// The Town Center whose bell ring took this snapshot
+    /// (GAR-07): bells are per-TC toggles, so only THAT TC's
+    /// second ring may restore this villager — another TC's ring
+    /// cycle neither releases it nor may overwrite the snapshot.
+    pub bell_tc: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

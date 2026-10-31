@@ -2862,7 +2862,15 @@ model. *Shipped 2026-10-29 (Castle P3b):* the snapshot rides the
 villager (`BellSnapshot`: position + task + node/building ids);
 the second ring ejects the bell's own villagers and restores the
 gather/build/repair task when its target still stands, else walks
-the villager back to the snapshot position. · *Status:*
+the villager back to the snapshot position. *Correction
+2026-10-30 (live defect report):* the snapshot now names the TC
+whose ring took it (`bell_tc`) — with several Town Centers, one
+TC's ring cycle previously released another TC's bell villagers
+(the restore sweep was owner-wide while the rung flag is per-TC)
+and a second TC's ring could overwrite a walking villager's
+snapshot with its zeroed walk state, losing the real task. A
+ring now skips villagers already holding a snapshot, and a
+second ring restores only its own bell's villagers. · *Status:*
 **MATCHES**.
 
 **GAR-08 — Rally-garrison on creation.** If a production building's rally

@@ -40,8 +40,9 @@ use crate::{Command, MatchMode, PlayerState, Sim, TcState};
 /// File magic: "SKSV" (Skirmish Save).
 const MAGIC: &[u8; 4] = b"SKSV";
 /// Save format version. Bump on any layout change; loaders
-/// refuse versions they do not know.
-const SAVE_VERSION: u32 = 1;
+/// refuse versions they do not know. Version 2: the Town Bell
+/// snapshot carries its ringing TC (`bell_tc`, GAR-07 fix).
+const SAVE_VERSION: u32 = 2;
 
 /// Little-endian byte writer over a growable buffer.
 struct W {
@@ -181,6 +182,7 @@ impl W {
                 self.task(s.task);
                 self.opt_u32(s.task_node);
                 self.opt_u32(s.task_building);
+                self.u32(s.bell_tc);
             }
         }
     }
@@ -788,6 +790,7 @@ impl<'a> R<'a> {
                 task: self.task()?,
                 task_node: self.opt_u32()?,
                 task_building: self.opt_u32()?,
+                bell_tc: self.u32()?,
             })),
             _ => None,
         }

@@ -7444,6 +7444,7 @@ impl Sim {
                                 h.write_u32(bb);
                             }
                         }
+                        h.write_u32(b.bell_tc);
                     }
                 }
                 h.write_u64(e.garrison_heal_remainder as u64);

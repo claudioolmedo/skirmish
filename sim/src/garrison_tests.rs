@@ -12,7 +12,7 @@
 
 use crate::build::{Building, BuildingKind};
 use crate::econ::ResourceKind;
-use crate::entity::{Entity, EntityKind, GarrisonRef, OWNER_OPPONENT, OWNER_PLAYER};
+use crate::entity::{Entity, EntityKind, GarrisonRef, Task, OWNER_OPPONENT, OWNER_PLAYER};
 use crate::{Command, Sim};
 use fixed::types::I16F16;
 
@@ -872,4 +872,704 @@ fn gar10_a_moving_ram_still_loads_and_ungarrisons_where_it_stands() {
     assert!(p.garrisoned_in.is_none());
     let d = crate::steer::vec_len(p.pos_x - rx, p.pos_y - ry);
     assert!(f(d) < 8.0, "ungarrisoned far from the Ram's position");
+}
+
+// ------------------------------------------------------------------
+// GAR-07 defect hunt (live report 2026-10-30): "ring the bell to go
+// into the Town Center — not all of them come back out afterwards."
+// Scenarios (a)–(f): over-capacity crowd, mixed tasks, a villager
+// garrisoned manually before the ring, a villager produced during
+// the bell, a fast double ring, and a rally set on the TC itself.
+
+fn player_villager_ids(sim: &Sim) -> Vec<u32> {
+    sim.entities()
+        .iter()
+        .filter(|e| e.kind == EntityKind::Villager && e.owner == OWNER_PLAYER && !e.dead)
+        .map(|e| e.id)
+        .collect()
+}
+
+/// Spawn `n` extra player villagers on free cells in the ring
+/// around the player's Town Center (inside the 23-tile bell
+/// radius), with hand-picked ids from `first_id` up.
+fn spawn_villagers_near_tc(sim: &mut Sim, n: usize, first_id: u32) -> Vec<u32> {
+    let tc = sim.town_center().id;
+    let (tx, ty) = {
+        let e = ent(sim, tc);
+        (e.pos_x, e.pos_y)
+    };
+    let (ccx, ccy) = sim.grid().world_to_cell(tx, ty);
+    let mut out = Vec::new();
+    let mut id = first_id;
+    'outer: for ring in 3i32..=6 {
+        for dx in -ring..=ring {
+            for dy in -ring..=ring {
+                if dx.abs() != ring && dy.abs() != ring {
+                    continue;
+                }
+                if out.len() >= n {
+                    break 'outer;
+                }
+                let cx = ccx as i32 + dx;
+                let cy = ccy as i32 + dy;
+                if cx < 0 || cy < 0 || cx >= crate::GRID_DIM as i32 || cy >= crate::GRID_DIM as i32
+                {
+                    continue;
+                }
+                let (cx, cy) = (cx as u32, cy as u32);
+                if sim.grid().is_blocked(cx, cy) {
+                    continue;
+                }
+                // Keep one villager per cell.
+                let (wx, wy) = sim.grid().cell_center(cx, cy);
+                if sim
+                    .entities()
+                    .iter()
+                    .any(|e| !e.dead && e.pos_x == wx && e.pos_y == wy)
+                {
+                    continue;
+                }
+                spawn(sim, id, EntityKind::Villager, OWNER_PLAYER, (cx, cy));
+                out.push(id);
+                id += 1;
+            }
+        }
+    }
+    assert_eq!(out.len(), n, "could not place {n} villagers near the TC");
+    out
+}
+
+fn nearest_node(sim: &Sim, from: (I16F16, I16F16)) -> u32 {
+    sim.nodes()
+        .iter()
+        .filter(|n| n.amount_left > I16F16::ZERO)
+        .min_by_key(|n| {
+            let d = crate::steer::vec_len(n.pos_x - from.0, n.pos_y - from.1);
+            d.to_bits()
+        })
+        .unwrap()
+        .id
+}
+
+// (a) More villagers inside the radius than the TC holds (15).
+// Only 15 can shelter; the rest never get a snapshot and keep
+// working. On the second ring every one of the 15 must come out.
+#[test]
+fn gar07_bell_over_capacity_crowd_all_sheltered_come_back_out() {
+    let mut sim = Sim::new(7);
+    let tc = sim.town_center().id;
+    spawn_villagers_near_tc(&mut sim, 17, 500);
+    assert_eq!(player_villager_ids(&sim).len(), 20);
+    sim.push_command(Command::TownBell { tc });
+    sim.tick();
+    // Exactly 15 hold snapshots (the TC's capacity); 5 never got
+    // an order and stay at work.
+    let snapped = player_villager_ids(&sim)
+        .into_iter()
+        .filter(|&id| ent(&sim, id).bell_snapshot.is_some())
+        .count();
+    assert_eq!(snapped, 15, "expected exactly 15 bell snapshots, got {snapped}");
+    // Every snapshot holder must actually get inside — nobody may
+    // be stranded outside with a garrison walk that died.
+    let all_in = run_until(&mut sim, 60_000, |s| {
+        player_villager_ids(s)
+            .into_iter()
+            .filter(|&id| ent(s, id).bell_snapshot.is_some())
+            .all(|id| ent(s, id).garrisoned_in == Some(GarrisonRef::TownCenter(tc)))
+    });
+    assert!(
+        all_in,
+        "some bell villagers never entered the TC: {:?}",
+        player_villager_ids(&sim)
+            .into_iter()
+            .filter(|&id| ent(&sim, id).bell_snapshot.is_some())
+            .map(|id| {
+                let e = ent(&sim, id);
+                (id, e.garrisoned_in, e.garrison_target, e.order.is_some())
+            })
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(sim.garrison_count_tc(tc), 15);
+    // Back to work: all 15 come out, snapshots consumed, the TC
+    // is empty again and nobody keeps a garrison walk.
+    sim.push_command(Command::TownBell { tc });
+    sim.tick();
+    assert_eq!(sim.garrison_count_tc(tc), 0, "the TC did not empty on back-to-work");
+    for id in player_villager_ids(&sim) {
+        let e = ent(&sim, id);
+        assert!(e.garrisoned_in.is_none(), "villager {id} still garrisoned");
+        assert!(e.bell_snapshot.is_none(), "villager {id} kept its snapshot");
+        assert!(e.garrison_target.is_none(), "villager {id} kept a garrison walk");
+    }
+}
+
+// (b) Mixed tasks at ring time: wood gatherer, food gatherer,
+// builder, repairer, idle. All shelter; on back-to-work all come
+// out AND resume their snapshotted task.
+#[test]
+fn gar07_bell_mixed_tasks_all_come_out_and_resume() {
+    let mut sim = Sim::new(7);
+    let tc = sim.town_center().id;
+    let extra = spawn_villagers_near_tc(&mut sim, 3, 500);
+    let starters = player_villager_ids(&sim)
+        .into_iter()
+        .filter(|id| !extra.contains(id))
+        .collect::<Vec<_>>();
+    let (v_wood, v_food, v_build) = (starters[0], starters[1], extra[0]);
+    let (v_repair, v_idle) = (extra[1], extra[2]);
+    // Wood: nearest node to the villager.
+    let wpos = {
+        let e = ent(&sim, v_wood);
+        (e.pos_x, e.pos_y)
+    };
+    let wood_node = nearest_node(&sim, wpos);
+    sim.push_command(Command::Gather {
+        entity: v_wood,
+        node: wood_node,
+    });
+    // Food: the villager next to a berry bush if one is in reach,
+    // else a second gatherer on another node.
+    let fpos = {
+        let e = ent(&sim, v_food);
+        (e.pos_x, e.pos_y)
+    };
+    let food_node = sim
+        .nodes()
+        .iter()
+        .filter(|n| n.kind == crate::econ::NodeKind::BerryBush && n.amount_left > I16F16::ZERO)
+        .min_by_key(|n| crate::steer::vec_len(n.pos_x - fpos.0, n.pos_y - fpos.1).to_bits())
+        .map(|n| n.id)
+        .unwrap_or_else(|| nearest_node(&sim, fpos));
+    sim.push_command(Command::Gather {
+        entity: v_food,
+        node: food_node,
+    });
+    // Build: a House foundation a few cells from the TC.
+    sim.stockpile_mut(OWNER_PLAYER)
+        .add(ResourceKind::Wood, I16F16::from_num(500));
+    let (tcx, tcy) = {
+        let e = ent(&sim, tc);
+        sim.grid().world_to_cell(e.pos_x, e.pos_y)
+    };
+    let (hx, hy) = sim.grid().cell_center(tcx + 6, tcy + 6);
+    sim.push_command(Command::Build {
+        entity: v_build,
+        kind: BuildingKind::House,
+        x: hx,
+        y: hy,
+    });
+    // Repair: a damaged own House record beside the TC.
+    sim.buildings
+        .push(placed(&sim, 900, BuildingKind::House, OWNER_PLAYER, (tcx + 5, tcy)));
+    let hi = sim.buildings.iter().position(|b| b.id == 900).unwrap();
+    sim.buildings[hi].hp = I16F16::from_num(50);
+    sim.push_command(Command::Repair {
+        entity: v_repair,
+        building: 900,
+    });
+    // Let the tasks take hold.
+    let tasked = run_until(&mut sim, 30_000, |s| {
+        matches!(ent(s, v_wood).task, Task::ToNode | Task::Gathering)
+            && matches!(ent(s, v_food).task, Task::ToNode | Task::Gathering)
+            && matches!(ent(s, v_build).task, Task::ToBuild | Task::Building)
+            && matches!(ent(s, v_repair).task, Task::Repair { .. })
+    });
+    assert!(tasked, "the mixed tasks never took hold");
+    let house_bid = sim
+        .buildings()
+        .iter()
+        .find(|b| b.kind == BuildingKind::House && !b.complete)
+        .map(|b| b.id)
+        .expect("the House foundation exists");
+    // Ring: everyone shelters in the TC.
+    sim.push_command(Command::TownBell { tc });
+    let all_in = run_until(&mut sim, 60_000, |s| {
+        player_villager_ids(s)
+            .into_iter()
+            .all(|id| ent(s, id).garrisoned_in == Some(GarrisonRef::TownCenter(tc)))
+    });
+    assert!(all_in, "not every villager sheltered");
+    // Back to work: everyone out, and each tasked villager resumes
+    // its snapshot task.
+    sim.push_command(Command::TownBell { tc });
+    sim.tick();
+    assert_eq!(sim.garrison_count_tc(tc), 0);
+    for id in player_villager_ids(&sim) {
+        assert!(ent(&sim, id).garrisoned_in.is_none(), "villager {id} still in");
+        assert!(ent(&sim, id).bell_snapshot.is_none(), "villager {id} kept snapshot");
+    }
+    let resumed = run_until(&mut sim, 30_000, |s| {
+        matches!(ent(s, v_wood).task, Task::ToNode | Task::Gathering | Task::Returning)
+            && matches!(ent(s, v_food).task, Task::ToNode | Task::Gathering | Task::Returning)
+            && matches!(ent(s, v_build).task, Task::ToBuild | Task::Building)
+            && matches!(ent(s, v_repair).task, Task::Repair { building } if building == 900)
+    });
+    assert!(
+        resumed,
+        "tasks did not resume: wood={:?} food={:?} build={:?} repair={:?} (foundation {house_bid})",
+        ent(&sim, v_wood).task,
+        ent(&sim, v_food).task,
+        ent(&sim, v_build).task,
+        ent(&sim, v_repair).task
+    );
+    let _ = v_idle;
+}
+
+// (g) A developed base at real-game scale: 24 villagers working
+// scattered tasks inside the radius, a Watch Tower beside the far
+// group (nearer to them than the TC), a Castle on the other side.
+// Full cycle: everyone the bell takes must shelter somewhere, and
+// on back-to-work EVERY shelter must empty of bell villagers.
+#[test]
+fn gar07_bell_developed_base_full_cycle_empties_every_shelter() {
+    let mut sim = Sim::new(7);
+    let tc = sim.town_center().id;
+    let (tcx, tcy) = {
+        let e = ent(&sim, tc);
+        sim.grid().world_to_cell(e.pos_x, e.pos_y)
+    };
+    // Tower 14 tiles east of the TC; Castle 14 tiles west.
+    sim.buildings.push(placed(
+        &sim,
+        900,
+        BuildingKind::WatchTower,
+        OWNER_PLAYER,
+        (tcx + 14, tcy),
+    ));
+    sim.buildings.push(placed(
+        &sim,
+        901,
+        BuildingKind::Castle,
+        OWNER_PLAYER,
+        (tcx.saturating_sub(16), tcy),
+    ));
+    // 21 extra villagers in three clusters: east (tower side),
+    // west (Castle side), and around the TC.
+    let mut spawned = Vec::new();
+    for i in 0..7 {
+        spawned.push((tcx + 11 + (i % 3), tcy + (i / 3) as u32 % 3));
+    }
+    for i in 0..7 {
+        spawned.push((tcx.saturating_sub(13 + (i % 3)), tcy + (i / 3) as u32 % 3));
+    }
+    for i in 0..7 {
+        spawned.push((tcx + (i % 3), tcy + 4 + (i / 3) as u32 % 3));
+    }
+    let mut ids = Vec::new();
+    for (n, cell) in spawned.into_iter().enumerate() {
+        let id = 500 + n as u32;
+        // Skip cells the fixtures or the map already block/occupy.
+        if sim.grid().is_blocked(cell.0, cell.1) {
+            continue;
+        }
+        let (wx, wy) = sim.grid().cell_center(cell.0, cell.1);
+        if sim
+            .entities()
+            .iter()
+            .any(|e| !e.dead && e.pos_x == wx && e.pos_y == wy)
+        {
+            continue;
+        }
+        spawn(&mut sim, id, EntityKind::Villager, OWNER_PLAYER, cell);
+        ids.push(id);
+    }
+    assert!(ids.len() >= 15, "fixture placed only {} villagers", ids.len());
+    // Send half of them to work on the nearest nodes so the ring
+    // catches a mix of walking / gathering / idle villagers.
+    let workers: Vec<u32> = ids.iter().step_by(2).cloned().collect();
+    for id in &workers {
+        let pos = {
+            let e = ent(&sim, *id);
+            (e.pos_x, e.pos_y)
+        };
+        let node = nearest_node(&sim, pos);
+        sim.push_command(Command::Gather {
+            entity: *id,
+            node,
+        });
+    }
+    for _ in 0..600 {
+        sim.tick();
+    }
+    sim.push_command(Command::TownBell { tc });
+    sim.tick();
+    let snapped: Vec<u32> = player_villager_ids(&sim)
+        .into_iter()
+        .filter(|&id| ent(&sim, id).bell_snapshot.is_some())
+        .collect();
+    assert!(
+        snapped.len() >= 18,
+        "the bell snapshotted only {} villagers",
+        snapped.len()
+    );
+    // Everyone snapshotted must end up inside SOME shelter.
+    let all_in = run_until(&mut sim, 90_000, |s| {
+        snapped
+            .iter()
+            .all(|&id| ent(s, id).garrisoned_in.is_some())
+    });
+    assert!(
+        all_in,
+        "bell villagers stranded outside: {:?}",
+        snapped
+            .iter()
+            .filter(|&id| ent(&sim, *id).garrisoned_in.is_none())
+            .map(|&id| {
+                let e = ent(&sim, id);
+                (id, e.garrison_target, e.order.is_some(), e.pos_x.to_num::<f64>(), e.pos_y.to_num::<f64>())
+            })
+            .collect::<Vec<_>>()
+    );
+    let in_tower = sim.garrison_count_building(900);
+    let in_castle = sim.garrison_count_building(901);
+    assert!(
+        in_tower > 0,
+        "nobody sheltered in the nearer tower (tower {in_tower}, castle {in_castle}, tc {})",
+        sim.garrison_count_tc(tc)
+    );
+    // Back to work: every shelter empties of bell villagers.
+    sim.push_command(Command::TownBell { tc });
+    sim.tick();
+    assert_eq!(sim.garrison_count_tc(tc), 0, "TC still holds bell villagers");
+    assert_eq!(sim.garrison_count_building(900), 0, "tower still holds bell villagers");
+    assert_eq!(sim.garrison_count_building(901), 0, "castle still holds bell villagers");
+    for id in &snapped {
+        let e = ent(&sim, *id);
+        assert!(e.garrisoned_in.is_none(), "villager {id} still garrisoned");
+        assert!(e.bell_snapshot.is_none(), "villager {id} kept its snapshot");
+        assert!(e.garrison_target.is_none(), "villager {id} kept a garrison walk");
+    }
+}
+
+// (h) TWO Town Centers: each TC's bell is its own toggle. TC2's
+// bell shelters the villagers around TC2; TC1's full ring cycle
+// must NOT release TC2's bell villagers (they answer to TC2's
+// bell, which is still rung), and TC2's own second ring must
+// release them.
+#[test]
+fn gar07_bell_two_town_centers_do_not_cross_release() {
+    let mut sim = Sim::new(7);
+    let tc1 = sim.town_center().id;
+    let (c1x, c1y) = {
+        let e = ent(&sim, tc1);
+        sim.grid().world_to_cell(e.pos_x, e.pos_y)
+    };
+    // Second TC fixture, 40 tiles east — its villagers are far
+    // outside TC1's bell radius.
+    let tc2: u32 = 950;
+    let (t2x, t2y) = sim.grid().cell_center(c1x + 40, c1y);
+    sim.entities
+        .push(Entity::spawned(tc2, EntityKind::TownCenter, OWNER_PLAYER, t2x, t2y));
+    sim.tc_states.push(crate::TcState {
+        tc_id: tc2,
+        queue: Vec::new(),
+        progress: 0,
+        rally: None,
+        rally_node: None,
+        garrison: Vec::new(),
+        garrison_arrows: 0,
+        weapon_target: None,
+        weapon_target_building: None,
+        weapon_strike_tick: None,
+        weapon_next_tick: 0,
+        weapon_engaged: false,
+        bell_active: false,
+    });
+    // Four villagers around TC2.
+    let mut near2 = Vec::new();
+    for i in 0..4u32 {
+        let cell = (c1x + 38 + (i % 2), c1y + 2 + (i / 2));
+        spawn(&mut sim, 500 + i, EntityKind::Villager, OWNER_PLAYER, cell);
+        near2.push(500 + i);
+    }
+    // Ring TC2: its four shelter inside TC2.
+    sim.push_command(Command::TownBell { tc: tc2 });
+    let in2 = run_until(&mut sim, 60_000, |s| s.garrison_count_tc(tc2) == 4);
+    assert!(in2, "TC2's bell did not shelter its villagers");
+    assert!(sim.tc_bell_active(tc2));
+    // TC1 runs a full ring cycle of its own (its starters shelter
+    // and come back). TC2's bell villagers must stay inside —
+    // TC2's bell is still rung.
+    sim.push_command(Command::TownBell { tc: tc1 });
+    let in1 = run_until(&mut sim, 60_000, |s| {
+        s.garrison_count_tc(tc1) == 3
+    });
+    assert!(in1, "TC1's bell did not shelter the starters");
+    sim.push_command(Command::TownBell { tc: tc1 });
+    sim.tick();
+    assert_eq!(sim.garrison_count_tc(tc1), 0, "TC1's own villagers did not come out");
+    assert_eq!(
+        sim.garrison_count_tc(tc2),
+        4,
+        "TC1's back-to-work released TC2's bell villagers"
+    );
+    assert!(sim.tc_bell_active(tc2), "TC2's bell state was disturbed");
+    for id in &near2 {
+        assert!(
+            ent(&sim, *id).bell_snapshot.is_some(),
+            "villager {id} lost its TC2 snapshot to TC1's ring cycle"
+        );
+    }
+    // TC2's own second ring releases them.
+    sim.push_command(Command::TownBell { tc: tc2 });
+    sim.tick();
+    assert_eq!(sim.garrison_count_tc(tc2), 0, "TC2's back-to-work did not release its villagers");
+    assert!(!sim.tc_bell_active(tc2));
+}
+
+// (i) A villager already walking to shelter for TC1's bell holds
+// TC1's snapshot of its REAL task. TC2's ring (its first) must
+// not steal the walker and overwrite the snapshot with the
+// walker's zeroed task — on back-to-work the villager must
+// return to the task it had before ANY bell.
+#[test]
+fn gar07_bell_second_tc_ring_does_not_steal_snapshot() {
+    let mut sim = Sim::new(7);
+    let tc1 = sim.town_center().id;
+    let (c1x, c1y) = {
+        let e = ent(&sim, tc1);
+        sim.grid().world_to_cell(e.pos_x, e.pos_y)
+    };
+    // Second TC 18 tiles east: a villager between them is inside
+    // both bells' 23-tile radii.
+    let tc2: u32 = 950;
+    let (t2x, t2y) = sim.grid().cell_center(c1x + 18, c1y);
+    sim.entities
+        .push(Entity::spawned(tc2, EntityKind::TownCenter, OWNER_PLAYER, t2x, t2y));
+    sim.tc_states.push(crate::TcState {
+        tc_id: tc2,
+        queue: Vec::new(),
+        progress: 0,
+        rally: None,
+        rally_node: None,
+        garrison: Vec::new(),
+        garrison_arrows: 0,
+        weapon_target: None,
+        weapon_target_building: None,
+        weapon_strike_tick: None,
+        weapon_next_tick: 0,
+        weapon_engaged: false,
+        bell_active: false,
+    });
+    // One villager 5 tiles east of TC1, put to work gathering the
+    // nearest node so its pre-bell task is real.
+    let vil = spawn_villagers_near_tc(&mut sim, 1, 500)[0];
+    // Move it to a known spot between the TCs first: 6 tiles east.
+    let (mx, my) = sim.grid().cell_center(c1x + 6, c1y + 2);
+    sim.push_command(Command::Move {
+        entity: vil,
+        x: mx,
+        y: my,
+    });
+    let _ = run_until(&mut sim, 30_000, |s| {
+        let e = ent(s, vil);
+        crate::steer::vec_len(e.pos_x - mx, e.pos_y - my) < I16F16::from_num(2)
+    });
+    let pos = {
+        let e = ent(&sim, vil);
+        (e.pos_x, e.pos_y)
+    };
+    let node = nearest_node(&sim, pos);
+    sim.push_command(Command::Gather {
+        entity: vil,
+        node,
+    });
+    let working = run_until(&mut sim, 30_000, |s| {
+        matches!(ent(s, vil).task, Task::ToNode | Task::Gathering)
+    });
+    assert!(working, "the villager never started gathering");
+    // Ring TC1: snapshot of the gather task, walk to shelter.
+    sim.push_command(Command::TownBell { tc: tc1 });
+    sim.tick();
+    assert!(ent(&sim, vil).bell_snapshot.is_some(), "TC1's ring took no snapshot");
+    // Ring TC2 at once, while the villager is still walking: the
+    // snapshot must survive untouched.
+    sim.push_command(Command::TownBell { tc: tc2 });
+    sim.tick();
+    let snap = ent(&sim, vil)
+        .bell_snapshot
+        .expect("TC2's ring consumed the snapshot");
+    assert!(
+        matches!(snap.task, Task::ToNode | Task::Gathering | Task::Returning),
+        "TC2's ring overwrote the snapshot task with {:?}",
+        snap.task
+    );
+    assert_eq!(snap.task_node, Some(node), "the snapshot lost its gather node");
+}
+
+// (c) A villager garrisoned MANUALLY before the ring is not a
+// bell villager: the bell shelters the others around it, and
+// back-to-work releases only the bell's own — the manual one
+// stays inside.
+#[test]
+fn gar07_bell_leaves_manually_garrisoned_villager_inside() {
+    let mut sim = Sim::new(7);
+    let tc = sim.town_center().id;
+    let manual = spawn_villagers_near_tc(&mut sim, 1, 500)[0];
+    sim.push_command(Command::GarrisonTc {
+        entity: manual,
+        tc,
+    });
+    let inside = run_until(&mut sim, 30_000, |s| s.garrison_count_tc(tc) == 1);
+    assert!(inside, "the manual garrison never completed");
+    assert!(ent(&sim, manual).bell_snapshot.is_none());
+    sim.push_command(Command::TownBell { tc });
+    let all_in = run_until(&mut sim, 60_000, |s| {
+        player_villager_ids(s)
+            .into_iter()
+            .all(|id| ent(s, id).garrisoned_in == Some(GarrisonRef::TownCenter(tc)))
+    });
+    assert!(all_in, "the bell did not shelter the remaining villagers");
+    assert_eq!(sim.garrison_count_tc(tc), 4);
+    sim.push_command(Command::TownBell { tc });
+    sim.tick();
+    // The 3 bell villagers are out; the manual one stays.
+    assert_eq!(
+        sim.garrison_count_tc(tc),
+        1,
+        "back-to-work must leave exactly the manual garrison inside"
+    );
+    assert_eq!(
+        ent(&sim, manual).garrisoned_in,
+        Some(GarrisonRef::TownCenter(tc))
+    );
+    for id in player_villager_ids(&sim) {
+        if id != manual {
+            assert!(ent(&sim, id).garrisoned_in.is_none(), "bell villager {id} still in");
+        }
+    }
+}
+
+// (d) A villager PRODUCED while the bell is active is not a bell
+// villager: it spawns outside, snapshot-free, and back-to-work
+// does not touch it.
+#[test]
+fn gar07_bell_villager_produced_during_bell_is_untouched() {
+    let mut sim = Sim::new(7);
+    let tc = sim.town_center().id;
+    sim.push_command(Command::TownBell { tc });
+    let all_in = run_until(&mut sim, 60_000, |s| {
+        player_villager_ids(s)
+            .into_iter()
+            .all(|id| ent(s, id).garrisoned_in == Some(GarrisonRef::TownCenter(tc)))
+    });
+    assert!(all_in, "the bell did not shelter the starting villagers");
+    sim.stockpile_mut(OWNER_PLAYER)
+        .add(ResourceKind::Food, I16F16::from_num(500));
+    let before = player_villager_ids(&sim).len();
+    sim.push_command(Command::TrainVillagerAt { tc });
+    let born = run_until(&mut sim, 60_000, |s| player_villager_ids(s).len() == before + 1);
+    assert!(born, "no villager was produced during the bell");
+    let new_vil = player_villager_ids(&sim)
+        .into_iter()
+        .find(|id| ent(&sim, *id).bell_snapshot.is_none() && ent(&sim, *id).garrisoned_in.is_none())
+        .expect("the new villager stands outside, snapshot-free");
+    sim.push_command(Command::TownBell { tc });
+    sim.tick();
+    assert_eq!(sim.garrison_count_tc(tc), 0, "the bell villagers did not all come out");
+    let e = ent(&sim, new_vil);
+    assert!(e.garrisoned_in.is_none() && e.bell_snapshot.is_none());
+}
+
+// (e) Fast double ring: ring again while everyone is still
+// walking to shelter. Nobody may be stranded: no snapshots, no
+// garrison walks, nobody inside — and a later full ring cycle
+// still works.
+#[test]
+fn gar07_bell_fast_double_ring_strands_nobody() {
+    let mut sim = Sim::new(7);
+    let tc = sim.town_center().id;
+    sim.push_command(Command::TownBell { tc });
+    for _ in 0..5 {
+        sim.tick();
+    }
+    sim.push_command(Command::TownBell { tc });
+    for _ in 0..5 {
+        sim.tick();
+    }
+    assert!(!sim.tc_bell_active(tc));
+    for id in player_villager_ids(&sim) {
+        let e = ent(&sim, id);
+        assert!(e.bell_snapshot.is_none(), "villager {id} kept its snapshot");
+        assert!(e.garrison_target.is_none(), "villager {id} kept a garrison walk");
+        assert!(e.garrisoned_in.is_none(), "villager {id} is garrisoned");
+    }
+    // A fresh full cycle still works afterwards.
+    sim.push_command(Command::TownBell { tc });
+    let all_in = run_until(&mut sim, 60_000, |s| {
+        player_villager_ids(s)
+            .into_iter()
+            .all(|id| ent(s, id).garrisoned_in == Some(GarrisonRef::TownCenter(tc)))
+    });
+    assert!(all_in, "the bell no longer shelters after a fast double ring");
+    sim.push_command(Command::TownBell { tc });
+    sim.tick();
+    assert_eq!(sim.garrison_count_tc(tc), 0);
+}
+
+// (f) The TC's rally point sits ON the TC itself, and a villager
+// is produced while the bell is active: the rally sends the new
+// villager inside as a production garrison (GAR-08) — it holds
+// no bell snapshot, so back-to-work releases the bell's own and
+// leaves the produced one inside.
+#[test]
+fn gar07_bell_with_rally_on_tc_keeps_production_garrison() {
+    let mut sim = Sim::new(7);
+    let tc = sim.town_center().id;
+    let (tx, ty) = {
+        let e = ent(&sim, tc);
+        (e.pos_x, e.pos_y)
+    };
+    sim.push_command(Command::SetRallyTc { tc, x: tx, y: ty });
+    sim.tick();
+    sim.push_command(Command::TownBell { tc });
+    let all_in = run_until(&mut sim, 60_000, |s| {
+        player_villager_ids(s)
+            .into_iter()
+            .all(|id| ent(s, id).garrisoned_in == Some(GarrisonRef::TownCenter(tc)))
+    });
+    assert!(all_in, "the bell did not shelter the starting villagers");
+    sim.stockpile_mut(OWNER_PLAYER)
+        .add(ResourceKind::Food, I16F16::from_num(500));
+    sim.push_command(Command::TrainVillagerAt { tc });
+    // The produced villager rallies into the TC (production entry)
+    // or, if the rally does not take it inside, stands outside —
+    // either way it holds no snapshot and the bell villagers are
+    // unaffected. Wait for training to finish either way.
+    let born = run_until(&mut sim, 60_000, |s| {
+        player_villager_ids(s).len() == 4
+            && player_villager_ids(s).into_iter().any(|id| {
+                let e = ent(s, id);
+                e.bell_snapshot.is_none()
+                    && (e.garrisoned_in == Some(GarrisonRef::TownCenter(tc))
+                        || (e.garrisoned_in.is_none() && e.garrison_target.is_none()))
+            })
+    });
+    assert!(born, "the villager was never produced during the bell");
+    let produced = player_villager_ids(&sim)
+        .into_iter()
+        .find(|id| ent(&sim, *id).bell_snapshot.is_none())
+        .unwrap();
+    let produced_inside = ent(&sim, produced).garrisoned_in.is_some();
+    sim.push_command(Command::TownBell { tc });
+    sim.tick();
+    // Every bell villager is out; the produced one is exactly
+    // where it was (inside as production garrison, or outside).
+    for id in player_villager_ids(&sim) {
+        if id != produced {
+            assert!(
+                ent(&sim, id).garrisoned_in.is_none(),
+                "bell villager {id} still inside after back-to-work"
+            );
+        }
+    }
+    assert_eq!(
+        ent(&sim, produced).garrisoned_in.is_some(),
+        produced_inside,
+        "back-to-work moved the production villager"
+    );
+    assert_eq!(
+        sim.garrison_count_tc(tc),
+        if produced_inside { 1 } else { 0 }
+    );
 }

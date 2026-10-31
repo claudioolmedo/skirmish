@@ -919,6 +919,13 @@ impl Sim {
                         && e.owner == owner
                         && !e.dead
                         && e.garrisoned_in.is_none()
+                        // Already holding a snapshot: this villager
+                        // answers to the bell that took it (possibly
+                        // still walking to that bell's shelter). A
+                        // second TC's ring must not steal it and
+                        // overwrite the snapshot with its zeroed
+                        // walk state (GAR-07).
+                        && e.bell_snapshot.is_none()
                         && crate::steer::vec_len(e.pos_x - tcx, e.pos_y - tcy)
                             <= TOWN_BELL_RADIUS
                 })
@@ -984,6 +991,7 @@ impl Sim {
                         task: e.task,
                         task_node: e.task_node,
                         task_building: e.task_building,
+                        bell_tc: tc,
                     });
                 }
                 if self.apply_garrison_order(idx, host, false) {
@@ -999,10 +1007,17 @@ impl Sim {
             // Ring again — "back to work": ungarrison the bell
             // villagers and restore each snapshot (id order).
             self.tc_states[si].bell_active = false;
+            // Only THIS bell's own villagers: a snapshot names the
+            // TC whose ring took it, and another TC's ring cycle
+            // must leave both the snapshot and that TC's bell
+            // state untouched (GAR-07).
             let held: Vec<usize> = (0..self.entities.len())
                 .filter(|&idx| {
                     self.entities[idx].owner == owner
-                        && self.entities[idx].bell_snapshot.is_some()
+                        && matches!(
+                            self.entities[idx].bell_snapshot,
+                            Some(s) if s.bell_tc == tc
+                        )
                         && !self.entities[idx].dead
                 })
                 .collect();
