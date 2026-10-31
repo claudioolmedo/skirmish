@@ -59,6 +59,7 @@ fn placed(sim: &Sim, id: u32, kind: BuildingKind, owner: u8, cell: (u32, u32)) -
         repair_cost_remainder: 0,
         repair_stone_remainder: 0,
         build_rate_remainder: 0,
+        gate_along_x: true,
         complete: true,
         node_id: None,
         queue: Vec::new(),

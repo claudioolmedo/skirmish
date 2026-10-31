@@ -369,10 +369,10 @@ function isWallKind(kind) { return kind === 9 || kind === 14; }
 // The gate kinds (Package J, BLD-13): 4×1 spans placed by a
 // single click on the span's anchor cell — the sim resolves the
 // orientation and replaces our own same-family wall segments
-// under the span. A gate's wall family: 16 ↔ 9, 17 ↔ 14.
-function isGateKind(kind) { return kind === 16 || kind === 17; }
-const GATE_OF_WALL = { 9: 16, 14: 17 };
-const WALL_OF_GATE = { 16: 9, 17: 14 };
+// under the span. A gate's wall family: 18 ↔ 9, 19 ↔ 14.
+function isGateKind(kind) { return kind === 18 || kind === 19; }
+const GATE_OF_WALL = { 9: 18, 14: 19 };
+const WALL_OF_GATE = { 18: 9, 19: 14 };
 const BUILD_ICON = ['i-house', 'i-farm', 'i-tc', 'i-lumber', 'i-mill',
   'i-mining', 'i-range', 'i-stable', 'i-blacksmith', 'i-palisade',
   'i-watchtower', 'i-outpost', 'i-market', 'i-tc', 'i-stonewall', 'i-castle', 'i-university', 'i-siegeworkshop', 'i-palisade', 'i-stonewall'];
@@ -2265,7 +2265,7 @@ function gateOrientationAt(kind, cx, cy) {
 // a placeable orientation, the Feudal age for the Stone Gate, and
 // the price payable.
 function mirrorGateValid(kind, cx, cy) {
-  if (kind === 17 && myAge() < 1) return false; // Stone Gate is Feudal
+  if (kind === 19 && myAge() < 1) return false; // Stone Gate is Feudal
   if (gateOrientationAt(kind, cx, cy) === null) return false;
   if (myStock()[1] < BUILD_COST[kind]) return false;
   if (myStock()[3] < BUILD_COST_STONE[kind]) return false;

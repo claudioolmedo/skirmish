@@ -1412,7 +1412,8 @@ impl WasmSim {
     /// building id order. `kind` tags: 0 house, 1 farm, 2 barracks
     /// (M3); 3 lumber camp, 4 mill, 5 mining camp, 6 archery range,
     /// 7 stable, 8 blacksmith (M6); 9 palisade wall (BLD-13);
-    /// 16 palisade gate, 17 stone gate (Package J, BLD-13 — their
+    /// 16 university (Castle P3c), 17 siege workshop (Castle
+    /// P4a); 18 palisade gate, 19 stone gate (Package J, BLD-13 — their
     /// `size` reads 1, the span's ACROSS edge; the span itself is
     /// in `gate_states`). `progress` is the construction fraction 0..1 (1 when
     /// complete); `complete` is 0/1; `size` is the footprint edge in

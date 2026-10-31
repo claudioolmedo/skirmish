@@ -152,6 +152,11 @@ impl W {
         if let Task::Repair { building } = v {
             self.u32(building);
         }
+        // Package J landing: Task::RepairTc (tag 7) carries its
+        // Town Center id the same way.
+        if let Task::RepairTc { tc } = v {
+            self.u32(tc);
+        }
     }
     fn queued_order(&mut self, v: &QueuedOrder) {
         self.u8(v.tag());
@@ -170,6 +175,8 @@ impl W {
                 self.fx(y);
             }
             QueuedOrder::Repair { building } => self.u32(building),
+            // Package J landing: QueuedOrder::RepairTc (tag 7).
+            QueuedOrder::RepairTc { tc } => self.u32(tc),
         }
     }
     fn bell_snapshot(&mut self, v: Option<BellSnapshot>) {
@@ -416,6 +423,13 @@ impl W {
                 self.u8(resource.tag());
                 self.i32(amount);
             }
+            // Package J landing: Command::RepairTc joins the
+            // pending-command codec append-only at tag 38.
+            Command::RepairTc { entity, tc } => {
+                self.u8(38);
+                self.u32(entity);
+                self.u32(tc);
+            }
         }
     }
 }
@@ -485,6 +499,12 @@ impl Sim {
             w.opt_u64(t.weapon_strike_tick);
             w.u64(t.weapon_next_tick);
             w.bool(t.weapon_engaged);
+            // Package J landing: the TC repair accumulators
+            // (BLD-07) — hashed while nonzero, so a save taken
+            // mid-repair must carry them for the load-time hash
+            // check to pass.
+            w.i64(t.repair_hp_remainder);
+            w.i64(t.repair_cost_remainder);
         }
         // --- buildings ---
         w.u32(self.next_building_id);
@@ -514,6 +534,9 @@ impl Sim {
             w.opt_u64(b.weapon_strike_tick);
             w.u64(b.weapon_next_tick);
             w.bool(b.weapon_engaged);
+            // Package J landing: the gate span orientation
+            // (hashed for gates), in struct order.
+            w.bool(b.gate_along_x);
             w.usize(b.garrison.len());
             for id in &b.garrison {
                 w.u32(*id);
@@ -749,6 +772,7 @@ impl<'a> R<'a> {
             6 => Some(Task::Repair {
                 building: self.u32()?,
             }),
+            7 => Some(Task::RepairTc { tc: self.u32()? }),
             _ => None,
         }
     }
@@ -778,6 +802,7 @@ impl<'a> R<'a> {
                 x: self.fx()?,
                 y: self.fx()?,
             }),
+            7 => Some(QueuedOrder::RepairTc { tc: self.u32()? }),
             _ => None,
         }
     }
@@ -970,6 +995,10 @@ impl<'a> R<'a> {
                 resource: ResourceKind::from_tag(self.u8()?)?,
                 amount: self.i32()?,
             }),
+            38 => Some(Command::RepairTc {
+                entity: self.u32()?,
+                tc: self.u32()?,
+            }),
             _ => None,
         }
     }
@@ -1102,6 +1131,8 @@ impl Sim {
                 weapon_strike_tick: r.opt_u64()?,
                 weapon_next_tick: r.u64()?,
                 weapon_engaged: r.bool()?,
+                repair_hp_remainder: r.i64()?,
+                repair_cost_remainder: r.i64()?,
             });
         }
         let next_building_id = r.u32()?;
@@ -1132,6 +1163,7 @@ impl Sim {
             let weapon_strike_tick = r.opt_u64()?;
             let weapon_next_tick = r.u64()?;
             let weapon_engaged = r.bool()?;
+            let gate_along_x = r.bool()?;
             let n_g = r.count(4)?;
             let mut garrison = Vec::with_capacity(n_g);
             for _ in 0..n_g {
@@ -1163,6 +1195,7 @@ impl Sim {
                 weapon_strike_tick,
                 weapon_next_tick,
                 weapon_engaged,
+                gate_along_x,
                 garrison,
                 garrison_arrows,
             });

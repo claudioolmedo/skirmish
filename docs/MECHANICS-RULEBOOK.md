@@ -1406,9 +1406,9 @@ every kind (BLD-05 models only the foundation HP line), so
 palisade foundations fight at 2/5 here.
 *Gates (shipped 2026-10-30, Package J, wave-2 audit):* the
 follow-on above landed. Two gate kinds join the wall family as
-placed buildings — **Palisade Gate** (tag 16: 20 wood, 30 s,
+placed buildings — **Palisade Gate** (tag 18: 20 wood, 30 s,
 4×1, HP 240 Dark / 400 Feudal+, armor 2 melee / 4 pierce, Dark
-Age) and **Stone Gate** (tag 17: 30 stone, 70 s, 4×1, HP 1,650
+Age) and **Stone Gate** (tag 19: 30 stone, 70 s, 4×1, HP 1,650
 Feudal / 2,700 Castle+, armor 6/6, Feudal Age), rows per the
 same Building table (walls dossier §5). A gate is placed as a
 4-cell span (along-x, or along-y when the x span cannot stand),

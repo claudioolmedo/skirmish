@@ -161,7 +161,7 @@ fn gate_table_rows_match_the_de_building_table() {
     assert_eq!(k.age_required(), Age::Dark);
     assert_eq!(k.sight_tiles_at(Age::Dark), 2);
     assert!(k.is_gate());
-    assert_eq!(k.tag(), 16);
+    assert_eq!(k.tag(), 18);
     // Stone Gate: 30 stone, 70 s, 1650 Feudal / 2700 Castle+,
     // armor 6/6, Feudal Age.
     let k = SGATE;
@@ -174,7 +174,7 @@ fn gate_table_rows_match_the_de_building_table() {
     assert_eq!(k.armor_melee_at(Age::Feudal), 6);
     assert_eq!(k.armor_pierce_at(Age::Feudal), 6);
     assert_eq!(k.age_required(), Age::Feudal);
-    assert_eq!(k.tag(), 17);
+    assert_eq!(k.tag(), 19);
     // Neither gate is a wall segment, a drop-off, a production
     // building, or a garrison host.
     assert!(!PGATE.is_wall() && !SGATE.is_wall());
