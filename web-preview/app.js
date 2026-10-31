@@ -425,7 +425,7 @@ let TECH_NAME = {
   16: 'Light Cavalry', 17: 'Husbandry', 18: 'Imperial Age',
   19: 'Caravan', 20: 'Ballistics', 21: 'Murder Holes', 22: 'Treadmill Crane',
   23: 'Masonry', 24: 'Fortified Wall', 25: 'Coinage', 26: 'Banking',
-  27: 'Town Watch', 28: 'Town Patrol',
+  27: 'Town Watch', 28: 'Town Patrol', 29: 'Conscription',
 };
 // Research-block explanations, indexed by the sim's ResearchBlock
 // tag (0 ok — unused, 1 funds, 2 queue full, 3 already done,
@@ -472,6 +472,7 @@ function refreshNames() {
     24: t('tech.fortifiedwall'),
     19: t('tech.caravan'), 25: t('tech.coinage'), 26: t('tech.banking'),
     27: t('tech.townwatch'), 28: t('tech.townpatrol'),
+    29: t('tech.conscription'),
   };
   RESEARCH_BLOCK_TITLES = [
     '', t('block.noResources'), t('block.queueFullTrain'),
@@ -1005,7 +1006,7 @@ function updateEventFeed() {
   const lines = diffFeedEvents(prev, snap, {
     buildingName: (k) => BUILD_NAME[k],
     unitName: (k) => KIND_NAME[k],
-    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15, lightcavalry: 16, husbandry: 17, caravan: 19, coinage: 25, banking: 26, townwatch: 27, townpatrol: 28 }[key]],
+    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15, lightcavalry: 16, husbandry: 17, caravan: 19, coinage: 25, banking: 26, townwatch: 27, townpatrol: 28, conscription: 29 }[key]],
   }, feedFmt());
   feedPrev = snap;
   for (const text of lines) pushFeedLine(text);
@@ -10618,6 +10619,7 @@ function runCommandButton(id, times = 1) {
       'research-treadmill': 22, 'research-masonry': 23,
       'research-fortifiedwall': 24,
       'research-coinage': 25, 'research-banking': 26,
+      'research-conscription': 29,
       'research-goldmining': 11, 'research-stonemining': 12,
       'research-horsecollar': 13,
     }[id];
@@ -10769,7 +10771,7 @@ function renderCommands() {
   const RB_TAGS = {
     blacksmith: [2, 3, 4, 7, 8], barracks: [5], stable: [9, 16, 17],
     lumbercamp: [10], miningcamp: [11, 12], mill: [13], market: [19, 25, 26],
-    university: [20, 21, 22, 23, 24],
+    university: [20, 21, 22, 23, 24], castle: [29],
   };
   const rbB = bk && RB_TAGS[context]
     ? Object.fromEntries(RB_TAGS[context].map((t) => [t, sim.research_block_at(bk.id, t)]))
@@ -11185,10 +11187,13 @@ function renderCommands() {
       }),
     );
   } else if (context === 'castle') {
-    // Castle P3a: the Castle's whole panel — Train Petard, its
-    // only production (the generic roster has no unique units;
-    // the empty slots stay absent per the icon-only panel law).
+    // Castle P3a: the Castle's panel — Train Petard, its only
+    // production (the generic roster has no unique units; the
+    // empty slots stay absent per the icon-only panel law).
+    // Package M adds the Castle's one research: Conscription,
+    // in the grid's second cell.
     const underConstruction = !bk.complete;
+    const consDone = (techMask & (1 << 29)) !== 0;
     cmdGrid.append(
       cmdButton({
         id: 'train-petard', icon: 'i-petard', label: 'Petard',
@@ -11198,6 +11203,19 @@ function renderCommands() {
         title: underConstruction
           ? t('cmd.underConstruction', { name: KIND_NAME[15], building: BUILD_NAME[15] })
           : t('cmd.trainTitleTime', { name: KIND_NAME[15], cost: costText([[65, 'food'], [20, 'gold']]), secs: 25 }) + (TRAIN_BLOCK_TITLES[blockP] ? ' ' + TRAIN_BLOCK_TITLES[blockP] : ''),
+      }),
+      cmdButton({
+        id: 'research-conscription', icon: 'i-conscription', label: 'Conscription',
+        costIcon: 'i-food', cost: 150, cost2Icon: 'i-gold', cost2: 150,
+        disabled: underConstruction || consDone || rbB[29] === 2 || rbB[29] === 3 || rbB[29] === 4,
+        key: badgeForButton({ context, id: 'research-conscription', index: 1 }),
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: TECH_NAME[29], building: BUILD_NAME[15] })
+          : consDone
+            ? t('cmd.researchDone', { name: TECH_NAME[29] })
+            : age < 3
+              ? t('cmd.buildGate', { name: TECH_NAME[29], gate: t('gate.imperial') })
+              : t('cmd.conscriptionTitle', { name: TECH_NAME[29], cost: costText([[150, 'food'], [150, 'gold']]), secs: 60 }) + (RESEARCH_BLOCK_TITLES[rbB[29]] ? ' ' + RESEARCH_BLOCK_TITLES[rbB[29]] : ''),
       }),
     );
   } else if (context === 'siegeworkshop') {

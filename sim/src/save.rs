@@ -45,7 +45,9 @@ const MAGIC: &[u8; 4] = b"SKSV";
 /// Version 3: Package J — building records carry `gate_along_x`,
 /// TC records carry the repair accumulators, and the pending-
 /// command codec gains `Command::RepairTc` (tag 38).
-const SAVE_VERSION: u32 = 3;
+/// Version 4: Package M — the building record gains the
+/// Conscription queue-rate remainder.
+const SAVE_VERSION: u32 = 4;
 
 /// Little-endian byte writer over a growable buffer.
 struct W {
@@ -526,6 +528,7 @@ impl Sim {
             w.i64(b.repair_cost_remainder);
             w.i64(b.repair_stone_remainder);
             w.i64(b.build_rate_remainder);
+            w.i64(b.queue_rate_remainder);
             w.bool(b.complete);
             w.opt_u32(b.node_id);
             w.prod_queue(&b.queue);
@@ -1155,6 +1158,7 @@ impl Sim {
             let repair_cost_remainder = r.i64()?;
             let repair_stone_remainder = r.i64()?;
             let build_rate_remainder = r.i64()?;
+            let queue_rate_remainder = r.i64()?;
             let complete = r.bool()?;
             let node_id = r.opt_u32()?;
             let queue = r.prod_queue()?;
@@ -1187,6 +1191,7 @@ impl Sim {
                 repair_cost_remainder,
                 repair_stone_remainder,
                 build_rate_remainder,
+                queue_rate_remainder,
                 complete,
                 node_id,
                 queue,

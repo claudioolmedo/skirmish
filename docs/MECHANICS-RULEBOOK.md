@@ -2501,8 +2501,9 @@ buildings — units and techs alike in that building. Treadmill Crane
 not repair (BLD-07).
 *Source:* Technology wiki (Conscription, Treadmill Crane entries);
 MECHANICS-STUDY §8. · *Impl:* a per-building progress-rate scalar from the
-owner's patch set, multiplied into queue progress and build progress. ·
-*Status:* **MISSING**.
+owner's patch set, multiplied into queue progress and build progress —
+shipped in the two halves below. ·
+*Status:* **MATCHES**.
 *Narrowed 2026-10-30 (Castle P3c):* the Treadmill Crane half lands
 at the University (TechId 22; 200 W / 50 S, 20 s) — construction
 progress accrues at ×6/5 for the owner's builders, carried exactly
@@ -2512,6 +2513,22 @@ thirds; repair never reads the scaled rate (BLD-07's flat rate is
 untouched — pinned side by side in `university_p3c_tests`). The
 Conscription half (queue progress at military production
 buildings) does not exist yet, so the rule stays MISSING.
+*Landed 2026-10-30 (Package M):* the Conscription half — Castle,
+Imperial, 150 F / 150 G, 60 s, TechId 29, researched at the
+Castle itself. The affected set is read from the owner's mask at
+progress time (`tech::conscription_scales`): Barracks, Archery
+Range, Stable and Castle queues accrue ×4/3, for unit and
+research heads alike, carried exactly by a per-building rate
+remainder in thirds of a tick (three ticks accrue exactly four;
+the remainder rides the building record through save/restore and
+is hashed only while nonzero, so a stream that never researches
+Conscription stays byte-identical — the golden hash does not
+move). The Siege Workshop is excluded by name; the Market and
+the Town Center are not military production buildings and never
+scale. `conscription_tests` pin the row, the gates and flow,
+the exact 3/4 drains, the exclusions at full rate and the
+remainder's save round-trip. With both halves in, the rule is
+whole.
 
 **TEC-10 — Monastery line (rule-relevant subset).** The Monk technologies
 modify §12's rules directly: Redemption (475G, 50 s) unlocks siege/
@@ -4177,6 +4194,13 @@ paragraphs above kept their packages' own stale tallies and
 are superseded by this count). The table below equals the
 body.
 
+updated 2026-10-30 for Package M (external builder): Conscription
+lands at the Castle (TechId 29) and TEC-09 moves MISSING →
+MATCHES — both of the rule's halves (Treadmill Crane's
+construction scalar from P3c, Conscription's queue scalar here)
+are now in. The book stands at 222 rules, 157 / 21 / 44. The
+table below equals the body.
+
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
 | 1 | Simulation & time (SIM) | 12 | 12 | 0 | 0 |
@@ -4189,7 +4213,7 @@ body.
 | 8 | Combat & damage (CMB) | 17 | 16 | 0 | 1 |
 | 9 | Projectiles & ballistics (PRJ) | 10 | 6 | 2 | 2 |
 | 10 | Unit classes & counters (CLS) | 8 | 5 | 0 | 3 |
-| 11 | Technologies & age advancement (TEC) | 11 | 6 | 2 | 3 |
+| 11 | Technologies & age advancement (TEC) | 11 | 7 | 2 | 2 |
 | 12 | Monks, conversion & relics (MNK) | 13 | 0 | 0 | 13 |
 | 13 | Trade, market & tribute (TRD) | 8 | 8 | 0 | 0 |
 | 14 | Garrison, transport & repair (GAR) | 10 | 8 | 0 | 2 |
@@ -4197,7 +4221,7 @@ body.
 | 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |
 | 17 | Multiplayer determinism (NET) | 11 | 9 | 1 | 1 |
 | 18 | Information rules (INF) | 13 | 10 | 2 | 1 |
-| | **Total** | **222** | **156** | **21** | **45** |
+| | **Total** | **222** | **157** | **21** | **44** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer

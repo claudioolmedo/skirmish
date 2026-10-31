@@ -241,11 +241,17 @@ pub enum TechId {
     /// Town Center, Castle: a second +4 on the same terms (Package
     /// K, VIS-03; chains from Town Watch, TEC-07). Tag 28.
     TownPatrol,
+    /// Castle, Imperial: military production buildings work 33%
+    /// faster — queue progress at the Barracks, Archery Range,
+    /// Stable and Castle accrues ×4/3 (units and techs alike);
+    /// the Siege Workshop is explicitly excluded, as are the
+    /// Market and the Town Center (Package M, TEC-09). Tag 29.
+    Conscription,
 }
 
 impl TechId {
     /// All technologies, in tag order.
-    pub const ALL: [TechId; 29] = [
+    pub const ALL: [TechId; 30] = [
         TechId::Loom,
         TechId::FeudalAge,
         TechId::Fletching,
@@ -275,6 +281,7 @@ impl TechId {
         TechId::Banking,
         TechId::TownWatch,
         TechId::TownPatrol,
+        TechId::Conscription,
     ];
 
     /// Stable tag: 0 loom, 1 feudal age, 2 fletching, 3 scale mail,
@@ -298,6 +305,8 @@ impl TechId {
     /// 25 coinage, 26 banking, 27 town watch, 28 town patrol
     /// (Package K, TRD-04/VIS-03 — appended after the University
     /// block 20–24 reserved by Castle P3c, so no tag moved.)
+    /// 29 conscription (Package M, TEC-09 — appended after
+    /// Package K's 25–28, so no tag moved.)
     pub fn tag(self) -> u8 {
         match self {
             TechId::Loom => 0,
@@ -329,6 +338,7 @@ impl TechId {
             TechId::Banking => 26,
             TechId::TownWatch => 27,
             TechId::TownPatrol => 28,
+            TechId::Conscription => 29,
         }
     }
 
@@ -376,6 +386,9 @@ impl TechId {
             | TechId::TreadmillCrane
             | TechId::Masonry
             | TechId::FortifiedWall => TechHost::Building(BuildingKind::University),
+            // Package M: Conscription is researched at the Castle
+            // itself (wiki, Conscription).
+            TechId::Conscription => TechHost::Building(BuildingKind::Castle),
         }
     }
 
@@ -386,7 +399,7 @@ impl TechId {
             TechId::Loom | TechId::FeudalAge => Age::Dark,
             TechId::CastleAge => Age::Feudal,
             TechId::ImperialAge => Age::Castle,
-            TechId::Banking => Age::Imperial,
+            TechId::Banking | TechId::Conscription => Age::Imperial,
             TechId::HandCart
             | TechId::LightCavalry
             | TechId::Husbandry
@@ -457,6 +470,7 @@ impl TechId {
             TechId::Banking => 4200,   // 70 s (wiki, Banking)
             TechId::TownWatch => 1500, // 25 s (wiki, Town Watch)
             TechId::TownPatrol => 2400, // 40 s (wiki, Town Patrol)
+            TechId::Conscription => 3600, // 60 s (wiki, Conscription)
         }
     }
 
@@ -493,6 +507,7 @@ impl TechId {
             TechId::Banking => (300, 0, 200, 0), // wiki, Banking
             TechId::TownWatch => (75, 0, 0, 0),  // wiki, Town Watch
             TechId::TownPatrol => (300, 0, 100, 0), // wiki, Town Patrol
+            TechId::Conscription => (150, 0, 150, 0), // wiki, Conscription
         }
     }
 }
@@ -526,6 +541,25 @@ pub fn building_los_bonus(techs: u64) -> u32 {
         bonus += 4;
     }
     bonus
+}
+
+/// Whether queues at `kind` accrue progress at Conscription's
+/// rate for a player holding the researched set `techs` (TEC-09):
+/// the military production buildings — Barracks, Archery Range,
+/// Stable and Castle — work 33% faster (progress ×4/3); the
+/// Siege Workshop is explicitly excluded, and neither the Market
+/// nor the Town Center is a military production building (wiki,
+/// Conscription). Read at progress time from the owner's mask —
+/// no stored per-building rate (TEC-06's lookup discipline).
+pub fn conscription_scales(kind: BuildingKind, techs: u64) -> bool {
+    techs & TechId::Conscription.bit() != 0
+        && matches!(
+            kind,
+            BuildingKind::Barracks
+                | BuildingKind::ArcheryRange
+                | BuildingKind::Stable
+                | BuildingKind::Castle
+        )
 }
 
 /// The gather rate of a node kind for a villager whose owner has
@@ -707,9 +741,9 @@ mod tests {
             assert_eq!(TechId::from_tag(t.tag()), Some(t));
         }
         // 25-28 are Package K's Coinage/Banking/Town Watch/Town
-        // Patrol (combo landing, bot-loop 2026-10-30); the next
-        // free tag is 29.
-        assert_eq!(TechId::from_tag(29), None);
+        // Patrol (combo landing, bot-loop 2026-10-30); 29 is
+        // Package M's Conscription, so the next free tag is 30.
+        assert_eq!(TechId::from_tag(30), None);
     }
 
     #[test]

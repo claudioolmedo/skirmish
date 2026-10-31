@@ -1528,6 +1528,16 @@ pub struct Building {
     /// Treadmill Crane. Part of the hashed state (written only
     /// while nonzero).
     pub build_rate_remainder: i64,
+    /// Conscription queue-rate remainder (Package M, TEC-09): the
+    /// ×4/3 queue scalar does not divide the tick evenly, so the
+    /// sub-tick remainder carries here (0 ≤ r < 3, in thirds of a
+    /// progress tick) — each production tick at a scaled building
+    /// adds `4 + r` thirds, accrues `(4 + r) / 3` whole ticks of
+    /// progress and keeps the rest, so three ticks accrue exactly
+    /// four. Always 0 at an unscaled building (any owner without
+    /// Conscription, the Siege Workshop always). Part of the
+    /// hashed state (written only while nonzero).
+    pub queue_rate_remainder: i64,
     pub complete: bool,
     /// For a completed Farm: the resource node it became. The building
     /// record stays as the footprint registry until the node depletes,
@@ -2098,6 +2108,7 @@ mod tests {
             repair_stone_remainder: 0,
             build_rate_remainder: 0,
             gate_along_x: true,
+            queue_rate_remainder: 0,
             complete: false,
             node_id: None,
             queue: Vec::new(),

@@ -83,6 +83,8 @@ mod new_units_tests;
 mod trade_tests;
 #[cfg(test)]
 mod tribute_vision_tests;
+#[cfg(test)]
+mod conscription_tests;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
@@ -3008,6 +3010,9 @@ impl Sim {
             let entry = b.queue.remove(index as usize);
             if index == 0 {
                 b.train_progress = 0;
+                // Package M: the head's fractional Conscription
+                // accrual dies with it, like its whole ticks.
+                b.queue_rate_remainder = 0;
             }
             (b.owner, entry)
         };
@@ -5336,6 +5341,7 @@ impl Sim {
             repair_stone_remainder: 0,
             build_rate_remainder: 0,
             gate_along_x,
+            queue_rate_remainder: 0,
             complete: false,
             node_id: None,
             queue: Vec::new(),
@@ -6297,9 +6303,29 @@ impl Sim {
             {
                 continue; // housed: this building's queue stalls too
             }
-            self.buildings[bi].train_progress += 1;
+            // Conscription (Package M, TEC-09): at a military
+            // production building whose owner holds the tech, the
+            // head accrues ×4/3 — carried exactly by the building's
+            // queue-rate remainder (thirds of a tick), so three
+            // ticks accrue exactly four, for unit and research
+            // heads alike. The Siege Workshop never scales (the
+            // exclusion is in `conscription_scales`), and neither
+            // does the Town Center above (not a placed building).
+            if tech::conscription_scales(self.buildings[bi].kind, self.tech_mask_of(owner)) {
+                let b = &mut self.buildings[bi];
+                let acc = 4 + b.queue_rate_remainder;
+                b.train_progress += (acc / 3) as u64;
+                b.queue_rate_remainder = acc % 3;
+            } else {
+                self.buildings[bi].train_progress += 1;
+            }
             if self.buildings[bi].train_progress >= head.ticks() {
-                self.buildings[bi].train_progress = 0;
+                // A scaled step can overshoot the head's last tick
+                // by one; the excess carries to the next head, as
+                // a work *rate* should. Unscaled progress lands
+                // exactly on the boundary, so this subtraction is
+                // the old reset-to-0 there.
+                self.buildings[bi].train_progress -= head.ticks();
                 self.buildings[bi].queue.remove(0);
                 let bid = self.buildings[bi].id;
                 match head {
@@ -7761,6 +7787,16 @@ impl Sim {
                 h.write_u8(0xB5);
                 h.write_u64(b.build_rate_remainder as u64);
             }
+            // Package M: the Conscription queue-rate remainder —
+            // written ONLY while nonzero, behind a marker byte
+            // (0xB4 in the building section; the entity section's
+            // 0xB4 is a different stream position), so a match
+            // whose owner never researches Conscription hashes
+            // byte-identically to before.
+            if b.queue_rate_remainder != 0 {
+                h.write_u8(0xB4);
+                h.write_u64(b.queue_rate_remainder as u64);
+            }
             if b.weapon_target.is_some()
                 || b.weapon_target_building.is_some()
                 || b.weapon_strike_tick.is_some()
@@ -8563,6 +8599,7 @@ mod tests {
             repair_stone_remainder: 0,
             build_rate_remainder: 0,
             gate_along_x: true,
+            queue_rate_remainder: 0,
             complete: false,
             node_id: None,
             queue: Vec::new(),
@@ -8674,6 +8711,7 @@ mod tests {
             repair_stone_remainder: 0,
             build_rate_remainder: 0,
             gate_along_x: true,
+            queue_rate_remainder: 0,
             complete: true,
             node_id: Some(nid),
             queue: Vec::new(),

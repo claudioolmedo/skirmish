@@ -45,6 +45,7 @@ fn placed(sim: &mut Sim, kind: BuildingKind, owner: u8, cell: (u32, u32)) -> u32
         repair_stone_remainder: 0,
         build_rate_remainder: 0,
         gate_along_x: true,
+        queue_rate_remainder: 0,
         complete: true,
         node_id: None,
         queue: Vec::new(),
