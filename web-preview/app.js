@@ -11362,7 +11362,11 @@ function updateSelPanel() {
   // its idle line keeps the rates (see the production branch).
   // The University (kind 16, Castle P3c) is a pure researcher and
   // joins the same shape, or its queue line would not render either.
-  const PROD_KINDS = [2, 3, 4, 5, 6, 7, 8, 12, 15, 16];
+  // The Siege Workshop (kind 17, Castle P4a) trains the Battering
+  // Ram and joins the same shape (bot-loop, 2026-10-30): live
+  // session b57befa2 trained a Ram on the combo build and saw no
+  // "Training…" queue line at all — the same defect family.
+  const PROD_KINDS = [2, 3, 4, 5, 6, 7, 8, 12, 15, 16, 17];
   const context = selUnits.length > 0 ? 'units'
     : selectedBuilding
       ? (selectedBuilding.type === 'tc'
@@ -11372,7 +11376,7 @@ function updateSelPanel() {
       : selectedAnimal != null ? 'animal'
       : 'none';
   const singleHp = selUnits.length === 1 ? Math.floor(st.hp[selUnits[0] * 2]) : -1;
-  const TRAINS_TAG = { 2: 3, 6: 4, 7: 2, 12: 16, 15: 15 };
+  const TRAINS_TAG = { 2: 3, 6: 4, 7: 2, 12: 16, 15: 15, 17: 17 };
   const bkBlock = bk && TRAINS_TAG[bk.kind] != null
     ? sim.building_train_block(bk.id, TRAINS_TAG[bk.kind]) : -1;
   const tcQueueCodes = myTcQueue().join('.');
