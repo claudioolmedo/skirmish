@@ -288,6 +288,7 @@ const CARRY_COLORS = ['#d9a05b', '#ff5da2', '#ffd700', '#c3c8cd', '#ff5da2', '#f
 // Entity kind tags (must match the sim's EntityKind::tag).
 const KIND_TC = 1;
 const KIND_SHEEP = 5;
+const KIND_RAM = 17;
 // i18n: the display-name tables below are rebuilt from
 // play/i18n.js on every locale switch (refreshNames) — the
 // semantic ids index the string table (unit.<id>, building.<id>).
@@ -6464,8 +6465,48 @@ async function main() {
   // sits well above its ground point, so it gets a wider pick
   // radius: clicks on the visible body must select it (the
   // 1.9 wu standard radius only covers clicks near its feet).
+  // The Battering Ram's drawn body (drawBatteringRam): an A-frame
+  // ~3.0 world units tall and ~3.1 wide, rising straight up the
+  // screen from its ground point. A click on the visible body
+  // converts to a ground point up to ~4.2 units north-west of the
+  // Ram (screen-up is the (-d, -d) world direction), outside both
+  // pick radii — so body clicks missed, a bystander beside the Ram
+  // won entityAt's nearest test, and the order degraded to a
+  // ground move: the Ram could neither be selected nor garrisoned
+  // by clicking its body (live sessions b57befa2 + fa0c2b59, the
+  // tree-canopy pick family). ramBodyD2 decomposes the click
+  // against the drawn body — h = height up the sprite, dx =
+  // screen-x offset from its column — and returns the squared
+  // distance to the body's centre when the click lands on it,
+  // else null. The ground pick stays primary; this only names
+  // clicks the ground radii cannot reach.
+  const RAM_BODY_H = 3.0;
+  const RAM_BODY_HALF_W = 1.6;
+  function ramBodyD2(st, i, wx, wy) {
+    const dxw = wx - st.pos[i * 2];
+    const dyw = wy - st.pos[i * 2 + 1];
+    const h = -(dxw + dyw) / 2;
+    const dx = dxw - dyw;
+    if (h < 0 || h > RAM_BODY_H || Math.abs(dx) > RAM_BODY_HALF_W) return null;
+    return (h - RAM_BODY_H / 2) ** 2 + dx ** 2;
+  }
+
   function unitAt(wx, wy) {
     const st = entityState();
+    // A click on a Ram's drawn body names the Ram ahead of the
+    // ground pick (the body is what the player clicked; a unit
+    // standing beside it must not win the pick).
+    let bodyBest = null;
+    let bodyBestD2 = Infinity;
+    for (let i = 0; i < st.count; i++) {
+      if (!isOwnUnit(st, i) || st.kinds[i] !== KIND_RAM) continue;
+      const bd2 = ramBodyD2(st, i, wx, wy);
+      if (bd2 !== null && bd2 < bodyBestD2) {
+        bodyBestD2 = bd2;
+        bodyBest = i;
+      }
+    }
+    if (bodyBest !== null) return bodyBest;
     let best = null;
     let bestD2 = 1.9 * 1.9;
     for (let i = 0; i < st.count; i++) {
@@ -6511,6 +6552,20 @@ async function main() {
   // are big, and a missed click should still read as an attack.
   function entityAt(wx, wy) {
     const st = entityState();
+    // Same Ram-body precedence as unitAt: a right-click on the
+    // drawn body is a click on the Ram (garrison / attack target),
+    // never on a bystander standing beside it.
+    let bodyBest = null;
+    let bodyBestD2 = Infinity;
+    for (let i = 0; i < st.count; i++) {
+      if (st.kinds[i] !== KIND_RAM || st.hp[i * 2] < 1) continue;
+      const bd2 = ramBodyD2(st, i, wx, wy);
+      if (bd2 !== null && bd2 < bodyBestD2) {
+        bodyBestD2 = bd2;
+        bodyBest = i;
+      }
+    }
+    if (bodyBest !== null) return bodyBest;
     let best = null;
     let bestD2 = 2.2 * 2.2;
     for (let i = 0; i < st.count; i++) {
