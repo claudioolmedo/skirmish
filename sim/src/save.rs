@@ -42,7 +42,10 @@ const MAGIC: &[u8; 4] = b"SKSV";
 /// Save format version. Bump on any layout change; loaders
 /// refuse versions they do not know. Version 2: the Town Bell
 /// snapshot carries its ringing TC (`bell_tc`, GAR-07 fix).
-const SAVE_VERSION: u32 = 2;
+/// Version 3: Package J — building records carry `gate_along_x`,
+/// TC records carry the repair accumulators, and the pending-
+/// command codec gains `Command::RepairTc` (tag 38).
+const SAVE_VERSION: u32 = 3;
 
 /// Little-endian byte writer over a growable buffer.
 struct W {

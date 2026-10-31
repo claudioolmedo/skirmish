@@ -249,6 +249,12 @@ fn scripted_siege_wins_the_match() {
     // farther out and the farmer's trips lengthen; the arc is
     // unchanged and the human never loses, but the win re-paces
     // to tick 518,618 (measured). Window grows to 600,000.
+    // BLD-17 (2026-10-31, Package J): the AI now repairs its
+    // Town Center, and the old mass could not out-damage one
+    // repairer (see the script's BLD-17 note). With the script
+    // adapted — bigger mass, repairers killed first, a gatherer
+    // pulled to build when housed at cap — the win re-paces to
+    // tick 113,091 (measured, probe2b). Window stays 600,000.
     for _ in 0..600_000 {
         driver.drive(&mut sim);
         sim.tick();
@@ -326,8 +332,10 @@ impl HumanScript {
             sim.push_command(Command::ResearchTc {
                 tech: TechId::FeudalAge,
             });
-        } else if villagers + sim.train_queue_len() < 12 && sim.can_train_villager() {
-            // Town Center: train toward 12 villagers.
+        } else if villagers + sim.train_queue_len() < 16 && sim.can_train_villager() {
+            // Town Center: train toward 16 villagers (BLD-17
+            // adaptation: the bigger siege mass below needs the
+            // larger economy behind it).
             sim.push_command(Command::TrainVillager);
         }
         // Military production at the M6 homes: Militia from the
@@ -354,7 +362,7 @@ impl HumanScript {
             && villagers >= 10
             && food < 550.0;
         let army = living(sim, me, EntityKind::Militia) + living(sim, me, EntityKind::Archer);
-        if army < 16 && !saving_for_feudal {
+        if army < 32 && !saving_for_feudal {
             let producers: Vec<(u32, EntityKind)> = sim
                 .buildings()
                 .iter()
@@ -416,7 +424,30 @@ impl HumanScript {
             None
         };
         if let Some(kind) = want {
-            if let Some(builder) = self.first_idle_villager(sim) {
+            // BLD-17 adaptation, second half (measured in probe2,
+            // 2026-10-31): at 16 villagers + an 18-strong army the
+            // script sat HOUSED at the 35 cap for 100k+ ticks —
+            // training blocked, and no villager ever idle to build
+            // the next House (every hand tasked, no new villager
+            // spawning to be grabbed on its idle tick). A human
+            // housed at cap pulls a gatherer off work to build;
+            // for a House (only) the script does the same.
+            let builder = self.first_idle_villager(sim).or_else(|| {
+                if kind == BuildingKind::House {
+                    sim.entities()
+                        .iter()
+                        .find(|e| {
+                            e.owner == me
+                                && e.kind == EntityKind::Villager
+                                && !e.dead
+                                && !self.acted.contains(&e.id)
+                        })
+                        .map(|e| e.id)
+                } else {
+                    None
+                }
+            });
+            if let Some(builder) = builder {
                 if let Some((x, y)) = find_anchor(sim, builder, kind) {
                     sim.push_command(Command::Build {
                         entity: builder,
@@ -469,13 +500,32 @@ impl HumanScript {
                 }
             }
         }
-        // The push: at a dozen soldiers the script commits. Both
+        // The push: the script commits at a massed army. Both
         // Barracks rally to the enemy Town Center (fresh troops
         // walk to the front), and every free soldier is ordered in
-        // — Town Center first, then the nearest enemy unit, then
-        // the nearest enemy building. The latch stays on: this is
-        // a siege, not a raid.
-        if army >= 12 {
+        // — the enemy units around the Town Center first (its
+        // defenders and, since BLD-17, the villagers repairing
+        // it), then the Town Center, then the nearest enemy unit,
+        // then the nearest enemy building. The latch stays on:
+        // this is a siege, not a raid.
+        //
+        // BLD-17 adaptation (2026-10-31, bot-loop): Package J
+        // taught the AI to repair its Town Center (750 HP/min for
+        // the first repairer, +375 per additional — BLD-07's
+        // documented rates). Measured on this seed (fine probe,
+        // 10k grain, to 900k ticks): the old dozen-commit /
+        // 16-army script's best dent was −38 HP — a push's
+        // minimum-damage rate (~0.5 HP/s per soldier on the TC's
+        // 3/5 armor) cannot outpace even one repairer (12.5 HP/s),
+        // and the repair resets the TC between pushes, so no
+        // window growth converges. A human facing a repaired TC
+        // does the two things this script now does: mass a bigger
+        // army before committing (24 to latch, production to 32,
+        // unlatch floor 12, 16 villagers behind it) and kill the
+        // units at the TC — repairers first — before settling on
+        // the building. The sim's repair is NOT weakened; the
+        // script plays against it.
+        if army >= 24 {
             self.pushing = true;
         }
         // BLD-16 adaptation (2026-10-19): the Town Center footprint
@@ -487,7 +537,7 @@ impl HumanScript {
         // troops at home) rather than trickling in one by one
         // forever — the pre-BLD-16 trajectory won on the first
         // push, so the script never needed a second wave.
-        if self.pushing && army < 5 {
+        if self.pushing && army < 12 {
             self.pushing = false;
         }
         if !self.pushing {
@@ -566,7 +616,36 @@ impl HumanScript {
                 .map(|e| (e.id, e.pos_x, e.pos_y))
                 .collect();
             for (id, mx, my) in soldiers {
-                if let Some((tc, _, _)) = foe_tc {
+                if let Some((tc, tx, ty)) = foe_tc {
+                    // BLD-17 adaptation: clear the units standing
+                    // at the enemy Town Center first — defenders
+                    // and the villagers repairing it (a repairing
+                    // villager out-heals several soldiers; left
+                    // alive it resets the siege). Nearest such unit
+                    // to this soldier, within 14 tiles of the TC.
+                    let guard = sim
+                        .entities()
+                        .iter()
+                        .filter(|e| {
+                            e.owner == foe
+                                && !e.dead
+                                && e.kind != EntityKind::TownCenter
+                                && e.kind != EntityKind::Sheep
+                                && dist(e.pos_x - tx, e.pos_y - ty) <= 56.0
+                        })
+                        .min_by_key(|e| {
+                            let dx = f(e.pos_x - mx);
+                            let dy = f(e.pos_y - my);
+                            ((dx * dx + dy * dy) * 1024.0) as i64
+                        })
+                        .map(|e| e.id);
+                    if let Some(g) = guard {
+                        sim.push_command(Command::Attack {
+                            entity: id,
+                            target: g,
+                        });
+                        continue;
+                    }
                     sim.push_command(Command::Attack {
                         entity: id,
                         target: tc,
@@ -609,7 +688,7 @@ impl HumanScript {
         let me = OWNER_PLAYER;
         let tc = sim.town_center();
         let (tc_x, tc_y) = (tc.pos_x, tc.pos_y);
-        let targets = [6u32, 4, 3]; // food, wood, gold
+        let targets = [7u32, 5, 4]; // food, wood, gold (BLD-17 mass)
         let mut counts = [0u32; 3];
         for e in sim.entities() {
             if e.owner != me || e.kind != EntityKind::Villager || e.dead {
@@ -792,4 +871,5 @@ fn find_anchor(sim: &Sim, builder: u32, kind: BuildingKind) -> Option<(I16F16, I
     }
     None
 }
+
 
