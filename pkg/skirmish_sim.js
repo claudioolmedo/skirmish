@@ -99,7 +99,11 @@ export class WasmSim {
      * cell_y, size, queue_len, train_progress, owner, hp]` — in
      * building id order. `kind` tags: 0 house, 1 farm, 2 barracks
      * (M3); 3 lumber camp, 4 mill, 5 mining camp, 6 archery range,
-     * 7 stable, 8 blacksmith (M6); 9 palisade wall (BLD-13). `progress` is the construction fraction 0..1 (1 when
+     * 7 stable, 8 blacksmith (M6); 9 palisade wall (BLD-13);
+     * 16 university (Castle P3c), 17 siege workshop (Castle
+     * P4a); 18 palisade gate, 19 stone gate (Package J, BLD-13 — their
+     * `size` reads 1, the span's ACROSS edge; the span itself is
+     * in `gate_states`). `progress` is the construction fraction 0..1 (1 when
      * complete); `complete` is 0/1; `size` is the footprint edge in
      * cells; `queue_len` and `train_progress` (0..1 on the queue's
      * head) describe a production building's queue. M5 adds `owner`
@@ -323,6 +327,24 @@ export class WasmSim {
     food() {
         const ret = wasm.wasmsim_food(this.__wbg_ptr);
         return ret;
+    }
+    /**
+     * Gate spans and derived open state (Package J, BLD-13) as
+     * a flat array: three values per gate building, in building
+     * id order — `[id, along_x, open]` — where `along_x` is 1
+     * when the 4×1 span runs along +x from the anchor cell (0 =
+     * along +y) and `open` is the gate's derived open state
+     * right now (1 while an owner's unit stands at the gate and
+     * no foreign unit does; foundations read 0). The 13-value
+     * `buildings()` stride stays untouched; this side channel
+     * carries what a rectangle needs that a square never did.
+     * @returns {Float64Array}
+     */
+    gate_states() {
+        const ret = wasm.wasmsim_gate_states(this.__wbg_ptr);
+        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v1;
     }
     /**
      * @returns {number}
@@ -921,6 +943,33 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Order a villager to build a Palisade Gate (20 wood, 4×1
+     * span — Package J, BLD-13): the point names the span's
+     * anchor cell; the sim resolves the span's orientation
+     * (along-x first) and replaces the villager's own palisade
+     * segments under the span — see `push_build_house`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_palisade_gate(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_palisade_gate(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Queue a Palisade Gate build (Package J, BLD-13) — see
+     * `push_build_house_queued`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_palisade_gate_queued(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_palisade_gate_queued(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
      * Order a villager to build one Palisade Wall segment
      * (3 wood, 1×1 — BLD-13) — see `push_build_house`. A dragged
      * line of segments goes through `push_build_wall_line`.
@@ -991,6 +1040,32 @@ export class WasmSim {
      */
     push_build_stable_queued(entity, x, y) {
         const ret = wasm.wasmsim_push_build_stable_queued(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Order a villager to build a Stone Gate (30 stone, 4×1
+     * span, Feudal Age — Package J, BLD-13): the Stone Gate form
+     * of `push_build_palisade_gate`, replacing own stone
+     * segments.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_stone_gate(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_stone_gate(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Queue a Stone Gate build (Package J, BLD-13) — see
+     * `push_build_house_queued`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_stone_gate_queued(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_stone_gate_queued(this.__wbg_ptr, entity, x, y);
         return ret !== 0;
     }
     /**
@@ -1366,6 +1441,36 @@ export class WasmSim {
      */
     push_repair_queued(entity, building) {
         const ret = wasm.wasmsim_push_repair_queued(this.__wbg_ptr, entity, building);
+        return ret !== 0;
+    }
+    /**
+     * Order a villager to repair one of its own player's Town
+     * Centers (Package J, BLD-07's TC slice): travel to the Town
+     * Center's ring and restore the ENTITY's HP at the same flat
+     * rate as buildings, charged as a wood drip totaling exactly
+     * 550 wood (and no stone) over a full repair — the documented
+     * TC exception. Only living, damaged Town Centers of the
+     * villager's own player are valid targets. Returns whether
+     * the order *would* be accepted against the current state.
+     * @param {number} entity
+     * @param {number} tc
+     * @returns {boolean}
+     */
+    push_repair_tc(entity, tc) {
+        const ret = wasm.wasmsim_push_repair_tc(this.__wbg_ptr, entity, tc);
+        return ret !== 0;
+    }
+    /**
+     * Queue a Town Center repair order behind the villager's
+     * current order (Package J, BLD-07): the repair starts when
+     * the villager goes idle, and re-validates fully at
+     * execution — see `push_repair_tc`.
+     * @param {number} entity
+     * @param {number} tc
+     * @returns {boolean}
+     */
+    push_repair_tc_queued(entity, tc) {
+        const ret = wasm.wasmsim_push_repair_tc_queued(this.__wbg_ptr, entity, tc);
         return ret !== 0;
     }
     /**
