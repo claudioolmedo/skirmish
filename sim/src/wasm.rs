@@ -207,6 +207,22 @@ impl WasmSim {
         ok
     }
 
+    /// Order a villager to repair one of its own player's Town
+    /// Centers (Package J, BLD-07's TC slice): travel to the Town
+    /// Center's ring and restore the ENTITY's HP at the same flat
+    /// rate as buildings, charged as a wood drip totaling exactly
+    /// 550 wood (and no stone) over a full repair — the documented
+    /// TC exception. Only living, damaged Town Centers of the
+    /// villager's own player are valid targets. Returns whether
+    /// the order *would* be accepted against the current state.
+    pub fn push_repair_tc(&mut self, entity: u32, tc: u32) -> bool {
+        let ok = self.inner.can_repair_tc(entity, tc);
+        if ok {
+            self.inner.push_command(Command::RepairTc { entity, tc });
+        }
+        ok
+    }
+
     /// Order a unit to garrison in an own placed defensive
     /// building (Castle P3b, GAR-01/SEL-11): it walks there and
     /// enters on arrival. Returns whether the order *would* be
@@ -973,6 +989,23 @@ impl WasmSim {
         self.push_build(entity, BuildingKind::SiegeWorkshop, x, y)
     }
 
+    /// Order a villager to build a Palisade Gate (20 wood, 4×1
+    /// span — Package J, BLD-13): the point names the span's
+    /// anchor cell; the sim resolves the span's orientation
+    /// (along-x first) and replaces the villager's own palisade
+    /// segments under the span — see `push_build_house`.
+    pub fn push_build_palisade_gate(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build(entity, BuildingKind::PalisadeGate, x, y)
+    }
+
+    /// Order a villager to build a Stone Gate (30 stone, 4×1
+    /// span, Feudal Age — Package J, BLD-13): the Stone Gate form
+    /// of `push_build_palisade_gate`, replacing own stone
+    /// segments.
+    pub fn push_build_stone_gate(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build(entity, BuildingKind::StoneGate, x, y)
+    }
+
     /// Buy one lot (100) of a commodity at a completed Market
     /// (TRD-01..03): `resource_tag` is the `ResourceKind` tag
     /// (food 1, wood 2, stone 4 — gold is never a commodity).
@@ -1124,6 +1157,14 @@ impl WasmSim {
         self.push_queued(entity, QueuedOrder::Repair { building })
     }
 
+    /// Queue a Town Center repair order behind the villager's
+    /// current order (Package J, BLD-07): the repair starts when
+    /// the villager goes idle, and re-validates fully at
+    /// execution — see `push_repair_tc`.
+    pub fn push_repair_tc_queued(&mut self, entity: u32, tc: u32) -> bool {
+        self.push_queued(entity, QueuedOrder::RepairTc { tc })
+    }
+
     /// Queue an attack-move behind the unit's current order
     /// (CMB-10): it executes when the unit goes idle.
     pub fn push_attack_move_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
@@ -1230,6 +1271,18 @@ impl WasmSim {
     /// see `push_build_house_queued`.
     pub fn push_build_siege_workshop_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
         self.push_build_queued(entity, BuildingKind::SiegeWorkshop, x, y)
+    }
+
+    /// Queue a Palisade Gate build (Package J, BLD-13) — see
+    /// `push_build_house_queued`.
+    pub fn push_build_palisade_gate_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build_queued(entity, BuildingKind::PalisadeGate, x, y)
+    }
+
+    /// Queue a Stone Gate build (Package J, BLD-13) — see
+    /// `push_build_house_queued`.
+    pub fn push_build_stone_gate_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build_queued(entity, BuildingKind::StoneGate, x, y)
     }
 
     /// Queue a Market build — see `push_build_house_queued`.
@@ -1358,7 +1411,10 @@ impl WasmSim {
     /// cell_y, size, queue_len, train_progress, owner, hp]` — in
     /// building id order. `kind` tags: 0 house, 1 farm, 2 barracks
     /// (M3); 3 lumber camp, 4 mill, 5 mining camp, 6 archery range,
-    /// 7 stable, 8 blacksmith (M6); 9 palisade wall (BLD-13). `progress` is the construction fraction 0..1 (1 when
+    /// 7 stable, 8 blacksmith (M6); 9 palisade wall (BLD-13);
+    /// 16 palisade gate, 17 stone gate (Package J, BLD-13 — their
+    /// `size` reads 1, the span's ACROSS edge; the span itself is
+    /// in `gate_states`). `progress` is the construction fraction 0..1 (1 when
     /// complete); `complete` is 0/1; `size` is the footprint edge in
     /// cells; `queue_len` and `train_progress` (0..1 on the queue's
     /// head) describe a production building's queue. M5 adds `owner`
@@ -1397,6 +1453,28 @@ impl WasmSim {
                 };
                 out.push(I16F16::from_bits(frac).to_num::<f64>());
             }
+        }
+        out
+    }
+
+    /// Gate spans and derived open state (Package J, BLD-13) as
+    /// a flat array: three values per gate building, in building
+    /// id order — `[id, along_x, open]` — where `along_x` is 1
+    /// when the 4×1 span runs along +x from the anchor cell (0 =
+    /// along +y) and `open` is the gate's derived open state
+    /// right now (1 while an owner's unit stands at the gate and
+    /// no foreign unit does; foundations read 0). The 13-value
+    /// `buildings()` stride stays untouched; this side channel
+    /// carries what a rectangle needs that a square never did.
+    pub fn gate_states(&self) -> Vec<f64> {
+        let mut out = Vec::new();
+        for b in self.inner.buildings() {
+            if !b.kind.is_gate() {
+                continue;
+            }
+            out.push(b.id as f64);
+            out.push(if b.gate_along_x { 1.0 } else { 0.0 });
+            out.push(if self.inner.gate_is_open(b) { 1.0 } else { 0.0 });
         }
         out
     }

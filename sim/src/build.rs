@@ -194,6 +194,56 @@ pub const SIEGE_WORKSHOP_BUILD_TICKS: u64 = 2400;
 /// Population room from one completed Castle: +20 (Castle P3a;
 /// same source).
 pub const CASTLE_POP_SUPPORT: u32 = 20;
+/// Palisade Gate construction cost: 20 wood (Package J, BLD-13;
+/// AoE wiki, Wall article's Building table via the walls dossier
+/// §5 — the follow-on row BLD-13's note records).
+pub const PALISADE_GATE_WOOD_COST: I16F16 = I16F16::from_bits(1_310_720); // 20
+/// Palisade Gate build time: 30 s at 60 Hz (same source).
+pub const PALISADE_GATE_BUILD_TICKS: u64 = 1800;
+/// Palisade Gate hit points, Dark Age column: 240 (same source;
+/// 400 from Feudal on — the step lives in `max_hp_at`).
+pub const PALISADE_GATE_HP_DARK: i32 = 240;
+/// Stone Gate construction cost: 30 stone (Package J, BLD-13;
+/// same Building table, walls dossier §5).
+pub const STONE_GATE_STONE_COST: I16F16 = I16F16::from_bits(1_966_080); // 30
+/// Stone Gate build time: 70 s at 60 Hz (same source).
+pub const STONE_GATE_BUILD_TICKS: u64 = 4200;
+/// Stone Gate hit points, Feudal column: 1650 (same source; 2700
+/// from Castle on — the step lives in `max_hp_at`).
+pub const STONE_GATE_HP_FEUDAL: i32 = 1650;
+/// A gate's long edge, in cells (Package J, BLD-13): the DE gate
+/// footprint is 4×1 — four cells along the wall line, one across.
+pub const GATE_SPAN_CELLS: u32 = 4;
+/// The build/repair range of a gate (Package J): a builder on the
+/// far corner ring cell of the 4×1 span stands ≈8.9 units from
+/// the span's center; 10.5 covers the whole ring plus steering's
+/// arrival shortfall, in the geometry of the ranges above.
+pub const GATE_BUILD_RANGE: I16F16 = I16F16::from_bits(688_128); // 10.5
+/// The radius around a gate's span center in which a standing
+/// unit counts for the gate's DERIVED open state (Package J,
+/// BLD-13): an owner's unit inside it holds the gate open; a
+/// foreign unit inside it holds it shut. 5.0 world units (1.25
+/// tiles) — the gate's own cell ring: a unit must be AT the
+/// gate, not merely in its neighborhood. An ADOPTED constant:
+/// DE documents no numeric radius (its gates key on units
+/// passing through / standing at the gate), so this is the
+/// smallest radius covering a unit standing on or beside the
+/// span — flagged in the handoff for the loop's adjudication,
+/// like the gates' sight value.
+pub const GATE_OPEN_RADIUS: I16F16 = I16F16::from_bits(327_680); // 5.0
+/// The Town Center's repair range (Package J, BLD-07's TC slice):
+/// its 4×4 footprint is 16 units wide, so a repairer on a corner
+/// ring cell stands ≈14.1 units from the center — 15.0 covers
+/// the whole ring, the Town Center's own build-range geometry.
+pub const TC_REPAIR_RANGE: I16F16 = I16F16::from_bits(983_040); // 15.0
+/// The Town Center repair exception (BLD-07): restoring a Town
+/// Center from 0 to full HP costs exactly this much wood — and
+/// no stone — whatever the generic 50%-of-build-cost formula
+/// would say (wiki, Villager, repair section; corroborated by
+/// wiki, Town Center, "Repairing": twice the 275 wood of a new
+/// one, against its 100 stone waived).
+pub const TC_REPAIR_FULL_WOOD: I16F16 = I16F16::from_bits(36_044_800); // 550
+
 /// Town Center build time: 150 s at 60 Hz (study §5 — the
 /// player-built figure; the 100 s techtree number is the
 /// non-buildable Dark Age "stack" variant, per the study note).
@@ -297,6 +347,22 @@ pub enum BuildingKind {
     /// garrison of 10 (GAR-08). It does not fire — no
     /// `BuildingWeapon`.
     SiegeWorkshop,
+    /// Package J (BLD-13): the Palisade Gate — the palisade
+    /// line's door. 20 wood, 30 s build, 4×1 footprint laid along
+    /// the wall line (its span replaces up to four own Palisade
+    /// Wall segments), HP 240 Dark / 400 from Feudal, armor 2/4
+    /// (AoE wiki, Wall article's Building table — walls dossier
+    /// §5). Dark Age. Its open/closed state is DERIVED, never
+    /// stored: it stands open while one of its owner's units is
+    /// near and no enemy player unit is near, and its cells block
+    /// the grid exactly while it is closed (see
+    /// `Sim::refresh_gate_blocking`).
+    PalisadeGate,
+    /// Package J (BLD-13): the Stone Gate — the stone line's
+    /// door, the Palisade Gate's Feudal sibling. 30 stone, 70 s
+    /// build, 4×1, HP 1650 Feudal / 2700 from Castle, armor 6/6
+    /// (same Building table). Feudal Age.
+    StoneGate,
 }
 
 impl BuildingKind {
@@ -307,7 +373,8 @@ impl BuildingKind {
     /// 12 = market, 13 = town center (construction record only —
     /// see the variant), 14 = stone wall (BLD-20), 15 = castle
     /// (Castle P3a), 16 = university (Castle P3c), 17 = siege
-    /// workshop (Castle P4a). Tags are an ABI contract — append
+    /// workshop (Castle P4a), 18 = palisade gate, 19 = stone
+    /// gate (Package J, BLD-13). Tags are an ABI contract — append
     /// only, never renumber.
     pub fn tag(self) -> u8 {
         match self {
@@ -329,6 +396,8 @@ impl BuildingKind {
             BuildingKind::Castle => 15,
             BuildingKind::University => 16,
             BuildingKind::SiegeWorkshop => 17,
+            BuildingKind::PalisadeGate => 18,
+            BuildingKind::StoneGate => 19,
         }
     }
 
@@ -353,6 +422,8 @@ impl BuildingKind {
             15 => Some(BuildingKind::Castle),
             16 => Some(BuildingKind::University),
             17 => Some(BuildingKind::SiegeWorkshop),
+            18 => Some(BuildingKind::PalisadeGate),
+            19 => Some(BuildingKind::StoneGate),
             _ => None,
         }
     }
@@ -363,6 +434,26 @@ impl BuildingKind {
     /// stone).
     pub fn is_wall(self) -> bool {
         matches!(self, BuildingKind::PalisadeWall | BuildingKind::StoneWall)
+    }
+
+    /// Whether this kind is a gate (Package J, BLD-13): a 4×1
+    /// span laid along a wall line, solid to everyone while
+    /// closed and passable while open — the open state is derived
+    /// from unit proximity, never stored (see the variants).
+    pub fn is_gate(self) -> bool {
+        matches!(self, BuildingKind::PalisadeGate | BuildingKind::StoneGate)
+    }
+
+    /// The wall segment kind of this gate's family (Package J):
+    /// a gate's span may replace standing segments of its own
+    /// family (the dossier's "placed over a wall line's span,
+    /// replacing segments"). `None` for non-gates.
+    pub fn wall_family(self) -> Option<BuildingKind> {
+        match self {
+            BuildingKind::PalisadeGate => Some(BuildingKind::PalisadeWall),
+            BuildingKind::StoneGate => Some(BuildingKind::StoneWall),
+            _ => None,
+        }
     }
 
     /// Wood paid at placement time.
@@ -390,6 +481,10 @@ impl BuildingKind {
             BuildingKind::University => UNIVERSITY_WOOD_COST,
             // Castle P4a: the Siege Workshop's 200 wood.
             BuildingKind::SiegeWorkshop => SIEGE_WORKSHOP_WOOD_COST,
+            // Package J: the Palisade Gate's 20 wood (BLD-13).
+            BuildingKind::PalisadeGate => PALISADE_GATE_WOOD_COST,
+            // Package J: the Stone Gate's price is all stone.
+            BuildingKind::StoneGate => I16F16::ZERO,
         }
     }
 
@@ -408,6 +503,8 @@ impl BuildingKind {
             BuildingKind::StoneWall => STONE_WALL_STONE_COST,
             // Castle P3a: 650 stone (dossier §2).
             BuildingKind::Castle => CASTLE_STONE_COST,
+            // Package J: 30 stone (walls dossier §5).
+            BuildingKind::StoneGate => STONE_GATE_STONE_COST,
             _ => I16F16::ZERO,
         }
     }
@@ -439,6 +536,8 @@ impl BuildingKind {
             BuildingKind::Castle => CASTLE_BUILD_TICKS,
             BuildingKind::University => UNIVERSITY_BUILD_TICKS,
             BuildingKind::SiegeWorkshop => SIEGE_WORKSHOP_BUILD_TICKS,
+            BuildingKind::PalisadeGate => PALISADE_GATE_BUILD_TICKS,
+            BuildingKind::StoneGate => STONE_GATE_BUILD_TICKS,
         }
     }
 
@@ -459,6 +558,12 @@ impl BuildingKind {
     pub fn blocks_footprint(self) -> bool {
         match self {
             BuildingKind::Farm => false,
+            // Package J: a gate's grid block is CONDITIONAL (it
+            // lifts while the gate stands open), so the generic
+            // place/complete/destroy footprint writes must not
+            // touch it — `Sim::refresh_gate_blocking` owns the
+            // gate cells outright.
+            BuildingKind::PalisadeGate | BuildingKind::StoneGate => false,
             _ => true,
         }
     }
@@ -485,7 +590,14 @@ impl BuildingKind {
             BuildingKind::PalisadeWall
             | BuildingKind::StoneWall
             | BuildingKind::WatchTower
-            | BuildingKind::Outpost => 1,
+            | BuildingKind::Outpost
+            // Package J: a gate's ACROSS edge is 1 cell; its span
+            // geometry (4 cells along the line) lives in
+            // `Building::footprint_cells` / `half_extents`, which
+            // are orientation-aware. Consumers that need the true
+            // rectangle use those, never this scalar.
+            | BuildingKind::PalisadeGate
+            | BuildingKind::StoneGate => 1,
             BuildingKind::House
             | BuildingKind::LumberCamp
             | BuildingKind::Mill
@@ -512,7 +624,11 @@ impl BuildingKind {
     /// A builder this close to the building's center is actively
     /// building (see the range constants for the geometry).
     pub fn build_range(self) -> I16F16 {
-        if self == BuildingKind::Market {
+        if self.is_gate() {
+            // Package J: the 4×1 span's own range (see the
+            // constant's geometry note).
+            GATE_BUILD_RANGE
+        } else if self == BuildingKind::Market {
             // The 4×4 kinds keep their own ranges (Market 15.5,
             // Town Center 15.0 — see the constants' geometry notes).
             MARKET_BUILD_RANGE
@@ -598,7 +714,10 @@ impl BuildingKind {
             | BuildingKind::Blacksmith
             | BuildingKind::WatchTower
             | BuildingKind::Market
-            | BuildingKind::StoneWall => Age::Feudal,
+            | BuildingKind::StoneWall
+            // Package J: the Stone Gate is Feudal-born, like its
+            // wall (walls dossier §5: HP keyed Feudal/Castle).
+            | BuildingKind::StoneGate => Age::Feudal,
             BuildingKind::TownCenter
             | BuildingKind::Castle
             | BuildingKind::University
@@ -638,7 +757,14 @@ impl BuildingKind {
             // article's Building table, both wall rows) — the
             // palisade shipped with the generic building sight 4;
             // this arm gives both wall kinds their DE row.
-            BuildingKind::PalisadeWall | BuildingKind::StoneWall => 2,
+            // Package J: gates take the wall family's 2 as well —
+            // ADOPTED (the Building table's gate rows in hand do
+            // not pin a separate sight figure; nothing invented
+            // beyond the family's documented value).
+            BuildingKind::PalisadeWall
+            | BuildingKind::StoneWall
+            | BuildingKind::PalisadeGate
+            | BuildingKind::StoneGate => 2,
             // Castle P3a: the Castle's documented sight is 11
             // (dossier §2, wiki Castle infobox).
             BuildingKind::Castle => 11,
@@ -946,6 +1072,15 @@ impl BuildingKind {
             // §2, wiki Siege Workshop infobox); the Imperial
             // step to 2100 lives in `max_hp_at`.
             BuildingKind::SiegeWorkshop => 1800,
+            // Package J (BLD-13): the Palisade Gate's Dark-Age
+            // column, 240 (Building table, walls dossier §5);
+            // the Feudal step to 400 lives in `max_hp_at`.
+            BuildingKind::PalisadeGate => PALISADE_GATE_HP_DARK,
+            // Package J (BLD-13): the Stone Gate's Feudal
+            // column, 1650 (same table); the Castle step to
+            // 2700 lives in `max_hp_at`. The kind is Feudal-born,
+            // so this base row is the Feudal one.
+            BuildingKind::StoneGate => STONE_GATE_HP_FEUDAL,
         }
     }
 
@@ -977,6 +1112,14 @@ impl BuildingKind {
             // BLD-20: the Stone Wall's Castle step (wiki row
             // 1080 Feudal / 1800 Castle+).
             (BuildingKind::StoneWall, Age::Castle | Age::Imperial) => 1800,
+            // Package J (BLD-13): the Palisade Gate's step —
+            // 240 Dark / 400 Feudal / 400 Castle / 400 Imperial
+            // (Building table, walls dossier §5), written as
+            // "not Dark" like the palisade segment's own step.
+            (BuildingKind::PalisadeGate, age) if age != Age::Dark => 400,
+            // Package J (BLD-13): the Stone Gate's Castle step
+            // (1650 Feudal / 2700 Castle+, same table).
+            (BuildingKind::StoneGate, Age::Castle | Age::Imperial) => 2700,
             (BuildingKind::Barracks, Age::Castle | Age::Imperial) => 1800,
             (BuildingKind::ArcheryRange, Age::Castle | Age::Imperial) => 1800,
             (BuildingKind::Stable, Age::Castle | Age::Imperial) => 1800,
@@ -1023,6 +1166,12 @@ impl BuildingKind {
             // Castle P4a: the Siege Workshop's melee armor is 2
             // (dossier §2, wiki Siege Workshop infobox).
             BuildingKind::SiegeWorkshop => 2,
+            // Package J (BLD-13): the Palisade Gate's melee
+            // armor 2 (Building table, walls dossier §5).
+            BuildingKind::PalisadeGate => 2,
+            // Package J (BLD-13): the Stone Gate's melee armor
+            // 6 (same table).
+            BuildingKind::StoneGate => 6,
             BuildingKind::TownCenter => 3,
             _ => 0,
         }
@@ -1076,6 +1225,13 @@ impl BuildingKind {
             // Castle P4a: the Siege Workshop's pierce armor is
             // 9 (dossier §2, wiki Siege Workshop infobox).
             BuildingKind::SiegeWorkshop => 9,
+            // Package J (BLD-13): the Palisade Gate's pierce
+            // armor 4 (Building table, walls dossier §5) — the
+            // gate is softer to arrows than its wall (5).
+            BuildingKind::PalisadeGate => 4,
+            // Package J (BLD-13): the Stone Gate's pierce armor
+            // 6 (same table).
+            BuildingKind::StoneGate => 6,
             BuildingKind::TownCenter => 5,
             _ => 7,
         }
@@ -1420,6 +1576,14 @@ pub struct Building {
     /// target (the attack delay applies only to an engagement's
     /// first shot).
     pub weapon_engaged: bool,
+    // --- Package J: gate orientation (BLD-13; gates only) ---
+    /// A gate's span direction: `true` = the 4×1 span runs along
+    /// +x from the anchor cell, `false` = along +y. Resolved at
+    /// placement (the horizontal span wins when both fit — the
+    /// deterministic preference `Sim::validate_build_gate`
+    /// applies). Meaningless (and never read) for non-gate kinds.
+    /// Part of the hashed state, written only for gates.
+    pub gate_along_x: bool,
     // --- Castle P3b: garrison state (GAR-01..05) ---
     /// The entities garrisoned inside this building, in entry order
     /// (hashed list of entity ids — GAR-01's impl note). Empty for
@@ -1436,9 +1600,49 @@ pub struct Building {
 }
 
 impl Building {
-    /// The footprint cells, in fixed (row-major) order.
+    /// The footprint cells, in fixed (row-major) order. A gate's
+    /// footprint is its 4×1 span (Package J): four cells from the
+    /// anchor along its orientation — the one non-square
+    /// footprint in the game.
     pub fn footprint_cells(&self) -> Vec<(u32, u32)> {
+        if self.kind.is_gate() {
+            return gate_span_cells(self.cell_x, self.cell_y, self.gate_along_x);
+        }
         footprint_cells(self.cell_x, self.cell_y, self.kind.footprint_size())
+    }
+
+    /// The cells ringing this building's footprint (the builder /
+    /// repairer / attacker standing spots), in fixed row-major
+    /// order. Square kinds use `ring_cells`; a gate rings its
+    /// 4×1 rectangle.
+    pub fn ring_cells(&self) -> Vec<(u32, u32)> {
+        if self.kind.is_gate() {
+            return rect_ring_cells(
+                self.cell_x,
+                self.cell_y,
+                if self.gate_along_x { GATE_SPAN_CELLS } else { 1 },
+                if self.gate_along_x { 1 } else { GATE_SPAN_CELLS },
+            );
+        }
+        ring_cells(self.cell_x, self.cell_y, self.kind.footprint_size())
+    }
+
+    /// The footprint rectangle's half extents in world units,
+    /// (x, y): the geometry combat and approach math clamp
+    /// against. Square kinds read `footprint_size × 2` on both
+    /// axes (a cell is 4 units, so a size-N footprint spans 4N
+    /// units, half 2N); a gate's 4×1 span reads (8, 2) along its
+    /// orientation.
+    pub fn half_extents(&self) -> (I16F16, I16F16) {
+        if self.kind.is_gate() {
+            return if self.gate_along_x {
+                (I16F16::from_num(8), I16F16::from_num(2))
+            } else {
+                (I16F16::from_num(2), I16F16::from_num(8))
+            };
+        }
+        let half = I16F16::from_num(self.kind.footprint_size() as i32 * 2);
+        (half, half)
     }
 
     /// Build progress as a fraction of the kind's build total, in raw
@@ -1602,6 +1806,45 @@ pub fn wall_line_cells(ax: u32, ay: u32, bx: u32, by: u32) -> Vec<(u32, u32)> {
     let mut out = Vec::with_capacity((n + 1) as usize);
     for k in 0..=n {
         out.push((coord(ax, dx, k), coord(ay, dy, k)));
+    }
+    out
+}
+
+/// The cells of a gate's 4×1 span (Package J, BLD-13): four
+/// cells from the anchor `(cell_x, cell_y)` along the span's
+/// orientation — +x when `along_x`, +y otherwise — in fixed
+/// order.
+pub fn gate_span_cells(cell_x: u32, cell_y: u32, along_x: bool) -> Vec<(u32, u32)> {
+    let mut out = Vec::with_capacity(GATE_SPAN_CELLS as usize);
+    for k in 0..GATE_SPAN_CELLS {
+        out.push(if along_x {
+            (cell_x + k, cell_y)
+        } else {
+            (cell_x, cell_y + k)
+        });
+    }
+    out
+}
+
+/// The cells ringing a rectangular footprint of `w`×`h` cells
+/// anchored at `(cell_x, cell_y)`, in fixed row-major order:
+/// the (w+2)×(h+2) block around it minus the footprint itself.
+/// The rectangle form of `ring_cells` (a gate's standing spots).
+/// May contain out-of-grid cells; callers check bounds.
+pub fn rect_ring_cells(cell_x: u32, cell_y: u32, w: u32, h: u32) -> Vec<(u32, u32)> {
+    let mut out = Vec::with_capacity(((w + 2) * (h + 2) - w * h) as usize);
+    for dy in 0..(h as i32 + 2) {
+        for dx in 0..(w as i32 + 2) {
+            let x = cell_x as i32 + dx - 1;
+            let y = cell_y as i32 + dy - 1;
+            if (1..=w as i32).contains(&dx) && (1..=h as i32).contains(&dy) {
+                continue; // the footprint itself
+            }
+            if x < 0 || y < 0 {
+                continue;
+            }
+            out.push((x as u32, y as u32));
+        }
     }
     out
 }
@@ -1854,6 +2097,7 @@ mod tests {
             repair_cost_remainder: 0,
             repair_stone_remainder: 0,
             build_rate_remainder: 0,
+            gate_along_x: true,
             complete: false,
             node_id: None,
             queue: Vec::new(),

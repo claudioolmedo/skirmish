@@ -156,6 +156,7 @@ const BUILD_FNS = [
   'push_build_watch_tower', 'push_build_outpost', 'push_build_market',
   'push_build_town_center', 'push_build_stone_wall', 'push_build_castle',
   'push_build_university', 'push_build_siege_workshop',
+  'push_build_palisade_gate', 'push_build_stone_gate',
 ];
 const BUILD_FNS_QUEUED = BUILD_FNS.map((n) => n + '_queued');
 const TRAIN_AT_FNS = {
@@ -259,6 +260,9 @@ export function applyCommand(sim, cmd, owner, tcOf) {
     case 'repair': return cmd.q
       ? sim.push_repair_queued(cmd.e, cmd.b)
       : sim.push_repair(cmd.e, cmd.b);
+    case 'repair_tc': return cmd.q
+      ? sim.push_repair_tc_queued(cmd.e, cmd.tc)
+      : sim.push_repair_tc(cmd.e, cmd.tc);
     case 'build': return cmd.q
       ? sim[BUILD_FNS_QUEUED[cmd.k]](cmd.e, cmd.x, cmd.y)
       : sim[BUILD_FNS[cmd.k]](cmd.e, cmd.x, cmd.y);

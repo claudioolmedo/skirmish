@@ -1056,6 +1056,10 @@ impl Sim {
                         None => false,
                     },
                     Task::Repair { building } => self.apply_repair(idx, building),
+                    // Package J: a villager sheltered mid-TC-repair
+                    // resumes it on the second ring, through the
+                    // same apply path as its snapshot.
+                    Task::RepairTc { tc } => self.apply_repair_tc(idx, tc),
                     Task::Idle => false,
                 };
                 if !restored {

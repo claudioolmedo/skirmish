@@ -405,6 +405,11 @@ pub enum QueuedOrder {
     /// repair whose target has been destroyed, completed its
     /// repair, or was never valid is dropped.
     Repair { building: u32 },
+    /// Repair a Town Center (villagers; Package J, BLD-07's TC
+    /// slice). The Town Center is an entity, not a placed
+    /// building, so it carries its own queued form. Validation
+    /// happens when the order *executes*, like the base command.
+    RepairTc { tc: u32 },
     /// Attack-move to a world point (CMB-10): walk there, engaging
     /// whatever enters the unit's sight en route (CMB-08 chain),
     /// then resume the walk and hold at the destination.
@@ -419,7 +424,8 @@ pub enum QueuedOrder {
 
 impl QueuedOrder {
     /// Stable tag for the state hash: 0 move, 1 gather, 2 attack,
-    /// 3 build, 4 repair, 5 attack-move, 6 patrol.
+    /// 3 build, 4 repair, 5 attack-move, 6 patrol, 7 repair-Town-
+    /// Center (Package J — append only).
     pub fn tag(self) -> u8 {
         match self {
             QueuedOrder::Move { .. } => 0,
@@ -429,6 +435,7 @@ impl QueuedOrder {
             QueuedOrder::Repair { .. } => 4,
             QueuedOrder::AttackMove { .. } => 5,
             QueuedOrder::Patrol { .. } => 6,
+            QueuedOrder::RepairTc { .. } => 7,
         }
     }
 }
@@ -488,11 +495,20 @@ pub enum Task {
     /// building of the villager's own player, restoring its HP
     /// (BLD-07). The building id is the repair assignment.
     Repair { building: u32 },
+    /// Travelling to — or working on — the villager's own
+    /// player's damaged Town Center, restoring the ENTITY's HP
+    /// (Package J, BLD-07's TC slice: the Town Center is an
+    /// entity in this architecture — BLD-16 — so it cannot ride
+    /// `Repair`'s building record; this sibling phase mirrors
+    /// `Repair` exactly, with the TC entity id as the assignment
+    /// and the 550-wood exception priced in `Sim::repair_tc_tick`).
+    RepairTc { tc: u32 },
 }
 
 impl Task {
     /// Stable tag for the state hash: 0 idle, 1 to-node, 2 gathering,
-    /// 3 returning, 4 to-build, 5 building, 6 repair.
+    /// 3 returning, 4 to-build, 5 building, 6 repair, 7 repair-Town-
+    /// Center (Package J — append only).
     pub fn tag(self) -> u8 {
         match self {
             Task::Idle => 0,
@@ -502,6 +518,7 @@ impl Task {
             Task::ToBuild => 4,
             Task::Building => 5,
             Task::Repair { .. } => 6,
+            Task::RepairTc { .. } => 7,
         }
     }
 }

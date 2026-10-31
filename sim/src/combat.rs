@@ -1401,13 +1401,14 @@ impl Sim {
             }
         };
         let b = &self.buildings[bi];
-        let (bx, by, size) = (b.pos_x, b.pos_y, b.kind.footprint_size());
-        let (ax, ay) = (b.cell_x, b.cell_y);
+        let (bx, by) = (b.pos_x, b.pos_y);
         // Distance to the footprint rectangle (0 when beside it).
-        let half = I16F16::from_num(size as i32 * 2);
+        // Package J: the rectangle is the building's own — a
+        // gate's 4×1 span clamps per axis via `half_extents`.
+        let (hx, hy) = b.half_extents();
         let (px, py) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
-        let qx = (px - bx).clamp(-half, half) + bx;
-        let qy = (py - by).clamp(-half, half) + by;
+        let qx = (px - bx).clamp(-hx, hx) + bx;
+        let qy = (py - by).clamp(-hy, hy) + by;
         let dist = steer::vec_len(px - qx, py - qy);
         // PRJ-08: the firing band applies against buildings too —
         // the distance here is to the footprint's edge, so a
@@ -1494,8 +1495,8 @@ impl Sim {
                 None => true,
                 Some(o) => {
                     let (ox, oy) = (o.target_x, o.target_y);
-                    let qx2 = (ox - bx).clamp(-half, half) + bx;
-                    let qy2 = (oy - by).clamp(-half, half) + by;
+                    let qx2 = (ox - bx).clamp(-hx, hx) + bx;
+                    let qy2 = (oy - by).clamp(-hy, hy) + by;
                     let od = steer::vec_len(ox - qx2, oy - qy2);
                     if spec.range_min > I16F16::ZERO {
                         od < spec.range_min || od > spec.range_max
@@ -1505,7 +1506,8 @@ impl Sim {
                 }
             };
             if need {
-                match self.building_approach_point(idx, ax, ay, size, stand_off) {
+                let cells = self.buildings[bi].ring_cells();
+                match self.building_approach_point(idx, &cells, (bx, by), hx, hy, stand_off) {
                     Some((gx, gy)) => {
                         self.set_move_order(idx, gx, gy);
                     }
@@ -1548,9 +1550,10 @@ impl Sim {
     fn building_approach_point(
         &self,
         idx: usize,
-        ax: u32,
-        ay: u32,
-        size: u32,
+        cells: &[(u32, u32)],
+        center_pos: (I16F16, I16F16),
+        hx: I16F16,
+        hy: I16F16,
         stand_off: I16F16,
     ) -> Option<(I16F16, I16F16)> {
         /// A stand point this close to another living unit's
@@ -1560,13 +1563,17 @@ impl Sim {
 
         let from = (self.entities[idx].pos_x, self.entities[idx].pos_y);
         let attacker_id = self.entities[idx].id;
-        let (bx, by) = crate::build::footprint_center(ax, ay, size);
-        let half = I16F16::from_num(size as i32 * 2);
+        // Package J: the ring cells, the footprint's center and
+        // its per-axis half extents come from the building itself
+        // (`ring_cells` / `half_extents`) — a gate's 4×1 span
+        // rings and clamps as a rectangle, every other kind as
+        // its square, exactly as before.
+        let (bx, by) = center_pos;
         // (distance² to the attacker, ring order, stand point,
         // occupied) — sorted by the first two for a deterministic
         // preference order.
         let mut candidates: Vec<(i64, usize, I16F16, I16F16, bool)> = Vec::new();
-        for (order, (cx, cy)) in crate::build::ring_cells(ax, ay, size).iter().enumerate() {
+        for (order, (cx, cy)) in cells.iter().enumerate() {
             let (cx, cy) = (*cx, *cy);
             if cx >= crate::GRID_DIM || cy >= crate::GRID_DIM {
                 continue;
@@ -1575,8 +1582,8 @@ impl Sim {
             // The edge point nearest this cell's center, and the
             // outward direction from it: axis-aligned for edge
             // cells, diagonal for corner cells.
-            let ex = (center.0 - bx).clamp(-half, half) + bx;
-            let ey = (center.1 - by).clamp(-half, half) + by;
+            let ex = (center.0 - bx).clamp(-hx, hx) + bx;
+            let ey = (center.1 - by).clamp(-hy, hy) + by;
             let (dx, dy) = (center.0 - ex, center.1 - ey);
             let len = steer::vec_len(dx, dy);
             if len == I16F16::ZERO {
@@ -1624,15 +1631,16 @@ impl Sim {
         let owner = self.entities[idx].owner;
         let (ax, ay) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
         let b = &self.buildings[bi];
-        let (bx, by, bid, size) = (b.pos_x, b.pos_y, b.id, b.kind.footprint_size());
+        let (bx, by, bid) = (b.pos_x, b.pos_y, b.id);
+        // Package J: per-axis halves (a gate's span rectangle).
+        let (hx, hy) = b.half_extents();
         if spec.range_max > I16F16::ZERO {
             // PRJ-08: no release from inside the dead zone (edge
             // distance below range_min) — no projectile, no RNG
             // draw, mirroring resolve_strike; attack_building_step
             // repositions the shooter to its stand-off.
-            let half = I16F16::from_num(size as i32 * 2);
-            let qx = (ax - bx).clamp(-half, half) + bx;
-            let qy = (ay - by).clamp(-half, half) + by;
+            let qx = (ax - bx).clamp(-hx, hx) + bx;
+            let qy = (ay - by).clamp(-hy, hy) + by;
             if steer::vec_len(ax - qx, ay - qy) >= spec.range_min {
                 let roll = self.rng.below(100);
                 let mut impact = (bx, by);
@@ -1663,9 +1671,8 @@ impl Sim {
                 });
             }
         } else {
-            let half = I16F16::from_num(size as i32 * 2);
-            let qx = (ax - bx).clamp(-half, half) + bx;
-            let qy = (ay - by).clamp(-half, half) + by;
+            let qx = (ax - bx).clamp(-hx, hx) + bx;
+            let qy = (ay - by).clamp(-hy, hy) + by;
             if steer::vec_len(ax - qx, ay - qy) <= MELEE_REACH {
                 let atk_elev = self.entity_height(idx);
                 let attacks = ram_building_attacks(
@@ -1738,9 +1745,10 @@ impl Sim {
             .iter()
             .filter(|b| {
                 Some(b.id) != primary_building && {
-                    let half = I16F16::from_num(b.kind.footprint_size() as i32 * 2);
-                    let qx = (point.0 - b.pos_x).clamp(-half, half) + b.pos_x;
-                    let qy = (point.1 - b.pos_y).clamp(-half, half) + b.pos_y;
+                    // Package J: per-axis halves (gate spans).
+                    let (hx, hy) = b.half_extents();
+                    let qx = (point.0 - b.pos_x).clamp(-hx, hx) + b.pos_x;
+                    let qy = (point.1 - b.pos_y).clamp(-hy, hy) + b.pos_y;
                     steer::vec_len(point.0 - qx, point.1 - qy) <= radius
                 }
             })
@@ -2459,6 +2467,15 @@ impl Sim {
                 self.grid.set_dynamic(cx, cy, false);
             }
         }
+        // Package J: a gate's block is owned by the gate refresh,
+        // not by `blocks_footprint` — with the record gone the
+        // refresh can no longer see the span, so destruction
+        // frees its cells explicitly, whatever state it died in.
+        if b.kind.is_gate() {
+            for (cx, cy) in b.footprint_cells() {
+                self.grid.set_dynamic(cx, cy, false);
+            }
+        }
         if let Some(nid) = b.node_id {
             if let Some(ni) = self.node_index(nid) {
                 self.nodes[ni].amount_left = I16F16::ZERO;
@@ -2515,10 +2532,10 @@ impl Sim {
         if let Some(bid) = p.intended_building {
             if let Some(bi) = self.building_index(bid) {
                 let b = &self.buildings[bi];
-                let half =
-                    I16F16::from_num(b.kind.footprint_size() as i32 * 2) + HIT_SLACK;
-                if (p.impact_x - b.pos_x).abs() <= half
-                    && (p.impact_y - b.pos_y).abs() <= half
+                // Package J: per-axis halves (gate spans) + slack.
+                let (hx, hy) = b.half_extents();
+                if (p.impact_x - b.pos_x).abs() <= hx + HIT_SLACK
+                    && (p.impact_y - b.pos_y).abs() <= hy + HIT_SLACK
                 {
                     self.damage_building(bid, &p.attacks, p.attacker_elev, p.owner);
                 }

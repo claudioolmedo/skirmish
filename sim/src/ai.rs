@@ -316,12 +316,14 @@ fn is_idle(sim: &Sim, id: u32) -> bool {
 /// a player's order gets (the sim releases repairers on its own
 /// when the building is full or a tick's drip is unaffordable;
 /// this step only ever *assigns*). Targets in priority order:
-/// production buildings first (the army's source — and, with the
-/// Town Center unrepairable for everyone in our architecture,
-/// BLD-17's recorded scope, the highest-value placed buildings
-/// there are), then buildings under attack right now, then the
-/// most damaged; ties by ascending id. Farms are never assigned:
-/// a field is not repaired, for the AI exactly as for a player.
+/// production buildings first (the army's source — and the Town
+/// Center ahead of them all: it trains the villagers everything
+/// else runs on, and since Package J it is repairable for the
+/// AI through `Command::RepairTc` exactly as for a player,
+/// BLD-17's parity), then buildings under attack right now,
+/// then the most damaged; ties by ascending id. Farms are never
+/// assigned: a field is not repaired, for the AI exactly as for
+/// a player.
 /// Repairers come nearest-first — idle villagers, then gatherers
 /// pulled off the line (the construction step's own fallback) —
 /// and never more than `cfg.repairers_max` on duty at once
@@ -340,14 +342,44 @@ fn plan_repair(sim: &mut Sim, cfg: &AiConfig, acted: &mut Vec<u32>) {
         return;
     }
     // Repairers already on duty: they hold their assignments
-    // and count against the cap.
+    // and count against the cap — Town Center repairers
+    // (Package J) included, one shared cap for all repair work.
     let mut total: u32 = 0;
     for e in sim.entities() {
         if e.owner != me || e.dead {
             continue;
         }
-        if let Task::Repair { .. } = e.task {
+        if matches!(e.task, Task::Repair { .. } | Task::RepairTc { .. }) {
             total += 1;
+        }
+    }
+    if total >= cfg.repairers_max {
+        return;
+    }
+    // Package J (BLD-17 parity): the AI's own Town Center is a
+    // repair target through `Command::RepairTc` — the TC is an
+    // entity in this architecture, so it rides its own command,
+    // under the same caps, wood floor and cadence as every other
+    // target here. It is filled FIRST (see the step's doc: the
+    // head of the production-first order).
+    if let Some(tc) = sim.tc_entity_of(me) {
+        let max_hp = sim.stats_for(me, EntityKind::TownCenter).max_hp;
+        if !tc.dead && tc.hp < I16F16::from_num(max_hp) {
+            let (tx, ty, tc_id) = (tc.pos_x, tc.pos_y, tc.id);
+            while total < cfg.repairers_max {
+                let Some(vid) = nearest_repair_candidate(sim, tx, ty, acted) else {
+                    break;
+                };
+                if !sim.can_repair_tc(vid, tc_id) {
+                    break;
+                }
+                sim.push_command(Command::RepairTc {
+                    entity: vid,
+                    tc: tc_id,
+                });
+                acted.push(vid);
+                total += 1;
+            }
         }
     }
     if total >= cfg.repairers_max {
@@ -1814,6 +1846,7 @@ mod tests {
             repair_cost_remainder: 0,
             repair_stone_remainder: 0,
             build_rate_remainder: 0,
+            gate_along_x: true,
             complete: true,
             node_id: None,
             queue: Vec::new(),

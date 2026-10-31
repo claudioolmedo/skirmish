@@ -371,12 +371,31 @@ impl Grid {
         from: (I16F16, I16F16),
         to: (I16F16, I16F16),
     ) -> Option<Vec<(I16F16, I16F16)>> {
+        self.find_path_through(from, to, &[])
+    }
+
+    /// A* from one world point to another, treating the cells of
+    /// `passable` as unblocked wherever the grid's layers say
+    /// blocked (Package J, BLD-13: the querying unit's OWN gate
+    /// cells — a gate is conditionally blocked per querying
+    /// player, so the owner's path runs through its span: the
+    /// gate stands open for the owner's approach, and the derived
+    /// open state lifts the dynamic block as the unit nears).
+    /// Every other cell obeys the ordinary layers, and a
+    /// `passable` cell that is water or a tree stays blocked —
+    /// the exemption lifts only the building (dynamic) layer.
+    pub fn find_path_through(
+        &self,
+        from: (I16F16, I16F16),
+        to: (I16F16, I16F16),
+        passable: &[(u32, u32)],
+    ) -> Option<Vec<(I16F16, I16F16)>> {
         let start = self.world_to_cell(from.0, from.1);
         let goal = self.world_to_cell(to.0, to.1);
-        if self.is_blocked(goal.0, goal.1) {
+        if self.is_blocked(goal.0, goal.1) && !passable.contains(&goal) {
             return None;
         }
-        let cells = self.astar_cells(start, goal)?;
+        let cells = self.astar_cells(start, goal, passable)?;
         let mut waypoints: Vec<(I16F16, I16F16)> = cells
             .iter()
             .skip(1)
@@ -388,7 +407,15 @@ impl Grid {
     }
 
     /// A* over cell indices. Returns the cell trail from start to goal.
-    fn astar_cells(&self, start: (u32, u32), goal: (u32, u32)) -> Option<Vec<(u32, u32)>> {
+    /// `passable` cells (Package J: the querier's own gates) count
+    /// as unblocked for the building layer only — see
+    /// `find_path_through`.
+    fn astar_cells(
+        &self,
+        start: (u32, u32),
+        goal: (u32, u32),
+        passable: &[(u32, u32)],
+    ) -> Option<Vec<(u32, u32)>> {
         if start == goal {
             return Some(vec![start]);
         }
@@ -480,7 +507,14 @@ impl Grid {
                     continue;
                 }
                 let (nx, ny) = (nx as u32, ny as u32);
-                if self.is_blocked(nx, ny) {
+                // Package J: the querier's own gate cells are
+                // passable to it (they lift their building block
+                // for the owner's approach) — every other layer
+                // still applies to them.
+                let gate_free = passable.contains(&(nx, ny))
+                    && !self.is_water(nx, ny)
+                    && !self.is_node_blocked(nx, ny);
+                if self.is_blocked(nx, ny) && !gate_free {
                     continue;
                 }
                 // MAP-07: a cliff border is impassable — the step
@@ -499,8 +533,13 @@ impl Grid {
                 // ringed orthogonally by standing trunks — and the
                 // whole forest block behind it unworkable; the
                 // long tech tests caught what the arena never had.
+                // Package J: the querier's own gate cell is not a
+                // hard corner for it either (same exemption).
                 if dx != 0 && dy != 0 {
-                    let hard = |x: u32, y: u32| self.is_water(x, y) || self.is_dynamic(x, y);
+                    let hard = |x: u32, y: u32| {
+                        (self.is_water(x, y) || self.is_dynamic(x, y))
+                            && !passable.contains(&(x, y))
+                    };
                     if hard((cx as i32 + dx) as u32, cy) || hard(cx, (cy as i32 + dy) as u32) {
                         continue;
                     }

@@ -1162,11 +1162,26 @@ drip (`REPAIR_COST_FRACTION` = 50% of the build cost over a full
 repair; our buildings cost wood only) — both accumulated in
 fixed point on the building record so the totals hold exactly;
 repairers stop and stand idle when a tick's drip is unaffordable.
-Ships and siege do not exist yet; the Town Center is an entity in
-our architecture, not a placed building, so TC repair and its
-550-wood exception are out of scope. · *Status:* **DIFFERS**
-(placed buildings match; ships/siege and the TC exception not
-implemented).
+Ships and siege do not exist yet. The Town Center exception
+shipped 2026-10-30 (Package J, wave-2 audit): the Town Center is
+an entity in our architecture, not a placed building, so TC
+repair runs on a sibling path — `Command::RepairTc` /
+`Task::RepairTc` (tag 7) / `QueuedOrder::RepairTc` (tag 7) —
+that mirrors the placed-building model exactly: the same ring
+approach, the same rate (750 HP/min first repairer, +375/min
+each additional; no TC-specific rate is documented anywhere),
+the same stop-and-stand-idle rule when a tick's drip is
+unaffordable, and fixed-point HP/cost accumulators kept on the
+`TcState` record (hashed only while nonzero, so states with no
+TC repair in flight hash byte-identically). The one documented
+difference is the price: the drip is `TC_REPAIR_FULL_WOOD` =
+550 wood over a full repair and no stone, ever. Pinned by
+`sim/tests/tc_repair.rs` (validation matrix, solo and stacked
+rates, exact 550-wood/0-stone full-repair cost, wood-exhaustion
+stop, queued form, AI parity soak). Ships and siege still do
+not exist; their quarter-rate clause is vacuous until they
+arrive (Castle P4), at which point it enters this rule's scope.
+· *Status:* **MATCHES**.
 
 **BLD-08 — Population support.** Completed buildings add population room:
 House +5, Town Center +5, Castle +20. Losing the building removes the
@@ -1389,15 +1404,47 @@ footprint, segment-scale on 1×1 kinds. Dossier + gap audit:
 sim applies the standing armor (2/5) during construction for
 every kind (BLD-05 models only the foundation HP line), so
 palisade foundations fight at 2/5 here.
-*Follow-on (out of scope, recorded):* the Palisade Gate exists
-in DE on the same line (240/400/400/400 HP, armor 2/4, 20 wood,
-30 s, 4×1 footprint, per the Building table); gate state would
-derive from (owner, proximity of passable units) at path time,
-the pathing grid treating gates as conditionally blocked per
-querying player's diplomacy (M8 diplomacy table).
+*Gates (shipped 2026-10-30, Package J, wave-2 audit):* the
+follow-on above landed. Two gate kinds join the wall family as
+placed buildings — **Palisade Gate** (tag 16: 20 wood, 30 s,
+4×1, HP 240 Dark / 400 Feudal+, armor 2 melee / 4 pierce, Dark
+Age) and **Stone Gate** (tag 17: 30 stone, 70 s, 4×1, HP 1,650
+Feudal / 2,700 Castle+, armor 6/6, Feudal Age), rows per the
+same Building table (walls dossier §5). A gate is placed as a
+4-cell span (along-x, or along-y when the x span cannot stand),
+its anchor resolved deterministically at placement; the span
+may cover the placer's OWN same-family wall segments (complete
+or foundation), which it replaces without refund — enemy
+segments, other buildings, TC-reserved cells, nodes and water
+refuse. Gate state is DERIVED, never stored, exactly as the
+follow-on sketched: a complete gate stands **open** while a
+living mobile unit of its owner is within 5.0 world units of
+the span center and no unit of any other player is (an enemy
+inside the radius holds it shut; an enemy alone never opens
+it; the 5.0 radius is an adopted constant — DE documents the
+behavior, not a number). The grid's dynamic block on the span
+cells follows the derived state — blocked exactly while
+closed, lifted while open — re-derived at the head of every
+tick and after the combat and economy phases; an open gate is
+physically passable by anyone, as in DE. Gate foundations
+follow the wall family's BLD-20 rule: walkable until
+construction first advances, then blocked while closed.
+Owners path through their own gates from anywhere
+(`Grid::find_path_through` admits the mover-owner's gate cells
+as passable; every other path consumer keeps the plain
+search). The client renders gates from the family's segment
+art (open gates translucent), offers each gate on its wall
+button's second press (the build pages are full 3×3 grids),
+and the sim exports `gate_states()` for the derived state.
+Pinned by `sim/tests/gates.rs` (table rows, segment
+replacement, orientation, enemy rejection, derived open/close
++ owner passage + enemy exclusion, foundation blocking, combat
+damage, determinism). *Remaining follow-on:* the Fortified
+Gate (the Fortified Wall University upgrade's gate form) is
+still out of scope — it rides the University tech line.
 *Source:* GAP 4.12, 4.13; wiki pages above. · *Status:*
-**DIFFERS** — walls ship with the semantics above; gates are
-not yet present.
+**MATCHES** — walls and both gates ship with the semantics
+above.
 
 **BLD-14 — Docks straddle the shoreline.** A Dock's footprint must cover
 both land and water tiles. It is the production building for ships and
@@ -1493,9 +1540,16 @@ are its own complete, damaged placed buildings (Farms excluded,
 as for a player), in priority order: production buildings
 first, then buildings under attack (an enemy soldier the AI can
 currently see within the 10-tile defense ring), then the most
-damaged, ties by id; the Town Center is *not* a target — it is
-unrepairable for the human too (the scope divergence below), so
-the AI gains nothing a player lacks. Repairers are the nearest
+damaged, ties by id. **Town Center parity (2026-10-30, Package
+J):** the Town Center *is* a target for both sides through the
+sibling path of BLD-07 — the human orders it with
+`Command::RepairTc`, and the AI fills its own damaged Town
+Center FIRST (ahead of the production-first order above) with
+the same command, under the same repairer caps, 10-wood floor
+and decision cadence, so the AI gains nothing a player lacks.
+Pinned by the AI parity soak in `sim/tests/tc_repair.rs` (a
+human Scout dents the AI's Town Center; its villagers take up
+`Task::RepairTc` and mend it back to full). Repairers are the nearest
 idle villagers, gatherers pulled off the line only when nobody
 is idle (the construction step's own fallback); concurrent
 repairers are capped per profile (2 Easy / 3 Normal — about a
@@ -1517,16 +1571,19 @@ the in-crate gate tests in `sim/src/ai.rs` (funded repair with
 the profile cap observed and the drip visible in the stockpile;
 the bank held at zero — no assignment, no stuck villagers, HP
 frozen; repair resumes when wood returns; both personas).
-Scope divergence
-from BLD-07: placed buildings only — ships and siege do not
-exist yet, and the Town Center is an entity in our architecture
-rather than a placed building, so TC repair (and its 550-wood
-exception) is out of scope, not implemented. The golden hash is
-unchanged: no field is hashed for a state with no repair in
-flight and no buildings standing. · *Status:* **DIFFERS**
-(placed-building rate, cost and stop behavior match the
-documented values; scope is buildings-only, pending
-verification of the in-game feel against the reference).
+Scope note
+(2026-10-30, Package J): the Town Center slice of BLD-07 is now
+implemented on the sibling entity path — `Command::RepairTc`,
+`repair_tc_tick` immediately after `repair_tick`, accumulators
+on the `TcState` record hashed only while nonzero — at the
+documented 550-wood / no-stone exception price (see BLD-07);
+the Town Bell snapshot restores a `Task::RepairTc` like any
+other task. Ships and siege still do not exist, so their
+quarter-rate clause remains vacuous until Castle P4. The
+golden hash is unchanged: no field is hashed for a state with
+no repair in flight and no buildings standing. · *Status:*
+**MATCHES** (placed buildings and the Town Center, human and
+AI paths alike).
 
 **BLD-18 — Defensive buildings & building weapons (the Watch
 Tower and the Outpost).** Buildings that see farther and, for the

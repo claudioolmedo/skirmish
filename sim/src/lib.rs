@@ -88,14 +88,16 @@ mod tribute_vision_tests;
 mod wasm;
 
 pub use build::{
-    build_rate_thirds, repair_rate_hp_per_min, wall_line_cells, Building, BuildingKind,
-    ARCHERY_RANGE_BUILD_TICKS, ARCHERY_RANGE_WOOD_COST, BARRACKS_BUILD_TICKS,
+    build_rate_thirds, gate_span_cells, repair_rate_hp_per_min, wall_line_cells, Building,
+    BuildingKind, ARCHERY_RANGE_BUILD_TICKS, ARCHERY_RANGE_WOOD_COST, BARRACKS_BUILD_TICKS,
     BARRACKS_WOOD_COST, BLACKSMITH_BUILD_TICKS, BLACKSMITH_WOOD_COST, BUILD_RANGE,
     CAMP_BUILD_TICKS, CAMP_WOOD_COST, CASTLE_BUILD_TICKS, CASTLE_POP_SUPPORT, CASTLE_STONE_COST,
-    FARM_BUILD_TICKS, FARM_WOOD_COST, FOOTPRINT_CELLS,
-    HOUSE_BUILD_TICKS, HOUSE_POP_SUPPORT, HOUSE_WOOD_COST, REPAIR_COST_FRACTION,
-    REPAIR_HP_PER_MIN_EXTRA, REPAIR_HP_PER_MIN_FIRST, STABLE_BUILD_TICKS, STABLE_WOOD_COST,
-    TOWN_CENTER_POP_SUPPORT, TOWN_CENTER_WEAPON,
+    FARM_BUILD_TICKS, FARM_WOOD_COST, FOOTPRINT_CELLS, GATE_BUILD_RANGE, GATE_OPEN_RADIUS,
+    GATE_SPAN_CELLS, HOUSE_BUILD_TICKS, HOUSE_POP_SUPPORT, HOUSE_WOOD_COST,
+    PALISADE_GATE_BUILD_TICKS, PALISADE_GATE_HP_DARK, PALISADE_GATE_WOOD_COST,
+    REPAIR_COST_FRACTION, REPAIR_HP_PER_MIN_EXTRA, REPAIR_HP_PER_MIN_FIRST, STABLE_BUILD_TICKS,
+    STABLE_WOOD_COST, STONE_GATE_BUILD_TICKS, STONE_GATE_HP_FEUDAL, STONE_GATE_STONE_COST,
+    TC_REPAIR_FULL_WOOD, TC_REPAIR_RANGE, TOWN_CENTER_POP_SUPPORT, TOWN_CENTER_WEAPON,
 };
 pub use combat::{
     compute_damage, compute_damage_elev, compute_damage_hit, elevation_factor,
@@ -350,10 +352,23 @@ pub enum Command {
     /// under-construction targets are ignored (an unfinished
     /// building is resumed via `Build`, not repaired). The Town
     /// Center is an entity in this architecture, not a placed
-    /// building, and is NOT a repair target. When the owner's
-    /// stockpile cannot cover a tick's drip, the repairer stops
-    /// and goes idle (the documented DE behavior).
+    /// building, and is NOT a repair target — it has its own
+    /// command (`RepairTc`, below). When the owner's stockpile
+    /// cannot cover a tick's drip, the repairer stops and goes
+    /// idle (the documented DE behavior).
     Repair { entity: u32, building: u32 },
+    /// Order a villager to repair one of its own player's Town
+    /// Centers (Package J, BLD-07's TC exception): travel to the
+    /// Town Center's ring and restore the ENTITY's HP at the same
+    /// documented flat rate as buildings (750 HP/min for the
+    /// first repairer, +375 HP/min per additional — no TC-specific
+    /// repair time is documented), charged as a wood drip totaling
+    /// exactly `TC_REPAIR_FULL_WOOD` (550 wood, no stone) over a
+    /// full 0→100% repair — the documented exception to the
+    /// generic 50%-of-build-cost formula. Valid targets are
+    /// living, damaged Town Centers owned by the villager's
+    /// player. The stop-on-empty rule is the buildings' own.
+    RepairTc { entity: u32, tc: u32 },
     /// Task a Trade Cart to a foreign depot (Package D, TRD-05):
     /// the cart travels empty to the named Market — which must be
     /// completed and owned by *another* player (TRD-07: ally,
@@ -669,6 +684,20 @@ struct TcState {
     /// Town Bell state (GAR-07): true between the ring that sends
     /// villagers to shelter and the ring that sends them back.
     bell_active: bool,
+    // --- Package J: Town Center repair accumulators (BLD-07) ---
+    /// Repair fractional-HP accumulator for THIS Town Center,
+    /// in the placed buildings' exact form (see
+    /// `Building::repair_hp_remainder`): the sub-bit remainder of
+    /// the flat-rate restore. Reset to 0 at full HP. Part of the
+    /// hashed state, written only while nonzero.
+    repair_hp_remainder: i64,
+    /// Repair wood-drip accumulator for THIS Town Center, in
+    /// numerator form over the denominator `max_hp_bits` (the
+    /// TC exception prices a full repair at a flat 550 wood, so
+    /// the drip is `550 × restored / max_hp` — see
+    /// `Sim::repair_tc_tick`). Reset to 0 at full HP. Part of
+    /// the hashed state, written only while nonzero.
+    repair_cost_remainder: i64,
 }
 
 impl TcState {
@@ -933,6 +962,8 @@ impl Sim {
                 weapon_next_tick: 0,
                 weapon_engaged: false,
                 bell_active: false,
+                repair_hp_remainder: 0,
+                repair_cost_remainder: 0,
             }],
             buildings: Vec::new(),
             next_building_id: 0,
@@ -984,6 +1015,8 @@ impl Sim {
             weapon_next_tick: 0,
             weapon_engaged: false,
             bell_active: false,
+            repair_hp_remainder: 0,
+            repair_cost_remainder: 0,
         });
         // Villagers and Scout at the mirrored start offsets (the
         // generator keeps the Town Center's 3×3 clear for them).
@@ -1861,7 +1894,7 @@ impl Sim {
     }
 
     /// The living Town Center entity owned by `owner`, if any.
-    fn tc_entity_of(&self, owner: u8) -> Option<&Entity> {
+    pub(crate) fn tc_entity_of(&self, owner: u8) -> Option<&Entity> {
         self.entities.iter().find(|e| {
             e.kind == EntityKind::TownCenter && e.owner == owner && !e.dead
         })
@@ -3526,6 +3559,31 @@ impl Sim {
             && b.hp < I16F16::from_num(self.building_max_hp(b.kind, b.owner))
     }
 
+    /// Would a `RepairTc` command be accepted right now?
+    /// (Package J, BLD-07's TC slice.) The repairer must be a
+    /// living villager, and the target a living, *damaged* Town
+    /// Center owned by the villager's own player — the Town
+    /// Center is an entity in this architecture (BLD-16), so the
+    /// placed-building `can_repair` can never name it; this is
+    /// its sibling rule, with the damage test read against the
+    /// owner's effective TC maximum (`stats_for`: age- and
+    /// Masonry-scaled) instead of a building row. A pure query
+    /// mirroring `issue_repair_tc`'s validation.
+    pub fn can_repair_tc(&self, entity: u32, tc: u32) -> bool {
+        let (Some(idx), Some(ti)) = (self.entity_index(entity), self.entity_index(tc)) else {
+            return false;
+        };
+        let e = &self.entities[idx];
+        if e.kind != EntityKind::Villager || e.dead {
+            return false;
+        }
+        let t = &self.entities[ti];
+        !t.dead
+            && t.kind == EntityKind::TownCenter
+            && t.owner == e.owner
+            && t.hp < I16F16::from_num(self.stats_for(t.owner, EntityKind::TownCenter).max_hp)
+    }
+
     /// Would a `Trade` command be accepted right now? (Package D,
     /// TRD-05/07.) The entity must be a living, player-owned Trade
     /// Cart and the building a *complete* Market owned by another
@@ -3575,6 +3633,7 @@ impl Sim {
             QueuedOrder::Attack { target } => self.can_attack(entity, target),
             QueuedOrder::Build { .. } => self.entities[idx].kind == EntityKind::Villager,
             QueuedOrder::Repair { building } => self.can_repair(entity, building),
+            QueuedOrder::RepairTc { tc } => self.can_repair_tc(entity, tc),
             QueuedOrder::AttackMove { .. } => self.can_attack_move(entity),
             QueuedOrder::Patrol { .. } => self.can_attack_move(entity),
         }
@@ -3669,6 +3728,9 @@ impl Sim {
         if let Task::Repair { building } = e.task {
             return self.building_pos(building);
         }
+        if let Task::RepairTc { tc } = e.task {
+            return self.entity_pos(tc);
+        }
         if let Some(node) = e.task_node {
             if matches!(e.task, Task::ToNode | Task::Gathering | Task::Returning) {
                 return self.node_pos(node);
@@ -3698,6 +3760,7 @@ impl Sim {
             QueuedOrder::Gather { node } => self.node_pos(node),
             QueuedOrder::Attack { target } => self.entity_pos(target),
             QueuedOrder::Repair { building } => self.building_pos(building),
+            QueuedOrder::RepairTc { tc } => self.entity_pos(tc),
             QueuedOrder::AttackMove { x, y } => Some((x, y)),
             QueuedOrder::Patrol { x, y } => Some((x, y)),
         }
@@ -3791,6 +3854,12 @@ impl Sim {
     /// Returns the canonical per-tick state hash. Pure function of
     /// (seed, commands): no wall clock, no randomness outside `self.rng`.
     pub fn tick(&mut self) -> u64 {
+        // 0. Gates (Package J, BLD-13): the derived open state is
+        //    re-evaluated from unit positions and the grid's gate
+        //    blocks follow it — before commands path against the
+        //    grid, so this tick's orders see the state this tick's
+        //    positions imply.
+        self.refresh_gate_blocking();
         // 1. Apply queued commands in FIFO order (deterministic). Taken
         //    out of the queue first so the appliers may borrow `self`.
         let commands: Vec<Command> = std::mem::take(&mut self.commands);
@@ -3822,6 +3891,7 @@ impl Sim {
                 Command::ResearchTcAt { tc, tech } => self.issue_research_tc_at(tc, tech),
                 Command::ResearchAt { building, tech } => self.issue_research_at(building, tech),
                 Command::Repair { entity, building } => self.issue_repair(entity, building),
+                Command::RepairTc { entity, tc } => self.issue_repair_tc(entity, tc),
                 Command::Trade { entity, building } => self.issue_trade(entity, building),
                 Command::MarketBuy { building, resource } => {
                     self.issue_market_buy(building, resource)
@@ -4011,10 +4081,18 @@ impl Sim {
         //    animal behavior, attack machines, projectiles, deaths,
         //    carcass decay lives in the economy phase below.
         self.combat_phase();
+        // Package J: a gate destroyed in combat frees its cells
+        // the same tick (its record is gone; the refresh also
+        // re-derives every surviving gate after the movement and
+        // deaths above).
+        self.refresh_gate_blocking();
 
         // 4. Economy: carcass decay, training (Town Center + Barracks),
         //    then villager work cycles and construction.
         self.economy_tick();
+        // Package J: a gate completed this tick takes its derived
+        // block now, not next tick.
+        self.refresh_gate_blocking();
 
         // 4.5 Garrison (Castle P3b, GAR-01..08): arrivals enter
         //     their hosts, shelter healing accrues, and the ≤20% HP
@@ -4530,13 +4608,9 @@ impl Sim {
     /// fresh order of any work kind clears the others, as with
     /// `Build`/`Gather`).
     fn assign_repairer(&mut self, idx: usize, bid: u32) {
-        let (ax, ay, size) = match self.building_index(bid) {
-            Some(bi) => {
-                let b = &self.buildings[bi];
-                (b.cell_x, b.cell_y, b.kind.footprint_size())
-            }
-            None => return,
-        };
+        if self.building_index(bid).is_none() {
+            return;
+        }
         {
             let e = &mut self.entities[idx];
             e.task = Task::Repair { building: bid };
@@ -4544,7 +4618,7 @@ impl Sim {
             e.task_building = None;
             e.task_dropoff = None;
         }
-        match self.approach_point(idx, ax, ay, size) {
+        match self.approach_point_building(idx, bid) {
             Some((px, py)) => {
                 self.set_move_order(idx, px, py);
             }
@@ -4559,6 +4633,347 @@ impl Sim {
                 e.vel_y = I16F16::ZERO;
             }
         }
+    }
+
+    /// Apply a `RepairTc` command (Package J, BLD-07): validate
+    /// (same rules as `can_repair_tc`), cancel the villager's
+    /// current work, and put it on Town Center repair duty. No
+    /// cost is charged up front — the wood drip runs per tick of
+    /// actual repair in `repair_tc_tick`. Replace semantics like
+    /// every fresh direct order.
+    fn issue_repair_tc(&mut self, entity: u32, tc: u32) {
+        if !self.can_repair_tc(entity, tc) {
+            return;
+        }
+        let idx = self.entity_index(entity).expect("validated");
+        self.entities[idx].order_queue.clear();
+        self.entities[idx].order_from_queue = false;
+        self.apply_repair_tc(idx, tc);
+    }
+
+    /// The mechanics of a Town Center repair order, shared by the
+    /// `RepairTc` command and by queued-order execution. Returns
+    /// whether the order took effect (repairer assigned).
+    fn apply_repair_tc(&mut self, idx: usize, tc: u32) -> bool {
+        let entity = self.entities[idx].id;
+        if !self.can_repair_tc(entity, tc) {
+            return false;
+        }
+        self.assign_repairer_tc(idx, tc);
+        true
+    }
+
+    /// Put villager `idx` on Town Center repair duty (Package J):
+    /// the mirror of `assign_repairer` — the villager travels to
+    /// the best ring standing spot around the Town Center's 4×4
+    /// (anchor = the TC's cell − 1 on each axis, the BLD-16
+    /// convention), and its work step takes it from travel to
+    /// in-range work. The assignment lives in the `Task::RepairTc`
+    /// phase itself, so the gather and construction assignments
+    /// are both cleared, as with `Repair`.
+    fn assign_repairer_tc(&mut self, idx: usize, tc: u32) {
+        let (ax, ay) = match self.entity_index(tc) {
+            Some(ti) => {
+                let t = &self.entities[ti];
+                let (cx, cy) = self.grid.world_to_cell(t.pos_x, t.pos_y);
+                (cx.saturating_sub(1), cy.saturating_sub(1))
+            }
+            None => return,
+        };
+        {
+            let e = &mut self.entities[idx];
+            e.task = Task::RepairTc { tc };
+            e.task_node = None;
+            e.task_building = None;
+            e.task_dropoff = None;
+        }
+        match self.approach_point(idx, ax, ay, 4) {
+            Some((px, py)) => {
+                self.set_move_order(idx, px, py);
+            }
+            None => {
+                // No standing spot right now (crowded ring): the
+                // work step probes again — and gives up to Idle
+                // if the ring stays unreachable (mirrors
+                // `assign_repairer`).
+                let e = &mut self.entities[idx];
+                e.order = None;
+                e.vel_x = I16F16::ZERO;
+                e.vel_y = I16F16::ZERO;
+            }
+        }
+    }
+
+    /// Town Center repair tick (Package J, BLD-07): runs in the
+    /// economy phase right after the buildings' `repair_tick`,
+    /// whose arithmetic it mirrors exactly. For every Town Center
+    /// with villagers on `RepairTc` duty standing in range: the
+    /// restore runs at the documented flat rate (750 HP/min for
+    /// the first repairer, +375 HP/min per additional — BLD-07's
+    /// rate is the villager repair rate and no TC-specific repair
+    /// time is documented), charged as a continuous WOOD drip
+    /// totaling exactly `TC_REPAIR_FULL_WOOD` (550 wood, NO
+    /// stone) over a full 0→max repair — the documented exception
+    /// to the generic 50%-of-build-cost formula. If the drip
+    /// cannot be charged, nothing is restored and the repairers
+    /// stop and stand idle, the buildings' rule. The maximum is
+    /// the owner's effective TC HP (`stats_for`: age- and
+    /// Masonry-scaled), not a flat 2400.
+    fn repair_tc_tick(&mut self) {
+        // Town Centers under repair, in entity order (stable).
+        let mut targets: Vec<u32> = Vec::new();
+        for e in &self.entities {
+            if let Task::RepairTc { tc } = e.task {
+                if !targets.contains(&tc) {
+                    targets.push(tc);
+                }
+            }
+        }
+        for tc_id in targets {
+            let Some(ti) = self.entity_index(tc_id) else {
+                continue;
+            };
+            let Some(si) = self.tc_states.iter().position(|s| s.tc_id == tc_id) else {
+                continue;
+            };
+            let owner = self.entities[ti].owner;
+            let max_hp_bits =
+                (self.stats_for(owner, EntityKind::TownCenter).max_hp as i64) << 16;
+            let hp_bits = self.entities[ti].hp.to_bits() as i64;
+            let missing = max_hp_bits - hp_bits;
+            // In-range repairers only — the construction-range
+            // test against the Town Center's center, the same
+            // test the work step maintains (TC_REPAIR_RANGE is
+            // the TC's own build-range geometry).
+            let mut n = 0u32;
+            for (idx, e) in self.entities.iter().enumerate() {
+                if e.dead || e.kind != EntityKind::Villager {
+                    continue;
+                }
+                if e.task == (Task::RepairTc { tc: tc_id }) {
+                    let t = &self.entities[ti];
+                    if self.distance_to(idx, t.pos_x, t.pos_y) <= TC_REPAIR_RANGE {
+                        n += 1;
+                    }
+                }
+            }
+            if missing <= 0 {
+                self.clear_tc_repairers(tc_id);
+                self.tc_states[si].repair_hp_remainder = 0;
+                self.tc_states[si].repair_cost_remainder = 0;
+                continue;
+            }
+            if n == 0 {
+                continue;
+            }
+            let acc = self.tc_states[si].repair_hp_remainder
+                + build::repair_rate_hp_per_min(n) * 65_536;
+            let mut restored = acc / 3600;
+            let mut hp_rem = acc % 3600;
+            if restored > missing {
+                restored = missing;
+                hp_rem = 0;
+            }
+            if restored <= 0 {
+                self.tc_states[si].repair_hp_remainder = hp_rem;
+                continue;
+            }
+            // The wood drip for exactly the HP about to be
+            // restored: 550 wood × restored / max_hp (numerator
+            // form over the max-HP denominator, so a full repair
+            // totals the exception price to < 1 bit). No stone —
+            // ever (BLD-07).
+            let cost_acc = self.tc_states[si].repair_cost_remainder
+                + TC_REPAIR_FULL_WOOD.to_bits() as i64 * restored;
+            let drip = cost_acc / max_hp_bits;
+            let cost_rem = cost_acc % max_hp_bits;
+            if !self
+                .stockpile_mut(owner)
+                .spend(ResourceKind::Wood, I16F16::from_bits(drip as i32))
+            {
+                // Cannot cover this tick's drip: nothing is
+                // restored, no accumulator moves, and the
+                // repairers stop and stand idle (BLD-07).
+                self.clear_tc_repairers(tc_id);
+                continue;
+            }
+            let done = restored == missing;
+            self.entities[ti].hp = I16F16::from_bits((hp_bits + restored) as i32);
+            self.tc_states[si].repair_hp_remainder = if done { 0 } else { hp_rem };
+            self.tc_states[si].repair_cost_remainder = if done { 0 } else { cost_rem };
+            if done {
+                self.clear_tc_repairers(tc_id);
+            }
+        }
+    }
+
+    /// Release every repairer assigned to Town Center `tc_id`:
+    /// the job is over (the Town Center is full, or the owner
+    /// can no longer pay for the repair) — each repairer goes
+    /// idle where it stands, like `clear_repairers`.
+    fn clear_tc_repairers(&mut self, tc_id: u32) {
+        for idx in 0..self.entities.len() {
+            if self.entities[idx].task == (Task::RepairTc { tc: tc_id }) {
+                self.stop_task(idx);
+            }
+        }
+    }
+
+    // === Package J: gates (BLD-13) ===
+    //
+    // A gate's open state is DERIVED, never stored (the rulebook
+    // follow-on's design brief): a COMPLETE gate stands open
+    // while a living mobile unit of its owner is within
+    // `GATE_OPEN_RADIUS` of its span center, and no unit of any
+    // other player is. A foreign unit inside the radius closes
+    // it (it never opens it); with nobody near, it stands
+    // closed. The grid's dynamic block on the span cells follows
+    // the derived state: blocked exactly while closed, lifted
+    // while open — and an OPEN gate is physically passable by
+    // anyone, owner or not (DE's gates work exactly so: the
+    // derived block is what closes it, never a per-player wall).
+    // An under-construction gate follows the wall family's
+    // foundation rule (BLD-20): walkable until construction
+    // first advances, then blocked while closed.
+
+    /// The derived open state of the gate building `b` (see the
+    /// section note): an owner unit near, no foreign unit near.
+    pub fn gate_is_open(&self, b: &build::Building) -> bool {
+        if !b.kind.is_gate() || !b.complete {
+            return false;
+        }
+        let mut own_near = false;
+        // Squared distances in i64 BITS: world offsets reach
+        // hundreds of units, whose squares overflow I16F16 —
+        // the same reason the combat scans square i64 bit values.
+        let r = GATE_OPEN_RADIUS.to_bits() as i64;
+        for e in &self.entities {
+            if e.dead || e.garrisoned_in.is_some() || !e.kind.is_mobile() {
+                continue;
+            }
+            let dx = (e.pos_x - b.pos_x).to_bits() as i64;
+            let dy = (e.pos_y - b.pos_y).to_bits() as i64;
+            if dx * dx + dy * dy > r * r {
+                continue;
+            }
+            if e.owner == b.owner {
+                own_near = true;
+            } else {
+                // Any foreign unit inside the radius holds the
+                // gate shut, whatever the owner side shows.
+                return false;
+            }
+        }
+        own_near
+    }
+
+    /// Re-derive every gate's grid block from its open state
+    /// (see the section note). Idempotent and cheap (gate counts
+    /// are small); called at the head of `tick()` and after the
+    /// combat and economy phases, so a completion or a death
+    /// lands its block change the same tick. Foundation gates
+    /// (BLD-20's rule): unblocked until construction first
+    /// advances (`progress_thirds > 0`), blocked from then on
+    /// while closed.
+    fn refresh_gate_blocking(&mut self) {
+        for bi in 0..self.buildings.len() {
+            if !self.buildings[bi].kind.is_gate() {
+                continue;
+            }
+            let b = &self.buildings[bi];
+            let blocked = if b.complete {
+                !self.gate_is_open(b)
+            } else {
+                b.progress_thirds > 0
+            };
+            let cells = b.footprint_cells();
+            for &(cx, cy) in &cells {
+                if cx < GRID_DIM && cy < GRID_DIM {
+                    self.grid.set_dynamic(cx, cy, blocked);
+                }
+            }
+        }
+    }
+
+    /// The span cells of every gate owned by `owner` (complete
+    /// or not) — the passable set a move order for one of the
+    /// owner's units paths through, so it can route to and
+    /// through its own gate from anywhere on the map (the gate
+    /// lifts its block as the unit enters the open radius).
+    /// Empty in a world without gates, where `set_move_order`
+    /// keeps the plain path search.
+    fn gate_cells_of(&self, owner: u8) -> Vec<(u32, u32)> {
+        let mut out = Vec::new();
+        for b in &self.buildings {
+            if b.kind.is_gate() && b.owner == owner {
+                out.extend(b.footprint_cells());
+            }
+        }
+        out
+    }
+
+    /// Can a gate of `kind` stand with its span on
+    /// `gate_span_cells(ax, ay, along_x)`, placed by `owner`?
+    /// The span's cells must be in bounds, off every living Town
+    /// Center's reserved 4×4 (BLD-16) and off every live resource
+    /// node, and each cell must be either free ground or covered
+    /// by one of the placer's OWN same-family wall segments
+    /// (complete or foundation) — the segments the gate replaces
+    /// (the dossier's "placed over a wall line's span"). Enemy
+    /// segments, other buildings (a Farm's plot included) and
+    /// blocked ground all refuse. Units never block a gate's
+    /// placement (the wall family's BLD-20 exemption: the line
+    /// is dragged over standing ground).
+    fn gate_span_placeable(
+        &self,
+        kind: BuildingKind,
+        owner: u8,
+        ax: u32,
+        ay: u32,
+        along_x: bool,
+    ) -> bool {
+        let family = kind.wall_family().expect("gate kind");
+        for &(cx, cy) in &build::gate_span_cells(ax, ay, along_x) {
+            if cx >= GRID_DIM || cy >= GRID_DIM {
+                return false;
+            }
+            // A living Town Center's reserved 4×4 (BLD-16): the
+            // cells tx−1..=tx+2 × ty−1..=ty+2 around its cell,
+            // written without subtraction so nothing underflows.
+            for e in &self.entities {
+                if e.kind == EntityKind::TownCenter && !e.dead {
+                    let (tx, ty) = self.grid.world_to_cell(e.pos_x, e.pos_y);
+                    if cx + 1 >= tx && cx <= tx + 2 && cy + 1 >= ty && cy <= ty + 2 {
+                        return false;
+                    }
+                }
+            }
+            // A live resource node reserves its cell.
+            for n in &self.nodes {
+                if !n.is_depleted() && self.grid.world_to_cell(n.pos_x, n.pos_y) == (cx, cy) {
+                    return false;
+                }
+            }
+            // The replacable segment: the placer's own
+            // same-family wall standing on exactly this cell.
+            let replaced = self.buildings.iter().any(|b| {
+                b.kind == family && b.owner == owner && b.cell_x == cx && b.cell_y == cy
+            });
+            if replaced {
+                continue;
+            }
+            if self.grid.is_blocked(cx, cy) {
+                return false;
+            }
+            // Any standing building's footprint (farms included —
+            // they never enter the blocking grid).
+            for b in &self.buildings {
+                if b.footprint_cells().contains(&(cx, cy)) {
+                    return false;
+                }
+            }
+        }
+        true
     }
 
     /// Apply a `TrainAt` command (M3): deduct the unit's table cost
@@ -4853,9 +5268,51 @@ impl Sim {
                 .add(ResourceKind::Wood, kind.wood_cost());
             return None;
         }
+        // Package J: a gate's orientation resolves here exactly
+        // as validation resolved it (along-x wins when both spans
+        // fit — validation ran in this same command step, with no
+        // interleaving placement, so the re-derivation cannot
+        // disagree), its center is the span's center, and the
+        // placer's own same-family wall segments under the span
+        // are REMOVED as the foundation lands (the dossier's
+        // conversion: the gate replaces the segments — no refund,
+        // it is not a deletion). The removal runs through the
+        // ordinary destruction path, so builders/repairers on a
+        // replaced segment stand down and its cell frees before
+        // the gate's own refresh takes the span over.
+        let mut gate_along_x = true;
+        if kind.is_gate() {
+            gate_along_x = self.gate_span_placeable(kind, builder_owner, cell_x, cell_y, true);
+            let family = kind.wall_family().expect("gate kind");
+            let span = build::gate_span_cells(cell_x, cell_y, gate_along_x);
+            let replaced: Vec<u32> = self
+                .buildings
+                .iter()
+                .filter(|b| {
+                    b.kind == family
+                        && b.owner == builder_owner
+                        && span.contains(&(b.cell_x, b.cell_y))
+                })
+                .map(|b| b.id)
+                .collect();
+            for bid in replaced {
+                self.destroy_building(bid);
+            }
+        }
         let id = self.next_building_id;
         self.next_building_id += 1;
-        let (pos_x, pos_y) = build::footprint_center(cell_x, cell_y, kind.footprint_size());
+        let (pos_x, pos_y) = if kind.is_gate() {
+            // The span's center: the anchor cell's center shifted
+            // 1.5 cells (6 units) along the span's axis.
+            let anchor = build::footprint_center(cell_x, cell_y, 1);
+            if gate_along_x {
+                (anchor.0 + I16F16::from_num(6), anchor.1)
+            } else {
+                (anchor.0, anchor.1 + I16F16::from_num(6))
+            }
+        } else {
+            build::footprint_center(cell_x, cell_y, kind.footprint_size())
+        };
         let building = Building {
             id,
             kind,
@@ -4878,6 +5335,7 @@ impl Sim {
             repair_cost_remainder: 0,
             repair_stone_remainder: 0,
             build_rate_remainder: 0,
+            gate_along_x,
             complete: false,
             node_id: None,
             queue: Vec::new(),
@@ -5162,6 +5620,7 @@ impl Sim {
             }
             QueuedOrder::Build { kind, x, y } => self.apply_build(entity, kind, x, y),
             QueuedOrder::Repair { building } => self.apply_repair(idx, building),
+            QueuedOrder::RepairTc { tc } => self.apply_repair_tc(idx, tc),
             QueuedOrder::AttackMove { x, y } => {
                 if !self.combat_orderable(idx) {
                     return false;
@@ -5332,14 +5791,14 @@ impl Sim {
         // clicked; the placement ghost always names the anchor and
         // resolves identically).
         for b in &self.buildings {
-            let bsize = b.kind.footprint_size();
+            // The order's cell may be ANY cell of the standing
+            // footprint — read through `footprint_cells`, which
+            // is the square range for every kind but a gate,
+            // whose span is its 4×1 (Package J).
             if !b.complete
                 && b.kind == kind
                 && b.owner == self.entities[idx].owner
-                && ax >= b.cell_x
-                && ax < b.cell_x + bsize
-                && ay >= b.cell_y
-                && ay < b.cell_y + bsize
+                && b.footprint_cells().contains(&(ax, ay))
             {
                 return BuildVerdict::Resume(b.id);
             }
@@ -5359,6 +5818,13 @@ impl Sim {
             if !self.has_completed_building(builder_owner, req) {
                 return BuildVerdict::Reject;
             }
+        }
+        // Package J: a gate's placement is its own branch — the
+        // 4×1 span is not a square footprint, and its cells may
+        // replace the placer's own same-family wall segments
+        // (see `validate_build_gate`).
+        if kind.is_gate() {
+            return self.validate_build_gate(idx, kind, ax, ay);
         }
         // The whole footprint must be inside the grid.
         if ax + size > GRID_DIM || ay + size > GRID_DIM {
@@ -5484,23 +5950,76 @@ impl Sim {
         BuildVerdict::Place(ax, ay)
     }
 
+    /// Placement validation for a gate (Package J, BLD-13): the
+    /// span's orientation resolves deterministically — the
+    /// along-x span wins when both fit (the same resolution
+    /// `place_building` re-derives when the foundation lands, so
+    /// the two always agree) — then the span must be placeable
+    /// (`gate_span_placeable`), the price payable, and a ring
+    /// standing spot reachable, the generic tail's three checks
+    /// in the span's own geometry.
+    fn validate_build_gate(
+        &self,
+        idx: usize,
+        kind: BuildingKind,
+        ax: u32,
+        ay: u32,
+    ) -> BuildVerdict {
+        let builder_owner = self.entities[idx].owner;
+        let along_x = if self.gate_span_placeable(kind, builder_owner, ax, ay, true) {
+            true
+        } else if self.gate_span_placeable(kind, builder_owner, ax, ay, false) {
+            false
+        } else {
+            return BuildVerdict::Reject;
+        };
+        if self.stockpile_of(builder_owner).amount(ResourceKind::Wood) < kind.wood_cost() {
+            return BuildVerdict::Reject;
+        }
+        if self.stockpile_of(builder_owner).amount(ResourceKind::Stone) < kind.stone_cost() {
+            return BuildVerdict::Reject;
+        }
+        // Reachable-ish: at least one ring cell of the span
+        // stands open and the builder has a path to it (stand
+        // points pulled in to 9.5 from the span center, the
+        // `approach_point_building` geometry, inlined here
+        // because the building does not stand yet).
+        let cells = build::rect_ring_cells(
+            ax,
+            ay,
+            if along_x { GATE_SPAN_CELLS } else { 1 },
+            if along_x { 1 } else { GATE_SPAN_CELLS },
+        );
+        let (pos_x, pos_y) = {
+            let anchor_center = self.grid.cell_center(ax, ay);
+            if along_x {
+                (anchor_center.0 + I16F16::from_num(6), anchor_center.1)
+            } else {
+                (anchor_center.0, anchor_center.1 + I16F16::from_num(6))
+            }
+        };
+        if self
+            .approach_point_cells(idx, &cells, Some(((pos_x, pos_y), I16F16::from_bits(622_592))))
+            .is_none()
+        {
+            return BuildVerdict::Reject;
+        }
+        BuildVerdict::Place(ax, ay)
+    }
+
     /// Put villager `idx` on construction duty for building `bid`:
     /// travel phase, with a move order to the best standing spot.
     fn assign_builder(&mut self, idx: usize, bid: u32) {
-        let (ax, ay, size) = match self.building_index(bid) {
-            Some(bi) => {
-                let b = &self.buildings[bi];
-                (b.cell_x, b.cell_y, b.kind.footprint_size())
-            }
-            None => return,
-        };
+        if self.building_index(bid).is_none() {
+            return;
+        }
         {
             let e = &mut self.entities[idx];
             e.task = Task::ToBuild;
             e.task_building = Some(bid);
             e.task_node = None;
         }
-        match self.approach_point(idx, ax, ay, size) {
+        match self.approach_point_building(idx, bid) {
             Some((px, py)) => {
                 self.set_move_order(idx, px, py);
             }
@@ -5526,8 +6045,63 @@ impl Sim {
         ay: u32,
         size: u32,
     ) -> Option<(I16F16, I16F16)> {
+        // A 1×1 site's builder must stand BESIDE his segment
+        // (SMALL_BUILD_RANGE, 5.8): targeting the ring cell's
+        // center livelocked a diagonal approach — steering
+        // completes the order up to 1.0 short of the center,
+        // stranding him up to ≈6.66 from the segment's center,
+        // outside build range; the re-issued order then
+        // completed instantly, forever (the stone-line stall
+        // the 2026-10-24 walls tests caught). So a 1×1 stand
+        // point is pulled in along the ray from the site's
+        // center to 4.6 units: still inside the ring cell
+        // (which spans 2.0–6.0 orthogonally, 2.83–8.49
+        // diagonally), and his walk crosses into build range
+        // before steering can complete the order.
+        let pull = if size == 1 {
+            Some((self.grid.cell_center(ax, ay), I16F16::from_bits(301_466))) // ≈4.6
+        } else {
+            None
+        };
+        self.approach_point_cells(idx, &build::ring_cells(ax, ay, size), pull)
+    }
+
+    /// The standing spot for building `bid` (Package J): square
+    /// kinds read `approach_point` on their anchor; a GATE reads
+    /// the ring of its whole 4×1 span, with stand points pulled
+    /// in toward the span's center to 9.5 units — a span-corner
+    /// ring cell's center sits ≈10.8 from the center, outside
+    /// the gate's build range (10.5), so the corner cells need
+    /// the same pull-in medicine the 1×1 sites take.
+    fn approach_point_building(&self, idx: usize, bid: u32) -> Option<(I16F16, I16F16)> {
+        let bi = self.building_index(bid)?;
+        let b = &self.buildings[bi];
+        if b.kind.is_gate() {
+            let cells = b.ring_cells();
+            return self.approach_point_cells(
+                idx,
+                &cells,
+                Some(((b.pos_x, b.pos_y), I16F16::from_bits(622_592))), // 9.5
+            );
+        }
+        self.approach_point(idx, b.cell_x, b.cell_y, b.kind.footprint_size())
+    }
+
+    /// The first cell of `cells` (fixed order) that is in bounds,
+    /// unblocked, and reachable from the villager's position —
+    /// the shared search under `approach_point`. When `pull`
+    /// names a site center and a stand distance, the stand point
+    /// is pulled in along the ray from the site to that distance
+    /// (see `approach_point`'s note); otherwise the cell's center
+    /// is the stand point.
+    fn approach_point_cells(
+        &self,
+        idx: usize,
+        cells: &[(u32, u32)],
+        pull: Option<((I16F16, I16F16), I16F16)>,
+    ) -> Option<(I16F16, I16F16)> {
         let from = (self.entities[idx].pos_x, self.entities[idx].pos_y);
-        for (cx, cy) in build::ring_cells(ax, ay, size) {
+        for &(cx, cy) in cells {
             if cx >= GRID_DIM || cy >= GRID_DIM {
                 continue;
             }
@@ -5535,31 +6109,17 @@ impl Sim {
                 continue;
             }
             let center = self.grid.cell_center(cx, cy);
-            // A 1×1 site's builder must stand BESIDE his segment
-            // (SMALL_BUILD_RANGE, 5.8): targeting the ring cell's
-            // center livelocked a diagonal approach — steering
-            // completes the order up to 1.0 short of the center,
-            // stranding him up to ≈6.66 from the segment's center,
-            // outside build range; the re-issued order then
-            // completed instantly, forever (the stone-line stall
-            // the 2026-10-24 walls tests caught). So a 1×1 stand
-            // point is pulled in along the ray from the site's
-            // center to 4.6 units: still inside the ring cell
-            // (which spans 2.0–6.0 orthogonally, 2.83–8.49
-            // diagonally), and his walk crosses into build range
-            // before steering can complete the order.
-            let target = if size == 1 {
-                let site = self.grid.cell_center(ax, ay);
-                let (dx, dy) = (center.0 - site.0, center.1 - site.1);
-                let len = steer::vec_len(dx, dy);
-                if len > I16F16::ZERO {
-                    let stand = I16F16::from_bits(301_466); // ≈4.6
-                    (site.0 + dx * stand / len, site.1 + dy * stand / len)
-                } else {
-                    center
+            let target = match pull {
+                Some((site, stand)) => {
+                    let (dx, dy) = (center.0 - site.0, center.1 - site.1);
+                    let len = steer::vec_len(dx, dy);
+                    if len > I16F16::ZERO {
+                        (site.0 + dx * stand / len, site.1 + dy * stand / len)
+                    } else {
+                        center
+                    }
                 }
-            } else {
-                center
+                None => center,
             };
             if self.grid.find_path(from, target).is_some() {
                 return Some(target);
@@ -5630,7 +6190,14 @@ impl Sim {
     /// affected through other paths).
     fn set_move_order(&mut self, idx: usize, x: I16F16, y: I16F16) -> bool {
         let (px, py) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
-        let order = match self.grid.find_path((px, py), (x, y)) {
+        // Package J (BLD-13): a unit paths through its OWN
+        // player's gate spans — the gate is conditionally blocked
+        // per querying player, and the derived open state lifts
+        // the block as the owner approaches. In a world without
+        // gates of this owner the search is the plain one,
+        // unchanged.
+        let gates = self.gate_cells_of(self.entities[idx].owner);
+        let order = match self.grid.find_path_through((px, py), (x, y), &gates) {
             Some(wps) if !wps.is_empty() => Some(MoveOrder {
                 target_x: x,
                 target_y: y,
@@ -5762,6 +6329,9 @@ impl Sim {
         }
         self.construction_tick();
         self.repair_tick();
+        // Package J: Town Center repair runs on the buildings'
+        // model, immediately after it (BLD-07's TC slice).
+        self.repair_tc_tick();
     }
 
     /// Spawn a unit trained at a production building: on the first
@@ -6075,11 +6645,7 @@ impl Sim {
                     return;
                 }
                 let (bx, by) = (self.buildings[bi].pos_x, self.buildings[bi].pos_y);
-                let (ax, ay) = (self.buildings[bi].cell_x, self.buildings[bi].cell_y);
-                let (range, size) = (
-                    self.buildings[bi].kind.build_range(),
-                    self.buildings[bi].kind.footprint_size(),
-                );
+                let range = self.buildings[bi].kind.build_range();
                 let d = self.distance_to(idx, bx, by);
                 if d <= range {
                     let e = &mut self.entities[idx];
@@ -6088,7 +6654,7 @@ impl Sim {
                     e.vel_x = I16F16::ZERO;
                     e.vel_y = I16F16::ZERO;
                 } else if self.entities[idx].order.is_none() {
-                    match self.approach_point(idx, ax, ay, size) {
+                    match self.approach_point_building(idx, bid) {
                         Some((px, py)) => {
                             self.set_move_order(idx, px, py);
                         }
@@ -6141,7 +6707,7 @@ impl Sim {
                         return;
                     }
                 };
-                let (complete, hp, max_hp, bx, by, ax, ay, range, size) = {
+                let (complete, hp, max_hp, bx, by, range) = {
                     let b = &self.buildings[bi];
                     (
                         b.complete,
@@ -6149,10 +6715,7 @@ impl Sim {
                         I16F16::from_num(self.building_max_hp(b.kind, b.owner)),
                         b.pos_x,
                         b.pos_y,
-                        b.cell_x,
-                        b.cell_y,
                         b.kind.build_range(),
-                        b.kind.footprint_size(),
                     )
                 };
                 if !complete || hp >= max_hp {
@@ -6174,13 +6737,59 @@ impl Sim {
                     e.vel_x = I16F16::ZERO;
                     e.vel_y = I16F16::ZERO;
                 } else if self.entities[idx].order.is_none() {
-                    match self.approach_point(idx, ax, ay, size) {
+                    match self.approach_point_building(idx, bid) {
                         Some((px, py)) => {
                             self.set_move_order(idx, px, py);
                         }
                         // No standable ring cell is reachable:
                         // give up and idle instead of probing the
                         // ring every tick (mirrors `ToBuild`).
+                        None => self.stop_task(idx),
+                    }
+                }
+            }
+            Task::RepairTc { tc } => {
+                // Package J: the Repair arm's mirror for the Town
+                // Center entity (BLD-07's TC slice).
+                let ti = match self.entity_index(tc) {
+                    Some(ti) => ti,
+                    None => {
+                        self.stop_task(idx);
+                        return;
+                    }
+                };
+                let t = &self.entities[ti];
+                let max_hp = I16F16::from_num(
+                    self.stats_for(t.owner, EntityKind::TownCenter).max_hp,
+                );
+                if t.dead || t.hp >= max_hp {
+                    // The Town Center is gone, or the repair
+                    // finished (another repairer's tick can land
+                    // the final HP before this step runs): the
+                    // job is done — stand down.
+                    self.stop_task(idx);
+                    return;
+                }
+                let (bx, by) = (t.pos_x, t.pos_y);
+                let (tcx, tcy) = self.grid.world_to_cell(bx, by);
+                let (ax, ay) = (tcx.saturating_sub(1), tcy.saturating_sub(1));
+                let d = self.distance_to(idx, bx, by);
+                if d <= TC_REPAIR_RANGE {
+                    // In range: stand and work. The HP restore
+                    // itself is applied by `repair_tc_tick`,
+                    // which counts the in-range repairers.
+                    let e = &mut self.entities[idx];
+                    e.order = None;
+                    e.vel_x = I16F16::ZERO;
+                    e.vel_y = I16F16::ZERO;
+                } else if self.entities[idx].order.is_none() {
+                    match self.approach_point(idx, ax, ay, 4) {
+                        Some((px, py)) => {
+                            self.set_move_order(idx, px, py);
+                        }
+                        // No standable ring cell is reachable:
+                        // give up and idle instead of probing the
+                        // ring every tick (mirrors `Repair`).
                         None => self.stop_task(idx),
                     }
                 }
@@ -6500,6 +7109,8 @@ impl Sim {
             weapon_next_tick: 0,
             weapon_engaged: false,
             bell_active: false,
+            repair_hp_remainder: 0,
+            repair_cost_remainder: 0,
         });
     }
 
@@ -6540,20 +7151,25 @@ impl Sim {
         // moved in afterwards. Deterministic: entities in id
         // order, the ring search in fixed order.
         if self.buildings[bi].kind != BuildingKind::Farm {
-            let (ax, ay, size) = (
-                self.buildings[bi].cell_x,
-                self.buildings[bi].cell_y,
-                self.buildings[bi].kind.footprint_size(),
-            );
-            let cells = build::footprint_cells(ax, ay, size);
-            for idx in 0..self.entities.len() {
-                if self.entities[idx].dead {
-                    continue;
-                }
-                let cell = self.grid
-                    .world_to_cell(self.entities[idx].pos_x, self.entities[idx].pos_y);
-                if cells.contains(&cell) {
-                    self.displace_out_of_blocked(idx);
+            // Package J: the footprint read is the building's own
+            // (a gate's span, not its anchor cell). A gate that
+            // completes OPEN (its owner's unit at the span) leaves
+            // its standers be — the span is passable ground while
+            // open; a gate that completes closed cures its span
+            // like any blocking footprint.
+            let gate_open = self.buildings[bi].kind.is_gate()
+                && self.gate_is_open(&self.buildings[bi]);
+            if !gate_open {
+                let cells = self.buildings[bi].footprint_cells();
+                for idx in 0..self.entities.len() {
+                    if self.entities[idx].dead {
+                        continue;
+                    }
+                    let cell = self.grid
+                        .world_to_cell(self.entities[idx].pos_x, self.entities[idx].pos_y);
+                    if cells.contains(&cell) {
+                        self.displace_out_of_blocked(idx);
+                    }
                 }
             }
         }
@@ -7055,6 +7671,17 @@ impl Sim {
                 h.write_u64(s.weapon_next_tick);
                 h.write_u8(u8::from(s.weapon_engaged));
             }
+            // Package J: the TC's repair accumulators (BLD-07) —
+            // written ONLY while either is nonzero, behind marker
+            // 0xB7 (this section's 0xBE bell and 0xB8 weapon
+            // markers precede it), so a state with no Town Center
+            // repair in flight hashes byte-identically to before;
+            // a repair in flight is fully covered.
+            if s.repair_hp_remainder != 0 || s.repair_cost_remainder != 0 {
+                h.write_u8(0xB7);
+                h.write_u64(s.repair_hp_remainder as u64);
+                h.write_u64(s.repair_cost_remainder as u64);
+            }
         }
         // M2.5: buildings (id order), construction state included.
         // M3: production queues join.
@@ -7165,6 +7792,20 @@ impl Sim {
                 h.write_u64(b.weapon_next_tick);
                 h.write_u8(u8::from(b.weapon_engaged));
             }
+            // Package J: a gate's span orientation (BLD-13) —
+            // written ONLY for gates, behind marker 0xBB (the
+            // building section's 0xB7 repair-stone, 0xB5 Treadmill
+            // build-rate and 0xB6 weapon blocks precede it; 0xBB
+            // is the next free marker in this section — renumbered
+            // at the combo landing, where 0xB5 was already taken),
+            // so a state with no gate standing hashes
+            // byte-identically to before; a placed gate's
+            // orientation — which decides its footprint, center
+            // and blocking — is covered.
+            if b.kind.is_gate() {
+                h.write_u8(0xBB);
+                h.write_u8(u8::from(b.gate_along_x));
+            }
         }
         // SIM-06 boundary: progression, stockpiles, nodes, queues
         // and buildings — the economy block.
@@ -7210,6 +7851,7 @@ impl Sim {
                         h.write_i32(y.to_bits());
                     }
                     QueuedOrder::Repair { building } => h.write_u32(building),
+                    QueuedOrder::RepairTc { tc } => h.write_u32(tc),
                     QueuedOrder::AttackMove { x, y } => {
                         h.write_i32(x.to_bits());
                         h.write_i32(y.to_bits());
@@ -7226,7 +7868,7 @@ impl Sim {
             // written only in phase, so a state with no queued
             // chain in flight hashes exactly as before (the
             // golden stream is untouched). The byte cannot be
-            // mistaken for what follows: task tags are 0..=6.
+            // mistaken for what follows: task tags are 0..=7.
             if e.order_from_queue {
                 h.write_u8(0xF1);
             }
@@ -7239,6 +7881,11 @@ impl Sim {
             // exactly as before (the golden stream is untouched).
             if let Task::Repair { building } = e.task {
                 h.write_u32(building);
+            }
+            // Town Center repair assignment (Package J, BLD-07):
+            // the same in-phase-only pattern.
+            if let Task::RepairTc { tc } = e.task {
+                h.write_u32(tc);
             }
             match e.task_node {
                 None => h.write_u8(0),
@@ -7429,6 +8076,9 @@ impl Sim {
                         h.write_u8(b.task.tag());
                         if let Task::Repair { building } = b.task {
                             h.write_u32(building);
+                        }
+                        if let Task::RepairTc { tc } = b.task {
+                            h.write_u32(tc);
                         }
                         match b.task_node {
                             None => h.write_u8(0),
@@ -7912,6 +8562,7 @@ mod tests {
             repair_cost_remainder: 0,
             repair_stone_remainder: 0,
             build_rate_remainder: 0,
+            gate_along_x: true,
             complete: false,
             node_id: None,
             queue: Vec::new(),
@@ -8022,6 +8673,7 @@ mod tests {
             repair_cost_remainder: 0,
             repair_stone_remainder: 0,
             build_rate_remainder: 0,
+            gate_along_x: true,
             complete: true,
             node_id: Some(nid),
             queue: Vec::new(),

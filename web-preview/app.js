@@ -342,42 +342,56 @@ function pngIcon(png, cls) {
 // 15 castle (Castle P3a — 0 wood, 650 stone, 4×4);
 // 16 university (Castle P3c — 200 wood, 4×4);
 // 17 siege workshop (Castle P4a — 200 wood, 4×4, requires a
-// completed Blacksmith).
+// completed Blacksmith);
+// 18 palisade gate, 19 stone gate (Package J, BLD-13 — 4×1 spans:
+// 20 wood / 30 stone; BUILD_SIZE reads 1, the span's ACROSS edge —
+// the span itself is resolved by the sim and read back through
+// gate_states()).
 // Costs and footprints mirror the sim (MECHANICS-STUDY §5; the
 // palisade row is the current DE wiki row — 3 wood per segment).
-const BUILD_COST = [25, 60, 175, 100, 100, 100, 175, 175, 150, 3, 35, 25, 175, 275, 0, 0, 200, 200];
+const BUILD_COST = [25, 60, 175, 100, 100, 100, 175, 175, 150, 3, 35, 25, 175, 275, 0, 0, 200, 200, 20, 0];
 // Stone paid at placement, by kind tag (BLD-18's two defensive
 // structures, the Town Center, the Stone Wall and the Castle
 // cost stone; every other entry 0).
-const BUILD_COST_STONE = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 125, 5, 0, 100, 5, 650, 0, 0];
+const BUILD_COST_STONE = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 125, 5, 0, 100, 5, 650, 0, 0, 0, 30];
 const BUILD_I18N = ['house', 'farm', 'barracks', 'lumber', 'mill',
   'mining', 'range', 'stable', 'blacksmith', 'palisade', 'watchtower',
-  'outpost', 'market', 'towncenter', 'stonewall', 'castle', 'university', 'siegeworkshop'];
+  'outpost', 'market', 'towncenter', 'stonewall', 'castle', 'university', 'siegeworkshop', 'palisadegate', 'stonegate'];
 let BUILD_NAME = ['House', 'Farm', 'Barracks', 'Lumber Camp', 'Mill',
   'Mining Camp', 'Archery Range', 'Stable', 'Blacksmith', 'Palisade Wall',
-  'Watch Tower', 'Outpost', 'Market', 'Town Center', 'Stone Wall', 'Castle', 'University', 'Siege Workshop'];
+  'Watch Tower', 'Outpost', 'Market', 'Town Center', 'Stone Wall', 'Castle', 'University', 'Siege Workshop', 'Palisade Gate', 'Stone Gate'];
 // Farm footprint is 3 (DE-documented; Claudio's decision
 // 2026-10-22, superseding the earlier 2x2 specification).
-const BUILD_SIZE = [2, 3, 3, 2, 2, 2, 3, 3, 3, 1, 1, 1, 4, 4, 1, 4, 4, 4];
+const BUILD_SIZE = [2, 3, 3, 2, 2, 2, 3, 3, 3, 1, 1, 1, 4, 4, 1, 4, 4, 4, 1, 1];
 // The wall kinds (BLD-13 palisade, BLD-20 stone): 1×1 segments
 // placed by dragged lines, not single footprints.
 function isWallKind(kind) { return kind === 9 || kind === 14; }
+// The gate kinds (Package J, BLD-13): 4×1 spans placed by a
+// single click on the span's anchor cell — the sim resolves the
+// orientation and replaces our own same-family wall segments
+// under the span. A gate's wall family: 16 ↔ 9, 17 ↔ 14.
+function isGateKind(kind) { return kind === 16 || kind === 17; }
+const GATE_OF_WALL = { 9: 16, 14: 17 };
+const WALL_OF_GATE = { 16: 9, 17: 14 };
 const BUILD_ICON = ['i-house', 'i-farm', 'i-tc', 'i-lumber', 'i-mill',
   'i-mining', 'i-range', 'i-stable', 'i-blacksmith', 'i-palisade',
-  'i-watchtower', 'i-outpost', 'i-market', 'i-tc', 'i-stonewall', 'i-castle', 'i-university', 'i-siegeworkshop'];
+  'i-watchtower', 'i-outpost', 'i-market', 'i-tc', 'i-stonewall', 'i-castle', 'i-university', 'i-siegeworkshop', 'i-palisade', 'i-stonewall'];
 // The PNG set above, per building kind tag (same order as
 // BUILD_ICON): command buttons and building portraits.
 const BUILD_PNG = ['house.png', 'farm.png', 'barracks.png', 'lumber-camp.png',
   'mill.png', 'mining-camp.png', 'archery-range.png', 'stable.png',
   'blacksmith.png', 'palisade-wall.png', 'watchtower.png', 'outpost.png',
   'market.png', 'town-center.png', 'stone-wall.png', 'castle.png', 'university.png',
-  'siege-workshop.png'];
+  'siege-workshop.png', 'palisade-wall.png', 'stone-wall.png'];
 // Building max HP by kind tag (the sim's building table, study
 // §5) — for the enemy-building info panel (M5). The palisade
 // entry is its Dark-Age value (150; 250 from Feudal, BLD-13 —
 // the same base-column convention the House's 550 follows here);
-// the Watch Tower's 850 is its pre-Castle value (BLD-18).
-const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200, 150, 850, 500, 1800, 2400, 1080, 4800, 2100, 1800];
+// the Watch Tower's 850 is its pre-Castle value (BLD-18). The
+// gates follow the same convention: 240 is the Palisade Gate's
+// Dark column (400 from Feudal), 1650 the Stone Gate's Feudal
+// column (2700 from Castle).
+const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200, 150, 850, 500, 1800, 2400, 1080, 4800, 2100, 1800, 240, 1650];
 // WASM build commands by kind tag (M6 completes the set; BLD-13
 // adds the palisade's single-segment form — dragged lines go
 // through sim.push_build_wall_line, see attemptPlaceWallLine).
@@ -386,7 +400,7 @@ const PUSH_BUILD = ['push_build_house', 'push_build_farm', 'push_build_barracks'
   'push_build_archery_range', 'push_build_stable', 'push_build_blacksmith',
   'push_build_palisade_wall', 'push_build_watch_tower', 'push_build_outpost',
   'push_build_market', 'push_build_town_center', 'push_build_stone_wall',
-  'push_build_castle', 'push_build_university', 'push_build_siege_workshop'];
+  'push_build_castle', 'push_build_university', 'push_build_siege_workshop', 'push_build_palisade_gate', 'push_build_stone_gate'];
 const PUSH_BUILD_QUEUED = PUSH_BUILD.map((n) => `${n}_queued`);
 // Own-building minimap colors by kind tag (M6); kinds without an
 // entry keep the minimap's parchment default, the enemy's
@@ -395,6 +409,7 @@ const BUILDING_MINIMAP_COLOR = {
   3: '#8a6b42', 4: '#e5d9a8', 5: '#b9a24a', 6: '#c98f4e', 7: '#9a6a44', 8: '#6f6f76',
   9: '#7a5a34', 10: '#7a7a72', 11: '#a8843f', 12: '#b03a2e',
   13: '#d8cf9f', 14: '#8d8578', 15: '#a9a294', 16: '#7d7466', 17: '#6e5a41',
+  18: '#7a5a34', 19: '#8d8578',
 };
 
 // Ages and technologies (M6). Age tags match the sim's Age::tag;
@@ -2152,7 +2167,114 @@ function worldToCell(wx, wy) {
 // Mirrors Sim::validate_build (lib.rs) using only ABI-visible state, so
 // the ghost is honest. The sim re-validates every order itself — this
 // mirror is a courtesy, never the authority.
+
+// Every living Town Center's reserved 4×4 cell set (BLD-16: both
+// players'; the TC's cell −1..+2 on each axis) — shared by the
+// square mirror and the gate mirror below.
+function tcReservedCells() {
+  const set = new Set();
+  const kinds = sim.entity_kinds();
+  const pos = sim.positions();
+  for (let i = 0; i < kinds.length; i++) {
+    if (kinds[i] === KIND_TC) {
+      const [tx, ty] = worldToCell(pos[i * 2], pos[i * 2 + 1]);
+      for (let dy = -1; dy <= 2; dy++) {
+        for (let dx = -1; dx <= 2; dx++) {
+          const rx = tx + dx;
+          const ry = ty + dy;
+          if (rx >= 0 && ry >= 0) set.add(ry * GW + rx);
+        }
+      }
+    }
+  }
+  return set;
+}
+
+// The cells of a gate's 4×1 span anchored at (cx, cy) (Package J,
+// BLD-13): four cells along +x when `alongX`, else along +y — the
+// sim's gate_span_cells, mirrored.
+function gateSpanCells(cx, cy, alongX) {
+  const cells = [];
+  for (let k = 0; k < 4; k++) cells.push(alongX ? [cx + k, cy] : [cx, cy + k]);
+  return cells;
+}
+
+// Gate span orientation + derived open state by building id, read
+// from the sim's gate_states() side channel and cached per sim
+// tick (the carry caches' pattern at entityState's readers).
+let gateCache = { tick: -1, simRef: null, map: new Map() };
+function gateInfo() {
+  const t = sim && typeof sim.tick_count === 'function' ? sim.tick_count() : -1;
+  if (gateCache.tick !== t || gateCache.simRef !== sim) {
+    const map = new Map();
+    if (sim && typeof sim.gate_states === 'function') {
+      const flat = sim.gate_states();
+      for (let i = 0; i < flat.length; i += 3) {
+        map.set(flat[i], { alongX: flat[i + 1] > 0.5, open: flat[i + 2] > 0.5 });
+      }
+    }
+    gateCache = { tick: t, simRef: sim, map };
+  }
+  return gateCache.map;
+}
+
+// The orientation a gate of `kind` would take at anchor (cx, cy)
+// — 'x' when the along-x span is placeable (it wins ties, the
+// sim's rule), else 'y' when only that span fits, else null.
+// Mirrors Sim::gate_span_placeable cell by cell: in bounds, off
+// TC reserves and live nodes, and each cell free ground or
+// covered by OUR OWN same-family wall segment (the gate replaces
+// those). Age and price are mirrorValid's business, not the
+// orientation's.
+function gateOrientationAt(kind, cx, cy) {
+  const fam = WALL_OF_GATE[kind];
+  const buildings = buildingList();
+  const tcReserved = tcReservedCells();
+  const nodes = nodeList();
+  const info = gateInfo();
+  const cellOk = (x, y) => {
+    if (x < 0 || y < 0 || x >= GW || y >= GH) return false;
+    if (tcReserved.has(y * GW + x)) return false;
+    for (const n of nodes) {
+      if (n.amount <= 0) continue;
+      const nc = worldToCell(n.x, n.y);
+      if (nc[0] === x && nc[1] === y) return false;
+    }
+    const replaced = buildings.some((b) => b.owner === localOwner
+      && b.kind === fam && b.cellX === x && b.cellY === y);
+    if (replaced) return true;
+    if (OBST[y * GW + x]) return false;
+    for (const b of buildings) {
+      if (isGateKind(b.kind)) {
+        const gi = info.get(b.id);
+        const cells = gateSpanCells(b.cellX, b.cellY, gi ? gi.alongX : true);
+        if (cells.some(([gx, gy]) => gx === x && gy === y)) return false;
+      } else {
+        const bs = b.size || BUILD_SIZE[b.kind] || 2;
+        if (x >= b.cellX && x < b.cellX + bs && y >= b.cellY && y < b.cellY + bs) return false;
+      }
+    }
+    return true;
+  };
+  if (gateSpanCells(cx, cy, true).every(([x, y]) => cellOk(x, y))) return 'x';
+  if (gateSpanCells(cx, cy, false).every(([x, y]) => cellOk(x, y))) return 'y';
+  return null;
+}
+
+// Client mirror of the sim's gate placement (validate_build_gate):
+// a placeable orientation, the Feudal age for the Stone Gate, and
+// the price payable.
+function mirrorGateValid(kind, cx, cy) {
+  if (kind === 17 && myAge() < 1) return false; // Stone Gate is Feudal
+  if (gateOrientationAt(kind, cx, cy) === null) return false;
+  if (myStock()[1] < BUILD_COST[kind]) return false;
+  if (myStock()[3] < BUILD_COST_STONE[kind]) return false;
+  return true;
+}
+
 function mirrorValid(kind, cx, cy) {
+  // Package J: a gate's mirror is its span rule, not the square.
+  if (isGateKind(kind)) return mirrorGateValid(kind, cx, cy);
   const size = BUILD_SIZE[kind];
   if (cx < 0 || cy < 0 || cx + size > GW || cy + size > GH) return false;
   const buildings = buildingList();
@@ -2195,23 +2317,7 @@ function mirrorValid(kind, cx, cy) {
   // ghost previewed green over 15 cells the sim then silently
   // skipped (BLD-20: the ghost IS the wall — mirror the reserve
   // exactly).
-  const tcReserved = new Set();
-  {
-    const kinds = sim.entity_kinds();
-    const pos = sim.positions();
-    for (let i = 0; i < kinds.length; i++) {
-      if (kinds[i] === KIND_TC) {
-        const [tx, ty] = worldToCell(pos[i * 2], pos[i * 2 + 1]);
-        for (let dy = -1; dy <= 2; dy++) {
-          for (let dx = -1; dx <= 2; dx++) {
-            const rx = tx + dx;
-            const ry = ty + dy;
-            if (rx >= 0 && ry >= 0) tcReserved.add(ry * GW + rx);
-          }
-        }
-      }
-    }
-  }
+  const tcReserved = tcReservedCells();
   const nodes = nodeList();
   for (const [x, y] of cells) {
     if (OBST[y * GW + x]) return false; // static wall
@@ -3383,6 +3489,9 @@ function applyLocalOrder(cmd) {
     case 'repair': return cmd.q
       ? sim.push_repair_queued(cmd.e, cmd.b)
       : sim.push_repair(cmd.e, cmd.b);
+    case 'repair_tc': return cmd.q
+      ? sim.push_repair_tc_queued(cmd.e, cmd.tc)
+      : sim.push_repair_tc(cmd.e, cmd.tc);
     case 'build': return cmd.q
       ? sim[PUSH_BUILD_QUEUED[cmd.k]](cmd.e, cmd.x, cmd.y)
       : sim[PUSH_BUILD[cmd.k]](cmd.e, cmd.x, cmd.y);
@@ -6940,6 +7049,15 @@ async function main() {
   function attemptRepair(wx, wy, queued = false) {
     const b = buildingAt(wx, wy);
     if (!b) {
+      // Package J (BLD-07's TC slice): the Town Center is an
+      // ENTITY, not a placed building — the armed repair click
+      // names it through its own hit test and its own order.
+      const tc = tcAt(wx, wy);
+      const st0 = entityState();
+      if (tc != null && st0.hp[tc * 2] >= 1) {
+        attemptRepairTc(tc, queued);
+        return;
+      }
       flash(t('flash.repairArmOwn'));
       return;
     }
@@ -6964,6 +7082,36 @@ async function main() {
     for (const id of selectedUnits()) {
       if (st.kinds[id] !== 0) continue;
       if (issue({ t: 'repair', e: id, b: b.id, q: queued || undefined })) any = true;
+    }
+    if (!any) {
+      repairArm = false;
+      flash(t('flash.repairSelectVil'));
+      return;
+    }
+    if (!queued) repairArm = false;
+    playAck('villager', 'order');
+  }
+
+  // Town Center repair targeting (Package J, BLD-07): the armed
+  // click picked OUR Town Center (an entity — see attemptRepair);
+  // every selected villager is ordered onto it through the
+  // repair_tc order. The invalid-pick discipline is the building
+  // form's own: an enemy's Town Center and an undamaged one flash
+  // and stay armed.
+  function attemptRepairTc(tc, queued = false) {
+    const st = entityState();
+    if (st.owners[tc] !== localOwner) {
+      flash(t('flash.repairOwnOnly'));
+      return;
+    }
+    if (st.hp[tc * 2] >= st.hp[tc * 2 + 1]) {
+      flash(t('flash.repairUndamaged'));
+      return;
+    }
+    let any = false;
+    for (const id of selectedUnits()) {
+      if (st.kinds[id] !== 0) continue;
+      if (issue({ t: 'repair_tc', e: id, tc, q: queued || undefined })) any = true;
     }
     if (!any) {
       repairArm = false;
@@ -8585,6 +8733,8 @@ function drawBuilding(b, all) {
     progressBar(sx, sy - 5.1 * camS, b.progress);
   } else if (b.kind === 2) {
     drawBarracks(b);
+  } else if (isGateKind(b.kind)) {
+    drawGate(b, all);
   } else if (b.kind === 9) {
     drawPalisade(b, all);
   } else if (b.kind === 14) {
@@ -8716,6 +8866,34 @@ function drawWallArt(flip, sx, draw) {
   ctx.translate(2 * sx, 0);
   ctx.scale(-1, 1);
   draw();
+  ctx.restore();
+}
+
+// A Gate (Package J, BLD-13): the wall family's segment art laid
+// over the span's four cells — the family's own draw, fed
+// pseudo-segments so the neighbour mask reads the span as one
+// continuous run joining the real wall line on both sides. An
+// OPEN gate (the derived state: an owner's unit at the gate and
+// no foreign one) draws faded — its leaves stand open; closed,
+// it reads as wall. A foundation wears the family's stage art
+// per cell, progress bars included.
+function drawGate(b, all) {
+  const info = gateInfo().get(b.id) || { alongX: true, open: false };
+  const famKind = WALL_OF_GATE[b.kind];
+  const drawFam = famKind === 9 ? drawPalisade : drawStoneWall;
+  const segs = [];
+  for (let k = 0; k < 4; k++) {
+    const cellX = b.cellX + (info.alongX ? k : 0);
+    const cellY = b.cellY + (info.alongX ? 0 : k);
+    segs.push({
+      ...b, kind: famKind, cellX, cellY,
+      x: -HALF + (cellX + 0.5) * CS, y: -HALF + (cellY + 0.5) * CS,
+    });
+  }
+  const allPlus = (all || buildingList()).concat(segs);
+  ctx.save();
+  if (b.complete && info.open) ctx.globalAlpha = 0.45;
+  for (const s of segs) drawFam(s, allPlus);
   ctx.restore();
 }
 
@@ -10382,7 +10560,17 @@ function runCommandButton(id, times = 1) {
   } else if (id.startsWith('build-')) {
     const kind = Number(id.slice(6));
     repairArm = false;
-    placement = placement && placement.kind === kind ? null : { kind };
+    // Package J (BLD-13): a wall button's press cycle is wall →
+    // its gate → off (the gate rides the wall's button — see
+    // buildBtn); every other kind keeps the plain toggle.
+    const gateKind = GATE_OF_WALL[kind];
+    if (gateKind != null && placement && placement.kind === kind) {
+      placement = { kind: gateKind };
+    } else if (gateKind != null && placement && placement.kind === gateKind) {
+      placement = null;
+    } else {
+      placement = placement && placement.kind === kind ? null : { kind };
+    }
     playAudioCue(placement ? 'orderBuilding' : 'click');
     // The page STAYS armed while placement runs (UI FIX 4
     // addendum cancel rule): cancelling placement — Esc, a
@@ -10631,6 +10819,16 @@ function renderCommands() {
     const hasBarracks = all.some((b) => b.owner === localOwner && b.kind === 2 && b.complete);
     const hasBlacksmith = all.some((b) => b.owner === localOwner && b.kind === 8 && b.complete);
     const buildBtn = (kind) => {
+      // Package J (BLD-13): the two wall buttons carry their
+      // family's GATE on a second press (the panel grid is full —
+      // both pages already fill all nine cells — so the gate
+      // rides its wall's button: press once for the wall, again
+      // for the gate, a third time to cancel). While the gate is
+      // the armed placement, the button SHOWS the gate (its name,
+      // art and price), so what you see is what you will place.
+      const gateKind = GATE_OF_WALL[kind];
+      const shown = gateKind != null && placement && placement.kind === gateKind
+        ? gateKind : kind;
       let gate = null;
       if (kind === 15 && age < 2) gate = t('gate.castle');
       else if (kind === 16 && age < 2) gate = t('gate.castle');
@@ -10650,25 +10848,26 @@ function renderCommands() {
       // (the wiki's requirement row) — age gate first, then Mill.
       else if (kind === 12 && age < 1) gate = t('gate.feudal');
       else if (kind === 12 && !hasMill) gate = t('gate.mill');
-      const lacksWood = wood < BUILD_COST[kind];
-      const lacksStone = myStock()[3] < BUILD_COST_STONE[kind];
+      const lacksWood = wood < BUILD_COST[shown];
+      const lacksStone = myStock()[3] < BUILD_COST_STONE[shown];
       const costParts = [];
-      if (BUILD_COST[kind] > 0) costParts.push([BUILD_COST[kind], 'wood']);
-      if (BUILD_COST_STONE[kind] > 0) costParts.push([BUILD_COST_STONE[kind], 'stone']);
+      if (BUILD_COST[shown] > 0) costParts.push([BUILD_COST[shown], 'wood']);
+      if (BUILD_COST_STONE[shown] > 0) costParts.push([BUILD_COST_STONE[shown], 'stone']);
+      const baseTitle = gate
+        ? t('cmd.buildGate', { name: BUILD_NAME[shown], gate })
+        : t(lacksWood || lacksStone ? 'cmd.buildNeeds' : 'cmd.buildOk',
+          { name: BUILD_NAME[shown], cost: costText(costParts) });
       return cmdButton({
-        id: `build-${kind}`, icon: BUILD_ICON[kind], img: BUILD_PNG[kind], label: BUILD_NAME[kind],
+        id: `build-${kind}`, icon: BUILD_ICON[shown], img: BUILD_PNG[shown], label: BUILD_NAME[shown],
         // The badge price is the wood cost when the kind has one;
         // the all-stone Stone Wall badges its stone instead
         // (BLD-20). The full price always rides the title.
-        costIcon: BUILD_COST[kind] > 0 ? 'i-wood' : 'i-stone',
-        cost: BUILD_COST[kind] > 0 ? BUILD_COST[kind] : BUILD_COST_STONE[kind],
+        costIcon: BUILD_COST[shown] > 0 ? 'i-wood' : 'i-stone',
+        cost: BUILD_COST[shown] > 0 ? BUILD_COST[shown] : BUILD_COST_STONE[shown],
         disabled: !!gate || lacksWood || lacksStone,
-        active: !!placement && placement.kind === kind,
+        active: !!placement && (placement.kind === kind || placement.kind === gateKind),
         key: badgeForButton({ context, page: buildPage, id: `build-${kind}` }),
-        title: gate
-          ? t('cmd.buildGate', { name: BUILD_NAME[kind], gate })
-          : t(lacksWood || lacksStone ? 'cmd.buildNeeds' : 'cmd.buildOk',
-            { name: BUILD_NAME[kind], cost: costText(costParts) }),
+        title: gateKind != null ? `${baseTitle} ${t('cmd.gateHint')}` : baseTitle,
       });
     };
     if (buildPage) {
@@ -12552,6 +12751,20 @@ function draw() {
       ctx.fillRect(lx - tw / 2 - 5, ly - 2.7 * camS, tw + 10, 1.8 * camS);
       ctx.fillStyle = '#ffe9c9';
       ctx.fillText(label, lx, ly - 1.4 * camS);
+    } else if (isGateKind(placement.kind)) {
+      // Package J: the gate ghost is its resolved span — four
+      // cell diamonds along the orientation the sim would take
+      // (along-x first), green when the placement mirrors valid.
+      const orient = gateOrientationAt(placement.kind, cx, cy);
+      const ok = mirrorValid(placement.kind, cx, cy);
+      for (const [gx, gy] of gateSpanCells(cx, cy, orient !== 'y')) {
+        const x0 = -HALF + gx * CS;
+        const y0 = -HALF + gy * CS;
+        poly([
+          worldToScreen(x0, y0), worldToScreen(x0 + CS, y0),
+          worldToScreen(x0 + CS, y0 + CS), worldToScreen(x0, y0 + CS),
+        ], ok ? 'rgba(90, 230, 120, 0.30)' : 'rgba(240, 70, 55, 0.30)');
+      }
     } else {
       const ok = mirrorValid(placement.kind, cx, cy);
       const size = BUILD_SIZE[placement.kind];
