@@ -794,30 +794,39 @@ fn plan_train_military(sim: &mut Sim, cfg: &AiConfig) {
     // siege, not a share of the foot army), so they are counted
     // and produced on their own line: living plus queued, capped
     // at RAM_TARGET, one enqueue at a time like every other host.
+    // Castle P4b: Mangonels keep on the same line, capped at
+    // MANGONEL_TARGET, behind the Rams — one workshop queue
+    // serves both, one enqueue per decision as before.
     if sim.age_of(me) >= crate::tech::Age::Castle {
-        let rams = count_kind(sim, me, EntityKind::BatteringRam)
-            + sim
-                .buildings()
-                .iter()
-                .filter(|b| b.owner == me)
-                .flat_map(|b| b.queue.iter())
-                .filter(|entry| {
-                    matches!(
-                        entry,
-                        crate::tech::ProdEntry::Unit(EntityKind::BatteringRam)
-                    )
-                })
-                .count() as u32;
-        if rams < RAM_TARGET {
-            if let Some(host) = sim.buildings().iter().find(|b| {
-                b.owner == me && b.complete && b.kind == BuildingKind::SiegeWorkshop
-            }) {
-                if host.queue.is_empty()
+        let siege_count = |kind: EntityKind| -> u32 {
+            count_kind(sim, me, kind)
+                + sim
+                    .buildings()
+                    .iter()
+                    .filter(|b| b.owner == me)
+                    .flat_map(|b| b.queue.iter())
+                    .filter(|entry| matches!(entry, crate::tech::ProdEntry::Unit(k) if *k == kind))
+                    .count() as u32
+        };
+        if let Some(host) = sim.buildings().iter().find(|b| {
+            b.owner == me && b.complete && b.kind == BuildingKind::SiegeWorkshop
+        }) {
+            if host.queue.is_empty() {
+                if siege_count(EntityKind::BatteringRam) < RAM_TARGET
                     && sim.can_train_at(host.id, EntityKind::BatteringRam)
                 {
                     sim.push_command(Command::TrainAt {
                         building: host.id,
                         kind: EntityKind::BatteringRam,
+                    });
+                    return;
+                }
+                if siege_count(EntityKind::Mangonel) < MANGONEL_TARGET
+                    && sim.can_train_at(host.id, EntityKind::Mangonel)
+                {
+                    sim.push_command(Command::TrainAt {
+                        building: host.id,
+                        kind: EntityKind::Mangonel,
                     });
                     return;
                 }
@@ -896,6 +905,13 @@ fn plan_train_military(sim: &mut Sim, cfg: &AiConfig) {
 /// two rams — enough to crack a building line, few enough that
 /// the composition army still gets its wood and gold.
 const RAM_TARGET: u32 = 2;
+
+/// The Mangonel corps the siege step keeps (Castle P4b): two
+/// mangonels behind the Rams on the same workshop line — area
+/// damage against the wave's targets, fired through ordinary
+/// Attack orders (attack-ground is a player-order surface;
+/// the AI does not need it, AI-01).
+const MANGONEL_TARGET: u32 = 2;
 
 /// The four kinds the composition plan trains, in weight order
 /// (`AiConfig::mix_weights` indexes this array).
@@ -1408,6 +1424,12 @@ fn plan_wave(sim: &mut Sim, cfg: &AiConfig, acted: &mut Vec<u32>) {
                         // Castle P4a: Rams march with the wave —
                         // they are its building-crackers.
                         | EntityKind::BatteringRam
+                        // Castle P4b: Mangonels march with the
+                        // wave too — they fire at its targets
+                        // through the ordinary Attack path below
+                        // (no building-skip: a Mangonel's blast
+                        // is a unit weapon first).
+                        | EntityKind::Mangonel
                 )
                 && is_idle(sim, e.id)
                 && !acted.contains(&e.id)

@@ -407,6 +407,14 @@ impl WasmSim {
         self.push_train_at(building, EntityKind::BatteringRam)
     }
 
+    /// Enqueue a Mangonel at a completed Siege Workshop
+    /// (Castle P4b — the workshop is the Mangonel's only home;
+    /// `can_train_at` carries the Castle Age gate). See
+    /// `push_train_militia`.
+    pub fn push_train_mangonel(&mut self, building: u32) -> bool {
+        self.push_train_at(building, EntityKind::Mangonel)
+    }
+
     /// Enqueue a Trade Cart at a completed Market (Package D,
     /// TRD-05 — the Market is the cart's only home; `can_train_at`
     /// carries the Feudal Age gate). See `push_train_militia`.
@@ -1175,6 +1183,44 @@ impl WasmSim {
                 y: I16F16::from_num(y),
             },
         )
+    }
+
+    /// Attack ground (CMB-16, Castle P4b): the blast weapon
+    /// walks until the point is inside its firing band and
+    /// bombards it on its reload until re-tasked. Returns
+    /// whether the order *would* be accepted (a living player
+    /// unit carrying a blast weapon); the sim re-validates
+    /// when the command is applied.
+    pub fn push_attack_ground(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        let ok = self.inner.can_attack_ground(entity);
+        if ok {
+            self.inner.push_command(Command::AttackGround {
+                entity,
+                x: I16F16::from_num(x),
+                y: I16F16::from_num(y),
+            });
+        }
+        ok
+    }
+
+    /// Queue an attack-ground order behind the unit's current
+    /// order (CMB-16 / SEL-12).
+    pub fn push_attack_ground_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_queued(
+            entity,
+            QueuedOrder::AttackGround {
+                x: I16F16::from_num(x),
+                y: I16F16::from_num(y),
+            },
+        )
+    }
+
+    /// Whether the entity could accept an Attack Ground order
+    /// right now (CMB-16): a living player unit with a blast
+    /// weapon. The client's Attack Ground button/cursor reads
+    /// this; the sim re-validates on the command itself.
+    pub fn entity_can_attack_ground(&self, entity: u32) -> bool {
+        self.inner.can_attack_ground(entity)
     }
 
     /// Queue a patrol order behind the unit's current order

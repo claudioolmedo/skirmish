@@ -82,6 +82,28 @@ pub struct UnitSpec {
     /// Scatter radius for missed shots, world units. UNVERIFIED
     /// numerically in the docs (PRJ-04) — recorded design constant.
     pub scatter: I16F16,
+    /// Blast radius in world units (PRJ-07, Castle P4b): ZERO =
+    /// not a blast weapon. A blast weapon's projectile resolves
+    /// its whole attack table over every unit and building inside
+    /// this radius of the impact point — distance-tapered,
+    /// accuracy rolled per unit, friend and foe alike (CMB-12) —
+    /// instead of the single-target resolution (see
+    /// `combat::Sim::resolve_projectile`'s blast branch).
+    pub blast_radius: I16F16,
+    /// Pass-through flag (PRJ-09): the Scorpion line's bolt
+    /// pierces its target and keeps travelling. Inert in P4b —
+    /// the field lands with the shared row work so P4c's slice
+    /// adds no row churn; only the Scorpion row sets it.
+    pub pass_through: bool,
+    /// Extra minimum-damage projectiles released with the main
+    /// shot (PRJ-07's secondary projectiles, Castle P4b): the
+    /// Mangonel line throws 5 extra stones with the main one
+    /// (wiki, Mangonel article — update 153015 names them
+    /// individually, "even when using attack ground"); each
+    /// applies minimum damage (1) to everything inside the
+    /// blast radius, inside the same blast pass, with no extra
+    /// RNG draws. 0 on every other row.
+    pub blast_secondaries: u8,
     /// Movement speed, world units per tick (see module docs).
     pub speed: I16F16,
     /// Line of sight, world units (auto-acquisition radius).
@@ -126,6 +148,7 @@ pub fn spec(kind: EntityKind) -> &'static UnitSpec {
         EntityKind::Petard => &PETARD,
         EntityKind::TradeCart => &TRADE_CART,
         EntityKind::BatteringRam => &BATTERING_RAM,
+        EntityKind::Mangonel => &MANGONEL,
     }
 }
 
@@ -203,6 +226,9 @@ static VILLAGER: UnitSpec = UnitSpec {
     accuracy: 100,
     projectile_speed: I16F16::ZERO,
     scatter: I16F16::ZERO,
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
     speed: I16F16::from_bits(3_495), // 0.8 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(1_048_576), // 16 (4 tiles)
     radius: I16F16::from_bits(65_536), // 1.0
@@ -231,6 +257,9 @@ static TOWN_CENTER: UnitSpec = UnitSpec {
     accuracy: 100,
     projectile_speed: I16F16::ZERO,
     scatter: I16F16::ZERO,
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
     speed: I16F16::ZERO,
     los: I16F16::ZERO,
     radius: I16F16::from_bits(235_930), // 3.6 — matches the client footprint half-extent
@@ -266,6 +295,9 @@ static SCOUT_CAVALRY: UnitSpec = UnitSpec {
     accuracy: 100,
     projectile_speed: I16F16::ZERO,
     scatter: I16F16::ZERO,
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
     speed: I16F16::from_bits(5_243), // 1.20 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(1_048_576), // 16 (4 tiles, Dark Age)
     radius: I16F16::from_bits(65_536),
@@ -299,6 +331,9 @@ static MILITIA: UnitSpec = UnitSpec {
     accuracy: 100,
     projectile_speed: I16F16::ZERO,
     scatter: I16F16::ZERO,
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
     speed: I16F16::from_bits(3_932), // 0.90 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(1_048_576), // 16 (4 tiles)
     radius: I16F16::from_bits(65_536),
@@ -329,6 +364,9 @@ static ARCHER: UnitSpec = UnitSpec {
     accuracy: 80,
     projectile_speed: I16F16::from_bits(32_768), // 0.5 — design constant (see field doc)
     scatter: I16F16::from_bits(131_072),          // 2.0 — design constant (see field doc)
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
     speed: I16F16::from_bits(4_194),            // 0.96 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(1_572_864),            // 24 (6 tiles)
     radius: I16F16::from_bits(65_536),
@@ -368,6 +406,9 @@ static MAN_AT_ARMS: UnitSpec = UnitSpec {
     accuracy: 100,
     projectile_speed: I16F16::ZERO,
     scatter: I16F16::ZERO,
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
     speed: I16F16::from_bits(4_194), // 0.96 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(1_048_576), // 16 (4 tiles)
     radius: I16F16::from_bits(65_536),
@@ -419,6 +460,9 @@ static SPEARMAN: UnitSpec = UnitSpec {
     accuracy: 100,
     projectile_speed: I16F16::ZERO,
     scatter: I16F16::ZERO,
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
     speed: I16F16::from_bits(4_369), // 1.0 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(1_048_576), // 16 (4 tiles)
     radius: I16F16::from_bits(65_536),
@@ -458,6 +502,9 @@ static SKIRMISHER: UnitSpec = UnitSpec {
     accuracy: 90,
     projectile_speed: I16F16::from_bits(32_768), // 0.5 — design constant (see Archer)
     scatter: I16F16::from_bits(131_072),          // 2.0 — design constant (see Archer)
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
     speed: I16F16::from_bits(4_194),             // 0.96 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(1_572_864),           // 24 (6 tiles)
     radius: I16F16::from_bits(65_536),
@@ -491,6 +538,9 @@ static KNIGHT: UnitSpec = UnitSpec {
     accuracy: 100,
     projectile_speed: I16F16::ZERO,
     scatter: I16F16::ZERO,
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
     speed: I16F16::from_bits(5_898), // 1.35 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(1_048_576), // 16 (4 tiles)
     radius: I16F16::from_bits(65_536),
@@ -530,6 +580,9 @@ static LIGHT_CAVALRY: UnitSpec = UnitSpec {
     accuracy: 100,
     projectile_speed: I16F16::ZERO,
     scatter: I16F16::ZERO,
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
     speed: I16F16::from_bits(6_554), // 1.5 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(2_097_152), // 32 (8 tiles, Castle Age)
     radius: I16F16::from_bits(65_536),
@@ -569,6 +622,9 @@ static CAVALRY_ARCHER: UnitSpec = UnitSpec {
     accuracy: 50,
     projectile_speed: I16F16::from_bits(32_768), // 0.5 — design constant (see Archer)
     scatter: I16F16::from_bits(131_072),          // 2.0 — design constant (see Archer)
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
     speed: I16F16::from_bits(6_117),             // 1.4 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(1_310_720),            // 20 (5 tiles)
     radius: I16F16::from_bits(65_536),
@@ -620,6 +676,9 @@ static PETARD: UnitSpec = UnitSpec {
     accuracy: 100,
     projectile_speed: I16F16::ZERO,
     scatter: I16F16::ZERO,
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
     speed: I16F16::from_bits(3_495), // 0.8 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(1_048_576), // 16 (4 tiles)
     radius: I16F16::from_bits(65_536),
@@ -659,6 +718,9 @@ static TRADE_CART: UnitSpec = UnitSpec {
     accuracy: 100,
     projectile_speed: I16F16::ZERO,
     scatter: I16F16::ZERO,
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
     speed: I16F16::from_bits(5_461), // 1.25 tiles/s (update 141935; absolute scale, see header)
     los: I16F16::from_bits(1_835_008), // 28 (7 tiles)
     radius: I16F16::from_bits(65_536), // 1.0 (0.25 tiles)
@@ -707,6 +769,9 @@ static BATTERING_RAM: UnitSpec = UnitSpec {
     accuracy: 100,
     projectile_speed: I16F16::ZERO,
     scatter: I16F16::ZERO,
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
     speed: I16F16::from_bits(2_621), // 0.6 tiles/s, empty (see above)
     los: I16F16::from_bits(1_310_720), // 20 (5 tiles)
     radius: I16F16::from_bits(78_643), // 1.2 — adopted (see above)
@@ -716,6 +781,62 @@ static BATTERING_RAM: UnitSpec = UnitSpec {
     wood_cost: 160,
     gold_cost: 75,
     train_ticks: 2160, // 36 s
+};
+
+/// Mangonel (Castle P4b, PRJ-07 + CMB-16; wiki "Mangonel (Age
+/// of Empires II)" infobox via the Castle Age dossier, fetched
+/// 2026-10-22; secondary projectiles confirmed against the live
+/// article 2026-10-30 — update 153015's changelog names them):
+/// HP 50, attack 40 MELEE class with +35 vs Buildings (standard)
+/// and +12 vs Siege, armor 0/6, range 7 with a 3-tile minimum
+/// (PRJ-08's dead zone), blast radius 1.0 tile — the stone's
+/// damage tapers linearly from 100% at the impact center
+/// (PRJ-07; the engine's "delete trick" full-damage-to-half-
+/// radius is a reference bug and is NOT reproduced), accuracy
+/// 100% rolled PER UNIT inside the blast, plus 5 secondary
+/// projectiles at minimum damage released with the main stone.
+/// Projectile speed 3.5 tiles/s (the one per-weapon speed the
+/// docs pin — see the `projectile_speed` field note), RoF 6.0 s,
+/// attack delay 0 (the dossier's row: the first stone leaves
+/// with the engagement), speed 0.6 tiles/s, LoS 9. Cost 160 W /
+/// 135 G, train 46 s, Siege Workshop only (`BuildingKind::trains`
+/// + `EntityKind::train_age`). Its classes carry SIEGE, like the
+/// Ram's. The collision radius adopts the Ram's 1.2 — an
+/// implementation constant (§3.2.4 of the P4 plan), never
+/// presented as DE data. The weapon is blast-flagged (CMB-12):
+/// its stones hurt friend and foe alike, fell trees inside the
+/// radius (MAP-04), and it is the game's first Attack Ground
+/// weapon (CMB-16).
+static MANGONEL: UnitSpec = UnitSpec {
+    max_hp: 50,
+    attacks: &[
+        (cls::MELEE, 40),
+        (cls::STANDARD_BUILDINGS, 35),
+        (cls::SIEGE, 12),
+    ],
+    armor_melee: 0,
+    armor_pierce: 6,
+    armor_building: 0,
+    classes: cls::mask(&[cls::SIEGE]),
+    range_max: I16F16::from_bits(1_835_008), // 28 (7 tiles)
+    range_min: I16F16::from_bits(786_432),   // 12 (3 tiles)
+    reload_ticks: 360,                       // 6.0 s
+    attack_delay_ticks: 0,
+    accuracy: 100,
+    projectile_speed: I16F16::from_bits(15_291), // 3.5 tiles/s (absolute scale, see header)
+    scatter: I16F16::ZERO,                       // blast weapons do not scatter (PRJ-07)
+    blast_radius: I16F16::from_bits(262_144),    // 4 (1 tile)
+    pass_through: false,
+    blast_secondaries: 5,
+    speed: I16F16::from_bits(2_621), // 0.6 tiles/s (absolute scale, see header)
+    los: I16F16::from_bits(2_359_296), // 36 (9 tiles)
+    radius: I16F16::from_bits(78_643), // 1.2 — adopted (see above)
+    carcass_food: 0,
+    carcass_decay_bits: 0,
+    food_cost: 0,
+    wood_cost: 160,
+    gold_cost: 135,
+    train_ticks: 2760, // 46 s
 };
 
 /// Sheep (OPENING-SPEC §2.2): 100 food, speed 0.7, worked at the
@@ -743,6 +864,9 @@ static SHEEP: UnitSpec = UnitSpec {
     accuracy: 100,
     projectile_speed: I16F16::ZERO,
     scatter: I16F16::ZERO,
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
     speed: I16F16::from_bits(3_058), // 0.7 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(524_288),  // 8 (2 tiles — wiki, Herdable animal)
     radius: I16F16::from_bits(65_536),
@@ -778,6 +902,9 @@ static BOAR: UnitSpec = UnitSpec {
     accuracy: 100,
     projectile_speed: I16F16::ZERO,
     scatter: I16F16::ZERO,
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
     speed: I16F16::from_bits(3_495), // 0.8 tiles/s roaming/return (absolute scale); chase uses BOAR_CHASE_SPEED
     los: I16F16::from_bits(1_310_720), // 20 (5 tiles)
     radius: I16F16::from_bits(78_643), // 1.2 — the boar is bulky
@@ -820,6 +947,9 @@ static WOLF: UnitSpec = UnitSpec {
     accuracy: 100,
     projectile_speed: I16F16::ZERO,
     scatter: I16F16::ZERO,
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
     speed: I16F16::from_bits(4_369), // 1.0 tiles/s (absolute scale) — UNVERIFIED
     los: I16F16::from_bits(3_145_728), // 48 (12 tiles — wiki, Wolf)
     radius: I16F16::from_bits(65_536), // 1.0
@@ -851,6 +981,9 @@ static DEER: UnitSpec = UnitSpec {
     accuracy: 100,
     projectile_speed: I16F16::ZERO,
     scatter: I16F16::ZERO,
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
     speed: I16F16::from_bits(4_369), // 1.0 tiles/s (absolute scale) — UNVERIFIED
     los: I16F16::from_bits(1_048_576),
     radius: I16F16::from_bits(65_536),

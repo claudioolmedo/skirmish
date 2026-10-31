@@ -698,10 +698,12 @@ impl BuildingKind {
                 // only (TRD-05; wiki, "Trade Cart").
                 | (BuildingKind::Market, EntityKind::TradeCart)
                 // Castle P4a: the Battering Ram trains at the
-                // Siege Workshop only (the Mangonel and Scorpion
-                // join this roster in the P4b/P4c slices, when
-                // their kinds exist).
+                // Siege Workshop only (the Scorpion joins this
+                // roster in the P4c slice, when its kind exists).
                 | (BuildingKind::SiegeWorkshop, EntityKind::BatteringRam)
+                // Castle P4b: the Mangonel trains at the Siege
+                // Workshop only, beside the Ram.
+                | (BuildingKind::SiegeWorkshop, EntityKind::Mangonel)
         )
     }
 

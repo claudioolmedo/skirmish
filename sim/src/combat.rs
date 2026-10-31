@@ -148,6 +148,57 @@ pub struct Projectile {
     pub attacks: Vec<(u8, i32)>,
 }
 
+/// The mode of one blast application (Castle P4b): everything
+/// `Sim::apply_blast` varies between its two callers — the
+/// Petard's detonation (CMB-17: full table, no rolls, no taper,
+/// its strike's primary excluded) and a blast projectile's
+/// resolution (PRJ-07: tapered, per-unit rolls, secondaries,
+/// tree felling, primaries at full damage). Fields a caller
+/// leaves at their plain values reproduce the Petard's shipped
+/// behavior exactly.
+struct Blast {
+    /// Attacker entity id (kill credit).
+    attacker_id: u32,
+    /// Attacker owner (blast hurts every owner alike — CMB-12).
+    owner: u8,
+    /// Where the blast came from (apply_hit's threat point: the
+    /// projectile's spawn, or the detonation point itself).
+    threat: (I16F16, I16F16),
+    /// The blast's center.
+    point: (I16F16, I16F16),
+    /// The blast radius.
+    radius: I16F16,
+    /// The attacker's elevation level (PRJ-10's release-time read).
+    atk_elev: u8,
+    /// Per-unit accuracy, percent — `Some` rolls once per unit
+    /// in the radius, in ascending id order (PRJ-07); `None`
+    /// strikes every unit in reach (the Petard).
+    accuracy: Option<u32>,
+    /// Distance taper on (PRJ-07) or off (the Petard's single
+    /// documented radius).
+    taper: bool,
+    /// The entity / building that takes the full computed
+    /// damage (a projectile's intended target). `None` for
+    /// ground shots and for the Petard (whose primary is in
+    /// `struck_*` instead — it already took the strike).
+    primary_unit: Option<usize>,
+    primary_building: Option<u32>,
+    /// The entity the blast never touches (the detonating
+    /// Petard itself).
+    skip_unit: Option<usize>,
+    /// The entity / building excluded because it already took
+    /// the strike that triggered the blast (the Petard's
+    /// primary).
+    struck_unit: Option<usize>,
+    struck_building: Option<u32>,
+    /// Extra minimum-damage projectiles (PRJ-07): this many
+    /// points of flat damage to everything in the radius.
+    secondaries: u8,
+    /// Fell covered tree nodes (MAP-04 — the Onager line's
+    /// documented effect; not the Petard's).
+    fell_trees: bool,
+}
+
 /// The pre-elevation damage sum of CMB-01: Σ over participating
 /// (class, value) pairs of max(0, value − armor), and whether any
 /// pair participated at all. The minimum-1 clamp is NOT applied
@@ -350,6 +401,9 @@ pub(crate) fn building_spec(kind: BuildingKind, owner_age: crate::tech::Age) -> 
         accuracy: 0,
         projectile_speed: I16F16::ZERO,
         scatter: I16F16::ZERO,
+        blast_radius: I16F16::ZERO,
+        pass_through: false,
+        blast_secondaries: 0,
         speed: I16F16::ZERO,
         los: I16F16::ZERO,
         radius: I16F16::ZERO,
@@ -383,6 +437,14 @@ impl Sim {
         // entity attackers (same ascending-id discipline).
         for idx in 0..self.entities.len() {
             self.attack_building_step(idx);
+        }
+        // CMB-16 (Castle P4b): ground bombardments run their own
+        // step, after the building attackers (same ascending-id
+        // discipline) — a Mangonel's release draws no RNG (PRJ-07
+        // rolls per unit at impact, in projectile order), so the
+        // step's position in the phase costs no draw discipline.
+        for idx in 0..self.entities.len() {
+            self.attack_ground_step(idx);
         }
         // BLD-18: buildings that shoot run after every entity
         // attacker, in building-id order (the buildings vec's
@@ -813,6 +875,7 @@ impl Sim {
                 )
                 || e.attack_target.is_some()
                 || e.attack_building.is_some()
+                || e.attack_point.is_some()
                 || e.stance == crate::Stance::NoAttack
                 || (e.order.is_some() && e.attack_move.is_none() && e.patrol.is_empty())
             {
@@ -1119,6 +1182,148 @@ impl Sim {
     /// damage now (if still in reach), or a projectile release for a
     /// ranged attacker. Either way the reload restarts from this
     /// landing tick (CMB-05) and the engagement is underway.
+    /// One ground-bombardment tick (CMB-16, Castle P4b): the
+    /// `attack_step` counterpart for an Attack Ground order. The
+    /// "target" is a fixed point of earth: the weapon chases
+    /// until the point sits inside its firing band
+    /// [range_min, range_max] (PRJ-08 — including the dead-zone
+    /// stand-off: a Mangonel ordered to blast its own feet backs
+    /// away to near-max range and fires from there), then stands
+    /// and releases on its reload, forever, until the order is
+    /// replaced. A point no stand point can path to ends the
+    /// order, like an unreachable attack target (CMB-06).
+    fn attack_ground_step(&mut self, idx: usize) {
+        let tick = self.tick;
+        if self.entities[idx].garrisoned_in.is_some() {
+            return; // GAR-02: a garrisoned unit does not fight
+        }
+        let (gx, gy) = match self.entities[idx].attack_point {
+            Some(p) if !self.entities[idx].dead => p,
+            _ => return,
+        };
+        let spec = self.unit_stats(idx);
+        if spec.attacks.is_empty() || spec.blast_radius <= I16F16::ZERO {
+            self.entities[idx].clear_combat();
+            return;
+        }
+        let dist = self.distance_to(idx, gx, gy);
+        let in_range = dist <= spec.range_max && dist >= spec.range_min;
+
+        // A pending strike releases on its tick, wherever the
+        // chase has taken us (PRJ-08 checks the band at release).
+        if let Some(st) = self.entities[idx].strike_tick {
+            if tick >= st {
+                self.resolve_ground_strike(idx);
+            }
+        }
+
+        if in_range {
+            // Stand and fire: drop any chase order and hold.
+            if self.entities[idx].order.is_some() {
+                let e = &mut self.entities[idx];
+                e.order = None;
+                e.vel_x = I16F16::ZERO;
+                e.vel_y = I16F16::ZERO;
+            }
+            let ready = tick >= self.entities[idx].next_attack_tick;
+            if self.entities[idx].strike_tick.is_none() && ready {
+                if self.entities[idx].attack_engaged {
+                    // Sustained releases land the tick the reload
+                    // completes (CMB-04's delay discipline).
+                    self.resolve_ground_strike(idx);
+                } else {
+                    let at = tick + spec.attack_delay_ticks;
+                    self.entities[idx].strike_tick = Some(at);
+                }
+            }
+        } else if dist < spec.range_min {
+            // PRJ-08's dead zone, against a point: back away along
+            // the ray from the point through the weapon, to a
+            // stand point near maximum range (attack_step's exact
+            // geometry, with the point as the ray's origin).
+            let need = match &self.entities[idx].order {
+                None => true,
+                Some(o) => {
+                    let d = steer::vec_len(o.target_x - gx, o.target_y - gy);
+                    d < spec.range_min || d > spec.range_max
+                }
+            };
+            if need {
+                let (px, py) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
+                let (dx, dy) = (px - gx, py - gy);
+                let len = steer::vec_len(dx, dy);
+                let (ux, uy) = if len == I16F16::ZERO {
+                    (I16F16::from_num(1), I16F16::ZERO)
+                } else {
+                    (dx / len, dy / len)
+                };
+                let near = spec.range_max - I16F16::from_bits(98_304); // max − 1.5
+                let stand = if near > spec.range_min {
+                    near
+                } else {
+                    spec.range_min + I16F16::from_bits(98_304)
+                };
+                if !self.set_move_order(idx, gx + ux * stand, gy + uy * stand) {
+                    self.entities[idx].clear_combat();
+                }
+            }
+        } else {
+            // Chase: refresh the internal move order when it no
+            // longer leads at the point (the point never drifts,
+            // so this fires once, when the order is new).
+            let need = match &self.entities[idx].order {
+                None => true,
+                Some(o) => steer::vec_len(o.target_x - gx, o.target_y - gy) > CHASE_REPATH,
+            };
+            if need && !self.set_move_order(idx, gx, gy) {
+                self.entities[idx].clear_combat();
+            }
+        }
+    }
+
+    /// Release one ground-bombardment stone (CMB-16): an ordinary
+    /// `Projectile` with no intended target at all — impact is
+    /// the ordered point, and PRJ-07's blast resolution at impact
+    /// does the rest. PRJ-08: a release whose point has closed
+    /// inside the dead zone by the release tick never happens —
+    /// no projectile, no RNG draw (a blast release draws none in
+    /// any case: PRJ-07 rolls per unit at impact); the reload
+    /// still restarts and the ground step repositions the weapon.
+    fn resolve_ground_strike(&mut self, idx: usize) {
+        let spec = self.unit_stats(idx);
+        let attacker_id = self.entities[idx].id;
+        let owner = self.entities[idx].owner;
+        let (ax, ay) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
+        if let Some((gx, gy)) = self.entities[idx].attack_point {
+            if steer::vec_len(gx - ax, gy - ay) >= spec.range_min {
+                // Flight time = distance ÷ speed at spawn
+                // (PRJ-02), integer ceiling, at least one tick.
+                let dist_bits = steer::vec_len(gx - ax, gy - ay).to_bits() as i64;
+                let speed_bits = spec.projectile_speed.to_bits() as i64;
+                let flight = ((dist_bits + speed_bits - 1) / speed_bits).max(1) as u64;
+                self.projectiles.push(Projectile {
+                    spawn_x: ax,
+                    spawn_y: ay,
+                    impact_x: gx,
+                    impact_y: gy,
+                    spawn_tick: self.tick,
+                    impact_tick: self.tick + flight,
+                    intended: None,
+                    intended_building: None,
+                    attacker: attacker_id,
+                    attacker_building: None,
+                    owner,
+                    attacker_elev: self.entity_height(idx),
+                    attacks: spec.attacks.to_vec(),
+                });
+            }
+        }
+        let e = &mut self.entities[idx];
+        e.strike_tick = None;
+        e.next_attack_tick = self.tick + spec.reload_ticks;
+        e.attack_engaged = true;
+    }
+
     fn resolve_strike(&mut self, idx: usize, ti: usize) {
         // M6: release-time snapshot of the attacker's *effective*
         // attacks — a Fletching completing mid-flight does not
@@ -1156,16 +1361,23 @@ impl Sim {
                 };
                 // Ranged release: the accuracy roll is drawn NOW, at
                 // release, in combat-phase id order (PRJ-03/SIM-04).
-                let roll = self.rng.below(100);
+                // PRJ-07 (Castle P4b): a blast weapon makes NO
+                // release roll and never scatters — its accuracy
+                // is rolled per unit inside the blast at impact,
+                // so the stone flies to the aim point exactly and
+                // this release consumes no RNG draws at all.
                 let mut impact = aim;
-                if roll >= spec.accuracy {
-                    // Miss: scatter within the weapon's radius — two
-                    // further draws, same fixed order (PRJ-04).
-                    let sb = spec.scatter.to_bits();
-                    let span = (2 * sb + 1) as u32;
-                    let dx = self.rng.below(span) as i32 - sb;
-                    let dy = self.rng.below(span) as i32 - sb;
-                    impact = (aim.0 + I16F16::from_bits(dx), aim.1 + I16F16::from_bits(dy));
+                if spec.blast_radius <= I16F16::ZERO {
+                    let roll = self.rng.below(100);
+                    if roll >= spec.accuracy {
+                        // Miss: scatter within the weapon's radius — two
+                        // further draws, same fixed order (PRJ-04).
+                        let sb = spec.scatter.to_bits();
+                        let span = (2 * sb + 1) as u32;
+                        let dx = self.rng.below(span) as i32 - sb;
+                        let dy = self.rng.below(span) as i32 - sb;
+                        impact = (aim.0 + I16F16::from_bits(dx), aim.1 + I16F16::from_bits(dy));
+                    }
                 }
                 // Flight time = distance ÷ speed at spawn (PRJ-02),
                 // integer ceiling, at least one tick.
@@ -1240,6 +1452,38 @@ impl Sim {
         mishit: bool,
         atk_elev: u8,
     ) {
+        self.apply_hit_tapered(
+            attacker_id,
+            attacker_owner,
+            threat,
+            attacks,
+            ti,
+            mishit,
+            atk_elev,
+            None,
+        )
+    }
+
+    /// `apply_hit` with PRJ-07's blast taper (Castle P4b): the
+    /// computed damage is scaled by `taper` (1 at the impact
+    /// center, falling linearly to 0 at the blast radius) BEFORE
+    /// the minimum-damage floor — a participating hit inside the
+    /// radius always lands for at least 1, exactly the way
+    /// CMB-13's composition keeps every multiplier inside the
+    /// clamp. A hit with no participating attack class stays 0
+    /// at any taper (the minimum never creates damage).
+    #[allow(clippy::too_many_arguments)]
+    fn apply_hit_tapered(
+        &mut self,
+        attacker_id: u32,
+        attacker_owner: u8,
+        threat: (I16F16, I16F16),
+        attacks: &[(u8, i32)],
+        ti: usize,
+        mishit: bool,
+        atk_elev: u8,
+        taper: Option<I16F16>,
+    ) {
         if self.entities[ti].garrisoned_in.is_some() {
             return; // GAR-02: garrisoned units cannot be damaged
         }
@@ -1274,7 +1518,19 @@ impl Sim {
         // one of the multipliers INSIDE the minimum-1 clamp, not a
         // division after it — `compute_damage_hit` composes
         // elevation × mishit × Σ and clamps once, at the end.
-        let dmg = compute_damage_hit(attacks, &tspec, atk_elev, eff_tgt_elev, mishit);
+        // PRJ-07's taper (Castle P4b) composes the same way: it
+        // scales the computed damage and the floor re-applies.
+        let dmg = match taper {
+            None => compute_damage_hit(attacks, &tspec, atk_elev, eff_tgt_elev, mishit),
+            Some(f) => {
+                let base = compute_damage_hit(attacks, &tspec, atk_elev, eff_tgt_elev, mishit);
+                if base <= I16F16::ZERO {
+                    base
+                } else {
+                    (base * f).max(I16F16::from_num(1))
+                }
+            }
+        };
         {
             let t = &mut self.entities[ti];
             t.hp -= dmg;
@@ -1642,14 +1898,20 @@ impl Sim {
             let qx = (ax - bx).clamp(-hx, hx) + bx;
             let qy = (ay - by).clamp(-hy, hy) + by;
             if steer::vec_len(ax - qx, ay - qy) >= spec.range_min {
-                let roll = self.rng.below(100);
+                // PRJ-07 (Castle P4b): blast weapons make no
+                // release roll and never scatter (see
+                // resolve_strike) — the stone flies to the
+                // building's center exactly.
                 let mut impact = (bx, by);
-                if roll >= spec.accuracy {
-                    let sb = spec.scatter.to_bits();
-                    let span = (2 * sb + 1) as u32;
-                    let dx = self.rng.below(span) as i32 - sb;
-                    let dy = self.rng.below(span) as i32 - sb;
-                    impact = (bx + I16F16::from_bits(dx), by + I16F16::from_bits(dy));
+                if spec.blast_radius <= I16F16::ZERO {
+                    let roll = self.rng.below(100);
+                    if roll >= spec.accuracy {
+                        let sb = spec.scatter.to_bits();
+                        let span = (2 * sb + 1) as u32;
+                        let dx = self.rng.below(span) as i32 - sb;
+                        let dy = self.rng.below(span) as i32 - sb;
+                        impact = (bx + I16F16::from_bits(dx), by + I16F16::from_bits(dy));
+                    }
                 }
                 let dist_bits = steer::vec_len(bx - ax, by - ay).to_bits() as i64;
                 let speed_bits = spec.projectile_speed.to_bits() as i64;
@@ -1709,6 +1971,14 @@ impl Sim {
     /// order; deaths resolve in the phase's death sweep as usual.
     /// Finally the Petard is consumed — its HP is set to 0 and
     /// the death sweep removes it this same tick.
+    ///
+    /// Castle P4b: the application itself is the shared blast
+    /// helper (`apply_blast`) — the Petard's mode is the plain
+    /// one: no taper (its documented single radius takes the
+    /// full table), no accuracy rolls (a detonation strikes
+    /// everything in reach), no secondaries, no tree felling,
+    /// and its strike's primary is excluded (already struck).
+    /// Its numbers are untouched by the factoring.
     fn petard_detonate(
         &mut self,
         idx: usize,
@@ -1721,21 +1991,140 @@ impl Sim {
         let owner = self.entities[idx].owner;
         let atk_elev = self.entity_height(idx);
         let radius = crate::units::PETARD_BLAST_RADIUS;
+        self.apply_blast(
+            attacks,
+            Blast {
+                attacker_id,
+                owner,
+                threat: point,
+                point,
+                radius,
+                atk_elev,
+                accuracy: None,
+                taper: false,
+                primary_unit: None,
+                primary_building: None,
+                skip_unit: Some(idx),
+                struck_unit: primary_unit,
+                struck_building: primary_building,
+                secondaries: 0,
+                fell_trees: false,
+            },
+        );
+        // Consumed by its own detonation.
+        let e = &mut self.entities[idx];
+        e.hp = I16F16::ZERO;
+        e.clear_combat();
+    }
+
+    /// PRJ-07 (Castle P4b): one blast projectile's resolution.
+    /// The stone's whole attack table resolves over everything
+    /// inside the shooter's blast radius of the impact point —
+    /// the per-unit model of `apply_blast` in its tapered,
+    /// rolled, secondary-carrying mode; the projectile's
+    /// `intended` unit (for an entity-targeted shot) is the
+    /// primary and takes the full computed damage, and the
+    /// `intended_building` likewise. A ground shot has no
+    /// primary: everything in the radius is tapered.
+    fn resolve_blast(&mut self, p: &Projectile, spec: &UnitSpec) {
+        let primary_unit = p.intended.and_then(|tid| self.entity_index(tid));
+        self.apply_blast(
+            &p.attacks,
+            Blast {
+                attacker_id: p.attacker,
+                owner: p.owner,
+                threat: (p.spawn_x, p.spawn_y),
+                point: (p.impact_x, p.impact_y),
+                radius: spec.blast_radius,
+                atk_elev: p.attacker_elev,
+                accuracy: Some(spec.accuracy),
+                taper: true,
+                primary_unit,
+                primary_building: p.intended_building,
+                skip_unit: None,
+                struck_unit: None,
+                struck_building: None,
+                secondaries: spec.blast_secondaries,
+                fell_trees: true,
+            },
+        );
+    }
+
+    /// Apply one attack table to everything inside a radius —
+    /// the single blast application the Petard's detonation
+    /// (CMB-17) and the Mangonel line's projectiles (PRJ-07)
+    /// share (the P4 plan's §3.4 factoring). Resolution order is
+    /// the engine's everywhere: entities in ascending id order,
+    /// then buildings in ascending id order, then tree nodes in
+    /// ascending id order; deaths resolve in the phase's death
+    /// sweep as usual.
+    ///
+    /// The modes (see `Blast`): with `accuracy` set, each unit in
+    /// the radius rolls against it in ascending id order — the
+    /// ONLY RNG draws a blast ever consumes, in exactly that
+    /// order (PRJ-07's Impl prescription); buildings and trees
+    /// never roll. With `taper` set, each victim's damage scales
+    /// by 1 − dist/radius from the impact center (the primary
+    /// excepted — full computed damage); building distances are
+    /// measured to the footprint's edge, the module's building
+    /// convention. `secondaries` applies that many points of
+    /// flat minimum damage to everything in the radius after its
+    /// main application (PRJ-07's extra stones — no table, no
+    /// rolls). `fell_trees` depletes covered tree nodes and
+    /// opens their cells (MAP-04) with no wood credited — a
+    /// felled tree is destroyed, not harvested.
+    fn apply_blast(&mut self, attacks: &[(u8, i32)], b: Blast) {
         // Entities in the blast (ascending id = vec order).
         let victims: Vec<usize> = (0..self.entities.len())
             .filter(|&vi| {
-                vi != idx
-                    && Some(vi) != primary_unit
+                Some(vi) != b.skip_unit
+                    && Some(vi) != b.struck_unit
                     && !self.entities[vi].dead
                     && self.entities[vi].garrisoned_in.is_none()
                     && steer::vec_len(
-                        self.entities[vi].pos_x - point.0,
-                        self.entities[vi].pos_y - point.1,
-                    ) <= radius
+                        self.entities[vi].pos_x - b.point.0,
+                        self.entities[vi].pos_y - b.point.1,
+                    ) <= b.radius
             })
             .collect();
         for vi in victims {
-            self.apply_hit(attacker_id, owner, point, attacks, vi, false, atk_elev);
+            let dist = steer::vec_len(
+                self.entities[vi].pos_x - b.point.0,
+                self.entities[vi].pos_y - b.point.1,
+            );
+            let mut struck = true;
+            if let Some(acc) = b.accuracy {
+                // PRJ-07: one roll per unit in the radius, drawn
+                // in ascending id order — hit or miss, the draw
+                // is consumed, so the stream is a pure function
+                // of who stood in the blast.
+                if self.rng.below(100) >= acc {
+                    struck = false;
+                }
+            }
+            if struck {
+                let taper = if !b.taper || Some(vi) == b.primary_unit {
+                    None
+                } else {
+                    Some(I16F16::from_num(1) - dist / b.radius)
+                };
+                self.apply_hit_tapered(
+                    b.attacker_id,
+                    b.owner,
+                    b.threat,
+                    attacks,
+                    vi,
+                    false,
+                    b.atk_elev,
+                    taper,
+                );
+            }
+            if b.secondaries > 0 {
+                let e = &mut self.entities[vi];
+                e.hp -= I16F16::from_num(b.secondaries as i32);
+                e.last_hit_by = Some(b.attacker_id);
+                e.last_hit_owner = Some(b.owner);
+            }
         }
         // Buildings in the blast (ascending id = vec order):
         // distance is measured to the footprint's edge, the
@@ -1743,24 +2132,55 @@ impl Sim {
         let bids: Vec<u32> = self
             .buildings
             .iter()
-            .filter(|b| {
-                Some(b.id) != primary_building && {
-                    // Package J: per-axis halves (gate spans).
-                    let (hx, hy) = b.half_extents();
-                    let qx = (point.0 - b.pos_x).clamp(-hx, hx) + b.pos_x;
-                    let qy = (point.1 - b.pos_y).clamp(-hy, hy) + b.pos_y;
-                    steer::vec_len(point.0 - qx, point.1 - qy) <= radius
+            .filter(|bd| {
+                Some(bd.id) != b.struck_building && {
+                    // Package J landing: per-axis halves (gate spans),
+                    // not the square footprint half.
+                    let (hx, hy) = bd.half_extents();
+                    let qx = (b.point.0 - bd.pos_x).clamp(-hx, hx) + bd.pos_x;
+                    let qy = (b.point.1 - bd.pos_y).clamp(-hy, hy) + bd.pos_y;
+                    steer::vec_len(b.point.0 - qx, b.point.1 - qy) <= b.radius
                 }
             })
-            .map(|b| b.id)
+            .map(|bd| bd.id)
             .collect();
         for bid in bids {
-            self.damage_building(bid, attacks, atk_elev, owner);
+            let taper = if !b.taper || Some(bid) == b.primary_building {
+                None
+            } else {
+                let bd = &self.buildings[self.building_index(bid).expect("collected")];
+                let (hx, hy) = bd.half_extents();
+                let qx = (b.point.0 - bd.pos_x).clamp(-hx, hx) + bd.pos_x;
+                let qy = (b.point.1 - bd.pos_y).clamp(-hy, hy) + bd.pos_y;
+                let edge = steer::vec_len(b.point.0 - qx, b.point.1 - qy);
+                Some(I16F16::from_num(1) - edge / b.radius)
+            };
+            self.damage_building_tapered(bid, attacks, b.atk_elev, b.owner, taper);
+            if b.secondaries > 0 {
+                self.damage_building_flat(bid, b.secondaries as i32, b.owner);
+            }
         }
-        // Consumed by its own detonation.
-        let e = &mut self.entities[idx];
-        e.hp = I16F16::ZERO;
-        e.clear_combat();
+        // Trees in the blast (ascending id = vec order): felled
+        // where they stand — the node depletes and its cell
+        // opens, the MAP-04 pattern the chopping code uses when
+        // a tree runs dry, with no wood credited to anyone.
+        if b.fell_trees {
+            let felled: Vec<usize> = (0..self.nodes.len())
+                .filter(|&ni| {
+                    let n = &self.nodes[ni];
+                    n.kind == crate::econ::NodeKind::Tree
+                        && !n.is_depleted()
+                        && steer::vec_len(n.pos_x - b.point.0, n.pos_y - b.point.1) <= b.radius
+                })
+                .collect();
+            for ni in felled {
+                self.nodes[ni].amount_left = I16F16::ZERO;
+                let (cx, cy) = self
+                    .grid
+                    .world_to_cell(self.nodes[ni].pos_x, self.nodes[ni].pos_y);
+                self.grid.set_node_block(cx, cy, false);
+            }
+        }
     }
 
     /// BLD-18: every armed building's tick, in building-id order.
@@ -2396,6 +2816,21 @@ impl Sim {
         atk_elev: u8,
         attacker_owner: u8,
     ) {
+        self.damage_building_tapered(bid, attacks, atk_elev, attacker_owner, None)
+    }
+
+    /// `damage_building` with PRJ-07's blast taper (Castle P4b):
+    /// the computed damage is scaled by the taper factor before
+    /// the minimum-damage floor, exactly as `apply_hit_tapered`
+    /// composes it for entities.
+    pub(crate) fn damage_building_tapered(
+        &mut self,
+        bid: u32,
+        attacks: &[(u8, i32)],
+        atk_elev: u8,
+        attacker_owner: u8,
+        taper: Option<I16F16>,
+    ) {
         let bi = match self.building_index(bid) {
             Some(bi) => bi,
             None => return,
@@ -2429,6 +2864,34 @@ impl Sim {
         let b = &self.buildings[bi];
         let tgt_elev = self.height_at_world(b.pos_x, b.pos_y);
         let dmg = compute_damage_elev(attacks, &spec, atk_elev, tgt_elev);
+        let dmg = match taper {
+            None => dmg,
+            Some(f) => {
+                if dmg <= I16F16::ZERO {
+                    dmg
+                } else {
+                    (dmg * f).max(I16F16::from_num(1))
+                }
+            }
+        };
+        self.apply_building_damage(bid, dmg, attacker_owner);
+    }
+
+    /// Flat damage to a placed building (Castle P4b): PRJ-07's
+    /// secondary projectiles apply minimum damage with no attack
+    /// table at all — a bare subtraction through the same
+    /// destruction tail as a computed hit.
+    pub(crate) fn damage_building_flat(&mut self, bid: u32, amount: i32, attacker_owner: u8) {
+        self.apply_building_damage(bid, I16F16::from_num(amount), attacker_owner);
+    }
+
+    /// Subtract `dmg` from a building and run the destruction
+    /// tail (VIC-04 credit + removal) when it falls below 1 HP.
+    fn apply_building_damage(&mut self, bid: u32, dmg: I16F16, attacker_owner: u8) {
+        let bi = match self.building_index(bid) {
+            Some(bi) => bi,
+            None => return,
+        };
         self.buildings[bi].hp -= dmg;
         if self.buildings[bi].hp < I16F16::from_num(1) {
             // VIC-04: the lethal hit credits the attacker's owner
@@ -2524,6 +2987,22 @@ impl Sim {
     }
 
     fn resolve_projectile(&mut self, p: &Projectile) {
+        // PRJ-07 (Castle P4b): a blast weapon's projectile
+        // resolves as an area effect over its impact point, NOT
+        // as a single-target hit — this branch replaces the
+        // ordinary resolution wholesale for blast rows (the
+        // shooter's row decides, read at impact from the
+        // attacker entity; its blast fields are kind constants,
+        // identical at release and impact). No mishit scan, no
+        // friendly-fire exclusion: the blast hurts everyone in
+        // the radius (CMB-12).
+        if let Some(ai) = self.entity_index(p.attacker) {
+            let spec = self.unit_stats(ai);
+            if spec.blast_radius > I16F16::ZERO {
+                self.resolve_blast(p, &spec);
+                return;
+            }
+        }
         // A shot fired at a building (M5): it hits when the impact
         // point lands on (or within the slack of) the footprint;
         // buildings neither dodge nor move, so a surviving building

@@ -2031,9 +2031,20 @@ garrison exists). · *Status:* **MATCHES**.
 a *point*: projectiles land there with their blast (PRJ-07) whether or
 not a unit stands there. This is also how Onager-line units fell trees
 (MAP-04).
-*Source:* GAP 2.3; wiki, Attack (Mangonel-line behavior). · *Impl:* an
-attack order whose target is a position rather than an entity id, in the
-same order record (tagged union). · *Status:* **MISSING**.
+*Source:* GAP 2.3; wiki, Attack (Mangonel-line behavior). · *Impl:*
+shipped 2026-10-31 (Castle P4b) — `Command::AttackGround { entity, x, y }`
+(lockstep tag 38) stores the point in `Entity::attack_point`, mutually
+exclusive with entity/building attack orders; `attack_ground_step` in
+`combat.rs` mirrors `attack_step` with the point as target — the
+[range_min, range_max] band is enforced, a dead-zoned Mangonel backs off
+to a stand point near max range, path failure clears the order — and the
+bombardment is standing: it fires on the point until the order is
+replaced. `QueuedOrder::AttackGround` (tag 7) queues it under SEL-12.
+The Mangonel (`EntityKind::Mangonel`, tag 18) is the first attack-ground
+weapon; its stones fell trees through the shared blast helper (MAP-04).
+Tests: `siege_p4b_tests` (standing bombardment on bare ground, both
+seats, queued execution and replacement, min-range refusal). ·
+*Status:* **MATCHES**.
 
 **CMB-17 — The Petard.** The Castle's demolition unit: a suicide
 infantry whose only attack is its own detonation. *The Petard row
@@ -2157,10 +2168,26 @@ MECHANICS-STUDY §2.3). For blast weapons, accuracy is rolled per unit in
 the blast rather than per shot; the primary target takes the full
 computed damage.
 *Source:* MECHANICS-STUDY §2.3 (radii: Mangonel 1.0, Onager 1.25, Siege
-Onager 1.5 tiles; fractions as above). · *Impl:* blast resolution
-iterates entities in id order within the radius — the RNG draw order for
-per-unit rolls is therefore id order, fixed by construction. ·
-*Status:* **MISSING**.
+Onager 1.5 tiles; fractions as above). · *Impl:* shipped 2026-10-31
+(Castle P4b) — `apply_blast` / `resolve_blast` in `combat.rs` resolve a
+blast impact in ascending id order (entities, then buildings, then tree
+nodes), so the per-unit accuracy-roll draw order is id order, fixed by
+construction; every unit in the radius rolls, the primary included —
+its distinction is the taper factor, not a roll exemption. The
+Mangonel-line taper is linear, factor 1 − distance/radius (buildings
+measure to the footprint edge; a building primary takes factor 1),
+composed inside the CMB-13 clamp by `apply_hit_tapered` /
+`damage_building_tapered` (a participating attack still deals its
+minimum 1). The Mangonel row carries blast radius 1.0 tile and 5
+secondary projectiles dealing a flat 1 damage to everything in the
+radius after the main application (wiki, Mangonel, update 153015
+changelog). The Petard keeps its pre-P4b untapered, roll-free mode
+through the same helper — its numbers are unchanged. The DE "delete
+trick" (full damage out to half radius) is a reference bug and is not
+reproduced; the taper above is the documented model. Tests:
+`siege_p4b_tests` (center full damage, half-radius taper, friendly
+fire, outside-radius spare, building pair, tree felling). ·
+*Status:* **MATCHES**.
 
 **PRJ-08 — Minimum range is a dead zone.** A ranged unit or building
 cannot fire at targets closer than its minimum range (Mangonel 3,

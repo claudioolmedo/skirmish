@@ -47,7 +47,12 @@ const MAGIC: &[u8; 4] = b"SKSV";
 /// command codec gains `Command::RepairTc` (tag 38).
 /// Version 4: Package M — the building record gains the
 /// Conscription queue-rate remainder.
-const SAVE_VERSION: u32 = 4;
+/// Version 5: Castle P4b landing — the entity record gains
+/// `attack_point` (CMB-16), and the command / queued-order
+/// codecs gain their AttackGround tags, renumbered on landing
+/// (Command 39, QueuedOrder 8 — the builder's 38/7 were already
+/// RepairTc here).
+const SAVE_VERSION: u32 = 5;
 
 /// Little-endian byte writer over a growable buffer.
 struct W {
@@ -168,6 +173,7 @@ impl W {
         match *v {
             QueuedOrder::Move { x, y }
             | QueuedOrder::AttackMove { x, y }
+            | QueuedOrder::AttackGround { x, y }
             | QueuedOrder::Patrol { x, y } => {
                 self.fx(x);
                 self.fx(y);
@@ -435,6 +441,14 @@ impl W {
                 self.u32(entity);
                 self.u32(tc);
             }
+            // Castle P4b landing (CMB-16): tag 39, append-only
+            // like the enum (the builder's 38 was RepairTc here).
+            Command::AttackGround { entity, x, y } => {
+                self.u8(39);
+                self.u32(entity);
+                self.fx(x);
+                self.fx(y);
+            }
         }
     }
 }
@@ -581,6 +595,7 @@ impl Sim {
             }
             w.opt_u32(e.attack_target);
             w.opt_u32(e.attack_building);
+            w.opt_point(e.attack_point);
             w.opt_u64(e.strike_tick);
             w.u64(e.next_attack_tick);
             w.bool(e.attack_engaged);
@@ -809,6 +824,10 @@ impl<'a> R<'a> {
                 y: self.fx()?,
             }),
             7 => Some(QueuedOrder::RepairTc { tc: self.u32()? }),
+            8 => Some(QueuedOrder::AttackGround {
+                x: self.fx()?,
+                y: self.fx()?,
+            }),
             _ => None,
         }
     }
@@ -1004,6 +1023,11 @@ impl<'a> R<'a> {
             38 => Some(Command::RepairTc {
                 entity: self.u32()?,
                 tc: self.u32()?,
+            }),
+            39 => Some(Command::AttackGround {
+                entity: self.u32()?,
+                x: self.fx()?,
+                y: self.fx()?,
             }),
             _ => None,
         }
@@ -1239,6 +1263,7 @@ impl Sim {
             };
             let attack_target = r.opt_u32()?;
             let attack_building = r.opt_u32()?;
+            let attack_point = r.opt_point()?;
             let strike_tick = r.opt_u64()?;
             let next_attack_tick = r.u64()?;
             let attack_engaged = r.bool()?;
@@ -1302,6 +1327,7 @@ impl Sim {
                 dead,
                 attack_target,
                 attack_building,
+                attack_point,
                 strike_tick,
                 next_attack_tick,
                 attack_engaged,

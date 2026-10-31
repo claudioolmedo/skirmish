@@ -294,13 +294,13 @@ const KIND_RAM = 17;
 // semantic ids index the string table (unit.<id>, building.<id>).
 const KIND_I18N = ['villager', 'townCenter', 'scout', 'militia', 'archer',
   'sheep', 'boar', 'deer', 'manAtArms', 'spearman', 'skirmisher', 'wolf',
-  'knight', 'lightCavalry', 'cavalryArcher', 'petard', 'tradeCart', 'batteringRam'];
+  'knight', 'lightCavalry', 'cavalryArcher', 'petard', 'tradeCart', 'batteringRam', 'mangonel'];
 let KIND_NAME = {
   0: 'Villager', 1: 'Town Center', 2: 'Scout Cavalry', 3: 'Militia',
   4: 'Archer', 5: 'Sheep', 6: 'Boar', 7: 'Deer', 8: 'Man-at-Arms',
   9: 'Spearman', 10: 'Skirmisher', 11: 'Wolf',
   12: 'Knight', 13: 'Light Cavalry', 14: 'Cavalry Archer', 15: 'Petard',
-  16: 'Trade Cart', 17: 'Battering Ram',
+  16: 'Trade Cart', 17: 'Battering Ram', 18: 'Mangonel',
 };
 // Selection-panel portraits per unit kind (SVG symbol ids in
 // play/index.html).
@@ -308,7 +308,7 @@ const KIND_ICON = {
   0: 'i-villager', 2: 'i-villager', 3: 'i-militia', 4: 'i-archer', 5: 'i-pop',
   8: 'i-militia', 9: 'i-spearman', 10: 'i-skirmisher',
   12: 'i-villager', 13: 'i-villager', 14: 'i-archer', 15: 'i-petard',
-  16: 'i-trade-cart', 17: 'i-ram',
+  16: 'i-trade-cart', 17: 'i-ram', 18: 'i-mangonel',
 };
 
 // Original PNG icon set (2026-10-19, AI generations via Base44 on
@@ -882,7 +882,7 @@ let placement = null; // { kind } while placing a building
 // plain click places the single segment.
 let wallAnchor = null;
 let repairArm = false; // Repair targeting armed (villager root panel, E)
-let orderArm = null; // CMB-10/11 order targeting armed: 'attackmove' | 'patrol' | null
+let orderArm = null; // CMB-10/11 order targeting armed: 'attackmove' | 'patrol' | 'attackground' | null
 // M13 hotkey state (client-only, like placement): the armed
 // villager build page ('eco' | 'mil' | null), the go-to cycle
 // memory (building kind -> last id handed out), and the building
@@ -3509,6 +3509,7 @@ function applyLocalOrder(cmd) {
         : cmd.k === 15 ? sim.push_train_petard(cmd.b)
         : cmd.k === 16 ? sim.push_train_trade_cart(cmd.b)
         : cmd.k === 17 ? sim.push_train_battering_ram(cmd.b)
+        : cmd.k === 18 ? sim.push_train_mangonel(cmd.b)
         : sim.push_train_archer(cmd.b);
     // Package D (TRD-05): task a Trade Cart to a foreign Market.
     case 'trade': return sim.push_trade(cmd.e, cmd.b);
@@ -3533,6 +3534,11 @@ function applyLocalOrder(cmd) {
     case 'attackmove': return cmd.q
       ? sim.push_attack_move_queued(cmd.e, cmd.x, cmd.y)
       : sim.push_attack_move(cmd.e, cmd.x, cmd.y);
+    // Castle P4b (CMB-16): attack ground — the Mangonel's
+    // bombardment order, armed from its panel button.
+    case 'attackground': return cmd.q
+      ? sim.push_attack_ground_queued(cmd.e, cmd.x, cmd.y)
+      : sim.push_attack_ground(cmd.e, cmd.x, cmd.y);
     case 'patrol': return cmd.q
       ? sim.push_patrol_queued(cmd.e, cmd.x, cmd.y)
       : sim.push_patrol(cmd.e, cmd.x, cmd.y);
@@ -7136,15 +7142,21 @@ async function main() {
     const kind = orderArm;
     if (!kind) return;
     const st = entityState();
-    const targets = selectedUnits().filter((id) => [2, 3, 4, 8, 9, 10].includes(st.kinds[id]));
+    // CMB-16 (Castle P4b): attack ground belongs to the Mangonel
+    // alone — every selected Mangonel bombards the SAME point
+    // (no group offsets: the order names a point of earth, and
+    // DE's grouped attack-ground converges on it).
+    const targets = kind === 'attackground'
+      ? selectedUnits().filter((id) => st.kinds[id] === 18 && st.owners[id] === localOwner)
+      : selectedUnits().filter((id) => [2, 3, 4, 8, 9, 10].includes(st.kinds[id]));
     if (!targets.length) {
       orderArm = null;
-      flash(t('flash.orderSelectMil'));
+      flash(t(kind === 'attackground' ? 'flash.orderSelectMangonel' : 'flash.orderSelectMil'));
       renderCommands();
       return;
     }
     let moveDest = null;
-    if (targets.length >= 2) {
+    if (targets.length >= 2 && kind !== 'attackground') {
       let cx = 0;
       let cy = 0;
       for (const id of targets) {
@@ -9451,6 +9463,74 @@ function drawBatteringRam(i, wx, wy) {
   }
 }
 
+// The Mangonel (Castle P4b): original vector figure — a timber
+// frame on two big spoked wheels, its long throwing arm cocked
+// up over the frame with a sling and stone at the tip, a rope
+// coil and a spare stone at its feet. The owner's color rides
+// the cloth draped on the frame's side, as with its siege kin.
+function drawMangonel(i, wx, wy) {
+  const [sx, sy] = worldToScreen(wx, wy);
+  const u = camS;
+  shadow(sx, sy, 2.0 * u);
+  if (selection.has(i)) drawSelRing(sx, sy, 2.2);
+  // Wheels: two large dark discs with hub dots.
+  ctx.fillStyle = '#2e2418';
+  for (const dx of [-1.05, 1.05]) {
+    ctx.beginPath();
+    ctx.arc(sx + dx * u, sy - 0.42 * u, 0.46 * u, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.fillStyle = '#8a6844';
+  for (const dx of [-1.05, 1.05]) {
+    ctx.beginPath();
+    ctx.arc(sx + dx * u, sy - 0.42 * u, 0.15 * u, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // The frame: two uprights and a crossbeam at axle height.
+  ctx.strokeStyle = '#5f4c36';
+  ctx.lineWidth = Math.max(1.2, 0.24 * u);
+  for (const s of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(sx + s * 1.05 * u, sy - 0.45 * u);
+    ctx.lineTo(sx + s * 0.55 * u, sy - 1.85 * u);
+    ctx.stroke();
+  }
+  ctx.fillStyle = '#6d543a';
+  ctx.fillRect(sx - 1.25 * u, sy - 1.0 * u, 2.5 * u, 0.34 * u);
+  // The owner's cloth on the frame's side.
+  ctx.fillStyle = drawOwner === foeOwner() ? '#a03a2c' : '#2c5ea0';
+  ctx.fillRect(sx - 0.62 * u, sy - 1.0 * u, 1.24 * u, 0.55 * u);
+  // The throwing arm, cocked up to the left, pivot at the
+  // frame's top: butt with its counterweight low-right, long
+  // end high-left with the sling cup and its stone.
+  ctx.strokeStyle = '#8a6844';
+  ctx.lineWidth = Math.max(1.2, 0.26 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx + 0.75 * u, sy - 1.35 * u);
+  ctx.lineTo(sx - 1.35 * u, sy - 3.05 * u);
+  ctx.stroke();
+  ctx.fillStyle = '#4a4234';
+  ctx.fillRect(sx + 0.62 * u, sy - 1.62 * u, 0.5 * u, 0.55 * u);
+  // The sling: two cords from the arm's tip to the cupped stone.
+  ctx.strokeStyle = '#3a3a40';
+  ctx.lineWidth = Math.max(1, 0.08 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx - 1.35 * u, sy - 3.05 * u);
+  ctx.lineTo(sx - 1.78 * u, sy - 2.62 * u);
+  ctx.moveTo(sx - 1.35 * u, sy - 3.05 * u);
+  ctx.lineTo(sx - 1.05 * u, sy - 2.5 * u);
+  ctx.stroke();
+  ctx.fillStyle = '#6e6e73';
+  ctx.beginPath();
+  ctx.arc(sx - 1.42 * u, sy - 2.48 * u, 0.3 * u, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // A spare stone at the frame's foot.
+  ctx.fillStyle = '#5b5b60';
+  ctx.beginPath();
+  ctx.arc(sx + 1.5 * u, sy - 0.18 * u, 0.24 * u, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 // The Trade Cart (Package D, TRD-05): original vector figure —
 // a horse hauling a two-wheeled cart. The load is the sim's own
 // word (entity_trade): empty canvas on the outbound leg, gold
@@ -10423,6 +10503,7 @@ function attemptTrain(id) {
     'train-spearman': 9, 'train-skirmisher': 10,
     'train-knight': 12, 'train-cavalry-archer': 14,
     'train-petard': 15, 'train-trade-cart': 16, 'train-ram': 17,
+    'train-mangonel': 18,
   }[id];
   if (kindTag == null) return false;
   return selectedBuilding && selectedBuilding.type === 'building'
@@ -10445,6 +10526,7 @@ function flashTrainRefusal(id) {
       'train-spearman': 9, 'train-skirmisher': 10,
       'train-knight': 12, 'train-cavalry-archer': 14,
       'train-petard': 15, 'train-trade-cart': 16, 'train-ram': 17,
+      'train-mangonel': 18,
     }[id];
     const reason = sim.building_train_block(selectedBuilding.id, kindTag);
     flash(['', t('train.noResourcesUnit'),
@@ -10472,7 +10554,8 @@ function runCommandButton(id, times = 1) {
     || id === 'train-militia' || id === 'train-archer'
     || id === 'train-spearman' || id === 'train-skirmisher'
     || id === 'train-knight' || id === 'train-cavalry-archer'
-    || id === 'train-petard' || id === 'train-trade-cart' || id === 'train-ram') {
+    || id === 'train-petard' || id === 'train-trade-cart' || id === 'train-ram'
+    || id === 'train-mangonel') {
     let done = 0;
     while (done < times && attemptTrain(id)) done++;
     if (done === 0) flashTrainRefusal(id);
@@ -10495,16 +10578,20 @@ function runCommandButton(id, times = 1) {
     // SEL-17: the selected scouts' AutoExplore toggle — the same
     // order the G key issues (toggleAutoExplore plays the cue).
     toggleAutoExplore();
-  } else if (id === 'attack-move' || id === 'patrol') {
+  } else if (id === 'attack-move' || id === 'patrol' || id === 'attack-ground') {
     // CMB-10/11: arm (or disarm) order targeting — the click
     // that follows names the destination, exactly like build
     // placement. Re-clicking the armed button disarms it.
-    const kind = id === 'attack-move' ? 'attackmove' : 'patrol';
+    // CMB-16 (Castle P4b): Attack Ground arms the same way for
+    // the Mangonel — the click that follows names the point.
+    const kind = id === 'attack-move' ? 'attackmove'
+      : id === 'attack-ground' ? 'attackground' : 'patrol';
     orderArm = orderArm === kind ? null : kind;
     if (orderArm) {
       placement = null;
       repairArm = false;
-      flash(t(kind === 'attackmove' ? 'flash.attackMoveArm' : 'flash.patrolArm'));
+      flash(t(kind === 'attackmove' ? 'flash.attackMoveArm'
+        : kind === 'attackground' ? 'flash.attackGroundArm' : 'flash.patrolArm'));
     }
     playAudioCue('click');
   } else if (id.startsWith('stance-')) {
@@ -10757,6 +10844,7 @@ function renderCommands() {
   const blockCA = bk && context === 'range' ? sim.building_train_block(bk.id, 14) : -1;
   const blockP = bk && context === 'castle' ? sim.building_train_block(bk.id, 15) : -1;
   const blockR = bk && context === 'siegeworkshop' ? sim.building_train_block(bk.id, 17) : -1;
+  const blockMg = bk && context === 'siegeworkshop' ? sim.building_train_block(bk.id, 18) : -1;
   const blockTC = bk && context === 'market' ? sim.building_train_block(bk.id, 16) : -1;
   // Research blocks: the TC set (Loom 0, Feudal 1, Wheelbarrow 6,
   // Castle 14, Hand Cart 15) and the building techs, keyed by
@@ -10781,7 +10869,7 @@ function renderCommands() {
   const sig = [context, Math.floor(wood), Math.floor(myStock()[0]), Math.floor(myStock()[2]),
     Math.floor(myStock()[3]),
     reason, queue, bk ? bk.id : -1, bk ? bk.queue : -1, bk && bk.complete ? 1 : 0,
-    blockM, blockSp, blockA, blockSk, blockS, blockK, blockCA, blockP, blockR, blockTC, age, techMask, rbTc.join('.'), Object.values(rbB).join('.'),
+    blockM, blockSp, blockA, blockSk, blockS, blockK, blockCA, blockP, blockR, blockMg, blockTC, age, techMask, rbTc.join('.'), Object.values(rbB).join('.'),
     tcQueueCodes, bkQueueCodes, buildPage || '', repairArm ? 1 : 0,
     // Castle P3b: the garrison counts and the bell state are panel
     // state (button faces + disabled states read them).
@@ -10792,6 +10880,9 @@ function renderCommands() {
     // too (its Ungarrison button's disabled face reads it).
     selUnits.length === 1 && st.kinds[selUnits[0]] === 17
       ? sim.unit_garrison_count(selUnits[0]) : -1,
+    // Castle P4b: a selected Mangonel is panel state (its
+    // Attack Ground button appears with the selection).
+    selUnits.some((id) => st.kinds[id] === 18 && st.owners[id] === localOwner) ? 1 : 0,
     scoutSel ? selScouts.join('.') : -1, scoutAuto ? 1 : 0,
     selMil.length ? selMil.join('.') : -1, milStance, orderArm || '',
     placement ? placement.kind : -1,
@@ -11220,9 +11311,9 @@ function renderCommands() {
     );
   } else if (context === 'siegeworkshop') {
     // Castle P4a: the Siege Workshop's panel — Train Battering
-    // Ram, its only production in this slice (the Mangonel and
-    // the Scorpion join it in P4b/P4c), in the Castle panel's
-    // single-production shape.
+    // Ram (the Scorpion joins it in P4c), in the Castle panel's
+    // production shape. Castle P4b: Train Mangonel rides beside
+    // the Ram as the panel's second production.
     const underConstruction = !bk.complete;
     cmdGrid.append(
       cmdButton({
@@ -11233,6 +11324,15 @@ function renderCommands() {
         title: underConstruction
           ? t('cmd.underConstruction', { name: KIND_NAME[17], building: BUILD_NAME[17] })
           : t('cmd.trainTitleTime', { name: KIND_NAME[17], cost: costText([[160, 'wood'], [75, 'gold']]), secs: 36 }) + (TRAIN_BLOCK_TITLES[blockR] ? ' ' + TRAIN_BLOCK_TITLES[blockR] : ''),
+      }),
+      cmdButton({
+        id: 'train-mangonel', icon: 'i-mangonel', label: 'Mangonel',
+        costIcon: 'i-wood', cost: 160, cost2Icon: 'i-gold', cost2: 135,
+        disabled: underConstruction || blockMg === 2 || blockMg === 3,
+        key: badgeForButton({ context, id: 'train-mangonel', index: 1 }),
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: KIND_NAME[18], building: BUILD_NAME[17] })
+          : t('cmd.trainTitleTime', { name: KIND_NAME[18], cost: costText([[160, 'wood'], [135, 'gold']]), secs: 46 }) + (TRAIN_BLOCK_TITLES[blockMg] ? ' ' + TRAIN_BLOCK_TITLES[blockMg] : ''),
       }),
     );
   } else if (context === 'blacksmith') {
@@ -11521,6 +11621,20 @@ function renderCommands() {
       id: 'ungarrison', icon: 'i-ungarrison', label: t('cmd.ungarrison'),
       disabled: gN === 0, key: null,
       title: gN > 0 ? t('cmd.ungarrisonTitle', { n: gN }) : t('cmd.ungarrisonNone'),
+    }));
+  }
+  // CMB-16's Attack Ground (Castle P4b): an own Mangonel's
+  // panel carries the bombardment button — it arms ground
+  // targeting (orderArm 'attackground'); the click that
+  // follows names the point. Unbadged and mouse-only, like
+  // the garrison buttons above: the pinned DE panels give
+  // this command no grid letter in our layout.
+  if (context === 'units'
+      && selUnits.some((id) => st.kinds[id] === 18 && st.owners[id] === localOwner)) {
+    cmdGrid.append(cmdButton({
+      id: 'attack-ground', icon: 'i-attackground', label: t('cmd.attackGround'),
+      active: orderArm === 'attackground', key: null,
+      title: t('cmd.attackGroundTitle'),
     }));
   }
   // SEL-14 (wiki Hotkey page): Stop and Delete ride along
@@ -12474,7 +12588,8 @@ function draw() {
     drawKnight, drawLightCavalry, drawCavalryArcher, // 12/13/14: Castle P2 cavalry
     drawPetard, // 15: Petard (Castle P3a)
     drawTradeCart, // 16: Trade Cart (Package D)
-    drawBatteringRam]; // 17: Battering Ram (Castle P4a)
+    drawBatteringRam, // 17: Battering Ram (Castle P4a)
+    drawMangonel]; // 18: Mangonel (Castle P4b)
   for (let i = 0; i < count; i++) {
     const wx = pos[i * 2];
     const wy = pos[i * 2 + 1];

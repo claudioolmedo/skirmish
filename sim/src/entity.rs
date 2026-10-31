@@ -102,6 +102,14 @@ pub enum EntityKind {
     /// −3 melee armor is real DE data: melee hits against it
     /// AMPLIFY (CMB-01's formula has no clamp that eats it).
     BatteringRam,
+    /// Castle Age siege engine (Castle P4b, PRJ-07 + CMB-16):
+    /// trained at the Siege Workshop — a wheeled stone-thrower
+    /// whose blast-flagged stones damage everything inside a
+    /// 1-tile radius of the impact point (friend and foe alike),
+    /// taper with distance, fell trees, and can be ordered at
+    /// bare ground (Attack Ground). Its 3-tile minimum range
+    /// means it can never fire point-blank (PRJ-08).
+    Mangonel,
 }
 
 impl EntityKind {
@@ -113,7 +121,8 @@ impl EntityKind {
     /// 12 = knight, 13 = light cavalry, 14 = cavalry archer
     /// (Castle P2 — appended after the Wolf took 11 on main,
     /// so no tag moved), 15 = petard (Castle P3a), 16 = trade
-    /// cart (Package D), 17 = battering ram (Castle P4a).
+    /// cart (Package D), 17 = battering ram (Castle P4a),
+    /// 18 = mangonel (Castle P4b).
     pub fn tag(self) -> u8 {
         match self {
             EntityKind::Villager => 0,
@@ -134,6 +143,7 @@ impl EntityKind {
             EntityKind::Petard => 15,
             EntityKind::TradeCart => 16,
             EntityKind::BatteringRam => 17,
+            EntityKind::Mangonel => 18,
         }
     }
 
@@ -158,6 +168,7 @@ impl EntityKind {
             15 => Some(EntityKind::Petard),
             16 => Some(EntityKind::TradeCart),
             17 => Some(EntityKind::BatteringRam),
+            18 => Some(EntityKind::Mangonel),
             _ => None,
         }
     }
@@ -176,7 +187,8 @@ impl EntityKind {
             EntityKind::Knight
             | EntityKind::CavalryArcher
             | EntityKind::Petard
-            | EntityKind::BatteringRam => crate::tech::Age::Castle,
+            | EntityKind::BatteringRam
+            | EntityKind::Mangonel => crate::tech::Age::Castle,
             _ => crate::tech::Age::Dark,
         }
     }
@@ -206,6 +218,7 @@ impl EntityKind {
                 | EntityKind::Petard
                 | EntityKind::TradeCart
                 | EntityKind::BatteringRam
+                | EntityKind::Mangonel
         )
     }
 
@@ -227,6 +240,7 @@ impl EntityKind {
                 | EntityKind::Petard
                 | EntityKind::TradeCart
                 | EntityKind::BatteringRam
+                | EntityKind::Mangonel
         )
     }
 
@@ -275,6 +289,7 @@ impl EntityKind {
                 | EntityKind::LightCavalry
                 | EntityKind::CavalryArcher
                 | EntityKind::Petard
+                | EntityKind::Mangonel
         )
     }
 }
@@ -420,12 +435,17 @@ pub enum QueuedOrder {
     /// the loop instead of queueing behind it (the loop never
     /// ends, so a queued patrol could never execute otherwise).
     Patrol { x: I16F16, y: I16F16 },
+    /// Attack a world point (CMB-16, Castle P4b): the queued
+    /// form of the Attack Ground command — executes exactly like
+    /// a freshly issued one when the entity becomes idle.
+    AttackGround { x: I16F16, y: I16F16 },
 }
 
 impl QueuedOrder {
     /// Stable tag for the state hash: 0 move, 1 gather, 2 attack,
     /// 3 build, 4 repair, 5 attack-move, 6 patrol, 7 repair-Town-
-    /// Center (Package J — append only).
+    /// Center (Package J — append only), 8 attack ground (Castle
+    /// P4b landing — its builder tag 7 was already RepairTc here).
     pub fn tag(self) -> u8 {
         match self {
             QueuedOrder::Move { .. } => 0,
@@ -436,6 +456,7 @@ impl QueuedOrder {
             QueuedOrder::AttackMove { .. } => 5,
             QueuedOrder::Patrol { .. } => 6,
             QueuedOrder::RepairTc { .. } => 7,
+            QueuedOrder::AttackGround { .. } => 8,
         }
     }
 }
@@ -639,6 +660,15 @@ pub struct Entity {
     /// with `attack_target`; the combat phase's building step chases
     /// and strikes it, and building destruction clears it.
     pub attack_building: Option<u32>,
+    /// The ground point this one is bombarding (CMB-16, Castle
+    /// P4b), if any — the position counterpart of `attack_target`:
+    /// an Attack Ground order's target is a point of earth, not a
+    /// thing on it. Mutually exclusive with `attack_target` and
+    /// `attack_building`; the combat phase's ground step chases
+    /// until the point sits inside the weapon's firing band and
+    /// then keeps releasing on the reload, forever, until the
+    /// order is replaced (the reference's standing bombardment).
+    pub attack_point: Option<(I16F16, I16F16)>,
     /// Tick at which a pending strike lands (the attack-delay window
     /// of an engagement's first attack — CMB-04). `None` when no
     /// strike is pending.
@@ -835,6 +865,7 @@ impl Entity {
             dead: false,
             attack_target: None,
             attack_building: None,
+            attack_point: None,
             strike_tick: None,
             next_attack_tick: 0,
             attack_engaged: false,
@@ -895,6 +926,7 @@ impl Entity {
     pub fn clear_combat(&mut self) {
         self.attack_target = None;
         self.attack_building = None;
+        self.attack_point = None;
         self.strike_tick = None;
         self.attack_engaged = false;
         // The engagement is over, so its provenance is too (CMB-09).

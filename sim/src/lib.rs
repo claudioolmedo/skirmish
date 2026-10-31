@@ -68,6 +68,8 @@ mod castle_p3_tests;
 #[cfg(test)]
 mod siege_p4a_tests;
 #[cfg(test)]
+mod siege_p4b_tests;
+#[cfg(test)]
 mod university_p3c_tests;
 #[cfg(test)]
 mod garrison_tests;
@@ -521,6 +523,18 @@ pub enum Command {
         resource: ResourceKind,
         amount: i32,
     },
+    /// Attack a point of ground (CMB-16, Castle P4b): the
+    /// blast weapon named walks until the point sits inside its
+    /// firing band [range_min, range_max] (PRJ-08 — a point
+    /// inside the dead zone is backed away from, never fired on
+    /// point-blank) and then bombards the point on its reload,
+    /// forever, until the order is replaced. The stones land on
+    /// the point whether or not anything stands there; the blast
+    /// resolves over whatever the radius covers at impact
+    /// (PRJ-07), trees included (MAP-04). Only blast weapons
+    /// (a spec row with `blast_radius > 0`) accept the order —
+    /// in this roster, the Mangonel line.
+    AttackGround { entity: u32, x: I16F16, y: I16F16 },
 }
 
 /// Why Town Center training cannot currently proceed (M2.5). The
@@ -3365,7 +3379,9 @@ impl Sim {
                 let n = e.patrol.len();
                 (
                     !e.dead && is_player_owner(e.owner) && e.kind.is_military(),
-                    e.attack_target.is_some() || e.attack_building.is_some(),
+                    e.attack_target.is_some()
+                        || e.attack_building.is_some()
+                        || e.attack_point.is_some(),
                     e.order.as_ref().map(|o| (o.target_x, o.target_y)),
                     e.attack_move,
                     if n > 0 {
@@ -3641,6 +3657,7 @@ impl Sim {
             QueuedOrder::RepairTc { tc } => self.can_repair_tc(entity, tc),
             QueuedOrder::AttackMove { .. } => self.can_attack_move(entity),
             QueuedOrder::Patrol { .. } => self.can_attack_move(entity),
+            QueuedOrder::AttackGround { .. } => self.can_attack_ground(entity),
         }
     }
 
@@ -3747,6 +3764,9 @@ impl Sim {
         if let Some(b) = e.attack_building {
             return self.building_pos(b);
         }
+        if let Some(p) = e.attack_point {
+            return Some(p);
+        }
         if let Some(o) = &e.order {
             return Some((o.target_x, o.target_y));
         }
@@ -3768,6 +3788,7 @@ impl Sim {
             QueuedOrder::RepairTc { tc } => self.entity_pos(tc),
             QueuedOrder::AttackMove { x, y } => Some((x, y)),
             QueuedOrder::Patrol { x, y } => Some((x, y)),
+            QueuedOrder::AttackGround { x, y } => Some((x, y)),
         }
     }
 
@@ -3841,6 +3862,7 @@ impl Sim {
                     && e.order.is_none()
                     && e.attack_target.is_none()
                     && e.attack_building.is_none()
+                    && e.attack_point.is_none()
                     && e.attack_move.is_none()
                     && e.patrol.is_empty()
                     && e.garrisoned_in.is_none()
@@ -3941,6 +3963,9 @@ impl Sim {
                     resource,
                     amount,
                 } => self.issue_tribute(sender, recipient, resource, amount),
+                Command::AttackGround { entity, x, y } => {
+                    self.issue_attack_ground(entity, x, y)
+                }
             }
         }
 
@@ -4316,6 +4341,7 @@ impl Sim {
         e.order = None;
         e.attack_target = Some(target);
         e.attack_building = None;
+        e.attack_point = None;
         e.strike_tick = None;
         e.attack_engaged = false;
         e.next_attack_tick = 0;
@@ -4351,6 +4377,68 @@ impl Sim {
         e.order = None;
         e.attack_target = None;
         e.attack_building = Some(building);
+        e.attack_point = None;
+        e.strike_tick = None;
+        e.attack_engaged = false;
+        e.next_attack_tick = 0;
+        // CMB-09/10/11: explicit-order provenance (see apply_attack).
+        e.attack_auto = false;
+        e.attack_move = None;
+        e.patrol.clear();
+        e.patrol_next = 0;
+    }
+
+    /// Would an `AttackGround` command be accepted right now
+    /// (CMB-16, Castle P4b)? The attacker must be a living
+    /// player unit carrying a blast weapon (`blast_radius > 0` —
+    /// the Mangonel line in this roster): attack ground is the
+    /// blast weapon's order, and no other kind accepts it. The
+    /// point itself is unconstrained — a point the weapon can
+    /// never reach or stand off from ends the engagement when
+    /// the combat phase tries to fight it, like an unreachable
+    /// attack target (CMB-06's discipline).
+    pub fn can_attack_ground(&self, entity: u32) -> bool {
+        let Some(ai) = self.entity_index(entity) else {
+            return false;
+        };
+        let a = &self.entities[ai];
+        if a.dead || !entity::is_player_owner(a.owner) {
+            return false;
+        }
+        let spec = units::spec(a.kind);
+        !spec.attacks.is_empty() && spec.blast_radius > I16F16::ZERO
+    }
+
+    /// Apply an `AttackGround` command (CMB-16): validate, cancel
+    /// the attacker's current work, and set its ground target.
+    /// The combat phase's ground step chases until the point is
+    /// inside the firing band and bombards it on the reload. A
+    /// non-queued order also clears the entity's order queue
+    /// (SEL-12 replace semantics).
+    fn issue_attack_ground(&mut self, entity: u32, x: I16F16, y: I16F16) {
+        if !self.can_attack_ground(entity) {
+            return;
+        }
+        let idx = self.entity_index(entity).expect("validated");
+        self.entities[idx].order_queue.clear();
+        self.entities[idx].order_from_queue = false;
+        self.apply_attack_ground(idx, x, y);
+    }
+
+    /// The mechanics of an attack-ground order, shared by the
+    /// `AttackGround` command and by queued-order execution.
+    fn apply_attack_ground(&mut self, idx: usize, x: I16F16, y: I16F16) {
+        let e = &mut self.entities[idx];
+        e.task = Task::Idle;
+        e.task_node = None;
+        e.task_building = None;
+        e.task_dropoff = None;
+        e.auto_explore = false;
+        e.auto_target = None;
+        e.order = None;
+        e.attack_target = None;
+        e.attack_building = None;
+        e.attack_point = Some((x, y));
         e.strike_tick = None;
         e.attack_engaged = false;
         e.next_attack_tick = 0;
@@ -5569,6 +5657,7 @@ impl Sim {
                     || e.order.is_some()
                     || e.attack_target.is_some()
                     || e.attack_building.is_some()
+                    || e.attack_point.is_some()
                     // CMB-10/11: a standing order owns the unit —
                     // its queue waits behind the attack-move (which
                     // completes) and behind a patrol (which never
@@ -5646,6 +5735,13 @@ impl Sim {
                 } else {
                     self.apply_patrol(idx, x, y);
                 }
+                true
+            }
+            QueuedOrder::AttackGround { x, y } => {
+                if !self.can_attack_ground(entity) {
+                    return false;
+                }
+                self.apply_attack_ground(idx, x, y);
                 true
             }
         }
@@ -7896,6 +7992,10 @@ impl Sim {
                         h.write_i32(x.to_bits());
                         h.write_i32(y.to_bits());
                     }
+                    QueuedOrder::AttackGround { x, y } => {
+                        h.write_i32(x.to_bits());
+                        h.write_i32(y.to_bits());
+                    }
                 }
             }
             // INF-09: the current order's queue provenance
@@ -8075,6 +8175,20 @@ impl Sim {
                     h.write_i32(px.to_bits());
                     h.write_i32(py.to_bits());
                 }
+            }
+            // CMB-16 (Castle P4b landing): the standing Attack
+            // Ground point — written ONLY while one is in play
+            // (marker 0xBC — the builder's 0xBA was already the
+            // Ram passenger list's marker in this same section,
+            // and a same-length payload made the two genuinely
+            // ambiguous; 0xBC is the section's next free byte),
+            // on the same conditional pattern, so a match that
+            // never orders a bombardment hashes byte-identically
+            // to before.
+            if let Some((gx, gy)) = e.attack_point {
+                h.write_u8(0xBC);
+                h.write_i32(gx.to_bits());
+                h.write_i32(gy.to_bits());
             }
             // Castle P3b: garrison state (GAR-01..08) — written
             // ONLY while any of it is in play (marker 0xB9), on the
