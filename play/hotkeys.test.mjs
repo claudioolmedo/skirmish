@@ -109,7 +109,7 @@ test('panel slot letters run a selected building\u2019s buttons', () => {
   assert.equal(at('miningcamp', 'KeyW').id, 'research-stonemining');
 });
 
-test('Town Center letters are DE’s own: Villager Q, Loom A, Age Z, the Wheelbarrow line S', () => {
+test('Town Center letters are DE’s own: Villager Q, Loom A, Age Z, the Wheelbarrow line S, Town Watch D', () => {
   // DE's grid letter is the button's panel position, and the TC
   // panel's arrangement is not our button order — it is the
   // reference panel's own, read off the 2026-10-19 player
@@ -120,16 +120,19 @@ test('Town Center letters are DE’s own: Villager Q, Loom A, Age Z, the Wheelba
   // darkened at row 2, column 2 until Feudal. Hand Cart is that
   // same cell's next rung — the panel never shows both — so S
   // resolves to whichever rung is rendered. Scoped to the TC
-  // context only: W/E/D run nothing here (D is Town Watch's
-  // cell in DE — a tech we do not have), and the villager
-  // context keeps its own A.
+  // context only: W/E run nothing here, and the villager
+  // context keeps its own A. Package K (VIS-03) landed the tech
+  // D always named: Town Watch sits at D, and Town Patrol is
+  // that same cell's next rung, like Hand Cart over Wheelbarrow.
   const at = (code, rendered) => resolveHotkey({ context: 'tc', page: null, code, rendered });
   assert.equal(at('KeyQ').id, 'train', 'Create Villager — top-left of the TC panel');
   assert.equal(at('KeyA').id, 'research-loom', 'Loom — below Villager (study frame f_025)');
   assert.equal(at('KeyZ').id, 'research-age', 'Age advancement — below Loom, first column\u2019s foot');
   assert.equal(at('KeyW'), null, 'W is not a TC letter in DE');
   assert.equal(at('KeyE'), null, 'E is not a TC letter in DE');
-  assert.equal(at('KeyD'), null, 'D is not a TC letter (Town Watch\u2019s cell in DE — a tech we do not have)');
+  assert.equal(at('KeyD').id, 'research-townwatch', 'Town Watch — its DE cell (Package K)');
+  assert.equal(at('KeyD', ['train', 'research-loom', 'research-age', 'research-wheelbarrow', 'research-townpatrol']).id,
+    'research-townpatrol', 'Town Patrol — the Town Watch cell\u2019s next rung, once Town Watch is in');
   assert.equal(at('KeyS').id, 'research-wheelbarrow', 'Wheelbarrow — right of Loom');
   assert.equal(at('KeyS', ['train', 'research-loom', 'research-age', 'research-handcart']).id,
     'research-handcart', 'Hand Cart — the Wheelbarrow cell\u2019s next rung, once Wheelbarrow is in');
@@ -141,6 +144,8 @@ test('Town Center letters are DE’s own: Villager Q, Loom A, Age Z, the Wheelba
   assert.equal(badgeForButton({ context: 'tc', id: 'research-age', index: 2 }), 'Z');
   assert.equal(badgeForButton({ context: 'tc', id: 'research-wheelbarrow', index: 3 }), 'S');
   assert.equal(badgeForButton({ context: 'tc', id: 'research-handcart', index: 4 }), 'S');
+  assert.equal(badgeForButton({ context: 'tc', id: 'research-townwatch', index: 5 }), 'D');
+  assert.equal(badgeForButton({ context: 'tc', id: 'research-townpatrol', index: 6 }), 'D');
   // Other panels keep their position badges.
   assert.equal(badgeForButton({ context: 'barracks', id: 'research-maa', index: 2 }), 'A');
   assert.equal(badgeForButton({ context: 'barracks', id: 'train-spearman', index: 1 }), 'W');
@@ -163,6 +168,12 @@ test('market panel: sells on Q W E, buys on A S D (TRD-01..03); Package D bottom
   assert.equal(badgeForButton({ context: 'market', id: 'trade-buy-stone' }), 'D');
   assert.equal(badgeForButton({ context: 'market', id: 'train-trade-cart' }), 'Z');
   assert.equal(badgeForButton({ context: 'market', id: 'research-caravan' }), 'X');
+  // Package K (TRD-04): Coinage / Banking carry NO letter — the
+  // grid is full (Delete holds C) — so no key resolves them and
+  // they paint no badge, like the garrison buttons.
+  assert.equal(at('KeyC'), null);
+  assert.equal(badgeForButton({ context: 'market', id: 'research-coinage', index: 8 }), null);
+  assert.equal(badgeForButton({ context: 'market', id: 'research-banking', index: 9 }), null);
 });
 
 test('no hotkeys in empty / enemy contexts — WASD keeps panning', () => {
@@ -214,11 +225,11 @@ test('go-to: Ctrl+letter jumps to a building type, in any context', () => {
 
 test('every building sits on exactly one page, in grid order, with a working badge', () => {
   assert.deepEqual([...PAGE_KINDS.eco, ...PAGE_KINDS.mil].sort((a, b) => a - b),
-    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], 'the two pages partition the seventeen buildings');
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17], 'the two pages partition the eighteen buildings');
   // Grid (render) order: the slots run Q W E / A S / ... in order.
   assert.deepEqual(PAGE_KINDS.eco, [0, 4, 1, 3, 5, 12, 13, 15], 'economic: House, Mill, Farm, Lumber, Mining, Market, Town Center, Castle');
-  assert.deepEqual(PAGE_KINDS.mil, [2, 6, 7, 8, 9, 10, 11, 14, 16],
-    'military: Barracks, Range, Stable, Blacksmith, Palisade Wall, Watch Tower, Outpost, Stone Wall, University');
+  assert.deepEqual(PAGE_KINDS.mil, [2, 6, 7, 8, 9, 10, 11, 14, 16, 17],
+    'military: Barracks, Range, Stable, Blacksmith, Palisade Wall, Watch Tower, Outpost, Stone Wall, University, Siege Workshop');
   for (const [page, kinds] of Object.entries(PAGE_KINDS)) {
     for (const kind of kinds) {
       assert.equal(PAGE_FOR_KIND[kind], page);

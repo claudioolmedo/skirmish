@@ -403,6 +403,22 @@ export class WasmSim {
         return v1;
     }
     /**
+     * NET-09: rebuild a sim from `save_game`'s bytes. Returns
+     * `None` (JS `undefined`) for anything that is not an intact
+     * save of a known version — the sim verifies the restored
+     * state's hash against the file's trailer before accepting
+     * it. The restored sim re-enters lockstep from the saved
+     * tick, exactly as if the match had never paused.
+     * @param {Uint8Array} bytes
+     * @returns {WasmSim | undefined}
+     */
+    static load_game(bytes) {
+        const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsim_load_game(ptr0, len0);
+        return ret === 0 ? undefined : WasmSim.__wrap(ret);
+    }
+    /**
      * The live trade prices as a flat array in canonical
      * commodity order, sell then buy per commodity:
      * [sell_food, buy_food, sell_wood, buy_wood, sell_stone,
@@ -930,6 +946,31 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Order a villager to build a Siege Workshop (200 wood, 4×4;
+     * Castle Age, requires a completed Blacksmith — Castle
+     * P4a) — see `push_build_house`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_siege_workshop(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_siege_workshop(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Queue a Siege Workshop build (Castle Age — Castle P4a) —
+     * see `push_build_house_queued`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_siege_workshop_queued(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_siege_workshop_queued(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
      * Order a villager to build a Stable (175 wood, 3×3 — M6;
      * Feudal Age, requires a Barracks) — see `push_build_house`.
      * @param {number} entity
@@ -1179,6 +1220,19 @@ export class WasmSim {
      */
     push_garrison_tc(entity, tc) {
         const ret = wasm.wasmsim_push_garrison_tc(this.__wbg_ptr, entity, tc);
+        return ret !== 0;
+    }
+    /**
+     * Order a unit to garrison inside an own Battering Ram
+     * (Castle P4a, GAR-10/SEL-11): it walks to the Ram's current
+     * position and enters on arrival. Returns whether the order
+     * *would* be accepted against the current state.
+     * @param {number} entity
+     * @param {number} host
+     * @returns {boolean}
+     */
+    push_garrison_unit(entity, host) {
+        const ret = wasm.wasmsim_push_garrison_unit(this.__wbg_ptr, entity, host);
         return ret !== 0;
     }
     /**
@@ -1500,6 +1554,18 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Enqueue a Battering Ram at a completed Siege Workshop
+     * (Castle P4a — the workshop is the Ram's only home;
+     * `can_train_at` carries the Castle Age gate). See
+     * `push_train_militia`.
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_train_battering_ram(building) {
+        const ret = wasm.wasmsim_push_train_battering_ram(this.__wbg_ptr, building);
+        return ret !== 0;
+    }
+    /**
      * Enqueue a Cavalry Archer at a completed Archery Range
      * (Castle P2). See `push_train_militia`.
      * @param {number} building
@@ -1606,6 +1672,26 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Tribute resources to another player (Package K, TRD-04):
+     * the sender pays `amount` plus its tribute fee (30%, 20%
+     * with Coinage, 0% with Banking — fee rounded up) and the
+     * recipient receives the full amount. `resource_tag` is the
+     * `ResourceKind` tag (food 1, wood 2, gold 3, stone 4).
+     * Returns false (and queues nothing) when the sim would
+     * reject the tribute: same or unknown seat, nothing sent,
+     * the sender holding under 30 of the resource or short of
+     * amount + fee.
+     * @param {number} sender
+     * @param {number} recipient
+     * @param {number} resource_tag
+     * @param {number} amount
+     * @returns {boolean}
+     */
+    push_tribute(sender, recipient, resource_tag, amount) {
+        const ret = wasm.wasmsim_push_tribute(this.__wbg_ptr, sender, recipient, resource_tag, amount);
+        return ret !== 0;
+    }
+    /**
      * Voluntarily ungarrison a placed building (Castle P3b,
      * GAR-03): every unit inside is placed at the exit point,
      * idle. Returns whether anyone was inside.
@@ -1623,6 +1709,18 @@ export class WasmSim {
      */
     push_ungarrison_tc(tc) {
         const ret = wasm.wasmsim_push_ungarrison_tc(this.__wbg_ptr, tc);
+        return ret !== 0;
+    }
+    /**
+     * Voluntarily ungarrison a Battering Ram (Castle P4a,
+     * GAR-10): every passenger steps out at the ring around the
+     * Ram's current position, idle. Returns whether anyone was
+     * inside.
+     * @param {number} host
+     * @returns {boolean}
+     */
+    push_ungarrison_unit(host) {
+        const ret = wasm.wasmsim_push_ungarrison_unit(this.__wbg_ptr, host);
         return ret !== 0;
     }
     /**
@@ -1671,6 +1769,19 @@ export class WasmSim {
     research_block_tc(tech_tag) {
         const ret = wasm.wasmsim_research_block_tc(this.__wbg_ptr, tech_tag);
         return ret >>> 0;
+    }
+    /**
+     * NET-09: serialize the full sim state as a save file
+     * (magic + version + body + the state's SIM-05 hash — see
+     * `Sim::save_game`). The client offers this in the pause
+     * menu as a download; no renderer state is included.
+     * @returns {Uint8Array}
+     */
+    save_game() {
+        const ret = wasm.wasmsim_save_game(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
     }
     /**
      * Any player's score by owner tag (VIC-04):
@@ -1916,6 +2027,27 @@ export class WasmSim {
         return ret >>> 0;
     }
     /**
+     * A player's current tribute fee, in percent (TRD-04):
+     * 30 by default, 20 with Coinage, 0 with Banking. Behind the
+     * diplomacy screen's fee line.
+     * @param {number} owner
+     * @returns {number}
+     */
+    tribute_fee_pct_for(owner) {
+        const ret = wasm.wasmsim_tribute_fee_pct_for(this.__wbg_ptr, owner);
+        return ret;
+    }
+    /**
+     * Entities garrisoned in a Battering Ram (Castle P4a,
+     * GAR-10).
+     * @param {number} host
+     * @returns {number}
+     */
+    unit_garrison_count(host) {
+        const ret = wasm.wasmsim_unit_garrison_count(this.__wbg_ptr, host);
+        return ret >>> 0;
+    }
+    /**
      * Number of villagers (Town Center not counted).
      * @returns {number}
      */
@@ -2022,6 +2154,13 @@ function getUint8ArrayMemory0() {
     return cachedUint8ArrayMemory0;
 }
 
+function passArray8ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 1, 1) >>> 0;
+    getUint8ArrayMemory0().set(arg, ptr / 1);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
+
 let cachedTextDecoder = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true });
 cachedTextDecoder.decode();
 const MAX_SAFARI_DECODE_BYTES = 2146435072;
@@ -2035,6 +2174,8 @@ function decodeText(ptr, len) {
     }
     return cachedTextDecoder.decode(getUint8ArrayMemory0().subarray(ptr, ptr + len));
 }
+
+let WASM_VECTOR_LEN = 0;
 
 let wasmModule, wasmInstance, wasm;
 function __wbg_finalize_init(instance, module) {

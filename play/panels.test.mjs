@@ -33,6 +33,18 @@ const LAYOUTS = {
     cells: { Q: 'train', A: 'research-loom', Z: 'research-age', S: 'research-handcart', C: 'delete-building' },
     unplaced: [],
   },
+  'town center (Package K — Town Watch takes the D cell the reference keeps for it)': {
+    context: 'tc', page: null,
+    ids: ['train', 'research-loom', 'research-age', 'research-wheelbarrow', 'research-townwatch', 'delete-building'],
+    cells: { Q: 'train', A: 'research-loom', Z: 'research-age', S: 'research-wheelbarrow', D: 'research-townwatch', C: 'delete-building' },
+    unplaced: [],
+  },
+  'town center (Package K — Town Patrol takes the Town Watch cell, DE chain rule)': {
+    context: 'tc', page: null,
+    ids: ['train', 'research-loom', 'research-age', 'research-handcart', 'research-townpatrol', 'delete-building'],
+    cells: { Q: 'train', A: 'research-loom', Z: 'research-age', S: 'research-handcart', D: 'research-townpatrol', C: 'delete-building' },
+    unplaced: [],
+  },
   barracks: {
     context: 'barracks', page: null,
     ids: ['train-militia', 'train-spearman', 'research-maa', 'delete-building'],
@@ -88,6 +100,16 @@ const LAYOUTS = {
     },
     unplaced: [],
   },
+  'market (Package K — the fee line rides unplaced: the grid is full, Delete holds C)': {
+    context: 'market', page: null,
+    ids: ['trade-sell-food', 'trade-sell-wood', 'trade-sell-stone', 'trade-buy-food', 'trade-buy-wood', 'trade-buy-stone', 'train-trade-cart', 'research-caravan', 'research-coinage', 'delete-building'],
+    cells: {
+      Q: 'trade-sell-food', W: 'trade-sell-wood', E: 'trade-sell-stone',
+      A: 'trade-buy-food', S: 'trade-buy-wood', D: 'trade-buy-stone', C: 'delete-building',
+      Z: 'train-trade-cart', X: 'research-caravan',
+    },
+    unplaced: ['research-coinage'],
+  },
   'military units (attack-move sits in the Q cell, badged with DE’s dedicated R)': {
     context: 'units', page: null,
     ids: ['attack-move', 'patrol', 'stance-0', 'stance-1', 'stance-2', 'stance-3', 'stop', 'auto-explore', 'delete'],
@@ -119,7 +141,7 @@ const LAYOUTS = {
     cells: {
       Q: 'build-2', W: 'build-6', E: 'build-7',
       A: 'build-8', S: 'build-9', D: 'build-10', Z: 'build-11', X: 'build-14', C: 'page-back',
-      V: 'build-16',
+      V: 'build-16', N: 'build-17',
     },
     unplaced: ['stop', 'delete'],
   },
@@ -198,7 +220,7 @@ test('Castle P3b: the garrison buttons ride the host panels, unbadged', () => {
   const app = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
   assert.match(app, /id: 'town-bell', icon: 'i-bell'/);
   assert.match(app, /id: 'ungarrison', icon: 'i-ungarrison'/);
-  assert.match(app, /GAR_PANEL = \['tc', 'castle', 'tower', 'outpost', 'barracks', 'range', 'stable'\]/);
+  assert.match(app, /GAR_PANEL = \['tc', 'castle', 'tower', 'outpost', 'barracks', 'range', 'stable', 'siegeworkshop'\]/);
   assert.match(app, /case 'garrison_b': return sim\.push_garrison_building/);
   assert.match(app, /case 'town_bell': return sim\.push_town_bell/);
   // The smart order (SEL-11's garrison context): a right-click on

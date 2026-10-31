@@ -80,8 +80,9 @@
 //       5 Mining Camp, 6 Archery Range, 7 Stable, 8 Blacksmith,
 //       9 Palisade Wall, 10 Watch Tower, 11 Outpost (BLD-18),
 //       12 Market (BLD-19), 14 Stone Wall (BLD-20), 15 Castle
-//       (Castle P3a), 16 University (Castle P3c; the tags are
-//       the sim's — append only).
+//       (Castle P3a), 16 University (Castle P3c), 17 Siege
+//       Workshop (Castle P4a; the tags are the sim's — append
+//       only).
 // PAGE_KINDS is the pages' GRID (render) order: slot 0 first.
 // Kind 13 (Town Center, Castle Age) closes the economic page —
 // DE's villager panel keeps the TC with the economic buildings,
@@ -89,13 +90,13 @@
 // beside it: the military page already fills all nine cells.
 export const PAGE_KINDS = {
   eco: [0, 4, 1, 3, 5, 12, 13, 15],
-  mil: [2, 6, 7, 8, 9, 10, 11, 14, 16],
+  mil: [2, 6, 7, 8, 9, 10, 11, 14, 16, 17],
 };
 
 /** Which build page a building kind belongs to ('eco' | 'mil'). */
 export const PAGE_FOR_KIND = {
   0: 'eco', 1: 'eco', 3: 'eco', 4: 'eco', 5: 'eco', 12: 'eco', 13: 'eco', 15: 'eco',
-  2: 'mil', 6: 'mil', 7: 'mil', 8: 'mil', 9: 'mil', 10: 'mil', 11: 'mil', 14: 'mil', 16: 'mil',
+  2: 'mil', 6: 'mil', 7: 'mil', 8: 'mil', 9: 'mil', 10: 'mil', 11: 'mil', 14: 'mil', 16: 'mil', 17: 'mil',
 };
 
 /**
@@ -126,6 +127,7 @@ export const PAGE_KEYS = {
     KeyZ: 11, // Outpost — slot 6 (BLD-18)
     KeyX: 14, // Stone Wall — slot 7 (BLD-20; the defensive row's second wall, beside the Palisade as in DE)
     KeyV: 16, // University — slot 8 (Castle P3c; the page's nine kinds overflow the 3×3, so the University opens a fourth row under the Barracks — V, the free letter under the page's first column. Its DE page is this one; the Castle precedent (overflow to the eco page) is exhausted — that page is full too.)
+    KeyN: 17, // Siege Workshop — slot 9 (Castle P4a; the fourth row's second cell. The bottom letter row runs Z X C V B N — B is the Barracks' silent alias on this page, so the workshop takes the next free letter, N.)
     KeyC: 'back', // Back — the last slot
   },
 };
@@ -133,7 +135,7 @@ export const PAGE_KEYS = {
 /** The one letter shown as a button's key badge on an armed page. */
 export const PAGE_BADGE = {
   eco: { 0: 'Q', 4: 'W', 1: 'E', 3: 'A', 5: 'S', 12: 'D', 13: 'Z', 15: 'X' },
-  mil: { 2: 'Q', 6: 'W', 7: 'E', 8: 'A', 9: 'S', 10: 'D', 11: 'Z', 14: 'X', 16: 'V' },
+  mil: { 2: 'Q', 6: 'W', 7: 'E', 8: 'A', 9: 'S', 10: 'D', 11: 'Z', 14: 'X', 16: 'V', 17: 'N' },
 };
 
 /** Panel contexts whose buttons answer to position keys, in order. */
@@ -146,12 +148,15 @@ export const PANEL_BUTTONS = {
   // build context's special buttons get outside these tables.
   units: ['attack-move', 'patrol', 'stance-0', 'stance-1', 'stance-2', 'stance-3',
     'stop', 'delete'],
-  tc: ['train', 'research-loom', 'research-age', 'research-wheelbarrow', 'research-handcart'],
+  tc: ['train', 'research-loom', 'research-age', 'research-wheelbarrow', 'research-handcart',
+    'research-townwatch', 'research-townpatrol'],
   barracks: ['train-militia', 'train-spearman', 'research-maa'],
   range: ['train-archer', 'train-skirmisher', 'train-cavalry-archer'],
   stable: ['train-scout', 'train-knight', 'research-lightcavalry', 'research-bloodlines', 'research-husbandry'],
   // Castle P3a: the Castle's whole panel — Train Petard.
   castle: ['train-petard'],
+  // Castle P4a: the Siege Workshop's whole panel — Train Ram.
+  siegeworkshop: ['train-ram'],
   blacksmith: ['research-fletching', 'research-scalemail', 'research-padded',
     'research-forging', 'research-barding'],
   lumbercamp: ['research-doublebit'],
@@ -230,6 +235,13 @@ export const PANEL_KEYS = {
     // reference panel keeps Town Watch, a tech we do not have.)
     'research-wheelbarrow': ['KeyS', 'S'],
     'research-handcart': ['KeyS', 'S'],
+    // Package K (VIS-03): the Town Watch line takes D — the
+    // cell the reference panel keeps for it (the Castle P1 note
+    // above already named it: "D is where the reference panel
+    // keeps Town Watch"). Town Patrol is the SAME cell's next
+    // rung, like Hand Cart over Wheelbarrow at S.
+    'research-townwatch': ['KeyD', 'D'],
+    'research-townpatrol': ['KeyD', 'D'],
   },
   barracks: {
     'train-militia': ['KeyQ', 'Q'],
@@ -294,6 +306,11 @@ export const PANEL_KEYS = {
   castle: {
     'train-petard': ['KeyQ', 'Q'],
   },
+  // Castle P4a: the Siege Workshop's single train button, same
+  // first-slot rule.
+  siegeworkshop: {
+    'train-ram': ['KeyQ', 'Q'],
+  },
   // The Market (TRD-01..03): the plain positional grid over the
   // two rendered rows — sells Q W E, buys A S D. Package D: the
   // bottom row takes Train Trade Cart at Z and Caravan at X (the
@@ -307,6 +324,11 @@ export const PANEL_KEYS = {
     'trade-buy-stone': ['KeyD', 'D'],
     'train-trade-cart': ['KeyZ', 'Z'],
     'research-caravan': ['KeyX', 'X'],
+    // Package K (TRD-04): Coinage / Banking are NOT in this
+    // table — the Market's nine cells are all spoken for (the
+    // exchange, the cart, Caravan, and Delete at C), so the fee
+    // line renders unbadged after the grid and answers to the
+    // mouse, exactly like the garrison buttons (app.js).
   },
   // Castle P3c: the University — the plain positional grid over
   // its five researches (top row Q W E, second row A S).
@@ -427,9 +449,11 @@ export const GRID_CELLS = {
   A: [2, 1], S: [2, 2], D: [2, 3],
   Z: [3, 1], X: [3, 2], C: [3, 3],
   // Castle P3c: the military build page's fourth row (see
-  // PAGE_KEYS.mil) — only the University's V lives there; the
-  // renderer adds the fourth row only for that page.
+  // PAGE_KEYS.mil) — the University's V opened it; Castle P4a's
+  // Siege Workshop takes its second cell (N). The renderer
+  // adds the fourth row only for that page.
   V: [4, 1],
+  N: [4, 2],
 };
 
 /**

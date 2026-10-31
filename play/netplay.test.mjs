@@ -57,6 +57,17 @@ test('validateCommand accepts the full vocabulary and rejects junk', () => {
     // Package D: Caravan is tech 19 at the Market (renumbered
     // from the builder's 18 on rebase — 18 is Imperial).
     { t: 'research_at', b: 3, tech: 19 },
+    // Package K: Coinage (25) and Banking (26) are Market
+    // researches; Town Watch (27) and Town Patrol (28) are TC
+    // researches; a tribute names a seat, a resource tag and a
+    // positive amount.
+    { t: 'research_at', b: 3, tech: 25 },
+    { t: 'research_at', b: 3, tech: 26 },
+    { t: 'research_tc', tech: 27 },
+    { t: 'research_tc', tech: 28, tc: 4 },
+    { t: 'tribute', to: 2, r: 1, a: 100 },
+    { t: 'tribute', to: 0, r: 3, a: 500 },
+    { t: 'tribute', to: 2, r: 4, a: 1 },
     { t: 'train_at', b: 3, k: 16 },
     { t: 'trade', e: 4, b: 9 },
     { t: 'rally_tc', x: 1, y: 2, tc: 4 },
@@ -73,6 +84,12 @@ test('validateCommand accepts the full vocabulary and rejects junk', () => {
     { t: 'ungarrison_tc' },
     { t: 'town_bell', tc: 4 },
     { t: 'town_bell' },
+    // Castle P4a: build kind 17 (Siege Workshop), train kind 17
+    // (Battering Ram) and the Ram garrison vocabulary.
+    { t: 'build', e: 1, k: 17, x: 0, y: 0 },
+    { t: 'train_at', b: 3, k: 17 },
+    { t: 'garrison_u', e: 1, host: 4 },
+    { t: 'ungarrison_u', host: 4 },
     { t: 'auto_explore', e: 4, on: true },
     { t: 'auto_explore', e: 4, on: false },
     { t: 'attackmove', e: 4, x: 10, y: -2 },
@@ -92,7 +109,7 @@ test('validateCommand accepts the full vocabulary and rejects junk', () => {
     null, 42, {}, { t: 'nope' },
     { t: 'move', e: -1, x: 0, y: 0 },
     { t: 'move', e: 1, x: NaN, y: 0 },
-    { t: 'build', e: 1, k: 17, x: 0, y: 0 },
+    { t: 'build', e: 1, k: 18, x: 0, y: 0 },
     { t: 'mbuy', b: 3, r: 3 },
     { t: 'mbuy', b: 3, r: 0 },
     { t: 'msell', r: 1 },
@@ -108,6 +125,19 @@ test('validateCommand accepts the full vocabulary and rejects junk', () => {
     // building research (Package D renumber pins, 2026-10-30).
     { t: 'research_tc', tech: 19 },
     { t: 'research_at', b: 3, tech: 18 },
+    // Package K: the fee techs are not TC research, the LoS
+    // techs are not building research, and a tribute to Gaia, of
+    // nothing, of a non-resource or past the sanity ceiling is
+    // junk.
+    { t: 'research_tc', tech: 25 },
+    { t: 'research_at', b: 3, tech: 27 },
+    { t: 'tribute', to: 1, r: 1, a: 100 },
+    { t: 'tribute', to: 2, r: 0, a: 100 },
+    { t: 'tribute', to: 2, r: 5, a: 100 },
+    { t: 'tribute', to: 2, r: 1, a: 0 },
+    { t: 'tribute', to: 2, r: 1, a: -50 },
+    { t: 'tribute', to: 2, r: 1, a: 100001 },
+    { t: 'tribute', to: 2, r: 1.5, a: 100 },
     { t: 'trade', e: 4 },
     { t: 'trade', b: 9 },
     { t: 'train_vil', tc: -1 },
@@ -132,6 +162,11 @@ test('validateCommand accepts the full vocabulary and rejects junk', () => {
     { t: 'ungarrison_b' },
     { t: 'ungarrison_tc', tc: -1 },
     { t: 'town_bell', tc: 1.5 },
+    { t: 'garrison_u', e: 1 },
+    { t: 'garrison_u', host: 4 },
+    { t: 'garrison_u', e: 1, host: -1 },
+    { t: 'ungarrison_u' },
+    { t: 'ungarrison_u', host: 1.5 },
   ];
   for (const c of bad) assert.equal(validateCommand(c), false, JSON.stringify(c));
 });
@@ -287,6 +322,9 @@ test('applyCommand maps semantic commands to the per-seat sim calls', () => {
   applyCommand(sim, { t: 'ungarrison_b', b: 9 }, 0, tcOf);
   applyCommand(sim, { t: 'ungarrison_tc' }, 2, tcOf);
   applyCommand(sim, { t: 'town_bell' }, 0, tcOf);
+  // Package K (TRD-04): a tribute's sender is the bundle's
+  // owner — seat 2 tributes seat 0 here.
+  applyCommand(sim, { t: 'tribute', to: 0, r: 3, a: 250 }, 2, tcOf);
   assert.deepEqual(calls, [
     ['push_move', 5, 1, 2],
     ['push_move_queued', 5, 1, 2],
@@ -313,6 +351,7 @@ test('applyCommand maps semantic commands to the per-seat sim calls', () => {
     ['push_ungarrison_building', 9],
     ['push_ungarrison_tc', 40],
     ['push_town_bell', 0],
+    ['push_tribute', 2, 0, 3, 250],
   ]);
 });
 
@@ -591,6 +630,32 @@ test('NET-07: exact duplicates within one bundle collapse', () => {
   const bundle = pair.simB.applied.find(([s, cmds]) => s === 0 && cmds.length > 0);
   assert.equal(bundle[1].length, 2, 'duplicate dropped, distinct kept');
   assert.equal(pair.a.state().droppedDupes, 1);
+});
+
+test('NET-07: a redelivered bundle is counted and never applied twice', () => {
+  const pair = linkedPair();
+  pair.a.start(0);
+  pair.b.start(0);
+  pair.b.localCommand({ t: 'move', e: 3, x: 1, y: 1 });
+  // Deliver every message bound for A twice: each bundle's
+  // second copy is a network redelivery — its turn slot is
+  // already filled, so it must be counted and discarded.
+  for (let t = 0; t <= 500; t += 10) {
+    pair.a.pump(t);
+    pair.b.pump(t);
+    for (const m of pair.inboxA.splice(0)) {
+      pair.a.receive(m);
+      pair.a.receive(m);
+    }
+    for (const m of pair.inboxB.splice(0)) pair.b.receive(m);
+  }
+  assert.ok(pair.a.state().droppedRedelivered >= 1, 'redeliveries counted');
+  assert.equal(pair.eventsA.filter((e) => e.type === 'desync').length, 0);
+  // The move was applied exactly once on A's sim: one bundle of
+  // slot 1 carries it, never two.
+  const withMove = pair.simA.applied
+    .filter(([s, cmds]) => s === 1 && cmds.some((c) => c.t === 'move' && c.e === 3));
+  assert.equal(withMove.length, 1, 'the redelivered bundle never re-applied');
 });
 
 test('delay adaptation: a lagging link raises the input delay for both', () => {

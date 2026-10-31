@@ -198,6 +198,15 @@ export class WasmSim {
      */
     idle_villagers_for(owner: number): Uint32Array;
     /**
+     * NET-09: rebuild a sim from `save_game`'s bytes. Returns
+     * `None` (JS `undefined`) for anything that is not an intact
+     * save of a known version — the sim verifies the restored
+     * state's hash against the file's trailer before accepting
+     * it. The restored sim re-enters lockstep from the saved
+     * tick, exactly as if the match had never paused.
+     */
+    static load_game(bytes: Uint8Array): WasmSim | undefined;
+    /**
      * The live trade prices as a flat array in canonical
      * commodity order, sell then buy per commodity:
      * [sell_food, buy_food, sell_wood, buy_wood, sell_stone,
@@ -445,6 +454,17 @@ export class WasmSim {
      */
     push_build_palisade_wall_queued(entity: number, x: number, y: number): boolean;
     /**
+     * Order a villager to build a Siege Workshop (200 wood, 4×4;
+     * Castle Age, requires a completed Blacksmith — Castle
+     * P4a) — see `push_build_house`.
+     */
+    push_build_siege_workshop(entity: number, x: number, y: number): boolean;
+    /**
+     * Queue a Siege Workshop build (Castle Age — Castle P4a) —
+     * see `push_build_house_queued`.
+     */
+    push_build_siege_workshop_queued(entity: number, x: number, y: number): boolean;
+    /**
      * Order a villager to build a Stable (175 wood, 3×3 — M6;
      * Feudal Age, requires a Barracks) — see `push_build_house`.
      */
@@ -569,6 +589,13 @@ export class WasmSim {
      * GAR-01/SEL-11). See `push_garrison_building`.
      */
     push_garrison_tc(entity: number, tc: number): boolean;
+    /**
+     * Order a unit to garrison inside an own Battering Ram
+     * (Castle P4a, GAR-10/SEL-11): it walks to the Ram's current
+     * position and enters on arrival. Returns whether the order
+     * *would* be accepted against the current state.
+     */
+    push_garrison_unit(entity: number, host: number): boolean;
     /**
      * Order a villager to work a resource node (gather → haul → deposit
      * → repeat). Ids only — no floats cross this boundary here.
@@ -743,6 +770,13 @@ export class WasmSim {
      */
     push_train_archer(building: number): boolean;
     /**
+     * Enqueue a Battering Ram at a completed Siege Workshop
+     * (Castle P4a — the workshop is the Ram's only home;
+     * `can_train_at` carries the Castle Age gate). See
+     * `push_train_militia`.
+     */
+    push_train_battering_ram(building: number): boolean;
+    /**
      * Enqueue a Cavalry Archer at a completed Archery Range
      * (Castle P2). See `push_train_militia`.
      */
@@ -800,6 +834,18 @@ export class WasmSim {
      */
     push_train_villager(): boolean;
     /**
+     * Tribute resources to another player (Package K, TRD-04):
+     * the sender pays `amount` plus its tribute fee (30%, 20%
+     * with Coinage, 0% with Banking — fee rounded up) and the
+     * recipient receives the full amount. `resource_tag` is the
+     * `ResourceKind` tag (food 1, wood 2, gold 3, stone 4).
+     * Returns false (and queues nothing) when the sim would
+     * reject the tribute: same or unknown seat, nothing sent,
+     * the sender holding under 30 of the resource or short of
+     * amount + fee.
+     */
+    push_tribute(sender: number, recipient: number, resource_tag: number, amount: number): boolean;
+    /**
      * Voluntarily ungarrison a placed building (Castle P3b,
      * GAR-03): every unit inside is placed at the exit point,
      * idle. Returns whether anyone was inside.
@@ -809,6 +855,13 @@ export class WasmSim {
      * Voluntarily ungarrison a Town Center (Castle P3b, GAR-03).
      */
     push_ungarrison_tc(tc: number): boolean;
+    /**
+     * Voluntarily ungarrison a Battering Ram (Castle P4a,
+     * GAR-10): every passenger steps out at the ring around the
+     * Ram's current position, idle. Returns whether anyone was
+     * inside.
+     */
+    push_ungarrison_unit(host: number): boolean;
     /**
      * All rally points as a flat array, four values per entry —
      * `[x, y, node, has]` — entry 0 is the Town Center, entries
@@ -833,6 +886,13 @@ export class WasmSim {
      * 4 requirements not met. UI affordance only.
      */
     research_block_tc(tech_tag: number): number;
+    /**
+     * NET-09: serialize the full sim state as a save file
+     * (magic + version + body + the state's SIM-05 hash — see
+     * `Sim::save_game`). The client offers this in the pause
+     * menu as a download; no renderer state is included.
+     */
+    save_game(): Uint8Array;
     /**
      * Any player's score by owner tag (VIC-04):
      * `[military, economy, technology, society, total]` for owner
@@ -939,6 +999,17 @@ export class WasmSim {
      */
     train_queue_len(): number;
     /**
+     * A player's current tribute fee, in percent (TRD-04):
+     * 30 by default, 20 with Coinage, 0 with Banking. Behind the
+     * diplomacy screen's fee line.
+     */
+    tribute_fee_pct_for(owner: number): number;
+    /**
+     * Entities garrisoned in a Battering Ram (Castle P4a,
+     * GAR-10).
+     */
+    unit_garrison_count(host: number): number;
+    /**
      * Number of villagers (Town Center not counted).
      */
     villager_count(): number;
@@ -987,6 +1058,7 @@ export interface InitOutput {
     readonly wasmsim_idle_military_for: (a: number, b: number) => [number, number];
     readonly wasmsim_idle_villagers: (a: number) => [number, number];
     readonly wasmsim_idle_villagers_for: (a: number, b: number) => [number, number];
+    readonly wasmsim_load_game: (a: number, b: number) => number;
     readonly wasmsim_market_prices: (a: number) => [number, number];
     readonly wasmsim_market_rates: (a: number) => [number, number];
     readonly wasmsim_match_state: (a: number) => number;
@@ -1031,6 +1103,8 @@ export interface InitOutput {
     readonly wasmsim_push_build_outpost_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_palisade_wall: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_palisade_wall_queued: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_siege_workshop: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_siege_workshop_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_stable: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_stable_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_stone_wall: (a: number, b: number, c: number, d: number) => number;
@@ -1050,6 +1124,7 @@ export interface InitOutput {
     readonly wasmsim_push_force_deposit: (a: number, b: number) => number;
     readonly wasmsim_push_garrison_building: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_garrison_tc: (a: number, b: number, c: number) => number;
+    readonly wasmsim_push_garrison_unit: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_gather: (a: number, b: number, c: number) => void;
     readonly wasmsim_push_gather_queued: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_market_buy: (a: number, b: number, c: number) => number;
@@ -1077,6 +1152,7 @@ export interface InitOutput {
     readonly wasmsim_push_town_bell: (a: number, b: number) => number;
     readonly wasmsim_push_trade: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_train_archer: (a: number, b: number) => number;
+    readonly wasmsim_push_train_battering_ram: (a: number, b: number) => number;
     readonly wasmsim_push_train_cavalry_archer: (a: number, b: number) => number;
     readonly wasmsim_push_train_knight: (a: number, b: number) => number;
     readonly wasmsim_push_train_militia: (a: number, b: number) => number;
@@ -1087,12 +1163,15 @@ export interface InitOutput {
     readonly wasmsim_push_train_trade_cart: (a: number, b: number) => number;
     readonly wasmsim_push_train_villager: (a: number) => number;
     readonly wasmsim_push_train_villager_at: (a: number, b: number) => number;
+    readonly wasmsim_push_tribute: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly wasmsim_push_ungarrison_building: (a: number, b: number) => number;
     readonly wasmsim_push_ungarrison_tc: (a: number, b: number) => number;
+    readonly wasmsim_push_ungarrison_unit: (a: number, b: number) => number;
     readonly wasmsim_rally_points: (a: number) => [number, number];
     readonly wasmsim_research_block_at: (a: number, b: number, c: number) => number;
     readonly wasmsim_research_block_tc: (a: number, b: number) => number;
     readonly wasmsim_research_block_tc_at: (a: number, b: number, c: number) => number;
+    readonly wasmsim_save_game: (a: number) => [number, number];
     readonly wasmsim_score_for: (a: number, b: number) => [number, number];
     readonly wasmsim_state_hash: (a: number) => [number, number];
     readonly wasmsim_state_hash_parts: (a: number) => [number, number];
@@ -1115,11 +1194,14 @@ export interface InitOutput {
     readonly wasmsim_train_block_reason: (a: number) => number;
     readonly wasmsim_train_block_reason_at: (a: number, b: number) => number;
     readonly wasmsim_train_queue_len: (a: number) => number;
+    readonly wasmsim_tribute_fee_pct_for: (a: number, b: number) => number;
+    readonly wasmsim_unit_garrison_count: (a: number, b: number) => number;
     readonly wasmsim_villager_count: (a: number) => number;
     readonly wasmsim_wood: (a: number) => number;
     readonly wasmsim_world_half: (a: number) => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
+    readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_start: () => void;
 }
 
