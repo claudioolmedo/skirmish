@@ -153,8 +153,10 @@ export const PANEL_BUTTONS = {
   barracks: ['train-militia', 'train-spearman', 'research-maa'],
   range: ['train-archer', 'train-skirmisher', 'train-cavalry-archer'],
   stable: ['train-scout', 'train-knight', 'research-lightcavalry', 'research-bloodlines', 'research-husbandry'],
-  // Castle P3a: the Castle's whole panel — Train Petard.
-  castle: ['train-petard'],
+  // Castle P3a: the Castle's panel — Train Petard, and Package
+  // M's Conscription research beside it (the plain positional
+  // grid's second cell).
+  castle: ['train-petard', 'research-conscription'],
   // Castle P4a: the Siege Workshop's whole panel — Train Ram.
   siegeworkshop: ['train-ram'],
   blacksmith: ['research-fletching', 'research-scalemail', 'research-padded',
@@ -303,8 +305,11 @@ export const PANEL_KEYS = {
   },
   // Castle P3a: the Castle's single train button takes the
   // plain panel's first slot, like every production panel.
+  // Package M: Conscription takes the second cell (W), the
+  // plain positional grid's next slot.
   castle: {
     'train-petard': ['KeyQ', 'Q'],
+    'research-conscription': ['KeyW', 'W'],
   },
   // Castle P4a: the Siege Workshop's single train button, same
   // first-slot rule.
