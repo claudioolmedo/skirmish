@@ -1275,6 +1275,8 @@ fn gar07_bell_two_town_centers_do_not_cross_release() {
         weapon_next_tick: 0,
         weapon_engaged: false,
         bell_active: false,
+        repair_hp_remainder: 0,
+        repair_cost_remainder: 0,
     });
     // Four villagers around TC2.
     let mut near2 = Vec::new();
@@ -1351,6 +1353,8 @@ fn gar07_bell_second_tc_ring_does_not_steal_snapshot() {
         weapon_next_tick: 0,
         weapon_engaged: false,
         bell_active: false,
+        repair_hp_remainder: 0,
+        repair_cost_remainder: 0,
     });
     // One villager 5 tiles east of TC1, put to work gathering the
     // nearest node so its pre-bell task is real.
