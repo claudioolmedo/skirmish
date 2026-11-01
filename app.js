@@ -9391,7 +9391,7 @@ const NEW_BUILDING_STYLE = {
   15: { wall: '#9b9587', wall2: '#7c7668', roof: '#5d564c' }, // Castle: pale stone keep (Castle P3a)
   16: { wall: '#a89a7c', wall2: '#8a7c60', roof: '#8c3f34' }, // University: ivory stone + deep red roof (Castle P3c)
   17: { wall: '#7a6248', wall2: '#5f4c36', roof: '#4a3b2a' }, // Siege Workshop: heavy dark timber (Castle P4a)
-  18: { wall: '#b3a284', wall2: '#94835f', roof: '#7a5c2e' }, // Monastery: pale stone + bronze-gold roof (Castle P5a)
+  20: { wall: '#b3a284', wall2: '#94835f', roof: '#7a5c2e' }, // Monastery: pale stone + bronze-gold roof (Castle P5a; kind 20 since the landing renumber — 18/19 are the gates)
 };
 
 function drawNewBuilding(b) {
@@ -9537,9 +9537,9 @@ function drawBuildingFeature(kind, sx, sy, hgt) {
     ctx.fillRect(sx - 1.05 * u, top + 0.18 * u, 2.1 * u, 0.34 * u);
     ctx.fillStyle = '#c8ccd2';
     ctx.fillRect(sx + 0.82 * u, top + 0.18 * u, 0.23 * u, 0.34 * u);
-  } else if (kind === 18) {
+  } else if (kind === 20) {
     // The Monastery's dome and cross at the roof point
-    // (Castle P5a).
+    // (Castle P5a; kind 20 since the landing renumber).
     ctx.fillStyle = '#7a5c2e';
     ctx.beginPath();
     ctx.arc(sx, top + 0.1 * u, 0.62 * u, Math.PI, 0);
@@ -11400,7 +11400,7 @@ function renderCommands() {
       else if (kind === 17 && !hasBlacksmith) gate = t('gate.blacksmith');
       // Castle P5a: the Monastery is Castle Age, with NO
       // prerequisite building (the dossier's row) — age gate only.
-      else if (kind === 18 && age < 2) gate = t('gate.castle');
+      else if (kind === 20 && age < 2) gate = t('gate.castle');
       else if (kind === 13 && age < 2) gate = t('gate.castle');
       else if (kind === 1 && !hasMill) gate = t('gate.mill');
       // The Feudal kinds (BLD-18: the Watch Tower joins them;
