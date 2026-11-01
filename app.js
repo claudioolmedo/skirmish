@@ -11019,7 +11019,6 @@ function runCommandButton(id, times = 1) {
       flash(t(kind === 'attackmove' ? 'flash.attackMoveArm'
         : kind === 'attackground' ? 'flash.attackGroundArm' : 'flash.patrolArm'));
       healArm = false;
-      flash(t(kind === 'attackmove' ? 'flash.attackMoveArm' : 'flash.patrolArm'));
     }
     playAudioCue('click');
   } else if (id === 'heal') {
