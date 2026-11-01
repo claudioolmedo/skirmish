@@ -140,6 +140,18 @@ export class WasmSim {
         return v1;
     }
     /**
+     * Whether the entity could accept an Attack Ground order
+     * right now (CMB-16): a living player unit with a blast
+     * weapon. The client's Attack Ground button/cursor reads
+     * this; the sim re-validates on the command itself.
+     * @param {number} entity
+     * @returns {boolean}
+     */
+    entity_can_attack_ground(entity) {
+        const ret = wasm.wasmsim_entity_can_attack_ground(this.__wbg_ptr, entity);
+        return ret !== 0;
+    }
+    /**
      * Could AutoExplore (SEL-17) be toggled on this entity right
      * now — a living Scout Cavalry owned by a player? The client
      * mirrors its button placement and the G key from this query
@@ -622,6 +634,34 @@ export class WasmSim {
      */
     push_attack(entity, target) {
         const ret = wasm.wasmsim_push_attack(this.__wbg_ptr, entity, target);
+        return ret !== 0;
+    }
+    /**
+     * Attack ground (CMB-16, Castle P4b): the blast weapon
+     * walks until the point is inside its firing band and
+     * bombards it on its reload until re-tasked. Returns
+     * whether the order *would* be accepted (a living player
+     * unit carrying a blast weapon); the sim re-validates
+     * when the command is applied.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_attack_ground(entity, x, y) {
+        const ret = wasm.wasmsim_push_attack_ground(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Queue an attack-ground order behind the unit's current
+     * order (CMB-16 / SEL-12).
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_attack_ground_queued(entity, x, y) {
+        const ret = wasm.wasmsim_push_attack_ground_queued(this.__wbg_ptr, entity, x, y);
         return ret !== 0;
     }
     /**
@@ -1689,6 +1729,18 @@ export class WasmSim {
      */
     push_train_knight(building) {
         const ret = wasm.wasmsim_push_train_knight(this.__wbg_ptr, building);
+        return ret !== 0;
+    }
+    /**
+     * Enqueue a Mangonel at a completed Siege Workshop
+     * (Castle P4b — the workshop is the Mangonel's only home;
+     * `can_train_at` carries the Castle Age gate). See
+     * `push_train_militia`.
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_train_mangonel(building) {
+        const ret = wasm.wasmsim_push_train_mangonel(this.__wbg_ptr, building);
         return ret !== 0;
     }
     /**

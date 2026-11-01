@@ -72,6 +72,13 @@ export class WasmSim {
      */
     entity_auto_explore(): Uint8Array;
     /**
+     * Whether the entity could accept an Attack Ground order
+     * right now (CMB-16): a living player unit with a blast
+     * weapon. The client's Attack Ground button/cursor reads
+     * this; the sim re-validates on the command itself.
+     */
+    entity_can_attack_ground(entity: number): boolean;
+    /**
      * Could AutoExplore (SEL-17) be toggled on this entity right
      * now — a living Scout Cavalry owned by a player? The client
      * mirrors its button placement and the G key from this query
@@ -320,6 +327,20 @@ export class WasmSim {
      * sim re-validates when the command is applied).
      */
     push_attack(entity: number, target: number): boolean;
+    /**
+     * Attack ground (CMB-16, Castle P4b): the blast weapon
+     * walks until the point is inside its firing band and
+     * bombards it on its reload until re-tasked. Returns
+     * whether the order *would* be accepted (a living player
+     * unit carrying a blast weapon); the sim re-validates
+     * when the command is applied.
+     */
+    push_attack_ground(entity: number, x: number, y: number): boolean;
+    /**
+     * Queue an attack-ground order behind the unit's current
+     * order (CMB-16 / SEL-12).
+     */
+    push_attack_ground_queued(entity: number, x: number, y: number): boolean;
     /**
      * Attack-move (CMB-10): the unit walks to the point,
      * engaging whatever enters its sight en route, then resumes
@@ -847,6 +868,13 @@ export class WasmSim {
      */
     push_train_knight(building: number): boolean;
     /**
+     * Enqueue a Mangonel at a completed Siege Workshop
+     * (Castle P4b — the workshop is the Mangonel's only home;
+     * `can_train_at` carries the Castle Age gate). See
+     * `push_train_militia`.
+     */
+    push_train_mangonel(building: number): boolean;
+    /**
      * Enqueue a Militia at a completed Barracks (M3). Returns
      * whether the order *would* be accepted (queue room + funds);
      * the cost is deducted when the command is applied next tick.
@@ -1094,6 +1122,7 @@ export interface InitOutput {
     readonly wasmsim_buildings: (a: number) => [number, number];
     readonly wasmsim_cell_size: (a: number) => number;
     readonly wasmsim_entity_auto_explore: (a: number) => [number, number];
+    readonly wasmsim_entity_can_attack_ground: (a: number, b: number) => number;
     readonly wasmsim_entity_can_auto_explore: (a: number, b: number) => number;
     readonly wasmsim_entity_carry: (a: number) => [number, number];
     readonly wasmsim_entity_count: (a: number) => number;
@@ -1135,6 +1164,8 @@ export interface InitOutput {
     readonly wasmsim_projectiles: (a: number) => [number, number];
     readonly wasmsim_push_attack: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_attack_building: (a: number, b: number, c: number) => number;
+    readonly wasmsim_push_attack_ground: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_attack_ground_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_attack_move: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_attack_move_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_attack_queued: (a: number, b: number, c: number) => number;
@@ -1221,6 +1252,7 @@ export interface InitOutput {
     readonly wasmsim_push_train_battering_ram: (a: number, b: number) => number;
     readonly wasmsim_push_train_cavalry_archer: (a: number, b: number) => number;
     readonly wasmsim_push_train_knight: (a: number, b: number) => number;
+    readonly wasmsim_push_train_mangonel: (a: number, b: number) => number;
     readonly wasmsim_push_train_militia: (a: number, b: number) => number;
     readonly wasmsim_push_train_petard: (a: number, b: number) => number;
     readonly wasmsim_push_train_scout: (a: number, b: number) => number;

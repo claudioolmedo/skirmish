@@ -164,7 +164,7 @@ const TRAIN_AT_FNS = {
   9: 'push_train_spearman', 10: 'push_train_skirmisher',
   12: 'push_train_knight', 14: 'push_train_cavalry_archer',
   15: 'push_train_petard', 16: 'push_train_trade_cart',
-  17: 'push_train_battering_ram',
+  17: 'push_train_battering_ram', 18: 'push_train_mangonel',
 };
 
 const isInt = (v) => Number.isInteger(v) && v >= 0;
@@ -197,7 +197,7 @@ export function validateCommand(c) {
     // absent — the pre-BLD-20 wire form — or 14 stone wall).
     case 'buildline': return isInt(c.e) && isNum(c.x0) && isNum(c.y0) && isNum(c.x1) && isNum(c.y1)
       && (c.k === undefined || c.k === 9 || c.k === 14);
-    case 'train_at': return isInt(c.b) && (c.k === 2 || c.k === 3 || c.k === 4 || c.k === 9 || c.k === 10 || c.k === 12 || c.k === 14 || c.k === 15 || c.k === 16 || c.k === 17);
+    case 'train_at': return isInt(c.b) && (c.k === 2 || c.k === 3 || c.k === 4 || c.k === 9 || c.k === 10 || c.k === 12 || c.k === 14 || c.k === 15 || c.k === 16 || c.k === 17 || c.k === 18);
     case 'train_vil': return c.tc === undefined || isInt(c.tc);
     case 'research_tc': return (c.tech === 0 || c.tech === 1 || c.tech === 6
       || c.tech === 14 || c.tech === 15 || c.tech === 18
@@ -227,6 +227,10 @@ export function validateCommand(c) {
     case 'ungarrison_u': return isInt(c.host);
     case 'auto_explore': return isInt(c.e) && typeof c.on === 'boolean';
     case 'attackmove': return isInt(c.e) && isNum(c.x) && isNum(c.y);
+    // Castle P4b (CMB-16): attack ground — an entity id and a
+    // ground point, attackmove's shape; the queue flag rides
+    // the same optional q as attackmove/patrol.
+    case 'attackground': return isInt(c.e) && isNum(c.x) && isNum(c.y);
     case 'patrol': return isInt(c.e) && isNum(c.x) && isNum(c.y);
     case 'stance': return isInt(c.e) && isInt(c.s) && c.s <= 3;
     case 'stop': return isInt(c.e);
@@ -287,6 +291,9 @@ export function applyCommand(sim, cmd, owner, tcOf) {
     case 'attackmove': return cmd.q
       ? sim.push_attack_move_queued(cmd.e, cmd.x, cmd.y)
       : sim.push_attack_move(cmd.e, cmd.x, cmd.y);
+    case 'attackground': return cmd.q
+      ? sim.push_attack_ground_queued(cmd.e, cmd.x, cmd.y)
+      : sim.push_attack_ground(cmd.e, cmd.x, cmd.y);
     case 'patrol': return cmd.q
       ? sim.push_patrol_queued(cmd.e, cmd.x, cmd.y)
       : sim.push_patrol(cmd.e, cmd.x, cmd.y);
