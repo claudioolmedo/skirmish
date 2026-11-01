@@ -2231,21 +2231,31 @@ export class WasmSim {
     /**
      * The human player's researched-technology bitmask (M6): bit
      * per tech tag (`TechId::tag`); the Feudal bit reads set while
-     * the player stands in the Feudal Age.
+     * the player stands in the Feudal Age. Returned as f64, NOT
+     * u32 (bot-loop, 2026-11-01): tags reached 32 (Sanctity) with
+     * Castle P5a and 34 (Herbal Medicine) with P5e, and the u32
+     * cast silently dropped every bit >= 32 — the Monastery techs
+     * could never read as researched in the client, and the JS
+     * `1 << tag` checks aliased them onto Loom/Feudal/Fletching.
+     * A u64 mask is exact in an f64 (tags stay far below 2^53);
+     * JS readers must test bits arithmetically, not with `<<`.
      * @returns {number}
      */
     tech_mask() {
         const ret = wasm.wasmsim_tech_mask(this.__wbg_ptr);
-        return ret >>> 0;
+        return ret;
     }
     /**
      * Researched-technology bitmask of a specific player.
+     * f64 for the full u64 mask — see `tech_mask` (tags >= 32
+     * were truncated away by the old u32 cast, bot-loop
+     * 2026-11-01).
      * @param {number} owner
      * @returns {number}
      */
     tech_mask_for(owner) {
         const ret = wasm.wasmsim_tech_mask_for(this.__wbg_ptr, owner);
-        return ret >>> 0;
+        return ret;
     }
     /**
      * The generated map's terrain layer (M7, MAP-03): flat

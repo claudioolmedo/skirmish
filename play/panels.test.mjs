@@ -229,7 +229,7 @@ test('Castle P3b: the garrison buttons ride the host panels, unbadged', () => {
   const app = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
   assert.match(app, /id: 'town-bell', icon: 'i-bell'/);
   assert.match(app, /id: 'ungarrison', icon: 'i-ungarrison'/);
-  assert.match(app, /GAR_PANEL = \['tc', 'castle', 'tower', 'outpost', 'barracks', 'range', 'stable', 'siegeworkshop'\]/);
+  assert.match(app, /GAR_PANEL = \['tc', 'castle', 'tower', 'outpost', 'barracks', 'range', 'stable', 'siegeworkshop', 'monastery'\]/);
   assert.match(app, /case 'garrison_b': return sim\.push_garrison_building/);
   assert.match(app, /case 'town_bell': return sim\.push_town_bell/);
   // The smart order (SEL-11's garrison context): a right-click on
