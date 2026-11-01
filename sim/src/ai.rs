@@ -563,6 +563,16 @@ fn plan_build(sim: &mut Sim, cfg: &AiConfig, acted: &mut Vec<u32>) {
             // Castle P4a: the siege program's home — without it
             // the AI fields no Rams and razes nothing in Castle.
             Some((BuildingKind::SiegeWorkshop, (tc_x, tc_y)))
+        } else if !have(BuildingKind::Monastery)
+            && sim.age_of(me) >= crate::tech::Age::Castle
+            && wood >= BuildingKind::Monastery.wood_cost()
+        {
+            // Castle P5a: the Monastery — the AI's faith program.
+            // Its monks heal the army in the field through
+            // MNK-10's auto-task, which needs no steering from
+            // this script: the building and the monks (the
+            // training step below) are the whole commitment.
+            Some((BuildingKind::Monastery, (tc_x, tc_y)))
         } else if pop + 1 >= cap && !house_in_progress && wood >= BuildingKind::House.wood_cost() {
             Some((BuildingKind::House, (tc_x, tc_y)))
         } else if !have(BuildingKind::Mill)
@@ -729,14 +739,24 @@ fn plan_scout(sim: &mut Sim, acted: &mut Vec<u32>) {
 /// Production rally: set once per production building (Barracks,
 /// Archery Range), when it stands complete and has no rally yet —
 /// toward the expected enemy start, stopping short of it (the
-/// staging point fresh troops gather at).
+/// staging point fresh troops gather at). The Monastery is
+/// excluded (Castle P5a): monks are healers, not staging troops —
+/// their post is the base they heal. A staging rally can also
+/// land on a garrisonable building, and a monk that rally-
+/// garrisons (GAR-08) heals nobody and has no call-out in this
+/// script; the corps below would count it as fielded and never
+/// replace it.
 fn plan_rally(sim: &mut Sim) {
     let me = OWNER_OPPONENT;
     let Some((hx, hy)) = expected_enemy_start(sim) else {
         return;
     };
     let Some(building) = sim.buildings().iter().find(|b| {
-        b.owner == me && b.kind.is_production() && b.complete && b.rally.is_none()
+        b.owner == me
+            && b.kind.is_production()
+            && b.kind != BuildingKind::Monastery
+            && b.complete
+            && b.rally.is_none()
     }) else {
         return;
     };
@@ -785,6 +805,51 @@ fn plan_train_military(sim: &mut Sim, cfg: &AiConfig) {
             let (cost, _, _, _) = crate::tech::TechId::FeudalAge.cost();
             if sim.stockpile_of(me).amount(ResourceKind::Food) < I16F16::from_num(cost + 50) {
                 return;
+            }
+        }
+    }
+    // Monks (Castle P5a, MNK-10): in the Castle Age a standing
+    // Monastery keeps a small monk corps alongside the
+    // composition army — monks are healers, not a MIX kind, so
+    // they are counted and produced on their own line like the
+    // Rams below: living plus queued, capped at MONK_TARGET, one
+    // enqueue at a time. The monk phase's auto-task does the
+    // healing itself; this script only fields them. The count is
+    // of FIELDED monks: one sitting in a garrison (a rally-
+    // garrison, GAR-08) heals nobody, so it does not fill the
+    // corps — a replacement is trained alongside it.
+    if sim.age_of(me) >= crate::tech::Age::Castle {
+        let monks = sim
+            .entities()
+            .iter()
+            .filter(|e| {
+                e.owner == me
+                    && e.kind == EntityKind::Monk
+                    && !e.dead
+                    && e.garrisoned_in.is_none()
+            })
+            .count() as u32
+            + sim
+                .buildings()
+                .iter()
+                .filter(|b| b.owner == me)
+                .flat_map(|b| b.queue.iter())
+                .filter(|entry| {
+                    matches!(entry, crate::tech::ProdEntry::Unit(EntityKind::Monk))
+                })
+                .count() as u32;
+        if monks < MONK_TARGET {
+            if let Some(host) = sim.buildings().iter().find(|b| {
+                b.owner == me && b.complete && b.kind == BuildingKind::Monastery
+            }) {
+                if host.queue.is_empty() && sim.can_train_at(host.id, EntityKind::Monk)
+                {
+                    sim.push_command(Command::TrainAt {
+                        building: host.id,
+                        kind: EntityKind::Monk,
+                    });
+                    return;
+                }
             }
         }
     }
@@ -912,6 +977,11 @@ const RAM_TARGET: u32 = 2;
 /// Attack orders (attack-ground is a player-order surface;
 /// the AI does not need it, AI-01).
 const MANGONEL_TARGET: u32 = 2;
+/// The monk corps the training step keeps (Castle P5a): two
+/// monks — a healing detail for the field army (150 HP/min
+/// each, MNK-10), few enough that the gold still feeds the
+/// composition.
+const MONK_TARGET: u32 = 2;
 
 /// The four kinds the composition plan trains, in weight order
 /// (`AiConfig::mix_weights` indexes this array).

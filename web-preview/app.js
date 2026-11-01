@@ -88,6 +88,7 @@ import {
   PAGE_KINDS, resolveHotkey, badgeForButton, panelCellFor, GRID_CELLS, edgePan,
 } from './play/hotkeys.js';
 import { diffFeedEvents } from './play/feed.js';
+import { TECH_TREE, techState, techTreeColumns } from './play/techtree.js';
 import { createAudioEngine, cuesForSnapshotDiff, distanceGain } from './play/audio.js';
 import {
   firstHpDrop, nearestHpDrop, alertFresh, alertFlashOn, alertDue,
@@ -190,6 +191,13 @@ const pauseBtn = document.getElementById('pause-btn');
 // the overlay is a live panel, never a pause (see refreshDiplo).
 const diploBtn = document.getElementById('diplo-btn');
 const diploOverlay = document.getElementById('diplo-overlay');
+// Score + Technology Tree (INF-11 + INF-06, wave-1 leftovers):
+// the top-bar doors and their overlays — live read-only panels
+// like diplomacy, never a pause.
+const scoreBtn = document.getElementById('score-btn');
+const scoreOverlay = document.getElementById('score-overlay');
+const techtreeBtn = document.getElementById('techtree-btn');
+const techtreeOverlay = document.getElementById('techtree-overlay');
 // Fullscreen toggle (Claudio, 2026-10-19): a top-bar button and
 // a pause-menu entry, both driving the one toggleFullscreen().
 const fullscreenBtn = document.getElementById('fullscreen-btn');
@@ -292,15 +300,21 @@ const KIND_RAM = 17;
 // i18n: the display-name tables below are rebuilt from
 // play/i18n.js on every locale switch (refreshNames) — the
 // semantic ids index the string table (unit.<id>, building.<id>).
+// Castle P5a: tags 18/19 are the P4 plan's reserved Mangonel /
+// Scorpion slots — named here so the positional table keeps the
+// Monk at his true tag 20; the two kinds (and their locale
+// strings) land with slices P4b/P4c and are never rendered
+// before then.
 const KIND_I18N = ['villager', 'townCenter', 'scout', 'militia', 'archer',
   'sheep', 'boar', 'deer', 'manAtArms', 'spearman', 'skirmisher', 'wolf',
-  'knight', 'lightCavalry', 'cavalryArcher', 'petard', 'tradeCart', 'batteringRam', 'mangonel'];
+  'knight', 'lightCavalry', 'cavalryArcher', 'petard', 'tradeCart', 'batteringRam', 'mangonel', 'scorpion', 'monk'];
 let KIND_NAME = {
   0: 'Villager', 1: 'Town Center', 2: 'Scout Cavalry', 3: 'Militia',
   4: 'Archer', 5: 'Sheep', 6: 'Boar', 7: 'Deer', 8: 'Man-at-Arms',
   9: 'Spearman', 10: 'Skirmisher', 11: 'Wolf',
   12: 'Knight', 13: 'Light Cavalry', 14: 'Cavalry Archer', 15: 'Petard',
   16: 'Trade Cart', 17: 'Battering Ram', 18: 'Mangonel',
+  16: 'Trade Cart', 17: 'Battering Ram', 20: 'Monk',
 };
 // Selection-panel portraits per unit kind (SVG symbol ids in
 // play/index.html).
@@ -309,6 +323,7 @@ const KIND_ICON = {
   8: 'i-militia', 9: 'i-spearman', 10: 'i-skirmisher',
   12: 'i-villager', 13: 'i-villager', 14: 'i-archer', 15: 'i-petard',
   16: 'i-trade-cart', 17: 'i-ram', 18: 'i-mangonel',
+  16: 'i-trade-cart', 17: 'i-ram', 20: 'i-monk',
 };
 
 // Original PNG icon set (2026-10-19, AI generations via Base44 on
@@ -322,7 +337,7 @@ const KIND_ICON = {
 // Kind tags here match KIND_NAME / the sim's entity kinds.
 const KIND_PNG = {
   0: 'villager.png', 2: 'scout.png', 3: 'militia.png', 4: 'archer.png',
-  8: 'man-at-arms.png',
+  8: 'man-at-arms.png', 20: 'monk.png',
 };
 // An <img> glyph occupying the same slot (and classes) as the
 // SVG icons, so every sizing rule applies unchanged.
@@ -346,23 +361,24 @@ function pngIcon(png, cls) {
 // 18 palisade gate, 19 stone gate (Package J, BLD-13 — 4×1 spans:
 // 20 wood / 30 stone; BUILD_SIZE reads 1, the span's ACROSS edge —
 // the span itself is resolved by the sim and read back through
-// gate_states()).
+// gate_states());
+// 20 monastery (Castle P5a — 175 wood, 3×3, no prerequisite).
 // Costs and footprints mirror the sim (MECHANICS-STUDY §5; the
 // palisade row is the current DE wiki row — 3 wood per segment).
-const BUILD_COST = [25, 60, 175, 100, 100, 100, 175, 175, 150, 3, 35, 25, 175, 275, 0, 0, 200, 200, 20, 0];
+const BUILD_COST = [25, 60, 175, 100, 100, 100, 175, 175, 150, 3, 35, 25, 175, 275, 0, 0, 200, 200, 20, 0, 175];
 // Stone paid at placement, by kind tag (BLD-18's two defensive
 // structures, the Town Center, the Stone Wall and the Castle
 // cost stone; every other entry 0).
-const BUILD_COST_STONE = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 125, 5, 0, 100, 5, 650, 0, 0, 0, 30];
+const BUILD_COST_STONE = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 125, 5, 0, 100, 5, 650, 0, 0, 0, 30, 0];
 const BUILD_I18N = ['house', 'farm', 'barracks', 'lumber', 'mill',
   'mining', 'range', 'stable', 'blacksmith', 'palisade', 'watchtower',
-  'outpost', 'market', 'towncenter', 'stonewall', 'castle', 'university', 'siegeworkshop', 'palisadegate', 'stonegate'];
+  'outpost', 'market', 'towncenter', 'stonewall', 'castle', 'university', 'siegeworkshop', 'palisadegate', 'stonegate', 'monastery'];
 let BUILD_NAME = ['House', 'Farm', 'Barracks', 'Lumber Camp', 'Mill',
   'Mining Camp', 'Archery Range', 'Stable', 'Blacksmith', 'Palisade Wall',
-  'Watch Tower', 'Outpost', 'Market', 'Town Center', 'Stone Wall', 'Castle', 'University', 'Siege Workshop', 'Palisade Gate', 'Stone Gate'];
+  'Watch Tower', 'Outpost', 'Market', 'Town Center', 'Stone Wall', 'Castle', 'University', 'Siege Workshop', 'Palisade Gate', 'Stone Gate', 'Monastery'];
 // Farm footprint is 3 (DE-documented; Claudio's decision
 // 2026-10-22, superseding the earlier 2x2 specification).
-const BUILD_SIZE = [2, 3, 3, 2, 2, 2, 3, 3, 3, 1, 1, 1, 4, 4, 1, 4, 4, 4, 1, 1];
+const BUILD_SIZE = [2, 3, 3, 2, 2, 2, 3, 3, 3, 1, 1, 1, 4, 4, 1, 4, 4, 4, 1, 1, 3];
 // The wall kinds (BLD-13 palisade, BLD-20 stone): 1×1 segments
 // placed by dragged lines, not single footprints.
 function isWallKind(kind) { return kind === 9 || kind === 14; }
@@ -375,14 +391,14 @@ const GATE_OF_WALL = { 9: 18, 14: 19 };
 const WALL_OF_GATE = { 18: 9, 19: 14 };
 const BUILD_ICON = ['i-house', 'i-farm', 'i-tc', 'i-lumber', 'i-mill',
   'i-mining', 'i-range', 'i-stable', 'i-blacksmith', 'i-palisade',
-  'i-watchtower', 'i-outpost', 'i-market', 'i-tc', 'i-stonewall', 'i-castle', 'i-university', 'i-siegeworkshop', 'i-palisade', 'i-stonewall'];
+  'i-watchtower', 'i-outpost', 'i-market', 'i-tc', 'i-stonewall', 'i-castle', 'i-university', 'i-siegeworkshop', 'i-palisade', 'i-stonewall', 'i-monastery'];
 // The PNG set above, per building kind tag (same order as
 // BUILD_ICON): command buttons and building portraits.
 const BUILD_PNG = ['house.png', 'farm.png', 'barracks.png', 'lumber-camp.png',
   'mill.png', 'mining-camp.png', 'archery-range.png', 'stable.png',
   'blacksmith.png', 'palisade-wall.png', 'watchtower.png', 'outpost.png',
   'market.png', 'town-center.png', 'stone-wall.png', 'castle.png', 'university.png',
-  'siege-workshop.png', 'palisade-wall.png', 'stone-wall.png'];
+  'siege-workshop.png', 'palisade-wall.png', 'stone-wall.png', 'monastery.png'];
 // Building max HP by kind tag (the sim's building table, study
 // §5) — for the enemy-building info panel (M5). The palisade
 // entry is its Dark-Age value (150; 250 from Feudal, BLD-13 —
@@ -391,7 +407,8 @@ const BUILD_PNG = ['house.png', 'farm.png', 'barracks.png', 'lumber-camp.png',
 // gates follow the same convention: 240 is the Palisade Gate's
 // Dark column (400 from Feudal), 1650 the Stone Gate's Feudal
 // column (2700 from Castle).
-const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200, 150, 850, 500, 1800, 2400, 1080, 4800, 2100, 1800, 240, 1650];
+const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200, 150, 850, 500, 1800, 2400, 1080, 4800, 2100, 1800, 240, 1650, 2100];
+// the Watch Tower's 850 is its pre-Castle value (BLD-18).
 // WASM build commands by kind tag (M6 completes the set; BLD-13
 // adds the palisade's single-segment form — dragged lines go
 // through sim.push_build_wall_line, see attemptPlaceWallLine).
@@ -400,7 +417,7 @@ const PUSH_BUILD = ['push_build_house', 'push_build_farm', 'push_build_barracks'
   'push_build_archery_range', 'push_build_stable', 'push_build_blacksmith',
   'push_build_palisade_wall', 'push_build_watch_tower', 'push_build_outpost',
   'push_build_market', 'push_build_town_center', 'push_build_stone_wall',
-  'push_build_castle', 'push_build_university', 'push_build_siege_workshop', 'push_build_palisade_gate', 'push_build_stone_gate'];
+  'push_build_castle', 'push_build_university', 'push_build_siege_workshop', 'push_build_palisade_gate', 'push_build_stone_gate', 'push_build_monastery'];
 const PUSH_BUILD_QUEUED = PUSH_BUILD.map((n) => `${n}_queued`);
 // Own-building minimap colors by kind tag (M6); kinds without an
 // entry keep the minimap's parchment default, the enemy's
@@ -409,7 +426,7 @@ const BUILDING_MINIMAP_COLOR = {
   3: '#8a6b42', 4: '#e5d9a8', 5: '#b9a24a', 6: '#c98f4e', 7: '#9a6a44', 8: '#6f6f76',
   9: '#7a5a34', 10: '#7a7a72', 11: '#a8843f', 12: '#b03a2e',
   13: '#d8cf9f', 14: '#8d8578', 15: '#a9a294', 16: '#7d7466', 17: '#6e5a41',
-  18: '#7a5a34', 19: '#8d8578',
+  18: '#7a5a34', 19: '#8d8578', 20: '#b3a284',
 };
 
 // Ages and technologies (M6). Age tags match the sim's Age::tag;
@@ -426,6 +443,8 @@ let TECH_NAME = {
   19: 'Caravan', 20: 'Ballistics', 21: 'Murder Holes', 22: 'Treadmill Crane',
   23: 'Masonry', 24: 'Fortified Wall', 25: 'Coinage', 26: 'Banking',
   27: 'Town Watch', 28: 'Town Patrol', 29: 'Conscription',
+  30: 'Heavy Plow', 31: 'Crop Rotation',
+  32: 'Sanctity', 33: 'Fervor',
 };
 // Research-block explanations, indexed by the sim's ResearchBlock
 // tag (0 ok — unused, 1 funds, 2 queue full, 3 already done,
@@ -473,6 +492,8 @@ function refreshNames() {
     19: t('tech.caravan'), 25: t('tech.coinage'), 26: t('tech.banking'),
     27: t('tech.townwatch'), 28: t('tech.townpatrol'),
     29: t('tech.conscription'),
+    30: t('tech.heavyplow'), 31: t('tech.croprotation'),
+    32: t('tech.sanctity'), 33: t('tech.fervor'),
   };
   RESEARCH_BLOCK_TITLES = [
     '', t('block.noResources'), t('block.queueFullTrain'),
@@ -642,6 +663,7 @@ function showMatchEnd(ms) {
   };
   playAudioCue(ms === 1 ? 'victory' : 'defeat');
   renderEndScore();
+  renderEndStats();
   renderEndFeedback();
   endOverlay.style.display = 'flex';
 }
@@ -743,6 +765,209 @@ function setDiplo(open) {
   if (!diploOverlay) return;
   diploOverlay.style.display = open ? 'flex' : 'none';
   if (open) refreshDiplo();
+}
+
+/// Score (INF-11): the live standings — every player's Age,
+/// population and total score (the VIC-04 total; DE keeps the
+/// four categories for the post-game screen, and so does the
+/// end card here). Public fields only (INF-07), read through
+/// the same lens as the diplomacy screen. Never pauses.
+function refreshScoreboard() {
+  if (!sim || !scoreOverlay || scoreOverlay.style.display === 'none') return;
+  const set = (id, v) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = String(v);
+  };
+  set('score-you-age', AGE_NAMES[myAge()] || AGE_NAMES[0]);
+  set('score-you-pop', myPop());
+  set('score-you-total', sim.score_for(localOwner)[4]);
+  set('score-foe-age', AGE_NAMES[sim.age_for(foeOwner())] || AGE_NAMES[0]);
+  set('score-foe-pop', sim.population_for(foeOwner()));
+  set('score-foe-total', sim.score_for(foeOwner())[4]);
+}
+
+function setScore(open) {
+  if (!scoreOverlay) return;
+  scoreOverlay.style.display = open ? 'flex' : 'none';
+  if (open) refreshScoreboard();
+}
+
+/// Technology Tree (INF-06): the full-screen research graph —
+/// every technology in play/techtree.js (the pinned mirror of
+/// the sim's table), columns by the Age each requires, grouped
+/// under its host building, painted with the LOCAL player's
+/// met/unmet prerequisites. A view, not a panel: nothing here
+/// issues an order. Never pauses.
+let techtreeBuilt = false;
+function buildTechTree() {
+  if (techtreeBuilt) return;
+  techtreeBuilt = true;
+  const body = document.getElementById('techtree-body');
+  if (!body) return;
+  techTreeColumns().forEach((groups, ageIdx) => {
+    const col = document.createElement('div');
+    col.className = 'techtree-col';
+    const h = document.createElement('h3');
+    h.dataset.ageCol = String(ageIdx);
+    col.append(h);
+    for (const g of groups) {
+      const host = document.createElement('div');
+      host.className = 'techtree-host';
+      host.textContent = BUILD_NAME[g.host] || '';
+      col.append(host);
+      for (const e of g.entries) {
+        const node = document.createElement('div');
+        node.className = 'techtree-node';
+        node.id = `tt-node-${e.tag}`;
+        const name = document.createElement('span');
+        name.className = 'tt-name';
+        const cost = document.createElement('span');
+        cost.className = 'tt-cost';
+        const req = document.createElement('span');
+        req.className = 'tt-req';
+        node.append(name, cost, req);
+        col.append(node);
+      }
+    }
+    body.append(col);
+  });
+}
+
+function refreshTechTree() {
+  if (!sim || !techtreeOverlay || techtreeOverlay.style.display === 'none') return;
+  buildTechTree();
+  const mask = myTechMask();
+  const age = myAge();
+  document.querySelectorAll('#techtree-body .techtree-col h3').forEach((h) => {
+    h.textContent = AGE_NAMES[Number(h.dataset.ageCol)] || '';
+  });
+  const resKeys = ['food', 'wood', 'gold', 'stone'];
+  for (const e of TECH_TREE) {
+    const node = document.getElementById(`tt-node-${e.tag}`);
+    if (!node) continue;
+    const state = techState(e, mask, age);
+    node.classList.toggle('done', state === 'done');
+    node.classList.toggle('locked', state === 'locked');
+    node.querySelector('.tt-name').textContent = TECH_NAME[e.tag] || '';
+    const pairs = e.cost
+      .map((n, i) => [n, resKeys[i]])
+      .filter(([n]) => n > 0);
+    node.querySelector('.tt-cost').textContent =
+      `${costText(pairs)} · ${e.secs} s · ${t('tree.' + state)}`;
+    node.querySelector('.tt-req').textContent =
+      e.requires != null && state !== 'done'
+        ? t('tree.requires', { name: TECH_NAME[e.requires] || '' })
+        : '';
+  }
+  const legend = document.getElementById('techtree-legend');
+  if (legend) {
+    legend.textContent = `${t('tree.done')} · ${t('tree.available')} · ${t('tree.locked')}`;
+  }
+}
+
+function setTechTree(open) {
+  if (!techtreeOverlay) return;
+  techtreeOverlay.style.display = open ? 'flex' : 'none';
+  if (open) refreshTechTree();
+}
+
+/// INF-11's score timeline: the client samples both players'
+/// PUBLIC total scores once per game minute as the match runs
+/// (the rule's own Impl note — the sim keeps no history), and
+/// the end card draws the two lines. Per-match state, reset at
+/// every match start beside the feed's and audio's resets.
+let scoreHistory = []; // [[youTotal, foeTotal], ...] per minute
+let scoreSampledMinute = -1;
+function resetScoreHistory() {
+  scoreHistory = [];
+  scoreSampledMinute = -1;
+  revealMap = false;
+  const chip = document.getElementById('end-results-chip');
+  if (chip) chip.style.display = 'none';
+}
+function sampleScore() {
+  if (!sim) return;
+  const minute = Math.floor(sim.tick_count() / 3600);
+  if (minute === scoreSampledMinute) return;
+  scoreSampledMinute = minute;
+  scoreHistory.push([sim.score_for(localOwner)[4], sim.score_for(foeOwner())[4]]);
+}
+
+/// Fill the end card's statistics (INF-11): the timeline, the
+/// sim's run counters per player (kills/losses, buildings
+/// razed/lost, resources gathered — match_stats_for's flat
+/// [killed, lost, razed, blost, food, wood, gold, stone]) and
+/// each player's researched-technology list. Called by
+/// showMatchEnd beside renderEndScore.
+function renderEndStats() {
+  if (!sim) return;
+  const set = (id, v) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = String(v);
+  };
+  const you = sim.match_stats_for(localOwner);
+  const foe = sim.match_stats_for(foeOwner());
+  const rows = ['killed', 'lost', 'razed', 'blost', 'food', 'wood', 'gold', 'stone'];
+  rows.forEach((row, i) => {
+    set(`end-stats-you-${row}`, you[i]);
+    set(`end-stats-foe-${row}`, foe[i]);
+  });
+  const names = (owner) => sim.researched_techs_for(owner)
+    .map((tag) => TECH_NAME[tag])
+    .filter(Boolean)
+    .join(', ');
+  set('end-techs-you', `${t('diplo.you')}: ${names(localOwner) || '—'}`);
+  set('end-techs-foe', `${t('diplo.opponent')}: ${names(foeOwner()) || '—'}`);
+  drawScoreTimeline();
+}
+
+/// The timeline itself: two lines over the sampled minutes,
+/// the local seat in blue, the foe in red (the match's own
+/// colors), scaled to the highest sampled total.
+function drawScoreTimeline() {
+  const cv = document.getElementById('end-timeline');
+  if (!cv || !cv.getContext) return;
+  const ctx = cv.getContext('2d');
+  const W = cv.width;
+  const H = cv.height;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#f3e9d2';
+  ctx.fillRect(0, 0, W, H);
+  const pts = scoreHistory.length ? scoreHistory : [[0, 0]];
+  const max = Math.max(10, ...pts.map(([a, b]) => Math.max(a, b)));
+  const x = (i) => (pts.length <= 1 ? W / 2 : (i / (pts.length - 1)) * (W - 16) + 8);
+  const y = (v) => H - 8 - (v / max) * (H - 20);
+  ctx.strokeStyle = '#b09b72';
+  ctx.beginPath();
+  ctx.moveTo(8, y(0));
+  ctx.lineTo(W - 8, y(0));
+  ctx.stroke();
+  const line = (idx, color) => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    pts.forEach((p, i) => {
+      if (i === 0) ctx.moveTo(x(i), y(p[idx]));
+      else ctx.lineTo(x(i), y(p[idx]));
+    });
+    ctx.stroke();
+    ctx.lineWidth = 1;
+  };
+  line(0, '#2c4f9e');
+  line(1, '#b03a2e');
+}
+
+/// INF-11's "View map": after the decision the player may
+/// browse the whole revealed map (DE's post-game view). The
+/// fog reads as fully visible while the flag stands (myFog),
+/// the end card hides, and the Results chip is the way back.
+/// The flag is per-match client state, cleared at match start.
+let revealMap = false;
+function setRevealMap(on) {
+  revealMap = !!on;
+  const chip = document.getElementById('end-results-chip');
+  if (chip) chip.style.display = on ? '' : 'none';
+  if (endOverlay) endOverlay.style.display = on ? 'none' : (matchEnded ? 'flex' : 'none');
 }
 
 /// Paint the feedback block for a freshly ended match: hidden
@@ -883,6 +1108,7 @@ let placement = null; // { kind } while placing a building
 let wallAnchor = null;
 let repairArm = false; // Repair targeting armed (villager root panel, E)
 let orderArm = null; // CMB-10/11 order targeting armed: 'attackmove' | 'patrol' | 'attackground' | null
+let healArm = false; // Heal targeting armed (Castle P5a — the Monk panel's Heal button)
 // M13 hotkey state (client-only, like placement): the armed
 // villager build page ('eco' | 'mil' | null), the go-to cycle
 // memory (building kind -> last id handed out), and the building
@@ -1006,7 +1232,7 @@ function updateEventFeed() {
   const lines = diffFeedEvents(prev, snap, {
     buildingName: (k) => BUILD_NAME[k],
     unitName: (k) => KIND_NAME[k],
-    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15, lightcavalry: 16, husbandry: 17, caravan: 19, coinage: 25, banking: 26, townwatch: 27, townpatrol: 28, conscription: 29 }[key]],
+    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15, lightcavalry: 16, husbandry: 17, caravan: 19, coinage: 25, banking: 26, townwatch: 27, townpatrol: 28, conscription: 29, heavyplow: 30, croprotation: 31, sanctity: 32, fervor: 33 }[key]],
   }, feedFmt());
   feedPrev = snap;
   for (const text of lines) pushFeedLine(text);
@@ -2300,6 +2526,7 @@ function mirrorValid(kind, cx, cy) {
   // Siege Workshop is Castle Age AND needs a completed
   // Blacksmith standing (Castle P4a, BLD-15's chain).
   if (kind === 17 && (myAge() < 2 || !ownDone.some((b) => b.kind === 8))) return false;
+  if (kind === 20 && myAge() < 2) return false; // Monastery is Castle Age (Castle P5a); no prerequisite building
   if ((kind === 6 || kind === 7) && !ownDone.some((b) => b.kind === 2)) return false;
   // Any standing building's footprint (square range overlap).
   for (const b of buildings) {
@@ -2541,6 +2768,8 @@ addEventListener('keydown', (e) => {
       placement = null;
     } else if (repairArm) {
       repairArm = false;
+    } else if (healArm) {
+      healArm = false; // Castle P5a: Esc disarms Heal targeting
     } else if (orderArm) {
       orderArm = null; // CMB-10/11: Esc disarms order targeting
     } else if (buildPage) {
@@ -2953,6 +3182,7 @@ function handleHotkey(e) {
     case 'arm':
       buildPage = act.page;
       repairArm = false;
+      healArm = false;
       renderCommands();
       playAudioCue('click');
       return true;
@@ -3449,6 +3679,9 @@ function revealedFog() {
   return revealedFogCache;
 }
 const myFog = () => {
+  // INF-11: the post-game revealed map ("View map") — every
+  // cell visible while the flag stands.
+  if (revealMap) return revealedFog();
   if (playback) {
     if (playback.fogView === 'all') return revealedFog();
     return sim.fog_for(playback.fogView);
@@ -3510,9 +3743,12 @@ function applyLocalOrder(cmd) {
         : cmd.k === 16 ? sim.push_train_trade_cart(cmd.b)
         : cmd.k === 17 ? sim.push_train_battering_ram(cmd.b)
         : cmd.k === 18 ? sim.push_train_mangonel(cmd.b)
+        : cmd.k === 20 ? sim.push_train_monk(cmd.b)
         : sim.push_train_archer(cmd.b);
     // Package D (TRD-05): task a Trade Cart to a foreign Market.
     case 'trade': return sim.push_trade(cmd.e, cmd.b);
+    // Castle P5a (MNK-10): task a Monk to heal an allied unit.
+    case 'heal': return sim.push_heal(cmd.e, cmd.tg);
     case 'train_vil': return sim.push_train_villager_at(cmd.tc != null ? cmd.tc : myTcId);
     case 'research_tc': return sim.push_research_tc_at(cmd.tc != null ? cmd.tc : myTcId, cmd.tech);
     case 'research_at': return sim.push_research_at(cmd.b, cmd.tech);
@@ -3557,6 +3793,11 @@ function applyLocalOrder(cmd) {
     // client's seat; online the same command rides the bundle and
     // netplay's applier names the sender from the bundle's owner.
     case 'tribute': return sim.push_tribute(localOwner, cmd.to, cmd.r, cmd.a);
+    // ECO-14 (wave-1 leftovers): the Mill reseed desk — the sim
+    // derives the owner from the named Mill.
+    case 'queue_reseed': return sim.push_queue_reseed(cmd.b);
+    case 'dequeue_reseed': return sim.push_dequeue_reseed(cmd.b);
+    case 'set_auto_reseed': return sim.push_set_auto_reseed(cmd.b, cmd.on);
     default: return false;
   }
 }
@@ -3597,6 +3838,7 @@ function resetSim(mode = matchMode) {
     seed, modeTag: MODE_TAG[mode], seats: [0], view: 0, speed: matchSpeed,
   });
   seenBuildings.clear(); // M7: last-known enemy buildings are per-match
+  resetScoreHistory(); // INF-11: timeline + revealed-map flag are per-match
   resetEventFeed();
   resetAudioWorldState();
   refreshWorldLayers();
@@ -3705,6 +3947,7 @@ function adoptSim(newSim, owner) {
   matchEnded = false;
   endOverlay.style.display = 'none';
   seenBuildings.clear();
+  resetScoreHistory(); // INF-11: per-match, as in resetSim
   resetEventFeed();
   resetAudioWorldState();
   refreshWorldLayers();
@@ -5636,6 +5879,7 @@ function adoptLoadedSim(loaded) {
     netUi.playbackBar.hidden = true;
   }
   sim = loaded;
+  resetScoreHistory(); // INF-11: a loaded match starts a fresh timeline
   localRecorder = null;
   // The pause menu's mode radios must agree with the loaded
   // match — Restart applies the checked one.
@@ -5737,6 +5981,23 @@ function applyStaticStrings() {
   setText('diplo-foe-stance', 'diplo.enemy');
   setText('diplo-tribute-title', 'diplo.tribute');
   setText('diplo-tribute-note', 'diplo.tributeNote');
+  // Score + Technology Tree (INF-11 + INF-06): the top-bar
+  // doors and the two screens' statics; live values are
+  // refreshScoreboard's / refreshTechTree's.
+  setTitle('score-btn', 'top.scoreTitle');
+  setText('score-btn-label', 'top.score');
+  setText('score-title', 'score.title');
+  setAttr('score-close', 'aria-label', 'score.close');
+  setText('score-col-player', 'diplo.player');
+  setText('score-col-age', 'diplo.age');
+  setText('score-col-pop', 'diplo.population');
+  setText('score-col-total', 'diplo.score');
+  setText('score-you-name', 'diplo.you');
+  setText('score-foe-name', 'diplo.opponent');
+  setTitle('techtree-btn', 'top.techtreeTitle');
+  setText('techtree-btn-label', 'top.techtree');
+  setText('techtree-title', 'tree.title');
+  setAttr('techtree-close', 'aria-label', 'tree.close');
   setAttr('cmd-panel', 'aria-label', 'panel.commands');
   setAttr('sel-panel', 'aria-label', 'panel.selection');
   setAttr('minimap-wrap', 'aria-label', 'panel.minimap');
@@ -5803,6 +6064,21 @@ function applyStaticStrings() {
   setText('end-score-technology-l', 'end.scoreTechnology');
   setText('end-score-society-l', 'end.scoreSociety');
   setText('end-score-total-l', 'end.scoreTotal');
+  // INF-11 statistics statics (values are renderEndStats').
+  setText('end-timeline-l', 'end.timelineTitle');
+  setText('end-stats-you', 'end.scoreYou');
+  setText('end-stats-foe', 'end.scoreFoe');
+  setText('end-stats-killed-l', 'end.statsUnitsKilled');
+  setText('end-stats-lost-l', 'end.statsUnitsLost');
+  setText('end-stats-razed-l', 'end.statsBuildingsRazed');
+  setText('end-stats-blost-l', 'end.statsBuildingsLost');
+  setText('end-stats-food-l', 'end.statsFood');
+  setText('end-stats-wood-l', 'end.statsWood');
+  setText('end-stats-gold-l', 'end.statsGold');
+  setText('end-stats-stone-l', 'end.statsStone');
+  setText('end-techs-l', 'end.techsTitle');
+  setText('end-viewmap-btn', 'end.viewMap');
+  setText('end-results-chip', 'end.results');
   // End-of-match feedback block (its GitHub line is the anchor's
   // text; the stub DOMs have no querySelector hit and skip it).
   setText('feedback-q', 'feedback.question');
@@ -5985,6 +6261,19 @@ async function main() {
   if (diploBtn) diploBtn.addEventListener('click', () => setDiplo(diploOverlay.style.display === 'none'));
   const diploClose = document.getElementById('diplo-close');
   if (diploClose) diploClose.addEventListener('click', () => setDiplo(false));
+  // Score + Technology Tree (INF-11 + INF-06): top-bar doors
+  // like diplomacy's — toggle open/closed, never pause.
+  if (scoreBtn) scoreBtn.addEventListener('click', () => setScore(scoreOverlay.style.display === 'none'));
+  const scoreClose = document.getElementById('score-close');
+  if (scoreClose) scoreClose.addEventListener('click', () => setScore(false));
+  if (techtreeBtn) techtreeBtn.addEventListener('click', () => setTechTree(techtreeOverlay.style.display === 'none'));
+  const techtreeClose = document.getElementById('techtree-close');
+  if (techtreeClose) techtreeClose.addEventListener('click', () => setTechTree(false));
+  // INF-11's View map and the way back to the results.
+  const viewMapBtn = document.getElementById('end-viewmap-btn');
+  if (viewMapBtn) viewMapBtn.addEventListener('click', () => setRevealMap(true));
+  const resultsChip = document.getElementById('end-results-chip');
+  if (resultsChip) resultsChip.addEventListener('click', () => setRevealMap(false));
   if (fullscreenBtn) fullscreenBtn.addEventListener('click', toggleFullscreen);
   if (pauseFullscreenBtn) pauseFullscreenBtn.addEventListener('click', toggleFullscreen);
   document.addEventListener('fullscreenchange', onFullscreenChange);
@@ -6495,6 +6784,20 @@ async function main() {
     // Gap 4: Shift+click on a train button queues five.
     runCommandButton(btn.id, ev.shiftKey ? SHIFT_TRAIN_COUNT : 1);
   });
+  // ECO-14: a right-click on the Mill's reseed-queue button
+  // removes one paid reseed (refunded) — the one contextmenu
+  // the command panel owns; everything else keeps the
+  // browser default suppressed by the canvas-level handler.
+  cmdGrid.addEventListener('contextmenu', (ev) => {
+    const btn = ev.target.closest('button');
+    if (!btn || btn.id !== 'reseed-queue' || btn.disabled) return;
+    ev.preventDefault();
+    if (selectedBuilding && selectedBuilding.type === 'building') {
+      if (issue({ t: 'dequeue_reseed', b: selectedBuilding.id })) {
+        playAudioCue('orderBuilding');
+      }
+    }
+  });
 
   // Minimap camera control: click or drag to jump the main camera.
   // The bottom bar floats above #view, so these gestures never reach
@@ -6921,6 +7224,23 @@ async function main() {
       }
       if (any) { orderAck('order'); flash(t('flash.garrisoned')); return; }
     }
+    // Heal (Castle P5a, MNK-10): a right-click on an OWN wounded
+    // unit with Monk(s) selected tasks every selected Monk to
+    // heal it — the monk's whole right-click purpose, ahead of
+    // the ground-move fall-through (a click on a healthy ally or
+    // with no monk selected keeps the ordinary meaning). The
+    // sim's can_heal gates each monk (siege targets and the Town
+    // Center are refused there and fall through).
+    if (t != null && st.owners[t] === localOwner
+        && st.hp[t * 2] < st.hp[t * 2 + 1]
+        && targets.some((id) => st.kinds[id] === 20)) {
+      let any = false;
+      for (const id of targets) {
+        if (st.kinds[id] !== 20) continue;
+        if (issue({ t: 'heal', e: id, tg: t })) any = true;
+      }
+      if (any) { orderAck('order'); return; }
+    }
     const bT = buildingAt(wx, wy);
     // Trade tasking (Package D, TRD-05/07): a Trade Cart clicked
     // onto a foreign Market — ANY other player's completed
@@ -7127,6 +7447,41 @@ async function main() {
     }
     if (!queued) repairArm = false;
     playAck('villager', 'order');
+  }
+
+  // Heal targeting (Castle P5a, MNK-10): the armed click names
+  // the patient — one of our own wounded units. Every selected
+  // Monk takes the order (the sim re-validates each: kind,
+  // ownership, the siege/building exclusions). No queued form —
+  // the Heal order replaces, like Trade. The mirror flashes are
+  // courtesies; the sim's can_heal is the authority.
+  function attemptHeal(wx, wy) {
+    const tg = entityAt(wx, wy);
+    if (tg == null) {
+      flash(t('flash.healArmUnit'));
+      return;
+    }
+    const st = entityState();
+    if (st.owners[tg] !== localOwner) {
+      flash(t('flash.healOwnOnly'));
+      return;
+    }
+    if (st.hp[tg * 2] >= st.hp[tg * 2 + 1]) {
+      flash(t('flash.healFull'));
+      return;
+    }
+    let any = false;
+    for (const id of selectedUnits()) {
+      if (st.kinds[id] !== 20) continue;
+      if (issue({ t: 'heal', e: id, tg })) any = true;
+    }
+    if (!any) {
+      healArm = false;
+      flash(t('flash.healSelectMonk'));
+      return;
+    }
+    healArm = false;
+    playAudioCue('click');
   }
 
   // Attack-move / patrol targeting (CMB-10/11): the armed click
@@ -7352,6 +7707,10 @@ async function main() {
       if (!d.moved) attemptRepair(wx, wy, ev.shiftKey); // a targeting click, not a drag
       return;
     }
+    if (healArm) {
+      if (!d.moved) attemptHeal(wx, wy); // a targeting click, not a drag
+      return;
+    }
     if (orderArm) {
       if (!d.moved) attemptOrderGround(wx, wy, ev.shiftKey); // a targeting click, not a drag
       return;
@@ -7518,6 +7877,11 @@ async function main() {
     }
     if (repairArm) {
       repairArm = false;
+      return;
+    }
+    if (healArm) {
+      healArm = false; // Castle P5a: a right-click cancels Heal targeting
+      renderCommands();
       return;
     }
     if (orderArm) {
@@ -9027,6 +9391,7 @@ const NEW_BUILDING_STYLE = {
   15: { wall: '#9b9587', wall2: '#7c7668', roof: '#5d564c' }, // Castle: pale stone keep (Castle P3a)
   16: { wall: '#a89a7c', wall2: '#8a7c60', roof: '#8c3f34' }, // University: ivory stone + deep red roof (Castle P3c)
   17: { wall: '#7a6248', wall2: '#5f4c36', roof: '#4a3b2a' }, // Siege Workshop: heavy dark timber (Castle P4a)
+  18: { wall: '#b3a284', wall2: '#94835f', roof: '#7a5c2e' }, // Monastery: pale stone + bronze-gold roof (Castle P5a)
 };
 
 function drawNewBuilding(b) {
@@ -9172,6 +9537,15 @@ function drawBuildingFeature(kind, sx, sy, hgt) {
     ctx.fillRect(sx - 1.05 * u, top + 0.18 * u, 2.1 * u, 0.34 * u);
     ctx.fillStyle = '#c8ccd2';
     ctx.fillRect(sx + 0.82 * u, top + 0.18 * u, 0.23 * u, 0.34 * u);
+  } else if (kind === 18) {
+    // The Monastery's dome and cross at the roof point
+    // (Castle P5a).
+    ctx.fillStyle = '#7a5c2e';
+    ctx.beginPath();
+    ctx.arc(sx, top + 0.1 * u, 0.62 * u, Math.PI, 0);
+    ctx.fill();
+    ctx.fillRect(sx - 0.07 * u, top - 0.85 * u, 0.14 * u, 0.5 * u);
+    ctx.fillRect(sx - 0.3 * u, top - 0.68 * u, 0.6 * u, 0.13 * u);
   } else if (kind === 11) {
     // The outpost's lookout flag.
     ctx.fillStyle = '#3a2c1c';
@@ -9528,6 +9902,48 @@ function drawMangonel(i, wx, wy) {
   ctx.fillStyle = '#5b5b60';
   ctx.beginPath();
   ctx.arc(sx + 1.5 * u, sy - 0.18 * u, 0.24 * u, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// The Monk (Castle P5a, MNK-10): original vector figure — a
+// hooded brown robe with the owner's sash, a staff topped by
+// a small gold cross. The monk carries no weapon (CLS-08);
+// its silhouette is the robe and the staff.
+function drawMonk(i, wx, wy) {
+  const [sx, sy] = worldToScreen(wx, wy);
+  const u = camS;
+  shadow(sx, sy, 0.95 * u);
+  if (selection.has(i)) drawSelRing(sx, sy, 1.25);
+  // The staff, planted at his right side.
+  ctx.strokeStyle = '#4a3826';
+  ctx.lineWidth = Math.max(1, 0.13 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx + 0.72 * u, sy - 0.1 * u);
+  ctx.lineTo(sx + 0.72 * u, sy - 2.35 * u);
+  ctx.stroke();
+  ctx.fillStyle = '#d8b34a'; // the staff's gold cross
+  ctx.fillRect(sx + 0.65 * u, sy - 2.62 * u, 0.14 * u, 0.42 * u);
+  ctx.fillRect(sx + 0.53 * u, sy - 2.5 * u, 0.38 * u, 0.11 * u);
+  // The robe: a plain brown bell.
+  ctx.fillStyle = '#6b4a2e';
+  ctx.beginPath();
+  ctx.ellipse(sx, sy - 0.85 * u, 0.62 * u, 0.82 * u, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // The owner's sash across the chest.
+  ctx.strokeStyle = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e';
+  ctx.lineWidth = Math.max(1, 0.2 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx - 0.38 * u, sy - 1.25 * u);
+  ctx.lineTo(sx + 0.38 * u, sy - 0.6 * u);
+  ctx.stroke();
+  // The hood, and the face in its shadow.
+  ctx.fillStyle = '#54381f';
+  ctx.beginPath();
+  ctx.arc(sx, sy - 1.92 * u, 0.4 * u, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#e8c39a';
+  ctx.beginPath();
+  ctx.arc(sx, sy - 1.88 * u, 0.27 * u, 0, 0, Math.PI * 2);
   ctx.fill();
 }
 
@@ -10340,6 +10756,12 @@ let audioHousedPrev = false;
 function updateTopBar() {
   // Diplomacy (Package K): an open diplomacy screen stays live.
   if (diploOverlay && diploOverlay.style.display !== 'none') refreshDiplo();
+  // INF-11 + INF-06 (wave-1 leftovers): the per-minute score
+  // sample for the post-game timeline, and the two new live
+  // panels staying live while open.
+  sampleScore();
+  if (scoreOverlay && scoreOverlay.style.display !== 'none') refreshScoreboard();
+  if (techtreeOverlay && techtreeOverlay.style.display !== 'none') refreshTechTree();
   const [food, wood, gold, stone] = myStock();
   resFood.textContent = Math.floor(food);
   resWood.textContent = Math.floor(wood);
@@ -10504,6 +10926,7 @@ function attemptTrain(id) {
     'train-knight': 12, 'train-cavalry-archer': 14,
     'train-petard': 15, 'train-trade-cart': 16, 'train-ram': 17,
     'train-mangonel': 18,
+    'train-monk': 20,
   }[id];
   if (kindTag == null) return false;
   return selectedBuilding && selectedBuilding.type === 'building'
@@ -10527,6 +10950,7 @@ function flashTrainRefusal(id) {
       'train-knight': 12, 'train-cavalry-archer': 14,
       'train-petard': 15, 'train-trade-cart': 16, 'train-ram': 17,
       'train-mangonel': 18,
+      'train-monk': 20,
     }[id];
     const reason = sim.building_train_block(selectedBuilding.id, kindTag);
     flash(['', t('train.noResourcesUnit'),
@@ -10555,7 +10979,7 @@ function runCommandButton(id, times = 1) {
     || id === 'train-spearman' || id === 'train-skirmisher'
     || id === 'train-knight' || id === 'train-cavalry-archer'
     || id === 'train-petard' || id === 'train-trade-cart' || id === 'train-ram'
-    || id === 'train-mangonel') {
+    || id === 'train-mangonel' || id === 'train-monk') {
     let done = 0;
     while (done < times && attemptTrain(id)) done++;
     if (done === 0) flashTrainRefusal(id);
@@ -10568,10 +10992,12 @@ function runCommandButton(id, times = 1) {
     // rendered grid for mouse and keyboard alike.
     buildPage = id === 'page-eco' ? 'eco' : 'mil';
     repairArm = false;
+    healArm = false;
     playAudioCue('click');
   } else if (id === 'page-back') {
     placement = null;
     repairArm = false;
+    healArm = false;
     buildPage = null; // back to the root page
     playAudioCue('click');
   } else if (id === 'auto-explore') {
@@ -10592,6 +11018,20 @@ function runCommandButton(id, times = 1) {
       repairArm = false;
       flash(t(kind === 'attackmove' ? 'flash.attackMoveArm'
         : kind === 'attackground' ? 'flash.attackGroundArm' : 'flash.patrolArm'));
+      healArm = false;
+      flash(t(kind === 'attackmove' ? 'flash.attackMoveArm' : 'flash.patrolArm'));
+    }
+    playAudioCue('click');
+  } else if (id === 'heal') {
+    // Castle P5a (MNK-10): arm (or disarm) Heal targeting — the
+    // click that follows picks one of our wounded units, exactly
+    // like Repair's arm. Re-clicking the armed button disarms it.
+    healArm = !healArm;
+    if (healArm) {
+      placement = null;
+      repairArm = false;
+      orderArm = null;
+      flash(t('flash.healArm'));
     }
     playAudioCue('click');
   } else if (id.startsWith('stance-')) {
@@ -10609,6 +11049,25 @@ function runCommandButton(id, times = 1) {
     // GAR-07: ring the selected Town Center's bell (the sim holds
     // the rung state; the second ring sends everyone back).
     if (issue({ t: 'town_bell', tc: panelTcId() })) playAudioCue('orderBuilding');
+  } else if (id === 'reseed-queue') {
+    // ECO-14: buy one farm reseed ahead at the selected Mill
+    // (60 wood, paid now; right-click refunds — see the grid's
+    // contextmenu listener).
+    if (selectedBuilding && selectedBuilding.type === 'building') {
+      if (issue({ t: 'queue_reseed', b: selectedBuilding.id })) {
+        playAudioCue('orderBuilding');
+      } else {
+        flash(t('block.noResources'));
+      }
+    }
+  } else if (id === 'reseed-auto') {
+    // ECO-14: flip the selected Mill owner's auto-reseed toggle.
+    if (selectedBuilding && selectedBuilding.type === 'building') {
+      const [, auto] = sim.reseed_for(localOwner);
+      if (issue({ t: 'set_auto_reseed', b: selectedBuilding.id, on: auto !== 1 })) {
+        playAudioCue('orderBuilding');
+      }
+    }
   } else if (id === 'ungarrison') {
     // GAR-03: voluntary ungarrison of the selected building or TC.
     // Castle P4a: a selected Ram ungarrisons the same way (its
@@ -10642,6 +11101,7 @@ function runCommandButton(id, times = 1) {
     repairArm = !repairArm;
     if (repairArm) {
       placement = null;
+      healArm = false;
       flash(t('flash.repairArm'));
     }
     playAudioCue('click');
@@ -10709,6 +11169,8 @@ function runCommandButton(id, times = 1) {
       'research-conscription': 29,
       'research-goldmining': 11, 'research-stonemining': 12,
       'research-horsecollar': 13,
+      'research-heavyplow': 30, 'research-croprotation': 31,
+      'research-sanctity': 32, 'research-fervor': 33,
     }[id];
     if (tag != null && selectedBuilding && selectedBuilding.type === 'building') {
       if (!issue({ t: 'research_at', b: selectedBuilding.id, tech: tag })) {
@@ -10801,7 +11263,7 @@ function renderCommands() {
   // context renders nothing, never command buttons.
   const foeSel = !!selectedBuilding && selectedBuilding.owner === foeOwner();
   // M6: each production/research building gets its own context.
-  const BUILDING_CONTEXT = { 2: 'barracks', 3: 'lumbercamp', 4: 'mill', 5: 'miningcamp', 6: 'range', 7: 'stable', 8: 'blacksmith', 10: 'tower', 11: 'outpost', 12: 'market', 15: 'castle', 16: 'university', 17: 'siegeworkshop' };
+  const BUILDING_CONTEXT = { 2: 'barracks', 3: 'lumbercamp', 4: 'mill', 5: 'miningcamp', 6: 'range', 7: 'stable', 8: 'blacksmith', 10: 'tower', 11: 'outpost', 12: 'market', 15: 'castle', 16: 'university', 17: 'siegeworkshop', 20: 'monastery' };
   const context = selUnits.length > 0
     ? (hasVillager ? 'build' : 'units')
     : selectedBuilding
@@ -10846,6 +11308,7 @@ function renderCommands() {
   const blockR = bk && context === 'siegeworkshop' ? sim.building_train_block(bk.id, 17) : -1;
   const blockMg = bk && context === 'siegeworkshop' ? sim.building_train_block(bk.id, 18) : -1;
   const blockTC = bk && context === 'market' ? sim.building_train_block(bk.id, 16) : -1;
+  const blockMo = bk && context === 'monastery' ? sim.building_train_block(bk.id, 20) : -1;
   // Research blocks: the TC set (Loom 0, Feudal 1, Wheelbarrow 6,
   // Castle 14, Hand Cart 15) and the building techs, keyed by
   // tag — Blacksmith (Fletching 2, Scale Mail 3, Padded 4,
@@ -10858,8 +11321,10 @@ function renderCommands() {
       myResearchBlockTc(27), myResearchBlockTc(28)] : [-1, -1, -1, -1, -1, -1, -1, -1];
   const RB_TAGS = {
     blacksmith: [2, 3, 4, 7, 8], barracks: [5], stable: [9, 16, 17],
-    lumbercamp: [10], miningcamp: [11, 12], mill: [13], market: [19, 25, 26],
+    lumbercamp: [10], miningcamp: [11, 12], mill: [13, 30, 31], market: [19, 25, 26],
     university: [20, 21, 22, 23, 24], castle: [29],
+    lumbercamp: [10], miningcamp: [11, 12], mill: [13], market: [19, 25, 26],
+    university: [20, 21, 22, 23, 24], monastery: [32, 33],
   };
   const rbB = bk && RB_TAGS[context]
     ? Object.fromEntries(RB_TAGS[context].map((t) => [t, sim.research_block_at(bk.id, t)]))
@@ -10869,13 +11334,16 @@ function renderCommands() {
   const sig = [context, Math.floor(wood), Math.floor(myStock()[0]), Math.floor(myStock()[2]),
     Math.floor(myStock()[3]),
     reason, queue, bk ? bk.id : -1, bk ? bk.queue : -1, bk && bk.complete ? 1 : 0,
-    blockM, blockSp, blockA, blockSk, blockS, blockK, blockCA, blockP, blockR, blockMg, blockTC, age, techMask, rbTc.join('.'), Object.values(rbB).join('.'),
-    tcQueueCodes, bkQueueCodes, buildPage || '', repairArm ? 1 : 0,
+    blockM, blockSp, blockA, blockSk, blockS, blockK, blockCA, blockP, blockR, blockMg, blockTC, blockMo, age, techMask, rbTc.join('.'), Object.values(rbB).join('.'),
+    tcQueueCodes, bkQueueCodes, buildPage || '', repairArm ? 1 : 0, healArm ? 1 : 0,
     // Castle P3b: the garrison counts and the bell state are panel
     // state (button faces + disabled states read them).
     context === 'tc' ? sim.tc_garrison_count(panelTcId()) : -1,
     context === 'tc' ? (sim.tc_bell_active(panelTcId()) ? 1 : 0) : -1,
     bk ? sim.building_garrison_count(bk.id) : -1,
+    // ECO-14: the Mill's reseed state is panel state (the queue
+    // count in the button's title, the toggle's active face).
+    context === 'mill' ? sim.reseed_for(localOwner).join('.') : '',
     // Castle P4a: a selected Ram's passenger count is panel state
     // too (its Ungarrison button's disabled face reads it).
     selUnits.length === 1 && st.kinds[selUnits[0]] === 17
@@ -10930,6 +11398,9 @@ function renderCommands() {
       // gate first, then the building, like the Market's shape.
       else if (kind === 17 && age < 2) gate = t('gate.castle');
       else if (kind === 17 && !hasBlacksmith) gate = t('gate.blacksmith');
+      // Castle P5a: the Monastery is Castle Age, with NO
+      // prerequisite building (the dossier's row) — age gate only.
+      else if (kind === 18 && age < 2) gate = t('gate.castle');
       else if (kind === 13 && age < 2) gate = t('gate.castle');
       else if (kind === 1 && !hasMill) gate = t('gate.mill');
       // The Feudal kinds (BLD-18: the Watch Tower joins them;
@@ -11335,6 +11806,45 @@ function renderCommands() {
           : t('cmd.trainTitleTime', { name: KIND_NAME[18], cost: costText([[160, 'wood'], [135, 'gold']]), secs: 46 }) + (TRAIN_BLOCK_TITLES[blockMg] ? ' ' + TRAIN_BLOCK_TITLES[blockMg] : ''),
       }),
     );
+  } else if (context === 'monastery') {
+    // Castle P5a: the Monastery's panel — Train Monk (its only
+    // production) and the first two rows of its technology set:
+    // Sanctity (Monks +15 HP) and Fervor (Monks +15% speed).
+    // The rest of TEC-10's Castle row joins with the P5b/P5c
+    // slices; the Imperial row stays absent, never fake buttons.
+    // The research buttons mirror the University's techBtn: the
+    // hard research blocks (2/3/4) grey, the funds block (1)
+    // stays clickable and flashes its reason (the fd194a2 law).
+    const underConstruction = !bk.complete;
+    const techBtn = (id, tag, icon, titleKey, secs, index) => {
+      const done = (techMask & (1 << tag)) !== 0;
+      const rb = rbB[tag];
+      return cmdButton({
+        id, icon, label: TECH_NAME[tag],
+        costIcon: 'i-gold', cost: tag === 32 ? 175 : 140,
+        key: badgeForButton({ context, id, index }),
+        disabled: underConstruction || done || rb === 2 || rb === 3 || rb === 4,
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: TECH_NAME[tag], building: BUILD_NAME[20] })
+          : done
+            ? t('cmd.researchDone', { name: TECH_NAME[tag] })
+            : t(titleKey, { name: TECH_NAME[tag], cost: costText([[tag === 32 ? 175 : 140, 'gold']]), secs })
+              + (RESEARCH_BLOCK_TITLES[rb] ? ' ' + RESEARCH_BLOCK_TITLES[rb] : ''),
+      });
+    };
+    cmdGrid.append(
+      cmdButton({
+        id: 'train-monk', icon: 'i-monk', img: 'monk.png', label: 'Monk',
+        costIcon: 'i-gold', cost: 100,
+        disabled: underConstruction || blockMo === 2 || blockMo === 3,
+        key: badgeForButton({ context, id: 'train-monk', index: 0 }),
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: KIND_NAME[20], building: BUILD_NAME[20] })
+          : t('cmd.trainTitleTime', { name: KIND_NAME[20], cost: costText([[100, 'gold']]), secs: 51 }) + (TRAIN_BLOCK_TITLES[blockMo] ? ' ' + TRAIN_BLOCK_TITLES[blockMo] : ''),
+      }),
+      techBtn('research-sanctity', 32, 'i-sanctity', 'cmd.sanctityTitle', 60, 1),
+      techBtn('research-fervor', 33, 'i-fervor', 'cmd.fervorTitle', 50, 2),
+    );
   } else if (context === 'blacksmith') {
     // M6: the Blacksmith's Feudal researches — the three armor /
     // arrow lines, plus Forging and Scale Barding Armor from
@@ -11532,6 +12042,32 @@ function renderCommands() {
     } else if (context === 'mill') {
       cmdGrid.append(campBtn('research-horsecollar', 13, 'i-horsecollar', 'Horse Collar',
         'cmd.horsecollarTitle', { cost: [[75, 'food'], [75, 'wood']], secs: 20 }, 0));
+      // ECO-14 (wave-1 leftovers): the farm chain completes —
+      // Heavy Plow (Castle, chains from Horse Collar) and Crop
+      // Rotation (Imperial, from Heavy Plow) take W and E.
+      cmdGrid.append(campBtn('research-heavyplow', 30, 'i-heavyplow', 'Heavy Plow',
+        'cmd.heavyplowTitle', { cost: [[125, 'food'], [125, 'wood']], secs: 40 }, 1));
+      cmdGrid.append(campBtn('research-croprotation', 31, 'i-croprotation', 'Crop Rotation',
+        'cmd.croprotationTitle', { cost: [[250, 'food'], [250, 'wood']], secs: 70 }, 2));
+      // ECO-14: the reseed desk — the paid queue (click buys
+      // one, right-click refunds one) and the auto-reseed
+      // toggle. Unbadged, mouse-only, like the garrison
+      // buttons: the grid's letters belong to the researches.
+      if (bk.complete) {
+        const [rq, auto] = sim.reseed_for(localOwner);
+        cmdGrid.append(cmdButton({
+          id: 'reseed-queue', icon: 'i-reseed', label: t('mill.reseedQueue'),
+          key: null,
+          // The queue count lives in the title, not on the
+          // face — the panel law (no indicators on faces).
+          title: t('mill.reseedTitle', { n: rq }),
+        }));
+        cmdGrid.append(cmdButton({
+          id: 'reseed-auto', icon: 'i-croprotation', label: t('mill.reseedAuto'),
+          key: null, active: auto === 1,
+          title: t('mill.reseedAutoTitle', { state: t(auto === 1 ? 'reseed.on' : 'reseed.off') }),
+        }));
+      }
     } else {
       cmdGrid.append(
         campBtn('research-goldmining', 11, 'i-goldmining', 'Gold Mining',
@@ -11635,6 +12171,20 @@ function renderCommands() {
       id: 'attack-ground', icon: 'i-attackground', label: t('cmd.attackGround'),
       active: orderArm === 'attackground', key: null,
       title: t('cmd.attackGroundTitle'),
+    }));
+  }
+  // Castle P5a (MNK-10): the Heal button rides a units panel
+  // whenever an own Monk is among the selection — unbadged,
+  // mouse-only, like the garrison buttons. It arms the heal
+  // cursor; the next click on an own wounded unit issues the
+  // order (monks also heal on their own when idle — the
+  // button is the deliberate form).
+  if (context === 'units'
+      && selUnits.some((i) => st.kinds[i] === 20 && st.owners[i] === localOwner)) {
+    cmdGrid.append(cmdButton({
+      id: 'heal', icon: 'i-heal', label: t('cmd.heal'),
+      active: healArm, key: null,
+      title: t('cmd.healTitle'),
     }));
   }
   // SEL-14 (wiki Hotkey page): Stop and Delete ride along
@@ -11762,7 +12312,7 @@ function updateSelPanel() {
       : selectedAnimal != null ? 'animal'
       : 'none';
   const singleHp = selUnits.length === 1 ? Math.floor(st.hp[selUnits[0] * 2]) : -1;
-  const TRAINS_TAG = { 2: 3, 6: 4, 7: 2, 12: 16, 15: 15, 17: 17 };
+  const TRAINS_TAG = { 2: 3, 6: 4, 7: 2, 12: 16, 15: 15, 17: 17, 20: 20 };
   const bkBlock = bk && TRAINS_TAG[bk.kind] != null
     ? sim.building_train_block(bk.id, TRAINS_TAG[bk.kind]) : -1;
   const tcQueueCodes = myTcQueue().join('.');
@@ -11824,6 +12374,10 @@ function updateSelPanel() {
         selInfo.textContent = t('sel.villagerInfo', { hp: hpTxt });
       } else if (kind === KIND_SHEEP) {
         selInfo.textContent = t('sel.sheepInfo', { hp: hpTxt });
+      } else if (kind === 20) {
+        // Castle P5a: the monk never attacks — its line names
+        // the heal order instead of the military boilerplate.
+        selInfo.textContent = t('sel.monkInfo', { hp: hpTxt });
       } else {
         selInfo.textContent = t('sel.militaryInfo', { hp: hpTxt });
       }
@@ -12589,7 +13143,9 @@ function draw() {
     drawPetard, // 15: Petard (Castle P3a)
     drawTradeCart, // 16: Trade Cart (Package D)
     drawBatteringRam, // 17: Battering Ram (Castle P4a)
-    drawMangonel]; // 18: Mangonel (Castle P4b)
+    drawMangonel, // 18: Mangonel (Castle P4b)
+    null, // 19: Scorpion — reserved (Castle P4c)
+    drawMonk]; // 20: Monk (Castle P5a)
   for (let i = 0; i < count; i++) {
     const wx = pos[i * 2];
     const wy = pos[i * 2 + 1];

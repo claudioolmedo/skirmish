@@ -127,6 +127,19 @@
 //!   standing farm also gains proportionally at the research
 //!   tick — 75 × (remaining ⁄ full)² (wiki, Horse Collar, with
 //!   its worked example: a farm at 50% gains 25% of 75).
+//! - The farm chain completes (ECO-14 remainder, wave-1 audit
+//!   Package F): Heavy Plow — Mill, Castle Age, 125 food /
+//!   125 wood, 40 s: farms +125 food (375 with Horse Collar) and
+//!   villagers carry +1 food from farms (wiki, Heavy Plow:
+//!   "can be researched at the Mill ... once the Castle Age is
+//!   reached", "gives Farms +125 food (for a total of 375) and
+//!   allows Villagers to carry +1 food"; the further upgrade of
+//!   Horse Collar). Crop Rotation — Mill, Imperial Age,
+//!   250 food / 250 wood, 70 s: farms +175 food (550 total)
+//!   (wiki, Crop Rotation; the further upgrade of Heavy Plow).
+//!   Both inherit update 169123's proportional top-up from the
+//!   Horse Collar sweep (the three articles state it verbatim),
+//!   against each farm's own stamped full amount.
 
 use crate::build::BuildingKind;
 use crate::econ::NodeKind;
@@ -247,11 +260,24 @@ pub enum TechId {
     /// the Siege Workshop is explicitly excluded, as are the
     /// Market and the Town Center (Package M, TEC-09). Tag 29.
     Conscription,
+    /// Mill, Castle: farms +125 food and +1 farm-food carry
+    /// (ECO-14; chains from Horse Collar, TEC-07). Tag 30.
+    HeavyPlow,
+    /// Mill, Imperial: farms +175 food (ECO-14; chains from
+    /// Heavy Plow, TEC-07). Tag 31.
+    CropRotation,
+    /// Monastery, Castle: Monks +15 HP (Castle P5a, MNK-01's
+    /// Sanctity row of TEC-10). Tag 32 — see the tag table's
+    /// note on the Monastery block's append order.
+    Sanctity,
+    /// Monastery, Castle: Monks +15% speed (Castle P5a, MNK-01's
+    /// Fervor row of TEC-10). Tag 33.
+    Fervor,
 }
 
 impl TechId {
     /// All technologies, in tag order.
-    pub const ALL: [TechId; 30] = [
+    pub const ALL: [TechId; 34] = [
         TechId::Loom,
         TechId::FeudalAge,
         TechId::Fletching,
@@ -282,6 +308,10 @@ impl TechId {
         TechId::TownWatch,
         TechId::TownPatrol,
         TechId::Conscription,
+        TechId::HeavyPlow,
+        TechId::CropRotation,
+        TechId::Sanctity,
+        TechId::Fervor,
     ];
 
     /// Stable tag: 0 loom, 1 feudal age, 2 fletching, 3 scale mail,
@@ -307,6 +337,21 @@ impl TechId {
     /// block 20–24 reserved by Castle P3c, so no tag moved.)
     /// 29 conscription (Package M, TEC-09 — appended after
     /// Package K's 25–28, so no tag moved.)
+    /// 30 heavy plow, 31 crop rotation (ECO-14 remainder —
+    /// renumbered at the bot-loop landing: the builder's 29/30
+    /// collided with Conscription's 29 on main, so the farm
+    /// chain appends after it, no existing tag moved.)
+    /// 32 sanctity, 33 fervor (Castle P5a — the Monastery
+    /// row's first two technologies, renumbered at the bot-loop
+    /// landing: the builder's 29/30 were taken here by
+    /// Conscription and the ECO-14 farm chain. The P5 execution
+    /// plan's §2 table foresaw the whole TEC-10 block at 29–35
+    /// in dossier order (Redemption first); append-only
+    /// discipline across separately-landing slices overrides
+    /// the foresight — each P5 slice appends ITS technologies
+    /// when it lands (P5b/c/e take 34+), exactly the Caravan
+    /// renumber precedent. No tag moves; the plan's deviation
+    /// is recorded in the P5a handoff.)
     pub fn tag(self) -> u8 {
         match self {
             TechId::Loom => 0,
@@ -339,6 +384,10 @@ impl TechId {
             TechId::TownWatch => 27,
             TechId::TownPatrol => 28,
             TechId::Conscription => 29,
+            TechId::HeavyPlow => 30,
+            TechId::CropRotation => 31,
+            TechId::Sanctity => 32,
+            TechId::Fervor => 33,
         }
     }
 
@@ -375,7 +424,9 @@ impl TechId {
             TechId::GoldMining | TechId::StoneMining => {
                 TechHost::Building(BuildingKind::MiningCamp)
             }
-            TechId::HorseCollar => TechHost::Building(BuildingKind::Mill),
+            TechId::HorseCollar | TechId::HeavyPlow | TechId::CropRotation => {
+                TechHost::Building(BuildingKind::Mill)
+            }
             TechId::LightCavalry | TechId::Husbandry => TechHost::Building(BuildingKind::Stable),
             TechId::Caravan | TechId::Coinage | TechId::Banking => {
                 TechHost::Building(BuildingKind::Market)
@@ -389,6 +440,12 @@ impl TechId {
             // Package M: Conscription is researched at the Castle
             // itself (wiki, Conscription).
             TechId::Conscription => TechHost::Building(BuildingKind::Castle),
+            // Castle P5a: the Monastery set (grows with the P5
+            // slices — Redemption/Atonement/Heresy/Devotion/
+            // Herbal Medicine join this arm as they land).
+            TechId::Sanctity | TechId::Fervor => {
+                TechHost::Building(BuildingKind::Monastery)
+            }
         }
     }
 
@@ -399,13 +456,17 @@ impl TechId {
             TechId::Loom | TechId::FeudalAge => Age::Dark,
             TechId::CastleAge => Age::Feudal,
             TechId::ImperialAge => Age::Castle,
-            TechId::Banking | TechId::Conscription => Age::Imperial,
+            TechId::Banking | TechId::Conscription | TechId::CropRotation => Age::Imperial,
             TechId::HandCart
             | TechId::LightCavalry
             | TechId::Husbandry
             | TechId::Caravan
             | TechId::Coinage
             | TechId::TownPatrol
+            | TechId::HeavyPlow
+            // Castle P5a: the Monastery set is Castle Age research.
+            | TechId::Sanctity
+            | TechId::Fervor
             // Castle P3c: the University set is Castle Age research.
             | TechId::Ballistics
             | TechId::MurderHoles
@@ -431,6 +492,13 @@ impl TechId {
             // technology table).
             TechId::Banking => Some(TechId::Coinage),
             TechId::TownPatrol => Some(TechId::TownWatch),
+            // ECO-14: the farm chain is a chain like ECO-03's —
+            // Heavy Plow is the further upgrade of Horse Collar,
+            // Crop Rotation of Heavy Plow (wiki, Heavy Plow /
+            // Crop Rotation: "Farming: Horse Collar → Heavy
+            // Plow → Crop Rotation").
+            TechId::HeavyPlow => Some(TechId::HorseCollar),
+            TechId::CropRotation => Some(TechId::HeavyPlow),
             _ => None,
         }
     }
@@ -471,6 +539,10 @@ impl TechId {
             TechId::TownWatch => 1500, // 25 s (wiki, Town Watch)
             TechId::TownPatrol => 2400, // 40 s (wiki, Town Patrol)
             TechId::Conscription => 3600, // 60 s (wiki, Conscription)
+            TechId::HeavyPlow => 2400,  // 40 s (wiki, Heavy Plow)
+            TechId::CropRotation => 4200, // 70 s (wiki, Crop Rotation)
+            TechId::Sanctity => 3600, // 60 s (wiki, Sanctity — dossier §5.6)
+            TechId::Fervor => 3000, // 50 s (wiki, Fervor — dossier §5.6)
         }
     }
 
@@ -508,6 +580,10 @@ impl TechId {
             TechId::TownWatch => (75, 0, 0, 0),  // wiki, Town Watch
             TechId::TownPatrol => (300, 0, 100, 0), // wiki, Town Patrol
             TechId::Conscription => (150, 0, 150, 0), // wiki, Conscription
+            TechId::HeavyPlow => (125, 125, 0, 0), // wiki, Heavy Plow
+            TechId::CropRotation => (250, 250, 0, 0), // wiki, Crop Rotation
+            TechId::Sanctity => (0, 0, 175, 0), // wiki, Sanctity — dossier §5.6
+            TechId::Fervor => (0, 0, 140, 0), // wiki, Fervor — dossier §5.6
         }
     }
 }
@@ -571,13 +647,24 @@ pub fn conscription_scales(kind: BuildingKind, techs: u64) -> bool {
 /// by ×115/100, Stone Mining StoneMine by ×115/100 (wiki pages,
 /// module docs); the multiply truncates the sub-bit remainder,
 /// the same rounding the Wheelbarrow speed patch records.
-/// Every other (kind, mask) pair returns the base rate.
+/// Every other (kind, mask) pair returns the base rate — except
+/// the Farm, whose own inherent work rate caps the harvest no
+/// matter who works it (ECO-14: 0.4 food/s, `econ::FARM_WORK_RATE_CAP`):
+/// the farm case clamps whatever the lookups below would give,
+/// so any future rate patch on farms meets the cap here first.
 pub fn patched_gather_rate(kind: NodeKind, techs: u64) -> I16F16 {
     let pct: i64 = match kind {
         NodeKind::Tree if techs & TechId::DoubleBitAxe.bit() != 0 => 120,
         NodeKind::GoldMine if techs & TechId::GoldMining.bit() != 0 => 115,
         NodeKind::StoneMine if techs & TechId::StoneMining.bit() != 0 => 115,
-        _ => return kind.gather_rate(),
+        _ => {
+            let base = kind.gather_rate();
+            return if kind == NodeKind::Farm {
+                base.min(crate::econ::FARM_WORK_RATE_CAP)
+            } else {
+                base
+            };
+        }
     };
     let base = kind.gather_rate();
     I16F16::from_bits(((base.to_bits() as i64 * pct) / 100) as i32)
@@ -742,8 +829,16 @@ mod tests {
         }
         // 25-28 are Package K's Coinage/Banking/Town Watch/Town
         // Patrol (combo landing, bot-loop 2026-10-30); 29 is
-        // Package M's Conscription, so the next free tag is 30.
-        assert_eq!(TechId::from_tag(30), None);
+        // Package M's Conscription; 30–31 are the ECO-14 farm
+        // chain's Heavy Plow / Crop Rotation (wave-1 leftovers,
+        // renumbered at landing from the builder's 29/30), so
+        // the next free tag is 32.
+        assert_eq!(TechId::from_tag(29), Some(TechId::Conscription));
+        assert_eq!(TechId::from_tag(30), Some(TechId::HeavyPlow));
+        assert_eq!(TechId::from_tag(31), Some(TechId::CropRotation));
+        assert_eq!(TechId::from_tag(32), Some(TechId::Sanctity));
+        assert_eq!(TechId::from_tag(33), Some(TechId::Fervor));
+        assert_eq!(TechId::from_tag(34), None);
     }
 
     #[test]
@@ -845,6 +940,58 @@ mod tests {
         ] {
             assert_eq!(t.age_required(), Age::Feudal);
         }
+    }
+
+    #[test]
+    fn farm_chain_table_matches_the_wiki() {
+        // ECO-14 remainder (values fetched from the Age of
+        // Empires wiki, 2026-10-30; see the module docs).
+        // Heavy Plow: Mill, Castle Age, 125 F / 125 W, 40 s,
+        // the further upgrade of Horse Collar.
+        assert_eq!(TechId::HeavyPlow.cost(), (125, 125, 0, 0));
+        assert_eq!(TechId::HeavyPlow.ticks(), 40 * 60);
+        assert_eq!(
+            TechId::HeavyPlow.host(),
+            TechHost::Building(BuildingKind::Mill)
+        );
+        assert_eq!(TechId::HeavyPlow.age_required(), Age::Castle);
+        assert_eq!(
+            TechId::HeavyPlow.requires_tech(),
+            Some(TechId::HorseCollar)
+        );
+        // Crop Rotation: Mill, Imperial Age, 250 F / 250 W,
+        // 70 s, the further upgrade of Heavy Plow.
+        assert_eq!(TechId::CropRotation.cost(), (250, 250, 0, 0));
+        assert_eq!(TechId::CropRotation.ticks(), 70 * 60);
+        assert_eq!(
+            TechId::CropRotation.host(),
+            TechHost::Building(BuildingKind::Mill)
+        );
+        assert_eq!(TechId::CropRotation.age_required(), Age::Imperial);
+        assert_eq!(
+            TechId::CropRotation.requires_tech(),
+            Some(TechId::HeavyPlow)
+        );
+        // The new tags append; no earlier tag moved. (Renumbered
+        // at the bot-loop landing: the builder's 29/30 collided
+        // with Conscription's 29 on main, so the farm chain sits
+        // at 30/31 and ALL holds 32 entries.)
+        assert_eq!(TechId::HeavyPlow.tag(), 30);
+        assert_eq!(TechId::CropRotation.tag(), 31);
+        assert_eq!(TechId::from_tag(30), Some(TechId::HeavyPlow));
+        assert_eq!(TechId::from_tag(31), Some(TechId::CropRotation));
+        assert_eq!(TechId::ALL.len(), 34);
+        // ECO-14: the farm gather lookup meets the farm's own
+        // 0.4 food/s work-rate cap — the base farm rate sits
+        // below it today, so the clamped value is the base rate,
+        // and the cap itself is the documented constant.
+        assert_eq!(
+            patched_gather_rate(NodeKind::Farm, 0),
+            NodeKind::Farm.gather_rate()
+        );
+        assert!(crate::econ::FARM_WORK_RATE_CAP > NodeKind::Farm.gather_rate());
+        let cap_per_sec = crate::econ::FARM_WORK_RATE_CAP * I16F16::from_num(60);
+        assert!(cap_per_sec > I16F16::from_num(0.39) && cap_per_sec < I16F16::from_num(0.41));
     }
 
     #[test]

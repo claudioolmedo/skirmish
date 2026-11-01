@@ -84,6 +84,15 @@ const LAYOUTS = {
     cells: { Q: 'research-horsecollar', C: 'delete-building' },
     unplaced: [],
   },
+  'mill (ECO-14 — the farm chain completes the top row; the reseed desk rides unplaced like the garrison buttons)': {
+    context: 'mill', page: null,
+    ids: ['research-horsecollar', 'research-heavyplow', 'research-croprotation', 'reseed-queue', 'reseed-auto', 'delete-building'],
+    cells: {
+      Q: 'research-horsecollar', W: 'research-heavyplow', E: 'research-croprotation',
+      C: 'delete-building',
+    },
+    unplaced: ['reseed-queue', 'reseed-auto'],
+  },
   'mining camp': {
     context: 'miningcamp', page: null,
     ids: ['research-goldmining', 'research-stonemining', 'delete-building'],
@@ -141,7 +150,7 @@ const LAYOUTS = {
     cells: {
       Q: 'build-2', W: 'build-6', E: 'build-7',
       A: 'build-8', S: 'build-9', D: 'build-10', Z: 'build-11', X: 'build-14', C: 'page-back',
-      V: 'build-16', N: 'build-17',
+      V: 'build-16', N: 'build-17', M: 'build-20',
     },
     unplaced: ['stop', 'delete'],
   },

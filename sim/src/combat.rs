@@ -2906,6 +2906,10 @@ impl Sim {
                 (b.owner, b.kind.total_cost().to_num::<i32>() as i64)
             };
             self.credit_destruction(attacker_owner, bowner, bvalue);
+            // INF-11: the statistics counters take the same
+            // lethal hit (razed for the attacker, lost for the
+            // owner).
+            self.note_building_destroyed(attacker_owner, bowner);
             self.destroy_building(bid);
         }
     }
@@ -3126,6 +3130,10 @@ impl Sim {
             if let Some(kowner) = killer_owner {
                 self.credit_destruction(kowner, victim_owner, crate::unit_cost_value(kind));
             }
+            // INF-11: the same death feeds the statistics
+            // counters (kills cross-player only, losses always) —
+            // see `Sim::note_entity_death` for the discipline.
+            self.note_entity_death(killer_owner, victim_owner, kind);
             let spec = units::spec(kind);
             if spec.carcass_food > 0 {
                 let node_kind = if kind == EntityKind::Sheep {
@@ -3140,6 +3148,7 @@ impl Sim {
                     pos_x: px,
                     pos_y: py,
                     amount_left: I16F16::from_num(spec.carcass_food),
+                    full_amount: I16F16::from_num(spec.carcass_food),
                     decay_per_tick: I16F16::from_bits(spec.carcass_decay_bits),
                 });
                 // The killer starts harvesting its kill — the

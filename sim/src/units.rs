@@ -149,6 +149,7 @@ pub fn spec(kind: EntityKind) -> &'static UnitSpec {
         EntityKind::TradeCart => &TRADE_CART,
         EntityKind::BatteringRam => &BATTERING_RAM,
         EntityKind::Mangonel => &MANGONEL,
+        EntityKind::Monk => &MONK,
     }
 }
 
@@ -839,6 +840,53 @@ static MANGONEL: UnitSpec = UnitSpec {
     train_ticks: 2760, // 46 s
 };
 
+/// Monk (Castle P5a, MNK-01/10; wiki "Monk (Age of Empires
+/// II)" infobox via the Castle Age dossier §5.6, fetched
+/// 2026-10-22): HP 30 (45 with Sanctity — the +15 patches in
+/// `Sim::stats_for`), armor 0/0, **no attack table at all**
+/// (CLS-08: the empty table IS the rule — `can_attack` refuses
+/// the order, acquisition never lists the kind, and the strike
+/// machines clear any combat state), speed 0.7 tiles/s (the
+/// Sheep row's absolute-scale bits; Fervor's +15% patches at
+/// lookup), LoS 11 (9 while carrying a relic — the P5d slice).
+/// Its class membership is MONK — until this row landed, the
+/// class was memberless and the Scout's +6 / Light Cavalry's
+/// +10 anti-monk attack rows keyed on nothing. Cost 100 gold,
+/// train 51 s, Monastery only (`BuildingKind::trains` +
+/// `EntityKind::train_age`). The radius adopts the foot rows'
+/// 1.0 as an implementation constant — the dossier gives no
+/// monk radius — never presented as DE data. Reload/delay/
+/// range are the inert zeros of the other attack-less rows
+/// (Sheep, Trade Cart): with no attack table they are never
+/// read.
+static MONK: UnitSpec = UnitSpec {
+    max_hp: 30,
+    attacks: NO_ATTACKS,
+    armor_melee: 0,
+    armor_pierce: 0,
+    armor_building: 0,
+    classes: cls::mask(&[cls::MONK]),
+    range_max: I16F16::ZERO,
+    range_min: I16F16::ZERO,
+    reload_ticks: 0,
+    attack_delay_ticks: 0,
+    accuracy: 100,
+    projectile_speed: I16F16::ZERO,
+    scatter: I16F16::ZERO,
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
+    speed: I16F16::from_bits(3_058), // 0.7 tiles/s (absolute scale, see header)
+    los: I16F16::from_bits(2_883_584), // 44 (11 tiles)
+    radius: I16F16::from_bits(65_536), // 1.0 — adopted (see above)
+    carcass_food: 0,
+    carcass_decay_bits: 0,
+    food_cost: 0,
+    wood_cost: 0,
+    gold_cost: 100,
+    train_ticks: 3060, // 51 s
+};
+
 /// Sheep (OPENING-SPEC §2.2): 100 food, speed 0.7, worked at the
 /// shepherd rate once dead. Line of Sight 2 tiles: the wiki's
 /// Herdable animal article gives the per-animal breakdown ("Cows,
@@ -1106,6 +1154,18 @@ mod tests {
         let w = spec(EntityKind::Wolf);
         assert_eq!((w.max_hp, w.carcass_food), (25, 0));
         assert_eq!(w.attacks, &[(cls::MELEE, 3)]);
+        // Monk (Castle P5a, MNK-01/CLS-08; wiki Monk infobox via
+        // dossier §5.6): HP 30, armor 0/0, NO attack table (the
+        // empty table is CLS-08 itself), speed 0.7 tiles/s, LoS
+        // 11 tiles, class MONK, 100 gold, train 51 s.
+        let mo = spec(EntityKind::Monk);
+        assert_eq!((mo.max_hp, mo.armor_melee, mo.armor_pierce), (30, 0, 0));
+        assert!(mo.attacks.is_empty());
+        assert_eq!(mo.speed, I16F16::from_bits(3_058));
+        assert_eq!(mo.los, I16F16::from_bits(2_883_584));
+        assert_ne!(mo.classes & cls::bit(cls::MONK), 0);
+        assert_eq!((mo.food_cost, mo.wood_cost, mo.gold_cost), (0, 0, 100));
+        assert_eq!(mo.train_ticks, 3060);
     }
 
     #[test]

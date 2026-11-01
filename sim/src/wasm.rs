@@ -415,6 +415,27 @@ impl WasmSim {
         self.push_train_at(building, EntityKind::Mangonel)
     }
 
+    /// Enqueue a Monk at a completed Monastery (Castle P5a,
+    /// MNK-01 — the Monastery is the Monk's only home;
+    /// `can_train_at` carries the Castle Age gate). See
+    /// `push_train_militia`.
+    pub fn push_train_monk(&mut self, building: u32) -> bool {
+        self.push_train_at(building, EntityKind::Monk)
+    }
+
+    /// Order a Monk to heal an allied unit (Castle P5a, MNK-10):
+    /// the monk walks into heal range and restores 150 HP/min
+    /// until the target is whole. Returns whether the order
+    /// *would* be accepted against the current state (the sim
+    /// re-validates when the command is applied).
+    pub fn push_heal(&mut self, entity: u32, target: u32) -> bool {
+        let ok = self.inner.can_heal(entity, target);
+        if ok {
+            self.inner.push_command(Command::Heal { entity, target });
+        }
+        ok
+    }
+
     /// Enqueue a Trade Cart at a completed Market (Package D,
     /// TRD-05 — the Market is the cart's only home; `can_train_at`
     /// carries the Feudal Age gate). See `push_train_militia`.
@@ -1014,6 +1035,13 @@ impl WasmSim {
         self.push_build(entity, BuildingKind::StoneGate, x, y)
     }
 
+    /// Order a villager to build a Monastery (175 wood, 3×3;
+    /// Castle Age, no prerequisite building — Castle P5a) — see
+    /// `push_build_house`.
+    pub fn push_build_monastery(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build(entity, BuildingKind::Monastery, x, y)
+    }
+
     /// Buy one lot (100) of a commodity at a completed Market
     /// (TRD-01..03): `resource_tag` is the `ResourceKind` tag
     /// (food 1, wood 2, stone 4 — gold is never a commodity).
@@ -1078,6 +1106,42 @@ impl WasmSim {
             amount,
         });
         true
+    }
+
+    /// Buy one farm reseed ahead at the named Mill (ECO-14):
+    /// 60 wood, paid now, into the Mill owner's paid reseed
+    /// queue. Returns false (and queues nothing) when the sim
+    /// would reject it: not a completed Mill, or the owner short
+    /// of the wood.
+    pub fn push_queue_reseed(&mut self, building: u32) -> bool {
+        if !self.inner.can_queue_reseed(building) {
+            return false;
+        }
+        self.inner.push_command(Command::QueueReseed { building });
+        true
+    }
+
+    /// Remove one paid reseed from the queue of the named Mill's
+    /// owner, refunding its 60 wood (ECO-14). False when the
+    /// queue is empty or the building is not a completed Mill.
+    pub fn push_dequeue_reseed(&mut self, building: u32) -> bool {
+        if !self.inner.can_dequeue_reseed(building) {
+            return false;
+        }
+        self.inner.push_command(Command::DequeueReseed { building });
+        true
+    }
+
+    /// Set the auto-reseed toggle of the named Mill's owner
+    /// (ECO-14). False when the building is not a completed Mill.
+    pub fn push_set_auto_reseed(&mut self, building: u32, on: bool) -> bool {
+        if self.inner.is_completed_mill(building) {
+            self.inner
+                .push_command(Command::SetAutoReseed { building, on });
+            true
+        } else {
+            false
+        }
     }
 
     /// A player's current tribute fee, in percent (TRD-04):
@@ -1329,6 +1393,12 @@ impl WasmSim {
     /// `push_build_house_queued`.
     pub fn push_build_stone_gate_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
         self.push_build_queued(entity, BuildingKind::StoneGate, x, y)
+    }
+
+    /// Queue a Monastery build (Castle Age — Castle P5a) — see
+    /// `push_build_house_queued`.
+    pub fn push_build_monastery_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build_queued(entity, BuildingKind::Monastery, x, y)
     }
 
     /// Queue a Market build — see `push_build_house_queued`.
@@ -1882,6 +1952,54 @@ impl WasmSim {
     /// Researched-technology bitmask of a specific player.
     pub fn tech_mask_for(&self, owner: u32) -> u32 {
         self.inner.tech_mask_of(owner as u8) as u32
+    }
+
+    /// A player's match statistics (INF-11), flat:
+    /// [units killed, units lost, buildings razed, buildings
+    /// lost, food gathered, wood gathered, gold gathered, stone
+    /// gathered] — the post-game statistics screen's numbers.
+    pub fn match_stats_for(&self, owner: u32) -> Vec<f64> {
+        let s = self.inner.match_stats_of(owner as u8);
+        vec![
+            s.units_killed as f64,
+            s.units_lost as f64,
+            s.buildings_razed as f64,
+            s.buildings_lost as f64,
+            s.gathered[0] as f64,
+            s.gathered[1] as f64,
+            s.gathered[2] as f64,
+            s.gathered[3] as f64,
+        ]
+    }
+
+    /// A player's researched technology tags (INF-11's
+    /// technologies-researched line / INF-06's tree states): the
+    /// researched-mask tags in ascending order, plus the age
+    /// advancements the player's current age implies (Feudal 1,
+    /// Castle 14, Imperial 18 — advancements are recorded by the
+    /// age itself, not by a mask bit).
+    pub fn researched_techs_for(&self, owner: u32) -> Vec<u32> {
+        let mask = self.inner.tech_mask_of(owner as u8);
+        let mut out: Vec<u32> = (0..31u32)
+            .filter(|&t| mask & (1u64 << t) != 0)
+            .collect();
+        let age = self.inner.age_of(owner as u8).tag();
+        for (need, tag) in [(1u8, 1u32), (2, 14), (3, 18)] {
+            if age >= need {
+                out.push(tag);
+            }
+        }
+        out.sort_unstable();
+        out
+    }
+
+    /// A player's Mill reseed state (ECO-14), flat: [paid reseed
+    /// queue, auto-reseed on as 0/1] — the Mill panel's faces.
+    pub fn reseed_for(&self, owner: u32) -> Vec<u32> {
+        vec![
+            self.inner.reseed_queue_of(owner as u8),
+            u32::from(self.inner.auto_reseed_of(owner as u8)),
+        ]
     }
 
     /// The fog-of-war grid of a specific player — `fog` for an

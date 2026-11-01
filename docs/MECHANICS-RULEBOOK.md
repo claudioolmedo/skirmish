@@ -1022,11 +1022,29 @@ specification. Horse Collar shipped
 standing farms by 75 × (remaining ⁄ 175)², rounded up to whole
 food — the articles' examples all round the result up (+19 at
 half) though no rounding rule is stated; the inference flagged
-above is followed in the sim. Heavy Plow and
-Crop Rotation wait for their Ages. · *Status:* **DIFFERS** (core
-farm loop and Horse Collar match; the footprint matched on
-2026-10-22 — work-rate cap and the reseed queue pending M6/M7
-conventions).
+above is followed in the sim. Completed 2026-10-31 (wave-1
+leftovers, Package F): the work-rate cap now clamps the farm
+gather case (437 bits/tick ≈ 0.4 food/s; the base farm rate
+sits below it today, so the clamp binds only a future raise);
+Heavy Plow (tag 29, Mill, Castle Age, 125/125, 40 s, chained
+from Horse Collar) and Crop Rotation (tag 30, Mill, Imperial
+Age, 250/250, 70 s, from Heavy Plow) ship, with the top-up
+generalized: every farm node stores its own stamped full
+(175 + the chain bonuses its owner held at completion, grown
+by each top-up it gains) and each farm tech tops standing
+farms up by bonus × (remaining ⁄ own full)² rounded up —
+reproducing the articles' totals end to end (250 ⁄ 375 ⁄ 550)
+and the half-farm examples at every rung (+19 ⁄ +32 ⁄ +44);
+Heavy Plow also gives +1 farm-food carry (the Heavy Plow
+article's "Villagers carry +1 food", read as the farm
+harvest). The Mill reseed desk ships: a paid queue at 60 wood
+per reseed, paid in advance (no queue cap — none is stated in
+the pinned sources), right-click refunds one, and an
+auto-reseed toggle that charges the 60 wood at depletion; a
+depleted farm with a reseed to spend returns to a foundation
+on the same plot instead of retiring, its farmer reassigned
+to build it, and the fresh node is stamped on completion as
+any new farm's. · *Status:* **MATCHES**.
 
 **ECO-15 — Fishing.** Villagers gather shore fish at 0.426/s. Fishing
 Ships gather from fish spots (0.280/s shore, 0.487/s deep-sea) and deposit
@@ -2352,8 +2370,14 @@ ordinary unit (and can be killed normally — conversion immunity is about
 being converted, MNK-08, not about being attacked).
 *Source:* MECHANICS-STUDY §3.8 (monk row: no attack fields); wiki, Monk.
 · *Impl:* monk rows carry no attack table; the combat system skips
-attack-less kinds in the attacker role automatically. · *Status:*
-**MISSING**.
+attack-less kinds in the attacker role automatically. Shipped in
+Castle P5a (2026-10-31): the Monk row (kind tag 20) carries the empty
+attack table itself, `can_attack` refuses it, CMB-08 acquisition never
+picks it as an attacker, and as a target it is ordinary — Light
+Cavalry's +10 vs the MONK class lands on it exactly. Pinned by
+`monk_never_attacks_but_is_a_normal_target` and
+`light_cavalry_bonus_damage_vs_monk` in
+`sim/src/monastery_p5a_tests.rs`. · *Status:* **MATCHES**.
 
 ---
 
@@ -2586,7 +2610,13 @@ table with the standard prerequisite shape (Castle, age). · *Status:*
 LoS 11, cost 100 gold, train time 51 s (MECHANICS-STUDY §3.8).
 *Source:* MECHANICS-STUDY §3.8. · *Impl:* conversion and healing are task
 states in the monk's entity record (target id + progress counters), ticked
-in a dedicated phase after combat. · *Status:* **MISSING** (GAP 6.8).
+in a dedicated phase after combat. Shipped so far (Castle P5a,
+2026-10-31): the monk's base numbers (30 HP, 0.7 speed, LoS 11, 100 gold,
+51 s at the Monastery) and the HEAL arm of the three actions — the monk
+phase runs after combat (`monk_tick`, step 4.6) and healing rides the
+entity record's heal fields (`sim/src/monks.rs`; MNK-10 is MATCHES).
+Conversion (P5b) and relic-carrying (P5d) are not shipped yet, so this
+rule's status stands. · *Status:* **MISSING** (GAP 6.8).
 
 **MNK-02 — Faith gates conversion.** A monk must be at 100% faith to
 begin converting. A successful conversion drains faith to 0; faith then
@@ -2687,8 +2717,19 @@ allies when idle. Healing never heals buildings, siege weapons, or ships
 overheals past max HP.
 *Source:* MECHANICS-STUDY §3.8; wiki, Monk (healing behavior). · *Impl:*
 the monk phase's auto-task: nearest wounded healable ally in range —
-same tie-break discipline as CMB-08 (squared distance, then id). ·
-*Status:* **MISSING**.
+same tie-break discipline as CMB-08 (squared distance, then id).
+Shipped in Castle P5a (2026-10-31, `sim/src/monks.rs`): range 4,
+150 HP/min through a per-monk remainder accumulator (no drift, never
+past max); the idle auto-task scans the monk's own sight, picks the
+nearest wounded healable ally (CMB-08 tie-break) and closes to range;
+a direct Heal order chases an out-of-range target; buildings, siege,
+ships, enemies and full-HP allies are refused, and healing never
+touches the target's orders or any faith state. Pinned by
+`heal_rate_is_exact_and_never_overheals`,
+`heal_order_chases_an_out_of_range_target`, `heal_exclusions_hold`,
+`heal_auto_task_picks_nearest_then_lowest_id` and
+`healing_never_touches_the_targets_orders` in
+`sim/src/monastery_p5a_tests.rs`. · *Status:* **MATCHES**.
 
 **MNK-11 — Heresy turns conversion into death.** If a player with Heresy
 would lose a unit to conversion, the unit dies instead of changing sides.
@@ -3699,7 +3740,16 @@ A full-screen tech-tree view shows the whole graph.
 queue count + progress in the selection info line, no badge on the
 button face (2026-10-19), and housed explanations) — buttons are data-driven from the same
 availability functions the sim validates with (BLD-15), so panel and sim
-can never disagree. · *Status:* **DIFFERS**.
+can never disagree. The full-screen tech-tree view shipped
+2026-10-31 (wave-1 leftovers): `play/techtree.js` carries the
+whole graph — every technology's tag, host building, required
+Age, cost, research time and prerequisite — as a mirror of
+`sim/src/tech.rs`, pinned against the Rust source by
+`play/techtree.test.mjs`; the view (top-bar Tech Tree button)
+paints each node researched / available / locked from the
+local player's researched mask and Age (the advancements read
+off the Age itself, never a mask bit), and never pauses.
+· *Status:* **MATCHES**.
 
 **INF-07 — Public vs. private information.** Always public in-match:
 every player's score (VIC-04), current Age, and population. Always
@@ -3820,9 +3870,22 @@ scoreboard shows live scores/ages/populations (INF-07). After the match,
 the statistics screen presents the full timeline: scores over time,
 military/economy breakdowns (VIC-04), units killed/lost, resources
 gathered, technologies, and the map revealed.
-*Source:* GAP 11.10. · *Impl:* post-game stats are an aggregation over
-the VIC-04 run counters + a score history sampled per minute (client-
-side sampling of public data). · *Status:* **MISSING**.
+*Source:* GAP 11.10. · *Impl:* shipped 2026-10-31 (wave-1
+leftovers), in the Impl note's own shape: the sim keeps the
+run counters beside VIC-04's credit points — units and
+buildings killed/lost (kills cross-player only, losses every
+death through the sweep; the Town Center counts as a
+building) and resources gathered, credited only when a
+villager's load reaches a stockpile (trade, tribute and
+market exchange are not gathering) — and the client samples
+both players' public totals once per game minute into a
+score history. In-match, the top-bar Score board shows Age,
+population and total per player (totals only — the VIC-04
+categories stay post-game, DE's own split); the end card
+draws the sampled timeline, lists the counters and each
+player's researched technologies, and offers View map (the
+revealed post-game map, with a Results chip back).
+· *Status:* **MATCHES**.
 
 **INF-12 — Occluded units are outlined in their owner's colour.** When a
 unit is partially or completely hidden behind a taller object drawn

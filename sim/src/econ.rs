@@ -188,6 +188,15 @@ impl NodeKind {
     }
 }
 
+/// ECO-14: a Farm's own inherent work rate — 0.4 food/s — caps
+/// how fast the field can be harvested, no matter who works it
+/// or what gather patches their owner holds. In the rate table's
+/// raw-bits convention: 0.4 × 65536 ⁄ 60 = 436.9, so 437 bits
+/// (≈ 0.4001/s). The base farm rate (348 bits ≈ 0.319/s) sits
+/// below the cap today, so the clamp binds only if a future
+/// patch raises the farm rate (see `tech::patched_gather_rate`).
+pub const FARM_WORK_RATE_CAP: I16F16 = I16F16::from_bits(437);
+
 /// One harvestable resource node on the map. Position is a fixed-point
 /// world point (a grid cell center for placed nodes; the death spot
 /// for carcasses); `amount_left` drains as villagers gather and the
@@ -199,6 +208,15 @@ pub struct ResourceNode {
     pub pos_x: I16F16,
     pub pos_y: I16F16,
     pub amount_left: I16F16,
+    /// The fullest this node has ever been: for a placed node its
+    /// kind's `full_amount`, for a carcass the dead animal's food
+    /// value, and for a Farm the stamped total — the seeded amount
+    /// (175 + the owner's farm-tech bonuses at completion) plus
+    /// every update-169123 top-up it has since gained. ECO-14's
+    /// proportional top-up divides the remaining amount by this
+    /// figure (a farm's proportion is of *its own* total, not of
+    /// the bare 175 — a post-Horse-Collar farm's full is 250).
+    pub full_amount: I16F16,
     /// Per-tick decay (M3, ECO-12): carcasses — and only carcasses —
     /// lose this much food every tick from the moment of death,
     /// gathered or not. Zero for every placed node.
@@ -214,6 +232,7 @@ impl ResourceNode {
             pos_x,
             pos_y,
             amount_left: kind.full_amount(),
+            full_amount: kind.full_amount(),
             decay_per_tick: I16F16::ZERO,
         }
     }

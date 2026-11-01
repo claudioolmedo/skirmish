@@ -191,6 +191,11 @@ pub const SIEGE_WORKSHOP_WOOD_COST: I16F16 = I16F16::from_bits(13_107_200); // 2
 /// Siege Workshop build time: 40 s at 60 Hz (Castle P4a; same
 /// source).
 pub const SIEGE_WORKSHOP_BUILD_TICKS: u64 = 2400;
+/// Monastery wood cost: 175 (Castle P5a; AoE wiki, Monastery
+/// infobox via the Castle Age dossier §5.6, fetched 2026-10-30).
+pub const MONASTERY_WOOD_COST: I16F16 = I16F16::from_bits(11_468_800); // 175
+/// Monastery build time: 40 s at 60 Hz (Castle P5a; same source).
+pub const MONASTERY_BUILD_TICKS: u64 = 2400;
 /// Population room from one completed Castle: +20 (Castle P3a;
 /// same source).
 pub const CASTLE_POP_SUPPORT: u32 = 20;
@@ -363,6 +368,19 @@ pub enum BuildingKind {
     /// build, 4×1, HP 1650 Feudal / 2700 from Castle, armor 6/6
     /// (same Building table). Feudal Age.
     StoneGate,
+    /// Castle P5a: the Monastery — the Castle Age's faith
+    /// building. 175 wood, 40 s build, **3×3** (the DE
+    /// footprint), 2100 HP (flat — the wiki infobox carries a
+    /// single HP figure, no per-Age split; passo 0.3 of the P5
+    /// execution plan), armor 2/9, LoS 6; Castle Age, no
+    /// building prerequisite (dossier §5.6: "Prerequisite:
+    /// none"). It trains the Monk (its only production) and
+    /// researches the Monastery technology row (TEC-10: in
+    /// P5a, Sanctity and Fervor). Like every production
+    /// building it holds a production garrison of 10 (GAR-08).
+    /// It does not fire — no `BuildingWeapon`. It is the one
+    /// building that can never be converted (MNK-08).
+    Monastery,
 }
 
 impl BuildingKind {
@@ -374,8 +392,10 @@ impl BuildingKind {
     /// see the variant), 14 = stone wall (BLD-20), 15 = castle
     /// (Castle P3a), 16 = university (Castle P3c), 17 = siege
     /// workshop (Castle P4a), 18 = palisade gate, 19 = stone
-    /// gate (Package J, BLD-13). Tags are an ABI contract — append
-    /// only, never renumber.
+    /// gate (Package J, BLD-13), 20 = monastery (Castle P5a —
+    /// renumbered at the bot-loop landing: the builder's 18 was
+    /// already the Palisade Gate here). Tags are an ABI
+    /// contract — append only, never renumber.
     pub fn tag(self) -> u8 {
         match self {
             BuildingKind::House => 0,
@@ -398,6 +418,7 @@ impl BuildingKind {
             BuildingKind::SiegeWorkshop => 17,
             BuildingKind::PalisadeGate => 18,
             BuildingKind::StoneGate => 19,
+            BuildingKind::Monastery => 20,
         }
     }
 
@@ -424,6 +445,7 @@ impl BuildingKind {
             17 => Some(BuildingKind::SiegeWorkshop),
             18 => Some(BuildingKind::PalisadeGate),
             19 => Some(BuildingKind::StoneGate),
+            20 => Some(BuildingKind::Monastery),
             _ => None,
         }
     }
@@ -485,6 +507,8 @@ impl BuildingKind {
             BuildingKind::PalisadeGate => PALISADE_GATE_WOOD_COST,
             // Package J: the Stone Gate's price is all stone.
             BuildingKind::StoneGate => I16F16::ZERO,
+            // Castle P5a: the Monastery's 175 wood.
+            BuildingKind::Monastery => MONASTERY_WOOD_COST,
         }
     }
 
@@ -538,6 +562,7 @@ impl BuildingKind {
             BuildingKind::SiegeWorkshop => SIEGE_WORKSHOP_BUILD_TICKS,
             BuildingKind::PalisadeGate => PALISADE_GATE_BUILD_TICKS,
             BuildingKind::StoneGate => STONE_GATE_BUILD_TICKS,
+            BuildingKind::Monastery => MONASTERY_BUILD_TICKS,
         }
     }
 
@@ -606,7 +631,9 @@ impl BuildingKind {
             | BuildingKind::Barracks
             | BuildingKind::ArcheryRange
             | BuildingKind::Stable
-            | BuildingKind::Blacksmith => 3,
+            | BuildingKind::Blacksmith
+            // Castle P5a: the Monastery is 3×3 (dossier §5.6).
+            | BuildingKind::Monastery => 3,
             // The placed 4×4 kinds: the Market, the Town Center
             // construction record (the standing Town Center is an
             // entity, not a kind — BLD-16), the Castle
@@ -668,6 +695,7 @@ impl BuildingKind {
                 | BuildingKind::Castle
                 | BuildingKind::Market
                 | BuildingKind::SiegeWorkshop
+                | BuildingKind::Monastery
         )
     }
 
@@ -704,6 +732,9 @@ impl BuildingKind {
                 // Castle P4b: the Mangonel trains at the Siege
                 // Workshop only, beside the Ram.
                 | (BuildingKind::SiegeWorkshop, EntityKind::Mangonel)
+                // Castle P5a: the Monk trains at the Monastery
+                // only (MNK-01).
+                | (BuildingKind::Monastery, EntityKind::Monk)
         )
     }
 
@@ -723,7 +754,8 @@ impl BuildingKind {
             BuildingKind::TownCenter
             | BuildingKind::Castle
             | BuildingKind::University
-            | BuildingKind::SiegeWorkshop => Age::Castle,
+            | BuildingKind::SiegeWorkshop
+            | BuildingKind::Monastery => Age::Castle,
             _ => Age::Dark,
         }
     }
@@ -776,6 +808,9 @@ impl BuildingKind {
             // Castle P4a: the Siege Workshop's documented sight
             // is 6 (dossier §2, wiki Siege Workshop infobox).
             BuildingKind::SiegeWorkshop => 6,
+            // Castle P5a: the Monastery's documented sight is 6
+            // (dossier §5.6, wiki Monastery infobox).
+            BuildingKind::Monastery => 6,
             BuildingKind::WatchTower => 10,
             BuildingKind::Outpost => match age {
                 Age::Dark => 6,
@@ -852,7 +887,8 @@ impl BuildingKind {
             BuildingKind::Barracks
             | BuildingKind::ArcheryRange
             | BuildingKind::Stable
-            | BuildingKind::SiegeWorkshop => Some(10),
+            | BuildingKind::SiegeWorkshop
+            | BuildingKind::Monastery => Some(10),
             _ => None,
         }
     }
@@ -876,6 +912,7 @@ impl BuildingKind {
                 | BuildingKind::ArcheryRange
                 | BuildingKind::Stable
                 | BuildingKind::SiegeWorkshop
+                | BuildingKind::Monastery
         )
     }
 
@@ -967,6 +1004,7 @@ impl BuildingKind {
                 | BuildingKind::TownCenter
                 | BuildingKind::Castle
                 | BuildingKind::SiegeWorkshop
+                | BuildingKind::Monastery
         )
     }
 
@@ -1020,10 +1058,14 @@ impl BuildingKind {
         // this column's doc above anticipated ("the University,
         // Siege Workshop and Monastery join this set when they
         // land"). Castle P4a: the Siege Workshop joins it the
-        // same way; the Monastery remains.
+        // same way. Castle P5a: the Monastery joins it too —
+        // the doc sentence above is now fully discharged.
         matches!(
             self,
-            BuildingKind::Castle | BuildingKind::University | BuildingKind::SiegeWorkshop
+            BuildingKind::Castle
+                | BuildingKind::University
+                | BuildingKind::SiegeWorkshop
+                | BuildingKind::Monastery
         )
     }
 
@@ -1083,6 +1125,11 @@ impl BuildingKind {
             // 2700 lives in `max_hp_at`. The kind is Feudal-born,
             // so this base row is the Feudal one.
             BuildingKind::StoneGate => STONE_GATE_HP_FEUDAL,
+            // Castle P5a: 2100 HP, flat (dossier §5.6, wiki
+            // Monastery infobox — a single HP figure, no
+            // per-Age split; `max_hp_at` falls through to this
+            // row at every Age).
+            BuildingKind::Monastery => 2100,
         }
     }
 
@@ -1174,6 +1221,9 @@ impl BuildingKind {
             // Package J (BLD-13): the Stone Gate's melee armor
             // 6 (same table).
             BuildingKind::StoneGate => 6,
+            // Castle P5a: the Monastery's melee armor is 2
+            // (dossier §5.6, wiki Monastery infobox).
+            BuildingKind::Monastery => 2,
             BuildingKind::TownCenter => 3,
             _ => 0,
         }
@@ -1234,6 +1284,9 @@ impl BuildingKind {
             // Package J (BLD-13): the Stone Gate's pierce armor
             // 6 (same table).
             BuildingKind::StoneGate => 6,
+            // Castle P5a: the Monastery's pierce armor is 9
+            // (dossier §5.6, wiki Monastery infobox).
+            BuildingKind::Monastery => 9,
             BuildingKind::TownCenter => 5,
             _ => 7,
         }

@@ -52,7 +52,15 @@ const MAGIC: &[u8; 4] = b"SKSV";
 /// codecs gain their AttackGround tags, renumbered on landing
 /// (Command 39, QueuedOrder 8 — the builder's 38/7 were already
 /// RepairTc here).
-const SAVE_VERSION: u32 = 5;
+/// Version 6: wave-1 leftovers landing — the players section
+/// carries the INF-11 counters, the gathered totals and the
+/// ECO-14 reseed state, node records carry the node's stamped
+/// full amount, and the command codec gains the reseed commands
+/// at tags 40-42 (the builder's 38-40 were taken here).
+/// Version 7: Castle P5a landing — the entity record gains the
+/// monk heal fields, and the command codec gains `Heal` at
+/// tag 43 (the builder's 38 was taken here).
+const SAVE_VERSION: u32 = 7;
 
 /// Little-endian byte writer over a growable buffer.
 struct W {
@@ -449,6 +457,29 @@ impl W {
                 self.fx(x);
                 self.fx(y);
             }
+            // Wave-1 leftovers landing (ECO-14): tags 40-42,
+            // append-only (the builder's 38-40 were taken here).
+            Command::QueueReseed { building } => {
+                self.u8(40);
+                self.u32(building);
+            }
+            Command::DequeueReseed { building } => {
+                self.u8(41);
+                self.u32(building);
+            }
+            Command::SetAutoReseed { building, on } => {
+                self.u8(42);
+                self.u32(building);
+                self.bool(on);
+            }
+            // Castle P5a landing: the Monk's heal order
+            // (MNK-10) at tag 43, append-only (the builder's
+            // 38 was taken here).
+            Command::Heal { entity, target } => {
+                self.u8(43);
+                self.u32(entity);
+                self.u32(target);
+            }
         }
     }
 }
@@ -480,6 +511,17 @@ impl Sim {
             w.u8(p.age.tag());
             w.u64(p.techs);
             w.u64(p.destroyed_value);
+            // Format v2: INF-11 counters, gathered totals,
+            // ECO-14 reseed state.
+            w.u32(p.units_killed);
+            w.u32(p.units_lost);
+            w.u32(p.buildings_razed);
+            w.u32(p.buildings_lost);
+            for b in p.gathered_bits {
+                w.u64(b as u64);
+            }
+            w.u32(p.reseed_queue);
+            w.bool(p.auto_reseed);
         }
         for s in &self.stockpiles {
             for a in s.amounts() {
@@ -497,6 +539,9 @@ impl Sim {
             w.fx(n.pos_x);
             w.fx(n.pos_y);
             w.fx(n.amount_left);
+            // Format v2: the node's stamped full amount (ECO-14's
+            // top-up divisor).
+            w.fx(n.full_amount);
             w.fx(n.decay_per_tick);
         }
         // --- Town Center states ---
@@ -633,6 +678,8 @@ impl Sim {
             w.opt_u32(e.trade_home);
             w.opt_u32(e.trade_target);
             w.bool(e.trade_loaded);
+            w.opt_u32(e.heal_target);
+            w.i64(e.heal_remainder);
             w.usize(e.garrison.len());
             for id in &e.garrison {
                 w.u32(*id);
@@ -1029,6 +1076,20 @@ impl<'a> R<'a> {
                 x: self.fx()?,
                 y: self.fx()?,
             }),
+            40 => Some(Command::QueueReseed {
+                building: self.u32()?,
+            }),
+            41 => Some(Command::DequeueReseed {
+                building: self.u32()?,
+            }),
+            42 => Some(Command::SetAutoReseed {
+                building: self.u32()?,
+                on: self.bool()?,
+            }),
+            43 => Some(Command::Heal {
+                entity: self.u32()?,
+                target: self.u32()?,
+            }),
             _ => None,
         }
     }
@@ -1112,6 +1173,15 @@ impl Sim {
             p.age = age_from_tag(r.u8()?)?;
             p.techs = r.u64()?;
             p.destroyed_value = r.u64()?;
+            p.units_killed = r.u32()?;
+            p.units_lost = r.u32()?;
+            p.buildings_razed = r.u32()?;
+            p.buildings_lost = r.u32()?;
+            for b in &mut p.gathered_bits {
+                *b = r.u64()? as i64;
+            }
+            p.reseed_queue = r.u32()?;
+            p.auto_reseed = r.bool()?;
         }
         let mut stockpiles = [Stockpile::starting(), Stockpile::starting()];
         for s in &mut stockpiles {
@@ -1122,7 +1192,7 @@ impl Sim {
             *s = Stockpile::from_amounts(amounts);
         }
         let market = Market::from_rates([r.i32()?, r.i32()?, r.i32()?]);
-        let n_nodes = r.count(21)?;
+        let n_nodes = r.count(25)?;
         let mut nodes = Vec::with_capacity(n_nodes);
         for _ in 0..n_nodes {
             nodes.push(ResourceNode {
@@ -1131,6 +1201,7 @@ impl Sim {
                 pos_x: r.fx()?,
                 pos_y: r.fx()?,
                 amount_left: r.fx()?,
+                full_amount: r.fx()?,
                 decay_per_tick: r.fx()?,
             });
         }
@@ -1301,6 +1372,8 @@ impl Sim {
             let trade_home = r.opt_u32()?;
             let trade_target = r.opt_u32()?;
             let trade_loaded = r.bool()?;
+            let heal_target = r.opt_u32()?;
+            let heal_remainder = r.i64()?;
             let n_g = r.count(4)?;
             let mut garrison = Vec::with_capacity(n_g);
             for _ in 0..n_g {
@@ -1361,6 +1434,8 @@ impl Sim {
                 trade_home,
                 trade_target,
                 trade_loaded,
+                heal_target,
+                heal_remainder,
                 garrison,
             });
         }

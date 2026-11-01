@@ -110,6 +110,14 @@ pub enum EntityKind {
     /// bare ground (Attack Ground). Its 3-tile minimum range
     /// means it can never fire point-blank (PRJ-08).
     Mangonel,
+    /// Castle Age faith unit (Castle P5a, MNK-01): trained at
+    /// the Monastery — it heals allied units (MNK-10) and, from
+    /// the P5b slice on, converts enemies and carries relics.
+    /// It has NO attack at all (CLS-08): its unit row's attack
+    /// table is empty, so no order, acquisition or retaliation
+    /// path can ever make it strike. Its MONK class row is what
+    /// the Light Cavalry's anti-monk bonus keys on.
+    Monk,
 }
 
 impl EntityKind {
@@ -122,7 +130,10 @@ impl EntityKind {
     /// (Castle P2 — appended after the Wolf took 11 on main,
     /// so no tag moved), 15 = petard (Castle P3a), 16 = trade
     /// cart (Package D), 17 = battering ram (Castle P4a),
-    /// 18 = mangonel (Castle P4b).
+    /// 18 = mangonel (Castle P4b), 20 = monk (Castle P5a).
+    /// Tag 19 stays RESERVED for the Scorpion (the P4 execution
+    /// plan's allocation, slice P4c): `from_tag` answers `None`
+    /// for it until that slice lands its kind.
     pub fn tag(self) -> u8 {
         match self {
             EntityKind::Villager => 0,
@@ -144,6 +155,7 @@ impl EntityKind {
             EntityKind::TradeCart => 16,
             EntityKind::BatteringRam => 17,
             EntityKind::Mangonel => 18,
+            EntityKind::Monk => 20,
         }
     }
 
@@ -169,6 +181,7 @@ impl EntityKind {
             16 => Some(EntityKind::TradeCart),
             17 => Some(EntityKind::BatteringRam),
             18 => Some(EntityKind::Mangonel),
+            20 => Some(EntityKind::Monk),
             _ => None,
         }
     }
@@ -189,6 +202,7 @@ impl EntityKind {
             | EntityKind::Petard
             | EntityKind::BatteringRam
             | EntityKind::Mangonel => crate::tech::Age::Castle,
+            | EntityKind::Monk => crate::tech::Age::Castle,
             _ => crate::tech::Age::Dark,
         }
     }
@@ -219,6 +233,7 @@ impl EntityKind {
                 | EntityKind::TradeCart
                 | EntityKind::BatteringRam
                 | EntityKind::Mangonel
+                | EntityKind::Monk
         )
     }
 
@@ -241,12 +256,13 @@ impl EntityKind {
                 | EntityKind::TradeCart
                 | EntityKind::BatteringRam
                 | EntityKind::Mangonel
+                | EntityKind::Monk
         )
     }
 
     /// Foot units that may garrison in a defensive building
     /// (Castle P3b, GAR-01): villagers, infantry, foot archers and
-    /// monks. Monks do not exist as a kind yet (Castle P5); the
+    /// monks (the Monk kind landed with Castle P5a). The
     /// Petard is foot-shaped but is a siege/suicide unit and is
     /// NOT garrisonable (scope resolution 2026-10-29).
     pub fn is_foot_garrisonable(self) -> bool {
@@ -258,6 +274,7 @@ impl EntityKind {
                 | EntityKind::Spearman
                 | EntityKind::Archer
                 | EntityKind::Skirmisher
+                | EntityKind::Monk
         )
     }
 
@@ -838,6 +855,26 @@ pub struct Entity {
     /// credited to the owner's stockpile at the moment the loaded
     /// cart arrives home (TRD-05) — never on the one-way leg.
     pub trade_loaded: bool,
+    // --- Monk state (Castle P5a, MNK-10; Monk only, inert
+    // defaults on every other kind) ---
+    /// The allied unit this monk is healing: set by an explicit
+    /// `Command::Heal`, or by the monk phase's auto-task when the
+    /// monk stands idle. Cleared when the target dies, reaches
+    /// full HP, stops being healable, or the monk is re-tasked.
+    /// Plain data — part of the hashed state, written only while
+    /// any monk field is non-default (the monk block, marker
+    /// 0xBB). The P5b slice extends this same field set with the
+    /// faith and conversion state — the block is the extension
+    /// point, and pre-P5 streams never write it.
+    pub heal_target: Option<u32>,
+    /// Healing fractional accumulator (MNK-10), in the GAR-04
+    /// shelter pattern: per tick the heal adds
+    /// `150 × 65536` to a conceptual accumulator whose quotient
+    /// over 3600 is the HP bits restored (150 HP/min = 2.5 HP/s
+    /// exactly, with no rounding drift); this holds the
+    /// remainder (0 ≤ r < 3600). Reset when the target changes
+    /// or reaches full HP.
+    pub heal_remainder: i64,
 }
 
 impl Entity {
@@ -900,6 +937,8 @@ impl Entity {
             trade_home: None,
             trade_target: None,
             trade_loaded: false,
+            heal_target: None,
+            heal_remainder: 0,
         }
     }
 

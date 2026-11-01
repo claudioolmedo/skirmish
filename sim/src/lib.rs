@@ -58,6 +58,7 @@ mod grid;
 mod hash;
 mod mapgen;
 mod market;
+mod monks;
 mod rng;
 mod save;
 mod steer;
@@ -69,6 +70,7 @@ mod castle_p3_tests;
 mod siege_p4a_tests;
 #[cfg(test)]
 mod siege_p4b_tests;
+mod monastery_p5a_tests;
 #[cfg(test)]
 mod university_p3c_tests;
 #[cfg(test)]
@@ -212,7 +214,8 @@ pub const ORDER_QUEUE_CAP: usize = 16;
 /// Center shorthand) and `AttackBuilding`; M6 adds the research
 /// commands (`ResearchTc`, `ResearchTcAt`, `ResearchAt`) and
 /// `ForceDeposit` (the force-drop-off gesture, ECO-07); the repair
-/// milestone (BLD-07) adds `Repair`; Package D adds `Trade`.
+/// milestone (BLD-07) adds `Repair`; Package D adds `Trade`;
+/// Castle P5a adds `Heal` (the Monk's order, MNK-10).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
     /// Does nothing. Exists so the command pipeline is exercised.
@@ -535,7 +538,36 @@ pub enum Command {
     /// (a spec row with `blast_radius > 0`) accept the order —
     /// in this roster, the Mangonel line.
     AttackGround { entity: u32, x: I16F16, y: I16F16 },
+    /// Buy one farm reseed ahead at the Mill (ECO-14): 60 wood,
+    /// paid now, added to the Mill owner's paid reseed queue.
+    /// The named building must be a completed Mill; the queue
+    /// itself is per player, so any standing Mill manages it.
+    /// An unaffordable or Mill-less order is ignored whole.
+    QueueReseed { building: u32 },
+    /// Remove one paid reseed from the Mill owner's queue,
+    /// refunding its 60 wood. An empty queue ignores the order.
+    DequeueReseed { building: u32 },
+    /// Set the Mill owner's auto-reseed toggle (ECO-14): with it
+    /// on, a depleted farm replants itself on depletion, charging
+    /// the 60 wood at that moment (MECHANICS-STUDY §6.3).
+    SetAutoReseed { building: u32, on: bool },
+    /// Order a Monk to heal an allied unit (Castle P5a, MNK-10):
+    /// the monk walks into heal range (4 tiles) and restores
+    /// 150 HP/min until the target is whole. The order is valid
+    /// only for the monk's own wounded, healable allies (never
+    /// buildings, siege, ships or enemies); an idle monk also
+    /// auto-tasks to the nearest wounded healable ally in its
+    /// sight, with no order at all. Healing never touches the
+    /// faith state (faith is conversion's resource, P5b) and
+    /// never interrupts the target's own orders.
+    Heal { entity: u32, target: u32 },
 }
+
+/// ECO-14: one farm reseed costs 60 wood (MECHANICS-STUDY §6.3:
+/// "Farms can be queued at the Mill (60 wood each, paid in
+/// advance)"), whether bought ahead into the queue or charged
+/// by the auto-reseed toggle at depletion.
+pub const RESEED_WOOD_COST: i32 = 60;
 
 /// Why Town Center training cannot currently proceed (M2.5). The
 /// numeric tags are the WASM ABI contract: 0 ok, 1 no food,
@@ -745,6 +777,50 @@ struct PlayerState {
     /// Military score is 20% of this value. Real hashed state —
     /// see the conditional write in `hash_parts`.
     destroyed_value: u64,
+    /// INF-11 run counters for the statistics screen: enemy units
+    /// this player has killed and units of their own they have
+    /// lost (population-counting kinds only — herdables and the
+    /// Town Center are not units here; the Town Center counts as
+    /// a building), and the building pair. Credited beside
+    /// `destroyed_value`'s own credit points (the death sweep and
+    /// `combat::damage_building`'s lethal hit); losses count every
+    /// death through the sweep, kills only cross-player ones —
+    /// the same discipline `credit_destruction` documents.
+    units_killed: u32,
+    units_lost: u32,
+    buildings_razed: u32,
+    buildings_lost: u32,
+    /// INF-11 run counter: the total resources this player has
+    /// *gathered* — villager loads reaching a stockpile through
+    /// `Sim::deposit` (and the builder's on-completion deposit),
+    /// in fixed-point bits per resource in canonical order.
+    /// Market exchange, tribute and trade-cart gold are not
+    /// gathering and never land here (the rulebook's wording is
+    /// "resources gathered").
+    gathered_bits: [i64; 4],
+    /// ECO-14: the Mill's paid farm-reseed queue — how many
+    /// reseeds this player has bought ahead (60 wood each, paid
+    /// at queue time). Any standing Mill manages the one queue;
+    /// a depleted farm consumes one to replant itself.
+    reseed_queue: u32,
+    /// ECO-14: the Mill's auto-reseed toggle — when on, a
+    /// depleted farm replants itself on depletion without
+    /// pre-payment, charging the 60 wood at that moment (and
+    /// only when the wood is there; MECHANICS-STUDY §6.3).
+    auto_reseed: bool,
+}
+
+/// One player's match statistics (INF-11): the run counters the
+/// post-game statistics screen presents — kills and losses of
+/// units and buildings, and the whole resources gathered per
+/// kind in canonical order (food, wood, gold, stone).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MatchStats {
+    pub units_killed: u32,
+    pub units_lost: u32,
+    pub buildings_razed: u32,
+    pub buildings_lost: u32,
+    pub gathered: [i64; 4],
 }
 
 /// One player's score breakdown (VIC-04; wiki, Score): the four
@@ -1395,6 +1471,82 @@ impl Sim {
         }
     }
 
+    /// ECO-14: whether naming `building` (a completed Mill) can
+    /// buy one more paid reseed for the Mill's owner: the owner
+    /// holds the 60 wood. The pinned sources state no queue cap,
+    /// so none is invented here.
+    pub fn can_queue_reseed(&self, building: u32) -> bool {
+        let Some(owner) = self.completed_mill_owner(building) else {
+            return false;
+        };
+        self.stockpile_of(owner).amount(ResourceKind::Wood) >= I16F16::from_num(RESEED_WOOD_COST)
+    }
+
+    /// ECO-14: whether naming `building` (a completed Mill) can
+    /// remove one paid reseed from the owner's queue (the queue
+    /// is nonempty).
+    pub fn can_dequeue_reseed(&self, building: u32) -> bool {
+        let Some(owner) = self.completed_mill_owner(building) else {
+            return false;
+        };
+        self.reseed_queue_of(owner) > 0
+    }
+
+    /// ECO-14: whether the named building is a completed Mill
+    /// (the SetAutoReseed gate — the toggle itself always
+    /// applies once named on a real Mill).
+    pub fn is_completed_mill(&self, building: u32) -> bool {
+        self.completed_mill_owner(building).is_some()
+    }
+
+    /// The owner of the named building when it is a completed
+    /// Mill, else `None` — the reseed commands' shared gate.
+    fn completed_mill_owner(&self, building: u32) -> Option<u8> {
+        let b = self.buildings.iter().find(|b| b.id == building)?;
+        if b.kind == BuildingKind::Mill && b.complete {
+            Some(b.owner)
+        } else {
+            None
+        }
+    }
+
+    fn issue_queue_reseed(&mut self, building: u32) {
+        if !self.can_queue_reseed(building) {
+            return;
+        }
+        let owner = self.completed_mill_owner(building).expect("checked above");
+        let paid = self
+            .stockpile_mut(owner)
+            .spend(ResourceKind::Wood, I16F16::from_num(RESEED_WOOD_COST));
+        debug_assert!(paid);
+        if paid {
+            if let Some(slot) = player_slot(owner) {
+                self.players[slot].reseed_queue += 1;
+            }
+        }
+    }
+
+    fn issue_dequeue_reseed(&mut self, building: u32) {
+        if !self.can_dequeue_reseed(building) {
+            return;
+        }
+        let owner = self.completed_mill_owner(building).expect("checked above");
+        if let Some(slot) = player_slot(owner) {
+            self.players[slot].reseed_queue -= 1;
+        }
+        self.stockpile_mut(owner)
+            .add(ResourceKind::Wood, I16F16::from_num(RESEED_WOOD_COST));
+    }
+
+    fn issue_set_auto_reseed(&mut self, building: u32, on: bool) {
+        let Some(owner) = self.completed_mill_owner(building) else {
+            return;
+        };
+        if let Some(slot) = player_slot(owner) {
+            self.players[slot].auto_reseed = on;
+        }
+    }
+
     /// Credit a destruction to the player who inflicted it
     /// (VIC-04, Military): `value` is the destroyed thing's
     /// resource cost. Only cross-player kills count — a Gaia
@@ -1423,6 +1575,105 @@ impl Sim {
         match player_slot(owner) {
             Some(slot) => self.players[slot].destroyed_value,
             None => 0,
+        }
+    }
+
+    /// INF-11: note one entity death in the statistics counters,
+    /// called by the death sweep beside its VIC-04 credit. The
+    /// Town Center counts as a building; herdables and every
+    /// other non-population kind count as neither. A loss counts
+    /// for every player-owned death through the sweep (a wolf's
+    /// kill and a deliberate delete included); a kill counts only
+    /// for a *different* player's killer (a Gaia killer and a
+    /// cleared `last_hit_by` — the Delete path — credit no one),
+    /// the discipline `credit_destruction` documents.
+    pub(crate) fn note_entity_death(
+        &mut self,
+        killer_owner: Option<u8>,
+        victim_owner: u8,
+        kind: EntityKind,
+    ) {
+        let Some(vs) = player_slot(victim_owner) else {
+            return;
+        };
+        let is_tc = kind == EntityKind::TownCenter;
+        if is_tc {
+            self.players[vs].buildings_lost += 1;
+        } else if kind.counts_population() {
+            self.players[vs].units_lost += 1;
+        } else {
+            return;
+        }
+        let Some(killer) = killer_owner else {
+            return;
+        };
+        let Some(ks) = player_slot(killer) else {
+            return;
+        };
+        if ks == vs {
+            return;
+        }
+        if is_tc {
+            self.players[ks].buildings_razed += 1;
+        } else {
+            self.players[ks].units_killed += 1;
+        }
+    }
+
+    /// INF-11: note one placed building destroyed by an enemy's
+    /// lethal hit, called by `combat::damage_building` beside its
+    /// VIC-04 credit. Self-demolition never reaches that path
+    /// (deletes call `destroy_building` directly), so a loss here
+    /// is always an enemy's work.
+    pub(crate) fn note_building_destroyed(&mut self, attacker_owner: u8, victim_owner: u8) {
+        let (Some(ks), Some(vs)) = (player_slot(attacker_owner), player_slot(victim_owner))
+        else {
+            return;
+        };
+        if ks == vs {
+            return;
+        }
+        self.players[ks].buildings_razed += 1;
+        self.players[vs].buildings_lost += 1;
+    }
+
+    /// A player's INF-11 statistics counters (the post-game
+    /// screen's numbers). Gaia and unknown tags read zeroes.
+    pub fn match_stats_of(&self, owner: u8) -> MatchStats {
+        match player_slot(owner) {
+            Some(slot) => {
+                let p = &self.players[slot];
+                MatchStats {
+                    units_killed: p.units_killed,
+                    units_lost: p.units_lost,
+                    buildings_razed: p.buildings_razed,
+                    buildings_lost: p.buildings_lost,
+                    gathered: [
+                        p.gathered_bits[0] >> 16,
+                        p.gathered_bits[1] >> 16,
+                        p.gathered_bits[2] >> 16,
+                        p.gathered_bits[3] >> 16,
+                    ],
+                }
+            }
+            None => MatchStats::default(),
+        }
+    }
+
+    /// ECO-14: how many farm reseeds a player has paid ahead at
+    /// the Mill (0 for Gaia / unknown tags).
+    pub fn reseed_queue_of(&self, owner: u8) -> u32 {
+        match player_slot(owner) {
+            Some(slot) => self.players[slot].reseed_queue,
+            None => 0,
+        }
+    }
+
+    /// ECO-14: a player's Mill auto-reseed toggle.
+    pub fn auto_reseed_of(&self, owner: u8) -> bool {
+        match player_slot(owner) {
+            Some(slot) => self.players[slot].auto_reseed,
+            None => false,
         }
     }
 
@@ -1754,6 +2005,23 @@ impl Sim {
         // (BLD-14), when the Trade Cog joins this same patch.
         if kind == EntityKind::TradeCart && p.techs & TechId::Caravan.bit() != 0 {
             s.speed = I16F16::from_bits(((s.speed.to_bits() as i64 * 6) / 5) as i32);
+        }
+        // The Monastery patches (Castle P5a, MNK-01): keyed on
+        // the MONK class mask, TEC-06's discipline — the Monk is
+        // the class's only member today, and a future monk-class
+        // kind inherits both patches by its table row alone.
+        let monk_class = s.classes & crate::classes::bit(crate::classes::MONK) != 0;
+        // Sanctity: monks +15 max HP (wiki, Sanctity) — the
+        // Bloodlines shape; the standing monks' current-HP grant
+        // is the completion sweep in `apply_research`.
+        if monk_class && p.techs & TechId::Sanctity.bit() != 0 {
+            s.max_hp += 15;
+        }
+        // Fervor: monks +15% speed (wiki, Fervor) — the
+        // Wheelbarrow integer scalar over the layered row:
+        // speed × 115/100, truncating the sub-bit remainder.
+        if monk_class && p.techs & TechId::Fervor.bit() != 0 {
+            s.speed = I16F16::from_bits(((s.speed.to_bits() as i64 * 115) / 100) as i32);
         }
         s
     }
@@ -2635,6 +2903,60 @@ impl Sim {
     ///   stated — ECO-14, inferred and followed). Farms raised
     ///   afterwards are stamped at creation (see the farm
     ///   completion path).
+    /// ECO-14: the full amount a Farm completed by `owner` is
+    /// seeded with — the bare 175 plus every farm-chain bonus
+    /// the owner holds (Horse Collar +75, Heavy Plow +125, Crop
+    /// Rotation +175). Stamped at completion (see the farm
+    /// completion path), never looked up live.
+    fn farm_full_amount(&self, owner: u8) -> I16F16 {
+        let mut full = NodeKind::Farm.full_amount();
+        if let Some(slot) = player_slot(owner) {
+            let techs = self.players[slot].techs;
+            if techs & TechId::HorseCollar.bit() != 0 {
+                full += I16F16::from_num(75);
+            }
+            if techs & TechId::HeavyPlow.bit() != 0 {
+                full += I16F16::from_num(125);
+            }
+            if techs & TechId::CropRotation.bit() != 0 {
+                full += I16F16::from_num(175);
+            }
+        }
+        full
+    }
+
+    /// ECO-14 (DE update 169123): when a farm-chain tech lands,
+    /// every standing farm of the owner gains
+    /// `bonus × (remaining ⁄ full)²`, the gain rounded up to
+    /// whole food (the articles' worked examples all round up;
+    /// no rule is stated — the round-up is inferred and
+    /// followed), where *full* is the farm's own stamped total
+    /// (`ResourceNode::full_amount` — 175 bare, 250 after Horse
+    /// Collar, and so on). The farm's full grows by the same
+    /// gain, so the next tech in the chain divides by the
+    /// farm's true total; an untouched farm always gains the
+    /// whole bonus, which is what the articles' totals state
+    /// (250 ⁄ 375 ⁄ 550 end to end).
+    fn top_up_farms(&mut self, owner: u8, bonus: i32) {
+        let farm_nodes: Vec<u32> = self
+            .buildings
+            .iter()
+            .filter(|b| b.owner == owner && b.kind == BuildingKind::Farm && b.complete)
+            .filter_map(|b| b.node_id)
+            .collect();
+        for nid in farm_nodes {
+            if let Some(node) = self.nodes.iter_mut().find(|n| n.id == nid) {
+                if node.full_amount <= I16F16::ZERO {
+                    continue;
+                }
+                let frac = node.amount_left / node.full_amount;
+                let gain = (I16F16::from_num(bonus) * frac * frac).ceil();
+                node.amount_left += gain;
+                node.full_amount += gain;
+            }
+        }
+    }
+
     fn apply_research(&mut self, owner: u8, tech: TechId) {
         let Some(slot) = player_slot(owner) else {
             return;
@@ -2670,29 +2992,29 @@ impl Sim {
                     }
                 }
             }
-            TechId::HorseCollar => {
+            TechId::Sanctity => {
+                // Castle P5a: standing monks gain the +15 as
+                // current HP with the maximum (the Loom/Bloodlines
+                // grant discipline — researched HP is never
+                // retroactively denied to a unit already standing).
                 self.players[slot].techs |= tech.bit();
-                let full = NodeKind::Farm.full_amount();
-                let farm_nodes: Vec<u32> = self
-                    .buildings
-                    .iter()
-                    .filter(|b| {
-                        b.owner == owner && b.kind == BuildingKind::Farm && b.complete
-                    })
-                    .filter_map(|b| b.node_id)
-                    .collect();
-                for nid in farm_nodes {
-                    if let Some(node) = self.nodes.iter_mut().find(|n| n.id == nid) {
-                        let frac = node.amount_left / full;
-                        // ECO-14: the articles' worked examples all
-                        // round the result UP to whole food (a half
-                        // farm gains 19, not 18.75) — no rounding
-                        // rule is stated, so the round-up is
-                        // inferred; it is followed here.
-                        let top_up = (I16F16::from_num(75) * frac * frac).ceil();
-                        node.amount_left += top_up;
+                for e in &mut self.entities {
+                    if e.owner == owner && e.kind == EntityKind::Monk && !e.dead {
+                        e.hp += I16F16::from_num(15);
                     }
                 }
+            }
+            TechId::HorseCollar => {
+                self.players[slot].techs |= tech.bit();
+                self.top_up_farms(owner, 75);
+            }
+            TechId::HeavyPlow => {
+                self.players[slot].techs |= tech.bit();
+                self.top_up_farms(owner, 125);
+            }
+            TechId::CropRotation => {
+                self.players[slot].techs |= tech.bit();
+                self.top_up_farms(owner, 175);
             }
             TechId::ManAtArms => {
                 self.players[slot].techs |= tech.bit();
@@ -2873,6 +3195,9 @@ impl Sim {
         // "work task" for the cart is its route).
         e.trade_target = None;
         e.trade_loaded = false;
+        // Castle P5a: Stop also ends a heal task (MNK-10).
+        e.heal_target = None;
+        e.heal_remainder = 0;
     }
 
     /// Would a `DeleteEntity` command be accepted right now?
@@ -3966,6 +4291,12 @@ impl Sim {
                 Command::AttackGround { entity, x, y } => {
                     self.issue_attack_ground(entity, x, y)
                 }
+                Command::QueueReseed { building } => self.issue_queue_reseed(building),
+                Command::DequeueReseed { building } => self.issue_dequeue_reseed(building),
+                Command::SetAutoReseed { building, on } => {
+                    self.issue_set_auto_reseed(building, on)
+                }
+                Command::Heal { entity, target } => self.issue_heal(entity, target),
             }
         }
 
@@ -4132,6 +4463,14 @@ impl Sim {
         //     of the field from the next tick's systems on).
         self.garrison_tick();
 
+        // 4.6 Monks (Castle P5a, MNK-01/10): healing — auto-task
+        //     for idle monks, the range chase, and the per-tick
+        //     accumulator. After garrison (a monk that entered a
+        //     host this tick is out of the field) and after combat
+        //     per MNK-01's phase order; the P5b slice's conversion
+        //     joins this same phase.
+        self.monk_tick();
+
         // 5. Order queues (M4, SEL-12): an entity that became fully
         //    idle this tick starts its next queued order, so a chain
         //    has no dead tick between links.
@@ -4271,6 +4610,10 @@ impl Sim {
             // runs "until re-tasked"). Its home stamp stays.
             e.trade_target = None;
             e.trade_loaded = false;
+            // Castle P5a: a plain move also ends a heal task —
+            // the monk is re-tasked by hand (MNK-10).
+            e.heal_target = None;
+            e.heal_remainder = 0;
         }
         // CMB-09: a Defensive unit's post follows its explicit
         // move orders — the post is the resolved destination.
@@ -6669,9 +7012,18 @@ impl Sim {
                 // deposit first.
                 let wheelbarrow = owner_techs & TechId::Wheelbarrow.bit() != 0;
                 let hand_cart = owner_techs & TechId::HandCart.bit() != 0;
-                let cap = self.nodes[ni]
+                let mut cap = self.nodes[ni]
                     .kind
                     .carry_cap_tiered(wheelbarrow, hand_cart);
+                // Heavy Plow (ECO-14): "Villagers carry +1 food"
+                // (wiki, Heavy Plow) — read as the farm harvest:
+                // one more food in the load when the node is a
+                // farm and the gatherer's owner holds the tech.
+                if self.nodes[ni].kind == NodeKind::Farm
+                    && owner_techs & TechId::HeavyPlow.bit() != 0
+                {
+                    cap += I16F16::from_num(1);
+                }
                 let room = cap - self.entities[idx].carry;
                 let take = rate.min(room).min(self.nodes[ni].amount_left);
                 if take > I16F16::ZERO {
@@ -7014,8 +7366,11 @@ impl Sim {
             self.complete_building(bid);
         }
         // Retire depleted farms: the node is inert and the field's
-        // ground returns to the map.
-        let retire: Vec<u32> = self
+        // ground returns to the map — unless the Mill reseed
+        // system replants it (ECO-14, below). Depleted farms are
+        // visited in building order (ids are placement order), so
+        // a short paid queue feeds the earliest fields first.
+        let depleted: Vec<u32> = self
             .buildings
             .iter()
             .filter(|b| {
@@ -7031,9 +7386,85 @@ impl Sim {
             })
             .map(|b| b.id)
             .collect();
+        let mut retire: Vec<u32> = Vec::new();
+        for bid in depleted {
+            if !self.try_replant_farm(bid) {
+                retire.push(bid);
+            }
+        }
         if !retire.is_empty() {
             self.buildings.retain(|b| !retire.contains(&b.id));
         }
+    }
+
+    /// ECO-14: try to replant one depleted farm in place,
+    /// returning whether the farm survives as a fresh foundation.
+    /// Payment order: one paid reseed from the Mill queue first;
+    /// else, with the auto-reseed toggle on, the 60 wood charged
+    /// on the spot (and the farm retires when the wood is not
+    /// there — the toggle reseeds "without pre-payment", it does
+    /// not conjure wood; MECHANICS-STUDY §6.3). The replanted
+    /// farm returns to a foundation exactly as a fresh placement
+    /// (BLD-05's 1 HP foot of the construction line); its dead
+    /// node stays in the node list, inert, until the completion
+    /// path stamps a fresh node over the building. The villager
+    /// who farmed the dead field becomes its builder (the
+    /// lowest-indexed living own villager still assigned to the
+    /// old node — the one-farmer-per-farm rule's worker, ECO-14);
+    /// any other gatherer on the dead node follows the ordinary
+    /// ECO-09 depletion paths in its own work step.
+    fn try_replant_farm(&mut self, bid: u32) -> bool {
+        let Some(bi) = self.building_index(bid) else {
+            return false;
+        };
+        let (owner, old_node) = (self.buildings[bi].owner, self.buildings[bi].node_id);
+        let Some(slot) = player_slot(owner) else {
+            return false;
+        };
+        if self.players[slot].reseed_queue > 0 {
+            self.players[slot].reseed_queue -= 1;
+        } else if self.players[slot].auto_reseed {
+            let charged = self.stockpile_mut(owner).spend(
+                ResourceKind::Wood,
+                I16F16::from_num(RESEED_WOOD_COST),
+            );
+            if !charged {
+                return false;
+            }
+        } else {
+            return false;
+        }
+        let max_hp = self.building_max_hp(BuildingKind::Farm, owner);
+        {
+            let b = &mut self.buildings[bi];
+            b.complete = false;
+            b.progress_thirds = 0;
+            b.hp = build::construction_hp_ceiling(
+                max_hp,
+                0,
+                BuildingKind::Farm.build_thirds(),
+            );
+            b.build_rate_remainder = 0;
+        }
+        if let Some(old_node) = old_node {
+            let farmer = self
+                .entities
+                .iter()
+                .enumerate()
+                .filter(|(_, e)| {
+                    !e.dead
+                        && e.owner == owner
+                        && e.kind == EntityKind::Villager
+                        && e.task_node == Some(old_node)
+                        && e.garrisoned_in.is_none()
+                })
+                .map(|(i, _)| i)
+                .next();
+            if let Some(idx) = farmer {
+                self.assign_builder(idx, bid);
+            }
+        }
+        true
     }
 
     /// The repair phase of a tick (BLD-07): runs immediately after
@@ -7317,6 +7748,11 @@ impl Sim {
                             e.carry = I16F16::ZERO;
                             e.carry_kind = None;
                             self.stockpile_mut(owner).add(res, carry);
+                            // INF-11: gathered, like every deposit.
+                            if let Some(slot) = player_slot(owner) {
+                                self.players[slot].gathered_bits[res.index()] +=
+                                    carry.to_bits() as i64;
+                            }
                         }
                     }
                 }
@@ -7337,18 +7773,18 @@ impl Sim {
         let (px, py) = (self.buildings[bi].pos_x, self.buildings[bi].pos_y);
         let nid = self.nodes.len() as u32;
         self.nodes.push(ResourceNode::placed(nid, NodeKind::Farm, px, py));
-        // Horse Collar (ECO-14): a farm raised by an owner who
-        // holds the tech is stamped with the raised amount
-        // (175 + 75) at creation — a stored value, not a live
-        // lookup (standing farms are topped up proportionally
-        // once, at the research tick, in `apply_research`).
+        // ECO-14: a farm raised by an owner who holds farm-chain
+        // techs is stamped with the raised amount (175 + 75 Horse
+        // Collar + 125 Heavy Plow + 175 Crop Rotation) at
+        // creation — a stored value, not a live lookup (standing
+        // farms are topped up proportionally once, at each
+        // research tick, in `apply_research`). The node's
+        // `full_amount` records the same total: the top-up's
+        // divisor.
         let farm_owner = self.buildings[bi].owner;
-        if player_slot(farm_owner)
-            .map(|s| self.players[s].techs & TechId::HorseCollar.bit() != 0)
-            .unwrap_or(false)
-        {
-            self.nodes[nid as usize].amount_left += I16F16::from_num(75);
-        }
+        let full = self.farm_full_amount(farm_owner);
+        self.nodes[nid as usize].amount_left = full;
+        self.nodes[nid as usize].full_amount = full;
         if let Some(bi) = self.building_index(bid) {
             self.buildings[bi].node_id = Some(nid);
         }
@@ -7384,6 +7820,13 @@ impl Sim {
             if carry > I16F16::ZERO {
                 let owner = self.entities[idx].owner;
                 self.stockpile_mut(owner).add(kind, carry);
+                // INF-11: a deposited load is a *gathered*
+                // resource — the statistics screen's per-kind
+                // totals grow here (and at the builder's
+                // on-completion deposit) and nowhere else.
+                if let Some(slot) = player_slot(owner) {
+                    self.players[slot].gathered_bits[kind.index()] += carry.to_bits() as i64;
+                }
             }
         }
         match self.entities[idx].task_node {
@@ -7691,6 +8134,34 @@ impl Sim {
             // the pre-score stream.
             if p.destroyed_value > 0 {
                 h.write_u64(p.destroyed_value);
+            }
+            // INF-11 + ECO-14: the statistics counters, the
+            // gathered totals and the Mill reseed state join the
+            // hash under one marker, written only while any of
+            // them is off its default (the same conditional-write
+            // precedent) — a match that never kills, gathers
+            // nothing countable... (gathering is universal, so in
+            // practice the block appears the first tick a load is
+            // deposited; from then on the stream carries it, as
+            // real state must).
+            if p.units_killed > 0
+                || p.units_lost > 0
+                || p.buildings_razed > 0
+                || p.buildings_lost > 0
+                || p.gathered_bits.iter().any(|&b| b != 0)
+                || p.reseed_queue > 0
+                || p.auto_reseed
+            {
+                h.write_u8(0xB9);
+                h.write_u32(p.units_killed);
+                h.write_u32(p.units_lost);
+                h.write_u32(p.buildings_razed);
+                h.write_u32(p.buildings_lost);
+                for b in p.gathered_bits {
+                    h.write_u64(b as u64);
+                }
+                h.write_u32(p.reseed_queue);
+                h.write_u8(u8::from(p.auto_reseed));
             }
         }
         // TRD-02: the global exchange rates join the hash once any
@@ -8286,6 +8757,26 @@ impl Sim {
                 }
                 h.write_u8(u8::from(e.trade_loaded));
             }
+            // Castle P5a: monk state (MNK-10) — written ONLY
+            // while any monk field is non-default, behind marker
+            // 0xBB (the entity section's own 0xBB — the building
+            // section's 0xBB gate block is a different stream
+            // position): a match with no monk ever tasked (every
+            // historical replay, and every monk standing idle)
+            // hashes bit-identically to before. The P5b slice
+            // extends this block with the faith/conversion
+            // fields, appended after these.
+            if e.heal_target.is_some() || e.heal_remainder != 0 {
+                h.write_u8(0xBB);
+                match e.heal_target {
+                    None => h.write_u8(0),
+                    Some(t) => {
+                        h.write_u8(1);
+                        h.write_u32(t);
+                    }
+                }
+                h.write_u64(e.heal_remainder as u64);
+            }
         }
         // M3: projectiles in flight, in spawn order.
         h.write_u32(self.projectiles.len() as u32);
@@ -8808,6 +9299,7 @@ mod tests {
             pos_x: I16F16::from_num(0),
             pos_y: I16F16::from_num(0),
             amount_left: half,
+            full_amount: I16F16::from_num(175),
             decay_per_tick: I16F16::from_num(0),
         });
         sim.buildings.push(Building {
@@ -8852,5 +9344,279 @@ mod tests {
             I16F16::from_num(213) / I16F16::from_num(2),
             "half farm after Horse Collar: {after} (want 106.5 = 87.5 + 19)"
         );
+    }
+
+    /// A completed building record with no queue or garrison —
+    /// the `horse_collar_top_up_rounds_up` scaffolding, factored.
+    fn standing_building(
+        id: u32,
+        kind: BuildingKind,
+        owner: u8,
+        node_id: Option<u32>,
+    ) -> Building {
+        Building {
+            id,
+            kind,
+            owner,
+            hp: I16F16::from_num(480),
+            cell_x: 0,
+            cell_y: 0,
+            pos_x: I16F16::from_num(0),
+            pos_y: I16F16::from_num(0),
+            progress_thirds: 0,
+            repair_hp_remainder: 0,
+            repair_cost_remainder: 0,
+            repair_stone_remainder: 0,
+            build_rate_remainder: 0,
+            gate_along_x: true,
+            queue_rate_remainder: 0,
+            complete: true,
+            node_id,
+            queue: Vec::new(),
+            train_progress: 0,
+            rally: None,
+            rally_node: None,
+            weapon_target: None,
+            weapon_target_building: None,
+            weapon_strike_tick: None,
+            weapon_next_tick: 0,
+            weapon_engaged: false,
+            garrison: Vec::new(),
+            garrison_arrows: 0,
+        }
+    }
+
+    fn farm_node(id: u32, amount: i32, full: i32) -> ResourceNode {
+        ResourceNode {
+            id,
+            kind: NodeKind::Farm,
+            pos_x: I16F16::from_num(0),
+            pos_y: I16F16::from_num(0),
+            amount_left: I16F16::from_num(amount),
+            full_amount: I16F16::from_num(full),
+            decay_per_tick: I16F16::from_num(0),
+        }
+    }
+
+    #[test]
+    fn farm_chain_stamps_and_top_ups_follow_each_farms_own_full() {
+        // ECO-14: the completion stamp grows down the chain —
+        // 175 bare, 250 with Horse Collar, 375 with Heavy Plow,
+        // 550 with Crop Rotation (the three articles' totals).
+        let mut sim = Sim::new(5);
+        let slot = player_slot(OWNER_PLAYER).unwrap();
+        assert_eq!(sim.farm_full_amount(OWNER_PLAYER), I16F16::from_num(175));
+        sim.players[slot].techs |= TechId::HorseCollar.bit();
+        assert_eq!(sim.farm_full_amount(OWNER_PLAYER), I16F16::from_num(250));
+        sim.players[slot].techs |= TechId::HeavyPlow.bit();
+        assert_eq!(sim.farm_full_amount(OWNER_PLAYER), I16F16::from_num(375));
+        sim.players[slot].techs |= TechId::CropRotation.bit();
+        assert_eq!(sim.farm_full_amount(OWNER_PLAYER), I16F16::from_num(550));
+
+        // The 169123 top-up divides by the farm's OWN full: an
+        // untouched post-Horse-Collar farm (250 standing) gains
+        // the whole Heavy Plow bonus and lands on the article's
+        // 375 total; a half-eaten one (125 of 250) gains
+        // ceil(125 × 0.5²) = 32 → 157 standing, its own full
+        // growing to 282 with it.
+        let mut sim = Sim::new(5);
+        sim.nodes.push(farm_node(999_011, 250, 250));
+        sim.buildings
+            .push(standing_building(999_012, BuildingKind::Farm, OWNER_PLAYER, Some(999_011)));
+        sim.nodes.push(farm_node(999_013, 125, 250));
+        sim.buildings
+            .push(standing_building(999_014, BuildingKind::Farm, OWNER_PLAYER, Some(999_013)));
+        fn node_of(sim: &Sim, id: u32) -> ResourceNode {
+            sim.nodes().iter().find(|n| n.id == id).unwrap().clone()
+        }
+        sim.apply_research(OWNER_PLAYER, TechId::HeavyPlow);
+        assert_eq!(node_of(&sim, 999_011).amount_left, I16F16::from_num(375));
+        assert_eq!(node_of(&sim, 999_011).full_amount, I16F16::from_num(375));
+        assert_eq!(node_of(&sim, 999_013).amount_left, I16F16::from_num(157));
+        assert_eq!(node_of(&sim, 999_013).full_amount, I16F16::from_num(282));
+        // Crop Rotation on the untouched farm completes the
+        // chain at the article's 550.
+        sim.apply_research(OWNER_PLAYER, TechId::CropRotation);
+        assert_eq!(node_of(&sim, 999_011).amount_left, I16F16::from_num(550));
+        assert_eq!(node_of(&sim, 999_011).full_amount, I16F16::from_num(550));
+    }
+
+    #[test]
+    fn reseed_queue_charges_refunds_and_replants() {
+        // ECO-14 (MECHANICS-STUDY §6.3): farms queue at the Mill
+        // at 60 wood each, paid in advance; a depleted farm
+        // consumes one to replant, or — with the auto-reseed
+        // toggle on — pays the 60 on depletion; with neither,
+        // the plot retires as before.
+        let mut sim = Sim::new(5);
+        let wood0 = sim.stockpile().amount(ResourceKind::Wood);
+        // An unknown building queues nothing.
+        sim.push_command(Command::QueueReseed { building: 424_242 });
+        sim.tick();
+        assert_eq!(sim.reseed_queue_of(OWNER_PLAYER), 0);
+        assert_eq!(sim.stockpile().amount(ResourceKind::Wood), wood0);
+        // A standing Mill: queue one (paid), then dequeue it
+        // (refunded whole).
+        sim.buildings
+            .push(standing_building(999_101, BuildingKind::Mill, OWNER_PLAYER, None));
+        sim.push_command(Command::QueueReseed { building: 999_101 });
+        sim.tick();
+        assert_eq!(sim.reseed_queue_of(OWNER_PLAYER), 1);
+        assert_eq!(
+            sim.stockpile().amount(ResourceKind::Wood),
+            wood0 - I16F16::from_num(60)
+        );
+        sim.push_command(Command::DequeueReseed { building: 999_101 });
+        sim.tick();
+        assert_eq!(sim.reseed_queue_of(OWNER_PLAYER), 0);
+        assert_eq!(sim.stockpile().amount(ResourceKind::Wood), wood0);
+        // Queue again and let a depleted farm eat the reseed:
+        // the farm returns to a foundation instead of retiring,
+        // and its farmer becomes the builder.
+        sim.push_command(Command::QueueReseed { building: 999_101 });
+        sim.tick();
+        assert_eq!(sim.reseed_queue_of(OWNER_PLAYER), 1);
+        sim.nodes.push(farm_node(999_102, 0, 175));
+        sim.buildings
+            .push(standing_building(999_103, BuildingKind::Farm, OWNER_PLAYER, Some(999_102)));
+        let farmer = sim
+            .entities
+            .iter()
+            .position(|e| e.owner == OWNER_PLAYER && e.kind == EntityKind::Villager)
+            .unwrap();
+        sim.entities[farmer].task_node = Some(999_102);
+        sim.tick();
+        assert_eq!(sim.reseed_queue_of(OWNER_PLAYER), 0, "the reseed was consumed");
+        let farm = sim
+            .buildings()
+            .iter()
+            .find(|b| b.id == 999_103)
+            .expect("the farm replants instead of retiring");
+        assert!(!farm.complete, "a replanted farm is a foundation again");
+        let farmer = &sim.entities[farmer];
+        // assign_builder sends the farmer walking to the site
+        // (ToBuild; the work step turns that into Building on
+        // arrival) — the assignment itself is the pinned fact.
+        assert_eq!(farmer.task_building, Some(999_103), "the farmer rebuilds the field");
+        assert!(
+            farmer.task == Task::ToBuild || farmer.task == Task::Building,
+            "the farmer is on build duty, not {:?}",
+            farmer.task
+        );
+        // Auto-reseed: no queue, the toggle pays on depletion.
+        sim.push_command(Command::SetAutoReseed {
+            building: 999_101,
+            on: true,
+        });
+        sim.tick();
+        assert!(sim.auto_reseed_of(OWNER_PLAYER));
+        let wood1 = sim.stockpile().amount(ResourceKind::Wood);
+        {
+            let b = sim
+                .buildings
+                .iter_mut()
+                .find(|b| b.id == 999_103)
+                .unwrap();
+            b.complete = true; // the field stands again, its node still drained
+        }
+        sim.tick();
+        assert_eq!(
+            sim.stockpile().amount(ResourceKind::Wood),
+            wood1 - I16F16::from_num(60),
+            "auto-reseed charges its 60 wood at depletion"
+        );
+        assert!(
+            !sim.buildings().iter().find(|b| b.id == 999_103).unwrap().complete,
+            "auto-reseed replants too"
+        );
+        // Neither queue nor toggle: the plot retires as it
+        // always did.
+        sim.push_command(Command::SetAutoReseed {
+            building: 999_101,
+            on: false,
+        });
+        sim.tick();
+        {
+            let b = sim
+                .buildings
+                .iter_mut()
+                .find(|b| b.id == 999_103)
+                .unwrap();
+            b.complete = true;
+        }
+        sim.tick();
+        assert!(
+            sim.buildings().iter().all(|b| b.id != 999_103),
+            "an unreseeded depleted farm retires"
+        );
+    }
+
+    #[test]
+    fn match_statistics_follow_the_counting_discipline() {
+        // INF-11: kills count cross-player only; losses count
+        // every death through the sweep; the Town Center counts
+        // as a building; herdables and Gaia deaths count as
+        // neither; gathered totals grow only at a deposit.
+        let mut sim = Sim::new(5);
+        sim.note_entity_death(Some(OWNER_PLAYER), OWNER_OPPONENT, EntityKind::Militia);
+        sim.note_entity_death(None, OWNER_PLAYER, EntityKind::Villager);
+        sim.note_entity_death(Some(OWNER_PLAYER), OWNER_GAIA, EntityKind::Wolf);
+        sim.note_entity_death(Some(OWNER_PLAYER), OWNER_OPPONENT, EntityKind::Sheep);
+        sim.note_entity_death(Some(OWNER_OPPONENT), OWNER_PLAYER, EntityKind::TownCenter);
+        sim.note_building_destroyed(OWNER_PLAYER, OWNER_OPPONENT);
+        let p = sim.match_stats_of(OWNER_PLAYER);
+        assert_eq!(
+            (p.units_killed, p.units_lost, p.buildings_razed, p.buildings_lost),
+            (1, 1, 1, 1)
+        );
+        let a = sim.match_stats_of(OWNER_OPPONENT);
+        // The opponent lost the Militia (unit) and the building;
+        // it razed one building — the player's Town Center,
+        // whose death credits the killer as a razing, not a
+        // unit kill.
+        assert_eq!(
+            (a.units_killed, a.units_lost, a.buildings_razed, a.buildings_lost),
+            (0, 1, 1, 1)
+        );
+        // A deposit of 10 food: the food total grows by 10, the
+        // stockpile by the same, and nothing else moves.
+        let idx = sim
+            .entities
+            .iter()
+            .position(|e| e.owner == OWNER_PLAYER && e.kind == EntityKind::Villager)
+            .unwrap();
+        sim.entities[idx].carry = I16F16::from_num(10);
+        sim.entities[idx].carry_kind = Some(ResourceKind::Food);
+        let food0 = sim.stockpile().amount(ResourceKind::Food);
+        sim.deposit(idx);
+        assert_eq!(sim.match_stats_of(OWNER_PLAYER).gathered, [10, 0, 0, 0]);
+        assert_eq!(
+            sim.stockpile().amount(ResourceKind::Food),
+            food0 + I16F16::from_num(10)
+        );
+    }
+
+    #[test]
+    fn save_roundtrip_carries_the_wave1_state() {
+        // NET-09 format v2: the INF-11 counters, the gathered
+        // totals, the ECO-14 reseed state and a farm node's
+        // stamped full all survive a save/load round trip, and
+        // the loaded sim hashes identically.
+        let mut sim = Sim::new(5);
+        let slot = player_slot(OWNER_PLAYER).unwrap();
+        sim.players[slot].units_killed = 7;
+        sim.players[slot].gathered_bits[1] = 123 << 16;
+        sim.players[slot].reseed_queue = 3;
+        sim.players[slot].auto_reseed = true;
+        sim.nodes.push(farm_node(999_201, 200, 250));
+        let bytes = sim.save_game();
+        let back = Sim::load_game(&bytes).expect("a v2 save loads");
+        assert_eq!(back.match_stats_of(OWNER_PLAYER).units_killed, 7);
+        assert_eq!(back.match_stats_of(OWNER_PLAYER).gathered[1], 123);
+        assert_eq!(back.reseed_queue_of(OWNER_PLAYER), 3);
+        assert!(back.auto_reseed_of(OWNER_PLAYER));
+        let node = back.nodes().iter().find(|n| n.id == 999_201).unwrap();
+        assert_eq!(node.full_amount, I16F16::from_num(250));
+        assert_eq!(back.state_hash(), sim.state_hash());
     }
 }
