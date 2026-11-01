@@ -307,7 +307,8 @@ installGlobals(tab);
 // The real page carries style="display:none" on its overlays;
 // the stub starts with empty styles, so mirror the HTML once.
 for (const id of ['pause-menu', 'help-overlay', 'end-overlay',
-  'online-overlay', 'desync-overlay', 'peer-overlay', 'loading-overlay']) {
+  'online-overlay', 'desync-overlay', 'peer-overlay', 'loading-overlay',
+  'score-overlay', 'techtree-overlay']) {
   tab.el(id).style.display = 'none';
 }
 await import('../app.js?hotkeys=1');

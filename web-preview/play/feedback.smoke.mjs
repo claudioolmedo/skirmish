@@ -317,7 +317,8 @@ function installGlobals(tab) {
 const tab = makeTab('https://skirmish.online/play/?mode=normal');
 installGlobals(tab);
 for (const id of ['pause-menu', 'help-overlay', 'end-overlay',
-  'online-overlay', 'desync-overlay', 'peer-overlay', 'loading-overlay']) {
+  'online-overlay', 'desync-overlay', 'peer-overlay', 'loading-overlay',
+  'score-overlay', 'techtree-overlay']) {
   tab.el(id).style.display = 'none';
 }
 await import('../app.js');

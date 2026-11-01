@@ -389,7 +389,8 @@ assert.ok(villagers.length >= 3 && tree && berry, 'the sandbox start has village
 const tab = makeTab('https://skirmish.online/play/?mode=sandbox&seed=7');
 installGlobals(tab);
 for (const id of ['pause-menu', 'help-overlay', 'end-overlay',
-  'online-overlay', 'desync-overlay', 'peer-overlay', 'loading-overlay']) {
+  'online-overlay', 'desync-overlay', 'peer-overlay', 'loading-overlay',
+  'score-overlay', 'techtree-overlay']) {
   tab.el(id).style.display = 'none';
 }
 await import('../app.js?carryprops=1');
