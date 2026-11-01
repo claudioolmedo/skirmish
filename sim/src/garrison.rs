@@ -711,7 +711,12 @@ impl Sim {
 
     /// Remove ONE unit from its host (the Town Bell's restore path
     /// ejects bell villagers individually), placing it at the exit.
-    fn eject_one(&mut self, idx: usize) {
+    /// `slot` spreads simultaneous ejections over the host's exit
+    /// points in order, exactly as `eject_host` does — the bell
+    /// path used to pass slot 0 for every villager, so a whole
+    /// shelter emptied onto ONE point (live report 2026-10-31:
+    /// villagers occupying the same space after the bell).
+    fn eject_one(&mut self, idx: usize, slot: usize) {
         let host = match self.entities[idx].garrisoned_in {
             Some(h) => h,
             None => return,
@@ -734,7 +739,7 @@ impl Sim {
                 }
             }
         }
-        self.place_at_exit(idx, host, 0);
+        self.place_at_exit(idx, host, slot);
         self.recompute_garrison_arrows(host);
     }
 
@@ -1021,10 +1026,10 @@ impl Sim {
                         && !self.entities[idx].dead
                 })
                 .collect();
-            for idx in held {
+            for (slot, idx) in held.into_iter().enumerate() {
                 let snap = self.entities[idx].bell_snapshot.take().expect("filtered");
                 if self.entities[idx].garrisoned_in.is_some() {
-                    self.eject_one(idx);
+                    self.eject_one(idx, slot);
                 } else {
                     // Still walking to shelter when the second ring
                     // landed: cancel the walk.

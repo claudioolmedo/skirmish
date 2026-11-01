@@ -493,6 +493,61 @@ fn gar07_town_bell_shelters_and_restores() {
     assert!(back, "the villager did not return to its snapshot position");
 }
 
+#[test]
+fn gar07_bell_back_to_work_ejects_villagers_to_distinct_spots() {
+    // Regression (Claudio live report 2026-10-31 11:52 PT): "depois
+    // da campainha tinha aldeões ocupando o mesmo espaço" — the
+    // bell's restore path ejected every villager through slot 0,
+    // so the whole shelter emptied onto ONE exit point. After the
+    // second ring, no two ejected villagers may share a position.
+    let mut sim = Sim::new(7);
+    let tc = sim.town_center().id;
+    sim.push_command(Command::TownBell { tc });
+    let sheltered = run_until(&mut sim, 30_000, |s| {
+        s.entities()
+            .iter()
+            .filter(|e| e.kind == EntityKind::Villager && e.owner == OWNER_PLAYER)
+            .all(|e| e.garrisoned_in.is_some())
+    });
+    assert!(sheltered, "the bell did not shelter every villager");
+    sim.push_command(Command::TownBell { tc });
+    sim.tick();
+    let mut spots: Vec<(i32, i32)> = sim
+        .entities()
+        .iter()
+        .filter(|e| e.kind == EntityKind::Villager && e.owner == OWNER_PLAYER)
+        .map(|e| (e.pos_x.to_bits(), e.pos_y.to_bits()))
+        .collect();
+    assert!(spots.len() >= 3, "expected the starting villagers, got {}", spots.len());
+    spots.sort();
+    spots.dedup();
+    assert_eq!(
+        spots.len(),
+        sim.entities()
+            .iter()
+            .filter(|e| e.kind == EntityKind::Villager && e.owner == OWNER_PLAYER)
+            .count(),
+        "bell villagers came out stacked on shared spots: {spots:?}"
+    );
+    // And after a few ticks of separation/movement, still no two
+    // villagers occupy the exact same point.
+    for _ in 0..30 {
+        sim.tick();
+    }
+    let mut spots2: Vec<(i32, i32)> = sim
+        .entities()
+        .iter()
+        .filter(|e| {
+            e.kind == EntityKind::Villager && e.owner == OWNER_PLAYER && !e.dead
+        })
+        .map(|e| (e.pos_x.to_bits(), e.pos_y.to_bits()))
+        .collect();
+    let n2 = spots2.len();
+    spots2.sort();
+    spots2.dedup();
+    assert_eq!(spots2.len(), n2, "villagers re-stacked after the bell: {spots2:?}");
+}
+
 // ------------------------------------------------------------------
 // GAR-08: rally-garrison, incl. production garrison.
 
