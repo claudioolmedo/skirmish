@@ -250,6 +250,13 @@ export class WasmSim {
      */
     match_state(): number;
     /**
+     * A player's match statistics (INF-11), flat:
+     * [units killed, units lost, buildings razed, buildings
+     * lost, food gathered, wood gathered, gold gathered, stone
+     * gathered] — the post-game statistics screen's numbers.
+     */
+    match_stats_for(owner: number): Float64Array;
+    /**
      * The match mode this sim was created with (M5): 0 sandbox,
      * 1 AI Easy, 2 AI Normal.
      */
@@ -471,6 +478,17 @@ export class WasmSim {
      */
     push_build_mining_camp_queued(entity: number, x: number, y: number): boolean;
     /**
+     * Order a villager to build a Monastery (175 wood, 3×3;
+     * Castle Age, no prerequisite building — Castle P5a) — see
+     * `push_build_house`.
+     */
+    push_build_monastery(entity: number, x: number, y: number): boolean;
+    /**
+     * Queue a Monastery build (Castle Age — Castle P5a) — see
+     * `push_build_house_queued`.
+     */
+    push_build_monastery_queued(entity: number, x: number, y: number): boolean;
+    /**
      * BLD-18: the Outpost (Dark Age, line-of-sight only).
      */
     push_build_outpost(entity: number, x: number, y: number): boolean;
@@ -633,6 +651,12 @@ export class WasmSim {
      */
     push_delete(entity: number): boolean;
     /**
+     * Remove one paid reseed from the queue of the named Mill's
+     * owner, refunding its 60 wood (ECO-14). False when the
+     * queue is empty or the building is not a completed Mill.
+     */
+    push_dequeue_reseed(building: number): boolean;
+    /**
      * Force drop-off (M6, ECO-07): order a loaded villager to haul
      * its carry to the nearest valid drop-off now, then return to
      * its previous work on its own. Returns whether the order
@@ -667,6 +691,14 @@ export class WasmSim {
      * Queue a gather order behind the villager's current order.
      */
     push_gather_queued(entity: number, node: number): boolean;
+    /**
+     * Order a Monk to heal an allied unit (Castle P5a, MNK-10):
+     * the monk walks into heal range and restores 150 HP/min
+     * until the target is whole. Returns whether the order
+     * *would* be accepted against the current state (the sim
+     * re-validates when the command is applied).
+     */
+    push_heal(entity: number, target: number): boolean;
     /**
      * Buy one lot (100) of a commodity at a completed Market
      * (TRD-01..03): `resource_tag` is the `ResourceKind` tag
@@ -711,6 +743,14 @@ export class WasmSim {
      * to its loop immediately instead (see `Sim::issue_queue`).
      */
     push_patrol_queued(entity: number, x: number, y: number): boolean;
+    /**
+     * Buy one farm reseed ahead at the named Mill (ECO-14):
+     * 60 wood, paid now, into the Mill owner's paid reseed
+     * queue. Returns false (and queues nothing) when the sim
+     * would reject it: not a completed Mill, or the owner short
+     * of the wood.
+     */
+    push_queue_reseed(building: number): boolean;
     /**
      * Order a villager to repair one of its own player's placed
      * buildings (BLD-07): travel to the building's ring and
@@ -792,6 +832,11 @@ export class WasmSim {
      * 75 s; Feudal Age — ECO-03).
      */
     push_research_wheelbarrow(): boolean;
+    /**
+     * Set the auto-reseed toggle of the named Mill's owner
+     * (ECO-14). False when the building is not a completed Mill.
+     */
+    push_set_auto_reseed(building: number, on: boolean): boolean;
     /**
      * Set a production building's rally point (M4: the Barracks).
      * Returns whether the building accepts a rally point.
@@ -880,6 +925,13 @@ export class WasmSim {
      * the cost is deducted when the command is applied next tick.
      */
     push_train_militia(building: number): boolean;
+    /**
+     * Enqueue a Monk at a completed Monastery (Castle P5a,
+     * MNK-01 — the Monastery is the Monk's only home;
+     * `can_train_at` carries the Castle Age gate). See
+     * `push_train_militia`.
+     */
+    push_train_monk(building: number): boolean;
     /**
      * Enqueue a Petard at a completed Castle (Castle P3a — the
      * Castle is the Petard's only home; `can_train_at` carries
@@ -973,6 +1025,20 @@ export class WasmSim {
      * 4 requirements not met. UI affordance only.
      */
     research_block_tc(tech_tag: number): number;
+    /**
+     * A player's researched technology tags (INF-11's
+     * technologies-researched line / INF-06's tree states): the
+     * researched-mask tags in ascending order, plus the age
+     * advancements the player's current age implies (Feudal 1,
+     * Castle 14, Imperial 18 — advancements are recorded by the
+     * age itself, not by a mask bit).
+     */
+    researched_techs_for(owner: number): Uint32Array;
+    /**
+     * A player's Mill reseed state (ECO-14), flat: [paid reseed
+     * queue, auto-reseed on as 0/1] — the Mill panel's faces.
+     */
+    reseed_for(owner: number): Uint32Array;
     /**
      * NET-09: serialize the full sim state as a save file
      * (magic + version + body + the state's SIM-05 hash — see
@@ -1151,6 +1217,7 @@ export interface InitOutput {
     readonly wasmsim_market_prices: (a: number) => [number, number];
     readonly wasmsim_market_rates: (a: number) => [number, number];
     readonly wasmsim_match_state: (a: number) => number;
+    readonly wasmsim_match_stats_for: (a: number, b: number) => [number, number];
     readonly wasmsim_mode: (a: number) => number;
     readonly wasmsim_new: (a: number) => number;
     readonly wasmsim_new_match: (a: number, b: number) => number;
@@ -1190,6 +1257,8 @@ export interface InitOutput {
     readonly wasmsim_push_build_mill_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_mining_camp: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_mining_camp_queued: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_monastery: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_monastery_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_outpost: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_outpost_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_palisade_gate: (a: number, b: number, c: number, d: number) => number;
@@ -1216,12 +1285,14 @@ export interface InitOutput {
     readonly wasmsim_push_cancel_queue_tc: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_delete: (a: number, b: number) => number;
     readonly wasmsim_push_delete_building: (a: number, b: number) => number;
+    readonly wasmsim_push_dequeue_reseed: (a: number, b: number) => number;
     readonly wasmsim_push_force_deposit: (a: number, b: number) => number;
     readonly wasmsim_push_garrison_building: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_garrison_tc: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_garrison_unit: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_gather: (a: number, b: number, c: number) => void;
     readonly wasmsim_push_gather_queued: (a: number, b: number, c: number) => number;
+    readonly wasmsim_push_heal: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_market_buy: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_market_sell: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_move: (a: number, b: number, c: number, d: number) => void;
@@ -1229,6 +1300,7 @@ export interface InitOutput {
     readonly wasmsim_push_noop: (a: number) => void;
     readonly wasmsim_push_patrol: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_patrol_queued: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_queue_reseed: (a: number, b: number) => number;
     readonly wasmsim_push_repair: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_repair_queued: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_repair_tc: (a: number, b: number, c: number) => number;
@@ -1241,6 +1313,7 @@ export interface InitOutput {
     readonly wasmsim_push_research_loom: (a: number) => number;
     readonly wasmsim_push_research_tc_at: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_research_wheelbarrow: (a: number) => number;
+    readonly wasmsim_push_set_auto_reseed: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_set_rally_building: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_set_rally_tc: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_set_rally_tc_of: (a: number, b: number, c: number, d: number) => number;
@@ -1254,6 +1327,7 @@ export interface InitOutput {
     readonly wasmsim_push_train_knight: (a: number, b: number) => number;
     readonly wasmsim_push_train_mangonel: (a: number, b: number) => number;
     readonly wasmsim_push_train_militia: (a: number, b: number) => number;
+    readonly wasmsim_push_train_monk: (a: number, b: number) => number;
     readonly wasmsim_push_train_petard: (a: number, b: number) => number;
     readonly wasmsim_push_train_scout: (a: number, b: number) => number;
     readonly wasmsim_push_train_skirmisher: (a: number, b: number) => number;
@@ -1269,6 +1343,8 @@ export interface InitOutput {
     readonly wasmsim_research_block_at: (a: number, b: number, c: number) => number;
     readonly wasmsim_research_block_tc: (a: number, b: number) => number;
     readonly wasmsim_research_block_tc_at: (a: number, b: number, c: number) => number;
+    readonly wasmsim_researched_techs_for: (a: number, b: number) => [number, number];
+    readonly wasmsim_reseed_for: (a: number, b: number) => [number, number];
     readonly wasmsim_save_game: (a: number) => [number, number];
     readonly wasmsim_score_for: (a: number, b: number) => [number, number];
     readonly wasmsim_state_hash: (a: number) => [number, number];

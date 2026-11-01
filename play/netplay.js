@@ -156,7 +156,7 @@ const BUILD_FNS = [
   'push_build_watch_tower', 'push_build_outpost', 'push_build_market',
   'push_build_town_center', 'push_build_stone_wall', 'push_build_castle',
   'push_build_university', 'push_build_siege_workshop',
-  'push_build_palisade_gate', 'push_build_stone_gate',
+  'push_build_palisade_gate', 'push_build_stone_gate', 'push_build_monastery',
 ];
 const BUILD_FNS_QUEUED = BUILD_FNS.map((n) => n + '_queued');
 const TRAIN_AT_FNS = {
@@ -165,6 +165,7 @@ const TRAIN_AT_FNS = {
   12: 'push_train_knight', 14: 'push_train_cavalry_archer',
   15: 'push_train_petard', 16: 'push_train_trade_cart',
   17: 'push_train_battering_ram', 18: 'push_train_mangonel',
+  17: 'push_train_battering_ram', 20: 'push_train_monk',
 };
 
 const isInt = (v) => Number.isInteger(v) && v >= 0;
@@ -183,12 +184,15 @@ export function validateCommand(c) {
     // Package D (TRD-05): a Trade Cart tasked to a foreign
     // Market — an entity id and a building id, like repair.
     case 'trade': return isInt(c.e) && isInt(c.b);
+    // Castle P5a (MNK-10): a Monk tasked to heal a unit — an
+    // entity id and a target entity id, like attack's shape.
+    case 'heal': return isInt(c.e) && isInt(c.tg);
     // The cap is the build table's own length (BUILD_FNS): every
     // kind the applier can dispatch is wire-legal, the first
     // index past the table is junk. (BLD-20 raised it to 14 with
     // the Stone Wall; 13 — the Town Center — was already
     // dispatchable but not validatable, an old inconsistency.)
-    case 'build': return isInt(c.e) && isInt(c.k) && c.k <= 17 && isNum(c.x) && isNum(c.y);
+    case 'build': return isInt(c.e) && isInt(c.k) && c.k <= 18 && isNum(c.x) && isNum(c.y);
     // TRD-01..03: Market trades — a building id and a commodity
     // tag (food 1, wood 2, stone 4; gold is never a commodity).
     case 'mbuy': case 'msell':
@@ -197,13 +201,13 @@ export function validateCommand(c) {
     // absent — the pre-BLD-20 wire form — or 14 stone wall).
     case 'buildline': return isInt(c.e) && isNum(c.x0) && isNum(c.y0) && isNum(c.x1) && isNum(c.y1)
       && (c.k === undefined || c.k === 9 || c.k === 14);
-    case 'train_at': return isInt(c.b) && (c.k === 2 || c.k === 3 || c.k === 4 || c.k === 9 || c.k === 10 || c.k === 12 || c.k === 14 || c.k === 15 || c.k === 16 || c.k === 17 || c.k === 18);
+    case 'train_at': return isInt(c.b) && (c.k === 2 || c.k === 3 || c.k === 4 || c.k === 9 || c.k === 10 || c.k === 12 || c.k === 14 || c.k === 15 || c.k === 16 || c.k === 17 || c.k === 18 || c.k === 20);
     case 'train_vil': return c.tc === undefined || isInt(c.tc);
     case 'research_tc': return (c.tech === 0 || c.tech === 1 || c.tech === 6
       || c.tech === 14 || c.tech === 15 || c.tech === 18
       || c.tech === 27 || c.tech === 28) && (c.tc === undefined || isInt(c.tc));
     case 'research_at': return isInt(c.b) && isInt(c.tech) && (c.tech <= 13 || c.tech === 16 || c.tech === 17 || c.tech === 19
-      || (c.tech >= 20 && c.tech <= 26));
+      || (c.tech >= 20 && c.tech <= 26) || (c.tech >= 29 && c.tech <= 33));
     // Package K (TRD-04): a tribute names the recipient's owner
     // tag (0 or 2 — the only seats), a ResourceKind tag (food 1,
     // wood 2, gold 3, stone 4) and a positive amount. The amount
@@ -212,6 +216,12 @@ export function validateCommand(c) {
     case 'tribute': return (c.to === 0 || c.to === 2)
       && isInt(c.r) && c.r >= 1 && c.r <= 4
       && isInt(c.a) && c.a >= 1 && c.a <= 100000;
+    // ECO-14 (wave-1 leftovers): the Mill reseed desk — the
+    // building names the Mill; the sim derives its owner and
+    // validates the rest (completed Mill, the wood, the queue).
+    case 'queue_reseed': return isInt(c.b);
+    case 'dequeue_reseed': return isInt(c.b);
+    case 'set_auto_reseed': return isInt(c.b) && typeof c.on === 'boolean';
     case 'rally_tc': return isNum(c.x) && isNum(c.y) && (c.tc === undefined || isInt(c.tc));
     case 'rally_b': return isInt(c.b) && isNum(c.x) && isNum(c.y);
     case 'force_dep': return isInt(c.e);
@@ -307,6 +317,10 @@ export function applyCommand(sim, cmd, owner, tcOf) {
     // — the sim derives validity from the cart and the depot, so
     // one form serves both seats (as repair).
     case 'trade': return sim.push_trade(cmd.e, cmd.b);
+    // Castle P5a (MNK-10): a Monk's heal order — the sim
+    // derives validity from the monk and the target, so one
+    // form serves both seats (as trade).
+    case 'heal': return sim.push_heal(cmd.e, cmd.tg);
     // TRD-01..03: Market trades — the sim derives the owner from
     // the building, so one form serves both seats (as research_at).
     case 'mbuy': return sim.push_market_buy(cmd.b, cmd.r);
@@ -315,6 +329,12 @@ export function applyCommand(sim, cmd, owner, tcOf) {
     // owner (applyCommand's contract), the recipient rides in
     // the command; the sim validates both seats.
     case 'tribute': return sim.push_tribute(owner, cmd.to, cmd.r, cmd.a);
+    // ECO-14: the reseed desk — the Mill's owner is derived in
+    // the sim from the named building (as research_at), so one
+    // form serves both seats.
+    case 'queue_reseed': return sim.push_queue_reseed(cmd.b);
+    case 'dequeue_reseed': return sim.push_dequeue_reseed(cmd.b);
+    case 'set_auto_reseed': return sim.push_set_auto_reseed(cmd.b, cmd.on);
     default: return false;
   }
 }

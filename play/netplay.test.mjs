@@ -90,6 +90,14 @@ test('validateCommand accepts the full vocabulary and rejects junk', () => {
     { t: 'train_at', b: 3, k: 17 },
     { t: 'garrison_u', e: 1, host: 4 },
     { t: 'ungarrison_u', host: 4 },
+    // Castle P5a: build kind 18 (Monastery), train kind 20
+    // (Monk), the Monastery researches (Sanctity 29, Fervor 30)
+    // and the Monk's heal order.
+    { t: 'build', e: 1, k: 18, x: 0, y: 0 },
+    { t: 'train_at', b: 3, k: 20 },
+    { t: 'research_at', b: 3, tech: 29 },
+    { t: 'research_at', b: 3, tech: 30 },
+    { t: 'heal', e: 1, tg: 2 },
     { t: 'auto_explore', e: 4, on: true },
     { t: 'auto_explore', e: 4, on: false },
     { t: 'attackmove', e: 4, x: 10, y: -2 },
@@ -109,7 +117,13 @@ test('validateCommand accepts the full vocabulary and rejects junk', () => {
     null, 42, {}, { t: 'nope' },
     { t: 'move', e: -1, x: 0, y: 0 },
     { t: 'move', e: 1, x: NaN, y: 0 },
-    { t: 'build', e: 1, k: 18, x: 0, y: 0 },
+    { t: 'build', e: 1, k: 19, x: 0, y: 0 },
+    // Castle P5a: Sanctity is not a TC research, and a heal
+    // order missing either id (or with a negative one) is junk.
+    { t: 'research_tc', tech: 29 },
+    { t: 'heal', e: 1 },
+    { t: 'heal', tg: 2 },
+    { t: 'heal', e: -1, tg: 2 },
     { t: 'mbuy', b: 3, r: 3 },
     { t: 'mbuy', b: 3, r: 0 },
     { t: 'msell', r: 1 },

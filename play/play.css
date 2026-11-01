@@ -371,6 +371,58 @@ html, body {
 }
 .diplo-send { display: inline-flex; align-items: center; gap: 6px; }
 .diplo-send:disabled { opacity: 0.45; }
+/* Wave-1 leftovers (INF-06 + INF-11): the technology tree and
+   the end card's statistics furniture, in the same parchment
+   language. The scoreboard reuses .diplo-card / .diplo-table. */
+.techtree-card {
+  min-width: min(920px, 96vw);
+  max-height: 92vh;
+  overflow: auto;
+}
+.techtree-body {
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.techtree-col { flex: 1 1 180px; min-width: 170px; max-width: 260px; }
+.techtree-col h3 {
+  margin: 4px 0 8px;
+  font: 700 15px/1.3 Georgia, 'Times New Roman', serif;
+  color: #43300f;
+  text-align: center;
+}
+.techtree-host {
+  margin: 9px 0 3px;
+  font: 700 11.5px/1.3 Georgia, 'Times New Roman', serif;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #7a5c33;
+  text-align: left;
+}
+.techtree-node {
+  border: 1px solid #b09b72;
+  border-radius: 6px;
+  background: #f3e9d2;
+  color: #43300f;
+  padding: 4px 7px;
+  margin: 0 0 5px;
+  font: 13px/1.3 Georgia, 'Times New Roman', serif;
+  text-align: left;
+}
+.techtree-node.done { background: #dfe8c8; border-color: #7a9a4d; }
+.techtree-node.locked { opacity: 0.45; }
+.techtree-node .tt-cost { display: block; font-size: 11.5px; color: #7a5c33; }
+.techtree-node .tt-req { display: block; font-size: 11.5px; color: #96691a; }
+#end-timeline { display: block; margin: 0 auto 10px; max-width: 92vw; }
+#end-results-chip {
+  position: fixed;
+  top: 54px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+}
 /* 2026-10-24: the lobby profile row (your name) and the
    report/contribute form — all in the existing parchment
    language, nothing new to learn. */

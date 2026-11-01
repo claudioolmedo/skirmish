@@ -489,6 +489,20 @@ export class WasmSim {
         return ret >>> 0;
     }
     /**
+     * A player's match statistics (INF-11), flat:
+     * [units killed, units lost, buildings razed, buildings
+     * lost, food gathered, wood gathered, gold gathered, stone
+     * gathered] — the post-game statistics screen's numbers.
+     * @param {number} owner
+     * @returns {Float64Array}
+     */
+    match_stats_for(owner) {
+        const ret = wasm.wasmsim_match_stats_for(this.__wbg_ptr, owner);
+        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v1;
+    }
+    /**
      * The match mode this sim was created with (M5): 0 sandbox,
      * 1 AI Easy, 2 AI Normal.
      * @returns {number}
@@ -960,6 +974,31 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Order a villager to build a Monastery (175 wood, 3×3;
+     * Castle Age, no prerequisite building — Castle P5a) — see
+     * `push_build_house`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_monastery(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_monastery(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Queue a Monastery build (Castle Age — Castle P5a) — see
+     * `push_build_house_queued`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_monastery_queued(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_monastery_queued(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
      * BLD-18: the Outpost (Dark Age, line-of-sight only).
      * @param {number} entity
      * @param {number} x
@@ -1302,6 +1341,17 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Remove one paid reseed from the queue of the named Mill's
+     * owner, refunding its 60 wood (ECO-14). False when the
+     * queue is empty or the building is not a completed Mill.
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_dequeue_reseed(building) {
+        const ret = wasm.wasmsim_push_dequeue_reseed(this.__wbg_ptr, building);
+        return ret !== 0;
+    }
+    /**
      * Force drop-off (M6, ECO-07): order a loaded villager to haul
      * its carry to the nearest valid drop-off now, then return to
      * its previous work on its own. Returns whether the order
@@ -1367,6 +1417,20 @@ export class WasmSim {
      */
     push_gather_queued(entity, node) {
         const ret = wasm.wasmsim_push_gather_queued(this.__wbg_ptr, entity, node);
+        return ret !== 0;
+    }
+    /**
+     * Order a Monk to heal an allied unit (Castle P5a, MNK-10):
+     * the monk walks into heal range and restores 150 HP/min
+     * until the target is whole. Returns whether the order
+     * *would* be accepted against the current state (the sim
+     * re-validates when the command is applied).
+     * @param {number} entity
+     * @param {number} target
+     * @returns {boolean}
+     */
+    push_heal(entity, target) {
+        const ret = wasm.wasmsim_push_heal(this.__wbg_ptr, entity, target);
         return ret !== 0;
     }
     /**
@@ -1451,6 +1515,19 @@ export class WasmSim {
      */
     push_patrol_queued(entity, x, y) {
         const ret = wasm.wasmsim_push_patrol_queued(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Buy one farm reseed ahead at the named Mill (ECO-14):
+     * 60 wood, paid now, into the Mill owner's paid reseed
+     * queue. Returns false (and queues nothing) when the sim
+     * would reject it: not a completed Mill, or the owner short
+     * of the wood.
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_queue_reseed(building) {
+        const ret = wasm.wasmsim_push_queue_reseed(this.__wbg_ptr, building);
         return ret !== 0;
     }
     /**
@@ -1592,6 +1669,17 @@ export class WasmSim {
      */
     push_research_wheelbarrow() {
         const ret = wasm.wasmsim_push_research_wheelbarrow(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * Set the auto-reseed toggle of the named Mill's owner
+     * (ECO-14). False when the building is not a completed Mill.
+     * @param {number} building
+     * @param {boolean} on
+     * @returns {boolean}
+     */
+    push_set_auto_reseed(building, on) {
+        const ret = wasm.wasmsim_push_set_auto_reseed(this.__wbg_ptr, building, on);
         return ret !== 0;
     }
     /**
@@ -1752,6 +1840,18 @@ export class WasmSim {
      */
     push_train_militia(building) {
         const ret = wasm.wasmsim_push_train_militia(this.__wbg_ptr, building);
+        return ret !== 0;
+    }
+    /**
+     * Enqueue a Monk at a completed Monastery (Castle P5a,
+     * MNK-01 — the Monastery is the Monk's only home;
+     * `can_train_at` carries the Castle Age gate). See
+     * `push_train_militia`.
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_train_monk(building) {
+        const ret = wasm.wasmsim_push_train_monk(this.__wbg_ptr, building);
         return ret !== 0;
     }
     /**
@@ -1926,6 +2026,34 @@ export class WasmSim {
     research_block_tc(tech_tag) {
         const ret = wasm.wasmsim_research_block_tc(this.__wbg_ptr, tech_tag);
         return ret >>> 0;
+    }
+    /**
+     * A player's researched technology tags (INF-11's
+     * technologies-researched line / INF-06's tree states): the
+     * researched-mask tags in ascending order, plus the age
+     * advancements the player's current age implies (Feudal 1,
+     * Castle 14, Imperial 18 — advancements are recorded by the
+     * age itself, not by a mask bit).
+     * @param {number} owner
+     * @returns {Uint32Array}
+     */
+    researched_techs_for(owner) {
+        const ret = wasm.wasmsim_researched_techs_for(this.__wbg_ptr, owner);
+        var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * A player's Mill reseed state (ECO-14), flat: [paid reseed
+     * queue, auto-reseed on as 0/1] — the Mill panel's faces.
+     * @param {number} owner
+     * @returns {Uint32Array}
+     */
+    reseed_for(owner) {
+        const ret = wasm.wasmsim_reseed_for(this.__wbg_ptr, owner);
+        var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
     }
     /**
      * NET-09: serialize the full sim state as a save file
