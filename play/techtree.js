@@ -64,6 +64,7 @@ export const TECH_TREE = [
   // --- Monastery -----------------------------------------------------
   { tag: 32, host: 20, age: 2, cost: [0, 0, 175, 0], secs: 60, requires: null }, // Sanctity
   { tag: 33, host: 20, age: 2, cost: [0, 0, 140, 0], secs: 50, requires: null }, // Fervor
+  { tag: 34, host: 20, age: 2, cost: [0, 0, 200, 0], secs: 35, requires: null }, // Herbal Medicine
 ];
 
 /** The age-advancement tags and the age each one reaches. */

@@ -162,7 +162,8 @@ export const PANEL_BUTTONS = {
   siegeworkshop: ['train-ram'],
   // Castle P5a: the Monastery's panel — Train Monk, then the
   // two Castle-Age monk researches (Sanctity, Fervor).
-  monastery: ['train-monk', 'research-sanctity', 'research-fervor'],
+  // Castle P5e: Herbal Medicine joins as the fourth button.
+  monastery: ['train-monk', 'research-sanctity', 'research-fervor', 'research-herbalmedicine'],
   blacksmith: ['research-fletching', 'research-scalemail', 'research-padded',
     'research-forging', 'research-barding'],
   lumbercamp: ['research-doublebit'],
@@ -327,10 +328,13 @@ export const PANEL_KEYS = {
   },
   // Castle P5a: the Monastery — the plain positional grid:
   // Train Monk Q, Sanctity W, Fervor E.
+  // Castle P5e: Herbal Medicine takes the next positional
+  // slot — A, the second row's first cell.
   monastery: {
     'train-monk': ['KeyQ', 'Q'],
     'research-sanctity': ['KeyW', 'W'],
     'research-fervor': ['KeyE', 'E'],
+    'research-herbalmedicine': ['KeyA', 'A'],
   },
   // The Market (TRD-01..03): the plain positional grid over the
   // two rendered rows — sells Q W E, buys A S D. Package D: the
