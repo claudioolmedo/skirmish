@@ -444,7 +444,7 @@ let TECH_NAME = {
   23: 'Masonry', 24: 'Fortified Wall', 25: 'Coinage', 26: 'Banking',
   27: 'Town Watch', 28: 'Town Patrol', 29: 'Conscription',
   30: 'Heavy Plow', 31: 'Crop Rotation',
-  32: 'Sanctity', 33: 'Fervor',
+  32: 'Sanctity', 33: 'Fervor', 34: 'Herbal Medicine',
 };
 // Research-block explanations, indexed by the sim's ResearchBlock
 // tag (0 ok — unused, 1 funds, 2 queue full, 3 already done,
@@ -494,6 +494,7 @@ function refreshNames() {
     29: t('tech.conscription'),
     30: t('tech.heavyplow'), 31: t('tech.croprotation'),
     32: t('tech.sanctity'), 33: t('tech.fervor'),
+    34: t('tech.herbalmedicine'),
   };
   RESEARCH_BLOCK_TITLES = [
     '', t('block.noResources'), t('block.queueFullTrain'),
@@ -1232,7 +1233,7 @@ function updateEventFeed() {
   const lines = diffFeedEvents(prev, snap, {
     buildingName: (k) => BUILD_NAME[k],
     unitName: (k) => KIND_NAME[k],
-    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15, lightcavalry: 16, husbandry: 17, caravan: 19, coinage: 25, banking: 26, townwatch: 27, townpatrol: 28, conscription: 29, heavyplow: 30, croprotation: 31, sanctity: 32, fervor: 33 }[key]],
+    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15, lightcavalry: 16, husbandry: 17, caravan: 19, coinage: 25, banking: 26, townwatch: 27, townpatrol: 28, conscription: 29, heavyplow: 30, croprotation: 31, sanctity: 32, fervor: 33, herbalmedicine: 34 }[key]],
   }, feedFmt());
   feedPrev = snap;
   for (const text of lines) pushFeedLine(text);
@@ -11170,6 +11171,7 @@ function runCommandButton(id, times = 1) {
       'research-horsecollar': 13,
       'research-heavyplow': 30, 'research-croprotation': 31,
       'research-sanctity': 32, 'research-fervor': 33,
+      'research-herbalmedicine': 34,
     }[id];
     if (tag != null && selectedBuilding && selectedBuilding.type === 'building') {
       if (!issue({ t: 'research_at', b: selectedBuilding.id, tech: tag })) {
@@ -11323,7 +11325,7 @@ function renderCommands() {
     lumbercamp: [10], miningcamp: [11, 12], mill: [13, 30, 31], market: [19, 25, 26],
     university: [20, 21, 22, 23, 24], castle: [29],
     lumbercamp: [10], miningcamp: [11, 12], mill: [13], market: [19, 25, 26],
-    university: [20, 21, 22, 23, 24], monastery: [32, 33],
+    university: [20, 21, 22, 23, 24], monastery: [32, 33, 34],
   };
   const rbB = bk && RB_TAGS[context]
     ? Object.fromEntries(RB_TAGS[context].map((t) => [t, sim.research_block_at(bk.id, t)]))
@@ -11809,25 +11811,28 @@ function renderCommands() {
     // Castle P5a: the Monastery's panel — Train Monk (its only
     // production) and the first two rows of its technology set:
     // Sanctity (Monks +15 HP) and Fervor (Monks +15% speed).
+    // Castle P5e: Herbal Medicine (garrison healing ×6) joins
+    // as the panel's fourth button, in the next positional
+    // slot (A — the second row's first cell).
     // The rest of TEC-10's Castle row joins with the P5b/P5c
     // slices; the Imperial row stays absent, never fake buttons.
     // The research buttons mirror the University's techBtn: the
     // hard research blocks (2/3/4) grey, the funds block (1)
     // stays clickable and flashes its reason (the fd194a2 law).
     const underConstruction = !bk.complete;
-    const techBtn = (id, tag, icon, titleKey, secs, index) => {
+    const techBtn = (id, tag, icon, titleKey, secs, gold, index) => {
       const done = (techMask & (1 << tag)) !== 0;
       const rb = rbB[tag];
       return cmdButton({
         id, icon, label: TECH_NAME[tag],
-        costIcon: 'i-gold', cost: tag === 32 ? 175 : 140,
+        costIcon: 'i-gold', cost: gold,
         key: badgeForButton({ context, id, index }),
         disabled: underConstruction || done || rb === 2 || rb === 3 || rb === 4,
         title: underConstruction
           ? t('cmd.underConstruction', { name: TECH_NAME[tag], building: BUILD_NAME[20] })
           : done
             ? t('cmd.researchDone', { name: TECH_NAME[tag] })
-            : t(titleKey, { name: TECH_NAME[tag], cost: costText([[tag === 32 ? 175 : 140, 'gold']]), secs })
+            : t(titleKey, { name: TECH_NAME[tag], cost: costText([[gold, 'gold']]), secs })
               + (RESEARCH_BLOCK_TITLES[rb] ? ' ' + RESEARCH_BLOCK_TITLES[rb] : ''),
       });
     };
@@ -11841,8 +11846,9 @@ function renderCommands() {
           ? t('cmd.underConstruction', { name: KIND_NAME[20], building: BUILD_NAME[20] })
           : t('cmd.trainTitleTime', { name: KIND_NAME[20], cost: costText([[100, 'gold']]), secs: 51 }) + (TRAIN_BLOCK_TITLES[blockMo] ? ' ' + TRAIN_BLOCK_TITLES[blockMo] : ''),
       }),
-      techBtn('research-sanctity', 32, 'i-sanctity', 'cmd.sanctityTitle', 60, 1),
-      techBtn('research-fervor', 33, 'i-fervor', 'cmd.fervorTitle', 50, 2),
+      techBtn('research-sanctity', 32, 'i-sanctity', 'cmd.sanctityTitle', 60, 175, 1),
+      techBtn('research-fervor', 33, 'i-fervor', 'cmd.fervorTitle', 50, 140, 2),
+      techBtn('research-herbalmedicine', 34, 'i-herbalmedicine', 'cmd.herbalTitle', 35, 200, 3),
     );
   } else if (context === 'blacksmith') {
     // M6: the Blacksmith's Feudal researches — the three armor /

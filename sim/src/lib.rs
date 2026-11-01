@@ -72,6 +72,8 @@ mod siege_p4a_tests;
 mod siege_p4b_tests;
 mod monastery_p5a_tests;
 #[cfg(test)]
+mod monastery_p5e_tests;
+#[cfg(test)]
 mod university_p3c_tests;
 #[cfg(test)]
 mod garrison_tests;

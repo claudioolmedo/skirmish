@@ -28,6 +28,7 @@ use fixed::types::I16F16;
 
 use crate::build::BuildingKind;
 use crate::entity::{EntityKind, GarrisonRef, Task};
+use crate::tech::TechId;
 use crate::{Sim, TC_GARRISON_CAPACITY, TC_GARRISON_HEAL_HP_PER_MIN, TOWN_BELL_RADIUS};
 
 /// GAR-10: a Battering Ram carries at most 6 foot units.
@@ -192,7 +193,7 @@ impl Sim {
     }
 
     fn host_heal_rate(&self, host: GarrisonRef) -> i64 {
-        match host {
+        let base = match host {
             GarrisonRef::Building(bid) => match self.building_index(bid) {
                 Some(bi) => self.buildings[bi].kind.garrison_heal_hp_per_min(),
                 None => 0,
@@ -201,6 +202,21 @@ impl Sim {
             // GAR-10: no shelter healing inside a Ram — GAR-04's
             // rates name the TC, towers and the Castle only.
             GarrisonRef::Unit(_) => 0,
+        };
+        if base <= 0 {
+            return base;
+        }
+        // Castle P5e (GAR-04 completion): Herbal Medicine
+        // multiplies the host's shelter rate ×6 when the HOST's
+        // owner has researched it (TEC-06 lookup discipline —
+        // read live from the owner's mask, never stored). A
+        // zero base stays zero, so production garrisons and the
+        // Ram still heal nobody. A match where nobody holds the
+        // tech reads the base rate exactly as before — no state
+        // changes, the golden hash does not move.
+        match self.host_geometry(host) {
+            Some((owner, _, _, _)) if self.has_tech(owner, TechId::HerbalMedicine) => base * 6,
+            _ => base,
         }
     }
 
@@ -830,7 +846,8 @@ impl Sim {
                 self.eject_host(host);
             }
         }
-        // Shelter healing (GAR-04 base rates).
+        // Shelter healing (GAR-04: base rates, ×6 with the
+        // host owner's Herbal Medicine — see `host_heal_rate`).
         for idx in 0..self.entities.len() {
             let host = match self.entities[idx].garrisoned_in {
                 Some(h) => h,

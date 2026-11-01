@@ -96,6 +96,7 @@ const EN = {
   'tech.conscription': 'Conscription',
   'tech.sanctity': 'Sanctity',
   'tech.fervor': 'Fervor',
+  'tech.herbalmedicine': 'Herbal Medicine',
   'tech.doublebit': 'Double-Bit Axe',
   'tech.goldmining': 'Gold Mining',
   'tech.stonemining': 'Stone Mining',
@@ -532,6 +533,7 @@ const EN = {
   'cmd.bankingTitle': 'Research {name} — {cost} · {secs} s. Tribute fee: falls to 0%.',
   'cmd.sanctityTitle': 'Research {name} — {cost} · {secs} s. Monks +15 HP.',
   'cmd.fervorTitle': 'Research {name} — {cost} · {secs} s. Monks +15% speed.',
+  'cmd.herbalTitle': 'Research {name} — {cost} · {secs} s. Garrisoned units heal 6× faster.',
   'cmd.townwatchTitle': 'Research {name} — {cost} · {secs} s. Buildings: +4 line of sight (except walls and Farms). Hotkey: D.',
   'cmd.townpatrolTitle': 'Research {name} — {cost} · {secs} s. Buildings: a further +4 line of sight (except walls and Farms). Hotkey: D.',
   // --- diplomacy (Package K: TRD-04 + INF-07) -----------------------
@@ -693,6 +695,7 @@ const PT_BR = {
   'tech.conscription': 'Conscrição',
   'tech.sanctity': 'Santidade',
   'tech.fervor': 'Fervor',
+  'tech.herbalmedicine': 'Medicina Herbal',
   'tech.caravan': 'Caravana',
   'tech.ballistics': 'Balística',
   'tech.murderholes': 'Buracos Assassinos',
@@ -1135,6 +1138,7 @@ const PT_BR = {
   'cmd.bankingTitle': 'Pesquisar {name} — {cost} · {secs} s. Taxa de tributo: cai para 0%.',
   'cmd.sanctityTitle': 'Pesquisar {name} — {cost} · {secs} s. Monges: +15 PV.',
   'cmd.fervorTitle': 'Pesquisar {name} — {cost} · {secs} s. Monges: +15% de velocidade.',
+  'cmd.herbalTitle': 'Pesquisar {name} — {cost} · {secs} s. Unidades guarnecidas curam 6× mais rápido.',
   'cmd.townwatchTitle': 'Pesquisar {name} — {cost} · {secs} s. Construções: +4 de linha de visão (exceto muros e Fazendas). Tecla: D.',
   'cmd.townpatrolTitle': 'Pesquisar {name} — {cost} · {secs} s. Construções: mais +4 de linha de visão (exceto muros e Fazendas). Tecla: D.',
   // --- diplomacia (Pacote K: TRD-04 + INF-07) --------------------------
@@ -1296,6 +1300,7 @@ const ES = {
   'tech.conscription': 'Conscripción',
   'tech.sanctity': 'Santidad',
   'tech.fervor': 'Fervor',
+  'tech.herbalmedicine': 'Medicina herbal',
   'tech.caravan': 'Caravana',
   'tech.ballistics': 'Balística',
   'tech.murderholes': 'Matacanes',
@@ -1738,6 +1743,7 @@ const ES = {
   'cmd.bankingTitle': 'Investigar {name} — {cost} · {secs} s. Tasa de tributo: cae al 0%.',
   'cmd.sanctityTitle': 'Investigar {name} — {cost} · {secs} s. Monjes: +15 PV.',
   'cmd.fervorTitle': 'Investigar {name} — {cost} · {secs} s. Monjes: +15% de velocidad.',
+  'cmd.herbalTitle': 'Investigar {name} — {cost} · {secs} s. Las unidades en guarnición se curan 6× más rápido.',
   'cmd.townwatchTitle': 'Investigar {name} — {cost} · {secs} s. Edificios: +4 de línea de visión (excepto muros y Granjas). Tecla: D.',
   'cmd.townpatrolTitle': 'Investigar {name} — {cost} · {secs} s. Edificios: +4 más de línea de visión (excepto muros y Granjas). Tecla: D.',
   // --- diplomacia (Paquete K: TRD-04 + INF-07) --------------------------

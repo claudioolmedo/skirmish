@@ -140,6 +140,14 @@
 //!   Both inherit update 169123's proportional top-up from the
 //!   Horse Collar sweep (the three articles state it verbatim),
 //!   against each farm's own stamped full amount.
+//! - Herbal Medicine (Castle P5e): Monastery, Castle Age,
+//!   200 gold, 35 s (wiki, Herbal Medicine; Castle Age dossier
+//!   §5.6). Effect: garrisoned units heal ×6 as fast (GAR-04) —
+//!   a pure flag read in the garrison tick's heal-rate path
+//!   (`Sim::host_heal_rate`): the Town Center / tower rate goes
+//!   6 → 36 HP/min (0.1 → 0.6 HP/s), the Castle's 12 → 72 HP/min
+//!   (0.2 → 1.2 HP/s), and a zero base rate (production
+//!   buildings, the Ram) stays zero. No completion sweep.
 
 use crate::build::BuildingKind;
 use crate::econ::NodeKind;
@@ -273,11 +281,15 @@ pub enum TechId {
     /// Monastery, Castle: Monks +15% speed (Castle P5a, MNK-01's
     /// Fervor row of TEC-10). Tag 33.
     Fervor,
+    /// Monastery, Castle: garrisoned units heal ×6 as fast
+    /// (Castle P5e, GAR-04's Herbal Medicine row of TEC-10).
+    /// Tag 34.
+    HerbalMedicine,
 }
 
 impl TechId {
     /// All technologies, in tag order.
-    pub const ALL: [TechId; 34] = [
+    pub const ALL: [TechId; 35] = [
         TechId::Loom,
         TechId::FeudalAge,
         TechId::Fletching,
@@ -312,6 +324,7 @@ impl TechId {
         TechId::CropRotation,
         TechId::Sanctity,
         TechId::Fervor,
+        TechId::HerbalMedicine,
     ];
 
     /// Stable tag: 0 loom, 1 feudal age, 2 fletching, 3 scale mail,
@@ -352,6 +365,8 @@ impl TechId {
     /// when it lands (P5b/c/e take 34+), exactly the Caravan
     /// renumber precedent. No tag moves; the plan's deviation
     /// is recorded in the P5a handoff.)
+    /// 34 herbal medicine (Castle P5e — appended after P5a's
+    /// 32/33, so no tag moved.)
     pub fn tag(self) -> u8 {
         match self {
             TechId::Loom => 0,
@@ -388,6 +403,7 @@ impl TechId {
             TechId::CropRotation => 31,
             TechId::Sanctity => 32,
             TechId::Fervor => 33,
+            TechId::HerbalMedicine => 34,
         }
     }
 
@@ -440,10 +456,10 @@ impl TechId {
             // Package M: Conscription is researched at the Castle
             // itself (wiki, Conscription).
             TechId::Conscription => TechHost::Building(BuildingKind::Castle),
-            // Castle P5a: the Monastery set (grows with the P5
-            // slices — Redemption/Atonement/Heresy/Devotion/
-            // Herbal Medicine join this arm as they land).
-            TechId::Sanctity | TechId::Fervor => {
+            // Castle P5a/P5e: the Monastery set (grows with the
+            // P5 slices — Redemption/Atonement/Heresy/Devotion
+            // join this arm as they land).
+            TechId::Sanctity | TechId::Fervor | TechId::HerbalMedicine => {
                 TechHost::Building(BuildingKind::Monastery)
             }
         }
@@ -464,9 +480,10 @@ impl TechId {
             | TechId::Coinage
             | TechId::TownPatrol
             | TechId::HeavyPlow
-            // Castle P5a: the Monastery set is Castle Age research.
+            // Castle P5a/P5e: the Monastery set is Castle Age research.
             | TechId::Sanctity
             | TechId::Fervor
+            | TechId::HerbalMedicine
             // Castle P3c: the University set is Castle Age research.
             | TechId::Ballistics
             | TechId::MurderHoles
@@ -543,6 +560,7 @@ impl TechId {
             TechId::CropRotation => 4200, // 70 s (wiki, Crop Rotation)
             TechId::Sanctity => 3600, // 60 s (wiki, Sanctity — dossier §5.6)
             TechId::Fervor => 3000, // 50 s (wiki, Fervor — dossier §5.6)
+            TechId::HerbalMedicine => 2100, // 35 s (wiki, Herbal Medicine — dossier §5.6)
         }
     }
 
@@ -584,6 +602,7 @@ impl TechId {
             TechId::CropRotation => (250, 250, 0, 0), // wiki, Crop Rotation
             TechId::Sanctity => (0, 0, 175, 0), // wiki, Sanctity — dossier §5.6
             TechId::Fervor => (0, 0, 140, 0), // wiki, Fervor — dossier §5.6
+            TechId::HerbalMedicine => (0, 0, 200, 0), // wiki, Herbal Medicine — dossier §5.6
         }
     }
 }
@@ -838,7 +857,9 @@ mod tests {
         assert_eq!(TechId::from_tag(31), Some(TechId::CropRotation));
         assert_eq!(TechId::from_tag(32), Some(TechId::Sanctity));
         assert_eq!(TechId::from_tag(33), Some(TechId::Fervor));
-        assert_eq!(TechId::from_tag(34), None);
+        // Castle P5e: Herbal Medicine appends at 34.
+        assert_eq!(TechId::from_tag(34), Some(TechId::HerbalMedicine));
+        assert_eq!(TechId::from_tag(35), None);
     }
 
     #[test]
@@ -980,7 +1001,10 @@ mod tests {
         assert_eq!(TechId::CropRotation.tag(), 31);
         assert_eq!(TechId::from_tag(30), Some(TechId::HeavyPlow));
         assert_eq!(TechId::from_tag(31), Some(TechId::CropRotation));
-        assert_eq!(TechId::ALL.len(), 34);
+        // 32 entries at this test's landing; P5a's Sanctity/
+        // Fervor (32/33) and P5e's Herbal Medicine (34) append
+        // after it, so ALL now holds 35.
+        assert_eq!(TechId::ALL.len(), 35);
         // ECO-14: the farm gather lookup meets the farm's own
         // 0.4 food/s work-rate cap — the base farm rate sits
         // below it today, so the clamped value is the base rate,

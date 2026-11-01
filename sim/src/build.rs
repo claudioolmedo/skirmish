@@ -936,7 +936,8 @@ impl BuildingKind {
     /// Castle 0.2 HP/s = 12/min; production garrisons heal nothing
     /// ("healing inside other buildings: none" — GAR-04). The Town
     /// Center's 6/min lives with its weapon/capacity constants in
-    /// lib.rs. Herbal Medicine's ×6 is Castle P5.
+    /// lib.rs. Herbal Medicine's ×6 (Castle P5e) layers on this
+    /// base column in the garrison tick's `host_heal_rate`.
     pub fn garrison_heal_hp_per_min(self) -> i64 {
         match self {
             BuildingKind::WatchTower | BuildingKind::Outpost => 6,

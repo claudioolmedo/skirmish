@@ -2591,7 +2591,14 @@ Theocracy (group conversion rest rule, MNK-06); Devotion/Faith
 33 s, MNK-02); Herbal Medicine (garrison healing ×6, GAR-04).
 *Source:* Technology wiki (Monastery table). · *Impl:* all are ordinary
 TEC-06 patches/flags — this rule exists so §12's implementation notes can
-reference one list. · *Status:* **MISSING**.
+reference one list. *Progress (Castle P5e, 2026-11-01):* Herbal Medicine —
+the Castle row's garrison entry — ships with P5e (TechId 34, 200G, 35 s;
+GAR-04 is now MATCHES), joining Sanctity and Fervor (Castle P5a) as the
+Castle-row entries in the tree; the remaining Castle-row entries
+(Redemption, Atonement, Heresy, Devotion) ride their own P5b/P5c slices,
+and the Imperial row (Block Printing, Theocracy, Faith, Illumination)
+is outstanding — so the rule stays MISSING until the whole list lands.
+· *Status:* **MISSING**.
 
 **TEC-11 — Unique technologies are an extension point.** Each empire has
 one Castle-Age and one Imperial-Age unique technology, researched at the
@@ -2957,9 +2964,16 @@ folded into the garrison record tick. *Narrowed 2026-10-29 (Castle
 P3b):* the base shelter healing SHIPPED — 0.1 HP/s in the Town
 Center and towers, 0.2 HP/s in the Castle, none in production
 buildings, via a per-entity remainder accumulator in the garrison
-tick. What remains is the Herbal Medicine ×6 multiplier, which
-rides the Monastery technology package (P5). · *Status:*
-**MISSING** (base rates shipped; the ×6 tech multiplier remains).
+tick. *Completed 2026-11-01 (Castle P5e):* the Herbal Medicine ×6
+multiplier SHIPPED — Herbal Medicine (TechId 34, Monastery, Castle
+Age, 200 gold, 35 s) is read live in the garrison tick's heal-rate
+path (`host_heal_rate`): when the host's owner has researched it,
+the Town Center / tower rate is 0.6 HP/s and the Castle's is
+1.2 HP/s, exact over a whole minute through the same remainder
+accumulator, never overhealing; a zero base rate (production
+buildings, the Ram) stays zero. `monastery_p5e_tests` pin the
+row, the gates, the ×6 rates, the unchanged base rates and the
+real research flow. · *Status:* **MATCHES**.
 
 **GAR-05 — Garrison adds arrows by DPS, with caps.** Only villagers and
 archer-type units add firepower to a defensive building. Each contributes
