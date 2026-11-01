@@ -571,9 +571,16 @@ impl WasmSim {
 
     /// The human player's researched-technology bitmask (M6): bit
     /// per tech tag (`TechId::tag`); the Feudal bit reads set while
-    /// the player stands in the Feudal Age.
-    pub fn tech_mask(&self) -> u32 {
-        self.inner.tech_mask_of(crate::entity::OWNER_PLAYER) as u32
+    /// the player stands in the Feudal Age. Returned as f64, NOT
+    /// u32 (bot-loop, 2026-11-01): tags reached 32 (Sanctity) with
+    /// Castle P5a and 34 (Herbal Medicine) with P5e, and the u32
+    /// cast silently dropped every bit >= 32 — the Monastery techs
+    /// could never read as researched in the client, and the JS
+    /// `1 << tag` checks aliased them onto Loom/Feudal/Fletching.
+    /// A u64 mask is exact in an f64 (tags stay far below 2^53);
+    /// JS readers must test bits arithmetically, not with `<<`.
+    pub fn tech_mask(&self) -> f64 {
+        self.inner.tech_mask_of(crate::entity::OWNER_PLAYER) as f64
     }
 
     /// The Town Center's queue as flat entry codes, head first
@@ -1950,8 +1957,11 @@ impl WasmSim {
     }
 
     /// Researched-technology bitmask of a specific player.
-    pub fn tech_mask_for(&self, owner: u32) -> u32 {
-        self.inner.tech_mask_of(owner as u8) as u32
+    /// f64 for the full u64 mask — see `tech_mask` (tags >= 32
+    /// were truncated away by the old u32 cast, bot-loop
+    /// 2026-11-01).
+    pub fn tech_mask_for(&self, owner: u32) -> f64 {
+        self.inner.tech_mask_of(owner as u8) as f64
     }
 
     /// A player's match statistics (INF-11), flat:
@@ -1980,7 +1990,11 @@ impl WasmSim {
     /// age itself, not by a mask bit).
     pub fn researched_techs_for(&self, owner: u32) -> Vec<u32> {
         let mask = self.inner.tech_mask_of(owner as u8);
-        let mut out: Vec<u32> = (0..31u32)
+        // Full tag range (bot-loop, 2026-11-01): the old 0..31
+        // scan dropped Crop Rotation (31) and every Monastery
+        // tech (Sanctity 32, Fervor 33, Herbal Medicine 34) from
+        // the researched list the score/tech-tree surfaces read.
+        let mut out: Vec<u32> = (0..64u32)
             .filter(|&t| mask & (1u64 << t) != 0)
             .collect();
         let age = self.inner.age_of(owner as u8).tag();

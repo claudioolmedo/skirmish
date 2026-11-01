@@ -73,14 +73,20 @@ export const ADVANCEMENTS = { 1: 1, 14: 2, 18: 3 };
 /**
  * Whether a technology counts as researched for a player whose
  * researched-mask is `mask` (TechId bits, the sim's u64 read as
- * a JS number — tags stay below 31, so the low word suffices)
- * and whose current age tag is `age`. The three advancements
- * are recorded by the age itself, never by a mask bit (the
- * sim's own convention).
+ * a JS number) and whose current age tag is `age`. The three
+ * advancements are recorded by the age itself, never by a mask
+ * bit (the sim's own convention).
+ *
+ * The bit test goes through BigInt, NOT `mask & (1 << tag)`
+ * (bot-loop, 2026-11-01): tags reached 32 (Sanctity) with
+ * Castle P5a and 34 (Herbal Medicine) with P5e, the wasm mask
+ * now crosses as a full f64, and a 32-bit shift wraps — tag 33
+ * aliased onto the Feudal bit and read "researched" from the
+ * Feudal Age on.
  */
 export function techDone(tag, mask, age) {
   if (tag in ADVANCEMENTS) return age >= ADVANCEMENTS[tag];
-  return (mask & (1 << tag)) !== 0;
+  return ((BigInt(Math.round(mask)) >> BigInt(tag)) & 1n) === 1n;
 }
 
 /**

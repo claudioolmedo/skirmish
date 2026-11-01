@@ -3650,6 +3650,13 @@ const seatAware = () => !!net || localOwner !== 0;
 const myStock = () => (seatAware() ? sim.stockpile_for(localOwner) : sim.stockpile());
 const myAge = () => (seatAware() ? sim.age_for(localOwner) : sim.age());
 const myTechMask = () => (seatAware() ? sim.tech_mask_for(localOwner) : sim.tech_mask());
+/// Whether tech `tag` is set in a tech mask (bot-loop, 2026-11-01):
+/// the mask is the sim's u64 carried as an f64, and tags reached
+/// 32+ with the Monastery techs — JS `mask & (1 << tag)` wraps
+/// the shift at 32 bits and aliases tag 33 onto the Feudal bit
+/// (the live "Fervor — researched." phantom). Test via BigInt,
+/// which reads the exact bit at any tag.
+const techMaskHas = (mask, tag) => ((BigInt(Math.round(mask)) >> BigInt(tag)) & 1n) === 1n;
 const myPop = () => (seatAware() ? sim.population_for(localOwner) : sim.population());
 const myPopCap = () => (seatAware() ? sim.population_cap_for(localOwner) : sim.population_cap());
 /// The Town Center the command panel acts on: the selected own
@@ -11821,7 +11828,7 @@ function renderCommands() {
     // stays clickable and flashes its reason (the fd194a2 law).
     const underConstruction = !bk.complete;
     const techBtn = (id, tag, icon, titleKey, secs, gold, index) => {
-      const done = (techMask & (1 << tag)) !== 0;
+      const done = techMaskHas(techMask, tag);
       const rb = rbB[tag];
       return cmdButton({
         id, icon, label: TECH_NAME[tag],
@@ -12091,7 +12098,7 @@ function renderCommands() {
   // leave these cells to other occupants (the TC's W/E are not
   // letters at all in the reference), so — like the building
   // Delete — they render unbadged and answer to the mouse.
-  const GAR_PANEL = ['tc', 'castle', 'tower', 'outpost', 'barracks', 'range', 'stable', 'siegeworkshop'];
+  const GAR_PANEL = ['tc', 'castle', 'tower', 'outpost', 'barracks', 'range', 'stable', 'siegeworkshop', 'monastery'];
   if (GAR_PANEL.includes(context)) {
     const gCount = context === 'tc' ? sim.tc_garrison_count(panelTcId())
       : (bk ? sim.building_garrison_count(bk.id) : 0);
@@ -12307,7 +12314,12 @@ function updateSelPanel() {
   // Ram and joins the same shape (bot-loop, 2026-10-30): live
   // session b57befa2 trained a Ram on the combo build and saw no
   // "Training…" queue line at all — the same defect family.
-  const PROD_KINDS = [2, 3, 4, 5, 6, 7, 8, 12, 15, 16, 17];
+  // The Monastery (kind 20, Castle P5a) trains the Monk and joins
+  // the same shape (bot-loop, 2026-11-01): live sessions on
+  // 2026-11-01 trained Monks and saw NO queue/progress line and
+  // NO cancel chip — the player could not tell the click had
+  // worked, the same defect family a third time.
+  const PROD_KINDS = [2, 3, 4, 5, 6, 7, 8, 12, 15, 16, 17, 20];
   const context = selUnits.length > 0 ? 'units'
     : selectedBuilding
       ? (selectedBuilding.type === 'tc'
