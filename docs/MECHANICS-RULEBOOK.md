@@ -774,7 +774,13 @@ and hash-safe since slots are just per-unit targets. · *Status:*
 tiles, a formed group narrows into a file/column for travel and re-forms
 near the destination.
 *Source:* GAP 2.10. · *Impl:* a slot-layout switch keyed on order distance
-in the same assignment function as MOV-07. · *Status:* **MISSING**.
+in the same assignment function as MOV-07. Shipped for the unit arms in Castle P5b (2026-11-02): the counter
+lives on the monk; unit→unit switches and the automatic chase keep it,
+a manual move order zeroes it. The building→unit reset arm lands with
+building conversion in P5c (no building conversion exists yet to
+switch from). Pinned by
+`ci_progress_is_sticky_across_targets_and_chase_but_not_manual_move`.
+· *Status:* **MATCHES**.
 
 **MOV-09 — Facing is one of 8 directions.** A unit has a facing (8-way);
 it attacks and is rendered in its facing; melee engagement turns the unit
@@ -2603,6 +2609,10 @@ Castle-row entries in the tree; the remaining Castle-row entries
 (Redemption, Atonement, Heresy, Devotion) ride their own P5b/P5c slices,
 and the Imperial row (Block Printing, Theocracy, Faith, Illumination)
 is outstanding — so the rule stays MISSING until the whole list lands.
+*Progress (Castle P5b, 2026-11-02):* Atonement (TechId 35, 325G, 40 s)
+and Devotion (TechId 36, 100F/200G, 40 s) land with the conversion
+core — five of the seven Castle-row entries now stand; Redemption and
+Heresy ride P5c, and the Imperial row keeps the rule MISSING.
 · *Status:* **MISSING**.
 
 **TEC-11 — Unique technologies are an extension point.** Each empire has
@@ -2627,7 +2637,9 @@ in a dedicated phase after combat. Shipped so far (Castle P5a,
 51 s at the Monastery) and the HEAL arm of the three actions — the monk
 phase runs after combat (`monk_tick`, step 4.6) and healing rides the
 entity record's heal fields (`sim/src/monks.rs`; MNK-10 is MATCHES).
-Conversion (P5b) and relic-carrying (P5d) are not shipped yet, so this
+Conversion shipped in Castle P5b (2026-11-02, `sim/src/monks.rs`:
+faith, the CI model, the eligibility function and the transfer in
+`sim/src/lib.rs`); relic-carrying (P5d) is not shipped yet, so this
 rule's status stands. · *Status:* **MISSING** (GAP 6.8).
 
 **MNK-02 — Faith gates conversion.** A monk must be at 100% faith to
@@ -2637,8 +2649,14 @@ partial faith cannot start a conversion, but healing (MNK-10) is always
 available.
 *Source:* wiki, Conversion / Faith / Illumination (current DE model). ·
 *Impl:* faith is a fixed-point 0..100 value per monk, regenerated in the
-monk phase; the conversion state refuses to start below full. ·
-*Status:* **MISSING**.
+monk phase; the conversion state refuses to start below full. Shipped in
+Castle P5b (2026-11-02): milli-percent faith on the entity record, exact
+62 s regen through a remainder accumulator (the 33 s Illumination span is
+a data constant read through a flag that stays false until the Imperial
+program), drain-to-0 on success. Pinned by
+`faith_gates_conversion_and_regenerates_in_exactly_62s` and
+`success_drains_faith_to_zero` in `sim/src/monastery_p5b_tests.rs`. ·
+*Status:* **MATCHES**.
 
 **MNK-03 — Conversion works in intervals (units).** While a target stays
 in range, the converting monk advances one conversion interval (CI) of
@@ -2652,7 +2670,13 @@ between fixed min/max times — is superseded.)*
 *Source:* wiki, Conversion (interval model, chances, guarantee points). ·
 *Impl:* the monk's conversion record holds (target id, CI count); each CI
 boundary draws one RNG roll in monk-phase id order (SIM-04 discipline);
-the guarantee is a counter check, not a roll. · *Status:* **MISSING**.
+the guarantee is a counter check, not a roll. Shipped in Castle P5b
+(2026-11-02): CI = 75 ticks, one RNG draw per rolled CI boundary in
+monk-phase id order, no draws in warm-up or at the guarantee. Pinned by
+`conversion_lands_only_in_ci_5_to_9`,
+`warmup_draws_no_rng_and_guarantee_is_a_counter` and the MNK-13
+distribution test in `sim/src/monastery_p5b_tests.rs`. ·
+*Status:* **MATCHES**.
 
 **MNK-04 — Buildings convert slower and at contact range.** Converting a
 building requires Redemption and a monk standing *adjacent* to it (not at
@@ -2676,7 +2700,14 @@ units, 1 CI ≈ 1.25 s.)
 *Source:* wiki, Conversion (resistance levels and modifier list). ·
 *Impl:* resistance rows keyed by target class in the monk table; shifts
 are integer CI adds applied when a conversion starts. Empire-specific
-rows (Teutons) are extension content (§C). · *Status:* **MISSING**.
+rows (Teutons) are extension content (§C). Shipped for unit targets in
+Castle P5b (2026-11-02): Scout-line level 2 (19%/CI, +3/+1), Devotion
++1/+1 read against the target's owner at conversion start; the building
+(level 3) and ship rows are data in the same table, consumed by P5c /
+the naval program. The Faith +4/+4 row reads an Imperial flag that
+stays false. Pinned by `scout_resistance_window_is_ci_8_to_10` and
+`devotion_shifts_the_victims_window_by_one_ci`. ·
+*Status:* **MATCHES**.
 
 **MNK-06 — Group conversion: independent rolls, shared rest.** Several
 monks converting one target do not add their chances — each monk runs its
@@ -2686,7 +2717,12 @@ unless the owner has Theocracy, in which case only one monk rests.
 *Source:* wiki, Conversion ("chance is not added up"; Theocracy rest
 rule). · *Impl:* on a conversion success, sweep the participant set
 (monks whose conversion record names this target) in id order: drain all,
-or the lowest-id one under Theocracy. · *Status:* **MISSING**.
+or the lowest-id one under Theocracy. Shipped in Castle P5b
+(2026-11-02): independent records and rolls per monk; on the first
+success every participating monk of the converting owner drains (the
+Theocracy branch reads an Imperial flag that stays false, so all drain
+until that tech exists). Pinned by
+`group_conversion_drains_every_participant`. · *Status:* **MATCHES**.
 
 **MNK-07 — CI progress is sticky across targets.** Switching a monk to a
 new target does *not* reset its CI progress — with one exception: after
@@ -2707,7 +2743,18 @@ Monks are convertible only if the owner has Atonement. Villagers and
 ordinary military are always convertible.
 *Source:* wiki, Conversion (eligibility rules). · *Impl:* an eligibility
 function over (target class flags × owner's tech set) in the monk table —
-flags per CLS-01, gates per TEC-10. · *Status:* **MISSING**.
+flags per CLS-01, gates per TEC-10. Shipped complete for units in
+Castle P5b (2026-11-02) as the one eligibility function
+(`Sim::eligible_target` / `can_convert_target`): villagers and ordinary
+military always; enemy monks only with Atonement (landed in this
+slice); siege units gated on a Redemption flag read that stays closed
+until the tech lands in P5c — which also keeps every building,
+Town Centers/Castles/Monasteries included, out of reach in this slice,
+as DE requires without Redemption; heroes/Kings/foundations/walls/
+Farms/Fish Traps name kinds or flags that do not exist in this roster
+yet and are refused by construction when they land on the same
+function. Garrisoned units are never offered (GAR-02). Pinned by
+`eligibility_matrix`. · *Status:* **MATCHES**.
 
 **MNK-09 — Relics: carried by monks, garrisoned in Monasteries.** A monk
 ordered onto a relic picks it up (carrying one reduces his LoS by 2 and
@@ -2760,8 +2807,19 @@ did until conversion. A converted villager thereafter builds using the
 stat lookup (TEC-06) normally reads the *owner's* patch set — conversion
 breaks that: on transfer, stamp the unit with a frozen patch snapshot
 (the attack/armor/stat-relevant patch ids it carried). This is the one
-place per-unit patch state exists; document it in the entity record. ·
-*Status:* **MISSING**.
+place per-unit patch state exists; document it in the entity record.
+Shipped for units in Castle P5b (2026-11-02): `transfer_ownership` in
+`sim/src/lib.rs` stamps `frozen_patches` from the old owner's mask
+before ownership moves, and the one stat lookup (`unit_stats` →
+`stats_for_masked`) resolves patches from the snapshot; orders clear,
+current HP is preserved, population (derived from ownership) moves
+seats the same tick, and VIC-04 credits the converted value like a
+kill. A converted villager builds with the new owner's set because
+build gates read the owner. The building arm joins the same function
+in P5c. Pinned by
+`converted_knight_keeps_its_snapshot_against_both_owners_later_techs`
+and `converted_monk_loses_its_own_in_flight_conversion`. ·
+*Status:* **MATCHES**.
 
 **MNK-13 — The monk is fragile by design.** Monks have 0/0 armor and
 30 HP (45 with Sanctity) and no attack: any military unit that reaches a
@@ -2769,7 +2827,11 @@ monk kills it quickly, which is the intended counter to conversion —
 conversions are strong because monks are easy to kill during the
 6–11 s window (MNK-03). No separate rule is needed; this records that
 the timing window *is* the balance mechanism, so MNK-03's numbers must
-not be "rounded for feel".
+not be "rounded for feel". Acceptance shipped in Castle P5b
+(2026-11-02): `mnk13_lone_monk_vs_knight_distribution` — 60 seeded
+lone-monk-vs-Knight runs, every conversion inside CIs 5–9, rolled
+successes before the guarantee occurring at the model's rate. ·
+*Status:* **MATCHES**.
 *Source:* MECHANICS-STUDY §3.8; wiki, Conversion. · *Impl:* acceptance
 test for §12: a lone monk vs. one Knight reproduces the documented
 outcome distribution from the CI model. · *Status:* **MISSING**.

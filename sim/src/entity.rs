@@ -478,6 +478,10 @@ pub enum QueuedOrder {
     /// form of the Attack Ground command — executes exactly like
     /// a freshly issued one when the entity becomes idle.
     AttackGround { x: I16F16, y: I16F16 },
+    /// Convert an enemy unit (Castle P5b, MNK-03): the queued
+    /// form of the Convert command (SEL-12) — executes exactly
+    /// like a freshly issued one when the entity becomes idle.
+    Convert { target: u32 },
 }
 
 impl QueuedOrder {
@@ -496,6 +500,7 @@ impl QueuedOrder {
             QueuedOrder::Patrol { .. } => 6,
             QueuedOrder::RepairTc { .. } => 7,
             QueuedOrder::AttackGround { .. } => 8,
+            QueuedOrder::Convert { .. } => 9,
         }
     }
 }
@@ -682,6 +687,18 @@ pub struct Entity {
     /// Who owns this entity: `OWNER_PLAYER` or `OWNER_GAIA`. Sheep
     /// flip from Gaia to the player on capture.
     pub owner: u8,
+    /// Frozen patch snapshot (Castle P5b, MNK-12): the researched-
+    /// tech mask (`TechId::bit` set) this unit carried at the
+    /// moment it was converted, stamped by `transfer_ownership`
+    /// BEFORE ownership moves. While set, the stat lookup
+    /// (`Sim::unit_stats`) resolves tech patches from this mask,
+    /// never from the (new) owner's set — the one place per-unit
+    /// patch state exists. Build availability is NOT frozen: a
+    /// converted villager builds with its new owner's set (the
+    /// rule's documented exception reads the owner, not the mask).
+    /// `None` on every never-converted unit. Plain data — part of
+    /// the hashed state, written only while set (marker 0xBD).
+    pub frozen_patches: Option<u64>,
     /// Current hit points (fractional; the entity dies the tick this
     /// drops below 1 — CMB-02 — processed in the combat phase's death
     /// sweep, which sets `dead`).
@@ -889,6 +906,51 @@ pub struct Entity {
     /// faith and conversion state — the block is the extension
     /// point, and pre-P5 streams never write it.
     pub heal_target: Option<u32>,
+    /// Faith (Castle P5b, MNK-02): the monk's conversion resource
+    /// in milli-percent, 0..=100_000 (100_000 = full). A conversion
+    /// may start only at full; a success drains the participant
+    /// set to 0 (MNK-06); regen restores full in 62 s (3 720
+    /// ticks; 33 s with Illumination — an Imperial flag no Castle
+    /// tech sets, read in `monks.rs`). Default is FULL: a resting
+    /// monk is indistinguishable from a pre-P5b stream (the 0xBB
+    /// block writes only while any monk field is non-default).
+    /// Plain data — part of the hashed state.
+    pub faith: i32,
+    /// Faith regen fractional accumulator (MNK-02), in the
+    /// Treadmill Crane scalar pattern: per tick the regen adds
+    /// 100_000 to a conceptual accumulator whose quotient over the
+    /// regen span is the milli-percent restored; this holds the
+    /// remainder. Reset on drain.
+    pub faith_remainder: i64,
+    /// The unit this monk is converting (Castle P5b, MNK-03): the
+    /// target half of the plan's ConversionRecord, flattened into
+    /// the entity record like `heal_target`. Cleared when the
+    /// target dies, converts, garrisons or leaves eligibility, or
+    /// the monk is re-tasked. Plain data — part of the hashed
+    /// state (0xBB block).
+    pub conversion_target: Option<u32>,
+    /// Sticky CI progress (MNK-07): completed conversion intervals
+    /// toward the current engagement. Lives on the MONK, never on
+    /// the pairing: a unit→unit target switch and the automatic
+    /// chase keep it; a manual move order zeroes it (the
+    /// building→unit reset arm is P5c — no building conversion
+    /// exists yet to switch from).
+    pub ci_progress: u32,
+    /// Ticks elapsed inside the current CI (0..75, MNK-03's
+    /// ≈1.25 s interval). Advances only while the target is in
+    /// conversion range.
+    pub ci_ticks: u32,
+    /// Resistance level of the current conversion target (MNK-05),
+    /// stamped when the conversion starts: chance per rolled CI is
+    /// 38 / max(1, level) %. 1 ordinary, 2 Scout-line.
+    pub conversion_level: u8,
+    /// CI shift of the first roll (MNK-05), stamped at start:
+    /// first rolled CI = 5 + this (Scout +3, Devotion +1, Faith
+    /// +4 — the Imperial rows read as flags that stay false).
+    pub conversion_start_shift: i32,
+    /// CI shift of the guarantee (MNK-05), stamped at start:
+    /// guarantee CI = 9 + this (Scout +1, Devotion +1, Faith +4).
+    pub conversion_guarantee_shift: i32,
     /// Healing fractional accumulator (MNK-10), in the GAR-04
     /// shelter pattern: per tick the heal adds
     /// `150 × 65536` to a conceptual accumulator whose quotient
@@ -960,7 +1022,16 @@ impl Entity {
             trade_target: None,
             trade_loaded: false,
             heal_target: None,
+            faith: 100_000,
+            faith_remainder: 0,
+            conversion_target: None,
+            ci_progress: 0,
+            ci_ticks: 0,
+            conversion_level: 1,
+            conversion_start_shift: 0,
+            conversion_guarantee_shift: 0,
             heal_remainder: 0,
+            frozen_patches: None,
         }
     }
 

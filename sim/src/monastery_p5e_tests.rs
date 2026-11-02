@@ -132,7 +132,7 @@ fn herbal_medicine_row_and_gates() {
     // Sanctity 32 / Fervor 33 — no existing tag moved.
     assert_eq!(TechId::HerbalMedicine.tag(), 34);
     assert_eq!(TechId::from_tag(34), Some(TechId::HerbalMedicine));
-    assert_eq!(TechId::ALL.len(), 35);
+    assert_eq!(TechId::ALL.len(), 37, "P5b's Atonement/Devotion append at 35/36");
     assert_eq!(
         TechId::HerbalMedicine.host(),
         TechHost::Building(BuildingKind::Monastery)

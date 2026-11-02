@@ -267,12 +267,84 @@ pub(crate) fn decide(sim: &mut Sim) {
     //    trained, walk down the ranking before giving up.
     plan_train_military(sim, &cfg);
 
+    // 4.5 Monk conversion (Castle P5b, §3.7 of the P5 plan):
+    //     fielded AI monks convert eligible player units in
+    //     conversion range through the ordinary Convert command.
+    plan_convert(sim, &mut acted);
+
     // 5. Idle villagers to work.
     assign_idle_villagers(sim, &cfg, &mut acted);
 
     // 6. Defense, then the wave.
     plan_defense(sim, &mut acted);
     plan_wave(sim, &cfg, &mut acted);
+}
+
+/// Monk conversion step (Castle P5b): every fielded AI monk
+/// that is not already converting, healing or booked this pass
+/// is ordered to convert the best eligible player unit inside
+/// conversion range (MNK-03's 9 tiles — the monk phase does the
+/// walking and the CI work; this step only chooses). Target
+/// priority is the AI table's existing value ordering applied to
+/// kinds: Knights first (the plan's named priority), then the
+/// other military kinds by their table cost, then villagers;
+/// ties break to the lowest id, like every AI choice. The order
+/// is the same `Command::Convert` a player issues (AI-01) and
+/// the sim re-validates it (full faith, MNK-08) when it applies.
+fn plan_convert(sim: &mut Sim, acted: &mut Vec<u32>) {
+    let me = OWNER_OPPONENT;
+    let monks: Vec<u32> = sim
+        .entities()
+        .iter()
+        .filter(|e| {
+            e.owner == me
+                && e.kind == EntityKind::Monk
+                && !e.dead
+                && e.garrisoned_in.is_none()
+                && e.conversion_target.is_none()
+                && e.heal_target.is_none()
+                && !acted.contains(&e.id)
+        })
+        .map(|e| e.id)
+        .collect();
+    for monk in monks {
+        let Some(m) = sim.entities().iter().find(|e| e.id == monk) else {
+            continue;
+        };
+        let (mx, my) = (m.pos_x, m.pos_y);
+        // (priority class, −cost, id): Knights 0, other military
+        // 1, villagers 2 — cost descending inside a class.
+        let mut best: Option<(i32, i64, u32)> = None;
+        for t in sim.entities() {
+            if t.owner == me || t.dead || !sim.can_convert(monk, t.id) {
+                continue;
+            }
+            let d = crate::steer::vec_len(t.pos_x - mx, t.pos_y - my);
+            if d > crate::monks::CONVERT_RANGE {
+                continue;
+            }
+            let spec = crate::units::spec(t.kind);
+            let cost = spec.food_cost as i64 + spec.wood_cost as i64 + spec.gold_cost as i64;
+            let class = if t.kind == EntityKind::Knight {
+                0
+            } else if t.kind == EntityKind::Villager {
+                2
+            } else {
+                1
+            };
+            let key = (class, -cost, t.id);
+            if best.map(|b| key < b).unwrap_or(true) {
+                best = Some(key);
+            }
+        }
+        if let Some((_, _, target)) = best {
+            sim.push_command(Command::Convert {
+                entity: monk,
+                target,
+            });
+            acted.push(monk);
+        }
+    }
 }
 
 /// Living units of one kind owned by `owner`.
@@ -2114,6 +2186,55 @@ mod tests {
         // to the very first enqueue instead.
         let got = collect_enqueues(&mut sim, 1, 2_000);
         assert_eq!(got, vec![EntityKind::Skirmisher]);
+    }
+
+    #[test]
+    fn ai_monk_converts_a_player_knight_in_range() {
+        // Castle P5b (§3.7): an AI monk with a player Knight in
+        // conversion range issues Convert through the ordinary
+        // command path and the Knight changes sides. The monk's
+        // HP is boosted as scene-setting (a Knight otherwise
+        // kills a 30 HP monk inside the conversion window —
+        // MNK-13's fragility is the counter, tested elsewhere);
+        // every decision asserted on is the script's own.
+        let mut sim = Sim::new_match(7, MatchMode::AiNormal);
+        let (mx, my) = sim.grid().cell_center(60, 60);
+        sim.entities.push(crate::entity::Entity::spawned(
+            9801,
+            EntityKind::Monk,
+            OWNER_OPPONENT,
+            mx,
+            my,
+        ));
+        let (kx, ky) = sim.grid().cell_center(62, 60);
+        sim.entities.push(crate::entity::Entity::spawned(
+            9802,
+            EntityKind::Knight,
+            OWNER_PLAYER,
+            kx,
+            ky,
+        ));
+        sim.entities.sort_by_key(|e| e.id);
+        sim.entities
+            .iter_mut()
+            .find(|e| e.id == 9801)
+            .unwrap()
+            .hp = fixed::types::I16F16::from_num(30_000);
+        let mut converted = false;
+        for _ in 0..3_000 {
+            sim.tick();
+            if sim
+                .entities()
+                .iter()
+                .find(|e| e.id == 9802)
+                .map(|e| e.owner == OWNER_OPPONENT)
+                .unwrap_or(false)
+            {
+                converted = true;
+                break;
+            }
+        }
+        assert!(converted, "the AI monk never converted the Knight");
     }
 
     #[test]

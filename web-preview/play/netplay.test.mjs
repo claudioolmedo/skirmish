@@ -98,6 +98,11 @@ test('validateCommand accepts the full vocabulary and rejects junk', () => {
     { t: 'research_at', b: 3, tech: 29 },
     { t: 'research_at', b: 3, tech: 30 },
     { t: 'heal', e: 1, tg: 2 },
+    // Castle P5b: the Monk's convert order and the two new
+    // Monastery researches (Atonement 35, Devotion 36).
+    { t: 'convert', e: 1, tg: 2 },
+    { t: 'research_at', b: 3, tech: 35 },
+    { t: 'research_at', b: 3, tech: 36 },
     { t: 'auto_explore', e: 4, on: true },
     { t: 'auto_explore', e: 4, on: false },
     { t: 'attackmove', e: 4, x: 10, y: -2 },
@@ -124,6 +129,9 @@ test('validateCommand accepts the full vocabulary and rejects junk', () => {
     { t: 'heal', e: 1 },
     { t: 'heal', tg: 2 },
     { t: 'heal', e: -1, tg: 2 },
+    { t: 'convert', e: 1 },
+    { t: 'convert', tg: 2 },
+    { t: 'convert', e: -1, tg: 2 },
     { t: 'mbuy', b: 3, r: 3 },
     { t: 'mbuy', b: 3, r: 0 },
     { t: 'msell', r: 1 },

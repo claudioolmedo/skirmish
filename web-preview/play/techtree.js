@@ -65,6 +65,8 @@ export const TECH_TREE = [
   { tag: 32, host: 20, age: 2, cost: [0, 0, 175, 0], secs: 60, requires: null }, // Sanctity
   { tag: 33, host: 20, age: 2, cost: [0, 0, 140, 0], secs: 50, requires: null }, // Fervor
   { tag: 34, host: 20, age: 2, cost: [0, 0, 200, 0], secs: 35, requires: null }, // Herbal Medicine
+  { tag: 35, host: 20, age: 2, cost: [0, 0, 325, 0], secs: 40, requires: null }, // Atonement (Castle P5b)
+  { tag: 36, host: 20, age: 2, cost: [100, 0, 200, 0], secs: 40, requires: null }, // Devotion (Castle P5b)
 ];
 
 /** The age-advancement tags and the age each one reaches. */

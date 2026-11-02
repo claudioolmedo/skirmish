@@ -60,7 +60,11 @@ const MAGIC: &[u8; 4] = b"SKSV";
 /// Version 7: Castle P5a landing — the entity record gains the
 /// monk heal fields, and the command codec gains `Heal` at
 /// tag 43 (the builder's 38 was taken here).
-const SAVE_VERSION: u32 = 7;
+/// Version 8: Castle P5b — the entity record gains the monk
+/// faith/conversion block and the frozen patch snapshot
+/// (MNK-12), and the codecs gain `Convert` (Command tag 44,
+/// QueuedOrder tag 9).
+const SAVE_VERSION: u32 = 8;
 
 /// Little-endian byte writer over a growable buffer.
 struct W {
@@ -196,6 +200,8 @@ impl W {
             QueuedOrder::Repair { building } => self.u32(building),
             // Package J landing: QueuedOrder::RepairTc (tag 7).
             QueuedOrder::RepairTc { tc } => self.u32(tc),
+            // Castle P5b: QueuedOrder::Convert (tag 9).
+            QueuedOrder::Convert { target } => self.u32(target),
         }
     }
     fn bell_snapshot(&mut self, v: Option<BellSnapshot>) {
@@ -480,6 +486,13 @@ impl W {
                 self.u32(entity);
                 self.u32(target);
             }
+            // Castle P5b: the Monk's convert order (MNK-03) at
+            // tag 44, append-only.
+            Command::Convert { entity, target } => {
+                self.u8(44);
+                self.u32(entity);
+                self.u32(target);
+            }
         }
     }
 }
@@ -680,6 +693,24 @@ impl Sim {
             w.bool(e.trade_loaded);
             w.opt_u32(e.heal_target);
             w.i64(e.heal_remainder);
+            // Castle P5b (v8): the monk conversion block (MNK-02/
+            // 03/05/07) and the frozen patch snapshot (MNK-12),
+            // in blank-default form on every non-monk entity.
+            w.i32(e.faith);
+            w.i64(e.faith_remainder);
+            w.opt_u32(e.conversion_target);
+            w.u32(e.ci_progress);
+            w.u32(e.ci_ticks);
+            w.u8(e.conversion_level);
+            w.i32(e.conversion_start_shift);
+            w.i32(e.conversion_guarantee_shift);
+            match e.frozen_patches {
+                None => w.u8(0),
+                Some(m) => {
+                    w.u8(1);
+                    w.u64(m);
+                }
+            }
             w.usize(e.garrison.len());
             for id in &e.garrison {
                 w.u32(*id);
@@ -875,6 +906,7 @@ impl<'a> R<'a> {
                 x: self.fx()?,
                 y: self.fx()?,
             }),
+            9 => Some(QueuedOrder::Convert { target: self.u32()? }),
             _ => None,
         }
     }
@@ -1087,6 +1119,10 @@ impl<'a> R<'a> {
                 on: self.bool()?,
             }),
             43 => Some(Command::Heal {
+                entity: self.u32()?,
+                target: self.u32()?,
+            }),
+            44 => Some(Command::Convert {
                 entity: self.u32()?,
                 target: self.u32()?,
             }),
@@ -1374,6 +1410,19 @@ impl Sim {
             let trade_loaded = r.bool()?;
             let heal_target = r.opt_u32()?;
             let heal_remainder = r.i64()?;
+            let faith = r.i32()?;
+            let faith_remainder = r.i64()?;
+            let conversion_target = r.opt_u32()?;
+            let ci_progress = r.u32()?;
+            let ci_ticks = r.u32()?;
+            let conversion_level = r.u8()?;
+            let conversion_start_shift = r.i32()?;
+            let conversion_guarantee_shift = r.i32()?;
+            let frozen_patches = match r.u8()? {
+                0 => None,
+                1 => Some(r.u64()?),
+                _ => return None,
+            };
             let n_g = r.count(4)?;
             let mut garrison = Vec::with_capacity(n_g);
             for _ in 0..n_g {
@@ -1436,6 +1485,15 @@ impl Sim {
                 trade_loaded,
                 heal_target,
                 heal_remainder,
+                faith,
+                faith_remainder,
+                conversion_target,
+                ci_progress,
+                ci_ticks,
+                conversion_level,
+                conversion_start_shift,
+                conversion_guarantee_shift,
+                frozen_patches,
                 garrison,
             });
         }

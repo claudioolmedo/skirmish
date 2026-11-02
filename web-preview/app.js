@@ -445,6 +445,7 @@ let TECH_NAME = {
   27: 'Town Watch', 28: 'Town Patrol', 29: 'Conscription',
   30: 'Heavy Plow', 31: 'Crop Rotation',
   32: 'Sanctity', 33: 'Fervor', 34: 'Herbal Medicine',
+  35: 'Atonement', 36: 'Devotion',
 };
 // Research-block explanations, indexed by the sim's ResearchBlock
 // tag (0 ok — unused, 1 funds, 2 queue full, 3 already done,
@@ -495,6 +496,7 @@ function refreshNames() {
     30: t('tech.heavyplow'), 31: t('tech.croprotation'),
     32: t('tech.sanctity'), 33: t('tech.fervor'),
     34: t('tech.herbalmedicine'),
+    35: t('tech.atonement'), 36: t('tech.devotion'),
   };
   RESEARCH_BLOCK_TITLES = [
     '', t('block.noResources'), t('block.queueFullTrain'),
@@ -1110,6 +1112,7 @@ let wallAnchor = null;
 let repairArm = false; // Repair targeting armed (villager root panel, E)
 let orderArm = null; // CMB-10/11 order targeting armed: 'attackmove' | 'patrol' | 'attackground' | null
 let healArm = false; // Heal targeting armed (Castle P5a — the Monk panel's Heal button)
+let convertArm = false; // Convert targeting armed (Castle P5b — the Monk panel's Convert button)
 // M13 hotkey state (client-only, like placement): the armed
 // villager build page ('eco' | 'mil' | null), the go-to cycle
 // memory (building kind -> last id handed out), and the building
@@ -1233,7 +1236,7 @@ function updateEventFeed() {
   const lines = diffFeedEvents(prev, snap, {
     buildingName: (k) => BUILD_NAME[k],
     unitName: (k) => KIND_NAME[k],
-    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15, lightcavalry: 16, husbandry: 17, caravan: 19, coinage: 25, banking: 26, townwatch: 27, townpatrol: 28, conscription: 29, heavyplow: 30, croprotation: 31, sanctity: 32, fervor: 33, herbalmedicine: 34 }[key]],
+    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15, lightcavalry: 16, husbandry: 17, caravan: 19, coinage: 25, banking: 26, townwatch: 27, townpatrol: 28, conscription: 29, heavyplow: 30, croprotation: 31, sanctity: 32, fervor: 33, herbalmedicine: 34, atonement: 35, devotion: 36 }[key]],
   }, feedFmt());
   feedPrev = snap;
   for (const text of lines) pushFeedLine(text);
@@ -2771,6 +2774,7 @@ addEventListener('keydown', (e) => {
       repairArm = false;
     } else if (healArm) {
       healArm = false; // Castle P5a: Esc disarms Heal targeting
+      convertArm = false; // Castle P5b: Esc disarms Convert targeting
     } else if (orderArm) {
       orderArm = null; // CMB-10/11: Esc disarms order targeting
     } else if (buildPage) {
@@ -3757,6 +3761,8 @@ function applyLocalOrder(cmd) {
     case 'trade': return sim.push_trade(cmd.e, cmd.b);
     // Castle P5a (MNK-10): task a Monk to heal an allied unit.
     case 'heal': return sim.push_heal(cmd.e, cmd.tg);
+    // Castle P5b (MNK-03): task a Monk to convert an enemy unit.
+    case 'convert': return sim.push_convert(cmd.e, cmd.tg);
     case 'train_vil': return sim.push_train_villager_at(cmd.tc != null ? cmd.tc : myTcId);
     case 'research_tc': return sim.push_research_tc_at(cmd.tc != null ? cmd.tc : myTcId, cmd.tech);
     case 'research_at': return sim.push_research_at(cmd.b, cmd.tech);
@@ -7249,6 +7255,21 @@ async function main() {
       }
       if (any) { orderAck('order'); return; }
     }
+    // Convert (Castle P5b, MNK-03): a right-click on an ENEMY
+    // unit with Monk(s) selected tasks every selected Monk to
+    // convert it — the monk's other right-click purpose. The
+    // sim's can_convert gates each monk (faith, MNK-08's list —
+    // a Ram without Redemption is refused there and the click
+    // falls through to the ordinary meanings).
+    if (t != null && st.owners[t] !== localOwner && st.owners[t] !== 1
+        && targets.some((id) => st.kinds[id] === 20)) {
+      let any = false;
+      for (const id of targets) {
+        if (st.kinds[id] !== 20) continue;
+        if (issue({ t: 'convert', e: id, tg: t })) any = true;
+      }
+      if (any) { orderAck('order'); return; }
+    }
     const bT = buildingAt(wx, wy);
     // Trade tasking (Package D, TRD-05/07): a Trade Cart clicked
     // onto a foreign Market — ANY other player's completed
@@ -7492,6 +7513,37 @@ async function main() {
     playAudioCue('click');
   }
 
+  // Convert targeting (Castle P5b, MNK-03): the armed click
+  // names the victim — an enemy unit. Every selected Monk takes
+  // the order (the sim re-validates each: full faith, MNK-08's
+  // eligibility list). No queued form — the Convert order
+  // replaces, like Heal. The mirror flashes are courtesies; the
+  // sim's can_convert_target / can_convert are the authority.
+  function attemptConvert(wx, wy) {
+    const tg = entityAt(wx, wy);
+    if (tg == null) {
+      flash(t('flash.convertArmUnit'));
+      return;
+    }
+    const st = entityState();
+    if (st.owners[tg] === localOwner || st.owners[tg] === 1) {
+      flash(t('flash.convertEnemyOnly'));
+      return;
+    }
+    let any = false;
+    for (const id of selectedUnits()) {
+      if (st.kinds[id] !== 20) continue;
+      if (issue({ t: 'convert', e: id, tg })) any = true;
+    }
+    if (!any) {
+      convertArm = false;
+      flash(t('flash.convertRefused'));
+      return;
+    }
+    convertArm = false;
+    playAudioCue('click');
+  }
+
   // Attack-move / patrol targeting (CMB-10/11): the armed click
   // names the destination for every selected military unit. Group
   // destinations keep the orderAt group-move shape (each unit's
@@ -7719,6 +7771,10 @@ async function main() {
       if (!d.moved) attemptHeal(wx, wy); // a targeting click, not a drag
       return;
     }
+    if (convertArm) {
+      if (!d.moved) attemptConvert(wx, wy); // a targeting click, not a drag
+      return;
+    }
     if (orderArm) {
       if (!d.moved) attemptOrderGround(wx, wy, ev.shiftKey); // a targeting click, not a drag
       return;
@@ -7889,6 +7945,7 @@ async function main() {
     }
     if (healArm) {
       healArm = false; // Castle P5a: a right-click cancels Heal targeting
+      convertArm = false; // Castle P5b: a right-click cancels Convert targeting
       renderCommands();
       return;
     }
@@ -11331,7 +11388,21 @@ function runCommandButton(id, times = 1) {
       placement = null;
       repairArm = false;
       orderArm = null;
+      convertArm = false;
       flash(t('flash.healArm'));
+    }
+    playAudioCue('click');
+  } else if (id === 'convert') {
+    // Castle P5b (MNK-03): arm (or disarm) Convert targeting —
+    // the click that follows picks an enemy unit, exactly like
+    // Heal's arm. Re-clicking the armed button disarms it.
+    convertArm = !convertArm;
+    if (convertArm) {
+      placement = null;
+      repairArm = false;
+      orderArm = null;
+      healArm = false;
+      flash(t('flash.convertArm'));
     }
     playAudioCue('click');
   } else if (id.startsWith('stance-')) {
@@ -11472,6 +11543,7 @@ function runCommandButton(id, times = 1) {
       'research-heavyplow': 30, 'research-croprotation': 31,
       'research-sanctity': 32, 'research-fervor': 33,
       'research-herbalmedicine': 34,
+      'research-atonement': 35, 'research-devotion': 36,
     }[id];
     if (tag != null && selectedBuilding && selectedBuilding.type === 'building') {
       if (!issue({ t: 'research_at', b: selectedBuilding.id, tech: tag })) {
@@ -11636,7 +11708,7 @@ function renderCommands() {
     Math.floor(myStock()[3]),
     reason, queue, bk ? bk.id : -1, bk ? bk.queue : -1, bk && bk.complete ? 1 : 0,
     blockM, blockSp, blockA, blockSk, blockS, blockK, blockCA, blockP, blockR, blockMg, blockTC, blockMo, age, techMask, rbTc.join('.'), Object.values(rbB).join('.'),
-    tcQueueCodes, bkQueueCodes, buildPage || '', repairArm ? 1 : 0, healArm ? 1 : 0,
+    tcQueueCodes, bkQueueCodes, buildPage || '', repairArm ? 1 : 0, healArm ? 1 : 0, convertArm ? 1 : 0,
     // Castle P3b: the garrison counts and the bell state are panel
     // state (button faces + disabled states read them).
     context === 'tc' ? sim.tc_garrison_count(panelTcId()) : -1,
@@ -12149,6 +12221,27 @@ function renderCommands() {
       techBtn('research-sanctity', 32, 'i-sanctity', 'cmd.sanctityTitle', 60, 175, 1),
       techBtn('research-fervor', 33, 'i-fervor', 'cmd.fervorTitle', 50, 140, 2),
       techBtn('research-herbalmedicine', 34, 'i-herbalmedicine', 'cmd.herbalTitle', 35, 200, 3),
+      techBtn('research-atonement', 35, 'i-atonement', 'cmd.atonementTitle', 40, 325, 4),
+      // Devotion is the set's one mixed-cost row (100 food /
+      // 200 gold — dossier §5.6), so it cannot ride techBtn's
+      // gold-only shape; it mirrors the Market's chained cells.
+      (() => {
+        const tag = 36;
+        const done = techMaskHas(techMask, tag);
+        const rb = rbB[tag];
+        return cmdButton({
+          id: 'research-devotion', icon: 'i-devotion', label: TECH_NAME[tag],
+          costIcon: 'i-food', cost: 100, cost2Icon: 'i-gold', cost2: 200,
+          key: badgeForButton({ context, id: 'research-devotion', index: 5 }),
+          disabled: underConstruction || done || rb === 2 || rb === 3 || rb === 4,
+          title: underConstruction
+            ? t('cmd.underConstruction', { name: TECH_NAME[tag], building: BUILD_NAME[20] })
+            : done
+              ? t('cmd.researchDone', { name: TECH_NAME[tag] })
+              : t('cmd.devotionTitle', { name: TECH_NAME[tag], cost: costText([[100, 'food'], [200, 'gold']]), secs: 40 })
+                + (RESEARCH_BLOCK_TITLES[rb] ? ' ' + RESEARCH_BLOCK_TITLES[rb] : ''),
+        });
+      })(),
     );
   } else if (context === 'blacksmith') {
     // M6: the Blacksmith's Feudal researches — the three armor /
@@ -12491,6 +12584,14 @@ function renderCommands() {
       active: healArm, key: null,
       title: t('cmd.healTitle'),
     }));
+    // Castle P5b (MNK-03): the Convert button rides beside Heal
+    // on the same terms — it arms the convert cursor; the next
+    // click on an enemy unit issues the order.
+    cmdGrid.append(cmdButton({
+      id: 'convert', icon: 'i-convert', label: t('cmd.convert'),
+      active: convertArm, key: null,
+      title: t('cmd.convertTitle'),
+    }));
   }
   // SEL-14 (wiki Hotkey page): Stop and Delete ride along
   // whenever UNITS are selected — Stop halts every selected
@@ -12687,7 +12788,7 @@ function updateSelPanel() {
       } else if (kind === 20) {
         // Castle P5a: the monk never attacks — its line names
         // the heal order instead of the military boilerplate.
-        selInfo.textContent = t('sel.monkInfo', { hp: hpTxt });
+        selInfo.textContent = t('sel.monkInfo', { hp: hpTxt, faith: sim.monk_faith(id) });
       } else {
         selInfo.textContent = t('sel.militaryInfo', { hp: hpTxt });
       }

@@ -72,6 +72,8 @@ mod siege_p4a_tests;
 mod siege_p4b_tests;
 mod monastery_p5a_tests;
 #[cfg(test)]
+mod monastery_p5b_tests;
+#[cfg(test)]
 mod monastery_p5e_tests;
 #[cfg(test)]
 mod university_p3c_tests;
@@ -563,6 +565,21 @@ pub enum Command {
     /// faith state (faith is conversion's resource, P5b) and
     /// never interrupts the target's own orders.
     Heal { entity: u32, target: u32 },
+    /// Order a Monk to convert an enemy unit (Castle P5b,
+    /// MNK-03): the monk walks into conversion range (9 tiles)
+    /// and advances one conversion interval (CI ≈ 1.25 s) at a
+    /// time — 4 warm-up CIs, then a 38%-per-CI roll divided by
+    /// the target's resistance level (MNK-05), guaranteed at the
+    /// 9th CI (both counters shifted by the target's resistance
+    /// rows). Valid only at full faith (MNK-02) and only against
+    /// an eligible target (`Sim::can_convert` — MNK-08: villagers
+    /// and ordinary military always; enemy monks only with
+    /// Atonement; siege and buildings only with Redemption, a
+    /// Castle P5c tech, so that gate is closed in this slice).
+    /// A success transfers ownership with a frozen patch snapshot
+    /// (MNK-12) and drains every participating monk's faith
+    /// (MNK-06).
+    Convert { entity: u32, target: u32 },
 }
 
 /// ECO-14: one farm reseed costs 60 wood (MECHANICS-STUDY §6.3:
@@ -1570,6 +1587,98 @@ impl Sim {
         self.players[cs].destroyed_value += value as u64;
     }
 
+    /// Transfer one unit to a new owner (Castle P5b, MNK-12) —
+    /// the single function every conversion success routes
+    /// through (plan §3.4; the building arm joins it in P5c).
+    /// Steps, in order:
+    /// 1. **Frozen snapshot first, before ownership moves:** the
+    ///    unit is stamped with the patch mask it carries NOW
+    ///    (its old owner's researched set, age bits included —
+    ///    inert in the lookup). From here its stats resolve from
+    ///    the snapshot (`stats_for_masked`), so neither owner's
+    ///    later research changes it. Current HP is untouched;
+    ///    max HP comes from the snapshot row. Exception, per the
+    ///    rule: a converted villager BUILDS with the new owner's
+    ///    building set — build availability reads the owner, so
+    ///    nothing special is owed here.
+    /// 2. **Orders cleared:** the unit stands idle for its new
+    ///    owner — orders, queue, tasks, combat state, trade and
+    ///    heal tasks all clear; a converted monk's own in-flight
+    ///    conversion is discarded and its CI progress resets (it
+    ///    changed sides; MNK-07's stickiness governs target
+    ///    switches by one monk, not a change of allegiance).
+    /// 3. **Back-pointers:** population is DERIVED from entity
+    ///    ownership (`living_population_of`), so both seats'
+    ///    counts move in this same step with no stored counters
+    ///    to adjust; the AI reads rosters live off ownership each
+    ///    decision, so the unit leaves the old AI's plans the
+    ///    tick it converts; a Ram host's passengers keep their
+    ///    own ownership (their `garrisoned_in` names the Ram, not
+    ///    its owner).
+    /// 4. **Score:** VIC-04's Military component counts converted
+    ///    value exactly as destroyed value — credited through
+    ///    `credit_destruction` (same-slot and zero-value guards
+    ///    ride along).
+    pub(crate) fn transfer_ownership(&mut self, entity: u32, new_owner: u8) {
+        let Some(idx) = self.entity_index(entity) else {
+            return;
+        };
+        let old_owner = self.entities[idx].owner;
+        if old_owner == new_owner || self.entities[idx].dead {
+            return;
+        }
+        // 1. Frozen snapshot, before ownership moves.
+        let mask = self.tech_mask_of(old_owner);
+        let kind = self.entities[idx].kind;
+        {
+            let e = &mut self.entities[idx];
+            e.frozen_patches = Some(mask);
+            // 2. Orders and state cleared — idle for the new owner.
+            e.order = None;
+            e.vel_x = I16F16::ZERO;
+            e.vel_y = I16F16::ZERO;
+            e.order_queue.clear();
+            e.order_from_queue = false;
+            e.task = Task::Idle;
+            e.task_node = None;
+            e.task_building = None;
+            e.task_dropoff = None;
+            e.clear_combat();
+            e.auto_explore = false;
+            e.auto_target = None;
+            e.attack_move = None;
+            e.patrol.clear();
+            e.patrol_next = 0;
+            e.garrison_target = None;
+            e.garrison_prod_entry = false;
+            e.trade_target = None;
+            e.trade_loaded = false;
+            e.heal_target = None;
+            e.heal_remainder = 0;
+            e.conversion_target = None;
+            e.ci_progress = 0;
+            e.ci_ticks = 0;
+            // 3. Ownership moves (population/AI derive from it).
+            e.owner = new_owner;
+        }
+        // 3b. The new owner's own attackers stand down: units of
+        // the converting side that were attacking this unit (it
+        // was their enemy a tick ago) clear their engagement —
+        // it is friendly now, and `attack_step` does not re-check
+        // allegiance. The old owner's units were never attacking
+        // it (it was theirs), so no other sweep is owed.
+        for e in &mut self.entities {
+            if e.owner == new_owner
+                && (e.attack_target == Some(entity) || e.aggro_target == Some(entity))
+            {
+                e.clear_combat();
+                e.aggro_target = None;
+            }
+        }
+        // 4. VIC-04: converted value counts like destroyed value.
+        self.credit_destruction(new_owner, old_owner, unit_cost_value(kind));
+    }
+
     /// The summed resource cost credited to a player for enemy
     /// units and buildings destroyed (VIC-04's Military input).
     /// Gaia and unknown tags read 0.
@@ -1816,11 +1925,34 @@ impl Sim {
     /// current-HP grant and the Man-at-Arms kind swap — are in
     /// `apply_research`). Gaia's rows are never patched.
     pub fn stats_for(&self, owner: u8, kind: EntityKind) -> UnitSpec {
+        self.stats_for_masked(owner, kind, None)
+    }
+
+    /// `stats_for` with an optional frozen patch mask (Castle
+    /// P5b, MNK-12): while `frozen` is set, the tech patches layer
+    /// from that mask instead of the owner's researched set (the
+    /// age column still reads the owner's age — CLS-04's steps are
+    /// age state, not patch state; the mask itself carries the age
+    /// advancement bits the unit had at conversion, and no patch
+    /// in the table keys on them). This is the ONE lookup every
+    /// stat path for a converted unit must go through — a path
+    /// reading owner patches directly for a frozen unit is a
+    /// defect (the P5b tests hunt it by researching after a
+    /// conversion and asserting nothing changes).
+    pub(crate) fn stats_for_masked(
+        &self,
+        owner: u8,
+        kind: EntityKind,
+        frozen: Option<u64>,
+    ) -> UnitSpec {
         let mut s = *units::spec(kind);
         let Some(slot) = player_slot(owner) else {
             return s;
         };
-        let p = self.players[slot];
+        let mut p = self.players[slot];
+        if let Some(mask) = frozen {
+            p.techs = mask;
+        }
         // CLS-04: the Scout Cavalry's automatic Feudal row —
         // attack 3 → 5, speed 1.20 → 1.55 tiles/s, LoS 4 → 6.
         if kind == EntityKind::ScoutCavalry && p.age >= Age::Feudal {
@@ -2033,7 +2165,9 @@ impl Sim {
     /// read — damage, range, LoS and HP all key on the owner.
     pub(crate) fn unit_stats(&self, idx: usize) -> UnitSpec {
         let e = &self.entities[idx];
-        self.stats_for(e.owner, e.kind)
+        // MNK-12: a converted unit's row resolves from its frozen
+        // patch snapshot, never its new owner's set.
+        self.stats_for_masked(e.owner, e.kind, e.frozen_patches)
     }
 
     /// The effective weapon of a placed building kind for `owner`
@@ -3200,6 +3334,11 @@ impl Sim {
         // Castle P5a: Stop also ends a heal task (MNK-10).
         e.heal_target = None;
         e.heal_remainder = 0;
+        // Castle P5b: Stop also ends a conversion task (CI
+        // progress stays sticky — MNK-07 names only the manual
+        // move as a reset).
+        e.conversion_target = None;
+        e.ci_ticks = 0;
     }
 
     /// Would a `DeleteEntity` command be accepted right now?
@@ -3985,6 +4124,7 @@ impl Sim {
             QueuedOrder::AttackMove { .. } => self.can_attack_move(entity),
             QueuedOrder::Patrol { .. } => self.can_attack_move(entity),
             QueuedOrder::AttackGround { .. } => self.can_attack_ground(entity),
+            QueuedOrder::Convert { target } => self.can_convert(entity, target),
         }
     }
 
@@ -4116,6 +4256,7 @@ impl Sim {
             QueuedOrder::AttackMove { x, y } => Some((x, y)),
             QueuedOrder::Patrol { x, y } => Some((x, y)),
             QueuedOrder::AttackGround { x, y } => Some((x, y)),
+            QueuedOrder::Convert { target } => self.entity_pos(target),
         }
     }
 
@@ -4199,6 +4340,7 @@ impl Sim {
                     && e.attack_move.is_none()
                     && e.patrol.is_empty()
                     && e.heal_target.is_none()
+                    && e.conversion_target.is_none()
                     && e.garrisoned_in.is_none()
             })
             .map(|e| e.id)
@@ -4306,6 +4448,7 @@ impl Sim {
                     self.issue_set_auto_reseed(building, on)
                 }
                 Command::Heal { entity, target } => self.issue_heal(entity, target),
+                Command::Convert { entity, target } => self.issue_convert(entity, target),
             }
         }
 
@@ -4623,6 +4766,14 @@ impl Sim {
             // the monk is re-tasked by hand (MNK-10).
             e.heal_target = None;
             e.heal_remainder = 0;
+            // Castle P5b (MNK-07): a MANUAL move order is the one
+            // reset of CI progress — the conversion task ends and
+            // the sticky counter zeroes. (The monk phase's own
+            // chase walks through `set_move_order`, never here,
+            // so chasing does not reset.)
+            e.conversion_target = None;
+            e.ci_progress = 0;
+            e.ci_ticks = 0;
         }
         // CMB-09: a Defensive unit's post follows its explicit
         // move orders — the post is the resolved destination.
@@ -6094,6 +6245,13 @@ impl Sim {
                     return false;
                 }
                 self.apply_attack_ground(idx, x, y);
+                true
+            }
+            QueuedOrder::Convert { target } => {
+                if !self.can_convert(entity, target) {
+                    return false;
+                }
+                self.apply_convert(idx, target);
                 true
             }
         }
@@ -8476,6 +8634,7 @@ impl Sim {
                         h.write_i32(x.to_bits());
                         h.write_i32(y.to_bits());
                     }
+                    QueuedOrder::Convert { target } => h.write_u32(target),
                 }
             }
             // INF-09: the current order's queue provenance
@@ -8775,7 +8934,17 @@ impl Sim {
             // hashes bit-identically to before. The P5b slice
             // extends this block with the faith/conversion
             // fields, appended after these.
-            if e.heal_target.is_some() || e.heal_remainder != 0 {
+            if e.heal_target.is_some()
+                || e.heal_remainder != 0
+                || e.faith != 100_000
+                || e.faith_remainder != 0
+                || e.conversion_target.is_some()
+                || e.ci_progress != 0
+                || e.ci_ticks != 0
+                || e.conversion_level != 1
+                || e.conversion_start_shift != 0
+                || e.conversion_guarantee_shift != 0
+            {
                 h.write_u8(0xBB);
                 match e.heal_target {
                     None => h.write_u8(0),
@@ -8785,6 +8954,34 @@ impl Sim {
                     }
                 }
                 h.write_u64(e.heal_remainder as u64);
+                // Castle P5b extension, appended after the P5a
+                // fields inside the same block: faith, its regen
+                // remainder, the conversion record (target, sticky
+                // CI counters, resistance stamps). A monk at rest
+                // (full faith, no conversion) still writes nothing.
+                h.write_i32(e.faith);
+                h.write_u64(e.faith_remainder as u64);
+                match e.conversion_target {
+                    None => h.write_u8(0),
+                    Some(t) => {
+                        h.write_u8(1);
+                        h.write_u32(t);
+                    }
+                }
+                h.write_u32(e.ci_progress);
+                h.write_u32(e.ci_ticks);
+                h.write_u8(e.conversion_level);
+                h.write_i32(e.conversion_start_shift);
+                h.write_i32(e.conversion_guarantee_shift);
+            }
+            // Castle P5b (MNK-12): the frozen patch snapshot —
+            // written ONLY while set, behind marker 0xBD (the
+            // entity section's next free byte; 0xBC is the
+            // Attack Ground point above), so a match with no
+            // conversion hashes byte-identically to before.
+            if let Some(mask) = e.frozen_patches {
+                h.write_u8(0xBD);
+                h.write_u64(mask);
             }
         }
         // M3: projectiles in flight, in spawn order.

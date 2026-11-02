@@ -285,11 +285,21 @@ pub enum TechId {
     /// (Castle P5e, GAR-04's Herbal Medicine row of TEC-10).
     /// Tag 34.
     HerbalMedicine,
+    /// Monastery, Castle: Monks can convert enemy Monks
+    /// (Castle P5b, MNK-08's Atonement row of TEC-10). Tag 35 —
+    /// appended after P5e's 34: each P5 slice appends its own
+    /// technologies when it lands (the P5a renumber precedent).
+    Atonement,
+    /// Monastery, Castle: conversion min & max +1 CI each for own
+    /// units as targets (Castle P5b, MNK-05's Devotion row of
+    /// TEC-10; the only non-pure-gold row in the set: 100 F /
+    /// 200 G). Tag 36.
+    Devotion,
 }
 
 impl TechId {
     /// All technologies, in tag order.
-    pub const ALL: [TechId; 35] = [
+    pub const ALL: [TechId; 37] = [
         TechId::Loom,
         TechId::FeudalAge,
         TechId::Fletching,
@@ -325,6 +335,8 @@ impl TechId {
         TechId::Sanctity,
         TechId::Fervor,
         TechId::HerbalMedicine,
+        TechId::Atonement,
+        TechId::Devotion,
     ];
 
     /// Stable tag: 0 loom, 1 feudal age, 2 fletching, 3 scale mail,
@@ -404,6 +416,8 @@ impl TechId {
             TechId::Sanctity => 32,
             TechId::Fervor => 33,
             TechId::HerbalMedicine => 34,
+            TechId::Atonement => 35,
+            TechId::Devotion => 36,
         }
     }
 
@@ -459,9 +473,11 @@ impl TechId {
             // Castle P5a/P5e: the Monastery set (grows with the
             // P5 slices — Redemption/Atonement/Heresy/Devotion
             // join this arm as they land).
-            TechId::Sanctity | TechId::Fervor | TechId::HerbalMedicine => {
-                TechHost::Building(BuildingKind::Monastery)
-            }
+            TechId::Sanctity
+            | TechId::Fervor
+            | TechId::HerbalMedicine
+            | TechId::Atonement
+            | TechId::Devotion => TechHost::Building(BuildingKind::Monastery),
         }
     }
 
@@ -480,10 +496,12 @@ impl TechId {
             | TechId::Coinage
             | TechId::TownPatrol
             | TechId::HeavyPlow
-            // Castle P5a/P5e: the Monastery set is Castle Age research.
+            // Castle P5a/P5e/P5b: the Monastery set is Castle Age research.
             | TechId::Sanctity
             | TechId::Fervor
             | TechId::HerbalMedicine
+            | TechId::Atonement
+            | TechId::Devotion
             // Castle P3c: the University set is Castle Age research.
             | TechId::Ballistics
             | TechId::MurderHoles
@@ -561,6 +579,8 @@ impl TechId {
             TechId::Sanctity => 3600, // 60 s (wiki, Sanctity — dossier §5.6)
             TechId::Fervor => 3000, // 50 s (wiki, Fervor — dossier §5.6)
             TechId::HerbalMedicine => 2100, // 35 s (wiki, Herbal Medicine — dossier §5.6)
+            TechId::Atonement => 2400, // 40 s (wiki, Atonement — dossier §5.6)
+            TechId::Devotion => 2400, // 40 s (wiki, Devotion — dossier §5.6)
         }
     }
 
@@ -603,6 +623,8 @@ impl TechId {
             TechId::Sanctity => (0, 0, 175, 0), // wiki, Sanctity — dossier §5.6
             TechId::Fervor => (0, 0, 140, 0), // wiki, Fervor — dossier §5.6
             TechId::HerbalMedicine => (0, 0, 200, 0), // wiki, Herbal Medicine — dossier §5.6
+            TechId::Atonement => (0, 0, 325, 0), // wiki, Atonement — dossier §5.6
+            TechId::Devotion => (100, 0, 200, 0), // wiki, Devotion — dossier §5.6
         }
     }
 }
@@ -859,7 +881,10 @@ mod tests {
         assert_eq!(TechId::from_tag(33), Some(TechId::Fervor));
         // Castle P5e: Herbal Medicine appends at 34.
         assert_eq!(TechId::from_tag(34), Some(TechId::HerbalMedicine));
-        assert_eq!(TechId::from_tag(35), None);
+        // Castle P5b: Atonement / Devotion append at 35/36.
+        assert_eq!(TechId::from_tag(35), Some(TechId::Atonement));
+        assert_eq!(TechId::from_tag(36), Some(TechId::Devotion));
+        assert_eq!(TechId::from_tag(37), None);
     }
 
     #[test]
@@ -1003,8 +1028,9 @@ mod tests {
         assert_eq!(TechId::from_tag(31), Some(TechId::CropRotation));
         // 32 entries at this test's landing; P5a's Sanctity/
         // Fervor (32/33) and P5e's Herbal Medicine (34) append
-        // after it, so ALL now holds 35.
-        assert_eq!(TechId::ALL.len(), 35);
+        // after it, and P5b's Atonement/Devotion (35/36) after
+        // those, so ALL now holds 37.
+        assert_eq!(TechId::ALL.len(), 37);
         // ECO-14: the farm gather lookup meets the farm's own
         // 0.4 food/s work-rate cap — the base farm rate sits
         // below it today, so the clamped value is the base rate,

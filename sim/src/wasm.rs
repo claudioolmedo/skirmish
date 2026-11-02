@@ -436,6 +436,32 @@ impl WasmSim {
         ok
     }
 
+    /// Order a Monk to convert an enemy unit (Castle P5b,
+    /// MNK-03): the monk walks into range 9 and works the CI
+    /// model. Returns whether the order *would* be accepted
+    /// (eligible target, MNK-08, at full faith, MNK-02); the sim
+    /// re-validates when the command is applied.
+    pub fn push_convert(&mut self, entity: u32, target: u32) -> bool {
+        let ok = self.inner.can_convert(entity, target);
+        if ok {
+            self.inner.push_command(Command::Convert { entity, target });
+        }
+        ok
+    }
+
+    /// Whether `target` is conversion-eligible for the monk
+    /// `entity` (Castle P5b, MNK-08 — eligibility only, no faith
+    /// gate): the client's cursor feedback read.
+    pub fn can_convert_target(&self, entity: u32, target: u32) -> bool {
+        self.inner.can_convert_target(entity, target)
+    }
+
+    /// A Monk's faith as a whole percent 0..100 (Castle P5b,
+    /// MNK-02): the selection-line read.
+    pub fn monk_faith(&self, entity: u32) -> i32 {
+        self.inner.monk_faith(entity)
+    }
+
     /// Enqueue a Trade Cart at a completed Market (Package D,
     /// TRD-05 — the Market is the cart's only home; `can_train_at`
     /// carries the Feudal Age gate). See `push_train_militia`.
