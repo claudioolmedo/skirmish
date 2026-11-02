@@ -135,3 +135,196 @@ test('the mask paints the synthesized polygon for call-less occluders', () => {
     /if \(!o\.it\.calls\.length && o\.it\.occ\.poly\)/,
     'call-less occluders contribute their polygon to the silhouette mask');
 });
+
+// ---------------------------------------------------------------------------
+// INF-12 vector-only units (bot-loop, 2026-11-02): the SAME structural
+// blindness the monk had, closed preventively for every remaining
+// production draw that was 100% vector (zero drawImage, no art-sheet
+// path consulted). Audit of UNIT_DRAW on origin/main 27f28f0: Villager,
+// Scout, Militia/Man-at-Arms, Archer, Spearman, Skirmisher and the
+// animals all route through drawImage art paths (drawDirUnit /
+// drawUnitPose / drawSpriteH) and were already visible to the pass;
+// only the five draws below — plus the monk above — never emitted a
+// drawImage. Each now paints its identical figure once into a cached
+// offscreen sprite and blits it, keeping a vector fallback. Every
+// figure is static (no walk/attack animation state feeds any of
+// these draws); the Trade Cart's only state is its binary loaded
+// flag, which keys its cache. Presentation only; INF-12's Status
+// is untouched (filled-vs-outline remains Claudio's decision).
+
+test('drawCavalry blits a cached sprite through drawImage', () => {
+  const body = fnBody('drawCavalry');
+  assert.match(body, /cavalrySprite\(variant, cloth\)/,
+    'drawCavalry obtains the cached cavalry sprite');
+  assert.match(body, /ctx\.drawImage\(spr,/,
+    'drawCavalry records a drawImage call the INF-12 recorder can capture');
+  assert.match(body, /paintCavalryFigure\(ctx, sx, sy, u, variant, cloth\)/,
+    'vector fallback retained for environments without a canvas');
+  assert.equal((body.match(/ctx\.drawImage\(/g) || []).length, 1,
+    'exactly one drawImage per cavalry draw');
+});
+
+test('the cavalry sprite is cached per variant and cloth colour', () => {
+  const body = fnBody('cavalrySprite');
+  assert.match(body, /cavalrySpriteCache\.has\(key\)/,
+    'cache is consulted before painting');
+  assert.match(body, /cavalrySpriteCache\.set\(key, cv\)/,
+    'painted sprite is stored per (variant, cloth) key');
+  assert.match(body, /paintCavalryFigure\(g,/,
+    'the sprite is painted by the shared figure painter');
+});
+
+test('paintCavalryFigure keeps the original figure (colours unchanged)', () => {
+  const body = fnBody('paintCavalryFigure');
+  for (const colour of ['#5d4630', '#6e6258', '#8a6844', '#77572f', '#b9bec6', '#9aa1ab', '#e8c39a', '#d8d8d8']) {
+    assert.ok(body.includes(colour),
+      `figure colour ${colour} preserved (legs, horses, armor, helm, weapons)`);
+  }
+  assert.match(body, /g\.ellipse\(sx, sy - 0\.95 \* u, 1\.15 \* u, 0\.55 \* u/,
+    'the horse body keeps its geometry');
+  assert.match(body, /variant === 'knight'/, 'knight variant branch preserved');
+  assert.match(body, /variant === 'cavarcher'/, 'cavalry archer variant branch preserved');
+});
+
+test('drawPetard blits a cached sprite through drawImage', () => {
+  const body = fnBody('drawPetard');
+  assert.match(body, /petardSprite\(cloth\)/,
+    'drawPetard obtains the cached petard sprite');
+  assert.match(body, /ctx\.drawImage\(spr,/,
+    'drawPetard records a drawImage call the INF-12 recorder can capture');
+  assert.match(body, /paintPetardFigure\(ctx, sx, sy, u, cloth\)/,
+    'vector fallback retained for environments without a canvas');
+  assert.equal((body.match(/ctx\.drawImage\(/g) || []).length, 1,
+    'exactly one drawImage per petard draw');
+});
+
+test('the petard sprite is cached per tunic colour', () => {
+  const body = fnBody('petardSprite');
+  assert.match(body, /petardSpriteCache\.has\(cloth\)/,
+    'cache is consulted before painting');
+  assert.match(body, /petardSpriteCache\.set\(cloth, cv\)/,
+    'painted sprite is stored per tunic colour');
+  assert.match(body, /paintPetardFigure\(g,/,
+    'the sprite is painted by the shared figure painter');
+});
+
+test('paintPetardFigure keeps the original figure (colours unchanged)', () => {
+  const body = fnBody('paintPetardFigure');
+  for (const colour of ['#e8c39a', '#4a3826', '#2e2a24', '#ffb347']) {
+    assert.ok(body.includes(colour),
+      `figure colour ${colour} preserved (head, barrel, bands, fuse spark)`);
+  }
+  assert.match(body, /g\.ellipse\(sx \+ 0\.55 \* u, sy - 0\.95 \* u, 0\.52 \* u, 0\.62 \* u/,
+    'the powder barrel keeps its geometry');
+});
+
+test('drawBatteringRam blits a cached sprite through drawImage', () => {
+  const body = fnBody('drawBatteringRam');
+  assert.match(body, /batteringRamSprite\(roof\)/,
+    'drawBatteringRam obtains the cached ram sprite');
+  assert.match(body, /ctx\.drawImage\(spr,/,
+    'drawBatteringRam records a drawImage call the INF-12 recorder can capture');
+  assert.match(body, /paintBatteringRamFigure\(ctx, sx, sy, u, roof\)/,
+    'vector fallback retained for environments without a canvas');
+  assert.equal((body.match(/ctx\.drawImage\(/g) || []).length, 1,
+    'exactly one drawImage per ram draw');
+});
+
+test('the battering ram sprite is cached per roof colour', () => {
+  const body = fnBody('batteringRamSprite');
+  assert.match(body, /ramSpriteCache\.has\(roof\)/,
+    'cache is consulted before painting');
+  assert.match(body, /ramSpriteCache\.set\(roof, cv\)/,
+    'painted sprite is stored per roof colour');
+  assert.match(body, /paintBatteringRamFigure\(g,/,
+    'the sprite is painted by the shared figure painter');
+});
+
+test('paintBatteringRamFigure keeps the original figure (colours unchanged)', () => {
+  const body = fnBody('paintBatteringRamFigure');
+  for (const colour of ['#2e2418', '#5f4c36', '#8a6844', '#c8ccd2', '#3a3a40']) {
+    assert.ok(body.includes(colour),
+      `figure colour ${colour} preserved (wheels, frame, log, iron cap, chains)`);
+  }
+  assert.match(body, /g\.fillRect\(sx - 1\.3 \* u, sy - 1\.55 \* u, 2\.35 \* u, 0\.5 \* u\)/,
+    'the slung log keeps its geometry');
+});
+
+test('drawMangonel blits a cached sprite through drawImage', () => {
+  const body = fnBody('drawMangonel');
+  assert.match(body, /mangonelSprite\(cloth\)/,
+    'drawMangonel obtains the cached mangonel sprite');
+  assert.match(body, /ctx\.drawImage\(spr,/,
+    'drawMangonel records a drawImage call the INF-12 recorder can capture');
+  assert.match(body, /paintMangonelFigure\(ctx, sx, sy, u, cloth\)/,
+    'vector fallback retained for environments without a canvas');
+  assert.equal((body.match(/ctx\.drawImage\(/g) || []).length, 1,
+    'exactly one drawImage per mangonel draw');
+});
+
+test('the mangonel sprite is cached per cloth colour', () => {
+  const body = fnBody('mangonelSprite');
+  assert.match(body, /mangonelSpriteCache\.has\(cloth\)/,
+    'cache is consulted before painting');
+  assert.match(body, /mangonelSpriteCache\.set\(cloth, cv\)/,
+    'painted sprite is stored per cloth colour');
+  assert.match(body, /paintMangonelFigure\(g,/,
+    'the sprite is painted by the shared figure painter');
+});
+
+test('paintMangonelFigure keeps the original figure (colours unchanged)', () => {
+  const body = fnBody('paintMangonelFigure');
+  for (const colour of ['#2e2418', '#8a6844', '#5f4c36', '#6d543a', '#4a4234', '#3a3a40', '#6e6e73', '#5b5b60']) {
+    assert.ok(body.includes(colour),
+      `figure colour ${colour} preserved (wheels, frame, arm, sling, stones)`);
+  }
+  assert.match(body, /g\.moveTo\(sx \+ 0\.75 \* u, sy - 1\.35 \* u\)/,
+    'the cocked throwing arm keeps its geometry');
+});
+
+test('drawTradeCart blits a cached sprite through drawImage', () => {
+  const body = fnBody('drawTradeCart');
+  assert.match(body, /tradeCartSprite\(cloth, loaded\)/,
+    'drawTradeCart obtains the cached trade cart sprite');
+  assert.match(body, /ctx\.drawImage\(spr,/,
+    'drawTradeCart records a drawImage call the INF-12 recorder can capture');
+  assert.match(body, /paintTradeCartFigure\(ctx, sx, sy, u, cloth, loaded\)/,
+    'vector fallback retained for environments without a canvas');
+  assert.equal((body.match(/ctx\.drawImage\(/g) || []).length, 1,
+    'exactly one drawImage per trade cart draw');
+});
+
+test('the trade cart sprite is cached per cloth colour and load state', () => {
+  const body = fnBody('tradeCartSprite');
+  assert.match(body, /tradeCartSpriteCache\.has\(key\)/,
+    'cache is consulted before painting');
+  assert.match(body, /tradeCartSpriteCache\.set\(key, cv\)/,
+    'painted sprite is stored per (cloth, loaded) key');
+  assert.match(body, /paintTradeCartFigure\(g,/,
+    'the sprite is painted by the shared figure painter');
+});
+
+test('paintTradeCartFigure keeps the original figure (colours unchanged)', () => {
+  const body = fnBody('paintTradeCartFigure');
+  for (const colour of ['#6d4c33', '#5d4030', '#8a6844', '#4a3826', '#c9a227', '#b8a888', '#e8c39a']) {
+    assert.ok(body.includes(colour),
+      `figure colour ${colour} preserved (horse, shafts, bed, gold, canvas, driver)`);
+  }
+  assert.match(body, /if \(loaded\)/,
+    'the loaded/unloaded load branch is preserved inside the painter');
+  assert.match(body, /g\.fillRect\(sx - 1\.35 \* u, sy - 1\.28 \* u, 1\.35 \* u, 0\.5 \* u\)/,
+    'the cart bed keeps its geometry');
+});
+
+test('the unit draw table still routes the converted kinds', () => {
+  assert.match(appJs, /drawKnight, drawLightCavalry, drawCavalryArcher,/,
+    'UNIT_DRAW[12/13/14] remain the cavalry draws');
+  assert.match(appJs, /drawPetard, \/\/ 15: Petard/,
+    'UNIT_DRAW[15] remains drawPetard');
+  assert.match(appJs, /drawTradeCart, \/\/ 16: Trade Cart/,
+    'UNIT_DRAW[16] remains drawTradeCart');
+  assert.match(appJs, /drawBatteringRam, \/\/ 17: Battering Ram/,
+    'UNIT_DRAW[17] remains drawBatteringRam');
+  assert.match(appJs, /drawMangonel, \/\/ 18: Mangonel/,
+    'UNIT_DRAW[18] remains drawMangonel');
+});
