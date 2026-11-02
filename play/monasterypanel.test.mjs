@@ -80,3 +80,29 @@ test('techDone reads high tags off the f64 mask, never the aliased low bits', ()
   assert.equal(techDone(0, 1, 0), true, 'Loom (0) still reads off bit 0');
   assert.equal(techDone(1, 0, 1), true, 'Feudal advancement still reads off the age, not a bit');
 });
+
+test('Castle P5b: Monastery panel carries Atonement + Devotion at tags 35/36', () => {
+  assert.match(appJs, /techBtn\('research-atonement', 35, 'i-atonement', 'cmd\.atonementTitle', 40, 325, 4\)/,
+    'Atonement button rides tag 35 at 325 gold / 40 s');
+  assert.match(appJs, /id: 'research-devotion'[\s\S]*?cost: 100, cost2Icon: 'i-gold', cost2: 200/,
+    'Devotion button carries its mixed cost (100 food / 200 gold)');
+  assert.match(appJs, /'research-atonement': 35, 'research-devotion': 36/,
+    'research dispatch maps both buttons to tags 35/36');
+  assert.match(appJs, /35: 'Atonement', 36: 'Devotion'/,
+    'TECH_NAME carries both new techs');
+});
+
+test('Castle P5b: Convert order path — dispatch, smart order, arm, faith line', () => {
+  assert.match(appJs, /case 'convert': return sim\.push_convert\(cmd\.e, cmd\.tg\)/,
+    'applyCommand dispatches convert to the sim');
+  assert.match(appJs, /issue\(\{ t: 'convert', e: id, tg: t \}\)/,
+    'right-click smart order issues convert for selected monks');
+  assert.match(appJs, /id: 'convert', icon: 'i-convert'/,
+    'the monk panel carries the Convert button');
+  assert.match(appJs, /sim\.monk_faith\(id\)/,
+    'the monk selection line reads faith from the sim');
+  assert.match(wasmRs, /pub fn push_convert/,
+    'the wasm boundary exports push_convert');
+  assert.match(wasmRs, /pub fn monk_faith/,
+    'the wasm boundary exports monk_faith');
+});

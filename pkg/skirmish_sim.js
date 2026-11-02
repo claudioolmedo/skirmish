@@ -121,6 +121,18 @@ export class WasmSim {
         return v1;
     }
     /**
+     * Whether `target` is conversion-eligible for the monk
+     * `entity` (Castle P5b, MNK-08 — eligibility only, no faith
+     * gate): the client's cursor feedback read.
+     * @param {number} entity
+     * @param {number} target
+     * @returns {boolean}
+     */
+    can_convert_target(entity, target) {
+        const ret = wasm.wasmsim_can_convert_target(this.__wbg_ptr, entity, target);
+        return ret !== 0;
+    }
+    /**
      * Cell edge length in world units.
      * @returns {number}
      */
@@ -510,6 +522,16 @@ export class WasmSim {
     mode() {
         const ret = wasm.wasmsim_mode(this.__wbg_ptr);
         return ret >>> 0;
+    }
+    /**
+     * A Monk's faith as a whole percent 0..100 (Castle P5b,
+     * MNK-02): the selection-line read.
+     * @param {number} entity
+     * @returns {number}
+     */
+    monk_faith(entity) {
+        const ret = wasm.wasmsim_monk_faith(this.__wbg_ptr, entity);
+        return ret;
     }
     /**
      * Create a simulation from a seed.
@@ -1312,6 +1334,20 @@ export class WasmSim {
      */
     push_cancel_queue_tc(tc, index) {
         const ret = wasm.wasmsim_push_cancel_queue_tc(this.__wbg_ptr, tc, index);
+        return ret !== 0;
+    }
+    /**
+     * Order a Monk to convert an enemy unit (Castle P5b,
+     * MNK-03): the monk walks into range 9 and works the CI
+     * model. Returns whether the order *would* be accepted
+     * (eligible target, MNK-08, at full faith, MNK-02); the sim
+     * re-validates when the command is applied.
+     * @param {number} entity
+     * @param {number} target
+     * @returns {boolean}
+     */
+    push_convert(entity, target) {
+        const ret = wasm.wasmsim_push_convert(this.__wbg_ptr, entity, target);
         return ret !== 0;
     }
     /**
