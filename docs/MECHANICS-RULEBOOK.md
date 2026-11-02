@@ -774,13 +774,7 @@ and hash-safe since slots are just per-unit targets. · *Status:*
 tiles, a formed group narrows into a file/column for travel and re-forms
 near the destination.
 *Source:* GAP 2.10. · *Impl:* a slot-layout switch keyed on order distance
-in the same assignment function as MOV-07. Shipped for the unit arms in Castle P5b (2026-11-02): the counter
-lives on the monk; unit→unit switches and the automatic chase keep it,
-a manual move order zeroes it. The building→unit reset arm lands with
-building conversion in P5c (no building conversion exists yet to
-switch from). Pinned by
-`ci_progress_is_sticky_across_targets_and_chase_but_not_manual_move`.
-· *Status:* **MATCHES**.
+in the same assignment function as MOV-07. · *Status:* **MISSING**.
 
 **MOV-09 — Facing is one of 8 directions.** A unit has a facing (8-way);
 it attacks and is rendered in its facing; melee engagement turns the unit
@@ -2733,7 +2727,13 @@ resumes when the monk re-engages.
 *Source:* wiki, Conversion (persistence rules, incl. the update-95810
 building→unit reset). · *Impl:* the CI counter lives on the *monk*, not
 the pairing; only (manual-move command | building→unit switch) zeroes it.
-· *Status:* **MISSING**.
+Shipped for the unit arms in Castle P5b (2026-11-02): the counter
+lives on the monk; unit→unit switches and the automatic chase keep it,
+a manual move order zeroes it. The building→unit reset arm lands with
+building conversion in P5c (no building conversion exists yet to
+switch from). Pinned by
+`ci_progress_is_sticky_across_targets_and_chase_but_not_manual_move`.
+· *Status:* **MATCHES**.
 
 **MNK-08 — Conversion immunity list.** Never convertible: heroes, Kings.
 Convertible only with Redemption: siege units and buildings — and even
@@ -2830,11 +2830,10 @@ the timing window *is* the balance mechanism, so MNK-03's numbers must
 not be "rounded for feel". Acceptance shipped in Castle P5b
 (2026-11-02): `mnk13_lone_monk_vs_knight_distribution` — 60 seeded
 lone-monk-vs-Knight runs, every conversion inside CIs 5–9, rolled
-successes before the guarantee occurring at the model's rate. ·
-*Status:* **MATCHES**.
+successes before the guarantee occurring at the model's rate.
 *Source:* MECHANICS-STUDY §3.8; wiki, Conversion. · *Impl:* acceptance
 test for §12: a lone monk vs. one Knight reproduces the documented
-outcome distribution from the CI model. · *Status:* **MISSING**.
+outcome distribution from the CI model. · *Status:* **MATCHES**.
 
 ---
 
