@@ -9701,59 +9701,117 @@ function drawScout(i, wx, wy) {
 // kind's own silhouette: the Knight in full armor with sword
 // and shield, the Light Cavalry a leaner scout-line rider with
 // a lance, the Cavalry Archer with a bow). Presentation only.
+//
+// Bot-loop fix (2026-11-02): like the monk (f217c5e), the
+// figure is painted ONCE into a cached offscreen sprite per
+// (variant, cloth) and blitted with drawImage. The pure-vector
+// original recorded no drawImage calls, so the INF-12
+// occlusion pass (recordFrameSprites / drawOccludedOutlines)
+// skipped these units outright (`if (!it.calls.length)
+// continue;`) and they never received the owner-colour
+// silhouette when a building hid them. The figure is fully
+// static — no walk/attack animation state feeds it (the legs
+// are fixed strokes, exactly as drawn before) — so a cached
+// sprite is frame-equivalent. Shapes and colours identical;
+// only the paint path changes. Sim untouched.
+const CAVALRY_SPRITE_U = 16; // cached-sprite pixels per world unit
+// Sprite content bounds in unit space (feet at the origin):
+// x [-1.17, 1.85] (shield edge → horse head), y [-2.81, 0]
+// (rider head top → feet); the box below adds a small margin.
+const CAVALRY_BOX = { x0: -1.4, y0: -3.05, w: 3.5, h: 3.2 };
+const cavalrySpriteCache = new Map(); // `${variant}|${cloth}` -> canvas | null
+function paintLegsOn(g, sx, sy, u, dxs, color) {
+  g.strokeStyle = color;
+  g.lineWidth = Math.max(1, 0.22 * u);
+  for (const dx of dxs) {
+    g.beginPath();
+    g.moveTo(sx + dx * u, sy - 0.55 * u);
+    g.lineTo(sx + dx * u, sy);
+    g.stroke();
+  }
+}
+function paintCavalryFigure(g, sx, sy, u, variant, cloth) {
+  paintLegsOn(g, sx, sy, u, [-0.75, -0.3, 0.45, 0.85], '#5d4630');
+  g.fillStyle = variant === 'knight' ? '#6e6258' : '#8a6844'; // horse body (armored barding tone for the Knight)
+  g.beginPath();
+  g.ellipse(sx, sy - 0.95 * u, 1.15 * u, 0.55 * u, 0, 0, Math.PI * 2);
+  g.fill();
+  g.strokeStyle = g.fillStyle; // neck
+  g.lineWidth = 0.5 * u;
+  g.beginPath();
+  g.moveTo(sx + 0.85 * u, sy - 1.2 * u);
+  g.lineTo(sx + 1.3 * u, sy - 1.75 * u);
+  g.stroke();
+  g.fillStyle = '#77572f'; // head
+  g.beginPath();
+  g.ellipse(sx + 1.45 * u, sy - 1.8 * u, 0.38 * u, 0.22 * u, 0.5, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = variant === 'knight' ? '#b9bec6' : cloth; // rider: steel armor (Knight) or player color
+  g.beginPath();
+  g.ellipse(sx - 0.05 * u, sy - 1.85 * u, 0.42 * u, 0.55 * u, 0, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = variant === 'knight' ? '#9aa1ab' : '#e8c39a'; // head / helm
+  g.beginPath();
+  g.arc(sx - 0.05 * u, sy - 2.55 * u, 0.26 * u, 0, Math.PI * 2);
+  g.fill();
+  if (variant === 'cavarcher') {
+    g.strokeStyle = '#8a6844'; // bow
+    g.lineWidth = Math.max(1, 0.13 * u);
+    g.beginPath();
+    g.arc(sx + 0.75 * u, sy - 1.9 * u, 0.55 * u, -1.1, 1.1);
+    g.stroke();
+  } else if (variant === 'knight') {
+    g.strokeStyle = '#d8d8d8'; // sword, held diagonal
+    g.lineWidth = Math.max(1, 0.16 * u);
+    g.beginPath();
+    g.moveTo(sx + 0.25 * u, sy - 2.4 * u);
+    g.lineTo(sx + 1.0 * u, sy - 1.2 * u);
+    g.stroke();
+    g.fillStyle = cloth; // shield (player color)
+    g.beginPath();
+    g.arc(sx - 0.75 * u, sy - 1.6 * u, 0.42 * u, 0, Math.PI * 2);
+    g.fill();
+  } else {
+    g.strokeStyle = '#d8d8d8'; // lance, held diagonal (Light Cavalry)
+    g.lineWidth = Math.max(1, 0.12 * u);
+    g.beginPath();
+    g.moveTo(sx + 0.2 * u, sy - 2.6 * u);
+    g.lineTo(sx + 1.15 * u, sy - 1.05 * u);
+    g.stroke();
+  }
+}
+function cavalrySprite(variant, cloth) {
+  const key = `${variant}|${cloth}`;
+  if (cavalrySpriteCache.has(key)) return cavalrySpriteCache.get(key);
+  let cv = null;
+  try {
+    cv = document.createElement('canvas');
+    cv.width = Math.ceil(CAVALRY_BOX.w * CAVALRY_SPRITE_U);
+    cv.height = Math.ceil(CAVALRY_BOX.h * CAVALRY_SPRITE_U);
+    const g = cv.getContext('2d');
+    if (!g) cv = null;
+    else {
+      paintCavalryFigure(g, -CAVALRY_BOX.x0 * CAVALRY_SPRITE_U,
+        -CAVALRY_BOX.y0 * CAVALRY_SPRITE_U, CAVALRY_SPRITE_U, variant, cloth);
+    }
+  } catch {
+    cv = null; // no canvas available (test stubs): vector fallback
+  }
+  cavalrySpriteCache.set(key, cv);
+  return cv;
+}
 function drawCavalry(i, wx, wy, variant) {
   const [sx, sy] = worldToScreen(wx, wy);
   const u = camS;
   shadow(sx, sy, 1.2 * u);
   if (selection.has(i)) drawSelRing(sx, sy, 1.5);
-  legs(sx, sy, u, [-0.75, -0.3, 0.45, 0.85], '#5d4630');
-  ctx.fillStyle = variant === 'knight' ? '#6e6258' : '#8a6844'; // horse body (armored barding tone for the Knight)
-  ctx.beginPath();
-  ctx.ellipse(sx, sy - 0.95 * u, 1.15 * u, 0.55 * u, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = ctx.fillStyle; // neck
-  ctx.lineWidth = 0.5 * u;
-  ctx.beginPath();
-  ctx.moveTo(sx + 0.85 * u, sy - 1.2 * u);
-  ctx.lineTo(sx + 1.3 * u, sy - 1.75 * u);
-  ctx.stroke();
-  ctx.fillStyle = '#77572f'; // head
-  ctx.beginPath();
-  ctx.ellipse(sx + 1.45 * u, sy - 1.8 * u, 0.38 * u, 0.22 * u, 0.5, 0, Math.PI * 2);
-  ctx.fill();
   const cloth = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e';
-  ctx.fillStyle = variant === 'knight' ? '#b9bec6' : cloth; // rider: steel armor (Knight) or player color
-  ctx.beginPath();
-  ctx.ellipse(sx - 0.05 * u, sy - 1.85 * u, 0.42 * u, 0.55 * u, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = variant === 'knight' ? '#9aa1ab' : '#e8c39a'; // head / helm
-  ctx.beginPath();
-  ctx.arc(sx - 0.05 * u, sy - 2.55 * u, 0.26 * u, 0, Math.PI * 2);
-  ctx.fill();
-  if (variant === 'cavarcher') {
-    ctx.strokeStyle = '#8a6844'; // bow
-    ctx.lineWidth = Math.max(1, 0.13 * u);
-    ctx.beginPath();
-    ctx.arc(sx + 0.75 * u, sy - 1.9 * u, 0.55 * u, -1.1, 1.1);
-    ctx.stroke();
-  } else if (variant === 'knight') {
-    ctx.strokeStyle = '#d8d8d8'; // sword, held diagonal
-    ctx.lineWidth = Math.max(1, 0.16 * u);
-    ctx.beginPath();
-    ctx.moveTo(sx + 0.25 * u, sy - 2.4 * u);
-    ctx.lineTo(sx + 1.0 * u, sy - 1.2 * u);
-    ctx.stroke();
-    ctx.fillStyle = cloth; // shield (player color)
-    ctx.beginPath();
-    ctx.arc(sx - 0.75 * u, sy - 1.6 * u, 0.42 * u, 0, Math.PI * 2);
-    ctx.fill();
+  const spr = cavalrySprite(variant, cloth);
+  if (spr) {
+    ctx.drawImage(spr, sx + CAVALRY_BOX.x0 * u, sy + CAVALRY_BOX.y0 * u,
+      CAVALRY_BOX.w * u, CAVALRY_BOX.h * u);
   } else {
-    ctx.strokeStyle = '#d8d8d8'; // lance, held diagonal (Light Cavalry)
-    ctx.lineWidth = Math.max(1, 0.12 * u);
-    ctx.beginPath();
-    ctx.moveTo(sx + 0.2 * u, sy - 2.6 * u);
-    ctx.lineTo(sx + 1.15 * u, sy - 1.05 * u);
-    ctx.stroke();
+    paintCavalryFigure(ctx, sx, sy, u, variant, cloth);
   }
 }
 function drawKnight(i, wx, wy) { drawCavalry(i, wx, wy, 'knight'); }
@@ -9764,84 +9822,174 @@ function drawCavalryArcher(i, wx, wy) { drawCavalry(i, wx, wy, 'cavarcher'); }
 // runner in a plain tunic hauling the dark powder barrel that
 // is his whole identity, fuse spark on top. No sprite set ships
 // for him yet; this is his draw, not a fallback.
+//
+// Bot-loop fix (2026-11-02): painted ONCE into a cached
+// offscreen sprite per tunic colour and blitted with drawImage,
+// following the monk fix (f217c5e) — the pure-vector original
+// recorded no drawImage calls, so the INF-12 occlusion pass
+// skipped him (`if (!it.calls.length) continue;`) and he never
+// got the owner-colour silhouette behind a building. The
+// figure is fully static (the fuse spark is a fixed dot, not
+// time-animated), so the cached sprite is frame-equivalent.
+// Shapes and colours identical; sim untouched.
+const PETARD_SPRITE_U = 16; // cached-sprite pixels per world unit
+// Sprite content bounds in unit space (feet at the origin):
+// x [-0.6, 1.07] (tunic edge → barrel edge), y [-2.23, 0]
+// (head top → feet); the box below adds a small margin.
+const PETARD_BOX = { x0: -0.85, y0: -2.5, w: 2.15, h: 2.65 };
+const petardSpriteCache = new Map(); // tunic colour -> canvas | null
+function paintPetardFigure(g, sx, sy, u, cloth) {
+  g.fillStyle = cloth; // tunic (player color)
+  g.beginPath();
+  g.ellipse(sx, sy - 0.85 * u, 0.6 * u, 0.78 * u, 0, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = '#e8c39a'; // head
+  g.beginPath();
+  g.arc(sx, sy - 1.9 * u, 0.33 * u, 0, Math.PI * 2);
+  g.fill();
+  // The barrel, carried in front: dark staves, iron bands.
+  g.fillStyle = '#4a3826';
+  g.beginPath();
+  g.ellipse(sx + 0.55 * u, sy - 0.95 * u, 0.52 * u, 0.62 * u, 0, 0, Math.PI * 2);
+  g.fill();
+  g.strokeStyle = '#2e2a24';
+  g.lineWidth = Math.max(1, 0.11 * u);
+  for (const dy of [-0.3, 0.18]) {
+    g.beginPath();
+    g.ellipse(sx + 0.55 * u, sy - 0.95 * u + dy * u, 0.52 * u, 0.62 * u, 0, -0.5, 0.5);
+    g.stroke();
+  }
+  // The fuse spark.
+  g.fillStyle = '#ffb347';
+  g.beginPath();
+  g.arc(sx + 0.55 * u, sy - 1.72 * u, 0.13 * u, 0, Math.PI * 2);
+  g.fill();
+}
+function petardSprite(cloth) {
+  if (petardSpriteCache.has(cloth)) return petardSpriteCache.get(cloth);
+  let cv = null;
+  try {
+    cv = document.createElement('canvas');
+    cv.width = Math.ceil(PETARD_BOX.w * PETARD_SPRITE_U);
+    cv.height = Math.ceil(PETARD_BOX.h * PETARD_SPRITE_U);
+    const g = cv.getContext('2d');
+    if (!g) cv = null;
+    else {
+      paintPetardFigure(g, -PETARD_BOX.x0 * PETARD_SPRITE_U,
+        -PETARD_BOX.y0 * PETARD_SPRITE_U, PETARD_SPRITE_U, cloth);
+    }
+  } catch {
+    cv = null; // no canvas available (test stubs): vector fallback
+  }
+  petardSpriteCache.set(cloth, cv);
+  return cv;
+}
 function drawPetard(i, wx, wy) {
   const [sx, sy] = worldToScreen(wx, wy);
   const u = camS;
   shadow(sx, sy, 0.95 * u);
   if (selection.has(i)) drawSelRing(sx, sy, 1.25);
-  ctx.fillStyle = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e'; // tunic (player color)
-  ctx.beginPath();
-  ctx.ellipse(sx, sy - 0.85 * u, 0.6 * u, 0.78 * u, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#e8c39a'; // head
-  ctx.beginPath();
-  ctx.arc(sx, sy - 1.9 * u, 0.33 * u, 0, Math.PI * 2);
-  ctx.fill();
-  // The barrel, carried in front: dark staves, iron bands.
-  ctx.fillStyle = '#4a3826';
-  ctx.beginPath();
-  ctx.ellipse(sx + 0.55 * u, sy - 0.95 * u, 0.52 * u, 0.62 * u, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = '#2e2a24';
-  ctx.lineWidth = Math.max(1, 0.11 * u);
-  for (const dy of [-0.3, 0.18]) {
-    ctx.beginPath();
-    ctx.ellipse(sx + 0.55 * u, sy - 0.95 * u + dy * u, 0.52 * u, 0.62 * u, 0, -0.5, 0.5);
-    ctx.stroke();
+  const cloth = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e';
+  const spr = petardSprite(cloth);
+  if (spr) {
+    ctx.drawImage(spr, sx + PETARD_BOX.x0 * u, sy + PETARD_BOX.y0 * u,
+      PETARD_BOX.w * u, PETARD_BOX.h * u);
+  } else {
+    paintPetardFigure(ctx, sx, sy, u, cloth);
   }
-  // The fuse spark.
-  ctx.fillStyle = '#ffb347';
-  ctx.beginPath();
-  ctx.arc(sx + 0.55 * u, sy - 1.72 * u, 0.13 * u, 0, Math.PI * 2);
-  ctx.fill();
 }
 
 // The Battering Ram (Castle P4a, GAR-10): original vector
 // figure — a great iron-capped log slung by chains in a timber
 // A-frame on four wheels, under a pitched hide roof. No sprite
 // set ships for it yet; this is its draw, not a fallback.
+//
+// Bot-loop fix (2026-11-02): painted ONCE into a cached
+// offscreen sprite per roof colour and blitted with drawImage,
+// following the monk fix (f217c5e) — the pure-vector original
+// recorded no drawImage calls, so the INF-12 occlusion pass
+// skipped it (`if (!it.calls.length) continue;`) and it never
+// got the owner-colour silhouette behind a building. The
+// figure is fully static, so the cached sprite is
+// frame-equivalent. Shapes and colours identical; sim
+// untouched.
+const RAM_SPRITE_U = 16; // cached-sprite pixels per world unit
+// Sprite content bounds in unit space (feet at the origin):
+// x [-1.55, 1.55] (roof edges), y [-2.95, 0.06] (roof apex →
+// wheel bottoms); the box below adds a small margin.
+const RAM_BOX = { x0: -1.8, y0: -3.2, w: 3.6, h: 3.4 };
+const ramSpriteCache = new Map(); // roof colour -> canvas | null
+function paintBatteringRamFigure(g, sx, sy, u, roof) {
+  // Wheels: two dark discs at the frame's feet.
+  g.fillStyle = '#2e2418';
+  for (const dx of [-1.15, 1.15]) {
+    g.beginPath();
+    g.arc(sx + dx * u, sy - 0.28 * u, 0.34 * u, 0, 0, Math.PI * 2);
+    g.fill();
+  }
+  // The A-frame legs.
+  g.strokeStyle = '#5f4c36';
+  g.lineWidth = Math.max(1.2, 0.22 * u);
+  for (const s of [-1, 1]) {
+    g.beginPath();
+    g.moveTo(sx + s * 1.35 * u, sy - 0.35 * u);
+    g.lineTo(sx + s * 0.35 * u, sy - 2.2 * u);
+    g.stroke();
+  }
+  // The pitched roof over the frame (the ram's hide cover).
+  g.fillStyle = roof;
+  g.beginPath();
+  g.moveTo(sx - 1.55 * u, sy - 2.05 * u);
+  g.lineTo(sx, sy - 2.95 * u);
+  g.lineTo(sx + 1.55 * u, sy - 2.05 * u);
+  g.closePath();
+  g.fill();
+  // The log, slung level under the apex, iron cap at the head.
+  g.fillStyle = '#8a6844';
+  g.fillRect(sx - 1.3 * u, sy - 1.55 * u, 2.35 * u, 0.5 * u);
+  g.fillStyle = '#c8ccd2';
+  g.fillRect(sx + 1.05 * u, sy - 1.55 * u, 0.3 * u, 0.5 * u);
+  // The sling chains from the apex to the log.
+  g.strokeStyle = '#3a3a40';
+  g.lineWidth = Math.max(1, 0.09 * u);
+  for (const dx of [-0.7, 0.55]) {
+    g.beginPath();
+    g.moveTo(sx, sy - 2.35 * u);
+    g.lineTo(sx + dx * u, sy - 1.58 * u);
+    g.stroke();
+  }
+}
+function batteringRamSprite(roof) {
+  if (ramSpriteCache.has(roof)) return ramSpriteCache.get(roof);
+  let cv = null;
+  try {
+    cv = document.createElement('canvas');
+    cv.width = Math.ceil(RAM_BOX.w * RAM_SPRITE_U);
+    cv.height = Math.ceil(RAM_BOX.h * RAM_SPRITE_U);
+    const g = cv.getContext('2d');
+    if (!g) cv = null;
+    else {
+      paintBatteringRamFigure(g, -RAM_BOX.x0 * RAM_SPRITE_U,
+        -RAM_BOX.y0 * RAM_SPRITE_U, RAM_SPRITE_U, roof);
+    }
+  } catch {
+    cv = null; // no canvas available (test stubs): vector fallback
+  }
+  ramSpriteCache.set(roof, cv);
+  return cv;
+}
 function drawBatteringRam(i, wx, wy) {
   const [sx, sy] = worldToScreen(wx, wy);
   const u = camS;
   shadow(sx, sy, 1.9 * u);
   if (selection.has(i)) drawSelRing(sx, sy, 2.1);
-  // Wheels: two dark discs at the frame's feet.
-  ctx.fillStyle = '#2e2418';
-  for (const dx of [-1.15, 1.15]) {
-    ctx.beginPath();
-    ctx.arc(sx + dx * u, sy - 0.28 * u, 0.34 * u, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  // The A-frame legs.
-  ctx.strokeStyle = '#5f4c36';
-  ctx.lineWidth = Math.max(1.2, 0.22 * u);
-  for (const s of [-1, 1]) {
-    ctx.beginPath();
-    ctx.moveTo(sx + s * 1.35 * u, sy - 0.35 * u);
-    ctx.lineTo(sx + s * 0.35 * u, sy - 2.2 * u);
-    ctx.stroke();
-  }
-  // The pitched roof over the frame (the ram's hide cover).
-  ctx.fillStyle = drawOwner === foeOwner() ? '#7c3f34' : '#6b6248';
-  ctx.beginPath();
-  ctx.moveTo(sx - 1.55 * u, sy - 2.05 * u);
-  ctx.lineTo(sx, sy - 2.95 * u);
-  ctx.lineTo(sx + 1.55 * u, sy - 2.05 * u);
-  ctx.closePath();
-  ctx.fill();
-  // The log, slung level under the apex, iron cap at the head.
-  ctx.fillStyle = '#8a6844';
-  ctx.fillRect(sx - 1.3 * u, sy - 1.55 * u, 2.35 * u, 0.5 * u);
-  ctx.fillStyle = '#c8ccd2';
-  ctx.fillRect(sx + 1.05 * u, sy - 1.55 * u, 0.3 * u, 0.5 * u);
-  // The sling chains from the apex to the log.
-  ctx.strokeStyle = '#3a3a40';
-  ctx.lineWidth = Math.max(1, 0.09 * u);
-  for (const dx of [-0.7, 0.55]) {
-    ctx.beginPath();
-    ctx.moveTo(sx, sy - 2.35 * u);
-    ctx.lineTo(sx + dx * u, sy - 1.58 * u);
-    ctx.stroke();
+  const roof = drawOwner === foeOwner() ? '#7c3f34' : '#6b6248';
+  const spr = batteringRamSprite(roof);
+  if (spr) {
+    ctx.drawImage(spr, sx + RAM_BOX.x0 * u, sy + RAM_BOX.y0 * u,
+      RAM_BOX.w * u, RAM_BOX.h * u);
+  } else {
+    paintBatteringRamFigure(ctx, sx, sy, u, roof);
   }
 }
 
@@ -9850,67 +9998,112 @@ function drawBatteringRam(i, wx, wy) {
 // up over the frame with a sling and stone at the tip, a rope
 // coil and a spare stone at its feet. The owner's color rides
 // the cloth draped on the frame's side, as with its siege kin.
+//
+// Bot-loop fix (2026-11-02): painted ONCE into a cached
+// offscreen sprite per cloth colour and blitted with drawImage,
+// following the monk fix (f217c5e) — the pure-vector original
+// recorded no drawImage calls, so the INF-12 occlusion pass
+// skipped it (`if (!it.calls.length) continue;`) and it never
+// got the owner-colour silhouette behind a building. The arm
+// is drawn in its fixed cocked pose (no firing animation state
+// feeds this draw), so the cached sprite is frame-equivalent.
+// Shapes and colours identical; sim untouched.
+const MANGONEL_SPRITE_U = 16; // cached-sprite pixels per world unit
+// Sprite content bounds in unit space (feet at the origin):
+// x [-1.72, 1.74] (sling stone → spare stone), y [-3.05, 0.06]
+// (arm tip → wheel bottoms); the box below adds a small margin.
+const MANGONEL_BOX = { x0: -1.95, y0: -3.3, w: 3.9, h: 3.5 };
+const mangonelSpriteCache = new Map(); // cloth colour -> canvas | null
+function paintMangonelFigure(g, sx, sy, u, cloth) {
+  // Wheels: two large dark discs with hub dots.
+  g.fillStyle = '#2e2418';
+  for (const dx of [-1.05, 1.05]) {
+    g.beginPath();
+    g.arc(sx + dx * u, sy - 0.42 * u, 0.46 * u, 0, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.fillStyle = '#8a6844';
+  for (const dx of [-1.05, 1.05]) {
+    g.beginPath();
+    g.arc(sx + dx * u, sy - 0.42 * u, 0.15 * u, 0, 0, Math.PI * 2);
+    g.fill();
+  }
+  // The frame: two uprights and a crossbeam at axle height.
+  g.strokeStyle = '#5f4c36';
+  g.lineWidth = Math.max(1.2, 0.24 * u);
+  for (const s of [-1, 1]) {
+    g.beginPath();
+    g.moveTo(sx + s * 1.05 * u, sy - 0.45 * u);
+    g.lineTo(sx + s * 0.55 * u, sy - 1.85 * u);
+    g.stroke();
+  }
+  g.fillStyle = '#6d543a';
+  g.fillRect(sx - 1.25 * u, sy - 1.0 * u, 2.5 * u, 0.34 * u);
+  // The owner's cloth on the frame's side.
+  g.fillStyle = cloth;
+  g.fillRect(sx - 0.62 * u, sy - 1.0 * u, 1.24 * u, 0.55 * u);
+  // The throwing arm, cocked up to the left, pivot at the
+  // frame's top: butt with its counterweight low-right, long
+  // end high-left with the sling cup and its stone.
+  g.strokeStyle = '#8a6844';
+  g.lineWidth = Math.max(1.2, 0.26 * u);
+  g.beginPath();
+  g.moveTo(sx + 0.75 * u, sy - 1.35 * u);
+  g.lineTo(sx - 1.35 * u, sy - 3.05 * u);
+  g.stroke();
+  g.fillStyle = '#4a4234';
+  g.fillRect(sx + 0.62 * u, sy - 1.62 * u, 0.5 * u, 0.55 * u);
+  // The sling: two cords from the arm's tip to the cupped stone.
+  g.strokeStyle = '#3a3a40';
+  g.lineWidth = Math.max(1, 0.08 * u);
+  g.beginPath();
+  g.moveTo(sx - 1.35 * u, sy - 3.05 * u);
+  g.lineTo(sx - 1.78 * u, sy - 2.62 * u);
+  g.moveTo(sx - 1.35 * u, sy - 3.05 * u);
+  g.lineTo(sx - 1.05 * u, sy - 2.5 * u);
+  g.stroke();
+  g.fillStyle = '#6e6e73';
+  g.beginPath();
+  g.arc(sx - 1.42 * u, sy - 2.48 * u, 0.3 * u, 0, 0, Math.PI * 2);
+  g.fill();
+  // A spare stone at the frame's foot.
+  g.fillStyle = '#5b5b60';
+  g.beginPath();
+  g.arc(sx + 1.5 * u, sy - 0.18 * u, 0.24 * u, 0, 0, Math.PI * 2);
+  g.fill();
+}
+function mangonelSprite(cloth) {
+  if (mangonelSpriteCache.has(cloth)) return mangonelSpriteCache.get(cloth);
+  let cv = null;
+  try {
+    cv = document.createElement('canvas');
+    cv.width = Math.ceil(MANGONEL_BOX.w * MANGONEL_SPRITE_U);
+    cv.height = Math.ceil(MANGONEL_BOX.h * MANGONEL_SPRITE_U);
+    const g = cv.getContext('2d');
+    if (!g) cv = null;
+    else {
+      paintMangonelFigure(g, -MANGONEL_BOX.x0 * MANGONEL_SPRITE_U,
+        -MANGONEL_BOX.y0 * MANGONEL_SPRITE_U, MANGONEL_SPRITE_U, cloth);
+    }
+  } catch {
+    cv = null; // no canvas available (test stubs): vector fallback
+  }
+  mangonelSpriteCache.set(cloth, cv);
+  return cv;
+}
 function drawMangonel(i, wx, wy) {
   const [sx, sy] = worldToScreen(wx, wy);
   const u = camS;
   shadow(sx, sy, 2.0 * u);
   if (selection.has(i)) drawSelRing(sx, sy, 2.2);
-  // Wheels: two large dark discs with hub dots.
-  ctx.fillStyle = '#2e2418';
-  for (const dx of [-1.05, 1.05]) {
-    ctx.beginPath();
-    ctx.arc(sx + dx * u, sy - 0.42 * u, 0.46 * u, 0, 0, Math.PI * 2);
-    ctx.fill();
+  const cloth = drawOwner === foeOwner() ? '#a03a2c' : '#2c5ea0';
+  const spr = mangonelSprite(cloth);
+  if (spr) {
+    ctx.drawImage(spr, sx + MANGONEL_BOX.x0 * u, sy + MANGONEL_BOX.y0 * u,
+      MANGONEL_BOX.w * u, MANGONEL_BOX.h * u);
+  } else {
+    paintMangonelFigure(ctx, sx, sy, u, cloth);
   }
-  ctx.fillStyle = '#8a6844';
-  for (const dx of [-1.05, 1.05]) {
-    ctx.beginPath();
-    ctx.arc(sx + dx * u, sy - 0.42 * u, 0.15 * u, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  // The frame: two uprights and a crossbeam at axle height.
-  ctx.strokeStyle = '#5f4c36';
-  ctx.lineWidth = Math.max(1.2, 0.24 * u);
-  for (const s of [-1, 1]) {
-    ctx.beginPath();
-    ctx.moveTo(sx + s * 1.05 * u, sy - 0.45 * u);
-    ctx.lineTo(sx + s * 0.55 * u, sy - 1.85 * u);
-    ctx.stroke();
-  }
-  ctx.fillStyle = '#6d543a';
-  ctx.fillRect(sx - 1.25 * u, sy - 1.0 * u, 2.5 * u, 0.34 * u);
-  // The owner's cloth on the frame's side.
-  ctx.fillStyle = drawOwner === foeOwner() ? '#a03a2c' : '#2c5ea0';
-  ctx.fillRect(sx - 0.62 * u, sy - 1.0 * u, 1.24 * u, 0.55 * u);
-  // The throwing arm, cocked up to the left, pivot at the
-  // frame's top: butt with its counterweight low-right, long
-  // end high-left with the sling cup and its stone.
-  ctx.strokeStyle = '#8a6844';
-  ctx.lineWidth = Math.max(1.2, 0.26 * u);
-  ctx.beginPath();
-  ctx.moveTo(sx + 0.75 * u, sy - 1.35 * u);
-  ctx.lineTo(sx - 1.35 * u, sy - 3.05 * u);
-  ctx.stroke();
-  ctx.fillStyle = '#4a4234';
-  ctx.fillRect(sx + 0.62 * u, sy - 1.62 * u, 0.5 * u, 0.55 * u);
-  // The sling: two cords from the arm's tip to the cupped stone.
-  ctx.strokeStyle = '#3a3a40';
-  ctx.lineWidth = Math.max(1, 0.08 * u);
-  ctx.beginPath();
-  ctx.moveTo(sx - 1.35 * u, sy - 3.05 * u);
-  ctx.lineTo(sx - 1.78 * u, sy - 2.62 * u);
-  ctx.moveTo(sx - 1.35 * u, sy - 3.05 * u);
-  ctx.lineTo(sx - 1.05 * u, sy - 2.5 * u);
-  ctx.stroke();
-  ctx.fillStyle = '#6e6e73';
-  ctx.beginPath();
-  ctx.arc(sx - 1.42 * u, sy - 2.48 * u, 0.3 * u, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // A spare stone at the frame's foot.
-  ctx.fillStyle = '#5b5b60';
-  ctx.beginPath();
-  ctx.arc(sx + 1.5 * u, sy - 0.18 * u, 0.24 * u, 0, 0, Math.PI * 2);
-  ctx.fill();
 }
 
 // The Monk (Castle P5a, MNK-10): original vector figure — a
@@ -10012,78 +10205,126 @@ function drawMonk(i, wx, wy) {
 // word (entity_trade): empty canvas on the outbound leg, gold
 // sacks heaped on the return — the player reads the route's
 // state off the cart, as in the reference game.
+//
+// Bot-loop fix (2026-11-02): painted ONCE into a cached
+// offscreen sprite per (driver cloth, loaded) pair and blitted
+// with drawImage, following the monk fix (f217c5e) — the
+// pure-vector original recorded no drawImage calls, so the
+// INF-12 occlusion pass skipped it (`if (!it.calls.length)
+// continue;`) and it never got the owner-colour silhouette
+// behind a building. The figure's only state is the binary
+// loaded flag, which already quantizes the draw into exactly
+// two figures, so the cache is keyed by it and stays
+// frame-equivalent. Shapes and colours identical; sim
+// untouched.
+const TRADE_CART_SPRITE_U = 16; // cached-sprite pixels per world unit
+// Sprite content bounds in unit space (feet at the origin):
+// x [-1.35, 2.01] (cart bed → horse head), y [-2.18, 0]
+// (driver head top → feet); the box below adds a small margin.
+const TRADE_CART_BOX = { x0: -1.6, y0: -2.45, w: 3.85, h: 2.6 };
+const tradeCartSpriteCache = new Map(); // `${cloth}|${loaded}` -> canvas | null
+function paintTradeCartFigure(g, sx, sy, u, cloth, loaded) {
+  // The horse, ahead of the cart (facing right, like every
+  // figure's neutral pose): body, neck and head, four legs.
+  g.fillStyle = '#6d4c33';
+  g.beginPath();
+  g.ellipse(sx + 0.95 * u, sy - 1.05 * u, 0.62 * u, 0.42 * u, 0, 0, Math.PI * 2);
+  g.fill();
+  g.strokeStyle = '#6d4c33';
+  g.lineWidth = Math.max(1, 0.16 * u);
+  for (const dx of [0.62, 0.82, 1.08, 1.28]) {
+    g.beginPath();
+    g.moveTo(sx + dx * u, sy - 0.75 * u);
+    g.lineTo(sx + dx * u, sy - 0.12 * u);
+    g.stroke();
+  }
+  g.beginPath(); // neck + head
+  g.moveTo(sx + 1.42 * u, sy - 1.28 * u);
+  g.lineTo(sx + 1.78 * u, sy - 1.62 * u);
+  g.stroke();
+  g.fillStyle = '#5d4030';
+  g.beginPath();
+  g.arc(sx + 1.84 * u, sy - 1.66 * u, 0.17 * u, 0, Math.PI * 2);
+  g.fill();
+  // The shafts from horse to cart.
+  g.strokeStyle = '#8a6844';
+  g.lineWidth = Math.max(1, 0.09 * u);
+  g.beginPath();
+  g.moveTo(sx + 0.42 * u, sy - 0.95 * u);
+  g.lineTo(sx - 0.28 * u, sy - 0.9 * u);
+  g.stroke();
+  // The cart bed and its two spoked wheels.
+  g.fillStyle = '#8a6844';
+  g.fillRect(sx - 1.35 * u, sy - 1.28 * u, 1.35 * u, 0.5 * u);
+  g.fillStyle = '#4a3826';
+  for (const dx of [-1.08, -0.28]) {
+    g.beginPath();
+    g.arc(sx + dx * u, sy - 0.42 * u, 0.3 * u, 0, Math.PI * 2);
+    g.fill();
+    g.strokeStyle = '#c9a227';
+    g.lineWidth = Math.max(1, 0.06 * u);
+    g.beginPath();
+    g.arc(sx + dx * u, sy - 0.42 * u, 0.3 * u, 0, Math.PI * 2);
+    g.stroke();
+  }
+  // The load: plain canvas empty, gold sacks loaded.
+  if (loaded) {
+    g.fillStyle = '#c9a227';
+    for (const [dx, dy] of [[-1.12, -1.5], [-0.72, -1.62], [-0.34, -1.5]]) {
+      g.beginPath();
+      g.ellipse(sx + dx * u, sy + dy * u, 0.24 * u, 0.2 * u, 0, 0, Math.PI * 2);
+      g.fill();
+    }
+  } else {
+    g.fillStyle = '#b8a888';
+    g.beginPath();
+    g.ellipse(sx - 0.68 * u, sy - 1.38 * u, 0.6 * u, 0.22 * u, 0, 0, Math.PI * 2);
+    g.fill();
+  }
+  // The driver, seated at the front of the bed (player color).
+  g.fillStyle = cloth;
+  g.beginPath();
+  g.ellipse(sx - 0.12 * u, sy - 1.52 * u, 0.26 * u, 0.36 * u, 0, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = '#e8c39a';
+  g.beginPath();
+  g.arc(sx - 0.12 * u, sy - 2.02 * u, 0.16 * u, 0, Math.PI * 2);
+  g.fill();
+}
+function tradeCartSprite(cloth, loaded) {
+  const key = `${cloth}|${loaded ? 1 : 0}`;
+  if (tradeCartSpriteCache.has(key)) return tradeCartSpriteCache.get(key);
+  let cv = null;
+  try {
+    cv = document.createElement('canvas');
+    cv.width = Math.ceil(TRADE_CART_BOX.w * TRADE_CART_SPRITE_U);
+    cv.height = Math.ceil(TRADE_CART_BOX.h * TRADE_CART_SPRITE_U);
+    const g = cv.getContext('2d');
+    if (!g) cv = null;
+    else {
+      paintTradeCartFigure(g, -TRADE_CART_BOX.x0 * TRADE_CART_SPRITE_U,
+        -TRADE_CART_BOX.y0 * TRADE_CART_SPRITE_U, TRADE_CART_SPRITE_U, cloth, loaded);
+    }
+  } catch {
+    cv = null; // no canvas available (test stubs): vector fallback
+  }
+  tradeCartSpriteCache.set(key, cv);
+  return cv;
+}
 function drawTradeCart(i, wx, wy) {
   const [sx, sy] = worldToScreen(wx, wy);
   const u = camS;
   shadow(sx, sy, 1.5 * u);
   if (selection.has(i)) drawSelRing(sx, sy, 1.6);
   const loaded = tradeStateOf(i) === 2;
-  // The horse, ahead of the cart (facing right, like every
-  // figure's neutral pose): body, neck and head, four legs.
-  ctx.fillStyle = '#6d4c33';
-  ctx.beginPath();
-  ctx.ellipse(sx + 0.95 * u, sy - 1.05 * u, 0.62 * u, 0.42 * u, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = '#6d4c33';
-  ctx.lineWidth = Math.max(1, 0.16 * u);
-  for (const dx of [0.62, 0.82, 1.08, 1.28]) {
-    ctx.beginPath();
-    ctx.moveTo(sx + dx * u, sy - 0.75 * u);
-    ctx.lineTo(sx + dx * u, sy - 0.12 * u);
-    ctx.stroke();
-  }
-  ctx.beginPath(); // neck + head
-  ctx.moveTo(sx + 1.42 * u, sy - 1.28 * u);
-  ctx.lineTo(sx + 1.78 * u, sy - 1.62 * u);
-  ctx.stroke();
-  ctx.fillStyle = '#5d4030';
-  ctx.beginPath();
-  ctx.arc(sx + 1.84 * u, sy - 1.66 * u, 0.17 * u, 0, Math.PI * 2);
-  ctx.fill();
-  // The shafts from horse to cart.
-  ctx.strokeStyle = '#8a6844';
-  ctx.lineWidth = Math.max(1, 0.09 * u);
-  ctx.beginPath();
-  ctx.moveTo(sx + 0.42 * u, sy - 0.95 * u);
-  ctx.lineTo(sx - 0.28 * u, sy - 0.9 * u);
-  ctx.stroke();
-  // The cart bed and its two spoked wheels.
-  ctx.fillStyle = '#8a6844';
-  ctx.fillRect(sx - 1.35 * u, sy - 1.28 * u, 1.35 * u, 0.5 * u);
-  ctx.fillStyle = '#4a3826';
-  for (const dx of [-1.08, -0.28]) {
-    ctx.beginPath();
-    ctx.arc(sx + dx * u, sy - 0.42 * u, 0.3 * u, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#c9a227';
-    ctx.lineWidth = Math.max(1, 0.06 * u);
-    ctx.beginPath();
-    ctx.arc(sx + dx * u, sy - 0.42 * u, 0.3 * u, 0, Math.PI * 2);
-    ctx.stroke();
-  }
-  // The load: plain canvas empty, gold sacks loaded.
-  if (loaded) {
-    ctx.fillStyle = '#c9a227';
-    for (const [dx, dy] of [[-1.12, -1.5], [-0.72, -1.62], [-0.34, -1.5]]) {
-      ctx.beginPath();
-      ctx.ellipse(sx + dx * u, sy + dy * u, 0.24 * u, 0.2 * u, 0, 0, Math.PI * 2);
-      ctx.fill();
-    }
+  const cloth = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e';
+  const spr = tradeCartSprite(cloth, loaded);
+  if (spr) {
+    ctx.drawImage(spr, sx + TRADE_CART_BOX.x0 * u, sy + TRADE_CART_BOX.y0 * u,
+      TRADE_CART_BOX.w * u, TRADE_CART_BOX.h * u);
   } else {
-    ctx.fillStyle = '#b8a888';
-    ctx.beginPath();
-    ctx.ellipse(sx - 0.68 * u, sy - 1.38 * u, 0.6 * u, 0.22 * u, 0, 0, Math.PI * 2);
-    ctx.fill();
+    paintTradeCartFigure(ctx, sx, sy, u, cloth, loaded);
   }
-  // The driver, seated at the front of the bed (player color).
-  ctx.fillStyle = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e';
-  ctx.beginPath();
-  ctx.ellipse(sx - 0.12 * u, sy - 1.52 * u, 0.26 * u, 0.36 * u, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#e8c39a';
-  ctx.beginPath();
-  ctx.arc(sx - 0.12 * u, sy - 2.02 * u, 0.16 * u, 0, Math.PI * 2);
-  ctx.fill();
 }
 
 function drawMilitia(i, wx, wy) {
