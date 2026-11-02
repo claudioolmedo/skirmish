@@ -280,6 +280,23 @@ fn p4a_ram_trains_at_the_workshop_only() {
     assert!(trained, "the workshop never produced a Battering Ram");
 }
 
+#[test]
+fn p4a_idle_military_key_finds_the_ram() {
+    // SEL-09 (bot-loop fix, 2026-11-01 16:22): the idle-military
+    // key's subject list includes siege — the Battering Ram was
+    // missed when P4a landed, like the Monk in P5a. The combat
+    // semantics stay narrow: `is_military` still excludes it.
+    let mut sim = sim_in_castle();
+    spawn(&mut sim, 950, EntityKind::BatteringRam, OWNER_PLAYER, (50, 50));
+    assert!(EntityKind::BatteringRam.is_idle_military());
+    assert!(!EntityKind::BatteringRam.is_military());
+    assert!(
+        sim.idle_military().contains(&950),
+        "idle_military() = {:?} does not contain the idle Ram 950",
+        sim.idle_military()
+    );
+}
+
 // ------------------------------------------------------------------
 // The AI slice (AI-04 extension): build chain, production, waves.
 

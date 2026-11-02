@@ -290,9 +290,12 @@ impl EntityKind {
         )
     }
 
-    /// Military kinds for the idle-military query (SEL-09): the
-    /// fighting units. Villagers have their own idle query (SEL-08)
-    /// and herdables are livestock, not military.
+    /// Military kinds for the combat/AI semantics that gate on
+    /// this predicate (stances, attack-move, the AI's army counts
+    /// and threat readings): the fighting units. Villagers have
+    /// their own idle query (SEL-08) and herdables are livestock,
+    /// not military. NOTE: this is deliberately NOT the SEL-09
+    /// idle-key subject list — see `is_idle_military` below.
     pub fn is_military(self) -> bool {
         matches!(
             self,
@@ -308,6 +311,25 @@ impl EntityKind {
                 | EntityKind::Petard
                 | EntityKind::Mangonel
         )
+    }
+
+    /// The SEL-09 idle-military key's subject list: every
+    /// `is_military` kind PLUS the Battering Ram (Castle P4a) and
+    /// the Monk (Castle P5a) — in the reference game the idle
+    /// military key finds idle siege and idle monks too (a monk
+    /// that walked off to heal is exactly the unit the key exists
+    /// to find). The two kinds were missed when they landed
+    /// because the idle query reused `is_military`, whose combat
+    /// semantics they must NOT join (a monk has no attacks and no
+    /// stance; a ram must not enter the AI's army counts) —
+    /// restored by the bot-loop run of 2026-11-01 16:22 after
+    /// three live sessions could not find a trained Monk with any
+    /// in-client tool. The Trade Cart stays out on purpose: a
+    /// civilian unit with its own trade loop (pinned by
+    /// trade_tests), never an idle-military subject.
+    pub fn is_idle_military(self) -> bool {
+        self.is_military()
+            || matches!(self, EntityKind::BatteringRam | EntityKind::Monk)
     }
 }
 

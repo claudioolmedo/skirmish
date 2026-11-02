@@ -493,8 +493,13 @@ top-bar indicator (INF-03) is the same query as a button. · *Status:*
 **SEL-09 — Idle military key.** The mirror key cycles idle military units
 (Shift: all idle military). Becomes meaningful when military kinds exist.
 *Source:* GAP 1.7. · *Impl:* shipped (M4) — `idle_military()` on the same
-ABI + `EntityKind::is_military` in the data table (Scout, Militia,
-Archer); `,` cycles, Shift+`,` selects all. · *Status:* **MATCHES**.
+ABI; `,` cycles, Shift+`,` selects all. The subject list is
+`EntityKind::is_idle_military` in the data table: the fighting kinds
+plus the Battering Ram (Castle P4a) and the Monk (Castle P5a), which
+the reference key also finds — the two were missing until the bot-loop
+fix of 2026-11-01, which kept them out of `is_military`'s combat
+semantics (stances, attack-move, AI counts) on purpose. A Monk with a
+heal task counts as at work, not idle. · *Status:* **MATCHES**.
 
 **SEL-10 — Go-to keys.** H selects and centers the Town Center; Ctrl+letter
 cycles buildings of each production type; Space centers on the current

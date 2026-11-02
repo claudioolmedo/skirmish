@@ -234,6 +234,49 @@ fn monk_training_flow_and_row() {
 }
 
 // ------------------------------------------------------------------
+// SEL-09: the idle-military key finds the Monk (bot-loop fix,
+// 2026-11-01 16:22 — three live sessions trained a Monk and could
+// not find it with any in-client tool; the idle query's subject
+// list had never been extended to the kind).
+
+#[test]
+fn idle_military_key_finds_the_monk() {
+    let mut sim = sim_in_castle();
+    top_up(&mut sim, OWNER_PLAYER);
+    let mon = placed(&sim, 900, BuildingKind::Monastery, OWNER_PLAYER, (30, 30));
+    let mon_id = mon.id;
+    sim.buildings.push(mon);
+    sim.push_command(Command::TrainAt {
+        building: mon_id,
+        kind: EntityKind::Monk,
+    });
+    let out = run_until(&mut sim, 4_000, |s| {
+        s.entities().iter().any(|e| e.kind == EntityKind::Monk)
+    });
+    assert!(out, "the Monk never left the Monastery");
+    let monk_id = sim
+        .entities()
+        .iter()
+        .find(|e| e.kind == EntityKind::Monk)
+        .unwrap()
+        .id;
+    // Nobody is wounded in this fixture, so the monk stands idle
+    // at its spawn point — and the idle-military key MUST list it.
+    assert!(
+        sim.idle_military().contains(&monk_id),
+        "idle_military() = {:?} does not contain the idle Monk {}",
+        sim.idle_military(),
+        monk_id
+    );
+    // The widening is ONLY the idle key's: the Monk stays out of
+    // the combat semantics `is_military` gates (no stance, no
+    // attack-move, no AI army counts).
+    assert!(!EntityKind::Monk.is_military());
+    assert!(EntityKind::Monk.is_idle_military());
+    assert!(!sim.can_set_stance(monk_id));
+}
+
+// ------------------------------------------------------------------
 // MNK-10: healing.
 
 #[test]

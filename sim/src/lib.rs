@@ -4168,8 +4168,11 @@ impl Sim {
     }
 
     /// Idle military (M4, SEL-09): living human military units
-    /// (Scout, Militia, Archer) with no move order and no attack
-    /// target. Id order. The mirror of `idle_villagers`.
+    /// with no move order and no attack target. Id order. The
+    /// mirror of `idle_villagers`. The subject list is
+    /// `EntityKind::is_idle_military` (the fighting kinds plus
+    /// the Battering Ram and the Monk — see its doc for why the
+    /// list is wider than `is_military`'s combat semantics).
     pub fn idle_military(&self) -> Vec<u32> {
         self.idle_military_of(entity::OWNER_PLAYER)
     }
@@ -4178,12 +4181,15 @@ impl Sim {
     /// of `idle_military`, same definition, any seat. A unit under
     /// a standing order (attack-move or patrol, CMB-10/11) is at
     /// work, not idle — between legs it has no move order, so the
-    /// standing-order state is part of the test.
+    /// standing-order state is part of the test. A Monk standing
+    /// in heal range with a heal task is likewise at work: its
+    /// move order is cleared while it heals, so the heal task
+    /// itself is part of the test.
     pub fn idle_military_of(&self, owner: u8) -> Vec<u32> {
         self.entities
             .iter()
             .filter(|e| {
-                e.kind.is_military()
+                e.kind.is_idle_military()
                     && e.owner == owner
                     && !e.dead
                     && e.order.is_none()
@@ -4192,6 +4198,7 @@ impl Sim {
                     && e.attack_point.is_none()
                     && e.attack_move.is_none()
                     && e.patrol.is_empty()
+                    && e.heal_target.is_none()
                     && e.garrisoned_in.is_none()
             })
             .map(|e| e.id)
