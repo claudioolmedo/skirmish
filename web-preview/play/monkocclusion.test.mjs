@@ -40,10 +40,17 @@ function fnBody(name) {
   return m[0];
 }
 
-test('the occlusion pass still skips call-less items (the mechanism)', () => {
-  assert.match(fnBody('drawOccludedOutlines'),
-    /if \(!it\.calls\.length\) continue;/,
-    'INF-12 skips items with no recorded drawImage calls — the reason a vector-only unit gets no silhouette');
+test('the occlusion pass skips items with neither calls nor geometry (the mechanism)', () => {
+  // Fix1's pin read `if (!it.calls.length) continue;` — the
+  // rule that made vector-only items invisible to INF-12.
+  // Fix2 refined it: an item may still take part when it
+  // carries synthesized geometry (occ.rect); what is skipped
+  // is an item with no rect from either source.
+  const body = fnBody('drawOccludedOutlines');
+  assert.match(body, /if \(!rect\) continue;/,
+    'INF-12 skips items that produced no rect — the reason a vector-only unit got no silhouette under fix1');
+  assert.match(body, /if \(!rect && it\.occ\.rect\)/,
+    'synthesized occluder geometry is the fallback rect source (fix2)');
 });
 
 test('drawMonk blits a cached sprite through drawImage', () => {
@@ -79,4 +86,52 @@ test('paintMonkFigure keeps the original figure (colours unchanged)', () => {
 test('the unit draw table still routes kind 20 to drawMonk', () => {
   assert.match(appJs, /drawMonk\]; \/\/ 20: Monk/,
     'UNIT_DRAW[20] remains drawMonk');
+});
+
+// ------------------------------------------------------------------
+// Fix2 (2026-11-02, same run): the OCCLUDER half of the defect.
+// The live verification of the unit-side fix (session 26cdf5a2)
+// showed the monk STILL invisible — while villagers behind the
+// Town Center and a sheep behind the House DID silhouette in
+// the same build. Code read: BUILDING_ART_KEY has no entries
+// for kinds 16/17/20, so the Monastery (and University / Siege
+// Workshop) draw through the vector fallback permanently and
+// record no drawImage calls — as occluders they were skipped
+// by the same call-less rule, so no silhouette could ever be
+// clipped through them. Placed buildings now carry synthesized
+// occluder geometry (buildingOccGeo), used only when an item
+// recorded no calls.
+
+test('art-less building kinds are exactly the vector-fallback occluders', () => {
+  const m = appJs.match(/const BUILDING_ART_KEY = \{([\s\S]*?)\};/);
+  assert.ok(m, 'BUILDING_ART_KEY found');
+  for (const k of [16, 17, 20]) {
+    assert.ok(!new RegExp(`\\b${k}:`).test(m[1]),
+      `kind ${k} has no building art key (its draw is the vector fallback)`);
+  }
+});
+
+test('placed buildings carry synthesized occluder geometry', () => {
+  assert.match(appJs,
+    /occ: \{ role: 'occluder', \.\.\.buildingOccGeo\(b\) \}/,
+    'the building draw entry spreads buildingOccGeo into its occ record');
+  const geo = fnBody('buildingOccGeo');
+  assert.match(geo, /worldToScreen\(b\.x - half, b\.y - half\)/,
+    'geometry corners go through the same projection as the draw');
+  assert.match(geo, /b\.size === 3 \? 3\.2 : 2\.1/,
+    'height mirrors the vector fallback box heights');
+  assert.match(geo, /poly = \[up\(t\), up\(r\), r, bt, l, up\(l\)\]/,
+    'the silhouette polygon is the raised footprint diamond');
+});
+
+test('the pass falls back to synthesized rects for call-less items', () => {
+  assert.match(fnBody('drawOccludedOutlines'),
+    /if \(!rect && it\.occ\.rect\) rect = \{ \.\.\.it\.occ\.rect \};/,
+    'a call-less item with occ.rect still takes part in the pass');
+});
+
+test('the mask paints the synthesized polygon for call-less occluders', () => {
+  assert.match(fnBody('paintOccludedSilhouette'),
+    /if \(!o\.it\.calls\.length && o\.it\.occ\.poly\)/,
+    'call-less occluders contribute their polygon to the silhouette mask');
 });
