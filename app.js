@@ -12697,6 +12697,20 @@ function drawRallyFlag(from, rx, ry, nodeId) {
 // through, as in DE. The decision (geometry + the fog fairness
 // gate) is occlusion.js's; nothing here touches the sim.
 //
+// Bot-loop fix2 (2026-11-02): three building kinds have no art
+// at all (BUILDING_ART_KEY has no 16 University / 17 Siege
+// Workshop / 20 Monastery), so their vector fallback is not a
+// first-frames transient — it is their permanent draw, and it
+// records no image calls in EVERY frame. Such buildings never
+// became occluders: no unit behind a Monastery could ever get
+// a silhouette, which is why a freshly trained Monk stayed
+// invisible even after the unit-side fix (f217c5e) made the
+// Monk himself recordable. Placed buildings therefore carry
+// synthesized occluder geometry (buildingOccGeo: the vector
+// box's own silhouette polygon + its bounding rect), used by
+// the pass only when the item recorded no calls — art-drawn
+// buildings keep their exact alpha path untouched.
+//
 // The recorder is deliberately dumb: it patches ctx.drawImage
 // only for the duration of the sorted pass and normalizes every
 // call to the 9-argument form. Items opt in via `occ` on their
@@ -12894,6 +12908,38 @@ function outlineColorFor(owner) {
 const occMaskCv = document.createElement('canvas');
 const occSilCv = document.createElement('canvas');
 
+// Synthesized occluder geometry for a placed building: the
+// screen-space silhouette of the generic building box (the
+// shape drawNewBuilding's vector fallback paints — footprint
+// diamond raised by the box height), as a polygon in draw
+// order plus its bounding rect. Corners go through
+// worldToScreen exactly like the building's own draw, and the
+// height mirrors the fallback's ((size 3 ? 3.2 : 2.1) units,
+// scaled by construction progress while the building rises).
+function buildingOccGeo(b) {
+  const half = (b.size * CS) / 2;
+  const t = worldToScreen(b.x - half, b.y - half);
+  const r = worldToScreen(b.x + half, b.y - half);
+  const bt = worldToScreen(b.x + half, b.y + half);
+  const l = worldToScreen(b.x - half, b.y + half);
+  const hgt = (b.size === 3 ? 3.2 : 2.1)
+    * (b.complete ? 1 : b.progress) * camS;
+  const up = (p) => [p[0], p[1] - hgt];
+  const poly = [up(t), up(r), r, bt, l, up(l)];
+  let minX = Infinity, minY = Infinity;
+  let maxX = -Infinity, maxY = -Infinity;
+  for (const [px, py] of poly) {
+    if (px < minX) minX = px;
+    if (py < minY) minY = py;
+    if (px > maxX) maxX = px;
+    if (py > maxY) maxY = py;
+  }
+  return {
+    rect: { x: minX, y: minY, w: maxX - minX, h: maxY - minY },
+    poly,
+  };
+}
+
 // Paint one unit's silhouette over its occluders: the unit's own
 // tinted alpha, clipped to the union of the covering occluders'
 // alpha (their recorded images replayed into a mask the size of
@@ -12923,6 +12969,24 @@ function paintOccludedSilhouette(unitEntry, cover, color) {
           call.m[4] - bx, call.m[5] - by);
         mg.drawImage(call.im, call.sx, call.sy, call.sw, call.sh,
           call.dx, call.dy, call.dw, call.dh);
+      }
+      // Bot-loop fix2 (2026-11-02): a call-less occluder (a
+      // building drawn by the vector fallback — the Monastery,
+      // University and Siege Workshop have no building art, so
+      // they record no drawImage calls) contributes its
+      // synthesized silhouette polygon to the mask instead;
+      // without it the mask stays empty and no silhouette can
+      // ever show through such a building.
+      if (!o.it.calls.length && o.it.occ.poly) {
+        mg.setTransform(1, 0, 0, 1, 0, 0);
+        mg.fillStyle = '#ffffff';
+        mg.beginPath();
+        o.it.occ.poly.forEach(([px, py], idx) => {
+          if (idx === 0) mg.moveTo(px - bx, py - by);
+          else mg.lineTo(px - bx, py - by);
+        });
+        mg.closePath();
+        mg.fill();
       }
     }
     mg.setTransform(1, 0, 0, 1, 0, 0);
@@ -12955,12 +13019,18 @@ function drawOccludedOutlines(items) {
   const units = [];
   const occluders = [];
   for (const it of items) {
-    if (!it.calls.length) continue;
     let rect = null;
     for (const call of it.calls) {
       const cr = callRectOf(call);
       rect = rect ? unionRectOf(rect, cr) : { ...cr };
     }
+    // Bot-loop fix2 (2026-11-02): an item with no recorded calls
+    // can still take part when its draw entry carries
+    // synthesized geometry (occ.rect — placed buildings compute
+    // it in buildingOccGeo, because the vector-fallback kinds
+    // record no drawImage calls and were previously invisible
+    // to this pass as occluders).
+    if (!rect && it.occ.rect) rect = { ...it.occ.rect };
     if (!rect) continue;
     const entry = { it, rect, depth: it.depth };
     if (it.occ.role === 'unit') units.push(entry);
@@ -13159,7 +13229,7 @@ function draw() {
   }
   for (const b of renderBuildings) {
     if (b.kind === 1 && b.complete) continue; // drawn as a farm node
-    draws.push({ key: b.x + b.y + CS, occ: { role: 'occluder' }, fn: () => drawBuilding(b, renderBuildings) });
+    draws.push({ key: b.x + b.y + CS, occ: { role: 'occluder', ...buildingOccGeo(b) }, fn: () => drawBuilding(b, renderBuildings) });
   }
   // Tree depletion tracking (falling trees + stumps) — the same
   // per-frame bookkeeping pattern as rubble, over the node list.
