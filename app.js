@@ -9917,42 +9917,94 @@ function drawMangonel(i, wx, wy) {
 // hooded brown robe with the owner's sash, a staff topped by
 // a small gold cross. The monk carries no weapon (CLS-08);
 // its silhouette is the robe and the staff.
+//
+// Bot-loop fix (2026-11-02): the figure is painted ONCE into a
+// cached offscreen sprite per sash colour and blitted with
+// drawImage, instead of stroking the vector shapes straight
+// onto the frame canvas every frame. The INF-12 occlusion pass
+// (recordFrameSprites / drawOccludedOutlines) can only see
+// units whose draw records drawImage calls — a call-less item
+// is skipped (`if (!it.calls.length) continue;`) — so the
+// pure-vector monk NEVER received the owner-colour silhouette
+// every sprite unit gets when a building hides it. That is
+// exactly the live defect: a trained monk spawns on the first
+// free ring cell (the NW corner, behind the Monastery), the
+// building paints over him, and with no silhouette the player
+// sees only the hood tip and staff cross peeking above the
+// roof — four live sessions read it as "Train Monk does
+// nothing". The sprite carries the identical shapes/colours;
+// only the paint path changes. Sim untouched.
+const MONK_SPRITE_U = 16; // cached-sprite pixels per world unit
+// Sprite content bounds in unit space (feet at the origin):
+// x [-0.62, 0.91] (robe edge → staff cross), y [-2.62, 0]
+// (cross top → feet); the box below adds a small margin.
+const MONK_BOX = { x0: -0.85, y0: -3.0, w: 1.9, h: 3.15 };
+const monkSpriteCache = new Map(); // sash colour -> canvas | null
+function paintMonkFigure(g, sx, sy, u, sash) {
+  // The staff, planted at his right side.
+  g.strokeStyle = '#4a3826';
+  g.lineWidth = Math.max(1, 0.13 * u);
+  g.beginPath();
+  g.moveTo(sx + 0.72 * u, sy - 0.1 * u);
+  g.lineTo(sx + 0.72 * u, sy - 2.35 * u);
+  g.stroke();
+  g.fillStyle = '#d8b34a'; // the staff's gold cross
+  g.fillRect(sx + 0.65 * u, sy - 2.62 * u, 0.14 * u, 0.42 * u);
+  g.fillRect(sx + 0.53 * u, sy - 2.5 * u, 0.38 * u, 0.11 * u);
+  // The robe: a plain brown bell.
+  g.fillStyle = '#6b4a2e';
+  g.beginPath();
+  g.ellipse(sx, sy - 0.85 * u, 0.62 * u, 0.82 * u, 0, 0, Math.PI * 2);
+  g.fill();
+  // The owner's sash across the chest.
+  g.strokeStyle = sash;
+  g.lineWidth = Math.max(1, 0.2 * u);
+  g.beginPath();
+  g.moveTo(sx - 0.38 * u, sy - 1.25 * u);
+  g.lineTo(sx + 0.38 * u, sy - 0.6 * u);
+  g.stroke();
+  // The hood, and the face in its shadow.
+  g.fillStyle = '#54381f';
+  g.beginPath();
+  g.arc(sx, sy - 1.92 * u, 0.4 * u, 0, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = '#e8c39a';
+  g.beginPath();
+  g.arc(sx, sy - 1.88 * u, 0.27 * u, 0, 0, Math.PI * 2);
+  g.fill();
+}
+function monkSprite(sash) {
+  if (monkSpriteCache.has(sash)) return monkSpriteCache.get(sash);
+  let cv = null;
+  try {
+    cv = document.createElement('canvas');
+    cv.width = Math.ceil(MONK_BOX.w * MONK_SPRITE_U);
+    cv.height = Math.ceil(MONK_BOX.h * MONK_SPRITE_U);
+    const g = cv.getContext('2d');
+    if (!g) cv = null;
+    else {
+      paintMonkFigure(g, -MONK_BOX.x0 * MONK_SPRITE_U,
+        -MONK_BOX.y0 * MONK_SPRITE_U, MONK_SPRITE_U, sash);
+    }
+  } catch {
+    cv = null; // no canvas available (test stubs): vector fallback
+  }
+  monkSpriteCache.set(sash, cv);
+  return cv;
+}
 function drawMonk(i, wx, wy) {
   const [sx, sy] = worldToScreen(wx, wy);
   const u = camS;
   shadow(sx, sy, 0.95 * u);
   if (selection.has(i)) drawSelRing(sx, sy, 1.25);
-  // The staff, planted at his right side.
-  ctx.strokeStyle = '#4a3826';
-  ctx.lineWidth = Math.max(1, 0.13 * u);
-  ctx.beginPath();
-  ctx.moveTo(sx + 0.72 * u, sy - 0.1 * u);
-  ctx.lineTo(sx + 0.72 * u, sy - 2.35 * u);
-  ctx.stroke();
-  ctx.fillStyle = '#d8b34a'; // the staff's gold cross
-  ctx.fillRect(sx + 0.65 * u, sy - 2.62 * u, 0.14 * u, 0.42 * u);
-  ctx.fillRect(sx + 0.53 * u, sy - 2.5 * u, 0.38 * u, 0.11 * u);
-  // The robe: a plain brown bell.
-  ctx.fillStyle = '#6b4a2e';
-  ctx.beginPath();
-  ctx.ellipse(sx, sy - 0.85 * u, 0.62 * u, 0.82 * u, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // The owner's sash across the chest.
-  ctx.strokeStyle = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e';
-  ctx.lineWidth = Math.max(1, 0.2 * u);
-  ctx.beginPath();
-  ctx.moveTo(sx - 0.38 * u, sy - 1.25 * u);
-  ctx.lineTo(sx + 0.38 * u, sy - 0.6 * u);
-  ctx.stroke();
-  // The hood, and the face in its shadow.
-  ctx.fillStyle = '#54381f';
-  ctx.beginPath();
-  ctx.arc(sx, sy - 1.92 * u, 0.4 * u, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#e8c39a';
-  ctx.beginPath();
-  ctx.arc(sx, sy - 1.88 * u, 0.27 * u, 0, 0, Math.PI * 2);
-  ctx.fill();
+  const sash = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e';
+  const spr = monkSprite(sash);
+  if (spr) {
+    ctx.drawImage(spr, sx + MONK_BOX.x0 * u, sy + MONK_BOX.y0 * u,
+      MONK_BOX.w * u, MONK_BOX.h * u);
+  } else {
+    paintMonkFigure(ctx, sx, sy, u, sash);
+  }
 }
 
 // The Trade Cart (Package D, TRD-05): original vector figure —
