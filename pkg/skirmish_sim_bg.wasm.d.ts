@@ -162,6 +162,7 @@ export const wasmsim_push_train_mangonel: (a: number, b: number) => number;
 export const wasmsim_push_train_militia: (a: number, b: number) => number;
 export const wasmsim_push_train_monk: (a: number, b: number) => number;
 export const wasmsim_push_train_petard: (a: number, b: number) => number;
+export const wasmsim_push_train_scorpion: (a: number, b: number) => number;
 export const wasmsim_push_train_scout: (a: number, b: number) => number;
 export const wasmsim_push_train_skirmisher: (a: number, b: number) => number;
 export const wasmsim_push_train_spearman: (a: number, b: number) => number;

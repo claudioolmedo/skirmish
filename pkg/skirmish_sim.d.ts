@@ -1001,6 +1001,13 @@ export class WasmSim {
      */
     push_train_petard(building: number): boolean;
     /**
+     * Enqueue a Scorpion at a completed Siege Workshop
+     * (Castle P4c — the workshop is the Scorpion's only home;
+     * `can_train_at` carries the Castle Age gate). See
+     * `push_train_militia`.
+     */
+    push_train_scorpion(building: number): boolean;
+    /**
      * Enqueue a Scout Cavalry at a completed Stable (M6). See
      * `push_train_militia`.
      */
@@ -1421,6 +1428,7 @@ export interface InitOutput {
     readonly wasmsim_push_train_militia: (a: number, b: number) => number;
     readonly wasmsim_push_train_monk: (a: number, b: number) => number;
     readonly wasmsim_push_train_petard: (a: number, b: number) => number;
+    readonly wasmsim_push_train_scorpion: (a: number, b: number) => number;
     readonly wasmsim_push_train_scout: (a: number, b: number) => number;
     readonly wasmsim_push_train_skirmisher: (a: number, b: number) => number;
     readonly wasmsim_push_train_spearman: (a: number, b: number) => number;

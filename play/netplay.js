@@ -165,6 +165,7 @@ const TRAIN_AT_FNS = {
   12: 'push_train_knight', 14: 'push_train_cavalry_archer',
   15: 'push_train_petard', 16: 'push_train_trade_cart',
   17: 'push_train_battering_ram', 18: 'push_train_mangonel',
+  19: 'push_train_scorpion',
   17: 'push_train_battering_ram', 20: 'push_train_monk',
 };
 

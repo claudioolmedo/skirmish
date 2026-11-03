@@ -314,7 +314,7 @@ let KIND_NAME = {
   4: 'Archer', 5: 'Sheep', 6: 'Boar', 7: 'Deer', 8: 'Man-at-Arms',
   9: 'Spearman', 10: 'Skirmisher', 11: 'Wolf',
   12: 'Knight', 13: 'Light Cavalry', 14: 'Cavalry Archer', 15: 'Petard',
-  16: 'Trade Cart', 17: 'Battering Ram', 18: 'Mangonel',
+  16: 'Trade Cart', 17: 'Battering Ram', 18: 'Mangonel', 19: 'Scorpion',
   16: 'Trade Cart', 17: 'Battering Ram', 20: 'Monk', 21: 'Relic',
 };
 // Selection-panel portraits per unit kind (SVG symbol ids in
@@ -323,7 +323,7 @@ const KIND_ICON = {
   0: 'i-villager', 2: 'i-villager', 3: 'i-militia', 4: 'i-archer', 5: 'i-pop',
   8: 'i-militia', 9: 'i-spearman', 10: 'i-skirmisher',
   12: 'i-villager', 13: 'i-villager', 14: 'i-archer', 15: 'i-petard',
-  16: 'i-trade-cart', 17: 'i-ram', 18: 'i-mangonel',
+  16: 'i-trade-cart', 17: 'i-ram', 18: 'i-mangonel', 19: 'i-scorpion',
   16: 'i-trade-cart', 17: 'i-ram', 20: 'i-monk', 21: 'i-gold',
 };
 
@@ -3803,6 +3803,7 @@ function applyLocalOrder(cmd) {
         : cmd.k === 16 ? sim.push_train_trade_cart(cmd.b)
         : cmd.k === 17 ? sim.push_train_battering_ram(cmd.b)
         : cmd.k === 18 ? sim.push_train_mangonel(cmd.b)
+        : cmd.k === 19 ? sim.push_train_scorpion(cmd.b)
         : cmd.k === 20 ? sim.push_train_monk(cmd.b)
         : sim.push_train_archer(cmd.b);
     // Package D (TRD-05): task a Trade Cart to a foreign Market.
@@ -10328,6 +10329,134 @@ function drawMangonel(i, wx, wy) {
   }
 }
 
+// The Scorpion (Castle P4c, PRJ-09): original vector figure —
+// a low wheeled ballista: two spoked wheels under a long
+// timber frame, a horizontal trough with a long loaded bolt,
+// and the torsion bow arms at the front with their string.
+// Painted through the same cached-sprite path as the Mangonel
+// and the Monk, so the INF-12 occlusion pass records its
+// drawImage and the owner-colour silhouette shows behind
+// buildings exactly like its workshop kin.
+const SCORPION_SPRITE_U = 16; // cached-sprite pixels per world unit
+// Sprite content bounds in unit space (feet at the origin):
+// x [-2.05, 1.95] (bow tip → winch), y [-2.0, 0] (bow top →
+// wheel bottom); the box below adds a small margin.
+const SCORPION_BOX = { x0: -2.2, y0: -2.15, w: 4.4, h: 2.35 };
+const scorpionSpriteCache = new Map(); // cloth colour -> canvas | null
+function paintScorpionFigure(g, sx, sy, u, cloth) {
+  // The wheels: two dark spoked wheels under the frame.
+  for (const s of [-1, 1]) {
+    g.fillStyle = '#4a3826';
+    g.beginPath();
+    g.arc(sx + s * 1.1 * u, sy - 0.55 * u, 0.55 * u, 0, 0, Math.PI * 2);
+    g.fill();
+    g.strokeStyle = '#8a6844';
+    g.lineWidth = Math.max(1, 0.09 * u);
+    for (const a of [0, Math.PI / 2]) {
+      g.beginPath();
+      g.moveTo(sx + (s * 1.1 - 0.42 * Math.cos(a)) * u, sy + (-0.55 - 0.42 * Math.sin(a)) * u);
+      g.lineTo(sx + (s * 1.1 + 0.42 * Math.cos(a)) * u, sy + (-0.55 + 0.42 * Math.sin(a)) * u);
+      g.stroke();
+    }
+    g.fillStyle = '#2e2115';
+    g.beginPath();
+    g.arc(sx + s * 1.1 * u, sy - 0.55 * u, 0.14 * u, 0, 0, Math.PI * 2);
+    g.fill();
+  }
+  // The frame: a long low base beam on two short posts.
+  g.fillStyle = '#6d543a';
+  g.fillRect(sx - 1.75 * u, sy - 1.12 * u, 3.5 * u, 0.3 * u);
+  g.fillStyle = '#5f4c36';
+  g.fillRect(sx - 1.35 * u, sy - 0.95 * u, 0.28 * u, 0.28 * u);
+  g.fillRect(sx + 1.05 * u, sy - 0.95 * u, 0.28 * u, 0.28 * u);
+  // The owner's cloth hung on the frame's side.
+  g.fillStyle = cloth;
+  g.fillRect(sx - 0.55 * u, sy - 0.82 * u, 1.1 * u, 0.45 * u);
+  // The trough: a thick slider beam running the frame's length,
+  // rising slightly toward the bow at the front (left).
+  g.strokeStyle = '#8a6844';
+  g.lineWidth = Math.max(1.2, 0.26 * u);
+  g.beginPath();
+  g.moveTo(sx + 1.6 * u, sy - 1.28 * u);
+  g.lineTo(sx - 1.6 * u, sy - 1.52 * u);
+  g.stroke();
+  // The loaded bolt along the trough, iron tip at the front.
+  g.strokeStyle = '#c9c2b4';
+  g.lineWidth = Math.max(1, 0.09 * u);
+  g.beginPath();
+  g.moveTo(sx + 1.35 * u, sy - 1.36 * u);
+  g.lineTo(sx - 1.85 * u, sy - 1.6 * u);
+  g.stroke();
+  g.fillStyle = '#3a3a40';
+  g.beginPath();
+  g.moveTo(sx - 1.85 * u, sy - 1.6 * u);
+  g.lineTo(sx - 1.62 * u, sy - 1.7 * u);
+  g.lineTo(sx - 1.66 * u, sy - 1.48 * u);
+  g.closePath();
+  g.fill();
+  // The torsion bow: two arms sweeping forward from the frame's
+  // front, and the string between their tips, behind the bolt.
+  g.strokeStyle = '#5f4c36';
+  g.lineWidth = Math.max(1.2, 0.2 * u);
+  g.beginPath();
+  g.moveTo(sx - 1.45 * u, sy - 1.5 * u);
+  g.quadraticCurveTo(sx - 1.95 * u, sy - 1.75 * u, sx - 1.98 * u, sy - 1.98 * u);
+  g.moveTo(sx - 1.45 * u, sy - 1.5 * u);
+  g.quadraticCurveTo(sx - 1.9 * u, sy - 1.2 * u, sx - 1.82 * u, sy - 1.02 * u);
+  g.stroke();
+  g.strokeStyle = '#d8d2c2';
+  g.lineWidth = Math.max(1, 0.06 * u);
+  g.beginPath();
+  g.moveTo(sx - 1.98 * u, sy - 1.98 * u);
+  g.lineTo(sx - 1.7 * u, sy - 1.55 * u);
+  g.lineTo(sx - 1.82 * u, sy - 1.02 * u);
+  g.stroke();
+  // The winch at the stock's rear: a small drum and handle.
+  g.fillStyle = '#4a3826';
+  g.beginPath();
+  g.arc(sx + 1.68 * u, sy - 1.32 * u, 0.17 * u, 0, 0, Math.PI * 2);
+  g.fill();
+  g.strokeStyle = '#4a3826';
+  g.lineWidth = Math.max(1, 0.08 * u);
+  g.beginPath();
+  g.moveTo(sx + 1.68 * u, sy - 1.32 * u);
+  g.lineTo(sx + 1.9 * u, sy - 1.55 * u);
+  g.stroke();
+}
+function scorpionSprite(cloth) {
+  if (scorpionSpriteCache.has(cloth)) return scorpionSpriteCache.get(cloth);
+  let cv = null;
+  try {
+    cv = document.createElement('canvas');
+    cv.width = Math.ceil(SCORPION_BOX.w * SCORPION_SPRITE_U);
+    cv.height = Math.ceil(SCORPION_BOX.h * SCORPION_SPRITE_U);
+    const g = cv.getContext('2d');
+    if (!g) cv = null;
+    else {
+      paintScorpionFigure(g, -SCORPION_BOX.x0 * SCORPION_SPRITE_U,
+        -SCORPION_BOX.y0 * SCORPION_SPRITE_U, SCORPION_SPRITE_U, cloth);
+    }
+  } catch {
+    cv = null; // no canvas available (test stubs): vector fallback
+  }
+  scorpionSpriteCache.set(cloth, cv);
+  return cv;
+}
+function drawScorpion(i, wx, wy) {
+  const [sx, sy] = worldToScreen(wx, wy);
+  const u = camS;
+  shadow(sx, sy, 2.0 * u);
+  if (selection.has(i)) drawSelRing(sx, sy, 2.2);
+  const cloth = drawOwner === foeOwner() ? '#a03a2c' : '#2c5ea0';
+  const spr = scorpionSprite(cloth);
+  if (spr) {
+    ctx.drawImage(spr, sx + SCORPION_BOX.x0 * u, sy + SCORPION_BOX.y0 * u,
+      SCORPION_BOX.w * u, SCORPION_BOX.h * u);
+  } else {
+    paintScorpionFigure(ctx, sx, sy, u, cloth);
+  }
+}
+
 // The Monk (Castle P5a, MNK-10): original vector figure — a
 // hooded brown robe with the owner's sash, a staff topped by
 // a small gold cross. The monk carries no weapon (CLS-08);
@@ -11521,7 +11650,7 @@ function attemptTrain(id) {
     'train-spearman': 9, 'train-skirmisher': 10,
     'train-knight': 12, 'train-cavalry-archer': 14,
     'train-petard': 15, 'train-trade-cart': 16, 'train-ram': 17,
-    'train-mangonel': 18,
+    'train-mangonel': 18, 'train-scorpion': 19,
     'train-monk': 20,
   }[id];
   if (kindTag == null) return false;
@@ -11545,7 +11674,7 @@ function flashTrainRefusal(id) {
       'train-spearman': 9, 'train-skirmisher': 10,
       'train-knight': 12, 'train-cavalry-archer': 14,
       'train-petard': 15, 'train-trade-cart': 16, 'train-ram': 17,
-      'train-mangonel': 18,
+      'train-mangonel': 18, 'train-scorpion': 19,
       'train-monk': 20,
     }[id];
     const reason = sim.building_train_block(selectedBuilding.id, kindTag);
@@ -11575,7 +11704,7 @@ function runCommandButton(id, times = 1) {
     || id === 'train-spearman' || id === 'train-skirmisher'
     || id === 'train-knight' || id === 'train-cavalry-archer'
     || id === 'train-petard' || id === 'train-trade-cart' || id === 'train-ram'
-    || id === 'train-mangonel' || id === 'train-monk') {
+    || id === 'train-mangonel' || id === 'train-scorpion' || id === 'train-monk') {
     let done = 0;
     while (done < times && attemptTrain(id)) done++;
     if (done === 0) flashTrainRefusal(id);
@@ -11946,6 +12075,7 @@ function renderCommands() {
   const blockP = bk && context === 'castle' ? sim.building_train_block(bk.id, 15) : -1;
   const blockR = bk && context === 'siegeworkshop' ? sim.building_train_block(bk.id, 17) : -1;
   const blockMg = bk && context === 'siegeworkshop' ? sim.building_train_block(bk.id, 18) : -1;
+  const blockSc = bk && context === 'siegeworkshop' ? sim.building_train_block(bk.id, 19) : -1;
   const blockTC = bk && context === 'market' ? sim.building_train_block(bk.id, 16) : -1;
   const blockMo = bk && context === 'monastery' ? sim.building_train_block(bk.id, 20) : -1;
   // Research blocks: the TC set (Loom 0, Feudal 1, Wheelbarrow 6,
@@ -11973,7 +12103,7 @@ function renderCommands() {
   const sig = [context, Math.floor(wood), Math.floor(myStock()[0]), Math.floor(myStock()[2]),
     Math.floor(myStock()[3]),
     reason, queue, bk ? bk.id : -1, bk ? bk.queue : -1, bk && bk.complete ? 1 : 0,
-    blockM, blockSp, blockA, blockSk, blockS, blockK, blockCA, blockP, blockR, blockMg, blockTC, blockMo, age, techMask, rbTc.join('.'), Object.values(rbB).join('.'),
+    blockM, blockSp, blockA, blockSk, blockS, blockK, blockCA, blockP, blockR, blockMg, blockSc, blockTC, blockMo, age, techMask, rbTc.join('.'), Object.values(rbB).join('.'),
     tcQueueCodes, bkQueueCodes, buildPage || '', repairArm ? 1 : 0, healArm ? 1 : 0, convertArm ? 1 : 0,
     // Castle P3b: the garrison counts and the bell state are panel
     // state (button faces + disabled states read them).
@@ -12421,9 +12551,10 @@ function renderCommands() {
     );
   } else if (context === 'siegeworkshop') {
     // Castle P4a: the Siege Workshop's panel — Train Battering
-    // Ram (the Scorpion joins it in P4c), in the Castle panel's
-    // production shape. Castle P4b: Train Mangonel rides beside
-    // the Ram as the panel's second production.
+    // Ram, in the Castle panel's production shape. Castle P4b:
+    // Train Mangonel rides beside the Ram as the panel's second
+    // production. Castle P4c: Train Scorpion completes the
+    // workshop's roster as the panel's third production.
     const underConstruction = !bk.complete;
     cmdGrid.append(
       cmdButton({
@@ -12443,6 +12574,15 @@ function renderCommands() {
         title: underConstruction
           ? t('cmd.underConstruction', { name: KIND_NAME[18], building: BUILD_NAME[17] })
           : t('cmd.trainTitleTime', { name: KIND_NAME[18], cost: costText([[160, 'wood'], [135, 'gold']]), secs: 46 }) + (TRAIN_BLOCK_TITLES[blockMg] ? ' ' + TRAIN_BLOCK_TITLES[blockMg] : ''),
+      }),
+      cmdButton({
+        id: 'train-scorpion', icon: 'i-scorpion', label: 'Scorpion',
+        costIcon: 'i-wood', cost: 75, cost2Icon: 'i-gold', cost2: 75,
+        disabled: underConstruction || blockSc === 2 || blockSc === 3,
+        key: badgeForButton({ context, id: 'train-scorpion', index: 2 }),
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: KIND_NAME[19], building: BUILD_NAME[17] })
+          : t('cmd.trainTitleTime', { name: KIND_NAME[19], cost: costText([[75, 'wood'], [75, 'gold']]), secs: 30 }) + (TRAIN_BLOCK_TITLES[blockSc] ? ' ' + TRAIN_BLOCK_TITLES[blockSc] : ''),
       }),
     );
   } else if (context === 'monastery') {
@@ -13927,7 +14067,7 @@ function draw() {
     drawTradeCart, // 16: Trade Cart (Package D)
     drawBatteringRam, // 17: Battering Ram (Castle P4a)
     drawMangonel, // 18: Mangonel (Castle P4b)
-    null, // 19: Scorpion — reserved (Castle P4c)
+    drawScorpion, // 19: Scorpion (Castle P4c)
     drawMonk, // 20: Monk (Castle P5a)
     drawRelic]; // 21: Relic (Castle P5d)
   for (let i = 0; i < count; i++) {
