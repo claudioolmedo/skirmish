@@ -129,14 +129,17 @@ export function slotLabel(slot, s = null) {
 
 /// The room screen's configuration summary line, e.g.
 /// "1v1 · Arabia · Conquest · Guest: AI · Normal". The settings
-/// shown are the game's fixed facts today (map, victory,
-/// players) plus the guest slot — from the guest's own seat the
-/// last part simply reads "You".
-export function roomConfigText({ guestSlot = 'open', selfIsGuest = false, speed = 1.7 } = {}, s = null) {
+/// shown are the game's facts today (map, players) plus the
+/// host's choices — the guest slot, the match speed (SIM-11)
+/// and the victory conditions (Package C: VIC-05/06/07 — a
+/// ready label composed by the caller, kind plus any clock /
+/// score suffixes). From the guest's own seat the guest part
+/// simply reads "You".
+export function roomConfigText({ guestSlot = 'open', selfIsGuest = false, speed = 1.7, victory = 'Conquest' } = {}, s = null) {
   const guest = selfIsGuest
     ? ((s && s.you) || 'You')
     : slotLabel(guestSlot, s && s.slot);
   // SIM-11: the match speed is part of the configuration summary.
   const speedTxt = `${speed}×`;
-  return s && s.format ? s.format(guest, speedTxt) : `1v1 · Arabia · Conquest · Guest: ${guest} · Speed: ${speedTxt}`;
+  return s && s.format ? s.format(guest, speedTxt, victory) : `1v1 · Arabia · ${victory} · Guest: ${guest} · Speed: ${speedTxt}`;
 }
