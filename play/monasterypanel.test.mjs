@@ -106,3 +106,29 @@ test('Castle P5b: Convert order path — dispatch, smart order, arm, faith line'
   assert.match(wasmRs, /pub fn monk_faith/,
     'the wasm boundary exports monk_faith');
 });
+
+test('Castle P5c: Monastery panel carries Redemption + Heresy at tags 37/38', () => {
+  assert.match(appJs, /techBtn\('research-redemption', 37, 'i-redemption', 'cmd\.redemptionTitle', 50, 475, 6\)/,
+    'Redemption button rides tag 37 at 475 gold / 50 s');
+  assert.match(appJs, /techBtn\('research-heresy', 38, 'i-heresy', 'cmd\.heresyTitle', 60, 1000, 7\)/,
+    'Heresy button rides tag 38 at 1000 gold / 60 s');
+  assert.match(appJs, /'research-redemption': 37, 'research-heresy': 38/,
+    'research dispatch maps both buttons to tags 37/38');
+  assert.match(appJs, /37: t\('tech\.redemption'\), 38: t\('tech\.heresy'\)/,
+    'TECH_NAME carries both new techs');
+  assert.match(appJs, /monastery: \[32, 33, 34, 35, 36, 37, 38\]/,
+    'RB_TAGS monastery covers the whole Castle row (research blocks)');
+});
+
+test('Castle P5c: building convert order path — dispatch, smart order, arm', () => {
+  assert.match(appJs, /case 'convertb': return sim\.push_convert_building\(cmd\.e, cmd\.b\)/,
+    'applyCommand dispatches convertb to the sim');
+  assert.match(appJs, /issue\(\{ t: 'convertb', e: id, b: bT\.id \}\)/,
+    'right-click on an enemy building issues convertb for selected monks');
+  assert.match(appJs, /issue\(\{ t: 'convertb', e: id, b: bT\.id \}\)/,
+    'the armed Convert click also accepts a building target');
+  assert.match(wasmRs, /pub fn push_convert_building/,
+    'the wasm boundary exports push_convert_building');
+  assert.match(wasmRs, /pub fn can_convert_building_target/,
+    'the wasm boundary exports can_convert_building_target');
+});

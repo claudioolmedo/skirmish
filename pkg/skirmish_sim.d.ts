@@ -63,6 +63,12 @@ export class WasmSim {
      */
     buildings(): Float64Array;
     /**
+     * Whether `building` is conversion-eligible for the monk
+     * `entity` (Castle P5c, MNK-08 — eligibility only, no faith
+     * gate): the client's cursor feedback read.
+     */
+    can_convert_building_target(entity: number, building: number): boolean;
+    /**
      * Whether `target` is conversion-eligible for the monk
      * `entity` (Castle P5b, MNK-08 — eligibility only, no faith
      * gate): the client's cursor feedback read.
@@ -646,6 +652,15 @@ export class WasmSim {
      */
     push_cancel_queue_tc(tc: number, index: number): boolean;
     /**
+     * Order a Monk to convert an enemy building (Castle P5c,
+     * MNK-04): the monk walks adjacent to the footprint and
+     * works the building CI row. Returns whether the order
+     * *would* be accepted (Redemption + eligible building,
+     * MNK-08, at full faith, MNK-02); the sim re-validates when
+     * the command is applied.
+     */
+    push_convert_building(entity: number, building: number): boolean;
+    /**
      * Order a Monk to convert an enemy unit (Castle P5b,
      * MNK-03): the monk walks into range 9 and works the CI
      * model. Returns whether the order *would* be accepted
@@ -1215,6 +1230,7 @@ export interface InitOutput {
     readonly wasmsim_building_queue: (a: number, b: number) => [number, number];
     readonly wasmsim_building_train_block: (a: number, b: number, c: number) => number;
     readonly wasmsim_buildings: (a: number) => [number, number];
+    readonly wasmsim_can_convert_building_target: (a: number, b: number, c: number) => number;
     readonly wasmsim_can_convert_target: (a: number, b: number, c: number) => number;
     readonly wasmsim_cell_size: (a: number) => number;
     readonly wasmsim_entity_auto_explore: (a: number) => [number, number];
@@ -1315,6 +1331,7 @@ export interface InitOutput {
     readonly wasmsim_push_cancel_queue_building: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_cancel_queue_tc: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_convert: (a: number, b: number, c: number) => number;
+    readonly wasmsim_push_convert_building: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_delete: (a: number, b: number) => number;
     readonly wasmsim_push_delete_building: (a: number, b: number) => number;
     readonly wasmsim_push_dequeue_reseed: (a: number, b: number) => number;

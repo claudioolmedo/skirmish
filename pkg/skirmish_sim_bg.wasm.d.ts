@@ -10,6 +10,7 @@ export const wasmsim_building_garrison_count: (a: number, b: number) => number;
 export const wasmsim_building_queue: (a: number, b: number) => [number, number];
 export const wasmsim_building_train_block: (a: number, b: number, c: number) => number;
 export const wasmsim_buildings: (a: number) => [number, number];
+export const wasmsim_can_convert_building_target: (a: number, b: number, c: number) => number;
 export const wasmsim_can_convert_target: (a: number, b: number, c: number) => number;
 export const wasmsim_cell_size: (a: number) => number;
 export const wasmsim_entity_auto_explore: (a: number) => [number, number];
@@ -110,6 +111,7 @@ export const wasmsim_push_build_watch_tower_queued: (a: number, b: number, c: nu
 export const wasmsim_push_cancel_queue_building: (a: number, b: number, c: number) => number;
 export const wasmsim_push_cancel_queue_tc: (a: number, b: number, c: number) => number;
 export const wasmsim_push_convert: (a: number, b: number, c: number) => number;
+export const wasmsim_push_convert_building: (a: number, b: number, c: number) => number;
 export const wasmsim_push_delete: (a: number, b: number) => number;
 export const wasmsim_push_delete_building: (a: number, b: number) => number;
 export const wasmsim_push_dequeue_reseed: (a: number, b: number) => number;

@@ -121,6 +121,18 @@ export class WasmSim {
         return v1;
     }
     /**
+     * Whether `building` is conversion-eligible for the monk
+     * `entity` (Castle P5c, MNK-08 — eligibility only, no faith
+     * gate): the client's cursor feedback read.
+     * @param {number} entity
+     * @param {number} building
+     * @returns {boolean}
+     */
+    can_convert_building_target(entity, building) {
+        const ret = wasm.wasmsim_can_convert_building_target(this.__wbg_ptr, entity, building);
+        return ret !== 0;
+    }
+    /**
      * Whether `target` is conversion-eligible for the monk
      * `entity` (Castle P5b, MNK-08 — eligibility only, no faith
      * gate): the client's cursor feedback read.
@@ -1334,6 +1346,21 @@ export class WasmSim {
      */
     push_cancel_queue_tc(tc, index) {
         const ret = wasm.wasmsim_push_cancel_queue_tc(this.__wbg_ptr, tc, index);
+        return ret !== 0;
+    }
+    /**
+     * Order a Monk to convert an enemy building (Castle P5c,
+     * MNK-04): the monk walks adjacent to the footprint and
+     * works the building CI row. Returns whether the order
+     * *would* be accepted (Redemption + eligible building,
+     * MNK-08, at full faith, MNK-02); the sim re-validates when
+     * the command is applied.
+     * @param {number} entity
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_convert_building(entity, building) {
+        const ret = wasm.wasmsim_push_convert_building(this.__wbg_ptr, entity, building);
         return ret !== 0;
     }
     /**
