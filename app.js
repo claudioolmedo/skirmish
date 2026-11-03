@@ -3869,6 +3869,16 @@ function resetSim(mode = matchMode) {
   for (const k of Object.keys(UNIT_POSE_STATE)) delete UNIT_POSE_STATE[k];
   selectUnits(new Set()); // also clears any building selection
   placement = null;
+  // Bot-loop (2026-11-02): armed targeting belongs to the OLD match —
+  // a Convert armed before Restart leaked into the fresh match and
+  // the first clicks produced "Convert: …" toasts with no Monk in
+  // the game (live, session 46c52fe1). Disarm every targeting state
+  // here, exactly as Esc / right-click disarm them mid-match.
+  repairArm = false;
+  orderArm = null;
+  healArm = false;
+  convertArm = false;
+  wallAnchor = null;
   // M4 client state resets with the match: control groups and the
   // idle-key cycling memory belong to the old game.
   controlGroups.clear();
@@ -3978,6 +3988,13 @@ function adoptSim(newSim, owner) {
   for (const k of Object.keys(UNIT_POSE_STATE)) delete UNIT_POSE_STATE[k];
   selectUnits(new Set());
   placement = null;
+  // Bot-loop (2026-11-02): same disarm as resetSim — an online or
+  // rejoined match must not inherit the previous match's targeting.
+  repairArm = false;
+  orderArm = null;
+  healArm = false;
+  convertArm = false;
+  wallAnchor = null;
   controlGroups.clear();
   groupTaps.reset();
   idleCycleVil = -1;
