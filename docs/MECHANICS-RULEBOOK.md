@@ -4487,7 +4487,7 @@ five relics) entering as MATCHES, and MNK-09, ECO-16 and MNK-01
 The table below is recounted mechanically over the Status tags
 and resynced in full (several rows had drifted since Package M
 as P3–P5 slices flipped rules in the body without a recount):
-the book stands at 223 rules, 182 / 16 / 25. The table below
+the book stands at 223 rules, 183 / 16 / 24. The table below
 equals the body.
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
@@ -4500,7 +4500,7 @@ equals the body.
 | 6 | Economy & drop-off (ECO) | 17 | 16 | 0 | 1 |
 | 7 | Buildings & placement (BLD) | 20 | 17 | 2 | 1 |
 | 8 | Combat & damage (CMB) | 17 | 17 | 0 | 0 |
-| 9 | Projectiles & ballistics (PRJ) | 10 | 7 | 2 | 1 |
+| 9 | Projectiles & ballistics (PRJ) | 10 | 8 | 2 | 0 |
 | 10 | Unit classes & counters (CLS) | 8 | 6 | 0 | 2 |
 | 11 | Technologies & age advancement (TEC) | 11 | 7 | 2 | 2 |
 | 12 | Monks, conversion & relics (MNK) | 13 | 13 | 0 | 0 |
@@ -4510,7 +4510,7 @@ equals the body.
 | 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |
 | 17 | Multiplayer determinism (NET) | 11 | 9 | 1 | 1 |
 | 18 | Information rules (INF) | 13 | 12 | 1 | 0 |
-| | **Total** | **223** | **182** | **16** | **25** |
+| | **Total** | **223** | **183** | **16** | **24** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer
