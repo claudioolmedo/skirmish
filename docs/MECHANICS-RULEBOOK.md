@@ -4520,6 +4520,12 @@ as P3–P5 slices flipped rules in the body without a recount):
 the book stands at 223 rules, 183 / 16 / 24. The table below
 equals the body.
 
+updated 2026-11-03 for Package C (bot-loop landing): the
+victory modes land — VIC-05 (time-limit and score-target
+victories), VIC-06 (Regicide, with the King unit) and VIC-07
+(Sudden Death) move MISSING → MATCHES. The book stands at
+223 rules, 186 / 16 / 21. The table below equals the body.
+
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
 | 1 | Simulation & time (SIM) | 12 | 12 | 0 | 0 |
@@ -4537,10 +4543,10 @@ equals the body.
 | 13 | Trade, market & tribute (TRD) | 8 | 8 | 0 | 0 |
 | 14 | Garrison, transport & repair (GAR) | 10 | 9 | 0 | 1 |
 | 15 | AI behavior & difficulty (AI) | 9 | 8 | 0 | 1 |
-| 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |
+| 16 | Victory, scoring & game modes (VIC) | 12 | 5 | 0 | 7 |
 | 17 | Multiplayer determinism (NET) | 11 | 9 | 1 | 1 |
 | 18 | Information rules (INF) | 13 | 12 | 1 | 0 |
-| | **Total** | **223** | **183** | **16** | **24** |
+| | **Total** | **223** | **186** | **16** | **21** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer
