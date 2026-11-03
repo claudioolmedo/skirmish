@@ -6550,6 +6550,22 @@ async function main() {
         teardownNet();
         setInMatch(true);
         setPaused(true);
+        // Bot-loop (2026-11-02): the map area could come back SOLID
+        // BLACK behind the pause menu after this round-trip (five
+        // live sightings; HUD and panels fine, Resume healed it).
+        // The stub-DOM smoke cannot reproduce it — the paint census
+        // there is identical across the round-trip and fog_for(0)
+        // equals fog() — so the failure lives in the real browser's
+        // handling of the canvas while #view was display:none under
+        // the lobby: the compositor drops the hidden canvas layer
+        // and the restored element can sit unpainted until the next
+        // full frame cycle settles. Force the issue on the return
+        // path itself: refit the backing store — reassigning
+        // canvas.width rebuilds the layer, and the frame loop's
+        // next repaint (≤1 frame later) then lands on a live
+        // surface, so the first visible frame after the close is
+        // the match, not the backdrop.
+        fitCanvas();
         return;
       }
       stopLobbyBrowser();

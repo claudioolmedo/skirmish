@@ -379,7 +379,14 @@ const roomSocket = () =>
   tab.el('btn-online').click();
   assert.equal(tab.el('online-overlay').style.display, 'flex', 'lobby overlay open');
   assert.equal(inMatch(tab), false, 'game view hidden while the lobby is up');
+  // Bot-loop (2026-11-02): the live map could return SOLID BLACK
+  // behind the pause menu after this round-trip (five sightings;
+  // the stub census cannot reproduce the compositor failure).
+  // The return path must refit the canvas backing store: shrink
+  // it here, and the close must restore the fitted size.
+  tab.el('view').width = 999;
   tab.el('online-close').click();
+  assert.equal(tab.el('view').width, 1280, 'closing the lobby refits the canvas backing store');
   assert.equal(tab.el('online-overlay').style.display, 'none', 'lobby closed');
   assert.equal(inMatch(tab), true, 'closing the lobby restores the game view');
   assert.equal(tab.el('pause-menu').style.display, 'flex', 'pause menu back over the match');
