@@ -2079,6 +2079,11 @@ impl Sim {
             .filter(|&vi| {
                 Some(vi) != b.skip_unit
                     && Some(vi) != b.struck_unit
+                    // MNK-09 (Castle P5d): relics are never blast
+                    // victims — indestructible, and excluded
+                    // before the accuracy roll so they never
+                    // consume a stream draw either.
+                    && self.entities[vi].kind != EntityKind::Relic
                     && !self.entities[vi].dead
                     && self.entities[vi].garrisoned_in.is_none()
                     && steer::vec_len(
@@ -2928,6 +2933,28 @@ impl Sim {
         // GAR-03 (Castle P3b): the garrison ejects unharmed beside
         // the building before the record is removed.
         self.eject_host(crate::entity::GarrisonRef::Building(bid));
+        // MNK-09 (Castle P5d): a destroyed Monastery drops its
+        // garrisoned relics on the ground at its position — they
+        // are Gaia objects and outlive the building (the plan is
+        // silent on the case; dropping keeps them in play for
+        // anyone's monk, the carrier-death rule's building twin,
+        // rather than deleting documented map objects). The
+        // ECO-16 trickle stops with the record.
+        if self.buildings[bi].kind == BuildingKind::Monastery
+            && !self.buildings[bi].relics.is_empty()
+        {
+            let (bx, by) = (self.buildings[bi].pos_x, self.buildings[bi].pos_y);
+            let stored = std::mem::take(&mut self.buildings[bi].relics);
+            for relic in stored {
+                if let Some(ri) = self.entity_index(relic) {
+                    let r = &mut self.entities[ri];
+                    r.relic_carried_by = None;
+                    r.relic_garrisoned_in = None;
+                    r.pos_x = bx;
+                    r.pos_y = by;
+                }
+            }
+        }
         let b = self.buildings.remove(bi);
         if b.kind.blocks_footprint() {
             for (cx, cy) in b.footprint_cells() {
@@ -3045,6 +3072,10 @@ impl Sim {
             let e = &self.entities[ti];
             if e.dead
                 || e.kind == EntityKind::TownCenter
+                // MNK-09 (Castle P5d): a relic is indestructible —
+                // a stray shot never lands on it (it is not a
+                // unit for any damage path).
+                || e.kind == EntityKind::Relic
                 || e.owner == p.owner
                 || e.garrisoned_in.is_some()
             {
@@ -3089,6 +3120,27 @@ impl Sim {
             {
                 let ram_id = self.entities[idx].id;
                 self.eject_host(crate::entity::GarrisonRef::Unit(ram_id));
+            }
+            // MNK-09 (Castle P5d): a dying carrier drops its
+            // relic on the ground where he died, for anyone's
+            // monk to take — the relic leaves his hands as the
+            // corpse is marked (before the immutable borrow
+            // below, like the ejections above). This is the ONE
+            // drop path: every death (combat, DeleteEntity's
+            // zeroed HP) funnels through this sweep.
+            if !self.entities[idx].dead
+                && self.entities[idx].hp < I16F16::from_num(1)
+                && self.entities[idx].carrying_relic.is_some()
+            {
+                let (px, py) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
+                let relic = self.entities[idx].carrying_relic.take().unwrap();
+                if let Some(ri) = self.entity_index(relic) {
+                    let r = &mut self.entities[ri];
+                    r.relic_carried_by = None;
+                    r.relic_garrisoned_in = None;
+                    r.pos_x = px;
+                    r.pos_y = py;
+                }
             }
             let e = &self.entities[idx];
             if e.dead || e.hp >= I16F16::from_num(1) {

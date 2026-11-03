@@ -150,6 +150,7 @@ pub fn spec(kind: EntityKind) -> &'static UnitSpec {
         EntityKind::BatteringRam => &BATTERING_RAM,
         EntityKind::Mangonel => &MANGONEL,
         EntityKind::Monk => &MONK,
+        EntityKind::Relic => &RELIC,
     }
 }
 
@@ -885,6 +886,49 @@ static MONK: UnitSpec = UnitSpec {
     wood_cost: 0,
     gold_cost: 100,
     train_ticks: 3060, // 51 s
+};
+
+/// Relic (Castle P5d, MNK-09): the Gaia object monks carry.
+/// Indestructible BY CONSTRUCTION, not by a big HP number: no
+/// damage path may ever name it — `can_attack` refuses it,
+/// acquisition never lists Gaia objects, the mishit and blast
+/// scans skip its kind, and it has no attack, no class and no
+/// orders. The HP row (100) is therefore inert state that no
+/// system reads down; it exists only because every entity
+/// carries an HP field. Speed 0 and LoS 0: it never moves on
+/// its own (the relic step writes a carried relic's position
+/// directly) and it reveals nothing. The radius (0.5 world
+/// units) is an implementation constant by analogy with the
+/// smallest shipped rows, recorded as such in the P5 plan
+/// §3.5.1 — the sources give no relic radius. Cost/train are
+/// the inert zeros: relics are placed by the generator
+/// (MAP-13), never produced.
+static RELIC: UnitSpec = UnitSpec {
+    max_hp: 100,
+    attacks: NO_ATTACKS,
+    armor_melee: 0,
+    armor_pierce: 0,
+    armor_building: 0,
+    classes: 0,
+    range_max: I16F16::ZERO,
+    range_min: I16F16::ZERO,
+    reload_ticks: 0,
+    attack_delay_ticks: 0,
+    accuracy: 100,
+    projectile_speed: I16F16::ZERO,
+    scatter: I16F16::ZERO,
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
+    speed: I16F16::ZERO,
+    los: I16F16::ZERO,
+    radius: I16F16::from_bits(32_768), // 0.5 — adopted (see above)
+    carcass_food: 0,
+    carcass_decay_bits: 0,
+    food_cost: 0,
+    wood_cost: 0,
+    gold_cost: 0,
+    train_ticks: 0,
 };
 
 /// Sheep (OPENING-SPEC §2.2): 100 food, speed 0.7, worked at the

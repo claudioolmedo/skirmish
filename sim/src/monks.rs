@@ -4,6 +4,10 @@
 //! spent resource, and relics are the P5b/P5d slices — they join
 //! this same phase (MNK-01's phase order: after combat, in id
 //! order) and this same entity field block (hash marker 0xBB).
+//! Castle P5d adds the relic lifecycle at this module's tail
+//! (MNK-09/ECO-16): pickup, carry, deposit, retrieve, the
+//! Monastery trickle, and the read-side queries the client and
+//! the AI consume.
 //!
 //! MNK-10's documented row (wiki, "Monk (Age of Empires II)" +
 //! "Healing", via the Castle Age dossier §5.6): heal range 4
@@ -19,9 +23,11 @@
 use fixed::types::I16F16;
 
 use crate::build::BuildingKind;
-use crate::entity::{EntityKind, Task};
+use crate::entity::{is_player_owner, EntityKind, Task};
+use crate::econ::ResourceKind;
+use crate::steer;
 use crate::tech::TechId;
-use crate::Sim;
+use crate::{Sim, MELEE_REACH};
 
 /// MNK-03: the conversion range, 9 tiles = 36 world units,
 /// measured center-to-center like every other range in the sim.
@@ -90,6 +96,41 @@ pub const HEAL_RANGE: I16F16 = I16F16::from_bits(1_048_576); // 16.0
 /// The accumulator below restores precisely this over any whole
 /// minute, with no rounding drift (the GAR-04 shelter pattern).
 pub const HEAL_HP_PER_MIN: i64 = 150;
+
+/// MNK-09 (Castle P5d): the carrying monk's line of sight —
+/// 9 tiles = 36 world units (his base 11 minus the documented
+/// 2). Applied at the one LoS lookup (`Sim::unit_stats`), never
+/// written into the table row.
+pub const CARRY_LOS: I16F16 = I16F16::from_bits(2_359_296); // 36.0
+
+/// MNK-09 (Castle P5d): the pickup touch distance — a monk
+/// ordered onto a ground relic takes it once his center stands
+/// this close to the relic's center (2 tiles). An
+/// implementation constant in the steering-arrival family (the
+/// generic waypoint reach is 1.0): the sources name no pickup
+/// radius; the relic's cell is unblocked, so the monk can
+/// always close the last of this distance.
+pub const RELIC_TOUCH: I16F16 = I16F16::from_bits(524_288); // 8.0
+
+/// ECO-16 (Castle P5d): one garrisoned relic pays 30 gold per
+/// minute (0.5 gold/s) to its Monastery's owner, continuously,
+/// until removed. The trickle accumulator in `relic_tick`
+/// restores precisely this over any whole minute, with no
+/// rounding drift (the GAR-04 remainder pattern).
+pub const RELIC_GOLD_PER_MIN: i64 = 30;
+
+/// MNK-09's relic state (Castle P5d): the lifecycle the plan
+/// prescribes — a relic is on the ground, carried by a monk, or
+/// garrisoned in a Monastery, exactly one of the three at any
+/// time. Derived from the entity record's two pointers
+/// (`relic_carried_by` / `relic_garrisoned_in`); never stored
+/// separately, so it can never disagree with them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RelicState {
+    Ground,
+    CarriedBy(u32),
+    GarrisonedIn(u32),
+}
 
 impl Sim {
     /// Whether a `Heal` command would be accepted right now: the
@@ -167,6 +208,11 @@ impl Sim {
         e.conversion_target = None;
         e.conversion_target_building = None;
         e.ci_ticks = 0;
+        // Castle P5d: a heal order also ends a relic errand
+        // (the carry itself is NOT an errand — a carrying monk
+        // ordered to heal keeps his relic, MNK-09).
+        e.relic_pickup_target = None;
+        e.relic_deposit_target = None;
         if e.heal_target != Some(target) {
             e.heal_target = Some(target);
             e.heal_remainder = 0;
@@ -276,6 +322,13 @@ impl Sim {
             return false;
         }
         let mi = self.entity_index(entity).unwrap();
+        // MNK-09 (Castle P5d): a monk carrying a relic cannot
+        // convert — he delivers it instead. The refusal is
+        // sim-side validation here; the client mirrors it
+        // through the `carrying_relic` read.
+        if self.entities[mi].carrying_relic.is_some() {
+            return false;
+        }
         self.entities[mi].faith >= FAITH_FULL
     }
 
@@ -339,6 +392,11 @@ impl Sim {
             return false;
         }
         let mi = self.entity_index(entity).unwrap();
+        // MNK-09 (Castle P5d): the carrying refusal, building
+        // arm — see `can_convert`.
+        if self.entities[mi].carrying_relic.is_some() {
+            return false;
+        }
         self.entities[mi].faith >= FAITH_FULL
     }
 
@@ -387,6 +445,8 @@ impl Sim {
         e.garrison_prod_entry = false;
         e.heal_target = None;
         e.heal_remainder = 0;
+        e.relic_pickup_target = None;
+        e.relic_deposit_target = None;
         e.conversion_target = None;
         e.conversion_target_building = Some(building);
         e.conversion_level = 3;
@@ -468,6 +528,8 @@ impl Sim {
         e.garrison_prod_entry = false;
         e.heal_target = None;
         e.heal_remainder = 0;
+        e.relic_pickup_target = None;
+        e.relic_deposit_target = None;
         e.conversion_target = Some(target);
         e.conversion_target_building = None;
         e.conversion_level = level;
@@ -833,12 +895,26 @@ impl Sim {
                 e.conversion_target = None;
                 e.conversion_target_building = None;
                 e.ci_ticks = 0;
+                // Castle P5d: a garrisoned monk runs no relic
+                // errand either — but a relic he CARRIES stays
+                // carried (it shelters with him, and its
+                // position stays his stored position).
+                e.relic_pickup_target = None;
+                e.relic_deposit_target = None;
                 continue;
             }
             // Castle P5b phase order per monk (plan §3.3.1):
             // faith regen → conversion advance → heal advance.
+            // Castle P5d extends the order with the plan's
+            // fourth item — relic bookkeeping — between
+            // conversion and heal: a monk walking a relic
+            // errand is busy with it, exactly as a converting
+            // monk is busy chanting.
             self.regen_faith(idx);
             if self.conversion_step(idx) {
+                continue;
+            }
+            if self.relic_step(idx) {
                 continue;
             }
             // Validate the standing task; a target that died,
@@ -946,5 +1022,465 @@ impl Sim {
             }
         }
         best.map(|(_, _, ti)| ti)
+    }
+
+    // =================================================================
+    // Castle P5d — the relic lifecycle (MNK-09 / ECO-16)
+    //
+    // The relic is an entity (kind tag 21, Gaia-owned); its state
+    // lives in two pointers on its own record and is mirrored by
+    // the monk's `carrying_relic` and the Monastery's `relics`
+    // list — three views of one fact, written together at every
+    // transition so they cannot drift apart:
+    //
+    //   pickup (ground)      monk takes it: carried_by=monk,
+    //                        carrying=relic, positions sync
+    //   deposit              into an own Monastery: garrisoned_in=
+    //                        monastery, list pushes, carry clears,
+    //                        the ECO-16 trickle starts
+    //   retrieve             reverse of deposit, out of an own
+    //                        Monastery: the trickle stops
+    //   carrier dies         combat's death sweep drops it on the
+    //                        ground where he died (MNK-09)
+    //   Monastery destroyed  combat's destroy path drops its
+    //                        store on the ground at its position
+    //
+    // Pickup/deposit ride direct orders only (the P5 plan §2:
+    // no queued forms — a queued Move onto a relic tile stays a
+    // plain move, as DE treats shift-click monks).
+    // =================================================================
+
+    /// MNK-09 read: a relic entity's lifecycle state, derived
+    /// from its own pointers. `None` when the id is not a relic.
+    pub fn relic_state(&self, relic: u32) -> Option<RelicState> {
+        let idx = self.entity_index(relic)?;
+        let e = &self.entities[idx];
+        if e.kind != EntityKind::Relic {
+            return None;
+        }
+        Some(match (e.relic_carried_by, e.relic_garrisoned_in) {
+            (Some(m), _) => RelicState::CarriedBy(m),
+            (None, Some(b)) => RelicState::GarrisonedIn(b),
+            (None, None) => RelicState::Ground,
+        })
+    }
+
+    /// MNK-09 read: the relic a monk carries, if any — the
+    /// client's "show it being carried" read and the AI's
+    /// deliver/don't-convert check.
+    pub fn carrying_relic(&self, entity: u32) -> Option<u32> {
+        self.entity_index(entity)
+            .map(|idx| self.entities[idx].carrying_relic)
+            .filter(|c| c.is_some())
+            .flatten()
+    }
+
+    /// MNK-09 read: how many relics a Monastery holds (the
+    /// client panel's count). 0 for anything else.
+    pub fn monastery_relic_count(&self, building: u32) -> u32 {
+        self.building_index(building)
+            .map(|bi| self.buildings[bi].relics.len() as u32)
+            .unwrap_or(0)
+    }
+
+    /// The flat relic census for the client's side channel:
+    /// every live relic entity with its state, in id order —
+    /// (relic id, state, holder), holder being the carrying
+    /// monk or the holding Monastery (0 on the ground).
+    pub fn relic_states(&self) -> Vec<(u32, RelicState)> {
+        self.entities
+            .iter()
+            .filter(|e| e.kind == EntityKind::Relic && !e.dead)
+            .map(|e| {
+                (e.id, match (e.relic_carried_by, e.relic_garrisoned_in) {
+                    (Some(m), _) => RelicState::CarriedBy(m),
+                    (None, Some(b)) => RelicState::GarrisonedIn(b),
+                    (None, None) => RelicState::Ground,
+                })
+            })
+            .collect()
+    }
+
+    /// Shared read-side check for an orderable fielded monk
+    /// (the heal order's checks): living, Monk, player-owned,
+    /// not garrisoned, not dead.
+    fn relic_monk_ok(&self, entity: u32) -> Option<usize> {
+        let idx = self.entity_index(entity)?;
+        let e = &self.entities[idx];
+        if e.kind != EntityKind::Monk
+            || !is_player_owner(e.owner)
+            || e.garrisoned_in.is_some()
+            || e.dead
+        {
+            return None;
+        }
+        Some(idx)
+    }
+
+    /// `Command::PickupRelic` validation (MNK-09): a living,
+    /// fielded, player-owned monk not already carrying, against
+    /// a relic on the ground, or a relic garrisoned in one of
+    /// the monk owner's own completed Monasteries (the DE
+    /// retrieve order). A relic carried by anyone — including a
+    /// monk of the same owner — cannot be taken.
+    pub fn can_pickup_relic(&self, entity: u32, relic: u32) -> bool {
+        let Some(mi) = self.relic_monk_ok(entity) else {
+            return false;
+        };
+        if self.entities[mi].carrying_relic.is_some() {
+            return false;
+        }
+        let Some(ri) = self.entity_index(relic) else {
+            return false;
+        };
+        let r = &self.entities[ri];
+        if r.kind != EntityKind::Relic || r.dead {
+            return false;
+        }
+        match (r.relic_carried_by, r.relic_garrisoned_in) {
+            (None, None) => true,
+            (None, Some(b)) => {
+                let owner = self.entities[mi].owner;
+                self.building_index(b).is_some_and(|bi| {
+                    let bb = &self.buildings[bi];
+                    bb.kind == BuildingKind::Monastery && bb.complete && bb.owner == owner
+                })
+            }
+            _ => false,
+        }
+    }
+
+    /// `Command::DepositRelic` validation (MNK-09): a carrying
+    /// monk (the same orderable-monk checks) depositing into a
+    /// completed Monastery of his own owner.
+    pub fn can_deposit_relic(&self, entity: u32, building: u32) -> bool {
+        let Some(mi) = self.relic_monk_ok(entity) else {
+            return false;
+        };
+        if self.entities[mi].carrying_relic.is_none() {
+            return false;
+        }
+        let owner = self.entities[mi].owner;
+        self.building_index(building).is_some_and(|bi| {
+            let b = &self.buildings[bi];
+            b.kind == BuildingKind::Monastery && b.complete && b.owner == owner
+        })
+    }
+
+    /// `Command::PickupRelic` — silence while the id is invalid
+    /// or the monk is garrisoned (the heal order's contract).
+    pub fn issue_pickup_relic(&mut self, entity: u32, relic: u32) {
+        if !self.can_pickup_relic(entity, relic) {
+            return;
+        }
+        let idx = self.entity_index(entity).unwrap();
+        self.entities[idx].order_queue.clear();
+        self.entities[idx].order_from_queue = false;
+        self.apply_pickup_relic(idx, relic);
+    }
+
+    /// `Command::DepositRelic` — the same silence contract.
+    pub fn issue_deposit_relic(&mut self, entity: u32, building: u32) {
+        if !self.can_deposit_relic(entity, building) {
+            return;
+        }
+        let idx = self.entity_index(entity).unwrap();
+        self.entities[idx].order_queue.clear();
+        self.entities[idx].order_from_queue = false;
+        self.apply_deposit_relic(idx, building);
+    }
+
+    /// The mechanics of a pickup order, without the queue
+    /// clearing (the apply-convert layering): every task
+    /// pointer yields to the new errand, exactly like a heal
+    /// order's — the monk's `order` itself is set by the chase
+    /// in `relic_step` on the next tick.
+    fn apply_pickup_relic(&mut self, idx: usize, relic: u32) {
+        let e = &mut self.entities[idx];
+        e.task = Task::Idle;
+        e.task_node = None;
+        e.attack_target = None;
+        e.attack_building = None;
+        e.strike_tick = None;
+        e.attack_engaged = false;
+        e.aggro_target = None;
+        e.returning_home = false;
+        e.attack_move = None;
+        e.patrol.clear();
+        e.patrol_next = 0;
+        e.order_from_queue = false;
+        e.garrison_target = None;
+        e.auto_explore = false;
+        e.auto_target = None;
+        e.heal_target = None;
+        e.heal_remainder = 0;
+        e.conversion_target = None;
+        e.conversion_target_building = None;
+        e.ci_ticks = 0;
+        // Defensive: a deposit errand and a pickup errand
+        // never coexist (each new order replaces the last).
+        e.relic_deposit_target = None;
+        e.relic_pickup_target = Some(relic);
+    }
+
+    /// The mechanics of a deposit order (same layering as
+    /// `apply_pickup_relic`).
+    fn apply_deposit_relic(&mut self, idx: usize, building: u32) {
+        let e = &mut self.entities[idx];
+        e.task = Task::Idle;
+        e.task_node = None;
+        e.attack_target = None;
+        e.attack_building = None;
+        e.strike_tick = None;
+        e.attack_engaged = false;
+        e.aggro_target = None;
+        e.returning_home = false;
+        e.attack_move = None;
+        e.patrol.clear();
+        e.patrol_next = 0;
+        e.order_from_queue = false;
+        e.garrison_target = None;
+        e.auto_explore = false;
+        e.auto_target = None;
+        e.heal_target = None;
+        e.heal_remainder = 0;
+        e.conversion_target = None;
+        e.conversion_target_building = None;
+        e.ci_ticks = 0;
+        e.relic_pickup_target = None;
+        e.relic_deposit_target = Some(building);
+    }
+
+    /// The standing point beside a building for a relic errand:
+    /// the monk's position clamped into the footprint (the
+    /// building-conversion chase geometry), so the arrival test
+    /// (footprint distance ≤ MELEE_REACH, the same adjacency
+    /// rule building conversion uses) can fire.
+    fn relic_stand_point(
+        &self,
+        idx: usize,
+        bi: usize,
+    ) -> (I16F16, I16F16) {
+        let (mx, my) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
+        let b = &self.buildings[bi];
+        let half = I16F16::from_num(b.kind.footprint_size() as i32 * 2);
+        (
+            mx.clamp(b.pos_x - half, b.pos_x + half),
+            my.clamp(b.pos_y - half, b.pos_y + half),
+        )
+    }
+
+    /// One monk's relic step (the `monk_tick` busy ladder's
+    /// relic rung): sync a carried relic to its monk, then
+    /// advance the errand in hand. Returns true while the monk
+    /// is walking (or completing) an errand — he does not heal
+    /// this tick, the MNK-01 single-task rule; a monk merely
+    /// CARRYING with no errand returns false: he may still
+    /// heal (MNK-09 names no healing exclusion).
+    fn relic_step(&mut self, idx: usize) -> bool {
+        // Carry sync: the relic rides exactly at its monk's
+        // position (its world identity while carried; the
+        // client draws it at the monk).
+        if let Some(r) = self.entities[idx].carrying_relic {
+            if let Some(ri) = self.entity_index(r) {
+                let (mx, my) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
+                let rel = &mut self.entities[ri];
+                rel.pos_x = mx;
+                rel.pos_y = my;
+            }
+        }
+        if let Some(relic) = self.entities[idx].relic_pickup_target {
+            return self.relic_pickup_step(idx, relic);
+        }
+        if let Some(building) = self.entities[idx].relic_deposit_target {
+            // A deposit errand presupposes the carry; losing it
+            // (impossible through the sim's own paths — nothing
+            // takes a relic out of a living monk's hands) ends
+            // the errand silently.
+            if self.entities[idx].carrying_relic.is_none() {
+                self.entities[idx].relic_deposit_target = None;
+                return false;
+            }
+            return self.relic_deposit_step(idx, building);
+        }
+        false
+    }
+
+    /// The pickup errand's advance: chase the ground relic and
+    /// take it inside `RELIC_TOUCH`, or walk to an own
+    /// Monastery and lift the relic out at adjacency. A target
+    /// that stops being takeable mid-errand (taken by another
+    /// monk, the Monastery lost) ends the errand in place —
+    /// the DE stand-and-wait behavior for a spent order.
+    fn relic_pickup_step(&mut self, idx: usize, relic: u32) -> bool {
+        let monk_id = self.entities[idx].id;
+        let monk_owner = self.entities[idx].owner;
+        let stale = self
+            .current_order_target(&self.entities[idx])
+            .is_some_and(|(x, y)| {
+                x.to_bits() != self.entities[idx].pos_x.to_bits()
+                    || y.to_bits() != self.entities[idx].pos_y.to_bits()
+            });
+        let Some(ri) = self.entity_index(relic) else {
+            self.entities[idx].relic_pickup_target = None;
+            return false;
+        };
+        let (carried_by, garrisoned_in) = (
+            self.entities[ri].relic_carried_by,
+            self.entities[ri].relic_garrisoned_in,
+        );
+        if carried_by.is_some() {
+            // Someone else's hands now (or, impossibly, our
+            // own — completion clears the errand itself).
+            self.entities[idx].relic_pickup_target = None;
+            return false;
+        }
+        match garrisoned_in {
+            None => {
+                // Ground: the touch test, else chase.
+                let (mx, my) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
+                let (rx, ry) = (self.entities[ri].pos_x, self.entities[ri].pos_y);
+                if steer::vec_len(rx - mx, ry - my) <= RELIC_TOUCH {
+                    let rel = &mut self.entities[ri];
+                    rel.relic_carried_by = Some(monk_id);
+                    rel.pos_x = mx;
+                    rel.pos_y = my;
+                    let e = &mut self.entities[idx];
+                    e.carrying_relic = Some(relic);
+                    e.relic_pickup_target = None;
+                    e.order = None;
+                    return true;
+                }
+                if stale {
+                    self.set_move_order(idx, rx, ry);
+                }
+                true
+            }
+            Some(b) => {
+                // Retrieve: still ours to take?
+                let Some(bi) = self.building_index(b) else {
+                    self.entities[idx].relic_pickup_target = None;
+                    return false;
+                };
+                let (bx, by, bkind, bowner, bcomplete) = {
+                    let bb = &self.buildings[bi];
+                    (bb.pos_x, bb.pos_y, bb.kind, bb.owner, bb.complete)
+                };
+                if bkind != BuildingKind::Monastery || !bcomplete || bowner != monk_owner {
+                    self.entities[idx].relic_pickup_target = None;
+                    return false;
+                }
+                let (mx, my) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
+                if self.distance_to_footprint(mx, my, bx, by, bkind) <= MELEE_REACH {
+                    // Take it out: the store, the pointers, the
+                    // carry — written together (the lifecycle
+                    // invariant). The ECO-16 trickle stops with
+                    // the removal (its count reads this list).
+                    self.buildings[bi].relics.retain(|&id| id != relic);
+                    let (mx2, my2) = (mx, my);
+                    let rel = &mut self.entities[ri];
+                    rel.relic_garrisoned_in = None;
+                    rel.relic_carried_by = Some(monk_id);
+                    rel.pos_x = mx2;
+                    rel.pos_y = my2;
+                    let e = &mut self.entities[idx];
+                    e.carrying_relic = Some(relic);
+                    e.relic_pickup_target = None;
+                    e.order = None;
+                    return true;
+                }
+                if stale {
+                    let (qx, qy) = self.relic_stand_point(idx, bi);
+                    self.set_move_order(idx, qx, qy);
+                }
+                true
+            }
+        }
+    }
+
+    /// The deposit errand's advance: walk to the own Monastery
+    /// and garrison the relic at adjacency (the pickup step's
+    /// mirror). The Monastery record takes the relic; the
+    /// relic's world position becomes the Monastery's (it is
+    /// off the map while garrisoned — clients draw garrisoned
+    /// relics only as the panel count).
+    fn relic_deposit_step(&mut self, idx: usize, building: u32) -> bool {
+        let monk_id = self.entities[idx].id;
+        let monk_owner = self.entities[idx].owner;
+        let Some(relic) = self.entities[idx].carrying_relic else {
+            self.entities[idx].relic_deposit_target = None;
+            return false;
+        };
+        let Some(bi) = self.building_index(building) else {
+            self.entities[idx].relic_deposit_target = None;
+            return false;
+        };
+        let (bx, by, bkind, bowner, bcomplete) = {
+            let b = &self.buildings[bi];
+            (b.pos_x, b.pos_y, b.kind, b.owner, b.complete)
+        };
+        if bkind != BuildingKind::Monastery || !bcomplete || bowner != monk_owner {
+            self.entities[idx].relic_deposit_target = None;
+            return false;
+        }
+        let stale = self
+            .current_order_target(&self.entities[idx])
+            .is_some_and(|(x, y)| {
+                x.to_bits() != self.entities[idx].pos_x.to_bits()
+                    || y.to_bits() != self.entities[idx].pos_y.to_bits()
+            });
+        let (mx, my) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
+        if self.distance_to_footprint(mx, my, bx, by, bkind) <= MELEE_REACH {
+            self.buildings[bi].relics.push(relic);
+            if let Some(ri) = self.entity_index(relic) {
+                let rel = &mut self.entities[ri];
+                rel.relic_carried_by = None;
+                rel.relic_garrisoned_in = Some(building);
+                rel.pos_x = bx;
+                rel.pos_y = by;
+            }
+            let e = &mut self.entities[idx];
+            e.carrying_relic = None;
+            e.relic_deposit_target = None;
+            e.order = None;
+            let _ = monk_id;
+            return true;
+        }
+        if stale {
+            let (qx, qy) = self.relic_stand_point(idx, bi);
+            self.set_move_order(idx, qx, qy);
+        }
+        true
+    }
+
+    /// The ECO-16 trickle (Castle P5d), run once per tick after
+    /// the monk phase: every COMPLETED Monastery holding relics
+    /// pays its owner 30 gold per minute per relic —
+    /// continuously, until a relic is removed (MNK-09 retrieve
+    /// or the Monastery's destruction). The accumulator is the
+    /// GAR-04/Treadmill pattern on the building record: a
+    /// Monastery with no relics accrues nothing and writes
+    /// nothing (determinism discipline: no new hash input for
+    /// stateless buildings — the hash block itself is
+    /// conditional on a non-empty store or remainder).
+    ///
+    /// Per tick per relic: 30 gold × 65536 bits ÷ 3600 ticks.
+    /// The remainder stays < 3600, so any whole minute pays
+    /// exactly 30 gold per relic — no rounding drift.
+    pub(crate) fn relic_tick(&mut self) {
+        for bi in 0..self.buildings.len() {
+            let b = &self.buildings[bi];
+            if b.kind != BuildingKind::Monastery || !b.complete || b.relics.is_empty() {
+                continue;
+            }
+            let total = self.buildings[bi].relic_gold_remainder
+                + self.buildings[bi].relics.len() as i64 * RELIC_GOLD_PER_MIN * 65_536;
+            let pay = total / 3_600;
+            self.buildings[bi].relic_gold_remainder = total % 3_600;
+            if pay > 0 {
+                let owner = self.buildings[bi].owner;
+                self.stockpile_mut(owner).add(ResourceKind::Gold, I16F16::from_bits(pay as i32));
+            }
+        }
     }
 }

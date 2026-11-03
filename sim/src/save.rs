@@ -67,7 +67,13 @@ const MAGIC: &[u8; 4] = b"SKSV";
 /// Version 9: Castle P5c — the entity record gains the monk's
 /// building conversion target (MNK-04), and the codecs gain
 /// `ConvertBuilding` (Command tag 45, QueuedOrder tag 10).
-const SAVE_VERSION: u32 = 9;
+/// Version 10: Castle P5d — the entity record gains the relic
+/// fields (the monk's carry/pickup/deposit state and the
+/// relic's carried-by/garrisoned-in pointers, MNK-09), the
+/// building record gains the Monastery relic store and its
+/// ECO-16 trickle remainder, and the command codec gains
+/// `PickupRelic` (tag 46) and `DepositRelic` (tag 47).
+const SAVE_VERSION: u32 = 10;
 
 /// Little-endian byte writer over a growable buffer.
 struct W {
@@ -505,6 +511,18 @@ impl W {
                 self.u32(entity);
                 self.u32(building);
             }
+            // Castle P5d: the Monk's relic orders (MNK-09) at
+            // tags 46/47, append-only.
+            Command::PickupRelic { entity, relic } => {
+                self.u8(46);
+                self.u32(entity);
+                self.u32(relic);
+            }
+            Command::DepositRelic { entity, building } => {
+                self.u8(47);
+                self.u32(entity);
+                self.u32(building);
+            }
         }
     }
 }
@@ -632,6 +650,15 @@ impl Sim {
                 w.u32(*id);
             }
             w.u32(b.garrison_arrows);
+            // Castle P5d (v10): the Monastery relic store and
+            // its ECO-16 trickle remainder (MNK-09/ECO-16) —
+            // hashed state, so a save taken mid-trickle must
+            // carry it for the load-time hash check to pass.
+            w.usize(b.relics.len());
+            for id in &b.relics {
+                w.u32(*id);
+            }
+            w.i64(b.relic_gold_remainder);
         }
         // --- entities ---
         w.usize(self.entities.len());
@@ -730,6 +757,14 @@ impl Sim {
             for id in &e.garrison {
                 w.u32(*id);
             }
+            // Castle P5d (v10): the relic fields (MNK-09) —
+            // the monk's carry/pickup/deposit state and the
+            // relic's carried-by/garrisoned-in pointers.
+            w.opt_u32(e.carrying_relic);
+            w.opt_u32(e.relic_pickup_target);
+            w.opt_u32(e.relic_deposit_target);
+            w.opt_u32(e.relic_carried_by);
+            w.opt_u32(e.relic_garrisoned_in);
         }
         // --- projectiles ---
         w.usize(self.projectiles.len());
@@ -1148,6 +1183,14 @@ impl<'a> R<'a> {
                 entity: self.u32()?,
                 building: self.u32()?,
             }),
+            46 => Some(Command::PickupRelic {
+                entity: self.u32()?,
+                relic: self.u32()?,
+            }),
+            47 => Some(Command::DepositRelic {
+                entity: self.u32()?,
+                building: self.u32()?,
+            }),
             _ => None,
         }
     }
@@ -1330,6 +1373,12 @@ impl Sim {
                 garrison.push(r.u32()?);
             }
             let garrison_arrows = r.u32()?;
+            let n_r = r.count(8)?;
+            let mut relics = Vec::with_capacity(n_r);
+            for _ in 0..n_r {
+                relics.push(r.u32()?);
+            }
+            let relic_gold_remainder = r.i64()?;
             buildings.push(Building {
                 id,
                 kind,
@@ -1359,6 +1408,8 @@ impl Sim {
                 gate_along_x,
                 garrison,
                 garrison_arrows,
+                relics,
+                relic_gold_remainder,
             });
         }
         let n_e = r.count(80)?;
@@ -1451,6 +1502,11 @@ impl Sim {
             for _ in 0..n_g {
                 garrison.push(r.u32()?);
             }
+            let carrying_relic = r.opt_u32()?;
+            let relic_pickup_target = r.opt_u32()?;
+            let relic_deposit_target = r.opt_u32()?;
+            let relic_carried_by = r.opt_u32()?;
+            let relic_garrisoned_in = r.opt_u32()?;
             entities.push(Entity {
                 id,
                 kind,
@@ -1518,6 +1574,11 @@ impl Sim {
                 conversion_start_shift,
                 conversion_guarantee_shift,
                 frozen_patches,
+                carrying_relic,
+                relic_pickup_target,
+                relic_deposit_target,
+                relic_carried_by,
+                relic_garrisoned_in,
                 garrison,
             });
         }

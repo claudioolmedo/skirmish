@@ -295,6 +295,27 @@ Gaia owns every node and wild animal until capture/harvest rules
 transfer them; the two player seats own the rest (M3/M5 entity model).
 · *Status:* **MATCHES**.
 
+**MAP-13 — Five relics on every generated map.** The map generator
+places 5 relics as Gaia objects, spread over contested ground: no
+relic inside a start's immediate base area (at least 20 tiles from
+either Town Center), and the placement is exactly fair — the sorted
+multiset of Chebyshev distances from the relics to start A equals
+the one to start B (the same fairness standard as the mirrored
+starts, MAP-09). Relics are entities with their own lifecycle
+(MNK-09); this rule covers only their placement.
+*Source:* wiki, Relic (a standard map's relic count is five);
+Castle P5 execution plan §1.4 (placement + fairness predicate,
+created with this rule). · *Impl:* shipped (Castle P5d, 2026-11-02):
+`mapgen::place_relics` runs last on each candidate — two mirrored
+pairs drawn from a dedicated stream (the base generation stream is
+untouched, so existing maps are bit-identical apart from the
+relics) plus one center relic at exactly equal Chebyshev distance
+from both Town Centers, found by deterministic scan; `validate`
+requires every relic cell on the shared landmass and exactly five
+placed; the fallback template carries its own fixed five. `Sim`
+spawns the relic entities last, after both starts, in both modes.
+· *Status:* **MATCHES**.
+
 ---
 
 ## 3. Visibility & exploration
@@ -1063,9 +1084,16 @@ reused verbatim for ships. · *Status:* **MISSING**.
 generates 0.5 gold per second (30/min) for its owner, continuously, until
 removed. (At that rate a monk bought for one relic pays back its 100 gold
 in 200 s.)
-*Source:* wiki, Relic (Age of Empires II). · *Impl:* a per-tick fixed-
-point accumulator on the monastery building record (MNK-09). · *Status:*
-**MISSING**.
+*Source:* wiki, Relic (Age of Empires II). · *Impl:* shipped (Castle
+P5d, 2026-11-02): a per-tick fixed-point accumulator on the Monastery
+building record — each tick adds count × 30 gold × 65536 ÷ 3600 to the
+owner's stockpile with the remainder kept on the record
+(`Building::relic_gold_remainder`, the GAR-04 pattern), so any whole
+minute pays exactly 30 gold per relic with no drift, and a Monastery
+holding no relics accrues and writes nothing (`Sim::relic_tick`, step
+4.7). Removing the relic (MNK-09 retrieve, or the Monastery's
+destruction) stops the trickle with the record. · *Status:*
+**MATCHES**.
 
 **ECO-17 — Starting stockpile.** A standard match starts at 200 food /
 200 wood / 100 gold / 200 stone, with the starting unit package specified
@@ -2639,8 +2667,11 @@ phase runs after combat (`monk_tick`, step 4.6) and healing rides the
 entity record's heal fields (`sim/src/monks.rs`; MNK-10 is MATCHES).
 Conversion shipped in Castle P5b (2026-11-02, `sim/src/monks.rs`:
 faith, the CI model, the eligibility function and the transfer in
-`sim/src/lib.rs`); relic-carrying (P5d) is not shipped yet, so this
-rule's status stands. · *Status:* **MISSING** (GAP 6.8).
+`sim/src/lib.rs`). Relic-carrying shipped in Castle P5d (2026-11-02):
+the monk phase's busy ladder gains its relic rung between conversion
+and heal (`relic_step` — pickup, deposit, retrieve; MNK-09), so all
+three actions now stand in the one phase, and this rule flips. ·
+*Status:* **MATCHES**.
 
 **MNK-02 — Faith gates conversion.** A monk must be at 100% faith to
 begin converting. A successful conversion drains faith to 0; faith then
@@ -2790,9 +2821,25 @@ fell, for anyone's monk to take. *(Monastery relic capacity: UNVERIFIED —
 no cap is documented in the sources consulted; treat as uncapped until a
 source says otherwise.)*
 *Source:* wiki, Relic; MECHANICS-STUDY §3.8 (LoS −2 while carrying). ·
-*Impl:* relic is an entity with states (ground | carried-by | garrisoned-
-in); the trickle is an accumulator on the monastery record. · *Status:*
-**MISSING** (GAP 6.8).
+*Impl:* shipped (Castle P5d, 2026-11-02): the relic is an entity (kind
+tag 21, Gaia-owned, indestructible — `can_attack`, the mishit scan and
+blast victims all exclude it; it has no attack table and no damage path
+names it) whose state (ground | carried-by | garrisoned-in) lives in
+two pointers on its own record, mirrored by the monk's `carrying_relic`
+and the Monastery's `relics` list — the uncapped store the note above
+prescribes (the Monastery's "garrison 10" is its production shelter,
+not a relic cap). `PickupRelic`/`DepositRelic` (direct orders only, no
+queued forms) ride the monk phase: carrying reads LoS 9 at the
+`unit_stats` lookup, conversion orders are refused while carrying (the
+eligibility reads stay pure; `can_convert`/`can_convert_building`
+carry the gate), and healing is NOT excluded — the sources name no
+heal ban, so a carrying monk still heals. The death sweep drops a
+carrier's relic at the death position; a converted carrier keeps
+carrying (the pointer names the monk, who changes owner); a destroyed
+Monastery drops its store on the ground at its position. The garrison
+count this rule maintains is the count VIC-03 will read when the
+Standard victory mode lands (VIC-02/VIC-03 stay DEFERRED). ·
+*Status:* **MATCHES**.
 
 **MNK-10 — Healing.** A monk heals one allied unit at a time within
 range 4 at 150 HP/min (2.5 HP/s), automatically choosing nearby wounded
@@ -4411,27 +4458,37 @@ construction scalar from P3c, Conscription's queue scalar here)
 are now in. The book stands at 222 rules, 157 / 21 / 44. The
 table below equals the body.
 
+updated 2026-11-02 for Castle P5d (external builder): relics
+land — the book GROWS to 223 rules with MAP-13 (the generator's
+five relics) entering as MATCHES, and MNK-09, ECO-16 and MNK-01
+(the monk's third action completes it) move MISSING → MATCHES.
+The table below is recounted mechanically over the Status tags
+and resynced in full (several rows had drifted since Package M
+as P3–P5 slices flipped rules in the body without a recount):
+the book stands at 223 rules, 182 / 16 / 25. The table below
+equals the body.
+
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
 | 1 | Simulation & time (SIM) | 12 | 12 | 0 | 0 |
-| 2 | Map, terrain & elevation (MAP) | 12 | 8 | 4 | 0 |
+| 2 | Map, terrain & elevation (MAP) | 13 | 9 | 4 | 0 |
 | 3 | Visibility & exploration (VIS) | 10 | 9 | 0 | 1 |
 | 4 | Selection & orders (SEL) | 17 | 16 | 1 | 0 |
 | 5 | Movement, pathfinding & collision (MOV) | 12 | 5 | 3 | 4 |
-| 6 | Economy & drop-off (ECO) | 17 | 14 | 1 | 2 |
-| 7 | Buildings & placement (BLD) | 20 | 14 | 5 | 1 |
-| 8 | Combat & damage (CMB) | 17 | 16 | 0 | 1 |
-| 9 | Projectiles & ballistics (PRJ) | 10 | 6 | 2 | 2 |
-| 10 | Unit classes & counters (CLS) | 8 | 5 | 0 | 3 |
+| 6 | Economy & drop-off (ECO) | 17 | 16 | 0 | 1 |
+| 7 | Buildings & placement (BLD) | 20 | 17 | 2 | 1 |
+| 8 | Combat & damage (CMB) | 17 | 17 | 0 | 0 |
+| 9 | Projectiles & ballistics (PRJ) | 10 | 7 | 2 | 1 |
+| 10 | Unit classes & counters (CLS) | 8 | 6 | 0 | 2 |
 | 11 | Technologies & age advancement (TEC) | 11 | 7 | 2 | 2 |
-| 12 | Monks, conversion & relics (MNK) | 13 | 0 | 0 | 13 |
+| 12 | Monks, conversion & relics (MNK) | 13 | 13 | 0 | 0 |
 | 13 | Trade, market & tribute (TRD) | 8 | 8 | 0 | 0 |
-| 14 | Garrison, transport & repair (GAR) | 10 | 8 | 0 | 2 |
+| 14 | Garrison, transport & repair (GAR) | 10 | 9 | 0 | 1 |
 | 15 | AI behavior & difficulty (AI) | 9 | 8 | 0 | 1 |
 | 16 | Victory, scoring & game modes (VIC) | 12 | 2 | 0 | 10 |
 | 17 | Multiplayer determinism (NET) | 11 | 9 | 1 | 1 |
-| 18 | Information rules (INF) | 13 | 10 | 2 | 1 |
-| | **Total** | **222** | **157** | **21** | **44** |
+| 18 | Information rules (INF) | 13 | 12 | 1 | 0 |
+| | **Total** | **223** | **182** | **16** | **25** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer

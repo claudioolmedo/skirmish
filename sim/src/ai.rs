@@ -272,12 +272,130 @@ pub(crate) fn decide(sim: &mut Sim) {
     //     conversion range through the ordinary Convert command.
     plan_convert(sim, &mut acted);
 
+    // 4.6 Relic fetch (Castle P5d, §3.7 of the P5 plan): an
+    //     idle AI monk is sent to the nearest relic the AI can
+    //     see and home to deposit it, through the ordinary
+    //     Pickup/Deposit commands.
+    plan_relic_fetch(sim, &mut acted);
+
     // 5. Idle villagers to work.
     assign_idle_villagers(sim, &cfg, &mut acted);
 
     // 6. Defense, then the wave.
     plan_defense(sim, &mut acted);
     plan_wave(sim, &cfg, &mut acted);
+}
+
+/// Relic fetch step (Castle P5d): the AI's relic economy
+/// through the ordinary player commands (AI-01), exactly as
+/// §3.7 of the P5 plan prescribes — an idle fielded monk is
+/// sent to the nearest relic and home to deposit it:
+///
+/// - a monk already CARRYING with no errand in hand is ordered
+///   to deposit at his nearest own completed Monastery (the
+///   sim's `can_deposit_relic` re-validates);
+/// - an empty-handed monk with no task at all (no conversion,
+///   no heal target, no move order, no errand) is ordered to
+///   pick up the nearest relic ON THE GROUND the AI can see
+///   (its fog view of the relic's cell, VIS rules — the AI
+///   never fetches what it cannot see);
+/// - a monk mid-errand is left alone: the monk phase walks the
+///   errand to completion on its own.
+///
+/// One order per monk per decision pass, lowest ids first, and
+/// every chosen monk joins `acted` so no later step re-tasks
+/// him this pass. The AI never retrieves from its own
+/// Monasteries (a garrisoned relic is already paying ECO-16)
+/// and never targets a carried relic.
+fn plan_relic_fetch(sim: &mut Sim, acted: &mut Vec<u32>) {
+    let me = OWNER_OPPONENT;
+    let monks: Vec<u32> = sim
+        .entities()
+        .iter()
+        .filter(|e| {
+            e.owner == me
+                && e.kind == EntityKind::Monk
+                && !e.dead
+                && e.garrisoned_in.is_none()
+                && !acted.contains(&e.id)
+        })
+        .map(|e| e.id)
+        .collect();
+    for monk in monks {
+        let Some(m) = sim.entities().iter().find(|e| e.id == monk) else {
+            continue;
+        };
+        let (mx, my) = (m.pos_x, m.pos_y);
+        if m.carrying_relic.is_some() {
+            // Deliver: only when no errand is already running.
+            if m.relic_deposit_target.is_some() || m.relic_pickup_target.is_some() {
+                continue;
+            }
+            // Nearest own completed Monastery by center distance.
+            let mut best: Option<(i64, u32)> = None;
+            for b in sim.buildings() {
+                if b.owner != me || b.kind != BuildingKind::Monastery || !b.complete {
+                    continue;
+                }
+                let d = crate::steer::vec_len(b.pos_x - mx, b.pos_y - my).to_bits() as i64;
+                let key = (d * d, b.id);
+                if best.map(|bb| key < bb).unwrap_or(true) {
+                    best = Some(key);
+                }
+            }
+            if let Some((_, bid)) = best {
+                if sim.can_deposit_relic(monk, bid) {
+                    sim.push_command(Command::DepositRelic {
+                        entity: monk,
+                        building: bid,
+                    });
+                    acted.push(monk);
+                }
+            }
+            continue;
+        }
+        // Fetch: only a wholly idle monk (the plan's "idle AI
+        // monk") — no task pointers, no move order, no errand.
+        let idle = m.conversion_target.is_none()
+            && m.conversion_target_building.is_none()
+            && m.heal_target.is_none()
+            && m.relic_pickup_target.is_none()
+            && m.order.is_none();
+        if !idle {
+            continue;
+        }
+        // Nearest visible ground relic by squared distance.
+        let mut best: Option<(i64, u32)> = None;
+        for (rid, state) in sim.relic_states() {
+            if state != crate::monks::RelicState::Ground {
+                continue;
+            }
+            let Some(r) = sim.entities().iter().find(|e| e.id == rid) else {
+                continue;
+            };
+            // The AI's fog: only what it can see (VIS — the
+            // cell's visibility for the opponent).
+            let (cx, cy) = sim.grid.world_to_cell(r.pos_x, r.pos_y);
+            if !sim.cell_visible_to(OWNER_OPPONENT, cx, cy) {
+                continue;
+            }
+            let dx = (r.pos_x - mx).to_bits() as i64;
+            let dy = (r.pos_y - my).to_bits() as i64;
+            let key = (dx * dx + dy * dy, rid);
+            if best.map(|bb| key < bb).unwrap_or(true) {
+                best = Some(key);
+            }
+        }
+        if let Some((_, rid)) = best {
+            if sim.can_pickup_relic(monk, rid) {
+                sim.push_command(Command::PickupRelic {
+                    entity: monk,
+                    relic: rid,
+                });
+                acted.push(monk);
+            }
+        }
+    }
 }
 
 /// Monk conversion step (Castle P5b): every fielded AI monk
@@ -2025,6 +2143,8 @@ mod tests {
             weapon_engaged: false,
             garrison: Vec::new(),
             garrison_arrows: 0,
+            relics: Vec::new(),
+            relic_gold_remainder: 0,
         }
     }
 

@@ -29,7 +29,12 @@
 //! every starting band, so no pack ever spawns beside a Town
 //! Center). Heights are gentle value-noise hills, flattened
 //! around each start and its packages (disc + per-node flattening),
-//! so openings play identically on every seed. Water exists in the
+//! so openings play identically on every seed. The generator also
+//! places the map's five relics (MAP-13, Castle P5d): two mirrored
+//! pairs plus one center relic at exactly equal Chebyshev distance
+//! from both Town Centers, every relic at least 20 tiles from both
+//! starts — the sorted distance multiset to start A equals the one
+//! to start B, so the relic race is exactly fair like the starts. Water exists in the
 //! vocabulary as small ponds (0–2 mirrored pairs), always ≥ 22
 //! tiles from a start (MAP-08 terrain support; fishing is trimmed —
 //! see ARCHITECTURE.md's M7 section).
@@ -82,6 +87,10 @@ pub struct GeneratedMap {
     pub grid: Grid,
     pub starts: [StartPackage; 2],
     pub neutral_nodes: Vec<(NodeKind, u32, u32)>,
+    /// MAP-13 (Castle P5d): the five relic cells, in placement
+    /// order (pair, pair, center). `Sim` spawns a Gaia relic
+    /// entity on each at match creation.
+    pub relics: Vec<(u32, u32)>,
 }
 
 fn idx(x: u32, y: u32) -> usize {
@@ -215,6 +224,15 @@ fn build(sub_seed: u64) -> Option<GeneratedMap> {
     // blurs after this, so the authored face survives intact.
     author_cliffs(&mut g, tc_a, tc_b);
 
+    // MAP-13 (Castle P5d): the five relics, placed last on the
+    // finished candidate — two mirrored pairs and one center
+    // relic (see `place_relics`). Placement draws from its OWN
+    // stream (sub-seed ⊕ separator), never the base stream, so
+    // the historical generation above is untouched: a candidate
+    // that cannot place all five fairly is rejected like any
+    // other invalid candidate.
+    let relics = place_relics(&mut g, tc_a, tc_b, sub_seed)?;
+
     // Materialize the grid: terrain, heights, and the tree blocks
     // (MAP-04: every tree node blocks its cell).
     let mut grid = Grid::new();
@@ -246,6 +264,7 @@ fn build(sub_seed: u64) -> Option<GeneratedMap> {
         grid,
         starts: [pkg_a, pkg_b],
         neutral_nodes: std::mem::take(&mut g.neutral),
+        relics,
     })
 }
 
@@ -254,6 +273,89 @@ fn build(sub_seed: u64) -> Option<GeneratedMap> {
 /// reachable land, no start enclosed, gentle height steps, dry
 /// start ground. Pure function of the map — the same candidate
 /// validates identically everywhere.
+
+/// MAP-13's minimum Chebyshev distance from a relic to either
+/// Town Center: no relic inside a start's immediate base area
+/// (the plan's placement rule — contested ground only).
+const RELIC_START_CLEARANCE: u32 = 20;
+
+/// Place the five relics on a finished candidate (MAP-13):
+/// two mirrored pairs drawn from a DEDICATED stream (the base
+/// generation stream is never touched, so existing maps are
+/// bit-identical apart from the relics themselves) and one
+/// center relic placed by deterministic scan — the free land
+/// cell nearest the map center whose Chebyshev distance to
+/// start A equals its distance to start B exactly. Every relic
+/// stands on free land at least `RELIC_START_CLEARANCE` tiles
+/// from both Town Centers. The fairness predicate follows by
+/// construction: rotation preserves Chebyshev distance, so a
+/// mirrored pair contributes the same two distances to each
+/// start, and the center relic contributes one equal distance
+/// to both — the sorted distance multisets are identical.
+/// `None` rejects the candidate (the generator retries with
+/// the next sub-seed, like any validation failure).
+fn place_relics(
+    g: &mut Gen,
+    tc_a: (u32, u32),
+    tc_b: (u32, u32),
+    sub_seed: u64,
+) -> Option<Vec<(u32, u32)>> {
+    let mut rng = Pcg32::new(sub_seed ^ 0x5245_4C49_4353_4D31); // "RELICM1"
+    let mut relics: Vec<(u32, u32)> = Vec::with_capacity(5);
+    let clear = |g: &Gen, x: u32, y: u32| {
+        g.free(x, y)
+            && chebyshev(x, y, tc_a.0, tc_a.1) >= RELIC_START_CLEARANCE
+            && chebyshev(x, y, tc_b.0, tc_b.1) >= RELIC_START_CLEARANCE
+    };
+    // Two mirrored pairs.
+    for _ in 0..2 {
+        let mut placed = false;
+        for _ in 0..200 {
+            let x = 4 + rng.below(GRID_DIM - 8);
+            let y = 4 + rng.below(GRID_DIM - 8);
+            let (mx, my) = rot(x, y);
+            if (mx, my) == (x, y) || !clear(g, x, y) || !clear(g, mx, my) {
+                continue;
+            }
+            if g.claim(x, y) && g.claim(mx, my) {
+                relics.push((x, y));
+                relics.push((mx, my));
+                placed = true;
+                break;
+            }
+        }
+        if !placed {
+            return None;
+        }
+    }
+    // The center relic: scan rings outward from the map center
+    // (row-major inside a ring — fully deterministic, no draws).
+    let center = (GRID_DIM / 2, GRID_DIM / 2);
+    let mut found = false;
+    'rings: for r in 0..GRID_DIM / 2 {
+        for y in 0..GRID_DIM {
+            for x in 0..GRID_DIM {
+                if chebyshev(x, y, center.0, center.1) != r {
+                    continue;
+                }
+                if chebyshev(x, y, tc_a.0, tc_a.1) != chebyshev(x, y, tc_b.0, tc_b.1) {
+                    continue;
+                }
+                if clear(g, x, y) && g.claim(x, y) {
+                    relics.push((x, y));
+                    found = true;
+                    break 'rings;
+                }
+            }
+        }
+    }
+    if !found {
+        return None;
+    }
+    debug_assert_eq!(relics.len(), 5);
+    Some(relics)
+}
+
 pub fn validate(map: &GeneratedMap) -> bool {
     let grid = &map.grid;
     // Flood fill over land (terrain only: trees stand *on* land and
@@ -305,6 +407,17 @@ pub fn validate(map: &GeneratedMap) -> bool {
         }
     }
     for &(_, x, y) in &map.neutral_nodes {
+        if !seen[idx(x, y)] {
+            return false;
+        }
+    }
+    // MAP-13 (Castle P5d): every relic stands on the shared
+    // landmass too — a relic sealed behind water or a cliff face
+    // would be a relic no monk could ever fetch.
+    if map.relics.len() != 5 {
+        return false;
+    }
+    for &(x, y) in &map.relics {
         if !seen[idx(x, y)] {
             return false;
         }
@@ -463,6 +576,12 @@ fn fallback() -> GeneratedMap {
         grid,
         starts: [pkg_a, pkg_b],
         neutral_nodes: Vec::new(),
+        // MAP-13: the template's five relics — two mirrored
+        // pairs and the equal-distance center cell (59, 26:
+        // Chebyshev 34 from both Town Centers), all on free
+        // land at least 20 tiles from both starts, verified
+        // against this template's fixed cells.
+        relics: vec![(50, 40), (69, 79), (45, 85), (74, 34), (59, 26)],
     }
 }
 

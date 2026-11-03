@@ -1656,6 +1656,26 @@ pub struct Building {
     /// non-garrisonable kinds. The Town Center's garrison lives on
     /// its `TcState` instead (the TC is an entity, BLD-16).
     pub garrison: Vec<u32>,
+    // --- Castle P5d: the Monastery's relic store (MNK-09) ---
+    /// The relics garrisoned in this Monastery, in deposit
+    /// order (Monastery only; empty on every other kind). The
+    /// store is uncapped (MNK-09: no cap is documented in the
+    /// sources consulted) and is NOT the production garrison
+    /// above — the dossier's "garrison 10" is the Monk rally
+    /// garrison, not a relic cap. Each stored relic's entity
+    /// record carries the inverse pointer
+    /// (`relic_garrisoned_in`). Part of the hashed state,
+    /// written only while non-default (marker 0xB8 in the
+    /// building section).
+    pub relics: Vec<u32>,
+    /// ECO-16 trickle accumulator (Castle P5d): per tick the
+    /// relic step adds `relic_count × 30 × 65536` to a
+    /// conceptual accumulator whose quotient over 3600 is the
+    /// gold bits paid to the owner's stockpile (30 gold/min
+    /// per relic, exact over any whole minute — the GAR-04
+    /// remainder pattern); this holds the remainder
+    /// (0 ≤ r < 3600). Part of the hashed state, with `relics`.
+    pub relic_gold_remainder: i64,
     /// The building's current total arrows per volley (GAR-05):
     /// recomputed on every garrison change (event, not per tick) —
     /// base volley + capped extra arrows for armed kinds; 0 for
@@ -2178,6 +2198,8 @@ mod tests {
             weapon_engaged: false,
             garrison: Vec::new(),
             garrison_arrows: 0,
+            relics: Vec::new(),
+            relic_gold_remainder: 0,
         };
         assert_eq!(b.progress_frac_bits(), 0);
         b.progress_thirds = 2250; // half of 4500

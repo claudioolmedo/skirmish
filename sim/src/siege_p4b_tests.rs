@@ -76,6 +76,8 @@ fn placed(sim: &Sim, id: u32, kind: BuildingKind, owner: u8, cell: (u32, u32)) -
         weapon_engaged: false,
         garrison: Vec::new(),
         garrison_arrows: 0,
+        relics: Vec::new(),
+        relic_gold_remainder: 0,
         gate_along_x: false,
         queue_rate_remainder: 0,
     }

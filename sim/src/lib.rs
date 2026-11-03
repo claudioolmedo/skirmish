@@ -78,6 +78,8 @@ mod monastery_p5c_tests;
 #[cfg(test)]
 mod monastery_p5e_tests;
 #[cfg(test)]
+mod monastery_p5d_tests;
+#[cfg(test)]
 mod university_p3c_tests;
 #[cfg(test)]
 mod garrison_tests;
@@ -596,6 +598,27 @@ pub enum Command {
     /// through `transfer_building_ownership` — or destroys it
     /// when the victim's owner has Heresy (MNK-11, Passo 0.1).
     ConvertBuilding { entity: u32, building: u32 },
+    /// Order a Monk to pick up a relic (Castle P5d, MNK-09):
+    /// the monk walks to the relic and takes it — from the
+    /// ground where it lies, or out of an own Monastery that
+    /// holds it (the DE retrieve order; the ECO-16 trickle
+    /// stops while it is carried). While carrying, the monk's
+    /// LoS is 9 and conversion orders are refused (he delivers
+    /// instead); healing stays available. Valid only for a
+    /// living, fielded Monk not already carrying, against a
+    /// relic on the ground or garrisoned in one of its owner's
+    /// own Monasteries (`Sim::can_pickup_relic`). No queued
+    /// form (the P5 plan §2: pickup/deposit ride direct orders
+    /// only).
+    PickupRelic { entity: u32, relic: u32 },
+    /// Order a carrying Monk to deposit its relic in an own
+    /// Monastery (Castle P5d, MNK-09): the monk walks adjacent
+    /// to the Monastery and garrisons the relic on arrival —
+    /// the ECO-16 gold trickle (0.5 gold/s) starts for the
+    /// Monastery's owner and runs until the relic is retrieved.
+    /// Valid only for a carrying Monk and a completed Monastery
+    /// of its owner (`Sim::can_deposit_relic`). No queued form.
+    DepositRelic { entity: u32, building: u32 },
 }
 
 /// ECO-14: one farm reseed costs 60 wood (MECHANICS-STUDY §6.3:
@@ -1101,6 +1124,23 @@ impl Sim {
         };
         if mode.is_match() {
             sim.spawn_opponent_start(&map.starts[1]);
+        }
+        // MAP-13 (Castle P5d): the map's five relics spawn LAST —
+        // Gaia-owned entities on the generator's relic cells, in
+        // both Sandbox and match modes (they are map objects,
+        // MAP-12). Spawning last keeps every historical entity id
+        // unmoved: relics take the next five ids in placement
+        // order, after both starts' full populations.
+        for &(cx, cy) in &map.relics {
+            let (pos_x, pos_y) = sim.grid.cell_center(cx, cy);
+            let id = sim.entities.len() as u32;
+            sim.entities.push(Entity::spawned(
+                id,
+                EntityKind::Relic,
+                entity::OWNER_GAIA,
+                pos_x,
+                pos_y,
+            ));
         }
         // VIS-07: a match starts nearly blind — only each start's
         // surroundings are known, from this first computation.
@@ -1675,6 +1715,14 @@ impl Sim {
             e.conversion_target_building = None;
             e.ci_progress = 0;
             e.ci_ticks = 0;
+            // Castle P5d: the converted monk's relic ERRANDS
+            // clear with the rest of his orders — but a relic
+            // he CARRIES stays carried (MNK-09: the relic's
+            // carrier pointer just names the monk; the relic
+            // has no owner to transfer). He now serves his new
+            // owner, relic in hand.
+            e.relic_pickup_target = None;
+            e.relic_deposit_target = None;
             // 3. Ownership moves (population/AI derive from it).
             e.owner = new_owner;
         }
@@ -2262,7 +2310,16 @@ impl Sim {
         let e = &self.entities[idx];
         // MNK-12: a converted unit's row resolves from its frozen
         // patch snapshot, never its new owner's set.
-        self.stats_for_masked(e.owner, e.kind, e.frozen_patches)
+        let mut s = self.stats_for_masked(e.owner, e.kind, e.frozen_patches);
+        // MNK-09 (Castle P5d): a Monk carrying a relic reads
+        // LoS 9 instead of his base 11 — applied here, at the
+        // one effective-row lookup every reader shares
+        // (visibility, the heal auto-task), never written into
+        // the table row.
+        if e.kind == EntityKind::Monk && e.carrying_relic.is_some() {
+            s.los = crate::monks::CARRY_LOS;
+        }
+        s
     }
 
     /// The effective weapon of a placed building kind for `owner`
@@ -2809,6 +2866,12 @@ impl Sim {
         let a = &self.entities[ai];
         let t = &self.entities[ti];
         if a.dead || t.dead || entity == target {
+            return false;
+        }
+        // MNK-09 (Castle P5d): a relic is indestructible — no
+        // unit may attack it (or be ordered onto it as a
+        // target); only a monk picking it up interacts with it.
+        if t.kind == EntityKind::Relic {
             return false;
         }
         if !entity::is_player_owner(a.owner) || units::spec(a.kind).attacks.is_empty() {
@@ -3435,6 +3498,10 @@ impl Sim {
         e.conversion_target = None;
         e.conversion_target_building = None;
         e.ci_ticks = 0;
+        // Castle P5d: Stop also ends a relic errand (the carry
+        // itself is kept, MNK-09).
+        e.relic_pickup_target = None;
+        e.relic_deposit_target = None;
     }
 
     /// Would a `DeleteEntity` command be accepted right now?
@@ -4552,6 +4619,12 @@ impl Sim {
                 Command::ConvertBuilding { entity, building } => {
                     self.issue_convert_building(entity, building)
                 }
+                Command::PickupRelic { entity, relic } => {
+                    self.issue_pickup_relic(entity, relic)
+                }
+                Command::DepositRelic { entity, building } => {
+                    self.issue_deposit_relic(entity, building)
+                }
             }
         }
 
@@ -4726,6 +4799,13 @@ impl Sim {
         //     joins this same phase.
         self.monk_tick();
 
+        // 4.7 Relics (Castle P5d, ECO-16): the Monastery gold
+        //     trickle — every completed Monastery holding relics
+        //     pays its owner 30 gold/min per relic. After the monk
+        //     phase, so a relic deposited this tick starts paying
+        //     next tick and a retrieved one stops with this tick.
+        self.relic_tick();
+
         // 5. Order queues (M4, SEL-12): an entity that became fully
         //    idle this tick starts its next queued order, so a chain
         //    has no dead tick between links.
@@ -4878,6 +4958,12 @@ impl Sim {
             e.conversion_target_building = None;
             e.ci_progress = 0;
             e.ci_ticks = 0;
+            // Castle P5d: a manual move also ends a relic
+            // errand (MNK-09's task family follows the
+            // heal/conversion convention); the CARRY is
+            // untouched — he walks with the relic in hand.
+            e.relic_pickup_target = None;
+            e.relic_deposit_target = None;
         }
         // CMB-09: a Defensive unit's post follows its explicit
         // move orders — the post is the resolved destination.
@@ -6050,6 +6136,8 @@ impl Sim {
             weapon_engaged: false,
             garrison: Vec::new(),
             garrison_arrows: 0,
+            relics: Vec::new(),
+            relic_gold_remainder: 0,
         };
         if kind.blocks_footprint() && !kind.is_wall() {
             for (cx, cy) in building.footprint_cells() {
@@ -8687,6 +8775,21 @@ impl Sim {
                 h.write_u8(0xBB);
                 h.write_u8(u8::from(b.gate_along_x));
             }
+            // Castle P5d: the Monastery relic store (MNK-09) and
+            // its ECO-16 trickle remainder — written ONLY while
+            // either is non-default, behind marker 0xB8 (the
+            // building section's next free byte; the TC section's
+            // 0xB8 weapon block is a different stream position),
+            // so a match where no relic is ever garrisoned hashes
+            // byte-identically to before.
+            if !b.relics.is_empty() || b.relic_gold_remainder != 0 {
+                h.write_u8(0xB8);
+                h.write_u32(b.relics.len() as u32);
+                for r in &b.relics {
+                    h.write_u32(*r);
+                }
+                h.write_u64(b.relic_gold_remainder as u64);
+            }
         }
         // SIM-06 boundary: progression, stockpiles, nodes, queues
         // and buildings — the economy block.
@@ -9057,6 +9160,9 @@ impl Sim {
                 || e.conversion_level != 1
                 || e.conversion_start_shift != 0
                 || e.conversion_guarantee_shift != 0
+                || e.carrying_relic.is_some()
+                || e.relic_pickup_target.is_some()
+                || e.relic_deposit_target.is_some()
             {
                 h.write_u8(0xBB);
                 match e.heal_target {
@@ -9098,6 +9204,32 @@ impl Sim {
                         h.write_u32(b);
                     }
                 }
+                // Castle P5d extension, appended inside the same
+                // block: the relic errands and the carry
+                // (MNK-09). A monk with no relic involvement in a
+                // stream that never wrote the block still writes
+                // nothing, so the golden hash does not move.
+                match e.carrying_relic {
+                    None => h.write_u8(0),
+                    Some(r) => {
+                        h.write_u8(1);
+                        h.write_u32(r);
+                    }
+                }
+                match e.relic_pickup_target {
+                    None => h.write_u8(0),
+                    Some(r) => {
+                        h.write_u8(1);
+                        h.write_u32(r);
+                    }
+                }
+                match e.relic_deposit_target {
+                    None => h.write_u8(0),
+                    Some(b) => {
+                        h.write_u8(1);
+                        h.write_u32(b);
+                    }
+                }
             }
             // Castle P5b (MNK-12): the frozen patch snapshot —
             // written ONLY while set, behind marker 0xBD (the
@@ -9107,6 +9239,32 @@ impl Sim {
             if let Some(mask) = e.frozen_patches {
                 h.write_u8(0xBD);
                 h.write_u64(mask);
+            }
+            // Castle P5d: the relic's own lifecycle state
+            // (MNK-09) — written ONLY while the relic is off the
+            // ground (carried or garrisoned), behind marker 0xBE
+            // (the entity section's next free byte after 0xBD),
+            // so a match where every relic lies on the ground
+            // writes nothing for them. The monk-side carry rides
+            // the 0xBB block above; this block covers the
+            // relic-side pointers, the state a reader of the
+            // relic itself must see.
+            if e.relic_carried_by.is_some() || e.relic_garrisoned_in.is_some() {
+                h.write_u8(0xBE);
+                match e.relic_carried_by {
+                    None => h.write_u8(0),
+                    Some(m) => {
+                        h.write_u8(1);
+                        h.write_u32(m);
+                    }
+                }
+                match e.relic_garrisoned_in {
+                    None => h.write_u8(0),
+                    Some(b) => {
+                        h.write_u8(1);
+                        h.write_u32(b);
+                    }
+                }
             }
         }
         // M3: projectiles in flight, in spawn order.
@@ -9549,6 +9707,8 @@ mod tests {
             weapon_engaged: false,
             garrison: Vec::new(),
             garrison_arrows: 0,
+            relics: Vec::new(),
+            relic_gold_remainder: 0,
         }
     }
 
@@ -9662,6 +9822,8 @@ mod tests {
             weapon_engaged: false,
             garrison: Vec::new(),
             garrison_arrows: 0,
+            relics: Vec::new(),
+            relic_gold_remainder: 0,
         });
         sim.apply_research(OWNER_PLAYER, TechId::HorseCollar);
         let after = sim
@@ -9714,6 +9876,8 @@ mod tests {
             weapon_engaged: false,
             garrison: Vec::new(),
             garrison_arrows: 0,
+            relics: Vec::new(),
+            relic_gold_remainder: 0,
         }
     }
 

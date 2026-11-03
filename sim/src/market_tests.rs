@@ -52,6 +52,8 @@ fn market_at(sim: &Sim, id: u32, owner: u8, cell: (u32, u32), complete: bool) ->
         weapon_engaged: false,
         garrison: Vec::new(),
         garrison_arrows: 0,
+        relics: Vec::new(),
+        relic_gold_remainder: 0,
     }
 }
 

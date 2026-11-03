@@ -484,6 +484,51 @@ impl WasmSim {
         self.inner.monk_faith(entity)
     }
 
+    /// Order a Monk to pick up a relic (Castle P5d, MNK-09):
+    /// from the ground, or out of an own Monastery (the
+    /// retrieve order). Returns whether the order *would* be
+    /// accepted; the sim re-validates when the command is
+    /// applied.
+    pub fn push_pickup_relic(&mut self, entity: u32, relic: u32) -> bool {
+        let ok = self.inner.can_pickup_relic(entity, relic);
+        if ok {
+            self.inner
+                .push_command(Command::PickupRelic { entity, relic });
+        }
+        ok
+    }
+
+    /// Order a carrying Monk to deposit its relic in an own
+    /// Monastery (Castle P5d, MNK-09/ECO-16). Same acceptance
+    /// contract as `push_pickup_relic`.
+    pub fn push_deposit_relic(&mut self, entity: u32, building: u32) -> bool {
+        let ok = self.inner.can_deposit_relic(entity, building);
+        if ok {
+            self.inner
+                .push_command(Command::DepositRelic { entity, building });
+        }
+        ok
+    }
+
+    /// The relic a monk is carrying, as an entity id, or -1
+    /// (Castle P5d, MNK-09): the client's "show it being
+    /// carried" read — the selection line, the draw pass's
+    /// carried prop, and the conversion cursor's refusal mirror
+    /// (a carrying monk's convert orders are refused sim-side;
+    /// the client greys them on this read).
+    pub fn carrying_relic(&self, entity: u32) -> i32 {
+        self.inner
+            .carrying_relic(entity)
+            .map(|r| r as i32)
+            .unwrap_or(-1)
+    }
+
+    /// How many relics a Monastery holds (Castle P5d, MNK-09):
+    /// the building panel's count.
+    pub fn monastery_relic_count(&self, building: u32) -> u32 {
+        self.inner.monastery_relic_count(building)
+    }
+
     /// Enqueue a Trade Cart at a completed Market (Package D,
     /// TRD-05 — the Market is the cart's only home; `can_train_at`
     /// carries the Feudal Age gate). See `push_train_militia`.
@@ -1647,6 +1692,36 @@ impl WasmSim {
             out.push(b.id as f64);
             out.push(if b.gate_along_x { 1.0 } else { 0.0 });
             out.push(if self.inner.gate_is_open(b) { 1.0 } else { 0.0 });
+        }
+        out
+    }
+
+    /// Flat relic census (Castle P5d, MNK-09): per relic,
+    /// [id, state, holder] — state 0 on the ground (holder 0),
+    /// 1 carried (holder = the monk's id), 2 garrisoned
+    /// (holder = the Monastery's building id). The 8-value
+    /// `entities()` stride stays untouched (a relic's position
+    /// rides it like any entity's; a carried relic's position IS
+    /// its monk's, a garrisoned one's its Monastery's); this
+    /// side channel carries the lifecycle, like `gate_states`.
+    pub fn relic_states(&self) -> Vec<f64> {
+        let mut out = Vec::new();
+        for (id, state) in self.inner.relic_states() {
+            out.push(id as f64);
+            match state {
+                crate::monks::RelicState::Ground => {
+                    out.push(0.0);
+                    out.push(0.0);
+                }
+                crate::monks::RelicState::CarriedBy(m) => {
+                    out.push(1.0);
+                    out.push(m as f64);
+                }
+                crate::monks::RelicState::GarrisonedIn(b) => {
+                    out.push(2.0);
+                    out.push(b as f64);
+                }
+            }
         }
         out
     }

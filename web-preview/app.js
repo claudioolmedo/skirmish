@@ -297,6 +297,7 @@ const CARRY_COLORS = ['#d9a05b', '#ff5da2', '#ffd700', '#c3c8cd', '#ff5da2', '#f
 const KIND_TC = 1;
 const KIND_SHEEP = 5;
 const KIND_RAM = 17;
+const KIND_RELIC = 21; // Castle P5d: the relic (MNK-09)
 // i18n: the display-name tables below are rebuilt from
 // play/i18n.js on every locale switch (refreshNames) — the
 // semantic ids index the string table (unit.<id>, building.<id>).
@@ -307,14 +308,14 @@ const KIND_RAM = 17;
 // before then.
 const KIND_I18N = ['villager', 'townCenter', 'scout', 'militia', 'archer',
   'sheep', 'boar', 'deer', 'manAtArms', 'spearman', 'skirmisher', 'wolf',
-  'knight', 'lightCavalry', 'cavalryArcher', 'petard', 'tradeCart', 'batteringRam', 'mangonel', 'scorpion', 'monk'];
+  'knight', 'lightCavalry', 'cavalryArcher', 'petard', 'tradeCart', 'batteringRam', 'mangonel', 'scorpion', 'monk', 'relic'];
 let KIND_NAME = {
   0: 'Villager', 1: 'Town Center', 2: 'Scout Cavalry', 3: 'Militia',
   4: 'Archer', 5: 'Sheep', 6: 'Boar', 7: 'Deer', 8: 'Man-at-Arms',
   9: 'Spearman', 10: 'Skirmisher', 11: 'Wolf',
   12: 'Knight', 13: 'Light Cavalry', 14: 'Cavalry Archer', 15: 'Petard',
   16: 'Trade Cart', 17: 'Battering Ram', 18: 'Mangonel',
-  16: 'Trade Cart', 17: 'Battering Ram', 20: 'Monk',
+  16: 'Trade Cart', 17: 'Battering Ram', 20: 'Monk', 21: 'Relic',
 };
 // Selection-panel portraits per unit kind (SVG symbol ids in
 // play/index.html).
@@ -323,7 +324,7 @@ const KIND_ICON = {
   8: 'i-militia', 9: 'i-spearman', 10: 'i-skirmisher',
   12: 'i-villager', 13: 'i-villager', 14: 'i-archer', 15: 'i-petard',
   16: 'i-trade-cart', 17: 'i-ram', 18: 'i-mangonel',
-  16: 'i-trade-cart', 17: 'i-ram', 20: 'i-monk',
+  16: 'i-trade-cart', 17: 'i-ram', 20: 'i-monk', 21: 'i-gold',
 };
 
 // Original PNG icon set (2026-10-19, AI generations via Base44 on
@@ -2665,6 +2666,52 @@ function tradeStateOf(i) {
   return trueTradeState.get(i) ?? 0;
 }
 
+// --- Relic state (the sim's own word, Castle P5d) -------------
+// A relic's lifecycle (MNK-09) rides the WASM ABI's relic_states
+// side channel — flat [id, state, holder] triples (0 ground,
+// 1 carried by the holder monk, 2 garrisoned in the holder
+// Monastery) — cached per sim tick + instance exactly like the
+// trade sheet above: the draw pass reads it to hide garrisoned
+// relics and to prop carried ones over their monks' heads, the
+// selection panel and the Monastery panel read the counts, and
+// the right-click path finds the relic a retrieve order names.
+let relicCacheSim = null;
+let relicCacheTick = -1;
+const relicById = new Map(); // relic id -> { state, holder }
+const relicByCarrier = new Map(); // monk id -> relic id
+function refreshRelicCache() {
+  if (!sim || typeof sim.relic_states !== 'function') return;
+  const t = sim.tick_count();
+  if (sim === relicCacheSim && t === relicCacheTick) return;
+  relicCacheSim = sim;
+  relicCacheTick = t;
+  relicById.clear();
+  relicByCarrier.clear();
+  const flat = sim.relic_states();
+  for (let j = 0; j + 2 < flat.length; j += 3) {
+    const id = flat[j];
+    const state = flat[j + 1];
+    const holder = flat[j + 2];
+    relicById.set(id, { state, holder });
+    if (state === 1) relicByCarrier.set(holder, id);
+  }
+}
+function relicStateOf(id) {
+  refreshRelicCache();
+  return relicById.get(id) ?? null;
+}
+function carriedRelicOf(monkId) {
+  refreshRelicCache();
+  return relicByCarrier.get(monkId) ?? null;
+}
+function firstGarrisonedRelic(buildingId) {
+  refreshRelicCache();
+  for (const [id, r] of relicById) {
+    if (r.state === 2 && r.holder === buildingId) return id;
+  }
+  return null;
+}
+
 function updateCarry(nodes, tcPos, pos, kinds, hp) {
   for (let i = 0; i < kinds.length; i++) {
     if (kinds[i] !== 0) continue; // villagers only — animals/military carry nothing
@@ -3766,6 +3813,12 @@ function applyLocalOrder(cmd) {
     case 'convert': return sim.push_convert(cmd.e, cmd.tg);
     // Castle P5c (MNK-04): task a Monk to convert an enemy building.
     case 'convertb': return sim.push_convert_building(cmd.e, cmd.b);
+    // Castle P5d (MNK-09): task a Monk to pick up a relic (from
+    // the ground, or out of an own Monastery — the retrieve).
+    case 'pickup': return sim.push_pickup_relic(cmd.e, cmd.tg);
+    // Castle P5d (MNK-09): task a carrying Monk to deposit its
+    // relic in an own Monastery (the ECO-16 trickle starts).
+    case 'deposit': return sim.push_deposit_relic(cmd.e, cmd.b);
     case 'train_vil': return sim.push_train_villager_at(cmd.tc != null ? cmd.tc : myTcId);
     case 'research_tc': return sim.push_research_tc_at(cmd.tc != null ? cmd.tc : myTcId, cmd.tech);
     case 'research_at': return sim.push_research_at(cmd.b, cmd.tech);
@@ -7251,6 +7304,23 @@ async function main() {
     // (the click falls through to a ground move, as a miss does).
     if (t != null && st.owners[t] !== localOwner
         && !cellVisibleW(st.pos[t * 2], st.pos[t * 2 + 1])) t = null;
+    // Relic pickup (Castle P5d, MNK-09): a right-click on a
+    // relic with Monk(s) selected tasks every selected Monk to
+    // pick it up — ahead of the generic Gaia-attack block below,
+    // because a relic is a Gaia object NO unit may attack (the
+    // sim refuses attack orders on it). The sim's
+    // can_pickup_relic gates each monk (already carrying, or
+    // the relic already carried, refuses there and the click
+    // falls through to the ground move at the bottom).
+    if (t != null && st.kinds[t] === KIND_RELIC
+        && targets.some((id) => st.kinds[id] === 20)) {
+      let any = false;
+      for (const id of targets) {
+        if (st.kinds[id] !== 20) continue;
+        if (issue({ t: 'pickup', e: id, tg: t })) any = true;
+      }
+      if (any) { orderAck('order'); return; }
+    }
     if (t != null && (st.owners[t] === 1 || st.owners[t] === foeOwner() || st.kinds[t] === KIND_SHEEP)) {
       let any = false;
       for (const id of targets) {
@@ -7349,6 +7419,33 @@ async function main() {
         if (issue({ t: 'attackb', e: id, b: bT.id })) any = true;
       }
       if (any) { orderAck('attack'); return; }
+    }
+    // Deposit / retrieve a relic (Castle P5d, MNK-09): a
+    // right-click on an OWN Monastery with Monk(s) selected — a
+    // carrying monk deposits its relic (the ECO-16 trickle
+    // starts); with no carrier in the selection and relics in
+    // the store, an empty-handed monk retrieves the first one.
+    // The sim gates both orders; a refused click falls through.
+    if (bT && bT.owner === localOwner && bT.kind === 20
+        && targets.some((id) => st.kinds[id] === 20)) {
+      let any = false;
+      for (const id of targets) {
+        if (st.kinds[id] !== 20) continue;
+        if (typeof sim.carrying_relic === 'function' && sim.carrying_relic(id) >= 0) {
+          if (issue({ t: 'deposit', e: id, b: bT.id })) any = true;
+        }
+      }
+      if (!any && typeof sim.monastery_relic_count === 'function'
+          && sim.monastery_relic_count(bT.id) > 0) {
+        const rid = firstGarrisonedRelic(bT.id);
+        if (rid != null) {
+          for (const id of targets) {
+            if (st.kinds[id] !== 20) continue;
+            if (issue({ t: 'pickup', e: id, tg: rid })) { any = true; break; }
+          }
+        }
+      }
+      if (any) { orderAck('order'); return; }
     }
     // Build-resume (SEL-11, 2026-10-22): an own foundation —
     // a building still under construction, Farms included —
@@ -10256,6 +10353,71 @@ const MONK_SPRITE_U = 16; // cached-sprite pixels per world unit
 // Sprite content bounds in unit space (feet at the origin):
 // x [-0.62, 0.91] (robe edge → staff cross), y [-2.62, 0]
 // (cross top → feet); the box below adds a small margin.
+// The Relic (Castle P5d, MNK-09): a small golden reliquary on a
+// stone pedestal — an original vector prop in the monk/trade-cart
+// figure family, painted once into a cached sprite (the INF-12
+// occlusion pass needs the drawImage, per the trade-cart fix) and
+// blitted like the monk. The same figure, scaled down, is the
+// prop drawMonk holds over a carrying monk's head.
+const RELIC_SPRITE_U = 16; // cached-sprite pixels per world unit
+const RELIC_BOX = { x0: -0.7, y0: -2.05, w: 1.4, h: 2.2 };
+let relicSpriteCache = null; // canvas | null (one figure, no variants)
+function paintRelicFigure(g, sx, sy, u) {
+  // The pedestal: a plain stone block the shrine stands on.
+  g.fillStyle = '#8d8578';
+  g.fillRect(sx - 0.52 * u, sy - 0.34 * u, 1.04 * u, 0.34 * u);
+  g.fillStyle = '#6f695e';
+  g.fillRect(sx - 0.6 * u, sy - 0.1 * u, 1.2 * u, 0.1 * u);
+  // The shrine: a gold casket with a darker lid line.
+  g.fillStyle = '#c9a227';
+  g.fillRect(sx - 0.42 * u, sy - 1.18 * u, 0.84 * u, 0.84 * u);
+  g.strokeStyle = '#7a5c14';
+  g.lineWidth = Math.max(1, 0.07 * u);
+  g.strokeRect(sx - 0.42 * u, sy - 1.18 * u, 0.84 * u, 0.84 * u);
+  g.fillStyle = '#e8c95a';
+  g.fillRect(sx - 0.42 * u, sy - 1.18 * u, 0.84 * u, 0.18 * u);
+  // The cross on the casket's face.
+  g.fillStyle = '#7a5c14';
+  g.fillRect(sx - 0.05 * u, sy - 0.92 * u, 0.1 * u, 0.44 * u);
+  g.fillRect(sx - 0.19 * u, sy - 0.8 * u, 0.38 * u, 0.09 * u);
+  // The finial cross crowning the shrine.
+  g.fillStyle = '#c9a227';
+  g.fillRect(sx - 0.05 * u, sy - 1.62 * u, 0.1 * u, 0.44 * u);
+  g.fillRect(sx - 0.19 * u, sy - 1.5 * u, 0.38 * u, 0.09 * u);
+}
+function relicSprite() {
+  if (relicSpriteCache !== null) return relicSpriteCache;
+  let cv = null;
+  try {
+    cv = document.createElement('canvas');
+    cv.width = Math.ceil(RELIC_BOX.w * RELIC_SPRITE_U);
+    cv.height = Math.ceil(RELIC_BOX.h * RELIC_SPRITE_U);
+    const g = cv.getContext('2d');
+    if (!g) cv = null;
+    else {
+      paintRelicFigure(g, -RELIC_BOX.x0 * RELIC_SPRITE_U,
+        -RELIC_BOX.y0 * RELIC_SPRITE_U, RELIC_SPRITE_U);
+    }
+  } catch {
+    cv = null; // no canvas available (test stubs): vector fallback
+  }
+  relicSpriteCache = cv;
+  return cv;
+}
+function drawRelic(i, wx, wy) {
+  const [sx, sy] = worldToScreen(wx, wy);
+  const u = camS;
+  shadow(sx, sy, 0.8 * u);
+  if (selection.has(i)) drawSelRing(sx, sy, 1.1);
+  const spr = relicSprite();
+  if (spr) {
+    ctx.drawImage(spr, sx + RELIC_BOX.x0 * u, sy + RELIC_BOX.y0 * u,
+      RELIC_BOX.w * u, RELIC_BOX.h * u);
+  } else {
+    paintRelicFigure(ctx, sx, sy, u);
+  }
+}
+
 const MONK_BOX = { x0: -0.85, y0: -3.0, w: 1.9, h: 3.15 };
 const monkSpriteCache = new Map(); // sash colour -> canvas | null
 function paintMonkFigure(g, sx, sy, u, sash) {
@@ -10322,6 +10484,14 @@ function drawMonk(i, wx, wy) {
       MONK_BOX.w * u, MONK_BOX.h * u);
   } else {
     paintMonkFigure(ctx, sx, sy, u, sash);
+  }
+  // Castle P5d (MNK-09): a monk carrying a relic reads as
+  // carrying — the reliquary rides above his head (the relic
+  // entity itself is not drawn while carried; see the draw
+  // loop). The prop is part of this draw call, so the INF-12
+  // occlusion silhouette covers it with the monk.
+  if (carriedRelicOf(i) != null) {
+    paintRelicFigure(ctx, sx + 0.15 * u, sy - 2.55 * u, 0.55 * u);
   }
 }
 
@@ -11524,6 +11694,33 @@ function runCommandButton(id, times = 1) {
     } else if (selectedBuilding && selectedBuilding.type === 'building') {
       if (issue({ t: 'ungarrison_b', b: selectedBuilding.id })) playAudioCue('orderBuilding');
     }
+  } else if (id === 'retrieve-relic') {
+    // Castle P5d (MNK-09): the Monastery panel's retrieve —
+    // the nearest own fielded Monk who is not already carrying
+    // walks to the selected Monastery and lifts its first
+    // garrisoned relic out (the same PickupRelic order the
+    // right-click issues; the sim re-validates it).
+    if (selectedBuilding && selectedBuilding.type === 'building') {
+      const rid = firstGarrisonedRelic(selectedBuilding.id);
+      if (rid != null) {
+        const stR = entityState();
+        let best = null;
+        let bestD2 = Infinity;
+        for (let i = 0; i < stR.count; i++) {
+          if (stR.kinds[i] !== 20 || stR.owners[i] !== localOwner
+              || stR.hp[i * 2] < 1 || (stR.garrisoned && stR.garrisoned[i])) continue;
+          if (typeof sim.carrying_relic === 'function' && sim.carrying_relic(i) >= 0) continue;
+          const d2 = (stR.pos[i * 2] - selectedBuilding.x) ** 2
+            + (stR.pos[i * 2 + 1] - selectedBuilding.y) ** 2;
+          if (d2 < bestD2) { bestD2 = d2; best = i; }
+        }
+        if (best != null && issue({ t: 'pickup', e: best, tg: rid })) {
+          playAudioCue('orderBuilding');
+        } else {
+          flash(t('flash.noFreeMonk'));
+        }
+      }
+    }
   } else if (id === 'stop') {
     // SEL-14: halt every selected unit where it stands.
     stopSelectedUnits();
@@ -12313,6 +12510,21 @@ function renderCommands() {
       })(),
       techBtn('research-redemption', 37, 'i-redemption', 'cmd.redemptionTitle', 50, 475, 6),
       techBtn('research-heresy', 38, 'i-heresy', 'cmd.heresyTitle', 60, 1000, 7),
+      // Castle P5d (MNK-09): the relic store's desk — the count
+      // itself rides the panel's info line; this button sends
+      // the nearest free own Monk to lift the first garrisoned
+      // relic back out (the retrieve order; the ECO-16 trickle
+      // stops while it is carried). Grey at an empty store.
+      (() => {
+        const rN = typeof sim.monastery_relic_count === 'function'
+          ? sim.monastery_relic_count(bk.id) : 0;
+        return cmdButton({
+          id: 'retrieve-relic', icon: 'i-gold', label: t('cmd.retrieveRelic'),
+          key: badgeForButton({ context, id: 'retrieve-relic', index: 8 }),
+          disabled: underConstruction || rN === 0,
+          title: t('cmd.retrieveRelicTitle', { n: rN }),
+        });
+      })(),
     );
   } else if (context === 'blacksmith') {
     // M6: the Blacksmith's Feudal researches — the three armor /
@@ -12860,6 +13072,14 @@ function updateSelPanel() {
         // Castle P5a: the monk never attacks — its line names
         // the heal order instead of the military boilerplate.
         selInfo.textContent = t('sel.monkInfo', { hp: hpTxt, faith: sim.monk_faith(id) });
+        // Castle P5d: a carrying monk's line says so (MNK-09).
+        if (typeof sim.carrying_relic === 'function' && sim.carrying_relic(id) >= 0) {
+          selInfo.textContent += ' · ' + t('sel.carryingRelic');
+        }
+      } else if (kind === KIND_RELIC) {
+        // Castle P5d: the relic's own line (MNK-09) — what it
+        // is and the one interaction it accepts.
+        selInfo.textContent = t('sel.relicInfo', { hp: hpTxt });
       } else {
         selInfo.textContent = t('sel.militaryInfo', { hp: hpTxt });
       }
@@ -13036,6 +13256,17 @@ function updateSelPanel() {
         : (bk && (bk.kind === 10 || bk.kind === 11 || bk.kind === 15))
           ? sim.building_garrison_arrows(bk.id) : 0;
       if (arrows > 0) line += ' · ' + t('sel.garrisonArrows', { n: arrows });
+      selInfo.textContent = selInfo.textContent ? `${selInfo.textContent} · ${line}` : line;
+    }
+  }
+  // Castle P5d: a Monastery's info line carries its garrisoned
+  // relic count (MNK-09) — the ECO-16 trickle's source, read
+  // from the sim like every other count in this panel.
+  if (context === 'building' && bk && bk.kind === 20
+      && typeof sim.monastery_relic_count === 'function') {
+    const rN = sim.monastery_relic_count(bk.id);
+    if (rN > 0) {
+      const line = t('sel.relicLine', { n: rN });
       selInfo.textContent = selInfo.textContent ? `${selInfo.textContent} · ${line}` : line;
     }
   }
@@ -13697,7 +13928,8 @@ function draw() {
     drawBatteringRam, // 17: Battering Ram (Castle P4a)
     drawMangonel, // 18: Mangonel (Castle P4b)
     null, // 19: Scorpion — reserved (Castle P4c)
-    drawMonk]; // 20: Monk (Castle P5a)
+    drawMonk, // 20: Monk (Castle P5a)
+    drawRelic]; // 21: Relic (Castle P5d)
   for (let i = 0; i < count; i++) {
     const wx = pos[i * 2];
     const wy = pos[i * 2 + 1];
@@ -13727,6 +13959,12 @@ function draw() {
           }
         },
       });
+    } else if (kinds[i] === KIND_RELIC && relicStateOf(i) && relicStateOf(i).state !== 0) {
+      // Castle P5d (MNK-09): a relic off the ground is not
+      // drawn at its stored position — a carried one rides as
+      // drawMonk's prop, a garrisoned one lives only as the
+      // Monastery panel's count.
+      continue;
     } else if (st.hp[i * 2] >= 1 && !(st.garrisoned && st.garrisoned[i])) {
       // M7 (VIS-01): enemy and Gaia UNITS draw only in currently
       // visible cells — explored memory remembers buildings, never

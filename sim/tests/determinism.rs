@@ -345,11 +345,28 @@ fn golden_hash_regression() {
     // scenario: no commands are issued (the movement cliff guard
     // and the CMB-01 across-cliff default never fire on an idle
     // map), and NET-09's save format is not hash coverage.
+    //
+    // Castle P5d (Relics — MNK-09/ECO-16/MAP-13, deliberate
+    // update): 3e199a9573417af3 -> f7af9c0fd33ac54c. Step
+    // attribution: the ONLY change entering this scenario is the
+    // five relic entities the generator places (MAP-13) and
+    // `Sim::with_mode` spawns last, after both starts — relic
+    // placement draws from its own stream and seed 42's map
+    // still validates on the first attempt, so the map itself is
+    // unchanged. Probe: with ONLY the relic spawn loop disabled
+    // (placement still runs), the golden returns to exactly
+    // 3e199a9573417af3. Every other P5d hash input is
+    // conditional and never enters this scenario: the monk 0xBB
+    // extension writes only for a monk with a relic errand or
+    // carry, the relic-state 0xBE block only while a relic is
+    // off the ground, and the building 0xB8 relic block only
+    // while a Monastery holds relics or a trickle remainder —
+    // the golden script builds no Monastery and tasks no monk.
     let mut sim = Sim::new(42);
     let mut hash = 0;
     for _ in 0..360 {
         hash = sim.tick();
     }
     assert_eq!(sim.tick_count(), 360);
-    assert_eq!(format!("{:016x}", hash), "3e199a9573417af3");
+    assert_eq!(format!("{:016x}", hash), "f7af9c0fd33ac54c");
 }

@@ -118,6 +118,14 @@ pub enum EntityKind {
     /// path can ever make it strike. Its MONK class row is what
     /// the Light Cavalry's anti-monk bonus keys on.
     Monk,
+    /// The relic (Castle P5d, MNK-09): a Gaia-owned object placed
+    /// by the map generator (MAP-13) — indestructible, never a
+    /// combat/heal/conversion target, moved only by the relic
+    /// lifecycle in `monks.rs` (ground | carried by a monk |
+    /// garrisoned in a Monastery). It is NOT mobile: it never
+    /// steers, pushes or is pushed; while carried, the relic
+    /// step copies its carrier's position each tick.
+    Relic,
 }
 
 impl EntityKind {
@@ -130,7 +138,8 @@ impl EntityKind {
     /// (Castle P2 — appended after the Wolf took 11 on main,
     /// so no tag moved), 15 = petard (Castle P3a), 16 = trade
     /// cart (Package D), 17 = battering ram (Castle P4a),
-    /// 18 = mangonel (Castle P4b), 20 = monk (Castle P5a).
+    /// 18 = mangonel (Castle P4b), 20 = monk (Castle P5a),
+    /// 21 = relic (Castle P5d).
     /// Tag 19 stays RESERVED for the Scorpion (the P4 execution
     /// plan's allocation, slice P4c): `from_tag` answers `None`
     /// for it until that slice lands its kind.
@@ -156,6 +165,7 @@ impl EntityKind {
             EntityKind::BatteringRam => 17,
             EntityKind::Mangonel => 18,
             EntityKind::Monk => 20,
+            EntityKind::Relic => 21,
         }
     }
 
@@ -182,6 +192,7 @@ impl EntityKind {
             17 => Some(EntityKind::BatteringRam),
             18 => Some(EntityKind::Mangonel),
             20 => Some(EntityKind::Monk),
+            21 => Some(EntityKind::Relic),
             _ => None,
         }
     }
@@ -209,8 +220,12 @@ impl EntityKind {
 
     /// Mobile units join the steering snapshot and can hold move
     /// orders; the Town Center is a static building and never moves.
+    /// The relic (Castle P5d) is static the same way: it is placed
+    /// by the generator and moved only by the relic lifecycle
+    /// writing its position directly (a carried relic tracks its
+    /// monk), never by steering.
     pub fn is_mobile(self) -> bool {
-        self != EntityKind::TownCenter
+        self != EntityKind::TownCenter && self != EntityKind::Relic
     }
 
     /// Player units that occupy one population slot while alive
@@ -975,6 +990,42 @@ pub struct Entity {
     /// remainder (0 ≤ r < 3600). Reset when the target changes
     /// or reaches full HP.
     pub heal_remainder: i64,
+    // --- Relic state (Castle P5d, MNK-09; inert defaults on
+    // every kind except the Monk and the Relic) ---
+    /// The relic this monk carries, if any (Monk only): while
+    /// set, the monk's LoS reads 9 instead of 11 and conversion
+    /// orders are refused (he delivers instead — MNK-09);
+    /// healing stays available. The inverse of the relic's
+    /// `relic_carried_by` (the garrison back-pointer pattern).
+    /// Plain data — part of the hashed state (the 0xBB monk
+    /// block, extended in P5d) and the save record (v10).
+    pub carrying_relic: Option<u32>,
+    /// The monk tasked to pick up a relic (Monk only): the relic
+    /// entity id — on the ground, or garrisoned in an own
+    /// Monastery (the DE retrieve order, MNK-09). The relic step
+    /// walks the monk to it and completes the pickup on arrival.
+    /// Plain data — hashed/saved with `carrying_relic`.
+    pub relic_pickup_target: Option<u32>,
+    /// The Monastery this carrying monk is tasked to deposit
+    /// its relic in (Monk only): a building id. The relic step
+    /// walks the monk adjacent and garrisons the relic on
+    /// arrival (ECO-16's trickle starts). Plain data —
+    /// hashed/saved with `carrying_relic`.
+    pub relic_deposit_target: Option<u32>,
+    /// The monk carrying this relic (Relic kind only): the
+    /// carrier half of MNK-09's state — `Some` exactly while the
+    /// relic's state is carried-by. While set, the relic is out
+    /// of the field at its carrier's position (the relic step
+    /// copies the position each tick). Plain data — part of the
+    /// hashed state (marker 0xBE) and the save record (v10).
+    pub relic_carried_by: Option<u32>,
+    /// The Monastery this relic is garrisoned in (Relic kind
+    /// only): `Some` exactly while the relic's state is
+    /// garrisoned-in — the relic has left the map into the
+    /// building's relic store (`Building::relics`) and pays the
+    /// ECO-16 trickle. Plain data — hashed/saved with
+    /// `relic_carried_by`.
+    pub relic_garrisoned_in: Option<u32>,
 }
 
 impl Entity {
@@ -1048,6 +1099,11 @@ impl Entity {
             conversion_start_shift: 0,
             conversion_guarantee_shift: 0,
             heal_remainder: 0,
+            carrying_relic: None,
+            relic_pickup_target: None,
+            relic_deposit_target: None,
+            relic_carried_by: None,
+            relic_garrisoned_in: None,
             frozen_patches: None,
         }
     }
