@@ -222,7 +222,7 @@ export function validateCommand(c) {
       || c.tech === 14 || c.tech === 15 || c.tech === 18
       || c.tech === 27 || c.tech === 28) && (c.tc === undefined || isInt(c.tc));
     case 'research_at': return isInt(c.b) && isInt(c.tech) && (c.tech <= 13 || c.tech === 16 || c.tech === 17 || c.tech === 19
-      || (c.tech >= 20 && c.tech <= 26) || (c.tech >= 29 && c.tech <= 38));
+      || (c.tech >= 20 && c.tech <= 26) || (c.tech >= 29 && c.tech <= 42));
     // Package K (TRD-04): a tribute names the recipient's owner
     // tag (0 or 2 — the only seats), a ResourceKind tag (food 1,
     // wood 2, gold 3, stone 4) and a positive amount. The amount

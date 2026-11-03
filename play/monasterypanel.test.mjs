@@ -116,8 +116,27 @@ test('Castle P5c: Monastery panel carries Redemption + Heresy at tags 37/38', ()
     'research dispatch maps both buttons to tags 37/38');
   assert.match(appJs, /37: t\('tech\.redemption'\), 38: t\('tech\.heresy'\)/,
     'TECH_NAME carries both new techs');
-  assert.match(appJs, /monastery: \[32, 33, 34, 35, 36, 37, 38\]/,
-    'RB_TAGS monastery covers the whole Castle row (research blocks)');
+  assert.match(appJs, /monastery: \[32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42\]/,
+    'RB_TAGS monastery covers the Castle row and the P5f Imperial row (research blocks)');
+});
+
+test('Castle P5f: Monastery panel carries the Imperial row at tags 39–42', () => {
+  assert.match(appJs, /techBtn\('research-blockprinting', 39, 'i-blockprinting', 'cmd\.blockprintingTitle', 55, 200, 8\)/,
+    'Block Printing button rides tag 39 at 200 gold / 55 s');
+  assert.match(appJs, /techBtn\('research-illumination', 40, 'i-illumination', 'cmd\.illuminationTitle', 65, 120, 9\)/,
+    'Illumination button rides tag 40 at 120 gold / 65 s');
+  assert.match(appJs, /techBtn\('research-theocracy', 41, 'i-theocracy', 'cmd\.theocracyTitle', 75, 200, 10\)/,
+    'Theocracy button rides tag 41 at 200 gold / 75 s');
+  assert.match(appJs, /id: 'research-faith'[\s\S]*?cost: 550, cost2Icon: 'i-gold', cost2: 750/,
+    'Faith button carries its mixed cost (550 food / 750 gold)');
+  assert.match(appJs, /'research-blockprinting': 39, 'research-illumination': 40/,
+    'research dispatch maps the Imperial buttons to tags 39/40');
+  assert.match(appJs, /'research-theocracy': 41, 'research-faith': 42/,
+    'research dispatch maps the Imperial buttons to tags 41/42');
+  assert.match(appJs, /39: t\('tech\.blockprinting'\), 40: t\('tech\.illumination'\)/,
+    'TECH_NAME carries Block Printing + Illumination');
+  assert.match(appJs, /41: t\('tech\.theocracy'\), 42: t\('tech\.faith'\)/,
+    'TECH_NAME carries Theocracy + Faith');
 });
 
 test('Castle P5c: building convert order path — dispatch, smart order, arm', () => {

@@ -108,6 +108,12 @@ test('validateCommand accepts the full vocabulary and rejects junk', () => {
     { t: 'convertb', e: 1, b: 3 },
     { t: 'research_at', b: 3, tech: 37 },
     { t: 'research_at', b: 3, tech: 38 },
+    // Castle P5f: the Imperial Monastery researches
+    // (Block Printing 39, Illumination 40, Theocracy 41, Faith 42).
+    { t: 'research_at', b: 3, tech: 39 },
+    { t: 'research_at', b: 3, tech: 40 },
+    { t: 'research_at', b: 3, tech: 41 },
+    { t: 'research_at', b: 3, tech: 42 },
     { t: 'auto_explore', e: 4, on: true },
     { t: 'auto_explore', e: 4, on: false },
     { t: 'attackmove', e: 4, x: 10, y: -2 },
