@@ -2590,8 +2590,21 @@ Faith link named in this rule's own text shipped in Castle P5f
 (2026-11-03): Faith (TechId 42, Monastery, Imperial) requires
 Devotion (`TechId::requires_tech`), enforced in the same
 `check_research` gate and pinned by `imperial_monastery_gates` in
-`sim/src/monastery_p5f_tests.rs`. The tree UI
-(INF-06) still does not exist. · *Status:* **DIFFERS**.
+`sim/src/monastery_p5f_tests.rs`. The last chain this rule's own
+text names — Double-Bit Axe → Bow Saw → Two-Man Saw — shipped in
+the TEC-07 wood-chain package (bot-loop builder, 2026-11-03):
+Bow Saw (TechId 43, Lumber Camp, Castle Age, 150 food /
+100 wood, 50 s, requires Double-Bit Axe) and Two-Man Saw
+(TechId 44, Lumber Camp, Imperial Age, 300 food / 200 wood,
+100 s, requires Bow Saw), both enforced in the same
+`check_research` gate and pinned by `sim/src/bowsaw_tests.rs`
+(the gates and the research queue flow), with the rows and the
+sequential gather-rate stacking (426 → 511 → 613 → 674 bits)
+pinned in `tech::tests`. The tree UI (INF-06) exists — it
+shipped 2026-10-31 and is MATCHES — and the whole graph, these
+two links included, shows there with met/unmet prerequisites.
+With every chain named in this rule's text now shipped, the
+rule is whole. · *Status:* **MATCHES**.
 
 **TEC-08 — Percent effects apply before armor subtraction; flat effects
 are part of the stat.** Where a tech grants "attack +X%", it scales the
@@ -4557,6 +4570,11 @@ Imperial Monastery row lands — TEC-10 (the Monastery line,
 11 of 11) moves MISSING → MATCHES. The book stands at
 223 rules, 187 / 16 / 20. The table below equals the body.
 
+updated 2026-11-03 for the TEC-07 wood chain (bot-loop
+builder): Bow Saw + Two-Man Saw land — TEC-07 (techs chain
+by prerequisites) moves DIFFERS → MATCHES. The book stands
+at 223 rules, 188 / 15 / 20. The table below equals the body.
+
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
 | 1 | Simulation & time (SIM) | 12 | 12 | 0 | 0 |
@@ -4569,7 +4587,7 @@ Imperial Monastery row lands — TEC-10 (the Monastery line,
 | 8 | Combat & damage (CMB) | 17 | 17 | 0 | 0 |
 | 9 | Projectiles & ballistics (PRJ) | 10 | 8 | 2 | 0 |
 | 10 | Unit classes & counters (CLS) | 8 | 6 | 0 | 2 |
-| 11 | Technologies & age advancement (TEC) | 11 | 8 | 2 | 1 |
+| 11 | Technologies & age advancement (TEC) | 11 | 9 | 1 | 1 |
 | 12 | Monks, conversion & relics (MNK) | 13 | 13 | 0 | 0 |
 | 13 | Trade, market & tribute (TRD) | 8 | 8 | 0 | 0 |
 | 14 | Garrison, transport & repair (GAR) | 10 | 9 | 0 | 1 |
@@ -4577,7 +4595,7 @@ Imperial Monastery row lands — TEC-10 (the Monastery line,
 | 16 | Victory, scoring & game modes (VIC) | 12 | 5 | 0 | 7 |
 | 17 | Multiplayer determinism (NET) | 11 | 9 | 1 | 1 |
 | 18 | Information rules (INF) | 13 | 12 | 1 | 0 |
-| | **Total** | **223** | **187** | **16** | **20** |
+| | **Total** | **223** | **188** | **15** | **20** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer

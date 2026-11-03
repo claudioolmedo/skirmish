@@ -101,6 +101,8 @@ mod trade_tests;
 mod tribute_vision_tests;
 #[cfg(test)]
 mod conscription_tests;
+#[cfg(test)]
+mod bowsaw_tests;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;

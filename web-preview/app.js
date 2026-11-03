@@ -508,6 +508,7 @@ function refreshNames() {
     37: t('tech.redemption'), 38: t('tech.heresy'),
     39: t('tech.blockprinting'), 40: t('tech.illumination'),
     41: t('tech.theocracy'), 42: t('tech.faith'),
+    43: t('tech.bowsaw'), 44: t('tech.twomansaw'),
   };
   RESEARCH_BLOCK_TITLES = [
     '', t('block.noResources'), t('block.queueFullTrain'),
@@ -1287,6 +1288,11 @@ function ownFeedSnapshot() {
       stonemining: (mask & 4096) !== 0,
       horsecollar: (mask & 8192) !== 0,
       handcart: (mask & 32768) !== 0,
+      // TEC-07 wood chain: tags 43/44 cross the 32-bit shift
+      // boundary, so these two read through the BigInt helper
+      // (the techtree.js techDone lesson) instead of `mask & n`.
+      bowsaw: techMaskHas(mask, 43),
+      twomansaw: techMaskHas(mask, 44),
     },
   };
 }
@@ -1335,7 +1341,7 @@ function updateEventFeed() {
   const lines = diffFeedEvents(prev, snap, {
     buildingName: (k) => BUILD_NAME[k],
     unitName: (k) => KIND_NAME[k],
-    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15, lightcavalry: 16, husbandry: 17, caravan: 19, coinage: 25, banking: 26, townwatch: 27, townpatrol: 28, conscription: 29, heavyplow: 30, croprotation: 31, sanctity: 32, fervor: 33, herbalmedicine: 34, atonement: 35, devotion: 36, redemption: 37, heresy: 38, blockprinting: 39, illumination: 40, theocracy: 41, faith: 42 }[key]],
+    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15, lightcavalry: 16, husbandry: 17, caravan: 19, coinage: 25, banking: 26, townwatch: 27, townpatrol: 28, conscription: 29, heavyplow: 30, croprotation: 31, sanctity: 32, fervor: 33, herbalmedicine: 34, atonement: 35, devotion: 36, redemption: 37, heresy: 38, blockprinting: 39, illumination: 40, theocracy: 41, faith: 42, bowsaw: 43, twomansaw: 44 }[key]],
   }, feedFmt());
   feedPrev = snap;
   for (const text of lines) pushFeedLine(text);
@@ -12245,6 +12251,7 @@ function runCommandButton(id, times = 1) {
       'research-redemption': 37, 'research-heresy': 38,
       'research-blockprinting': 39, 'research-illumination': 40,
       'research-theocracy': 41, 'research-faith': 42,
+      'research-bowsaw': 43, 'research-twomansaw': 44,
     }[id];
     if (tag != null && selectedBuilding && selectedBuilding.type === 'building') {
       if (!issue({ t: 'research_at', b: selectedBuilding.id, tech: tag })) {
@@ -12388,7 +12395,8 @@ function renderCommands() {
   // Castle 14, Hand Cart 15) and the building techs, keyed by
   // tag — Blacksmith (Fletching 2, Scale Mail 3, Padded 4,
   // Forging 7, Scale Barding 8), Barracks (MAA 5), Stable
-  // (Bloodlines 9), Lumber Camp (Double-Bit Axe 10), Mining Camp
+  // (Bloodlines 9), Lumber Camp (Double-Bit Axe 10, Bow Saw 43,
+  // Two-Man Saw 44), Mining Camp
   // (Gold 11, Stone 12), Mill (Horse Collar 13).
   const rbTc = context === 'tc'
     ? [myResearchBlockTc(0), myResearchBlockTc(1), myResearchBlockTc(6),
@@ -12396,9 +12404,9 @@ function renderCommands() {
       myResearchBlockTc(27), myResearchBlockTc(28)] : [-1, -1, -1, -1, -1, -1, -1, -1];
   const RB_TAGS = {
     blacksmith: [2, 3, 4, 7, 8], barracks: [5], stable: [9, 16, 17],
-    lumbercamp: [10], miningcamp: [11, 12], mill: [13, 30, 31], market: [19, 25, 26],
+    lumbercamp: [10, 43, 44], miningcamp: [11, 12], mill: [13, 30, 31], market: [19, 25, 26],
     university: [20, 21, 22, 23, 24], castle: [29],
-    lumbercamp: [10], miningcamp: [11, 12], mill: [13], market: [19, 25, 26],
+    lumbercamp: [10, 43, 44], miningcamp: [11, 12], mill: [13], market: [19, 25, 26],
     university: [20, 21, 22, 23, 24], monastery: [32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42],
   };
   const rbB = bk && RB_TAGS[context]
@@ -13169,7 +13177,10 @@ function renderCommands() {
     // at the Mining Camp. Glyph-only buttons, like Wheelbarrow.
     const underConstruction = !bk.complete;
     const campBtn = (id, tag, icon, label, titleKey, titleParams, index) => {
-      const done = (techMask & (1 << tag)) !== 0;
+      // BigInt mask read (the techMaskHas helper): the wood
+      // chain's tags (43/44) cross the 32-bit shift boundary
+      // where `(1 << tag)` wraps — the techtree.js lesson.
+      const done = techMaskHas(techMask, tag);
       const rb = rbB[tag];
       const pairs = titleParams.cost;
       return cmdButton({
@@ -13190,6 +13201,17 @@ function renderCommands() {
     if (context === 'lumbercamp') {
       cmdGrid.append(campBtn('research-doublebit', 10, 'i-doublebit', 'Double-Bit Axe',
         'cmd.doublebitTitle', { cost: [[100, 'food'], [50, 'wood']], secs: 25 }, 0));
+      // TEC-07: the wood chain completes — Bow Saw (Castle,
+      // chains from Double-Bit Axe) and Two-Man Saw (Imperial,
+      // from Bow Saw) take W and E, the Mill chain's own
+      // arrangement. No dedicated saw glyphs exist in the art
+      // set, so both reuse the Double-Bit Axe icon class (the
+      // saw line's glyph), like the glyph-only economy buttons
+      // above.
+      cmdGrid.append(campBtn('research-bowsaw', 43, 'i-doublebit', 'Bow Saw',
+        'cmd.bowsawTitle', { cost: [[150, 'food'], [100, 'wood']], secs: 50 }, 1));
+      cmdGrid.append(campBtn('research-twomansaw', 44, 'i-doublebit', 'Two-Man Saw',
+        'cmd.twomansawTitle', { cost: [[300, 'food'], [200, 'wood']], secs: 100 }, 2));
     } else if (context === 'mill') {
       cmdGrid.append(campBtn('research-horsecollar', 13, 'i-horsecollar', 'Horse Collar',
         'cmd.horsecollarTitle', { cost: [[75, 'food'], [75, 'wood']], secs: 20 }, 0));

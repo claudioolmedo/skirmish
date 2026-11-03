@@ -166,7 +166,7 @@ export const PANEL_BUTTONS = {
   monastery: ['train-monk', 'research-sanctity', 'research-fervor', 'research-herbalmedicine'],
   blacksmith: ['research-fletching', 'research-scalemail', 'research-padded',
     'research-forging', 'research-barding'],
-  lumbercamp: ['research-doublebit'],
+  lumbercamp: ['research-doublebit', 'research-bowsaw', 'research-twomansaw'],
   mill: ['research-horsecollar', 'research-heavyplow', 'research-croprotation'],
   miningcamp: ['research-goldmining', 'research-stonemining'],
   // TRD-01..03: the Market's exchange, in render order — the
@@ -303,6 +303,11 @@ export const PANEL_KEYS = {
   // order, as DE's Mill row reads.
   lumbercamp: {
     'research-doublebit': ['KeyQ', 'Q'],
+    // TEC-07: the wood chain completes the camp's top row —
+    // Bow Saw W, Two-Man Saw E, the chain's own order, as the
+    // Mill's farm chain reads (Heavy Plow W, Crop Rotation E).
+    'research-bowsaw': ['KeyW', 'W'],
+    'research-twomansaw': ['KeyE', 'E'],
   },
   mill: {
     'research-horsecollar': ['KeyQ', 'Q'],

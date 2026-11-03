@@ -134,7 +134,7 @@ fn herbal_medicine_row_and_gates() {
     // Sanctity 32 / Fervor 33 — no existing tag moved.
     assert_eq!(TechId::HerbalMedicine.tag(), 34);
     assert_eq!(TechId::from_tag(34), Some(TechId::HerbalMedicine));
-    assert_eq!(TechId::ALL.len(), 43, "P5b's Atonement/Devotion append at 35/36, P5c's Redemption/Heresy at 37/38, P5f's Imperial row at 39–42");
+    assert_eq!(TechId::ALL.len(), 45, "P5b's Atonement/Devotion append at 35/36, P5c's Redemption/Heresy at 37/38, P5f's Imperial row at 39–42, the TEC-07 wood chain at 43/44");
     assert_eq!(
         TechId::HerbalMedicine.host(),
         TechHost::Building(BuildingKind::Monastery)

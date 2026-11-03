@@ -140,6 +140,19 @@
 //!   Both inherit update 169123's proportional top-up from the
 //!   Horse Collar sweep (the three articles state it verbatim),
 //!   against each farm's own stamped full amount.
+//! - The wood chain completes (TEC-07): Bow Saw — Lumber
+//!   Camp, Castle Age, 150 food / 100 wood, 50 s: wood gather
+//!   rate +20% (wiki, Bow Saw; the further upgrade of
+//!   Double-Bit Axe). Two-Man Saw — Lumber Camp, Imperial
+//!   Age, 300 food / 200 wood, 100 s: wood gather rate a
+//!   further +10% (wiki, Two-Man Saw; the further upgrade of
+//!   Bow Saw). Both layer in `patched_gather_rate` as
+//!   sequential percentage patches on Tree — base, then
+//!   Double-Bit Axe ×120/100, then Bow Saw ×120/100, then
+//!   Two-Man Saw ×110/100, each step truncating like
+//!   Double-Bit Axe's own patch (TEC-06) — costs/times
+//!   verified 2026-11-03 against the AoE2 wiki Technology
+//!   table + per-tech articles.
 //! - The Imperial Monastery row (Castle P5f, TEC-10 completion;
 //!   all Monastery, Imperial Age; costs/times verified 2026-11-03
 //!   against the AoE2 wiki Technology table + Faith article,
@@ -334,11 +347,19 @@ pub enum TechId {
     /// +4/+4 CI shift (Castle P5f, MNK-05's Faith row of
     /// TEC-10; chains from Devotion, TEC-07). Tag 42.
     Faith,
+    /// Lumber Camp, Castle: wood gather rate +20% (TEC-07's
+    /// wood chain; chains from Double-Bit Axe, TEC-07).
+    /// Tag 43 — appended after P5f's 39–42.
+    BowSaw,
+    /// Lumber Camp, Imperial: wood gather rate a further +10%
+    /// (TEC-07's wood chain; chains from Bow Saw, TEC-07).
+    /// Tag 44.
+    TwoManSaw,
 }
 
 impl TechId {
     /// All technologies, in tag order.
-    pub const ALL: [TechId; 43] = [
+    pub const ALL: [TechId; 45] = [
         TechId::Loom,
         TechId::FeudalAge,
         TechId::Fletching,
@@ -382,6 +403,8 @@ impl TechId {
         TechId::Illumination,
         TechId::Theocracy,
         TechId::Faith,
+        TechId::BowSaw,
+        TechId::TwoManSaw,
     ];
 
     /// Stable tag: 0 loom, 1 feudal age, 2 fletching, 3 scale mail,
@@ -424,6 +447,10 @@ impl TechId {
     /// is recorded in the P5a handoff.)
     /// 34 herbal medicine (Castle P5e — appended after P5a's
     /// 32/33, so no tag moved.)
+    /// 39 block printing, 40 illumination, 41 theocracy,
+    /// 42 faith (Castle P5f — appended after P5c's 37/38.)
+    /// 43 bow saw, 44 two-man saw (TEC-07 wood chain —
+    /// appended after P5f's 39–42, so no tag moved.)
     pub fn tag(self) -> u8 {
         match self {
             TechId::Loom => 0,
@@ -469,6 +496,8 @@ impl TechId {
             TechId::Illumination => 40,
             TechId::Theocracy => 41,
             TechId::Faith => 42,
+            TechId::BowSaw => 43,
+            TechId::TwoManSaw => 44,
         }
     }
 
@@ -501,7 +530,9 @@ impl TechId {
             | TechId::ScaleBarding => TechHost::Building(BuildingKind::Blacksmith),
             TechId::ManAtArms => TechHost::Building(BuildingKind::Barracks),
             TechId::Bloodlines => TechHost::Building(BuildingKind::Stable),
-            TechId::DoubleBitAxe => TechHost::Building(BuildingKind::LumberCamp),
+            TechId::DoubleBitAxe | TechId::BowSaw | TechId::TwoManSaw => {
+                TechHost::Building(BuildingKind::LumberCamp)
+            }
             TechId::GoldMining | TechId::StoneMining => {
                 TechHost::Building(BuildingKind::MiningCamp)
             }
@@ -548,6 +579,8 @@ impl TechId {
             TechId::Banking
             | TechId::Conscription
             | TechId::CropRotation
+            // TEC-07 wood chain: Two-Man Saw is Imperial research.
+            | TechId::TwoManSaw
             // Castle P5f: the Imperial Monastery row.
             | TechId::BlockPrinting
             | TechId::Illumination
@@ -560,6 +593,8 @@ impl TechId {
             | TechId::Coinage
             | TechId::TownPatrol
             | TechId::HeavyPlow
+            // TEC-07 wood chain: Bow Saw is Castle Age research.
+            | TechId::BowSaw
             // Castle P5a/P5e/P5b: the Monastery set is Castle Age research.
             | TechId::Sanctity
             | TechId::Fervor
@@ -603,6 +638,11 @@ impl TechId {
             // Castle P5f (TEC-07): Faith is the further upgrade
             // of Devotion (wiki, Faith — verified 2026-11-03).
             TechId::Faith => Some(TechId::Devotion),
+            // TEC-07 wood chain: Bow Saw is the further upgrade
+            // of Double-Bit Axe, Two-Man Saw of Bow Saw (wiki,
+            // Bow Saw / Two-Man Saw — verified 2026-11-03).
+            TechId::BowSaw => Some(TechId::DoubleBitAxe),
+            TechId::TwoManSaw => Some(TechId::BowSaw),
             _ => None,
         }
     }
@@ -656,6 +696,8 @@ impl TechId {
             TechId::Illumination => 3900, // 65 s (wiki, Illumination — verified 2026-11-03)
             TechId::Theocracy => 4500, // 75 s (wiki, Theocracy — verified 2026-11-03)
             TechId::Faith => 3600, // 60 s (wiki, Faith — verified 2026-11-03)
+            TechId::BowSaw => 3000, // 50 s (wiki, Bow Saw — verified 2026-11-03)
+            TechId::TwoManSaw => 6000, // 100 s (wiki, Two-Man Saw — verified 2026-11-03)
         }
     }
 
@@ -706,6 +748,8 @@ impl TechId {
             TechId::Illumination => (0, 0, 120, 0), // wiki, Illumination — verified 2026-11-03
             TechId::Theocracy => (0, 0, 200, 0), // wiki, Theocracy — verified 2026-11-03
             TechId::Faith => (550, 0, 750, 0), // wiki, Faith (update 99311) — verified 2026-11-03
+            TechId::BowSaw => (150, 100, 0, 0), // wiki, Bow Saw — verified 2026-11-03
+            TechId::TwoManSaw => (300, 200, 0, 0), // wiki, Two-Man Saw — verified 2026-11-03
         }
     }
 }
@@ -769,14 +813,36 @@ pub fn conscription_scales(kind: BuildingKind, techs: u64) -> bool {
 /// by ×115/100, Stone Mining StoneMine by ×115/100 (wiki pages,
 /// module docs); the multiply truncates the sub-bit remainder,
 /// the same rounding the Wheelbarrow speed patch records.
+/// The wood chain's later links layer on Tree the same way, in
+/// chain order, each step truncating before the next applies
+/// (the sequential multiplication of the reference game's tech
+/// effects — the Hand Cart precedent in `Sim::stats_for`):
+/// Bow Saw ×120/100 after Double-Bit Axe, then Two-Man Saw
+/// ×110/100 after Bow Saw.
 /// Every other (kind, mask) pair returns the base rate — except
 /// the Farm, whose own inherent work rate caps the harvest no
 /// matter who works it (ECO-14: 0.4 food/s, `econ::FARM_WORK_RATE_CAP`):
 /// the farm case clamps whatever the lookups below would give,
 /// so any future rate patch on farms meets the cap here first.
 pub fn patched_gather_rate(kind: NodeKind, techs: u64) -> I16F16 {
+    if kind == NodeKind::Tree {
+        // The wood chain (TEC-07), sequentially: each held link
+        // multiplies the running bits and truncates before the
+        // next link applies — 426 → 511 (Double-Bit Axe) → 613
+        // (Bow Saw) → 674 (Two-Man Saw).
+        let mut bits = kind.gather_rate().to_bits() as i64;
+        if techs & TechId::DoubleBitAxe.bit() != 0 {
+            bits = bits * 120 / 100;
+        }
+        if techs & TechId::BowSaw.bit() != 0 {
+            bits = bits * 120 / 100;
+        }
+        if techs & TechId::TwoManSaw.bit() != 0 {
+            bits = bits * 110 / 100;
+        }
+        return I16F16::from_bits(bits as i32);
+    }
     let pct: i64 = match kind {
-        NodeKind::Tree if techs & TechId::DoubleBitAxe.bit() != 0 => 120,
         NodeKind::GoldMine if techs & TechId::GoldMining.bit() != 0 => 115,
         NodeKind::StoneMine if techs & TechId::StoneMining.bit() != 0 => 115,
         _ => {
@@ -973,7 +1039,10 @@ mod tests {
         assert_eq!(TechId::from_tag(40), Some(TechId::Illumination));
         assert_eq!(TechId::from_tag(41), Some(TechId::Theocracy));
         assert_eq!(TechId::from_tag(42), Some(TechId::Faith));
-        assert_eq!(TechId::from_tag(43), None);
+        // TEC-07 wood chain: Bow Saw / Two-Man Saw append at 43/44.
+        assert_eq!(TechId::from_tag(43), Some(TechId::BowSaw));
+        assert_eq!(TechId::from_tag(44), Some(TechId::TwoManSaw));
+        assert_eq!(TechId::from_tag(45), None);
     }
 
     #[test]
@@ -1119,8 +1188,9 @@ mod tests {
         // Fervor (32/33) and P5e's Herbal Medicine (34) append
         // after it, and P5b's Atonement/Devotion (35/36) after
         // those, and P5c's Redemption/Heresy (37/38) after those,
-        // and P5f's Imperial row (39–42) last, so ALL now holds 43.
-        assert_eq!(TechId::ALL.len(), 43);
+        // and P5f's Imperial row (39–42) after those, and the
+        // TEC-07 wood chain (43/44) last, so ALL now holds 45.
+        assert_eq!(TechId::ALL.len(), 45);
         // ECO-14: the farm gather lookup meets the farm's own
         // 0.4 food/s work-rate cap — the base farm rate sits
         // below it today, so the clamped value is the base rate,
@@ -1174,6 +1244,79 @@ mod tests {
         assert_eq!(
             patched_gather_rate(NodeKind::GoldMine, TechId::StoneMining.bit()),
             NodeKind::GoldMine.gather_rate()
+        );
+    }
+
+    #[test]
+    fn wood_chain_table_matches_the_wiki() {
+        // TEC-07 wood chain (values verified 2026-11-03 against
+        // the AoE2 wiki Technology table + per-tech articles).
+        // Bow Saw: Lumber Camp, Castle Age, 150 F / 100 W, 50 s,
+        // the further upgrade of Double-Bit Axe.
+        assert_eq!(TechId::BowSaw.cost(), (150, 100, 0, 0));
+        assert_eq!(TechId::BowSaw.ticks(), 50 * 60);
+        assert_eq!(
+            TechId::BowSaw.host(),
+            TechHost::Building(BuildingKind::LumberCamp)
+        );
+        assert_eq!(TechId::BowSaw.age_required(), Age::Castle);
+        assert_eq!(TechId::BowSaw.requires_tech(), Some(TechId::DoubleBitAxe));
+        assert_eq!(TechId::BowSaw.tag(), 43);
+        // Two-Man Saw: Lumber Camp, Imperial Age, 300 F / 200 W,
+        // 100 s, the further upgrade of Bow Saw.
+        assert_eq!(TechId::TwoManSaw.cost(), (300, 200, 0, 0));
+        assert_eq!(TechId::TwoManSaw.ticks(), 100 * 60);
+        assert_eq!(
+            TechId::TwoManSaw.host(),
+            TechHost::Building(BuildingKind::LumberCamp)
+        );
+        assert_eq!(TechId::TwoManSaw.age_required(), Age::Imperial);
+        assert_eq!(TechId::TwoManSaw.requires_tech(), Some(TechId::BowSaw));
+        assert_eq!(TechId::TwoManSaw.tag(), 44);
+        // The new tags append; no earlier tag moved.
+        assert_eq!(TechId::from_tag(43), Some(TechId::BowSaw));
+        assert_eq!(TechId::from_tag(44), Some(TechId::TwoManSaw));
+        assert_eq!(TechId::from_tag(45), None);
+        assert_eq!(TechId::ALL.len(), 45);
+    }
+
+    #[test]
+    fn wood_chain_gather_rates_stack_sequentially() {
+        // The sequential formula, each step truncating:
+        // base 426 bits → ×120/100 = 511 (Double-Bit Axe)
+        // → ×120/100 = 613 (Bow Saw) → ×110/100 = 674
+        // (Two-Man Saw).
+        let dba = TechId::DoubleBitAxe.bit();
+        let bow = TechId::BowSaw.bit();
+        let tms = TechId::TwoManSaw.bit();
+        assert_eq!(patched_gather_rate(NodeKind::Tree, 0).to_bits(), 426);
+        assert_eq!(patched_gather_rate(NodeKind::Tree, dba).to_bits(), 511);
+        assert_eq!(patched_gather_rate(NodeKind::Tree, dba | bow).to_bits(), 613);
+        assert_eq!(
+            patched_gather_rate(NodeKind::Tree, dba | bow | tms).to_bits(),
+            674
+        );
+        // The wood chain touches nothing but trees: gold and
+        // stone keep their own patches (and base rates) under
+        // the full wood mask.
+        let wood = dba | bow | tms;
+        assert_eq!(
+            patched_gather_rate(NodeKind::GoldMine, wood),
+            NodeKind::GoldMine.gather_rate()
+        );
+        assert_eq!(
+            patched_gather_rate(NodeKind::StoneMine, wood),
+            NodeKind::StoneMine.gather_rate()
+        );
+        assert_eq!(
+            patched_gather_rate(NodeKind::GoldMine, wood | TechId::GoldMining.bit())
+                .to_bits(),
+            477
+        );
+        assert_eq!(
+            patched_gather_rate(NodeKind::StoneMine, wood | TechId::StoneMining.bit())
+                .to_bits(),
+            451
         );
     }
 

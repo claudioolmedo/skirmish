@@ -123,8 +123,8 @@ fn imperial_monastery_rows() {
     assert_eq!(TechId::from_tag(40), Some(TechId::Illumination));
     assert_eq!(TechId::from_tag(41), Some(TechId::Theocracy));
     assert_eq!(TechId::from_tag(42), Some(TechId::Faith));
-    assert_eq!(TechId::from_tag(43), None);
-    assert_eq!(TechId::ALL.len(), 43);
+    assert_eq!(TechId::from_tag(43), Some(TechId::BowSaw));
+    assert_eq!(TechId::ALL.len(), 45, "the TEC-07 wood chain appends at 43/44");
     // All four: Monastery, Imperial Age.
     for t in [
         TechId::BlockPrinting,
