@@ -387,6 +387,16 @@ fn retrieve_stops_the_trickle_and_the_store_is_uncapped() {
     let tc = tc_cell(&sim);
     spawn(&mut sim, 902, EntityKind::Relic, OWNER_GAIA, (tc.0 + 20, tc.1 + 4));
     spawn(&mut sim, 903, EntityKind::Relic, OWNER_GAIA, (tc.0 + 21, tc.1 + 4));
+    // The fixture wired relic 901 as the monk's CARRY; hand it
+    // into the store properly first (clear the carry pair, as
+    // the save test does) — the monk must be empty-handed for
+    // the retrieve below to be a legal order at all.
+    {
+        let m = sim.entities.iter_mut().find(|e| e.id == monk).unwrap();
+        m.carrying_relic = None;
+        let r = sim.entities.iter_mut().find(|e| e.id == relic).unwrap();
+        r.relic_carried_by = None;
+    }
     give_garrison(&mut sim, monastery, relic);
     give_garrison(&mut sim, monastery, 902);
     give_garrison(&mut sim, monastery, 903);
@@ -623,21 +633,28 @@ fn ai_monk_fetches_a_relic_and_deposits_it() {
             })
     });
     assert!(monk, "the Castle-Age AI never fielded a Monk with a Monastery");
-    // Lay one of the map's real relics at the AI monk's feet —
-    // inside his own sight, so the AI legitimately knows it
-    // (plan_relic_fetch reads only what the AI can see).
-    let monk_id = sim
-        .entities()
-        .iter()
-        .find(|e| e.kind == EntityKind::Monk && e.owner == OWNER_OPPONENT && !e.dead)
-        .unwrap()
-        .id;
-    let (mx, my) = (ent(&sim, monk_id).pos_x, ent(&sim, monk_id).pos_y);
+    // Lay one of the map's real relics beside the AI
+    // Monastery — in plain sight of every monk the moment he
+    // exits training, so the AI legitimately knows it
+    // (plan_relic_fetch reads only what the AI can see; a relic
+    // laid beside a monk mid-rally-walk would fall out of his
+    // fog as he walks away, and the AI would rightly never
+    // fetch what it cannot see).
+    let (bx, by) = {
+        let b = sim
+            .buildings()
+            .iter()
+            .find(|b| {
+                b.owner == OWNER_OPPONENT && b.kind == BuildingKind::Monastery && b.complete
+            })
+            .unwrap();
+        (b.pos_x, b.pos_y)
+    };
     let relic_id = sim.relic_states()[0].0;
     {
         let r = sim.entities.iter_mut().find(|e| e.id == relic_id).unwrap();
-        r.pos_x = mx + I16F16::from_num(4);
-        r.pos_y = my;
+        r.pos_x = bx + I16F16::from_num(8);
+        r.pos_y = by;
     }
     let home = run_until(&mut sim, 240_000, |s| {
         matches!(s.relic_state(relic_id), Some(RelicState::GarrisonedIn(b))

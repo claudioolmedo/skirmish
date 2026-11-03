@@ -48,8 +48,10 @@ fn standard_start_has_scout_and_gaia_herds() {
     let sim = Sim::new(7);
     // M7 package: TC + 3 villagers + Scout + 8 sheep + 2 boars +
     // 6 deer (near herd 3 + far herd 3, OPENING-SPEC §2.2) — plus
-    // the AI-08 wolf pack (3), which brings the start to 24.
-    assert_eq!(sim.entities().len(), 24);
+    // the AI-08 wolf pack (3), which brings the start to 24 —
+    // plus the five relics MAP-13 (Castle P5d) lays on every
+    // standard map, which brings it to 29.
+    assert_eq!(sim.entities().len(), 29);
     let scout = ent(&sim, 4);
     assert_eq!(scout.kind, EntityKind::ScoutCavalry);
     assert_eq!(scout.owner, OWNER_PLAYER);
@@ -221,7 +223,7 @@ fn villager_dies_to_boar_population_drops_tombstone_stays() {
     assert_eq!(sim.population(), 3, "death must free the pop slot the same tick");
     // Tombstone: the entity is still in the list (ids stay stable),
     // out of play — and the boar, its victim gone, walks home.
-    assert_eq!(sim.entities().len(), 24); // M7 package size + AI-08 pack
+    assert_eq!(sim.entities().len(), 29); // M7 package + AI-08 pack + MAP-13 relics
     let recovered = run_until(&mut sim, 8000, |s| {
         let b = ent(s, 13);
         b.aggro_target.is_none() && b.hp == I16F16::from_num(75)

@@ -1315,12 +1315,6 @@ impl Sim {
     fn relic_pickup_step(&mut self, idx: usize, relic: u32) -> bool {
         let monk_id = self.entities[idx].id;
         let monk_owner = self.entities[idx].owner;
-        let stale = self
-            .current_order_target(&self.entities[idx])
-            .is_some_and(|(x, y)| {
-                x.to_bits() != self.entities[idx].pos_x.to_bits()
-                    || y.to_bits() != self.entities[idx].pos_y.to_bits()
-            });
         let Some(ri) = self.entity_index(relic) else {
             self.entities[idx].relic_pickup_target = None;
             return false;
@@ -1351,6 +1345,18 @@ impl Sim {
                     e.order = None;
                     return true;
                 }
+                // Chase in the heal/conversion pattern: the
+                // walk is (re)installed only when there is no
+                // order yet, or the standing order is not headed
+                // at the relic — a walking monk does not re-path
+                // every tick.
+                let stale = match &self.entities[idx].order {
+                    None => true,
+                    Some(o) => {
+                        steer::vec_len(o.target_x - rx, o.target_y - ry)
+                            > I16F16::from_num(2)
+                    }
+                };
                 if stale {
                     self.set_move_order(idx, rx, ry);
                 }
@@ -1389,8 +1395,15 @@ impl Sim {
                     e.order = None;
                     return true;
                 }
+                let (qx, qy) = self.relic_stand_point(idx, bi);
+                let stale = match &self.entities[idx].order {
+                    None => true,
+                    Some(o) => {
+                        steer::vec_len(o.target_x - qx, o.target_y - qy)
+                            > I16F16::from_num(2)
+                    }
+                };
                 if stale {
-                    let (qx, qy) = self.relic_stand_point(idx, bi);
                     self.set_move_order(idx, qx, qy);
                 }
                 true
@@ -1423,12 +1436,6 @@ impl Sim {
             self.entities[idx].relic_deposit_target = None;
             return false;
         }
-        let stale = self
-            .current_order_target(&self.entities[idx])
-            .is_some_and(|(x, y)| {
-                x.to_bits() != self.entities[idx].pos_x.to_bits()
-                    || y.to_bits() != self.entities[idx].pos_y.to_bits()
-            });
         let (mx, my) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
         if self.distance_to_footprint(mx, my, bx, by, bkind) <= MELEE_REACH {
             self.buildings[bi].relics.push(relic);
@@ -1446,8 +1453,15 @@ impl Sim {
             let _ = monk_id;
             return true;
         }
+        let (qx, qy) = self.relic_stand_point(idx, bi);
+        let stale = match &self.entities[idx].order {
+            None => true,
+            Some(o) => {
+                steer::vec_len(o.target_x - qx, o.target_y - qy)
+                    > I16F16::from_num(2)
+            }
+        };
         if stale {
-            let (qx, qy) = self.relic_stand_point(idx, bi);
             self.set_move_order(idx, qx, qy);
         }
         true
