@@ -258,6 +258,12 @@ const reportCloseX = document.getElementById('report-close-x');
 const reportThanks = document.getElementById('report-thanks');
 const reportError = document.getElementById('report-error');
 const modeInputs = document.querySelectorAll('input[name="match-mode"]');
+// Package C: the pause menu's victory controls (radios + the two
+// VIC-05 number fields). They feed chosenVictory live, the way
+// the speed buttons feed chosenSpeed; Restart applies the pick.
+const victoryInputs = document.querySelectorAll('input[name="victory-mode"]');
+const vicTimeInput = document.getElementById('vic-time');
+const vicScoreInput = document.getElementById('vic-score');
 // End-of-match feedback block (2026-10-19): refs + state. The
 // send goes to the relay's /feedback; once it succeeds the form
 // never shows again (localStorage skirmish2.feedbackDone) — the
@@ -298,6 +304,7 @@ const KIND_TC = 1;
 const KIND_SHEEP = 5;
 const KIND_RAM = 17;
 const KIND_RELIC = 21; // Castle P5d: the relic (MNK-09)
+const KIND_KING = 22; // Package C: the Regicide king (VIC-06) — builder's 21 was the Relic on main; renumbered 21 -> 22 at landing
 // i18n: the display-name tables below are rebuilt from
 // play/i18n.js on every locale switch (refreshNames) — the
 // semantic ids index the string table (unit.<id>, building.<id>).
@@ -308,14 +315,14 @@ const KIND_RELIC = 21; // Castle P5d: the relic (MNK-09)
 // before then.
 const KIND_I18N = ['villager', 'townCenter', 'scout', 'militia', 'archer',
   'sheep', 'boar', 'deer', 'manAtArms', 'spearman', 'skirmisher', 'wolf',
-  'knight', 'lightCavalry', 'cavalryArcher', 'petard', 'tradeCart', 'batteringRam', 'mangonel', 'scorpion', 'monk', 'relic'];
+  'knight', 'lightCavalry', 'cavalryArcher', 'petard', 'tradeCart', 'batteringRam', 'mangonel', 'scorpion', 'monk', 'relic', 'king'];
 let KIND_NAME = {
   0: 'Villager', 1: 'Town Center', 2: 'Scout Cavalry', 3: 'Militia',
   4: 'Archer', 5: 'Sheep', 6: 'Boar', 7: 'Deer', 8: 'Man-at-Arms',
   9: 'Spearman', 10: 'Skirmisher', 11: 'Wolf',
   12: 'Knight', 13: 'Light Cavalry', 14: 'Cavalry Archer', 15: 'Petard',
   16: 'Trade Cart', 17: 'Battering Ram', 18: 'Mangonel', 19: 'Scorpion',
-  16: 'Trade Cart', 17: 'Battering Ram', 20: 'Monk', 21: 'Relic',
+  20: 'Monk', 21: 'Relic', 22: 'King',
 };
 // Selection-panel portraits per unit kind (SVG symbol ids in
 // play/index.html).
@@ -324,7 +331,7 @@ const KIND_ICON = {
   8: 'i-militia', 9: 'i-spearman', 10: 'i-skirmisher',
   12: 'i-villager', 13: 'i-villager', 14: 'i-archer', 15: 'i-petard',
   16: 'i-trade-cart', 17: 'i-ram', 18: 'i-mangonel', 19: 'i-scorpion',
-  16: 'i-trade-cart', 17: 'i-ram', 20: 'i-monk', 21: 'i-gold',
+  20: 'i-monk', 21: 'i-gold', 22: 'i-king',
 };
 
 // Original PNG icon set (2026-10-19, AI generations via Base44 on
@@ -609,6 +616,94 @@ let builtMode = null; // the mode the current sim instance was built with
 let matchSpeed = GAME_SPEED;
 let chosenSpeed = GAME_SPEED;
 let matchEnded = false; // the victory/defeat overlay is up; the sim holds
+
+// --- Package C: victory settings (VIC-05/06/07) ---------------------------
+// The victory conditions are part of the match definition from
+// tick 0, exactly like the mode: they enter through the sim
+// constructor (WasmSim.new_match_victory), never change mid-match,
+// and — in netplay — ride the 'start' handshake like the speed
+// does, so both peers build the identical sim (the construction
+// hash check would refuse anything else). Plain Conquest is all
+// fields off; a default-settings build is WasmSim.new_match
+// itself, byte-identical to the pre-Package-C game.
+//   timeLimitTicks: the match clock in 60 Hz ticks (0 = none)
+//   scoreTarget:    the VIC-04 total that wins on reaching it (0 = none)
+//   regicide:       each player opens with a King; losing it loses
+//   suddenDeath:    losing the last Town Center loses
+const VICTORY_DEFAULT = { timeLimitTicks: 0, scoreTarget: 0, regicide: false, suddenDeath: false };
+let chosenVictory = { ...VICTORY_DEFAULT }; // the pause menu's pick (local matches, on Restart)
+let matchVictory = { ...VICTORY_DEFAULT }; // the settings the current sim was built with
+
+/// Foreign or stale input → a clean settings object. Ticks and
+/// target are clamped to the WASM ABI's u32 / i32 widths.
+function normalizeVictory(v) {
+  if (!v || typeof v !== 'object') return { ...VICTORY_DEFAULT };
+  const ticks = Number(v.timeLimitTicks);
+  const target = Number(v.scoreTarget);
+  return {
+    timeLimitTicks: Number.isFinite(ticks) ? Math.min(Math.max(Math.floor(ticks), 0), 0xffffffff) : 0,
+    scoreTarget: Number.isFinite(target) ? Math.min(Math.max(Math.floor(target), 0), 0x7fffffff) : 0,
+    regicide: v.regicide === true,
+    suddenDeath: v.suddenDeath === true,
+  };
+}
+function victoryIsDefault(v) {
+  const n = normalizeVictory(v);
+  return n.timeLimitTicks === 0 && n.scoreTarget === 0 && !n.regicide && !n.suddenDeath;
+}
+/// The WASM ABI flags packing (bit 0 Regicide, bit 1 Sudden Death).
+function victoryFlags(v) {
+  return (v.regicide ? 1 : 0) | (v.suddenDeath ? 2 : 0);
+}
+/// The one construction path for every match sim: default
+/// settings build exactly the pre-Package-C sim; anything else
+/// goes through the victory export. (A stale wasm build without
+/// the export degrades to Conquest locally — and netplay's
+/// construction-hash check refuses the mismatch, as designed.)
+function buildMatchSim(seed, modeTag, victory) {
+  const v = normalizeVictory(victory);
+  if (victoryIsDefault(v) || typeof WasmSim.new_match_victory !== 'function') {
+    return WasmSim.new_match(seed, modeTag);
+  }
+  return WasmSim.new_match_victory(seed, modeTag, v.timeLimitTicks, v.scoreTarget, victoryFlags(v));
+}
+/// The replay-meta fragment: Conquest recordings stay exactly
+/// the pre-Package-C shape; anything else carries its settings.
+function victoryMeta(v) {
+  return victoryIsDefault(v) ? {} : { victory: { ...normalizeVictory(v) } };
+}
+/// The prematch pick as a settings object: a condition kind
+/// ('conquest' | 'regicide' | 'sudden') plus the VIC-05 numbers
+/// as typed (minutes → 60 Hz ticks).
+function victoryFromPick(kind, minutes, score) {
+  const mins = Number(minutes);
+  const pts = Number(score);
+  return normalizeVictory({
+    timeLimitTicks: Number.isFinite(mins) && mins > 0 ? Math.floor(mins) * 3600 : 0,
+    scoreTarget: Number.isFinite(pts) && pts > 0 ? Math.floor(pts) : 0,
+    regicide: kind === 'regicide',
+    suddenDeath: kind === 'sudden',
+  });
+}
+/// The inverse pick, for reflecting a settings object into the
+/// prematch controls.
+function victoryPickOf(v) {
+  const n = normalizeVictory(v);
+  return {
+    kind: n.regicide ? 'regicide' : n.suddenDeath ? 'sudden' : 'conquest',
+    minutes: n.timeLimitTicks ? Math.round(n.timeLimitTicks / 3600) : 0,
+    score: n.scoreTarget || 0,
+  };
+}
+/// The short localized label for summaries (the room's config
+/// line): the condition kind plus any clock / score suffixes.
+function victoryLabel(v) {
+  const n = normalizeVictory(v);
+  let label = t(n.regicide ? 'victory.regicide' : n.suddenDeath ? 'victory.sudden' : 'victory.conquest');
+  if (n.timeLimitTicks) label += ' · ' + t('victory.minutes', { n: Math.round(n.timeLimitTicks / 3600) });
+  if (n.scoreTarget) label += ' · ' + t('victory.points', { n: n.scoreTarget });
+  return label;
+}
 
 // --- M8: lockstep multiplayer -------------------------------------------
 // Send-a-link 1v1 over the dumb relay (play/netplay.js holds the
@@ -3898,15 +3993,20 @@ function resetSim(mode = matchMode) {
   if (typeof netUi !== 'undefined' && netUi && netUi.playbackBar) {
     netUi.playbackBar.hidden = true;
   }
+  // Package C: a local match is built under the pause menu's
+  // chosen victory settings (inert in Sandbox, like the rest of
+  // the match machinery).
+  matchVictory = normalizeVictory(chosenVictory);
   sim = mode === 'sandbox'
     ? new WasmSim(seed)
-    : WasmSim.new_match(seed, MODE_TAG[mode]);
+    : buildMatchSim(seed, MODE_TAG[mode], matchVictory);
   // M8: every local match records its command stream — the end
   // overlay (and the pause menu) can download it as a replay.
   // SIM-11: a fresh local match takes the pause menu's chosen speed.
   matchSpeed = chosenSpeed;
   localRecorder = createRecorder({
     seed, modeTag: MODE_TAG[mode], seats: [0], view: 0, speed: matchSpeed,
+    ...victoryMeta(matchVictory),
   });
   seenBuildings.clear(); // M7: last-known enemy buildings are per-match
   resetScoreHistory(); // INF-11: timeline + revealed-map flag are per-match
@@ -4464,10 +4564,15 @@ async function hostStartMatch() {
   }
   if (net !== mine || net.phase !== 'starting') return; // cancelled mid-load
   net.seed = (Math.random() * 0x7fffffff) >>> 0;
-  net.pendingSim = WasmSim.new_match(net.seed, MODE_TAG.online);
+  // Package C: the host's victory settings build the host's sim
+  // and ride the handshake, like the speed — the guest builds
+  // from the same settings and the hash0 check verifies it.
+  matchVictory = normalizeVictory(net.victory);
+  net.pendingSim = buildMatchSim(net.seed, MODE_TAG.online, matchVictory);
   net.client.send({
     type: 'start', seed: net.seed, hash0: net.pendingSim.state_hash(),
     speed: isGameSpeed(net.speed) ? net.speed : GAME_SPEED, // SIM-11: the host's setting paces both clients
+    victory: { ...matchVictory }, // Package C: the host's victory settings
   });
   // The host's own build IS its verification — it is loaded.
   markSelfLoaded();
@@ -4491,7 +4596,12 @@ async function guestHandleStart(msg) {
     return;
   }
   if (net !== mine || net.phase !== 'starting') return; // cancelled mid-load
-  const candidate = WasmSim.new_match(msg.seed, MODE_TAG.online);
+  // Package C: build under the host's victory settings (an
+  // older host sends none — plain Conquest stands, and the hash
+  // check below still verifies the construction either way).
+  net.victory = normalizeVictory(msg.victory);
+  matchVictory = net.victory;
+  const candidate = buildMatchSim(msg.seed, MODE_TAG.online, matchVictory);
   if (candidate.state_hash() !== msg.hash0) {
     // Same seed, different construction hash: the two builds
     // disagree — lockstep would desync on turn 0. That is a
@@ -4537,7 +4647,8 @@ async function hostStartAiMatch() {
   }
   if (net !== mine || net.phase !== 'starting') return; // cancelled mid-load
   net.seed = (Math.random() * 0x7fffffff) >>> 0;
-  net.pendingSim = WasmSim.new_match(net.seed, MODE_TAG[mode]);
+  matchVictory = normalizeVictory(net.victory);
+  net.pendingSim = buildMatchSim(net.seed, MODE_TAG[mode], matchVictory);
   // The host's own build is its verification — and the AI seat
   // counts as loaded the moment that build verifies: there is
   // no second load to wait for.
@@ -4561,7 +4672,7 @@ function beginAiMatch(mode) {
   // a peer dropping out of the loading phase.
   net.phase = 'ended';
   teardownNet(); // clears the load timer, closes the room socket
-  aiRoom = { mode, seed, speed };
+  aiRoom = { mode, seed, speed, victory: { ...matchVictory } };
   adoptAiMatch(candidate, mode, seed);
 }
 
@@ -4578,6 +4689,7 @@ function adoptAiMatch(candidate, mode, seed) {
   matchSpeed = aiRoom && isGameSpeed(aiRoom.speed) ? aiRoom.speed : GAME_SPEED;
   localRecorder = createRecorder({
     seed, modeTag: MODE_TAG[mode], seats: [0], view: 0, speed: matchSpeed,
+    ...victoryMeta(matchVictory),
   });
   setInMatch(true); // the match begins: the game appears
   setPaused(false);
@@ -4585,12 +4697,14 @@ function adoptAiMatch(candidate, mode, seed) {
 }
 
 /// Pause-menu / end-overlay Restart for an AI-room match: the
-/// same configuration again — same seed, same AI difficulty —
-/// exactly what Restart means for a local match.
+/// same configuration again — same seed, same AI difficulty,
+/// same victory settings — exactly what Restart means for a
+/// local match.
 function restartAiMatch() {
   if (!aiRoom) return;
   const { mode, seed } = aiRoom;
-  adoptAiMatch(WasmSim.new_match(seed, MODE_TAG[mode]), mode, seed);
+  matchVictory = normalizeVictory(aiRoom.victory);
+  adoptAiMatch(buildMatchSim(seed, MODE_TAG[mode], matchVictory), mode, seed);
 }
 
 function beginOnlineMatch() {
@@ -4606,6 +4720,7 @@ function beginOnlineMatch() {
     seed: net.seed, modeTag: MODE_TAG.online, region: net.region,
     seats: [0, 2], view: owner,
     speed: isGameSpeed(net.speed) ? net.speed : GAME_SPEED, // SIM-11
+    ...victoryMeta(matchVictory), // Package C
   });
   net.session = makeNetSession();
   net.phase = 'playing';
@@ -4646,7 +4761,7 @@ function roomConfigStrings() {
   return {
     slot: slotStrings(),
     you: t('room.you'),
-    format: (guest, speed) => t('room.config', { guest, speed }),
+    format: (guest, speed, victory) => t('room.config', { guest, speed, victory }),
   };
 }
 function lobbyStrings() {
@@ -4701,6 +4816,7 @@ function renderRoom() {
     netUi.roomConfigLine.textContent = roomConfigText({
       guestSlot: slot, selfIsGuest: !isHost,
       speed: isGameSpeed(net.speed) ? net.speed : GAME_SPEED, // SIM-11
+      victory: victoryLabel(net.victory), // Package C
     }, roomConfigStrings());
   }
   // M12: the guest-seat selector is the host's alone, and it
@@ -4813,7 +4929,13 @@ async function rejoinFromResync(msg) {
   const owner = slot === 0 ? 0 : 2;
   lobbyStatus(t('status.rebuilding'));
   showOverlay(netUi.onlineOverlay, true);
-  const fresh = WasmSim.new_match(msg.seed, MODE_TAG.online);
+  // Package C: the rebuild must run under the match's victory
+  // settings (the resync carries them) or every Regicide / Sudden
+  // Death / timed match would silently rebuild as Conquest and
+  // desync from the frontier.
+  net.victory = normalizeVictory(msg.victory);
+  matchVictory = net.victory;
+  const fresh = buildMatchSim(msg.seed, MODE_TAG.online, matchVictory);
   adoptSim(fresh, owner);
   const byTick = new Map();
   for (const e of msg.events || []) byTick.set(e.tick, e);
@@ -4831,6 +4953,7 @@ async function rejoinFromResync(msg) {
     seed: net.seed, modeTag: MODE_TAG.online, region: net.region,
     seats: [0, 2], view: owner,
     speed: isGameSpeed(net.speed) ? net.speed : GAME_SPEED,
+    ...victoryMeta(matchVictory), // Package C
   });
   net.recorder.seed(msg.events || []);
   net.session = makeNetSession();
@@ -4849,6 +4972,7 @@ function sendResync() {
     delay: net.session.state().delay,
     yourSlot: net.role === 'host' ? 1 : 0,
     events: snapshot.events,
+    victory: { ...matchVictory }, // Package C: the match's settings, for the rebuild
   });
 }
 
@@ -5099,6 +5223,12 @@ function onNetMessage(msg) {
       // on arrival; it is foreign input.
       const peerName = cleanDisplayName(msg.name);
       if (peerName) net.peerName = peerName;
+      // Package C: adopt the host's advertised victory settings
+      // for the room summary (display only — 'start' carries the
+      // binding copy the sim is built from).
+      if (net.role === 'guest' && msg.victory) {
+        net.victory = normalizeVictory(msg.victory);
+      }
       // M12: a sealed guest seat (AI / Closed) admits no human —
       // a late hello on a stale link is told the room is full,
       // exactly like a third opener of a two-human room.
@@ -5109,7 +5239,10 @@ function onNetMessage(msg) {
       }
       if (!net.helloReplied) {
         net.helloReplied = true;
-        net.client.send({ type: 'hello', v: 1, role: net.role, name: myName() });
+        net.client.send({
+          type: 'hello', v: 1, role: net.role, name: myName(),
+          ...(net.role === 'host' ? { victory: { ...normalizeVictory(net.victory) } } : {}),
+        });
       }
       // M10 private rooms: a guest at the door of a private room
       // does not count as present until the password check passes
@@ -5380,7 +5513,14 @@ function connectToRoom() {
     + `/room/${encodeURIComponent(net.room)}?region=${encodeURIComponent(net.region)}${privFlag}${hostFlag}${listedFlag}`;
   net.client = createRelayClient({
     onOpen: () => {
-      net.client.send({ type: 'hello', v: 1, role: net.role, name: myName() });
+      // Package C: the host's hello also advertises its victory
+      // settings, so the guest's room screen can show the real
+      // conditions before readying (the binding copy still rides
+      // the 'start' handshake). Older clients ignore the field.
+      net.client.send({
+        type: 'hello', v: 1, role: net.role, name: myName(),
+        ...(net.role === 'host' ? { victory: { ...normalizeVictory(net.victory) } } : {}),
+      });
       if (net.role === 'host') {
         // M12: a sealed seat changes what "created" means — the
         // room is not in the public list and needs no guest.
@@ -5440,6 +5580,7 @@ function openLobby(join) {
     selectedRegion: null,
     guestSlot: 'open', // M12: the second seat — Open / AI / Closed
     speed: GAME_SPEED, // SIM-11: the match speed (host's Create Lobby pick)
+    victory: { ...VICTORY_DEFAULT }, // Package C: the victory settings (host's Create Lobby pick; the guest adopts the host's)
     // M10 room model. The password lives ONLY in the host
     // client's memory (net.password), set at create time; it is
     // never persisted and never sent anywhere — guests send
@@ -5565,6 +5706,12 @@ function createGame() {
   // SIM-11: the host's game-speed pick from the same settings box.
   const speedPick = netUi.createSpeed ? Number(netUi.createSpeed.value) : GAME_SPEED;
   net.speed = isGameSpeed(speedPick) ? speedPick : GAME_SPEED;
+  // Package C: the host's victory pick from the same settings
+  // box — it rides the 'start' handshake to the guest.
+  net.victory = victoryFromPick(
+    netUi.createVictory ? netUi.createVictory.value : 'conquest',
+    netUi.createVictoryTime ? netUi.createVictoryTime.value : 0,
+    netUi.createVictoryScore ? netUi.createVictoryScore.value : 0);
   net.region = net.selectedRegion || net.region || regionList[0].id;
   net.room = makeRoomId();
   // The room lives in memory from here — the address bar stays
@@ -5810,9 +5957,13 @@ async function startPlayback(rec) {
   }
   const owners = Array.isArray(rec.seats) && rec.seats.length >= 2
     ? rec.seats : [0, 2];
+  // Package C: a recording made under victory settings carries
+  // them in its meta and rebuilds under them; older recordings
+  // have none and replay as the Conquest they were.
+  matchVictory = normalizeVictory(rec.victory);
   sim = rec.modeTag === 0
     ? new WasmSim(rec.seed)
-    : WasmSim.new_match(rec.seed, rec.modeTag);
+    : buildMatchSim(rec.seed, rec.modeTag, matchVictory);
   playback = {
     rec, events, idx: 0, owners,
     view: typeof rec.view === 'number' ? rec.view : owners[0],
@@ -6109,6 +6260,13 @@ function applyStaticStrings() {
   setText('mode-easy-txt', 'mode.aiEasy');
   setText('mode-normal-txt', 'mode.aiNormal');
   setText('mode-note', 'pause.modeNote');
+  setAttr('victory-row', 'aria-label', 'pause.victory');
+  setText('vic-conquest-txt', 'victory.conquest');
+  setText('vic-regicide-txt', 'victory.regicide');
+  setText('vic-sudden-txt', 'victory.sudden');
+  setText('vic-time-txt', 'victory.time');
+  setText('vic-score-txt', 'victory.score');
+  setText('victory-note', 'pause.victoryNote');
   setAttr('quality-row', 'aria-label', 'pause.visualQuality');
   setText('quality-title', 'pause.quality');
   setText('q-auto', 'quality.auto');
@@ -6239,7 +6397,11 @@ function applyStaticStrings() {
   setText('set-map-name', 'set.map');
   setText('set-map-value', 'map.arabia');
   setText('set-victory-name', 'set.victory');
-  setText('set-victory-value', 'set.victoryValue');
+  setOptions('create-victory', {
+    conquest: 'victory.conquest', regicide: 'victory.regicide', sudden: 'victory.sudden',
+  });
+  setText('set-victory-time-name', 'victory.time');
+  setText('set-victory-score-name', 'victory.score');
   setText('set-players-name', 'set.players');
   setText('set-guest-name', 'set.guestSlot');
   const slotOptions = {
@@ -6337,6 +6499,26 @@ async function main() {
     const chosen = document.querySelector('input[name="match-mode"]:checked');
     return chosen ? chosen.value : matchMode;
   }
+  // Package C: the victory controls beside the mode radios. The
+  // pick updates chosenVictory on every change (the speed-row
+  // pattern); Restart's resetSim builds under it.
+  function syncVictoryInputs() {
+    const pick = victoryPickOf(chosenVictory);
+    for (const inp of victoryInputs) inp.checked = inp.value === pick.kind;
+    if (vicTimeInput) vicTimeInput.value = String(pick.minutes);
+    if (vicScoreInput) vicScoreInput.value = String(pick.score);
+  }
+  function readVictoryInputs() {
+    const chosen = document.querySelector('input[name="victory-mode"]:checked');
+    chosenVictory = victoryFromPick(
+      chosen ? chosen.value : 'conquest',
+      vicTimeInput ? vicTimeInput.value : 0,
+      vicScoreInput ? vicScoreInput.value : 0);
+  }
+  for (const inp of victoryInputs) inp.addEventListener('change', readVictoryInputs);
+  if (vicTimeInput) vicTimeInput.addEventListener('change', readVictoryInputs);
+  if (vicScoreInput) vicScoreInput.addEventListener('change', readVictoryInputs);
+  syncVictoryInputs();
   playing = false; // no match exists until one is entered
   paused = false;
   // The Menu button is the ONLY way to show the pause menu
@@ -6573,6 +6755,9 @@ async function main() {
     pwSetRow: document.getElementById('pw-set-row'),
     createGuestSlot: document.getElementById('create-guest-slot'),
     createSpeed: document.getElementById('create-speed'),
+    createVictory: document.getElementById('create-victory'),
+    createVictoryTime: document.getElementById('create-victory-time'),
+    createVictoryScore: document.getElementById('create-victory-score'),
     roomSection: document.getElementById('room-section'),
     slotHost: document.getElementById('slot-host'),
     slotGuest: document.getElementById('slot-guest'),
@@ -10624,6 +10809,94 @@ function drawMonk(i, wx, wy) {
   }
 }
 
+// The King (Package C, VIC-06): the Regicide figure — an
+// original vector king in the owner's cloth with a gold crown
+// and sceptre, painted ONCE into a cached offscreen sprite per
+// cloth colour and blitted with drawImage, following the monk
+// pattern, so the INF-12 occlusion pass can see him (a King
+// standing behind his Castle or Town Center still gets the
+// owner-colour silhouette). Shapes and colours are the game's
+// own; the sim is untouched.
+const KING_SPRITE_U = 16; // cached-sprite pixels per world unit
+// Sprite content bounds in unit space (feet at the origin):
+// x [-0.66, 0.95] (robe edge → sceptre orb), y [-2.85, 0]
+// (crown top → feet); the box below adds a small margin.
+const KING_BOX = { x0: -0.9, y0: -3.1, w: 2.1, h: 3.25 };
+const kingSpriteCache = new Map(); // cloth colour -> canvas | null
+function paintKingFigure(g, sx, sy, u, cloth) {
+  // The sceptre, planted at his right side, gold orb on top.
+  g.strokeStyle = '#4a3826';
+  g.lineWidth = Math.max(1, 0.13 * u);
+  g.beginPath();
+  g.moveTo(sx + 0.74 * u, sy - 0.1 * u);
+  g.lineTo(sx + 0.74 * u, sy - 2.2 * u);
+  g.stroke();
+  g.fillStyle = '#d8b34a';
+  g.beginPath();
+  g.arc(sx + 0.74 * u, sy - 2.38 * u, 0.17 * u, 0, 0, Math.PI * 2);
+  g.fill();
+  // The robe: a long bell in the owner's cloth, gold hem.
+  g.fillStyle = cloth;
+  g.beginPath();
+  g.ellipse(sx, sy - 0.88 * u, 0.66 * u, 0.88 * u, 0, 0, Math.PI * 2);
+  g.fill();
+  g.strokeStyle = '#d8b34a';
+  g.lineWidth = Math.max(1, 0.14 * u);
+  g.beginPath();
+  g.moveTo(sx - 0.5 * u, sy - 0.28 * u);
+  g.lineTo(sx + 0.5 * u, sy - 0.28 * u);
+  g.stroke();
+  // The head, and the gold crown above it (three points).
+  g.fillStyle = '#e8c39a';
+  g.beginPath();
+  g.arc(sx, sy - 1.98 * u, 0.3 * u, 0, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = '#d8b34a';
+  g.beginPath();
+  g.moveTo(sx - 0.34 * u, sy - 2.18 * u);
+  g.lineTo(sx - 0.34 * u, sy - 2.62 * u);
+  g.lineTo(sx - 0.12 * u, sy - 2.34 * u);
+  g.lineTo(sx, sy - 2.7 * u);
+  g.lineTo(sx + 0.12 * u, sy - 2.34 * u);
+  g.lineTo(sx + 0.34 * u, sy - 2.62 * u);
+  g.lineTo(sx + 0.34 * u, sy - 2.18 * u);
+  g.closePath();
+  g.fill();
+}
+function kingSprite(cloth) {
+  if (kingSpriteCache.has(cloth)) return kingSpriteCache.get(cloth);
+  let cv = null;
+  try {
+    cv = document.createElement('canvas');
+    cv.width = Math.ceil(KING_BOX.w * KING_SPRITE_U);
+    cv.height = Math.ceil(KING_BOX.h * KING_SPRITE_U);
+    const g = cv.getContext('2d');
+    if (!g) cv = null;
+    else {
+      paintKingFigure(g, -KING_BOX.x0 * KING_SPRITE_U,
+        -KING_BOX.y0 * KING_SPRITE_U, KING_SPRITE_U, cloth);
+    }
+  } catch {
+    cv = null; // no canvas available (test stubs): vector fallback
+  }
+  kingSpriteCache.set(cloth, cv);
+  return cv;
+}
+function drawKing(i, wx, wy) {
+  const [sx, sy] = worldToScreen(wx, wy);
+  const u = camS;
+  shadow(sx, sy, 0.95 * u);
+  if (selection.has(i)) drawSelRing(sx, sy, 1.25);
+  const cloth = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e';
+  const spr = kingSprite(cloth);
+  if (spr) {
+    ctx.drawImage(spr, sx + KING_BOX.x0 * u, sy + KING_BOX.y0 * u,
+      KING_BOX.w * u, KING_BOX.h * u);
+  } else {
+    paintKingFigure(ctx, sx, sy, u, cloth);
+  }
+}
+
 // The Trade Cart (Package D, TRD-05): original vector figure —
 // a horse hauling a two-wheeled cart. The load is the sim's own
 // word (entity_trade): empty canvas on the outbound leg, gold
@@ -14069,7 +14342,8 @@ function draw() {
     drawMangonel, // 18: Mangonel (Castle P4b)
     drawScorpion, // 19: Scorpion (Castle P4c)
     drawMonk, // 20: Monk (Castle P5a)
-    drawRelic]; // 21: Relic (Castle P5d)
+    drawRelic, // 21: Relic (Castle P5d)
+    drawKing]; // 22: King (Package C, VIC-06)
   for (let i = 0; i < count; i++) {
     const wx = pos[i * 2];
     const wy = pos[i * 2 + 1];

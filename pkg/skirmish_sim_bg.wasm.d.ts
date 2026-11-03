@@ -50,6 +50,7 @@ export const wasmsim_monastery_relic_count: (a: number, b: number) => number;
 export const wasmsim_monk_faith: (a: number, b: number) => number;
 export const wasmsim_new: (a: number) => number;
 export const wasmsim_new_match: (a: number, b: number) => number;
+export const wasmsim_new_match_victory: (a: number, b: number, c: number, d: number, e: number) => number;
 export const wasmsim_nodes: (a: number) => [number, number];
 export const wasmsim_obstacles: (a: number) => [number, number];
 export const wasmsim_population: (a: number) => number;

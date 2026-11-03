@@ -307,6 +307,18 @@ export class WasmSim {
      */
     static new_match(seed: number, mode_tag: number): WasmSim;
     /**
+     * Create a match under explicit victory settings (Package C:
+     * VIC-05/06/07): `new_match` plus the conditions chosen at
+     * setup. `time_limit_ticks` is the match clock in 60 Hz ticks
+     * (0 = none), `score_target` the VIC-04 total that wins on
+     * reaching it (0 = none), and `flags` packs the mode switches
+     * — bit 0 = Regicide (VIC-06), bit 1 = Sudden Death (VIC-07).
+     * All-zeros settings are exactly `new_match` (plain Conquest).
+     * In Sandbox mode the settings are inert, like the mode's
+     * other match machinery.
+     */
+    static new_match_victory(seed: number, mode_tag: number, time_limit_ticks: number, score_target: number, flags: number): WasmSim;
+    /**
      * Resource nodes as a flat array: five values per node —
      * `[id, x, y, kind, amount_left]` — in node id order. `kind` tags:
      * 0 tree, 1 berry bush, 2 gold mine, 3 stone mine, 4 farm (M2.5 —
@@ -1316,6 +1328,7 @@ export interface InitOutput {
     readonly wasmsim_monk_faith: (a: number, b: number) => number;
     readonly wasmsim_new: (a: number) => number;
     readonly wasmsim_new_match: (a: number, b: number) => number;
+    readonly wasmsim_new_match_victory: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly wasmsim_nodes: (a: number) => [number, number];
     readonly wasmsim_obstacles: (a: number) => [number, number];
     readonly wasmsim_population: (a: number) => number;
