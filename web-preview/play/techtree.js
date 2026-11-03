@@ -69,6 +69,10 @@ export const TECH_TREE = [
   { tag: 36, host: 20, age: 2, cost: [100, 0, 200, 0], secs: 40, requires: null }, // Devotion (Castle P5b)
   { tag: 37, host: 20, age: 2, cost: [0, 0, 475, 0], secs: 50, requires: null }, // Redemption (Castle P5c)
   { tag: 38, host: 20, age: 2, cost: [0, 0, 1000, 0], secs: 60, requires: null }, // Heresy (Castle P5c)
+  { tag: 39, host: 20, age: 3, cost: [0, 0, 200, 0], secs: 55, requires: null }, // Block Printing (Castle P5f)
+  { tag: 40, host: 20, age: 3, cost: [0, 0, 120, 0], secs: 65, requires: null }, // Illumination (Castle P5f)
+  { tag: 41, host: 20, age: 3, cost: [0, 0, 200, 0], secs: 75, requires: null }, // Theocracy (Castle P5f)
+  { tag: 42, host: 20, age: 3, cost: [550, 0, 750, 0], secs: 60, requires: 36 }, // Faith (Castle P5f)
 ];
 
 /** The age-advancement tags and the age each one reaches. */

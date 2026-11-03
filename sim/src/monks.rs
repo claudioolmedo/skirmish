@@ -33,6 +33,14 @@ use crate::{Sim, MELEE_REACH};
 /// measured center-to-center like every other range in the sim.
 pub const CONVERT_RANGE: I16F16 = I16F16::from_bits(2_359_296); // 36.0
 
+/// MNK-03 / TEC-10 (Castle P5f): Block Printing's bonus, +3
+/// tiles = 12 world units on the conversion range (12 tiles
+/// total). Read at the one range check in `conversion_step`
+/// through `conversion_range`; the monk's line of sight (11
+/// tiles, the unit table row) is a separate constant and is
+/// NOT touched — no extra behavior is invented here.
+pub const BLOCK_PRINTING_RANGE_BONUS: I16F16 = I16F16::from_bits(786_432); // 12.0
+
 /// MNK-03: one conversion interval (CI) ≈ 1.25 s = 75 ticks at
 /// 60 Hz. The ≈ is in the documented model itself; 75 is an
 /// implementation constant (the 2 400-tick 40 s build is the rate
@@ -46,9 +54,8 @@ pub const FAITH_FULL: i32 = 100_000;
 
 /// MNK-02: faith regenerates to full in 62 s (3 720 ticks); with
 /// Illumination (Imperial) in 33 s (1 980 ticks). The Illumination
-/// row is a data constant read through a tech-flag helper that
-/// stays false until the Imperial program adds the tech — the
-/// mechanism is correct today, the flag simply never sets.
+/// row is a data constant read through the tech-flag helper —
+/// the tech itself landed in Castle P5f (TechId 40).
 pub const FAITH_REGEN_TICKS: i64 = 3_720;
 pub const FAITH_REGEN_TICKS_ILLUMINATION: i64 = 1_980;
 
@@ -220,21 +227,43 @@ impl Sim {
     }
 
     /// Whether the Imperial Illumination flag stands for `owner`
-    /// (MNK-02's 33 s recharge). No Illumination tech exists in
-    /// the Castle roster (TEC-10's Imperial row) — the flag read
-    /// stays false until the Imperial program adds the tech row,
-    /// exactly the plan's data-row discipline.
+    /// (MNK-02's 33 s recharge). Read in P5b; the tech itself
+    /// landed in Castle P5f (TechId 40, Monastery, 120 G / 65 s).
     fn illumination_researched(&self, owner: u8) -> bool {
-        let _ = owner;
-        false
+        self.has_tech(owner, TechId::Illumination)
     }
 
     /// Whether the Imperial Theocracy flag stands for `owner`
-    /// (MNK-06's rest rule). Same discipline as Illumination:
-    /// read in P5b, set by no Castle tech.
+    /// (MNK-06's rest rule). Read in P5b; the tech itself landed
+    /// in Castle P5f (TechId 41, Monastery, 200 G / 75 s).
     fn theocracy_researched(&self, owner: u8) -> bool {
-        let _ = owner;
-        false
+        self.has_tech(owner, TechId::Theocracy)
+    }
+
+    /// Whether the Imperial Block Printing flag stands for
+    /// `owner` (MNK-03's +3 conversion range). The tech landed
+    /// in Castle P5f (TechId 39, Monastery, 200 G / 55 s).
+    fn block_printing_researched(&self, owner: u8) -> bool {
+        self.has_tech(owner, TechId::BlockPrinting)
+    }
+
+    /// Whether the Imperial Faith flag stands for `owner`
+    /// (MNK-05's +4/+4 shift): checked against the TARGET's
+    /// owner, like Devotion (Castle P5f, TechId 42, Monastery,
+    /// 550 F / 750 G / 60 s, requires Devotion).
+    fn faith_researched(&self, owner: u8) -> bool {
+        self.has_tech(owner, TechId::Faith)
+    }
+
+    /// The conversion range for a monk of `owner` (MNK-03):
+    /// the base 9 tiles, +3 tiles with Block Printing. The one
+    /// read every unit-conversion range check goes through.
+    fn conversion_range(&self, owner: u8) -> I16F16 {
+        if self.block_printing_researched(owner) {
+            CONVERT_RANGE + BLOCK_PRINTING_RANGE_BONUS
+        } else {
+            CONVERT_RANGE
+        }
     }
 
     /// Whether the Redemption flag stands for `owner` (MNK-08's
@@ -476,8 +505,9 @@ impl Sim {
     /// range and advances CIs. The resistance row (MNK-05) is
     /// stamped NOW, at the start: level (Scout-line 2, else 1),
     /// start shift (Scout +3, Devotion on the TARGET's owner
-    /// +1, Faith +4 — an Imperial flag that stays false) and
-    /// guarantee shift (Scout +1, Devotion +1, Faith +4).
+    /// +1, Faith on the TARGET's owner +4 — the Imperial tech
+    /// landed in Castle P5f) and guarantee shift (Scout +1,
+    /// Devotion +1, Faith +4).
     /// Sticky progress (MNK-07): `ci_progress`/`ci_ticks` are
     /// NOT reset by a target switch — the counter lives on the
     /// monk; only the stamps are re-read for the new target.
@@ -515,8 +545,11 @@ impl Sim {
         };
         let target_owner = self.entities[ti].owner;
         let devotion = self.has_tech(target_owner, TechId::Devotion);
-        let start_shift = (if scout { 3 } else { 0 }) + (if devotion { 1 } else { 0 });
-        let guarantee_shift = (if scout { 1 } else { 0 }) + (if devotion { 1 } else { 0 });
+        let faith = self.faith_researched(target_owner);
+        let start_shift =
+            (if scout { 3 } else { 0 }) + (if devotion { 1 } else { 0 }) + (if faith { 4 } else { 0 });
+        let guarantee_shift =
+            (if scout { 1 } else { 0 }) + (if devotion { 1 } else { 0 }) + (if faith { 4 } else { 0 });
         let e = &mut self.entities[idx];
         e.task = Task::Idle;
         e.task_node = None;
@@ -603,7 +636,7 @@ impl Sim {
         let limit = if is_contact_unit(self.entities[ti].kind) {
             crate::combat::MELEE_REACH
         } else {
-            CONVERT_RANGE
+            self.conversion_range(owner)
         };
         if dist > limit {
             // Automatic chase (MNK-07): does NOT reset progress.

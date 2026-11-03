@@ -506,6 +506,8 @@ function refreshNames() {
     34: t('tech.herbalmedicine'),
     35: t('tech.atonement'), 36: t('tech.devotion'),
     37: t('tech.redemption'), 38: t('tech.heresy'),
+    39: t('tech.blockprinting'), 40: t('tech.illumination'),
+    41: t('tech.theocracy'), 42: t('tech.faith'),
   };
   RESEARCH_BLOCK_TITLES = [
     '', t('block.noResources'), t('block.queueFullTrain'),
@@ -1333,7 +1335,7 @@ function updateEventFeed() {
   const lines = diffFeedEvents(prev, snap, {
     buildingName: (k) => BUILD_NAME[k],
     unitName: (k) => KIND_NAME[k],
-    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15, lightcavalry: 16, husbandry: 17, caravan: 19, coinage: 25, banking: 26, townwatch: 27, townpatrol: 28, conscription: 29, heavyplow: 30, croprotation: 31, sanctity: 32, fervor: 33, herbalmedicine: 34, atonement: 35, devotion: 36, redemption: 37, heresy: 38 }[key]],
+    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15, lightcavalry: 16, husbandry: 17, caravan: 19, coinage: 25, banking: 26, townwatch: 27, townpatrol: 28, conscription: 29, heavyplow: 30, croprotation: 31, sanctity: 32, fervor: 33, herbalmedicine: 34, atonement: 35, devotion: 36, redemption: 37, heresy: 38, blockprinting: 39, illumination: 40, theocracy: 41, faith: 42 }[key]],
   }, feedFmt());
   feedPrev = snap;
   for (const text of lines) pushFeedLine(text);
@@ -12212,6 +12214,8 @@ function runCommandButton(id, times = 1) {
       'research-herbalmedicine': 34,
       'research-atonement': 35, 'research-devotion': 36,
       'research-redemption': 37, 'research-heresy': 38,
+      'research-blockprinting': 39, 'research-illumination': 40,
+      'research-theocracy': 41, 'research-faith': 42,
     }[id];
     if (tag != null && selectedBuilding && selectedBuilding.type === 'building') {
       if (!issue({ t: 'research_at', b: selectedBuilding.id, tech: tag })) {
@@ -12366,7 +12370,7 @@ function renderCommands() {
     lumbercamp: [10], miningcamp: [11, 12], mill: [13, 30, 31], market: [19, 25, 26],
     university: [20, 21, 22, 23, 24], castle: [29],
     lumbercamp: [10], miningcamp: [11, 12], mill: [13], market: [19, 25, 26],
-    university: [20, 21, 22, 23, 24], monastery: [32, 33, 34, 35, 36, 37, 38],
+    university: [20, 21, 22, 23, 24], monastery: [32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42],
   };
   const rbB = bk && RB_TAGS[context]
     ? Object.fromEntries(RB_TAGS[context].map((t) => [t, sim.research_block_at(bk.id, t)]))
@@ -12923,6 +12927,30 @@ function renderCommands() {
       })(),
       techBtn('research-redemption', 37, 'i-redemption', 'cmd.redemptionTitle', 50, 475, 6),
       techBtn('research-heresy', 38, 'i-heresy', 'cmd.heresyTitle', 60, 1000, 7),
+      // Castle P5f: the Imperial Monastery row (TEC-10 complete).
+      techBtn('research-blockprinting', 39, 'i-blockprinting', 'cmd.blockprintingTitle', 55, 200, 8),
+      techBtn('research-illumination', 40, 'i-illumination', 'cmd.illuminationTitle', 65, 120, 9),
+      techBtn('research-theocracy', 41, 'i-theocracy', 'cmd.theocracyTitle', 75, 200, 10),
+      // Faith is a mixed-cost row (550 food / 750 gold — update
+      // 99311), so it cannot ride techBtn's gold-only shape; it
+      // mirrors Devotion's mixed-cost cell.
+      (() => {
+        const tag = 42;
+        const done = techMaskHas(techMask, tag);
+        const rb = rbB[tag];
+        return cmdButton({
+          id: 'research-faith', icon: 'i-faith', label: TECH_NAME[tag],
+          costIcon: 'i-food', cost: 550, cost2Icon: 'i-gold', cost2: 750,
+          key: badgeForButton({ context, id: 'research-faith', index: 11 }),
+          disabled: underConstruction || done || rb === 2 || rb === 3 || rb === 4,
+          title: underConstruction
+            ? t('cmd.underConstruction', { name: TECH_NAME[tag], building: BUILD_NAME[20] })
+            : done
+              ? t('cmd.researchDone', { name: TECH_NAME[tag] })
+              : t('cmd.faithTitle', { name: TECH_NAME[tag], cost: costText([[550, 'food'], [750, 'gold']]), secs: 60 })
+                + (RESEARCH_BLOCK_TITLES[rb] ? ' ' + RESEARCH_BLOCK_TITLES[rb] : ''),
+        });
+      })(),
       // Castle P5d (MNK-09): the relic store's desk — the count
       // itself rides the panel's info line; this button sends
       // the nearest free own Monk to lift the first garrisoned
@@ -12933,7 +12961,7 @@ function renderCommands() {
           ? sim.monastery_relic_count(bk.id) : 0;
         return cmdButton({
           id: 'retrieve-relic', icon: 'i-gold', label: t('cmd.retrieveRelic'),
-          key: badgeForButton({ context, id: 'retrieve-relic', index: 8 }),
+          key: badgeForButton({ context, id: 'retrieve-relic', index: 12 }),
           disabled: underConstruction || rN === 0,
           title: t('cmd.retrieveRelicTitle', { n: rN }),
         });

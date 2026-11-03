@@ -140,6 +140,19 @@
 //!   Both inherit update 169123's proportional top-up from the
 //!   Horse Collar sweep (the three articles state it verbatim),
 //!   against each farm's own stamped full amount.
+//! - The Imperial Monastery row (Castle P5f, TEC-10 completion;
+//!   all Monastery, Imperial Age; costs/times verified 2026-11-03
+//!   against the AoE2 wiki Technology table + Faith article,
+//!   update 99311 values for Faith): Block Printing — 200 gold,
+//!   55 s: monks +3 conversion range (layered at the conversion
+//!   range read in `monks`). Illumination — 120 gold, 65 s:
+//!   faith recharge 62 s → 33 s (the MNK-02 span flag in
+//!   `monks::regen_faith`). Theocracy — 200 gold, 75 s: in a
+//!   group conversion only the lowest-id participating monk
+//!   drains faith (the MNK-06 branch in `monks::rest_participants`).
+//!   Faith — 550 food / 750 gold, 60 s, requires Devotion
+//!   (TEC-07): own units as conversion targets get +4/+4 CI
+//!   shift (the MNK-05 stamps in `monks::apply_convert`).
 //! - Herbal Medicine (Castle P5e): Monastery, Castle Age,
 //!   200 gold, 35 s (wiki, Herbal Medicine; Castle Age dossier
 //!   §5.6). Effect: garrisoned units heal ×6 as fast (GAR-04) —
@@ -306,11 +319,26 @@ pub enum TechId {
     /// article sides with the dossier, "Converted buildings are
     /// destroyed"). Tag 38.
     Heresy,
+    /// Monastery, Imperial: Monks +3 conversion range (Castle
+    /// P5f, MNK-03's Block Printing row of TEC-10). Tag 39 —
+    /// appended after P5c's 37/38.
+    BlockPrinting,
+    /// Monastery, Imperial: faith recharge 62 s → 33 s (Castle
+    /// P5f, MNK-02's Illumination row of TEC-10). Tag 40.
+    Illumination,
+    /// Monastery, Imperial: in a group conversion only the
+    /// lowest-id participating monk drains faith (Castle P5f,
+    /// MNK-06's Theocracy row of TEC-10). Tag 41.
+    Theocracy,
+    /// Monastery, Imperial: own units as conversion targets get
+    /// +4/+4 CI shift (Castle P5f, MNK-05's Faith row of
+    /// TEC-10; chains from Devotion, TEC-07). Tag 42.
+    Faith,
 }
 
 impl TechId {
     /// All technologies, in tag order.
-    pub const ALL: [TechId; 39] = [
+    pub const ALL: [TechId; 43] = [
         TechId::Loom,
         TechId::FeudalAge,
         TechId::Fletching,
@@ -350,6 +378,10 @@ impl TechId {
         TechId::Devotion,
         TechId::Redemption,
         TechId::Heresy,
+        TechId::BlockPrinting,
+        TechId::Illumination,
+        TechId::Theocracy,
+        TechId::Faith,
     ];
 
     /// Stable tag: 0 loom, 1 feudal age, 2 fletching, 3 scale mail,
@@ -433,6 +465,10 @@ impl TechId {
             TechId::Devotion => 36,
             TechId::Redemption => 37,
             TechId::Heresy => 38,
+            TechId::BlockPrinting => 39,
+            TechId::Illumination => 40,
+            TechId::Theocracy => 41,
+            TechId::Faith => 42,
         }
     }
 
@@ -494,7 +530,11 @@ impl TechId {
             | TechId::Atonement
             | TechId::Devotion
             | TechId::Redemption
-            | TechId::Heresy => TechHost::Building(BuildingKind::Monastery),
+            | TechId::Heresy
+            | TechId::BlockPrinting
+            | TechId::Illumination
+            | TechId::Theocracy
+            | TechId::Faith => TechHost::Building(BuildingKind::Monastery),
         }
     }
 
@@ -505,7 +545,14 @@ impl TechId {
             TechId::Loom | TechId::FeudalAge => Age::Dark,
             TechId::CastleAge => Age::Feudal,
             TechId::ImperialAge => Age::Castle,
-            TechId::Banking | TechId::Conscription | TechId::CropRotation => Age::Imperial,
+            TechId::Banking
+            | TechId::Conscription
+            | TechId::CropRotation
+            // Castle P5f: the Imperial Monastery row.
+            | TechId::BlockPrinting
+            | TechId::Illumination
+            | TechId::Theocracy
+            | TechId::Faith => Age::Imperial,
             TechId::HandCart
             | TechId::LightCavalry
             | TechId::Husbandry
@@ -553,6 +600,9 @@ impl TechId {
             // Plow → Crop Rotation").
             TechId::HeavyPlow => Some(TechId::HorseCollar),
             TechId::CropRotation => Some(TechId::HeavyPlow),
+            // Castle P5f (TEC-07): Faith is the further upgrade
+            // of Devotion (wiki, Faith — verified 2026-11-03).
+            TechId::Faith => Some(TechId::Devotion),
             _ => None,
         }
     }
@@ -602,6 +652,10 @@ impl TechId {
             TechId::Devotion => 2400, // 40 s (wiki, Devotion — dossier §5.6)
             TechId::Redemption => 3000, // 50 s (wiki, Redemption — dossier §5.6)
             TechId::Heresy => 3600, // 60 s (wiki, Heresy — dossier §5.6)
+            TechId::BlockPrinting => 3300, // 55 s (wiki, Block Printing — verified 2026-11-03)
+            TechId::Illumination => 3900, // 65 s (wiki, Illumination — verified 2026-11-03)
+            TechId::Theocracy => 4500, // 75 s (wiki, Theocracy — verified 2026-11-03)
+            TechId::Faith => 3600, // 60 s (wiki, Faith — verified 2026-11-03)
         }
     }
 
@@ -648,6 +702,10 @@ impl TechId {
             TechId::Devotion => (100, 0, 200, 0), // wiki, Devotion — dossier §5.6
             TechId::Redemption => (0, 0, 475, 0), // wiki, Redemption — dossier §5.6
             TechId::Heresy => (0, 0, 1000, 0), // wiki, Heresy — dossier §5.6
+            TechId::BlockPrinting => (0, 0, 200, 0), // wiki, Block Printing — verified 2026-11-03
+            TechId::Illumination => (0, 0, 120, 0), // wiki, Illumination — verified 2026-11-03
+            TechId::Theocracy => (0, 0, 200, 0), // wiki, Theocracy — verified 2026-11-03
+            TechId::Faith => (550, 0, 750, 0), // wiki, Faith (update 99311) — verified 2026-11-03
         }
     }
 }
@@ -910,7 +968,12 @@ mod tests {
         // Castle P5c: Redemption / Heresy append at 37/38.
         assert_eq!(TechId::from_tag(37), Some(TechId::Redemption));
         assert_eq!(TechId::from_tag(38), Some(TechId::Heresy));
-        assert_eq!(TechId::from_tag(39), None);
+        // Castle P5f: the Imperial Monastery row appends at 39–42.
+        assert_eq!(TechId::from_tag(39), Some(TechId::BlockPrinting));
+        assert_eq!(TechId::from_tag(40), Some(TechId::Illumination));
+        assert_eq!(TechId::from_tag(41), Some(TechId::Theocracy));
+        assert_eq!(TechId::from_tag(42), Some(TechId::Faith));
+        assert_eq!(TechId::from_tag(43), None);
     }
 
     #[test]
@@ -1055,9 +1118,9 @@ mod tests {
         // 32 entries at this test's landing; P5a's Sanctity/
         // Fervor (32/33) and P5e's Herbal Medicine (34) append
         // after it, and P5b's Atonement/Devotion (35/36) after
-        // those, and P5c's Redemption/Heresy (37/38) last, so
-        // ALL now holds 39.
-        assert_eq!(TechId::ALL.len(), 39);
+        // those, and P5c's Redemption/Heresy (37/38) after those,
+        // and P5f's Imperial row (39–42) last, so ALL now holds 43.
+        assert_eq!(TechId::ALL.len(), 43);
         // ECO-14: the farm gather lookup meets the farm's own
         // 0.4 food/s work-rate cap — the base farm rate sits
         // below it today, so the clamped value is the base rate,

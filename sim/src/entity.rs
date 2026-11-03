@@ -955,8 +955,8 @@ pub struct Entity {
     /// in milli-percent, 0..=100_000 (100_000 = full). A conversion
     /// may start only at full; a success drains the participant
     /// set to 0 (MNK-06); regen restores full in 62 s (3 720
-    /// ticks; 33 s with Illumination — an Imperial flag no Castle
-    /// tech sets, read in `monks.rs`). Default is FULL: a resting
+    /// ticks; 33 s with Illumination — the Imperial tech landed
+    /// in Castle P5f, read in `monks.rs`). Default is FULL: a resting
     /// monk is indistinguishable from a pre-P5b stream (the 0xBB
     /// block writes only while any monk field is non-default).
     /// Plain data — part of the hashed state.
@@ -1001,7 +1001,7 @@ pub struct Entity {
     pub conversion_level: u8,
     /// CI shift of the first roll (MNK-05), stamped at start:
     /// first rolled CI = 5 + this (Scout +3, Devotion +1, Faith
-    /// +4 — the Imperial rows read as flags that stay false).
+    /// +4 — Faith is the Imperial tech landed in Castle P5f).
     pub conversion_start_shift: i32,
     /// CI shift of the guarantee (MNK-05), stamped at start:
     /// guarantee CI = 9 + this (Scout +1, Devotion +1, Faith +4).

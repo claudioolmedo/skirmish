@@ -2585,7 +2585,12 @@ host building) pairs — the first two links of every chain. The first
 tech-to-tech link shipped 2026-10-22 (Castle P1): Hand Cart requires
 Wheelbarrow (`TechId::requires_tech`), enforced in the same
 `check_research` gate — in Castle Age without Wheelbarrow the tech
-reads Locked, distinct from its Age block in Feudal. The tree UI
+reads Locked, distinct from its Age block in Feudal. The Devotion →
+Faith link named in this rule's own text shipped in Castle P5f
+(2026-11-03): Faith (TechId 42, Monastery, Imperial) requires
+Devotion (`TechId::requires_tech`), enforced in the same
+`check_research` gate and pinned by `imperial_monastery_gates` in
+`sim/src/monastery_p5f_tests.rs`. The tree UI
 (INF-06) still does not exist. · *Status:* **DIFFERS**.
 
 **TEC-08 — Percent effects apply before armor subtraction; flat effects
@@ -2668,7 +2673,19 @@ conversion unlocks — the Castle row is now COMPLETE (7 of 7: Sanctity,
 Fervor, Herbal Medicine, Atonement, Devotion, Redemption, Heresy);
 the Imperial row (Block Printing, Theocracy, Faith, Illumination)
 keeps the rule MISSING.
-· *Status:* **MISSING**.
+*Progress (Castle P5f, 2026-11-03):* the Imperial row lands — Block
+Printing (TechId 39, 200G, 55 s; monks +3 conversion range, read at
+the one conversion-range check in `monks`), Illumination (TechId 40,
+120G, 65 s; the MNK-02 regen span flag now reads the real tech),
+Theocracy (TechId 41, 200G, 75 s; the MNK-06 group-drain branch now
+reads the real tech) and Faith (TechId 42, 550F/750G, 60 s, requires
+Devotion per TEC-07; the MNK-05 +4/+4 stamps now read the real tech
+against the target's owner) — costs/times verified 2026-11-03 against
+the wiki Technology table + Faith article (update 99311 values for
+Faith). TEC-10 is now COMPLETE (11 of 11: the seven Castle-row entries
+plus the four Imperial-row entries), pinned by
+`sim/src/monastery_p5f_tests.rs`.
+· *Status:* **MATCHES**.
 
 **TEC-11 — Unique technologies are an extension point.** Each empire has
 one Castle-Age and one Imperial-Age unique technology, researched at the
@@ -2710,8 +2727,11 @@ available.
 monk phase; the conversion state refuses to start below full. Shipped in
 Castle P5b (2026-11-02): milli-percent faith on the entity record, exact
 62 s regen through a remainder accumulator (the 33 s Illumination span is
-a data constant read through a flag that stays false until the Imperial
-program), drain-to-0 on success. Pinned by
+a data constant read through a flag), drain-to-0 on success. The
+Illumination flag now reads the real tech (Castle P5f, 2026-11-03:
+TechId 40, Monastery, Imperial, 120G, 65 s), pinned there by
+`illumination_regenerates_faith_in_exactly_33s` in
+`sim/src/monastery_p5f_tests.rs`. Pinned by
 `faith_gates_conversion_and_regenerates_in_exactly_62s` and
 `success_drains_faith_to_zero` in `sim/src/monastery_p5b_tests.rs`. ·
 *Status:* **MATCHES**.
@@ -2777,8 +2797,11 @@ rows (Teutons) are extension content (§C). Shipped for unit targets in
 Castle P5b (2026-11-02): Scout-line level 2 (19%/CI, +3/+1), Devotion
 +1/+1 read against the target's owner at conversion start; the building row
 (level 3 → 13%/CI, CI 15–25) is consumed by P5c's building arm
-(2026-11-02) and the ship row stays data for the naval program. The Faith +4/+4 row reads an Imperial flag that
-stays false. Pinned by `scout_resistance_window_is_ci_8_to_10` and
+(2026-11-02) and the ship row stays data for the naval program. The Faith +4/+4 row now reads the real Imperial tech
+against the target's owner (Castle P5f, 2026-11-03: TechId 42,
+550F/750G, 60 s, requires Devotion), pinned there by
+`faith_shifts_the_victims_window_by_four_ci` in
+`sim/src/monastery_p5f_tests.rs`. Pinned by `scout_resistance_window_is_ci_8_to_10` and
 `devotion_shifts_the_victims_window_by_one_ci`. ·
 *Status:* **MATCHES**.
 
@@ -2793,8 +2816,11 @@ rule). · *Impl:* on a conversion success, sweep the participant set
 or the lowest-id one under Theocracy. Shipped in Castle P5b
 (2026-11-02): independent records and rolls per monk; on the first
 success every participating monk of the converting owner drains (the
-Theocracy branch reads an Imperial flag that stays false, so all drain
-until that tech exists). Pinned by
+Theocracy branch read an Imperial flag that stayed false, so all drained
+until that tech existed). The branch now reads the real tech (Castle
+P5f, 2026-11-03: TechId 41, Monastery, Imperial, 200G, 75 s), pinned
+there by `theocracy_drains_only_the_lowest_id_participant` in
+`sim/src/monastery_p5f_tests.rs`. Pinned by
 `group_conversion_drains_every_participant`. · *Status:* **MATCHES**.
 
 **MNK-07 — CI progress is sticky across targets.** Switching a monk to a
@@ -4526,6 +4552,11 @@ victories), VIC-06 (Regicide, with the King unit) and VIC-07
 (Sudden Death) move MISSING → MATCHES. The book stands at
 223 rules, 186 / 16 / 21. The table below equals the body.
 
+updated 2026-11-03 for Castle P5f (bot-loop builder): the
+Imperial Monastery row lands — TEC-10 (the Monastery line,
+11 of 11) moves MISSING → MATCHES. The book stands at
+223 rules, 187 / 16 / 20. The table below equals the body.
+
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
 | 1 | Simulation & time (SIM) | 12 | 12 | 0 | 0 |
@@ -4538,7 +4569,7 @@ victories), VIC-06 (Regicide, with the King unit) and VIC-07
 | 8 | Combat & damage (CMB) | 17 | 17 | 0 | 0 |
 | 9 | Projectiles & ballistics (PRJ) | 10 | 8 | 2 | 0 |
 | 10 | Unit classes & counters (CLS) | 8 | 6 | 0 | 2 |
-| 11 | Technologies & age advancement (TEC) | 11 | 7 | 2 | 2 |
+| 11 | Technologies & age advancement (TEC) | 11 | 8 | 2 | 1 |
 | 12 | Monks, conversion & relics (MNK) | 13 | 13 | 0 | 0 |
 | 13 | Trade, market & tribute (TRD) | 8 | 8 | 0 | 0 |
 | 14 | Garrison, transport & repair (GAR) | 10 | 9 | 0 | 1 |
@@ -4546,7 +4577,7 @@ victories), VIC-06 (Regicide, with the King unit) and VIC-07
 | 16 | Victory, scoring & game modes (VIC) | 12 | 5 | 0 | 7 |
 | 17 | Multiplayer determinism (NET) | 11 | 9 | 1 | 1 |
 | 18 | Information rules (INF) | 13 | 12 | 1 | 0 |
-| | **Total** | **223** | **186** | **16** | **21** |
+| | **Total** | **223** | **187** | **16** | **20** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer

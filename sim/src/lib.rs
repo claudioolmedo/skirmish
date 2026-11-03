@@ -78,6 +78,8 @@ mod monastery_p5b_tests;
 #[cfg(test)]
 mod monastery_p5c_tests;
 #[cfg(test)]
+mod monastery_p5f_tests;
+#[cfg(test)]
 mod monastery_p5e_tests;
 #[cfg(test)]
 mod monastery_p5d_tests;
