@@ -14105,6 +14105,31 @@ function draw() {
       // drawMonk's prop, a garrisoned one lives only as the
       // Monastery panel's count.
       continue;
+    } else if (kinds[i] === KIND_RELIC && st.hp[i * 2] >= 1) {
+      // Bot-loop fix (2026-11-03): a relic ON THE GROUND is a
+      // static Gaia OBJECT, not a unit — VIS-06's visible-only
+      // gate is for units, and the generic unit branch below
+      // applied it to the relic, so a discovered relic vanished
+      // the moment no unit stood watch over its cell (two long
+      // live sessions swept explored ground and found nothing:
+      // the relic only ever rendered inside a live sight
+      // circle). Like the resource nodes and the buildings, it
+      // draws on EXPLORED ground (the fog-dim pass below dims
+      // it when merely explored) and stays hidden while
+      // unexplored. Runtime-pinned by play/relicdraw.smoke.mjs.
+      if (!cellExploredW(wx, wy)) continue;
+      const owner = st.owners[i];
+      draws.push({
+        key: wx + wy,
+        occ: {
+          role: 'unit', owner,
+          fogVisible: cellExploredW(wx, wy),
+        },
+        fn: () => {
+          drawOwner = owner; // player color for this draw (M5)
+          drawRelic(i, wx, wy);
+        },
+      });
     } else if (st.hp[i * 2] >= 1 && !(st.garrisoned && st.garrisoned[i])) {
       // M7 (VIS-01): enemy and Gaia UNITS draw only in currently
       // visible cells — explored memory remembers buildings, never
@@ -14428,7 +14453,7 @@ function draw() {
   // it costs no extra ABI calls. Gaia animals get their own dot
   // colors; the dead are skipped.
   if (mmGeom) {
-    const GAIA_COLORS = { 5: '#cfd4d8', 6: '#a2532f', 7: '#c9a35f' };
+    const GAIA_COLORS = { 5: '#cfd4d8', 6: '#a2532f', 7: '#c9a35f', 21: '#e8c95a' };
     const mmEntities = [];
     for (let i = 0; i < count; i++) {
       if (kinds[i] !== KIND_TC && st.hp[i * 2] < 1) continue;
@@ -14438,7 +14463,14 @@ function draw() {
       const ex = pos[i * 2], ey = pos[i * 2 + 1];
       if (st.owners[i] !== localOwner) {
         const f = fogAtWorld(ex, ey);
-        if (kinds[i] === KIND_TC ? f < 1 : f !== 2) continue;
+        // Bot-loop fix (2026-11-03): a ground relic is a static
+        // object (see the main-view branch) — it plots on the
+        // minimap once its ground is EXPLORED, in relic gold;
+        // a carried/garrisoned relic plots nowhere.
+        if (kinds[i] === KIND_RELIC) {
+          const rs = relicStateOf(i);
+          if (f < 1 || (rs && rs.state !== 0)) continue;
+        } else if (kinds[i] === KIND_TC ? f < 1 : f !== 2) continue;
       }
       mmEntities.push({
         x: ex, y: ey, kind: kinds[i],
