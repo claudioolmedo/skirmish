@@ -233,7 +233,11 @@ fn p4a_battering_ram_row() {
     // formula amplifies through it — see the combat pins).
     assert_eq!(s.armor_melee, -3);
     assert_eq!(s.armor_pierce, 180);
-    assert_eq!(s.classes, cls::bit(cls::SIEGE));
+    // Castle P4c: the row also carries the distinct RAM class
+    // (MECHANICS-STUDY §1.3) beside SIEGE — the membership the
+    // Scorpion's +1 vs Rams row keys on (pinned in
+    // `siege_p4c_tests` as well).
+    assert_eq!(s.classes, cls::mask(&[cls::SIEGE, cls::RAM]));
     assert_eq!(s.reload_ticks, 300); // 5.0 s
     assert_eq!(s.speed.to_bits(), 2_621); // 0.6 tiles/s (empty)
     assert_eq!(s.los.to_bits(), 1_310_720); // 5 tiles
