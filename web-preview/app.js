@@ -4778,6 +4778,7 @@ function renderRoom() {
   if (!netUi || !netUi.roomSection) return;
   const inRoom = !!(net && net.room);
   netUi.roomSection.hidden = !inRoom;
+  updateLobbyClose(); // entering/leaving a room changes where the ✕ leads
   if (!inRoom) return;
   const isHost = net.role === 'host';
   const priv = net.privacy === 'private';
@@ -5565,6 +5566,21 @@ function connectToRoom() {
 // pause menu, so nothing ever brought the game view back).
 let lobbyReturnToMatch = false;
 
+/// The lobby's ✕ only exists when closing has somewhere to go:
+/// back to the live match it was opened over (lobbyReturnToMatch),
+/// or out of a room back to the browser. On the front door itself
+/// there is NOTHING under the lobby — openLobby cleared .in-match
+/// and the browser IS the page's home screen — so a visible ✕
+/// there stranded the player on a completely black page (bot-loop
+/// live reproduction, 2026-11-03: close the auto-opened Lobby
+/// Browser on the main menu → black page, only the beta banner
+/// left; reload the only recovery). Hide it in that state.
+function updateLobbyClose() {
+  if (!netUi || !netUi.onlineClose) return;
+  const canClose = lobbyReturnToMatch || !!(net && net.room);
+  netUi.onlineClose.style.display = canClose ? '' : 'none';
+}
+
 function openLobby(join) {
   lobbyReturnToMatch = !!(playing && paused && !matchEnded && !join);
   setInMatch(false); // the lobby is up: no game on screen
@@ -5614,6 +5630,7 @@ function openLobby(join) {
     startLobbyBrowser();
   }
   renderRoom();
+  updateLobbyClose();
   updateNetStatus();
 }
 
@@ -6829,8 +6846,20 @@ async function main() {
         fitCanvas();
         return;
       }
-      stopLobbyBrowser();
-      showOverlay(netUi.onlineOverlay, false);
+      if (net && net.room) {
+        // In a room, the ✕ means "leave the room": tear the
+        // session down and land back on the Lobby Browser front
+        // door. (Before this, it merely hid the overlay — the
+        // session stayed alive invisibly and the page went black,
+        // the same stranding as the front-door case.)
+        openLobby(null);
+        return;
+      }
+      // Front door (or any state with nothing under the lobby):
+      // the ✕ is hidden here by updateLobbyClose, because hiding
+      // the overlay would leave a black page with nothing on it.
+      // Guard anyway so no path can strand the player.
+      updateLobbyClose();
     });
   }
   if (netUi.refreshGamesBtn) {
