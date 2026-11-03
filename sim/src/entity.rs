@@ -482,6 +482,11 @@ pub enum QueuedOrder {
     /// form of the Convert command (SEL-12) — executes exactly
     /// like a freshly issued one when the entity becomes idle.
     Convert { target: u32 },
+    /// Convert an enemy building (Castle P5c, MNK-04): the
+    /// queued form of the ConvertBuilding command (SEL-12) —
+    /// buildings live in their own id space, so the queued form
+    /// carries its own variant, like Repair's.
+    ConvertBuilding { building: u32 },
 }
 
 impl QueuedOrder {
@@ -501,6 +506,7 @@ impl QueuedOrder {
             QueuedOrder::RepairTc { .. } => 7,
             QueuedOrder::AttackGround { .. } => 8,
             QueuedOrder::Convert { .. } => 9,
+            QueuedOrder::ConvertBuilding { .. } => 10,
         }
     }
 }
@@ -929,6 +935,16 @@ pub struct Entity {
     /// the monk is re-tasked. Plain data — part of the hashed
     /// state (0xBB block).
     pub conversion_target: Option<u32>,
+    /// The BUILDING this monk is converting (Castle P5c,
+    /// MNK-04): the building half of the conversion record —
+    /// buildings live in their own id space, so the target rides
+    /// its own field beside `conversion_target` (exactly one of
+    /// the two is ever set). Its presence is ALSO the MNK-07
+    /// building→unit reset marker: a unit conversion started
+    /// while this is set zeroes the sticky CI counter (the
+    /// update-95810 rule). Plain data — part of the hashed state
+    /// (0xBB block, appended in P5c) and the save record (v9).
+    pub conversion_target_building: Option<u32>,
     /// Sticky CI progress (MNK-07): completed conversion intervals
     /// toward the current engagement. Lives on the MONK, never on
     /// the pairing: a unit→unit target switch and the automatic
@@ -1025,6 +1041,7 @@ impl Entity {
             faith: 100_000,
             faith_remainder: 0,
             conversion_target: None,
+            conversion_target_building: None,
             ci_progress: 0,
             ci_ticks: 0,
             conversion_level: 1,

@@ -74,6 +74,8 @@ mod monastery_p5a_tests;
 #[cfg(test)]
 mod monastery_p5b_tests;
 #[cfg(test)]
+mod monastery_p5c_tests;
+#[cfg(test)]
 mod monastery_p5e_tests;
 #[cfg(test)]
 mod university_p3c_tests;
@@ -580,6 +582,20 @@ pub enum Command {
     /// (MNK-12) and drains every participating monk's faith
     /// (MNK-06).
     Convert { entity: u32, target: u32 },
+    /// Order a Monk to convert an enemy BUILDING (Castle P5c,
+    /// MNK-04): the building half of the Convert order — buildings
+    /// live in their own id space, so the order carries its own
+    /// variant, like AttackBuilding's. The monk walks ADJACENT to
+    /// the footprint (never range 9) and works the building CI
+    /// row: first roll at CI 15 at 13% (38 / level 3, MNK-05),
+    /// guaranteed at CI 25. Valid only at full faith (MNK-02),
+    /// only with Redemption researched, and only against an
+    /// eligible building (`Sim::can_convert_building` — MNK-08:
+    /// never Town Centers, Castles, Monasteries, walls, gates,
+    /// Farms or foundations). A success transfers the building
+    /// through `transfer_building_ownership` — or destroys it
+    /// when the victim's owner has Heresy (MNK-11, Passo 0.1).
+    ConvertBuilding { entity: u32, building: u32 },
 }
 
 /// ECO-14: one farm reseed costs 60 wood (MECHANICS-STUDY §6.3:
@@ -1656,6 +1672,7 @@ impl Sim {
             e.heal_target = None;
             e.heal_remainder = 0;
             e.conversion_target = None;
+            e.conversion_target_building = None;
             e.ci_progress = 0;
             e.ci_ticks = 0;
             // 3. Ownership moves (population/AI derive from it).
@@ -1677,6 +1694,84 @@ impl Sim {
         }
         // 4. VIC-04: converted value counts like destroyed value.
         self.credit_destruction(new_owner, old_owner, unit_cost_value(kind));
+    }
+
+    /// Transfer one placed BUILDING to a new owner (Castle P5c,
+    /// MNK-04 — the building arm of plan §3.4, joining
+    /// `transfer_ownership` in the same success path): the
+    /// footprint, grid, production/research queue and rally point
+    /// do not move — the queue records name the building, not the
+    /// owner, so the building simply works for its new owner from
+    /// this tick. Three things DO move:
+    ///
+    /// 1. **Passengers eject first (Passo 0.2).** Garrisoned units
+    ///    are ejected at the ring, ownership UNCHANGED, before the
+    ///    owner flips — the documented DE behavior (Aoe2Sheet,
+    ///    Garrisoning: "Units will also be ejected if the
+    ///    Building, Ram or Siege Tower gets converted"; the
+    ///    transport-ship exception names a kind that does not
+    ///    exist here). `eject_host` is the GAR-03 path destruction
+    ///    uses, so the exit geometry is identical.
+    /// 2. **Foreign hands come off it.** The old owner's builders
+    ///    and repairers still tasked on the building stand down,
+    ///    and the building's own weapon (a converted tower) drops
+    ///    its current engagement — it must not keep shooting its
+    ///    new owner's units on a stale target. The NEW owner's
+    ///    attackers aimed at the building stand down the same way
+    ///    the unit arm handles.
+    /// 3. **Score (VIC-04).** The building's cost is credited to
+    ///    the converter exactly as the unit arm credits a
+    ///    converted unit's cost.
+    ///
+    /// No frozen patch snapshot: MNK-12's snapshot is a UNIT
+    /// rule — a building's stats read its (new) owner's tech set
+    /// like every other building the owner holds, per plan §3.4's
+    /// building arm. Population support derives from ownership,
+    /// so both seats' counts move the same tick with no stored
+    /// counter to adjust.
+    pub(crate) fn transfer_building_ownership(&mut self, building: u32, new_owner: u8) {
+        let Some(bi) = self.building_index(building) else {
+            return;
+        };
+        let old_owner = self.buildings[bi].owner;
+        if old_owner == new_owner {
+            return;
+        }
+        // 1. Passengers eject, ownership unchanged (Passo 0.2).
+        self.eject_host(crate::entity::GarrisonRef::Building(building));
+        // 2. Foreign hands off; stale engagements dropped.
+        for e in &mut self.entities {
+            if e.owner != new_owner && e.task_building == Some(building)
+                && matches!(e.task, Task::ToBuild | Task::Building)
+            {
+                e.task = Task::Idle;
+                e.task_building = None;
+                e.task_dropoff = None;
+                e.order = None;
+                e.vel_x = I16F16::ZERO;
+                e.vel_y = I16F16::ZERO;
+            }
+            if matches!(e.task, Task::Repair { building: b } if b == building) && e.owner != new_owner {
+                e.task = Task::Idle;
+                e.task_dropoff = None;
+                e.order = None;
+                e.vel_x = I16F16::ZERO;
+                e.vel_y = I16F16::ZERO;
+            }
+            if e.owner == new_owner && e.attack_building == Some(building) {
+                e.clear_combat();
+            }
+        }
+        let value = {
+            let b = &mut self.buildings[bi];
+            b.weapon_target = None;
+            b.weapon_target_building = None;
+            b.weapon_engaged = false;
+            b.owner = new_owner;
+            b.kind.total_cost().to_num::<i32>() as i64
+        };
+        // 3. VIC-04: converted value counts like destroyed value.
+        self.credit_destruction(new_owner, old_owner, value);
     }
 
     /// The summed resource cost credited to a player for enemy
@@ -2361,7 +2456,7 @@ impl Sim {
     /// (0 when the point is beside or inside it): the point clamped
     /// into the rect, then the offset length — combat's building
     /// geometry, shared.
-    fn distance_to_footprint(
+    pub(crate) fn distance_to_footprint(
         &self,
         px: I16F16,
         py: I16F16,
@@ -3338,6 +3433,7 @@ impl Sim {
         // progress stays sticky — MNK-07 names only the manual
         // move as a reset).
         e.conversion_target = None;
+        e.conversion_target_building = None;
         e.ci_ticks = 0;
     }
 
@@ -4125,6 +4221,9 @@ impl Sim {
             QueuedOrder::Patrol { .. } => self.can_attack_move(entity),
             QueuedOrder::AttackGround { .. } => self.can_attack_ground(entity),
             QueuedOrder::Convert { target } => self.can_convert(entity, target),
+            QueuedOrder::ConvertBuilding { building } => {
+                self.can_convert_building(entity, building)
+            }
         }
     }
 
@@ -4257,6 +4356,7 @@ impl Sim {
             QueuedOrder::Patrol { x, y } => Some((x, y)),
             QueuedOrder::AttackGround { x, y } => Some((x, y)),
             QueuedOrder::Convert { target } => self.entity_pos(target),
+            QueuedOrder::ConvertBuilding { building } => self.building_pos(building),
         }
     }
 
@@ -4449,6 +4549,9 @@ impl Sim {
                 }
                 Command::Heal { entity, target } => self.issue_heal(entity, target),
                 Command::Convert { entity, target } => self.issue_convert(entity, target),
+                Command::ConvertBuilding { entity, building } => {
+                    self.issue_convert_building(entity, building)
+                }
             }
         }
 
@@ -4772,6 +4875,7 @@ impl Sim {
             // chase walks through `set_move_order`, never here,
             // so chasing does not reset.)
             e.conversion_target = None;
+            e.conversion_target_building = None;
             e.ci_progress = 0;
             e.ci_ticks = 0;
         }
@@ -6252,6 +6356,13 @@ impl Sim {
                     return false;
                 }
                 self.apply_convert(idx, target);
+                true
+            }
+            QueuedOrder::ConvertBuilding { building } => {
+                if !self.can_convert_building(entity, building) {
+                    return false;
+                }
+                self.apply_convert_building(idx, building);
                 true
             }
         }
@@ -8635,6 +8746,7 @@ impl Sim {
                         h.write_i32(y.to_bits());
                     }
                     QueuedOrder::Convert { target } => h.write_u32(target),
+                    QueuedOrder::ConvertBuilding { building } => h.write_u32(building),
                 }
             }
             // INF-09: the current order's queue provenance
@@ -8939,6 +9051,7 @@ impl Sim {
                 || e.faith != 100_000
                 || e.faith_remainder != 0
                 || e.conversion_target.is_some()
+                || e.conversion_target_building.is_some()
                 || e.ci_progress != 0
                 || e.ci_ticks != 0
                 || e.conversion_level != 1
@@ -8973,6 +9086,18 @@ impl Sim {
                 h.write_u8(e.conversion_level);
                 h.write_i32(e.conversion_start_shift);
                 h.write_i32(e.conversion_guarantee_shift);
+                // Castle P5c extension, appended inside the same
+                // block: the building half of the conversion
+                // record. A monk with no building target in a
+                // stream that never wrote the block still writes
+                // nothing, so the golden hash does not move.
+                match e.conversion_target_building {
+                    None => h.write_u8(0),
+                    Some(b) => {
+                        h.write_u8(1);
+                        h.write_u32(b);
+                    }
+                }
             }
             // Castle P5b (MNK-12): the frozen patch snapshot —
             // written ONLY while set, behind marker 0xBD (the

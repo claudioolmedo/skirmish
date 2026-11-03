@@ -456,6 +456,28 @@ impl WasmSim {
         self.inner.can_convert_target(entity, target)
     }
 
+    /// Order a Monk to convert an enemy building (Castle P5c,
+    /// MNK-04): the monk walks adjacent to the footprint and
+    /// works the building CI row. Returns whether the order
+    /// *would* be accepted (Redemption + eligible building,
+    /// MNK-08, at full faith, MNK-02); the sim re-validates when
+    /// the command is applied.
+    pub fn push_convert_building(&mut self, entity: u32, building: u32) -> bool {
+        let ok = self.inner.can_convert_building(entity, building);
+        if ok {
+            self.inner
+                .push_command(Command::ConvertBuilding { entity, building });
+        }
+        ok
+    }
+
+    /// Whether `building` is conversion-eligible for the monk
+    /// `entity` (Castle P5c, MNK-08 — eligibility only, no faith
+    /// gate): the client's cursor feedback read.
+    pub fn can_convert_building_target(&self, entity: u32, building: u32) -> bool {
+        self.inner.can_convert_building_target(entity, building)
+    }
+
     /// A Monk's faith as a whole percent 0..100 (Castle P5b,
     /// MNK-02): the selection-line read.
     pub fn monk_faith(&self, entity: u32) -> i32 {

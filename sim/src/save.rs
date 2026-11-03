@@ -64,7 +64,10 @@ const MAGIC: &[u8; 4] = b"SKSV";
 /// faith/conversion block and the frozen patch snapshot
 /// (MNK-12), and the codecs gain `Convert` (Command tag 44,
 /// QueuedOrder tag 9).
-const SAVE_VERSION: u32 = 8;
+/// Version 9: Castle P5c — the entity record gains the monk's
+/// building conversion target (MNK-04), and the codecs gain
+/// `ConvertBuilding` (Command tag 45, QueuedOrder tag 10).
+const SAVE_VERSION: u32 = 9;
 
 /// Little-endian byte writer over a growable buffer.
 struct W {
@@ -202,6 +205,8 @@ impl W {
             QueuedOrder::RepairTc { tc } => self.u32(tc),
             // Castle P5b: QueuedOrder::Convert (tag 9).
             QueuedOrder::Convert { target } => self.u32(target),
+            // Castle P5c: QueuedOrder::ConvertBuilding (tag 10).
+            QueuedOrder::ConvertBuilding { building } => self.u32(building),
         }
     }
     fn bell_snapshot(&mut self, v: Option<BellSnapshot>) {
@@ -493,6 +498,13 @@ impl W {
                 self.u32(entity);
                 self.u32(target);
             }
+            // Castle P5c: the Monk's building convert order
+            // (MNK-04) at tag 45, append-only.
+            Command::ConvertBuilding { entity, building } => {
+                self.u8(45);
+                self.u32(entity);
+                self.u32(building);
+            }
         }
     }
 }
@@ -711,6 +723,9 @@ impl Sim {
                     w.u64(m);
                 }
             }
+            // Castle P5c (v9): the building half of the monk
+            // conversion record (MNK-04).
+            w.opt_u32(e.conversion_target_building);
             w.usize(e.garrison.len());
             for id in &e.garrison {
                 w.u32(*id);
@@ -907,6 +922,9 @@ impl<'a> R<'a> {
                 y: self.fx()?,
             }),
             9 => Some(QueuedOrder::Convert { target: self.u32()? }),
+            10 => Some(QueuedOrder::ConvertBuilding {
+                building: self.u32()?,
+            }),
             _ => None,
         }
     }
@@ -1125,6 +1143,10 @@ impl<'a> R<'a> {
             44 => Some(Command::Convert {
                 entity: self.u32()?,
                 target: self.u32()?,
+            }),
+            45 => Some(Command::ConvertBuilding {
+                entity: self.u32()?,
+                building: self.u32()?,
             }),
             _ => None,
         }
@@ -1423,6 +1445,7 @@ impl Sim {
                 1 => Some(r.u64()?),
                 _ => return None,
             };
+            let conversion_target_building = r.opt_u32()?;
             let n_g = r.count(4)?;
             let mut garrison = Vec::with_capacity(n_g);
             for _ in 0..n_g {
@@ -1488,6 +1511,7 @@ impl Sim {
                 faith,
                 faith_remainder,
                 conversion_target,
+                conversion_target_building,
                 ci_progress,
                 ci_ticks,
                 conversion_level,

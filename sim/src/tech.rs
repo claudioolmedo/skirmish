@@ -295,11 +295,22 @@ pub enum TechId {
     /// TEC-10; the only non-pure-gold row in the set: 100 F /
     /// 200 G). Tag 36.
     Devotion,
+    /// Monastery, Castle: Monks can convert siege units and
+    /// buildings (Castle P5c, MNK-04/MNK-08's Redemption row of
+    /// TEC-10). Tag 37 — appended after P5b's 35/36.
+    Redemption,
+    /// Monastery, Castle: own units that would be converted die
+    /// instead, and own buildings that would be converted are
+    /// destroyed (Castle P5c, MNK-11's Heresy row of TEC-10 —
+    /// buildings per the P5 plan's Passo 0.1: the wiki Heresy
+    /// article sides with the dossier, "Converted buildings are
+    /// destroyed"). Tag 38.
+    Heresy,
 }
 
 impl TechId {
     /// All technologies, in tag order.
-    pub const ALL: [TechId; 37] = [
+    pub const ALL: [TechId; 39] = [
         TechId::Loom,
         TechId::FeudalAge,
         TechId::Fletching,
@@ -337,6 +348,8 @@ impl TechId {
         TechId::HerbalMedicine,
         TechId::Atonement,
         TechId::Devotion,
+        TechId::Redemption,
+        TechId::Heresy,
     ];
 
     /// Stable tag: 0 loom, 1 feudal age, 2 fletching, 3 scale mail,
@@ -418,6 +431,8 @@ impl TechId {
             TechId::HerbalMedicine => 34,
             TechId::Atonement => 35,
             TechId::Devotion => 36,
+            TechId::Redemption => 37,
+            TechId::Heresy => 38,
         }
     }
 
@@ -477,7 +492,9 @@ impl TechId {
             | TechId::Fervor
             | TechId::HerbalMedicine
             | TechId::Atonement
-            | TechId::Devotion => TechHost::Building(BuildingKind::Monastery),
+            | TechId::Devotion
+            | TechId::Redemption
+            | TechId::Heresy => TechHost::Building(BuildingKind::Monastery),
         }
     }
 
@@ -502,6 +519,8 @@ impl TechId {
             | TechId::HerbalMedicine
             | TechId::Atonement
             | TechId::Devotion
+            | TechId::Redemption
+            | TechId::Heresy
             // Castle P3c: the University set is Castle Age research.
             | TechId::Ballistics
             | TechId::MurderHoles
@@ -581,6 +600,8 @@ impl TechId {
             TechId::HerbalMedicine => 2100, // 35 s (wiki, Herbal Medicine — dossier §5.6)
             TechId::Atonement => 2400, // 40 s (wiki, Atonement — dossier §5.6)
             TechId::Devotion => 2400, // 40 s (wiki, Devotion — dossier §5.6)
+            TechId::Redemption => 3000, // 50 s (wiki, Redemption — dossier §5.6)
+            TechId::Heresy => 3600, // 60 s (wiki, Heresy — dossier §5.6)
         }
     }
 
@@ -625,6 +646,8 @@ impl TechId {
             TechId::HerbalMedicine => (0, 0, 200, 0), // wiki, Herbal Medicine — dossier §5.6
             TechId::Atonement => (0, 0, 325, 0), // wiki, Atonement — dossier §5.6
             TechId::Devotion => (100, 0, 200, 0), // wiki, Devotion — dossier §5.6
+            TechId::Redemption => (0, 0, 475, 0), // wiki, Redemption — dossier §5.6
+            TechId::Heresy => (0, 0, 1000, 0), // wiki, Heresy — dossier §5.6
         }
     }
 }
@@ -884,7 +907,10 @@ mod tests {
         // Castle P5b: Atonement / Devotion append at 35/36.
         assert_eq!(TechId::from_tag(35), Some(TechId::Atonement));
         assert_eq!(TechId::from_tag(36), Some(TechId::Devotion));
-        assert_eq!(TechId::from_tag(37), None);
+        // Castle P5c: Redemption / Heresy append at 37/38.
+        assert_eq!(TechId::from_tag(37), Some(TechId::Redemption));
+        assert_eq!(TechId::from_tag(38), Some(TechId::Heresy));
+        assert_eq!(TechId::from_tag(39), None);
     }
 
     #[test]
@@ -1029,8 +1055,9 @@ mod tests {
         // 32 entries at this test's landing; P5a's Sanctity/
         // Fervor (32/33) and P5e's Herbal Medicine (34) append
         // after it, and P5b's Atonement/Devotion (35/36) after
-        // those, so ALL now holds 37.
-        assert_eq!(TechId::ALL.len(), 37);
+        // those, and P5c's Redemption/Heresy (37/38) last, so
+        // ALL now holds 39.
+        assert_eq!(TechId::ALL.len(), 39);
         // ECO-14: the farm gather lookup meets the farm's own
         // 0.4 food/s work-rate cap — the base farm rate sits
         // below it today, so the clamped value is the base rate,

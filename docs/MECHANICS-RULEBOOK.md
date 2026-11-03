@@ -2607,6 +2607,12 @@ is outstanding — so the rule stays MISSING until the whole list lands.
 and Devotion (TechId 36, 100F/200G, 40 s) land with the conversion
 core — five of the seven Castle-row entries now stand; Redemption and
 Heresy ride P5c, and the Imperial row keeps the rule MISSING.
+*Progress (Castle P5c, 2026-11-02):* Redemption (TechId 37, 475G, 50 s)
+and Heresy (TechId 38, 1000G, 60 s) land with the building/contact
+conversion unlocks — the Castle row is now COMPLETE (7 of 7: Sanctity,
+Fervor, Herbal Medicine, Atonement, Devotion, Redemption, Heresy);
+the Imperial row (Block Printing, Theocracy, Faith, Illumination)
+keeps the rule MISSING.
 · *Status:* **MISSING**.
 
 **TEC-11 — Unique technologies are an extension point.** Each empire has
@@ -2678,10 +2684,25 @@ range 9). Building conversion starts its first attempt at the 15th CI,
 rolls 13% per CI, and is guaranteed at the 25th CI. Rams, Armored
 Elephants, and Trebuchets likewise require an adjacent monk even for unit
 conversion attempts.
-*Source:* wiki, Conversion (building timings, contact-conversion units).
+*Source:* wiki, Conversion (building timings, contact-conversion units);
+wiki, Redemption (contact-only list: buildings, Trebuchets, Siege Towers
+and Battering Rams — every other siege weapon converts at range).
 · *Impl:* the conversion record distinguishes (building | contact-unit |
 ranged-unit) timing rows in the monk data table; adjacency uses the same
-range check as melee (CMB-06). · *Status:* **MISSING**.
+range check as melee (CMB-06). Shipped in Castle P5c (2026-11-02):
+buildings convert through `Command::ConvertBuilding` — the monk walks
+adjacent to the footprint (footprint distance within melee reach; no
+progress at range 9), first roll at CI 15 at 13% (the level-3 row of
+MNK-05's one formula), guaranteed at CI 25; the Battering Ram converts
+at contact on the unit timing row while the Mangonel converts at range
+9; success routes through `transfer_building_ownership` (queue and
+rally persist; garrisoned passengers eject at the ring with their
+ownership unchanged — Passo 0.2, Aoe2Sheet, Garrisoning). Pinned by
+`building_conversion_lands_only_in_ci_15_to_25`,
+`building_conversion_makes_no_progress_from_range`,
+`ram_converts_at_contact_only_mangonel_at_range` and
+`converted_building_keeps_queue_and_rally_and_ejects_passengers` in
+`sim/src/monastery_p5c_tests.rs`. · *Status:* **MATCHES**.
 
 **MNK-05 — Resistance divides the chance, shifts the clock.** Each target
 type has a resistance *level* n: the per-CI chance is 38/max(1, n) %.
@@ -2696,9 +2717,9 @@ units, 1 CI ≈ 1.25 s.)
 are integer CI adds applied when a conversion starts. Empire-specific
 rows (Teutons) are extension content (§C). Shipped for unit targets in
 Castle P5b (2026-11-02): Scout-line level 2 (19%/CI, +3/+1), Devotion
-+1/+1 read against the target's owner at conversion start; the building
-(level 3) and ship rows are data in the same table, consumed by P5c /
-the naval program. The Faith +4/+4 row reads an Imperial flag that
++1/+1 read against the target's owner at conversion start; the building row
+(level 3 → 13%/CI, CI 15–25) is consumed by P5c's building arm
+(2026-11-02) and the ship row stays data for the naval program. The Faith +4/+4 row reads an Imperial flag that
 stays false. Pinned by `scout_resistance_window_is_ci_8_to_10` and
 `devotion_shifts_the_victims_window_by_one_ci`. ·
 *Status:* **MATCHES**.
@@ -2729,9 +2750,10 @@ building→unit reset). · *Impl:* the CI counter lives on the *monk*, not
 the pairing; only (manual-move command | building→unit switch) zeroes it.
 Shipped for the unit arms in Castle P5b (2026-11-02): the counter
 lives on the monk; unit→unit switches and the automatic chase keep it,
-a manual move order zeroes it. The building→unit reset arm lands with
-building conversion in P5c (no building conversion exists yet to
-switch from). Pinned by
+a manual move order zeroes it. The building→unit reset arm landed with
+building conversion in Castle P5c (2026-11-02), pinned there by
+`building_to_unit_switch_resets_ci_unit_switches_do_not` (which also
+pins that the unit→building switch keeps the counter). Pinned by
 `ci_progress_is_sticky_across_targets_and_chase_but_not_manual_move`.
 · *Status:* **MATCHES**.
 
@@ -2747,10 +2769,13 @@ flags per CLS-01, gates per TEC-10. Shipped complete for units in
 Castle P5b (2026-11-02) as the one eligibility function
 (`Sim::eligible_target` / `can_convert_target`): villagers and ordinary
 military always; enemy monks only with Atonement (landed in this
-slice); siege units gated on a Redemption flag read that stays closed
-until the tech lands in P5c — which also keeps every building,
-Town Centers/Castles/Monasteries included, out of reach in this slice,
-as DE requires without Redemption; heroes/Kings/foundations/walls/
+slice); siege units gated on Redemption (the tech landed in Castle P5c,
+2026-11-02, TechId 37), which also opens the function's BUILDING arm
+(`eligible_building`): complete, enemy, non-never-list buildings
+convert with Redemption, and Town Centers/Castles/Monasteries/walls/
+gates/Farms/foundations refuse even with it — pinned by
+`building_eligibility_matrix_with_redemption` in
+`sim/src/monastery_p5c_tests.rs`; heroes/Kings/foundations/walls/
 Farms/Fish Traps name kinds or flags that do not exist in this roster
 yet and are refused by construction when they land on the same
 function. Garrisoned units are never offered (GAR-02). Pinned by
@@ -2792,11 +2817,24 @@ touches the target's orders or any faith state. Pinned by
 
 **MNK-11 — Heresy turns conversion into death.** If a player with Heresy
 would lose a unit to conversion, the unit dies instead of changing sides.
-Buildings are exempt (they convert normally).
-*Source:* wiki, Conversion (Heresy note); Technology wiki. · *Impl:* at
-the conversion-success moment, check the *victim owner's* tech set: if
-Heresy and target is a unit → route to the death sweep (CMB-14) instead
-of the ownership transfer. · *Status:* **MISSING**.
+Buildings are NOT exempt: a building that would be converted is
+destroyed instead. *(Text corrected in Castle P5c, 2026-11-02, under
+the P5 plan's Passo 0.1: this rule previously read "Buildings are
+exempt (they convert normally)", which the wiki Heresy article
+contradicts — "Converted buildings are destroyed" — siding with the
+Castle Age dossier §5.6; the Building article agrees: "Buildings
+converted by enemy Monks collapse instead of changing color.")*
+*Source:* wiki, Heresy; wiki, Conversion (Heresy note); Technology wiki.
+· *Impl:* at the conversion-success moment, check the *victim owner's*
+tech set: if Heresy and target is a unit → route to the death sweep
+(CMB-14) instead of the ownership transfer; if Heresy and the target is
+a building → destroy it (`destroy_building`, GAR-03 ejection included)
+instead of `transfer_building_ownership`. The participants still rest
+(MNK-06) — the conversion succeeded. Shipped in Castle P5c (2026-11-02,
+Heresy = TechId 38, 1000G, 60 s, Monastery). Pinned by
+`heresy_unit_dies_instead_of_converting` and
+`heresy_building_is_destroyed_instead_of_converting` in
+`sim/src/monastery_p5c_tests.rs`. · *Status:* **MATCHES**.
 
 **MNK-12 — Converted units keep their attributes.** A converted unit
 keeps exactly the stats and upgrades it had at the moment of conversion:
@@ -2815,8 +2853,10 @@ before ownership moves, and the one stat lookup (`unit_stats` →
 current HP is preserved, population (derived from ownership) moves
 seats the same tick, and VIC-04 credits the converted value like a
 kill. A converted villager builds with the new owner's set because
-build gates read the owner. The building arm joins the same function
-in P5c. Pinned by
+build gates read the owner. The building arm joined the same success
+path in Castle P5c (2026-11-02) as `transfer_building_ownership`
+(§3.4's building arm: queue/rally persist, passengers eject; buildings
+carry no frozen snapshot — MNK-12's snapshot is a unit rule). Pinned by
 `converted_knight_keeps_its_snapshot_against_both_owners_later_techs`
 and `converted_monk_loses_its_own_in_flight_conversion`. ·
 *Status:* **MATCHES**.

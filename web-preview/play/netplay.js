@@ -190,6 +190,10 @@ export function validateCommand(c) {
     // Castle P5b (MNK-03): a Monk tasked to convert a unit —
     // an entity id and a target entity id, like heal's shape.
     case 'convert': return isInt(c.e) && isInt(c.tg);
+    // Castle P5c (MNK-04): a Monk tasked to convert a building —
+    // the building rides its own field (buildings have their own
+    // id space, like attackb's).
+    case 'convertb': return isInt(c.e) && isInt(c.b);
     // The cap is the build table's own length (BUILD_FNS): every
     // kind the applier can dispatch is wire-legal, the first
     // index past the table is junk. (BLD-20 raised it to 14 with
@@ -210,7 +214,7 @@ export function validateCommand(c) {
       || c.tech === 14 || c.tech === 15 || c.tech === 18
       || c.tech === 27 || c.tech === 28) && (c.tc === undefined || isInt(c.tc));
     case 'research_at': return isInt(c.b) && isInt(c.tech) && (c.tech <= 13 || c.tech === 16 || c.tech === 17 || c.tech === 19
-      || (c.tech >= 20 && c.tech <= 26) || (c.tech >= 29 && c.tech <= 36));
+      || (c.tech >= 20 && c.tech <= 26) || (c.tech >= 29 && c.tech <= 38));
     // Package K (TRD-04): a tribute names the recipient's owner
     // tag (0 or 2 — the only seats), a ResourceKind tag (food 1,
     // wood 2, gold 3, stone 4) and a positive amount. The amount
@@ -328,6 +332,10 @@ export function applyCommand(sim, cmd, owner, tcOf) {
     // derives validity from the monk and the target, so one
     // form serves both seats (as heal).
     case 'convert': return sim.push_convert(cmd.e, cmd.tg);
+    // Castle P5c (MNK-04): the building form of the convert
+    // order — the sim re-validates (Redemption, eligibility,
+    // full faith) when the command is applied.
+    case 'convertb': return sim.push_convert_building(cmd.e, cmd.b);
     // TRD-01..03: Market trades — the sim derives the owner from
     // the building, so one form serves both seats (as research_at).
     case 'mbuy': return sim.push_market_buy(cmd.b, cmd.r);

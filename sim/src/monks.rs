@@ -18,6 +18,7 @@
 
 use fixed::types::I16F16;
 
+use crate::build::BuildingKind;
 use crate::entity::{EntityKind, Task};
 use crate::tech::TechId;
 use crate::Sim;
@@ -53,6 +54,32 @@ pub const GUARANTEE_CI: u32 = 9;
 /// MNK-03/MNK-05: the base per-CI chance, in percent; the rolled
 /// chance against a target is `BASE_CHANCE_PCT / max(1, level)`.
 pub const BASE_CHANCE_PCT: u32 = 38;
+
+/// MNK-04 (Castle P5c): the building CI row — the first roll
+/// lands at CI 15 and conversion is guaranteed at CI 25. The
+/// per-CI chance is the level-3 row of the one MNK-05 formula
+/// (38/3 ≈ 13%, the figure MNK-04's text pins).
+pub const BUILDING_FIRST_ROLL_CI: u32 = 15;
+pub const BUILDING_GUARANTEE_CI: u32 = 25;
+
+/// The MNK-05 chance for a resistance `level`: 38 / level,
+/// rounded to the nearest percent — one formula giving the
+/// documented rows exactly (level 1 → 38%, level 2 → 19%,
+/// level 3 → 13%).
+fn chance_pct(level: u32) -> u32 {
+    let level = level.max(1);
+    (BASE_CHANCE_PCT + level / 2) / level
+}
+
+/// MNK-04's contact kinds: the units that convert only with the
+/// monk ADJACENT even though they are units — Battering Rams
+/// here; Armored Elephants and Trebuchets join this predicate
+/// when those kinds exist (the Redemption wiki article's list:
+/// buildings, Trebuchets, Siege Towers and Battering Rams are
+/// contact-only; every OTHER siege weapon converts at range).
+fn is_contact_unit(kind: EntityKind) -> bool {
+    matches!(kind, EntityKind::BatteringRam)
+}
 
 /// MNK-10: the heal range, 4 tiles = 16 world units, measured
 /// center-to-center like every other range in the sim
@@ -138,6 +165,7 @@ impl Sim {
         // (the monk is re-tasked by hand; CI progress stays
         // sticky — MNK-07 names only the manual MOVE as a reset).
         e.conversion_target = None;
+        e.conversion_target_building = None;
         e.ci_ticks = 0;
         if e.heal_target != Some(target) {
             e.heal_target = Some(target);
@@ -164,17 +192,17 @@ impl Sim {
     }
 
     /// Whether the Redemption flag stands for `owner` (MNK-08's
-    /// siege/building gate). The flag is READ in P5b; the tech
-    /// itself lands in Castle P5c — until then the gate is simply
-    /// always closed, which is the correct DE behavior for a
-    /// player without Redemption.
+    /// siege/building gate). Read in P5b; the tech itself landed
+    /// in Castle P5c (TechId 37, Monastery, 475 G / 50 s).
     fn redemption_researched(&self, owner: u8) -> bool {
-        // Redemption has no TechId until P5c allocates one; this
-        // accessor is the flag's read site — P5c's tech row makes
-        // it `self.has_tech(owner, TechId::Redemption)` and the
-        // gate opens with no eligibility change.
-        let _ = owner;
-        false
+        self.has_tech(owner, TechId::Redemption)
+    }
+
+    /// Whether the Heresy flag stands for `owner` (MNK-11):
+    /// checked in the success handler against the VICTIM owner's
+    /// set (Castle P5c, TechId 38, Monastery, 1000 G / 60 s).
+    fn heresy_researched(&self, owner: u8) -> bool {
+        self.has_tech(owner, TechId::Heresy)
     }
 
     /// MNK-08 eligibility of the target at `ti` for a monk of
@@ -251,6 +279,122 @@ impl Sim {
         self.entities[mi].faith >= FAITH_FULL
     }
 
+    /// MNK-08 eligibility of the BUILDING at `bi` for a monk of
+    /// `monk_owner` (Castle P5c — the building arm of the one
+    /// eligibility function): the monk's owner must hold
+    /// Redemption; the building must be COMPLETE (foundations are
+    /// on DE's never list), enemy-owned and player-owned; and its
+    /// kind must not be on the never-even-with-Redemption list:
+    /// Town Centers, Castles, Monasteries, walls, gates, Farms
+    /// (and Wonders / Kreposts / Fortified Churches / Fish Traps —
+    /// kinds that do not exist here, named in DE's list and
+    /// refused by construction when they land, as the unit arm
+    /// documents). Everything else — House, Barracks, camps,
+    /// Market, Blacksmith, ranges, Stable, towers, University,
+    /// Siege Workshop — converts.
+    fn eligible_building(&self, monk_owner: u8, bi: usize) -> bool {
+        if !self.redemption_researched(monk_owner) {
+            return false;
+        }
+        let b = &self.buildings[bi];
+        if !b.complete || b.owner == monk_owner {
+            return false;
+        }
+        if crate::player_slot(b.owner).is_none() {
+            return false; // Gaia-owned structures are not targets.
+        }
+        !matches!(
+            b.kind,
+            BuildingKind::TownCenter
+                | BuildingKind::Castle
+                | BuildingKind::Monastery
+                | BuildingKind::PalisadeWall
+                | BuildingKind::StoneWall
+                | BuildingKind::PalisadeGate
+                | BuildingKind::StoneGate
+                | BuildingKind::Farm
+        )
+    }
+
+    /// Whether a `ConvertBuilding` order's TARGET is eligible
+    /// right now (MNK-08 only — no faith gate): the client reads
+    /// this for cursor feedback, the sim re-validates on apply.
+    pub fn can_convert_building_target(&self, entity: u32, building: u32) -> bool {
+        let (Some(mi), Some(bi)) = (self.entity_index(entity), self.building_index(building))
+        else {
+            return false;
+        };
+        let m = &self.entities[mi];
+        if m.kind != EntityKind::Monk || !self.orderable(mi) {
+            return false;
+        }
+        self.eligible_building(m.owner, bi)
+    }
+
+    /// Whether a `ConvertBuilding` command would be accepted
+    /// right now: an eligible building (MNK-08) AND full faith
+    /// (MNK-02).
+    pub fn can_convert_building(&self, entity: u32, building: u32) -> bool {
+        if !self.can_convert_building_target(entity, building) {
+            return false;
+        }
+        let mi = self.entity_index(entity).unwrap();
+        self.entities[mi].faith >= FAITH_FULL
+    }
+
+    /// Apply a `ConvertBuilding` command (MNK-04): replace
+    /// semantics like every direct order; the monk phase walks
+    /// the monk adjacent to the footprint and advances the
+    /// building CI row.
+    pub(crate) fn issue_convert_building(&mut self, entity: u32, building: u32) {
+        if !self.can_convert_building(entity, building) {
+            return;
+        }
+        let idx = self.entity_index(entity).unwrap();
+        self.entities[idx].order_queue.clear();
+        self.entities[idx].order_from_queue = false;
+        self.apply_convert_building(idx, building);
+    }
+
+    /// The mechanics of a building convert order, shared by the
+    /// `ConvertBuilding` command and queued-order execution.
+    /// The resistance stamps encode the building row (MNK-04/05)
+    /// in the same fields the unit row uses: level 3, and shifts
+    /// that lift the unit bases (first roll CI 5, guarantee CI 9)
+    /// to the building bases (CI 15 / CI 25) — the +10/+16 deltas
+    /// are the row difference, with the target owner's Devotion
+    /// shift (MNK-05's +1/+1, read at start like the unit row)
+    /// added on top. Sticky progress (MNK-07): switching unit →
+    /// building does NOT reset the counter — only the
+    /// building → unit switch does (see `apply_convert`).
+    pub(crate) fn apply_convert_building(&mut self, idx: usize, building: u32) {
+        let bi = self.building_index(building).unwrap();
+        let target_owner = self.buildings[bi].owner;
+        let devotion = self.has_tech(target_owner, TechId::Devotion);
+        let shift = if devotion { 1 } else { 0 };
+        let e = &mut self.entities[idx];
+        e.task = Task::Idle;
+        e.task_node = None;
+        e.task_building = None;
+        e.task_dropoff = None;
+        e.clear_combat();
+        e.auto_explore = false;
+        e.auto_target = None;
+        e.attack_move = None;
+        e.patrol.clear();
+        e.patrol_next = 0;
+        e.garrison_target = None;
+        e.garrison_prod_entry = false;
+        e.heal_target = None;
+        e.heal_remainder = 0;
+        e.conversion_target = None;
+        e.conversion_target_building = Some(building);
+        e.conversion_level = 3;
+        e.conversion_start_shift = (BUILDING_FIRST_ROLL_CI - FIRST_ROLL_CI) as i32 + shift;
+        e.conversion_guarantee_shift =
+            (BUILDING_GUARANTEE_CI - GUARANTEE_CI) as i32 + shift;
+    }
+
     /// A monk's faith as a whole percent (0..100) — the client's
     /// selection-line read (MNK-02). Missing/non-monk ids read 0.
     pub fn monk_faith(&self, entity: u32) -> i32 {
@@ -288,6 +432,17 @@ impl Sim {
     /// clear the queue behind it). Callers validate first
     /// (`can_convert`).
     pub(crate) fn apply_convert(&mut self, idx: usize, target: u32) {
+        // MNK-07, the building→unit arm (Castle P5c — its test
+        // was assigned to this slice by the plan, §5): a monk
+        // leaving a BUILDING conversion for a unit target resets
+        // the sticky CI counter (the update-95810 rule). A
+        // unit→unit switch keeps it, as does unit→building
+        // (`apply_convert_building` never zeroes it either).
+        if self.entities[idx].conversion_target_building.is_some() {
+            let e = &mut self.entities[idx];
+            e.ci_progress = 0;
+            e.ci_ticks = 0;
+        }
         let ti = self.entity_index(target).unwrap();
         let (level, scout) = {
             let k = self.entities[ti].kind;
@@ -314,6 +469,7 @@ impl Sim {
         e.heal_target = None;
         e.heal_remainder = 0;
         e.conversion_target = Some(target);
+        e.conversion_target_building = None;
         e.conversion_level = level;
         e.conversion_start_shift = start_shift;
         e.conversion_guarantee_shift = guarantee_shift;
@@ -350,6 +506,9 @@ impl Sim {
     /// not also heal (its hands are busy; the DE reading the
     /// heal arm's own one-target discipline mirrors).
     fn conversion_step(&mut self, idx: usize) -> bool {
+        if self.entities[idx].conversion_target_building.is_some() {
+            return self.conversion_building_step(idx);
+        }
         let Some(target) = self.entities[idx].conversion_target else {
             return false;
         };
@@ -370,7 +529,17 @@ impl Sim {
         let ti = self.entity_index(target).unwrap();
         let (tx, ty) = (self.entities[ti].pos_x, self.entities[ti].pos_y);
         let dist = self.distance_to(idx, tx, ty);
-        if dist > CONVERT_RANGE {
+        // MNK-04 (Castle P5c): contact units (the Battering Ram)
+        // convert only with the monk ADJACENT — the CMB-06 melee
+        // reach against the target's center — while every other
+        // siege weapon (Mangonel, Scorpion) converts at the full
+        // range 9 like any unit (the Redemption article's split).
+        let limit = if is_contact_unit(self.entities[ti].kind) {
+            crate::combat::MELEE_REACH
+        } else {
+            CONVERT_RANGE
+        };
+        if dist > limit {
             // Automatic chase (MNK-07): does NOT reset progress.
             let stale = match &self.entities[idx].order {
                 None => true,
@@ -414,9 +583,109 @@ impl Sim {
         if progress >= guarantee {
             self.conversion_success(idx, target);
         } else if progress >= first_roll {
-            let chance = BASE_CHANCE_PCT / level;
+            let chance = chance_pct(level);
             if self.rng.below(100) < chance {
                 self.conversion_success(idx, target);
+            }
+        }
+        true
+    }
+
+    /// One monk's BUILDING conversion advance for this tick
+    /// (Castle P5c, MNK-04): the same CI machinery as the unit
+    /// row, with the range check replaced by ADJACENCY to the
+    /// footprint — the monk stands in the ring around the
+    /// building (footprint distance within the CMB-06 melee
+    /// reach, the same clamp geometry combat uses against
+    /// buildings) and makes NO progress from range 9. The CI
+    /// window itself rides the stamps `apply_convert_building`
+    /// set (first roll CI 15, guarantee CI 25, level 3 → 13%).
+    fn conversion_building_step(&mut self, idx: usize) -> bool {
+        let Some(building) = self.entities[idx].conversion_target_building else {
+            return false;
+        };
+        let owner = self.entities[idx].owner;
+        let valid = match self.building_index(building) {
+            Some(bi) => self.eligible_building(owner, bi),
+            None => false,
+        };
+        if !valid {
+            // Building destroyed, converted or no longer
+            // eligible: the task ends; sticky progress SURVIVES
+            // (MNK-07 — it is the building→UNIT switch by hand
+            // that resets, not the target's loss).
+            let e = &mut self.entities[idx];
+            e.conversion_target_building = None;
+            e.ci_ticks = 0;
+            return false;
+        }
+        let bi = self.building_index(building).unwrap();
+        let b = &self.buildings[bi];
+        let (bx, by, kind) = (b.pos_x, b.pos_y, b.kind);
+        let (mx, my) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
+        let dist = self.distance_to_footprint(mx, my, bx, by, kind);
+        if dist > crate::combat::MELEE_REACH {
+            // Automatic chase (MNK-07): steer to the standing
+            // point just outside the footprint edge on the monk's
+            // approach line (the drop-off steer geometry), and
+            // only re-path when the standing order is stale. The
+            // chase does NOT reset progress.
+            let half = I16F16::from_num(kind.footprint_size() as i32 * 2);
+            let qx = mx.clamp(bx - half, bx + half);
+            let qy = my.clamp(by - half, by + half);
+            let (dx, dy) = (mx - qx, my - qy);
+            let (sx, sy) = if dx == I16F16::ZERO && dy == I16F16::ZERO {
+                (bx + half + I16F16::from_num(2), by)
+            } else {
+                let len = crate::steer::vec_len(dx, dy);
+                let out = I16F16::from_num(2);
+                (qx + dx * out / len, qy + dy * out / len)
+            };
+            let stale = match &self.entities[idx].order {
+                None => true,
+                Some(o) => {
+                    crate::steer::vec_len(o.target_x - sx, o.target_y - sy)
+                        > I16F16::from_num(2)
+                }
+            };
+            if stale {
+                self.set_move_order(idx, sx, sy);
+            }
+            return true;
+        }
+        // Adjacent: stand and chant. Any walk order is over.
+        if self.entities[idx].order.is_some() {
+            let e = &mut self.entities[idx];
+            e.order = None;
+            e.vel_x = I16F16::ZERO;
+            e.vel_y = I16F16::ZERO;
+        }
+        {
+            let e = &mut self.entities[idx];
+            e.ci_ticks += 1;
+            if e.ci_ticks < CI_TICKS {
+                return true;
+            }
+            e.ci_ticks = 0;
+            e.ci_progress += 1;
+        }
+        let (progress, first_roll, guarantee, level) = {
+            let e = &self.entities[idx];
+            let first_roll =
+                (FIRST_ROLL_CI as i32 + e.conversion_start_shift).max(1) as u32;
+            let guarantee = ((GUARANTEE_CI as i32 + e.conversion_guarantee_shift)
+                .max(first_roll as i32)) as u32;
+            (e.ci_progress, first_roll, guarantee, e.conversion_level.max(1) as u32)
+        };
+        // RNG discipline, identical to the unit row: exactly one
+        // draw per rolled CI boundary, none in warm-up, none at
+        // the guarantee.
+        if progress >= guarantee {
+            self.conversion_building_success(idx, building);
+        } else if progress >= first_roll {
+            let chance = chance_pct(level);
+            if self.rng.below(100) < chance {
+                self.conversion_building_success(idx, building);
             }
         }
         true
@@ -443,12 +712,95 @@ impl Sim {
                     && e.conversion_target == Some(target)
             })
             .collect();
-        self.transfer_ownership(target, new_owner);
+        // MNK-11 (Castle P5c): Heresy — checked against the
+        // VICTIM owner's tech set at the success moment. The
+        // conversion "succeeded" (the participants below still
+        // rest), but a victim whose owner holds Heresy DIES
+        // instead of changing sides: its HP is zeroed and the
+        // ordinary death sweep (CMB-14, next tick's combat
+        // phase — the monk phase runs after combat) takes it,
+        // corpse and counters included. The kill is attributed
+        // to the converting owner for VIC-04, exactly as the
+        // transfer arm credits converted value; no killer ENTITY
+        // is named, so no carcass-harvest side path opens.
+        let victim_owner = self
+            .entity_index(target)
+            .map(|ti| self.entities[ti].owner)
+            .unwrap_or(new_owner);
+        if victim_owner != new_owner && self.heresy_researched(victim_owner) {
+            if let Some(ti) = self.entity_index(target) {
+                let e = &mut self.entities[ti];
+                e.hp = I16F16::ZERO;
+                e.last_hit_by = None;
+                e.last_hit_owner = Some(new_owner);
+            }
+        } else {
+            self.transfer_ownership(target, new_owner);
+        }
+        self.rest_participants(&participants, new_owner, false);
+    }
+
+    /// Building conversion success (Castle P5c, MNK-04 + MNK-11):
+    /// the building routes through `transfer_building_ownership`
+    /// — or, when the victim's owner holds Heresy, it is
+    /// DESTROYED instead (Passo 0.1: the wiki Heresy article —
+    /// "Converted buildings are destroyed" — sides with the
+    /// dossier against the rulebook's earlier "buildings are
+    /// exempt" line, which this slice's commit corrects with the
+    /// citation). Destruction rides `destroy_building`, so the
+    /// garrison ejects unharmed (GAR-03) and the footprint frees
+    /// exactly as a razed building's does; the VIC-04 credit and
+    /// the INF-11 building counters are recorded for the
+    /// converting owner first, mirroring the lethal-hit path in
+    /// `damage_building`. Participants rest exactly as in the
+    /// unit arm (MNK-06).
+    fn conversion_building_success(&mut self, monk_idx: usize, building: u32) {
+        let new_owner = self.entities[monk_idx].owner;
+        let participants: Vec<usize> = (0..self.entities.len())
+            .filter(|&i| {
+                let e = &self.entities[i];
+                e.kind == EntityKind::Monk
+                    && !e.dead
+                    && e.owner == new_owner
+                    && e.conversion_target_building == Some(building)
+            })
+            .collect();
+        let victim_owner = self
+            .building_index(building)
+            .map(|bi| self.buildings[bi].owner)
+            .unwrap_or(new_owner);
+        if victim_owner != new_owner && self.heresy_researched(victim_owner) {
+            let value = self
+                .building_index(building)
+                .map(|bi| self.buildings[bi].kind.total_cost().to_num::<i32>() as i64)
+                .unwrap_or(0);
+            self.credit_destruction(new_owner, victim_owner, value);
+            self.note_building_destroyed(new_owner, victim_owner);
+            self.destroy_building(building);
+        } else {
+            self.transfer_building_ownership(building, new_owner);
+        }
+        self.rest_participants(&participants, new_owner, true);
+    }
+
+    /// MNK-06's shared rest, factored for the unit and building
+    /// success arms: every participant's record clears; ALL
+    /// participants drain faith to 0 — unless the converting
+    /// owner has Theocracy, in which case only the lowest-id
+    /// participant drains (the others keep their faith; their
+    /// records still clear). Drained monks' CI progress resets
+    /// with the rest; non-drained participants keep theirs.
+    /// `building` selects which target field the records clear.
+    fn rest_participants(&mut self, participants: &[usize], new_owner: u8, building: bool) {
         let theocracy = self.theocracy_researched(new_owner);
         for (n, &pi) in participants.iter().enumerate() {
             let drains = !theocracy || n == 0;
             let e = &mut self.entities[pi];
-            e.conversion_target = None;
+            if building {
+                e.conversion_target_building = None;
+            } else {
+                e.conversion_target = None;
+            }
             e.ci_ticks = 0;
             if drains {
                 e.faith = 0;
@@ -479,6 +831,7 @@ impl Sim {
                 e.heal_target = None;
                 e.heal_remainder = 0;
                 e.conversion_target = None;
+                e.conversion_target_building = None;
                 e.ci_ticks = 0;
                 continue;
             }

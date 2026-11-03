@@ -103,6 +103,11 @@ test('validateCommand accepts the full vocabulary and rejects junk', () => {
     { t: 'convert', e: 1, tg: 2 },
     { t: 'research_at', b: 3, tech: 35 },
     { t: 'research_at', b: 3, tech: 36 },
+    // Castle P5c: the Monk's building convert order and the two
+    // last Monastery researches (Redemption 37, Heresy 38).
+    { t: 'convertb', e: 1, b: 3 },
+    { t: 'research_at', b: 3, tech: 37 },
+    { t: 'research_at', b: 3, tech: 38 },
     { t: 'auto_explore', e: 4, on: true },
     { t: 'auto_explore', e: 4, on: false },
     { t: 'attackmove', e: 4, x: 10, y: -2 },

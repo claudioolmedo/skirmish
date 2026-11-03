@@ -497,6 +497,7 @@ function refreshNames() {
     32: t('tech.sanctity'), 33: t('tech.fervor'),
     34: t('tech.herbalmedicine'),
     35: t('tech.atonement'), 36: t('tech.devotion'),
+    37: t('tech.redemption'), 38: t('tech.heresy'),
   };
   RESEARCH_BLOCK_TITLES = [
     '', t('block.noResources'), t('block.queueFullTrain'),
@@ -1236,7 +1237,7 @@ function updateEventFeed() {
   const lines = diffFeedEvents(prev, snap, {
     buildingName: (k) => BUILD_NAME[k],
     unitName: (k) => KIND_NAME[k],
-    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15, lightcavalry: 16, husbandry: 17, caravan: 19, coinage: 25, banking: 26, townwatch: 27, townpatrol: 28, conscription: 29, heavyplow: 30, croprotation: 31, sanctity: 32, fervor: 33, herbalmedicine: 34, atonement: 35, devotion: 36 }[key]],
+    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15, lightcavalry: 16, husbandry: 17, caravan: 19, coinage: 25, banking: 26, townwatch: 27, townpatrol: 28, conscription: 29, heavyplow: 30, croprotation: 31, sanctity: 32, fervor: 33, herbalmedicine: 34, atonement: 35, devotion: 36, redemption: 37, heresy: 38 }[key]],
   }, feedFmt());
   feedPrev = snap;
   for (const text of lines) pushFeedLine(text);
@@ -3763,6 +3764,8 @@ function applyLocalOrder(cmd) {
     case 'heal': return sim.push_heal(cmd.e, cmd.tg);
     // Castle P5b (MNK-03): task a Monk to convert an enemy unit.
     case 'convert': return sim.push_convert(cmd.e, cmd.tg);
+    // Castle P5c (MNK-04): task a Monk to convert an enemy building.
+    case 'convertb': return sim.push_convert_building(cmd.e, cmd.b);
     case 'train_vil': return sim.push_train_villager_at(cmd.tc != null ? cmd.tc : myTcId);
     case 'research_tc': return sim.push_research_tc_at(cmd.tc != null ? cmd.tc : myTcId, cmd.tech);
     case 'research_at': return sim.push_research_at(cmd.b, cmd.tech);
@@ -7304,6 +7307,21 @@ async function main() {
       }
       if (any) { orderAck('order'); return; }
     }
+    // Convert a building (Castle P5c, MNK-04): a right-click on
+    // an enemy building with Monk(s) selected tasks every
+    // selected Monk to convert it (Redemption and adjacency are
+    // the sim's call — can_convert_building gates each monk; a
+    // refused monk simply issues nothing and the click falls
+    // through to the attack meaning below for the rest).
+    if (bT && bT.owner === foeOwner() && cellExploredW(bT.x, bT.y)
+        && targets.some((id) => st.kinds[id] === 20)) {
+      let any = false;
+      for (const id of targets) {
+        if (st.kinds[id] !== 20) continue;
+        if (issue({ t: 'convertb', e: id, b: bT.id })) any = true;
+      }
+      if (any) { orderAck('order'); return; }
+    }
     // An enemy building (M5): attack it via the building order.
     // (No queued form in M5 — the order replaces, like a fresh
     // right-click should.)
@@ -7538,7 +7556,24 @@ async function main() {
   function attemptConvert(wx, wy) {
     const tg = entityAt(wx, wy);
     if (tg == null) {
-      flash(t('flash.convertArmUnit'));
+      // Castle P5c (MNK-04): the armed click may name an enemy
+      // BUILDING instead — every selected Monk takes the
+      // building convert order (the sim re-validates each).
+      const bT = buildingAt(wx, wy);
+      if (bT && bT.owner === foeOwner()) {
+        const st0 = entityState();
+        let any = false;
+        for (const id of selectedUnits()) {
+          if (st0.kinds[id] !== 20) continue;
+          if (issue({ t: 'convertb', e: id, b: bT.id })) any = true;
+        }
+        if (any) {
+          convertArm = false;
+          playAudioCue('click');
+          return;
+        }
+      }
+      flash(t('flash.convertArmBuilding'));
       return;
     }
     const st = entityState();
@@ -11560,6 +11595,7 @@ function runCommandButton(id, times = 1) {
       'research-sanctity': 32, 'research-fervor': 33,
       'research-herbalmedicine': 34,
       'research-atonement': 35, 'research-devotion': 36,
+      'research-redemption': 37, 'research-heresy': 38,
     }[id];
     if (tag != null && selectedBuilding && selectedBuilding.type === 'building') {
       if (!issue({ t: 'research_at', b: selectedBuilding.id, tech: tag })) {
@@ -11713,7 +11749,7 @@ function renderCommands() {
     lumbercamp: [10], miningcamp: [11, 12], mill: [13, 30, 31], market: [19, 25, 26],
     university: [20, 21, 22, 23, 24], castle: [29],
     lumbercamp: [10], miningcamp: [11, 12], mill: [13], market: [19, 25, 26],
-    university: [20, 21, 22, 23, 24], monastery: [32, 33, 34],
+    university: [20, 21, 22, 23, 24], monastery: [32, 33, 34, 35, 36, 37, 38],
   };
   const rbB = bk && RB_TAGS[context]
     ? Object.fromEntries(RB_TAGS[context].map((t) => [t, sim.research_block_at(bk.id, t)]))
@@ -12258,6 +12294,8 @@ function renderCommands() {
                 + (RESEARCH_BLOCK_TITLES[rb] ? ' ' + RESEARCH_BLOCK_TITLES[rb] : ''),
         });
       })(),
+      techBtn('research-redemption', 37, 'i-redemption', 'cmd.redemptionTitle', 50, 475, 6),
+      techBtn('research-heresy', 38, 'i-heresy', 'cmd.heresyTitle', 60, 1000, 7),
     );
   } else if (context === 'blacksmith') {
     // M6: the Blacksmith's Feudal researches — the three armor /
