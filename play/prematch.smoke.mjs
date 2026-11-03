@@ -404,5 +404,32 @@ const roomSocket = () =>
   console.log('PASS (6) pause → Play online → close → Resume/Restart: no black screen');
 }
 
+// (7) Regression (bot-loop, 2026-11-03): the Lobby Browser is the
+//     front door — it auto-opens at boot with NOTHING under it.
+//     Its ✕ used to be visible there, and clicking it hid the only
+//     screen the page has: a completely black page (beta banner
+//     only), reload the only recovery. The ✕ must be hidden on the
+//     front door, a forced click there must not hide the overlay,
+//     and the ✕ must come back when the lobby is opened over a
+//     live match (the case-(6) return path).
+{
+  const tab = makeTab('https://skirmish.online/play/');
+  await boot(tab);
+  assert.equal(tab.el('online-overlay').style.display, 'flex', 'lobby browser is the front door at boot');
+  assert.equal(tab.el('online-close').style.display, 'none', 'no ✕ on the front door: closing would strand the player on a black page');
+  tab.el('online-close').click();
+  assert.equal(tab.el('online-overlay').style.display, 'flex', 'a forced front-door close click cannot hide the only screen');
+  tab.el('btn-solo').click();
+  await sleep(1500);
+  assert.equal(inMatch(tab), true, 'solo match started');
+  tab.el('pause-btn').click();
+  tab.el('btn-online').click();
+  assert.equal(tab.el('online-overlay').style.display, 'flex', 'lobby open over the match');
+  assert.notEqual(tab.el('online-close').style.display, 'none', '✕ is back when the lobby covers a live match');
+  tab.el('online-close').click();
+  assert.equal(inMatch(tab), true, 'closing returns to the match');
+  console.log('PASS (7) front-door lobby: no ✕ to a black page; ✕ returns over a live match');
+}
+
 console.log('PREMATCH SMOKE: all cases passed');
 process.exit(0);
