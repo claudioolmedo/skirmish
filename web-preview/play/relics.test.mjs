@@ -89,3 +89,13 @@ test('the new strings exist in all three locales', () => {
     assert.equal(n, 3, `${key} present in EN, PT-BR and ES (found ${n})`);
   }
 });
+
+test('the ground relic draws on explored ground, not only while visible (2026-11-03 fix)', () => {
+  assert.match(appJs, /kinds\[i\] === KIND_RELIC && st\.hp\[i \* 2\] >= 1/,
+    'the draw loop has a dedicated ground-relic branch');
+  assert.match(appJs, /if \(!cellExploredW\(wx, wy\)\) continue;/,
+    'the ground relic is gated on explored, not on currently visible');
+  assert.match(appJs, /21: '#e8c95a'/, 'the minimap plots the relic in relic gold');
+  assert.match(appJs, /if \(f < 1 \|\| \(rs && rs\.state !== 0\)\) continue;/,
+    'the minimap relic plots once explored and only while on the ground');
+});
