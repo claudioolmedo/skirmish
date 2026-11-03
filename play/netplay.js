@@ -194,6 +194,13 @@ export function validateCommand(c) {
     // the building rides its own field (buildings have their own
     // id space, like attackb's).
     case 'convertb': return isInt(c.e) && isInt(c.b);
+    // Castle P5d (MNK-09): a Monk tasked to pick up a relic —
+    // an entity id and the relic's entity id, like heal's shape.
+    case 'pickup': return isInt(c.e) && isInt(c.tg);
+    // Castle P5d (MNK-09): a carrying Monk tasked to deposit
+    // its relic in a Monastery — the building rides its own
+    // field, like convertb's shape.
+    case 'deposit': return isInt(c.e) && isInt(c.b);
     // The cap is the build table's own length (BUILD_FNS): every
     // kind the applier can dispatch is wire-legal, the first
     // index past the table is junk. (BLD-20 raised it to 14 with
@@ -336,6 +343,11 @@ export function applyCommand(sim, cmd, owner, tcOf) {
     // order — the sim re-validates (Redemption, eligibility,
     // full faith) when the command is applied.
     case 'convertb': return sim.push_convert_building(cmd.e, cmd.b);
+    // Castle P5d (MNK-09): a Monk's relic orders — the sim
+    // derives validity from the monk and the relic/building, so
+    // one form serves both seats (as heal).
+    case 'pickup': return sim.push_pickup_relic(cmd.e, cmd.tg);
+    case 'deposit': return sim.push_deposit_relic(cmd.e, cmd.b);
     // TRD-01..03: Market trades — the sim derives the owner from
     // the building, so one form serves both seats (as research_at).
     case 'mbuy': return sim.push_market_buy(cmd.b, cmd.r);

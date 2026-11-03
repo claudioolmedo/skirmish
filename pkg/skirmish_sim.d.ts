@@ -75,6 +75,15 @@ export class WasmSim {
      */
     can_convert_target(entity: number, target: number): boolean;
     /**
+     * The relic a monk is carrying, as an entity id, or -1
+     * (Castle P5d, MNK-09): the client's "show it being
+     * carried" read — the selection line, the draw pass's
+     * carried prop, and the conversion cursor's refusal mirror
+     * (a carrying monk's convert orders are refused sim-side;
+     * the client greys them on this read).
+     */
+    carrying_relic(entity: number): number;
+    /**
      * Cell edge length in world units.
      */
     cell_size(): number;
@@ -273,6 +282,11 @@ export class WasmSim {
      * 1 AI Easy, 2 AI Normal.
      */
     mode(): number;
+    /**
+     * How many relics a Monastery holds (Castle P5d, MNK-09):
+     * the building panel's count.
+     */
+    monastery_relic_count(building: number): number;
     /**
      * A Monk's faith as a whole percent 0..100 (Castle P5b,
      * MNK-02): the selection-line read.
@@ -685,6 +699,12 @@ export class WasmSim {
      */
     push_delete(entity: number): boolean;
     /**
+     * Order a carrying Monk to deposit its relic in an own
+     * Monastery (Castle P5d, MNK-09/ECO-16). Same acceptance
+     * contract as `push_pickup_relic`.
+     */
+    push_deposit_relic(entity: number, building: number): boolean;
+    /**
      * Remove one paid reseed from the queue of the named Mill's
      * owner, refunding its 60 wood (ECO-14). False when the
      * queue is empty or the building is not a completed Mill.
@@ -777,6 +797,14 @@ export class WasmSim {
      * to its loop immediately instead (see `Sim::issue_queue`).
      */
     push_patrol_queued(entity: number, x: number, y: number): boolean;
+    /**
+     * Order a Monk to pick up a relic (Castle P5d, MNK-09):
+     * from the ground, or out of an own Monastery (the
+     * retrieve order). Returns whether the order *would* be
+     * accepted; the sim re-validates when the command is
+     * applied.
+     */
+    push_pickup_relic(entity: number, relic: number): boolean;
     /**
      * Buy one farm reseed ahead at the named Mill (ECO-14):
      * 60 wood, paid now, into the Mill owner's paid reseed
@@ -1044,6 +1072,17 @@ export class WasmSim {
      */
     rally_points(): Float64Array;
     /**
+     * Flat relic census (Castle P5d, MNK-09): per relic,
+     * [id, state, holder] — state 0 on the ground (holder 0),
+     * 1 carried (holder = the monk's id), 2 garrisoned
+     * (holder = the Monastery's building id). The 8-value
+     * `entities()` stride stays untouched (a relic's position
+     * rides it like any entity's; a carried relic's position IS
+     * its monk's, a garrisoned one's its Monastery's); this
+     * side channel carries the lifecycle, like `gate_states`.
+     */
+    relic_states(): Float64Array;
+    /**
      * Why research `tech_tag` at `building` cannot currently
      * proceed: same tags as `research_block_tc`. UI affordance.
      */
@@ -1232,6 +1271,7 @@ export interface InitOutput {
     readonly wasmsim_buildings: (a: number) => [number, number];
     readonly wasmsim_can_convert_building_target: (a: number, b: number, c: number) => number;
     readonly wasmsim_can_convert_target: (a: number, b: number, c: number) => number;
+    readonly wasmsim_carrying_relic: (a: number, b: number) => number;
     readonly wasmsim_cell_size: (a: number) => number;
     readonly wasmsim_entity_auto_explore: (a: number) => [number, number];
     readonly wasmsim_entity_can_attack_ground: (a: number, b: number) => number;
@@ -1265,6 +1305,7 @@ export interface InitOutput {
     readonly wasmsim_match_state: (a: number) => number;
     readonly wasmsim_match_stats_for: (a: number, b: number) => [number, number];
     readonly wasmsim_mode: (a: number) => number;
+    readonly wasmsim_monastery_relic_count: (a: number, b: number) => number;
     readonly wasmsim_monk_faith: (a: number, b: number) => number;
     readonly wasmsim_new: (a: number) => number;
     readonly wasmsim_new_match: (a: number, b: number) => number;
@@ -1334,6 +1375,7 @@ export interface InitOutput {
     readonly wasmsim_push_convert_building: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_delete: (a: number, b: number) => number;
     readonly wasmsim_push_delete_building: (a: number, b: number) => number;
+    readonly wasmsim_push_deposit_relic: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_dequeue_reseed: (a: number, b: number) => number;
     readonly wasmsim_push_force_deposit: (a: number, b: number) => number;
     readonly wasmsim_push_garrison_building: (a: number, b: number, c: number) => number;
@@ -1349,6 +1391,7 @@ export interface InitOutput {
     readonly wasmsim_push_noop: (a: number) => void;
     readonly wasmsim_push_patrol: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_patrol_queued: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_pickup_relic: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_queue_reseed: (a: number, b: number) => number;
     readonly wasmsim_push_repair: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_repair_queued: (a: number, b: number, c: number) => number;
@@ -1389,6 +1432,7 @@ export interface InitOutput {
     readonly wasmsim_push_ungarrison_tc: (a: number, b: number) => number;
     readonly wasmsim_push_ungarrison_unit: (a: number, b: number) => number;
     readonly wasmsim_rally_points: (a: number) => [number, number];
+    readonly wasmsim_relic_states: (a: number) => [number, number];
     readonly wasmsim_research_block_at: (a: number, b: number, c: number) => number;
     readonly wasmsim_research_block_tc: (a: number, b: number) => number;
     readonly wasmsim_research_block_tc_at: (a: number, b: number, c: number) => number;

@@ -145,6 +145,20 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * The relic a monk is carrying, as an entity id, or -1
+     * (Castle P5d, MNK-09): the client's "show it being
+     * carried" read — the selection line, the draw pass's
+     * carried prop, and the conversion cursor's refusal mirror
+     * (a carrying monk's convert orders are refused sim-side;
+     * the client greys them on this read).
+     * @param {number} entity
+     * @returns {number}
+     */
+    carrying_relic(entity) {
+        const ret = wasm.wasmsim_carrying_relic(this.__wbg_ptr, entity);
+        return ret;
+    }
+    /**
      * Cell edge length in world units.
      * @returns {number}
      */
@@ -533,6 +547,16 @@ export class WasmSim {
      */
     mode() {
         const ret = wasm.wasmsim_mode(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * How many relics a Monastery holds (Castle P5d, MNK-09):
+     * the building panel's count.
+     * @param {number} building
+     * @returns {number}
+     */
+    monastery_relic_count(building) {
+        const ret = wasm.wasmsim_monastery_relic_count(this.__wbg_ptr, building);
         return ret >>> 0;
     }
     /**
@@ -1404,6 +1428,18 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Order a carrying Monk to deposit its relic in an own
+     * Monastery (Castle P5d, MNK-09/ECO-16). Same acceptance
+     * contract as `push_pickup_relic`.
+     * @param {number} entity
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_deposit_relic(entity, building) {
+        const ret = wasm.wasmsim_push_deposit_relic(this.__wbg_ptr, entity, building);
+        return ret !== 0;
+    }
+    /**
      * Remove one paid reseed from the queue of the named Mill's
      * owner, refunding its 60 wood (ECO-14). False when the
      * queue is empty or the building is not a completed Mill.
@@ -1578,6 +1614,20 @@ export class WasmSim {
      */
     push_patrol_queued(entity, x, y) {
         const ret = wasm.wasmsim_push_patrol_queued(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Order a Monk to pick up a relic (Castle P5d, MNK-09):
+     * from the ground, or out of an own Monastery (the
+     * retrieve order). Returns whether the order *would* be
+     * accepted; the sim re-validates when the command is
+     * applied.
+     * @param {number} entity
+     * @param {number} relic
+     * @returns {boolean}
+     */
+    push_pickup_relic(entity, relic) {
+        const ret = wasm.wasmsim_push_pickup_relic(this.__wbg_ptr, entity, relic);
         return ret !== 0;
     }
     /**
@@ -2053,6 +2103,23 @@ export class WasmSim {
      */
     rally_points() {
         const ret = wasm.wasmsim_rally_points(this.__wbg_ptr);
+        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v1;
+    }
+    /**
+     * Flat relic census (Castle P5d, MNK-09): per relic,
+     * [id, state, holder] — state 0 on the ground (holder 0),
+     * 1 carried (holder = the monk's id), 2 garrisoned
+     * (holder = the Monastery's building id). The 8-value
+     * `entities()` stride stays untouched (a relic's position
+     * rides it like any entity's; a carried relic's position IS
+     * its monk's, a garrisoned one's its Monastery's); this
+     * side channel carries the lifecycle, like `gate_states`.
+     * @returns {Float64Array}
+     */
+    relic_states() {
+        const ret = wasm.wasmsim_relic_states(this.__wbg_ptr);
         var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
         return v1;

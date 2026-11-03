@@ -84,7 +84,9 @@ test('paintMonkFigure keeps the original figure (colours unchanged)', () => {
 });
 
 test('the unit draw table still routes kind 20 to drawMonk', () => {
-  assert.match(appJs, /drawMonk\]; \/\/ 20: Monk/,
+  // Castle P5d appended drawRelic at 21 — the monk's own entry
+  // keeps its routing and its comment.
+  assert.match(appJs, /drawMonk, \/\/ 20: Monk \(Castle P5a\)/,
     'UNIT_DRAW[20] remains drawMonk');
 });
 
