@@ -1052,6 +1052,9 @@ fn plan_train_military(sim: &mut Sim, cfg: &AiConfig) {
     // Castle P4b: Mangonels keep on the same line, capped at
     // MANGONEL_TARGET, behind the Rams — one workshop queue
     // serves both, one enqueue per decision as before.
+    // Castle P4c: Scorpions keep on the same line behind the
+    // Mangonels, capped at SCORPION_TARGET — the workshop's
+    // roster is complete, still one enqueue per decision.
     if sim.age_of(me) >= crate::tech::Age::Castle {
         let siege_count = |kind: EntityKind| -> u32 {
             count_kind(sim, me, kind)
@@ -1082,6 +1085,15 @@ fn plan_train_military(sim: &mut Sim, cfg: &AiConfig) {
                     sim.push_command(Command::TrainAt {
                         building: host.id,
                         kind: EntityKind::Mangonel,
+                    });
+                    return;
+                }
+                if siege_count(EntityKind::Scorpion) < SCORPION_TARGET
+                    && sim.can_train_at(host.id, EntityKind::Scorpion)
+                {
+                    sim.push_command(Command::TrainAt {
+                        building: host.id,
+                        kind: EntityKind::Scorpion,
                     });
                     return;
                 }
@@ -1167,6 +1179,12 @@ const RAM_TARGET: u32 = 2;
 /// Attack orders (attack-ground is a player-order surface;
 /// the AI does not need it, AI-01).
 const MANGONEL_TARGET: u32 = 2;
+
+/// The Scorpion corps the siege step keeps (Castle P4c): two
+/// scorpions behind the Mangonels on the same workshop line —
+/// line damage against the wave's targets, fired through
+/// ordinary Attack orders like the Mangonel's (AI-01).
+const SCORPION_TARGET: u32 = 2;
 /// The monk corps the training step keeps (Castle P5a): two
 /// monks — a healing detail for the field army (150 HP/min
 /// each, MNK-10), few enough that the gold still feeds the
@@ -1690,6 +1708,12 @@ fn plan_wave(sim: &mut Sim, cfg: &AiConfig, acted: &mut Vec<u32>) {
                         // (no building-skip: a Mangonel's blast
                         // is a unit weapon first).
                         | EntityKind::Mangonel
+                        // Castle P4c: Scorpions march with the
+                        // wave on the same terms as the Mangonel
+                        // — the ordinary Attack path below (no
+                        // building-skip: a Scorpion's bolt is a
+                        // unit weapon first).
+                        | EntityKind::Scorpion
                 )
                 && is_idle(sim, e.id)
                 && !acted.contains(&e.id)

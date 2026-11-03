@@ -70,6 +70,8 @@ mod castle_p3_tests;
 mod siege_p4a_tests;
 #[cfg(test)]
 mod siege_p4b_tests;
+#[cfg(test)]
+mod siege_p4c_tests;
 mod monastery_p5a_tests;
 #[cfg(test)]
 mod monastery_p5b_tests;

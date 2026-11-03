@@ -69,6 +69,16 @@ pub const CASTLE: u8 = 19;
 /// P4; the class ships now so the row is data, exactly like
 /// ELEPHANT and SHIP before it.
 pub const SIEGE: u8 = 20;
+/// Rams (Castle P4c): MECHANICS-STUDY §1.3's full armor class
+/// list carries Rams as a class of their own (the engine's
+/// class 17 there; the wiki's "Armor class: Ram" article) —
+/// distinct from SIEGE, which the Battering Ram ALSO carries.
+/// The class exists for the Scorpion's documented +1 vs Rams
+/// row (the P4 execution plan's Passo 0.3, resolved to a
+/// distinct class on that evidence): the Ram row gains the
+/// membership in the same slice that gives the class its first
+/// consumer, and the Mangonel's +12 stays keyed on SIEGE.
+pub const RAM: u8 = 21;
 
 /// Membership bit for one class id.
 pub const fn bit(class: u8) -> u64 {

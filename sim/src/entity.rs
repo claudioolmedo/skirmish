@@ -110,6 +110,14 @@ pub enum EntityKind {
     /// bare ground (Attack Ground). Its 3-tile minimum range
     /// means it can never fire point-blank (PRJ-08).
     Mangonel,
+    /// Castle Age siege engine (Castle P4c, PRJ-09): trained
+    /// at the Siege Workshop — a wheeled ballista whose bolts
+    /// pass through every enemy unit along their line (the
+    /// targeted unit takes full damage, every other enemy
+    /// half, friendly units nothing — the whole distinction
+    /// from the Mangonel's blast). Its 2-tile minimum range
+    /// keeps it from firing point-blank (PRJ-08).
+    Scorpion,
     /// Castle Age faith unit (Castle P5a, MNK-01): trained at
     /// the Monastery — it heals allied units (MNK-10) and, from
     /// the P5b slice on, converts enemies and carries relics.
@@ -138,11 +146,8 @@ impl EntityKind {
     /// (Castle P2 — appended after the Wolf took 11 on main,
     /// so no tag moved), 15 = petard (Castle P3a), 16 = trade
     /// cart (Package D), 17 = battering ram (Castle P4a),
-    /// 18 = mangonel (Castle P4b), 20 = monk (Castle P5a),
-    /// 21 = relic (Castle P5d).
-    /// Tag 19 stays RESERVED for the Scorpion (the P4 execution
-    /// plan's allocation, slice P4c): `from_tag` answers `None`
-    /// for it until that slice lands its kind.
+    /// 18 = mangonel (Castle P4b), 19 = scorpion (Castle P4c),
+    /// 20 = monk (Castle P5a), 21 = relic (Castle P5d).
     pub fn tag(self) -> u8 {
         match self {
             EntityKind::Villager => 0,
@@ -164,6 +169,7 @@ impl EntityKind {
             EntityKind::TradeCart => 16,
             EntityKind::BatteringRam => 17,
             EntityKind::Mangonel => 18,
+            EntityKind::Scorpion => 19,
             EntityKind::Monk => 20,
             EntityKind::Relic => 21,
         }
@@ -191,6 +197,7 @@ impl EntityKind {
             16 => Some(EntityKind::TradeCart),
             17 => Some(EntityKind::BatteringRam),
             18 => Some(EntityKind::Mangonel),
+            19 => Some(EntityKind::Scorpion),
             20 => Some(EntityKind::Monk),
             21 => Some(EntityKind::Relic),
             _ => None,
@@ -212,7 +219,8 @@ impl EntityKind {
             | EntityKind::CavalryArcher
             | EntityKind::Petard
             | EntityKind::BatteringRam
-            | EntityKind::Mangonel => crate::tech::Age::Castle,
+            | EntityKind::Mangonel
+            | EntityKind::Scorpion => crate::tech::Age::Castle,
             | EntityKind::Monk => crate::tech::Age::Castle,
             _ => crate::tech::Age::Dark,
         }
@@ -248,6 +256,7 @@ impl EntityKind {
                 | EntityKind::TradeCart
                 | EntityKind::BatteringRam
                 | EntityKind::Mangonel
+                | EntityKind::Scorpion
                 | EntityKind::Monk
         )
     }
@@ -271,6 +280,7 @@ impl EntityKind {
                 | EntityKind::TradeCart
                 | EntityKind::BatteringRam
                 | EntityKind::Mangonel
+                | EntityKind::Scorpion
                 | EntityKind::Monk
         )
     }
@@ -325,6 +335,7 @@ impl EntityKind {
                 | EntityKind::CavalryArcher
                 | EntityKind::Petard
                 | EntityKind::Mangonel
+                | EntityKind::Scorpion
         )
     }
 

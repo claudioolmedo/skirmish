@@ -346,8 +346,8 @@ pub enum BuildingKind {
     /// DE footprint is 4×4, not 3×3 — RISKS R8), 1800 HP in the
     /// Castle column (2100 Imperial), armor 2/9, LoS 6; Castle
     /// Age, and it requires a completed Blacksmith (BLD-15's
-    /// chain). It trains the Battering Ram (the Mangonel and
-    /// Scorpion join its roster in the P4b/P4c slices) and,
+    /// chain). It trains the Battering Ram, the Mangonel and
+    /// the Scorpion (the full roster since the P4c slice) and,
     /// like every production building, holds a production
     /// garrison of 10 (GAR-08). It does not fire — no
     /// `BuildingWeapon`.
@@ -726,12 +726,15 @@ impl BuildingKind {
                 // only (TRD-05; wiki, "Trade Cart").
                 | (BuildingKind::Market, EntityKind::TradeCart)
                 // Castle P4a: the Battering Ram trains at the
-                // Siege Workshop only (the Scorpion joins this
-                // roster in the P4c slice, when its kind exists).
+                // Siege Workshop only.
                 | (BuildingKind::SiegeWorkshop, EntityKind::BatteringRam)
                 // Castle P4b: the Mangonel trains at the Siege
                 // Workshop only, beside the Ram.
                 | (BuildingKind::SiegeWorkshop, EntityKind::Mangonel)
+                // Castle P4c: the Scorpion trains at the Siege
+                // Workshop only, completing the workshop's
+                // Castle Age roster.
+                | (BuildingKind::SiegeWorkshop, EntityKind::Scorpion)
                 // Castle P5a: the Monk trains at the Monastery
                 // only (MNK-01).
                 | (BuildingKind::Monastery, EntityKind::Monk)

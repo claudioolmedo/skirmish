@@ -149,6 +149,7 @@ pub fn spec(kind: EntityKind) -> &'static UnitSpec {
         EntityKind::TradeCart => &TRADE_CART,
         EntityKind::BatteringRam => &BATTERING_RAM,
         EntityKind::Mangonel => &MANGONEL,
+        EntityKind::Scorpion => &SCORPION,
         EntityKind::Monk => &MONK,
         EntityKind::Relic => &RELIC,
     }
@@ -747,7 +748,10 @@ static TRADE_CART: UnitSpec = UnitSpec {
 /// LoS 5. Cost 160 W / 75 G, train 36 s, Siege Workshop only
 /// (`BuildingKind::trains` + `EntityKind::train_age`). Its
 /// classes carry SIEGE — the membership the Petard's +60 row
-/// (Castle P3a) waited for. The attack delay adopts the
+/// (Castle P3a) waited for — and, since Castle P4c, RAM: the
+/// distinct Ram armor class of MECHANICS-STUDY §1.3, carried
+/// so the Scorpion's +1 vs Rams row has its documented target
+/// (the P4 plan's Passo 0.3). The attack delay adopts the
 /// foot-melee rows' 30 ticks as a recorded design constant
 /// (the dossier pins no separate ram frame value). The radius
 /// adopts the largest shipped row's 1.2 (the Boar's bulk) as an
@@ -763,7 +767,7 @@ static BATTERING_RAM: UnitSpec = UnitSpec {
     armor_melee: -3,
     armor_pierce: 180,
     armor_building: 0,
-    classes: cls::mask(&[cls::SIEGE]),
+    classes: cls::mask(&[cls::SIEGE, cls::RAM]),
     range_max: I16F16::ZERO,
     range_min: I16F16::ZERO,
     reload_ticks: 300,       // 5.0 s
@@ -839,6 +843,74 @@ static MANGONEL: UnitSpec = UnitSpec {
     wood_cost: 160,
     gold_cost: 135,
     train_ticks: 2760, // 46 s
+};
+
+/// Scorpion (Castle P4c, PRJ-09; wiki "Scorpion (Age of
+/// Empires II)" infobox via the Castle Age dossier §4, fetched
+/// 2026-10-22, article re-read 2026-11-03): HP 40, attack
+/// 11 pierce with +7 vs Elephants, +3 vs Buildings (standard),
+/// +1 vs Rams and +1 vs Infantry, armor 0/7, range 7 with a
+/// 2-tile minimum (PRJ-08's dead zone), RoF 3.6 s, speed 0.65
+/// tiles/s, LoS 9. Cost 75 W / 75 G, train 30 s, Siege
+/// Workshop only (`BuildingKind::trains` +
+/// `EntityKind::train_age`). Two documented quirks ride the
+/// table itself: the (MELEE, 0) pair — "Scorpions deal 0
+/// melee damage in addition to their pierce attack" (the
+/// article's changelog, The Conquerors) — which against the
+/// Ram's −3 melee armor lands 3 damage a bolt, the soft
+/// anti-ram bite the article's trivia calls out; and the
+/// +1 vs Rams keys on the distinct RAM armor class
+/// (MECHANICS-STUDY §1.3), not SIEGE — the P4 plan's
+/// Passo 0.3. Accuracy 100: no source in the corpus gives
+/// the Scorpion a sub-100 figure (the article's only
+/// accuracy technology is Ballistics, which since update
+/// 125283 lets its bolts track moving targets — the generic
+/// release already leads under Ballistics), so its misses
+/// are dodges, never scatter; the bolt flies at the generic
+/// 0.5 units/tick design constant like every unpinned
+/// projectile (PRJ-02). Attack delay 13 ticks from the
+/// article's 0.21 s figure (its comparison section: the
+/// Scorpion HAS a significant attack delay, the Mangonel
+/// none). The weapon is pass-through-flagged (PRJ-09): the
+/// bolt damages every ENEMY along its line — the targeted
+/// unit full, the rest half, friendly units nothing — out
+/// to 3 tiles past its maximum range. Its classes carry
+/// SIEGE, like its workshop kin. The collision radius adopts
+/// the Ram/Mangonel 1.2 — an implementation constant (§3.2.4
+/// of the P4 plan), never presented as DE data.
+static SCORPION: UnitSpec = UnitSpec {
+    max_hp: 40,
+    attacks: &[
+        (cls::PIERCE, 11),
+        (cls::MELEE, 0),
+        (cls::ELEPHANT, 7),
+        (cls::STANDARD_BUILDINGS, 3),
+        (cls::RAM, 1),
+        (cls::INFANTRY, 1),
+    ],
+    armor_melee: 0,
+    armor_pierce: 7,
+    armor_building: 0,
+    classes: cls::mask(&[cls::SIEGE]),
+    range_max: I16F16::from_bits(1_835_008), // 28 (7 tiles)
+    range_min: I16F16::from_bits(524_288),   // 8 (2 tiles — PRJ-08)
+    reload_ticks: 216,                       // 3.6 s
+    attack_delay_ticks: 13,                  // 0.21 s (see above)
+    accuracy: 100,
+    projectile_speed: I16F16::from_bits(32_768), // 0.5 — design constant (see Archer)
+    scatter: I16F16::from_bits(131_072),         // 2.0 — design constant (see Archer)
+    blast_radius: I16F16::ZERO,
+    pass_through: true,
+    blast_secondaries: 0,
+    speed: I16F16::from_bits(2_840), // 0.65 tiles/s (absolute scale, see header)
+    los: I16F16::from_bits(2_359_296), // 36 (9 tiles)
+    radius: I16F16::from_bits(78_643), // 1.2 — adopted (see above)
+    carcass_food: 0,
+    carcass_decay_bits: 0,
+    food_cost: 0,
+    wood_cost: 75,
+    gold_cost: 75,
+    train_ticks: 1800, // 30 s
 };
 
 /// Monk (Castle P5a, MNK-01/10; wiki "Monk (Age of Empires

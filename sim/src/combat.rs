@@ -274,6 +274,39 @@ pub fn ram_building_attacks(
     )
 }
 
+/// Point-to-segment proximity (PRJ-09's geometry): true when
+/// point C lies within `reach` of the segment AB. Computed in
+/// raw fixed-point bits with i64 intermediates throughout —
+/// the perpendicular case compares cross products instead of
+/// dividing, so no intermediate leaves i64 at map scale
+/// (components ≤ ~2^25 bits, products ≤ ~2^51). Pure integer
+/// ops: deterministic on every platform, like `steer::vec_len`.
+fn segment_within(
+    a: (I16F16, I16F16),
+    b: (I16F16, I16F16),
+    c: (I16F16, I16F16),
+    reach: I16F16,
+) -> bool {
+    let (ax, ay) = (a.0.to_bits() as i64, a.1.to_bits() as i64);
+    let (abx, aby) = (b.0.to_bits() as i64 - ax, b.1.to_bits() as i64 - ay);
+    let (acx, acy) = (c.0.to_bits() as i64 - ax, c.1.to_bits() as i64 - ay);
+    let reach = reach.to_bits() as i64;
+    let dot = abx * acx + aby * acy;
+    if dot <= 0 {
+        return acx * acx + acy * acy <= reach * reach;
+    }
+    let len2 = abx * abx + aby * aby;
+    if dot >= len2 {
+        let (bcx, bcy) = (acx - abx, acy - aby);
+        return bcx * bcx + bcy * bcy <= reach * reach;
+    }
+    // Perpendicular distance = |AB × AC| / |AB|; the hit test
+    // cross-multiplies instead of dividing.
+    let cross = (abx * acy - aby * acx).abs();
+    let len = steer::isqrt(len2 as u64) as i64;
+    cross <= reach * len
+}
+
 pub fn compute_damage(attacks: &[(u8, i32)], target: &UnitSpec) -> i32 {
     let (total, participated) = damage_sum(attacks, target);
     if participated {
@@ -3052,6 +3085,22 @@ impl Sim {
             }
             return;
         }
+        // PRJ-09 (Castle P4c): a pass-through weapon's bolt does
+        // not stop at its target — it resolves as a line through
+        // the impact point (see `resolve_pass_through`). This
+        // branch sits after the building branch on purpose: a
+        // bolt aimed at a placed building is an ordinary building
+        // shot (buildings are not pierced), and after the blast
+        // branch because the two weapon shapes are exclusive
+        // rows. No mishit scan for a bolt: what is not on the
+        // line is simply not hit.
+        if let Some(ai) = self.entity_index(p.attacker) {
+            let spec = self.unit_stats(ai);
+            if spec.pass_through {
+                self.resolve_pass_through(p, &spec);
+                return;
+            }
+        }
         if let Some(tid) = p.intended {
             if let Some(ti) = self.entity_index(tid) {
                 if !self.entities[ti].dead && self.entities[ti].garrisoned_in.is_none() {
@@ -3087,6 +3136,78 @@ impl Sim {
                 self.apply_hit(p.attacker, p.owner, (p.spawn_x, p.spawn_y), &p.attacks, ti, true, p.attacker_elev);
                 return;
             }
+        }
+    }
+
+    /// PRJ-09 (Castle P4c): pass-through resolution — the
+    /// Scorpion's bolt walks its whole line and damages every
+    /// ENEMY unit it touches. The line is the segment from the
+    /// spawn point through the impact point, extended so the
+    /// bolt's total travel is the weapon's maximum range plus
+    /// 3 tiles (the Scorpion article's figure: bolts "hit
+    /// units 10 tiles away" on a 7-range weapon). Candidates
+    /// are walked in ascending id order (the entities vector's
+    /// own order, the blast walk's discipline): the intended
+    /// target takes the full table (the ordinary `apply_hit`),
+    /// every other enemy takes the half application (the
+    /// mishit composition inside the CMB-13 clamp — PRJ-09's
+    /// half is that same factor). Friendly-owned units are
+    /// skipped ENTIRELY — no damage, no roll, and they do not
+    /// stop the bolt (CMB-12's exclusion, the whole
+    /// distinction from blast). Placed buildings are never
+    /// pierced (a bolt aimed at one resolved in the building
+    /// branch above); the Town Center — an entity in this
+    /// architecture but a building for this rule — is likewise
+    /// passed over unless it is the bolt's own target. No RNG
+    /// draws happen here: the shooter's accuracy roll was the
+    /// release's (PRJ-03), and pass-through adds none.
+    fn resolve_pass_through(&mut self, p: &Projectile, spec: &crate::units::UnitSpec) {
+        // The bolt's line in raw bits: spawn → extended end.
+        let travel = spec.range_max + I16F16::from_bits(786_432); // +12 (3 tiles)
+        let (dx, dy) = (p.impact_x - p.spawn_x, p.impact_y - p.spawn_y);
+        let aim_len = steer::vec_len(dx, dy);
+        if aim_len <= I16F16::ZERO {
+            return; // degenerate aim (never in band play): no line, no hits
+        }
+        let (dxb, dyb) = (dx.to_bits() as i64, dy.to_bits() as i64);
+        let (tb, lb) = (travel.to_bits() as i64, aim_len.to_bits() as i64);
+        let end_x = p.spawn_x + I16F16::from_bits((dxb * tb / lb) as i32);
+        let end_y = p.spawn_y + I16F16::from_bits((dyb * tb / lb) as i32);
+        for ti in 0..self.entities.len() {
+            let e = &self.entities[ti];
+            if e.dead || e.garrisoned_in.is_some() || e.owner == p.owner {
+                continue; // dead, sheltered (GAR-02), or friendly — untouched
+            }
+            let is_primary = p.intended == Some(e.id);
+            if e.kind == EntityKind::TownCenter && !is_primary {
+                continue; // buildings are not pierced (see above)
+            }
+            let tspec = units::spec(e.kind);
+            // The candidate is hit when its collision circle
+            // meets the bolt's line: its own radius plus the
+            // bolt's 0.1-tile projectile size (PRJ-09 — the
+            // Genie collision reading of "projectile size": the
+            // value the Scorpion article's changelog raised
+            // 0.025 → 0.1 precisely so bolts intersect what
+            // they pass).
+            let reach = tspec.radius + I16F16::from_bits(26_214); // +0.4 (0.1 tile)
+            if !segment_within(
+                (p.spawn_x, p.spawn_y),
+                (end_x, end_y),
+                (e.pos_x, e.pos_y),
+                reach,
+            ) {
+                continue;
+            }
+            self.apply_hit(
+                p.attacker,
+                p.owner,
+                (p.spawn_x, p.spawn_y),
+                &p.attacks,
+                ti,
+                !is_primary,
+                p.attacker_elev,
+            );
         }
     }
 

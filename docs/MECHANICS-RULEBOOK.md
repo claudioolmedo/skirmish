@@ -2291,10 +2291,32 @@ article's figure — the generic Pass-through damage article says 2
 tiles for projectiles in general, a recorded discrepancy; the
 Scorpion-specific value governs this entry. No DE patch note
 changes Scorpion friendly fire (the article's changelog through
-update 153015 lists none). · *Impl:* a `pass_through` flag in the weapon row; resolution
-walks the segment in id order, skipping friendly-owned units
-entirely (CMB-12's rule), full damage to the primary target and
-half to the rest. · *Status:* **MISSING**.
+update 153015 lists none). · *Impl:* shipped 2026-11-03
+(Castle P4c) — the `pass_through` flag in the weapon row (the
+Scorpion's, `units.rs`); `resolve_pass_through` in `combat.rs`
+resolves a bolt impact as the segment from its spawn point
+through the impact point, extended to the weapon's maximum
+range + 3 tiles of travel, walking candidates in ascending id
+order: friendly-owned units are skipped entirely (CMB-12's
+exclusion — no damage, no roll, and they do not stop the
+bolt), the intended target takes the full table through
+`apply_hit`, and every other enemy takes the half application
+(the mishit composition inside the CMB-13 clamp). A candidate
+is hit when its collision circle meets the segment — its own
+radius plus the bolt's 0.1-tile projectile size. Placed
+buildings are never pierced: a bolt aimed at one resolves as
+an ordinary building shot, and the Town Center (an entity in
+this architecture) is passed over unless it is the bolt's own
+target. No RNG draws happen in the walk — the shooter's
+accuracy roll was the release's (PRJ-03). The Scorpion's
+documented (MELEE, 0) pair and +1 vs Rams row ride its attack
+table; the Ram armor class (cls::RAM) ships in the same slice
+on the Battering Ram's row, whose SIEGE membership is
+unchanged. Tests: `siege_p4c_tests` (row and damage-table
+pins — 4 a bolt vs a Battering Ram —, line primary full /
+secondary half, friendly untouched mid-line, overtravel to
++3 tiles and not beyond, building shot not pierced, dead-zone
+reposition, bit-identical replay). · *Status:* **MATCHES**.
 
 **PRJ-10 — Projectiles ignore terrain height for targeting.** Height
 enters projectile combat only through the damage multiplier (CMB-01)

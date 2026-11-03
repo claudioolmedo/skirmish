@@ -415,6 +415,14 @@ impl WasmSim {
         self.push_train_at(building, EntityKind::Mangonel)
     }
 
+    /// Enqueue a Scorpion at a completed Siege Workshop
+    /// (Castle P4c — the workshop is the Scorpion's only home;
+    /// `can_train_at` carries the Castle Age gate). See
+    /// `push_train_militia`.
+    pub fn push_train_scorpion(&mut self, building: u32) -> bool {
+        self.push_train_at(building, EntityKind::Scorpion)
+    }
+
     /// Enqueue a Monk at a completed Monastery (Castle P5a,
     /// MNK-01 — the Monastery is the Monk's only home;
     /// `can_train_at` carries the Castle Age gate). See
