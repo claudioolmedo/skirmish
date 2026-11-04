@@ -263,6 +263,11 @@ export function validateCommand(c) {
     case 'deleteb': return isInt(c.b);
     case 'cancel_tc': return isInt(c.tc) && isInt(c.i) && c.i <= 15;
     case 'cancel_b': return isInt(c.b) && isInt(c.i) && c.i <= 15;
+    // VIC-11: a resignation names nothing — the resigning seat
+    // is the bundle's owner (applyCommand's contract), exactly
+    // like tribute's sender. (Distinct from the relay-level
+    // 'resign' MESSAGE, which stays the transport's own signal.)
+    case 'resign': return true;
     default: return false;
   }
 }
@@ -363,6 +368,10 @@ export function applyCommand(sim, cmd, owner, tcOf) {
     case 'queue_reseed': return sim.push_queue_reseed(cmd.b);
     case 'dequeue_reseed': return sim.push_dequeue_reseed(cmd.b);
     case 'set_auto_reseed': return sim.push_set_auto_reseed(cmd.b, cmd.on);
+    // VIC-11: resignation — the resigning seat is the bundle's
+    // owner, so both clients sweep the same player at the same
+    // tick and the ruins agree bit-for-bit.
+    case 'resign': return sim.push_resign(owner);
     default: return false;
   }
 }

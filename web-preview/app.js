@@ -3841,6 +3841,12 @@ function setPaused(v) {
     updateNetStatus();
     refreshNetPing();
   }
+  // VIC-11: locally, the same Resign button serves a local
+  // match (online, updateNetStatus above owns its visibility) —
+  // a match, not Sandbox, and not one already decided.
+  if (v && !net && typeof netUi !== 'undefined' && netUi && netUi.resignBtn) {
+    netUi.resignBtn.hidden = !(builtMode !== 'sandbox' && !matchEnded);
+  }
 }
 
 // --- M8: per-seat reads ---------------------------------------------------
@@ -4019,6 +4025,11 @@ function applyLocalOrder(cmd) {
     case 'queue_reseed': return sim.push_queue_reseed(cmd.b);
     case 'dequeue_reseed': return sim.push_dequeue_reseed(cmd.b);
     case 'set_auto_reseed': return sim.push_set_auto_reseed(cmd.b, cmd.on);
+    // VIC-11: resignation — locally the resigning seat is this
+    // client's (as tribute's sender); online the same command
+    // rides the bundle and netplay's applier names the sender
+    // from the bundle's owner.
+    case 'resign': return sim.push_resign(localOwner);
     default: return false;
   }
 }
@@ -7036,11 +7047,23 @@ async function main() {
   }
   if (netUi.resignBtn) {
     netUi.resignBtn.addEventListener('click', () => {
-      if (!net) return;
-      net.client.send({ type: 'resign' });
-      showOverlay(netUi.peerOverlay, false);
-      netMatchEnd(2, { selfResign: true });
-      setPaused(false);
+      if (net) {
+        net.client.send({ type: 'resign' });
+        showOverlay(netUi.peerOverlay, false);
+        netMatchEnd(2, { selfResign: true });
+        setPaused(false);
+        return;
+      }
+      // VIC-11 (local match): resign through the SIM — the
+      // ordinary command path (issue → applyLocalOrder →
+      // push_resign), recorded for the replay like every local
+      // order. The sweep lands at the next tick boundary and
+      // the frame loop raises the defeat overlay off
+      // match_state, exactly as for a Conquest defeat; the
+      // resigned player's buildings stay standing as ruins.
+      if (issue({ t: 'resign' })) {
+        setPaused(false);
+      }
     });
   }
   if (netUi.claimBtn) {

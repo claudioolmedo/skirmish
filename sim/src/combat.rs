@@ -2272,6 +2272,11 @@ impl Sim {
         if !b.complete {
             return;
         }
+        // VIC-11: a resigned player's buildings stand inert —
+        // their weapons never fire again.
+        if self.is_resigned(b.owner) {
+            return;
+        }
         let (owner, bx, by, size) = (b.owner, b.pos_x, b.pos_y, b.kind.footprint_size());
         let Some(w) = self.building_weapon(owner, b.kind) else {
             return;
@@ -2596,6 +2601,12 @@ impl Sim {
             let e = &self.entities[ei];
             (e.owner, e.pos_x, e.pos_y)
         };
+        // VIC-11: a resigned player's Town Center stands inert —
+        // it never fires again (its garrison was swept out at
+        // resignation, so this is belt-and-braces).
+        if self.is_resigned(owner) {
+            return;
+        }
         let half = I16F16::from_num(8); // the TC's 4x4 footprint
         if self.tc_states[si].garrison.is_empty() {
             // No garrison, no fire — and no held engagement.

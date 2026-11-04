@@ -110,7 +110,13 @@ const MAGIC: &[u8; 4] = b"SKSV";
 /// predated the v11 settings round-trip; without this block a
 /// mid-KotH save could never pass the load-time hash check,
 /// the countdown being hashed state in KotH matches.)
-const SAVE_VERSION: u32 = 14;
+/// Version 15: VIC-11 — each player record carries the
+/// `resigned` flag right after `mode_out` (hashed while set, so
+/// a post-resignation save could never pass the load-time hash
+/// check without it), and the command codec gains
+/// `Command::Resign` at tag 48 (append-only, like every tag
+/// before it).
+const SAVE_VERSION: u32 = 15;
 
 /// Little-endian byte writer over a growable buffer.
 struct W {
@@ -568,6 +574,12 @@ impl W {
                 self.u32(entity);
                 self.u32(building);
             }
+            // VIC-11: the resignation command (tag 48,
+            // append-only) — the resigning seat's owner byte.
+            Command::Resign { player } => {
+                self.u8(48);
+                self.u8(player);
+            }
         }
     }
 }
@@ -641,6 +653,8 @@ impl Sim {
             w.bool(p.auto_reseed);
             // Format v11: the mode-elimination flag (Package C).
             w.bool(p.mode_out);
+            // Format v15: the resignation flag (VIC-11).
+            w.bool(p.resigned);
         }
         for s in &self.stockpiles {
             for a in s.amounts() {
@@ -1278,6 +1292,9 @@ impl<'a> R<'a> {
                 entity: self.u32()?,
                 building: self.u32()?,
             }),
+            48 => Some(Command::Resign {
+                player: self.u8()?,
+            }),
             _ => None,
         }
     }
@@ -1407,6 +1424,7 @@ impl Sim {
             p.reseed_queue = r.u32()?;
             p.auto_reseed = r.bool()?;
             p.mode_out = r.bool()?;
+            p.resigned = r.bool()?;
         }
         let mut stockpiles = [Stockpile::starting(), Stockpile::starting()];
         for s in &mut stockpiles {

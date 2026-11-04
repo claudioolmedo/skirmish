@@ -107,6 +107,8 @@ mod bowsaw_tests;
 mod victory_relic_tests;
 #[cfg(test)]
 mod group_speed_tests;
+#[cfg(test)]
+mod vic11_tests;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
@@ -720,6 +722,21 @@ pub enum Command {
     /// Valid only for a carrying Monk and a completed Monastery
     /// of its owner (`Sim::can_deposit_relic`). No queued form.
     DepositRelic { entity: u32, building: u32 },
+    /// Resign the match (VIC-11): the named player — an owner
+    /// byte, `OWNER_PLAYER` or `OWNER_OPPONENT`, named
+    /// explicitly like `Tribute`'s seats because no target
+    /// implies the actor — leaves the game. Their units are
+    /// swept to the death path this tick with `last_hit_by`
+    /// cleared (no score credit to anyone, exactly the Delete
+    /// discipline), their production queues are dropped, and
+    /// the player is flagged inactive (`PlayerState::resigned`):
+    /// their buildings remain standing on the map, inert and
+    /// still owned by them, and their Markets remain valid
+    /// trade targets for everyone else (TRD-07). A resignation
+    /// for an unknown seat, a Gaia tag, or a player who has
+    /// already resigned is ignored whole. In Sandbox there is
+    /// no match to resign, so the command is ignored there too.
+    Resign { player: u8 },
 }
 
 /// ECO-14: one farm reseed costs 60 wood (MECHANICS-STUDY §6.3:
@@ -1098,6 +1115,15 @@ struct PlayerState {
     /// elimination is monotonic. Hashed conditionally, like
     /// `destroyed_value`, so Conquest streams stay byte-identical.
     mode_out: bool,
+    /// VIC-11: the resignation flag. Set once, by the `Resign`
+    /// command, when this player resigns: their units are swept
+    /// to the death path (no score credit to anyone), their
+    /// buildings stay standing inert under their ownership, and
+    /// `match_state` reads the flag as their loss. Sticky, like
+    /// every elimination. Hashed conditionally (marker byte after
+    /// `mode_out`'s), so a stream in which nobody resigns — the
+    /// golden scenario included — stays byte-identical.
+    resigned: bool,
 }
 
 /// One player's match statistics (INF-11): the run counters the
@@ -3581,6 +3607,7 @@ impl Sim {
         }
         if self.eliminated(entity::OWNER_PLAYER)
             || self.mode_out(entity::OWNER_PLAYER)
+            || self.is_resigned(entity::OWNER_PLAYER)
             || self.koth_winner == Some(entity::OWNER_OPPONENT)
         {
             return MatchState::Defeat;
@@ -3590,6 +3617,7 @@ impl Sim {
         }
         if self.eliminated(entity::OWNER_OPPONENT)
             || self.mode_out(entity::OWNER_OPPONENT)
+            || self.is_resigned(entity::OWNER_OPPONENT)
             || self.koth_winner == Some(entity::OWNER_PLAYER)
         {
             return MatchState::Victory;
@@ -3624,6 +3652,117 @@ impl Sim {
     pub(crate) fn set_mode_out(&mut self, owner: u8) {
         if let Some(slot) = player_slot(owner) {
             self.players[slot].mode_out = true;
+        }
+    }
+
+    /// Whether `owner` has resigned (VIC-11): the `Resign`
+    /// command flagged them inactive. Gaia and unknown tags
+    /// never resign.
+    pub fn is_resigned(&self, owner: u8) -> bool {
+        player_slot(owner).map(|s| self.players[s].resigned).unwrap_or(false)
+    }
+
+    /// Would a `Resign` command be accepted right now? A match
+    /// is running (Sandbox has nothing to resign), the seat is a
+    /// real player, and they have not already resigned.
+    pub fn can_resign(&self, player: u8) -> bool {
+        self.mode.is_match() && player_slot(player).is_some() && !self.is_resigned(player)
+    }
+
+    /// Apply a `Resign` command (VIC-11): flag the player
+    /// inactive and sweep their units to the death path.
+    ///
+    /// The sweep is deliberately the Delete discipline
+    /// (`issue_delete_entity`) applied to every unit the player
+    /// owns: HP zeroed with `last_hit_by` / `last_hit_owner`
+    /// cleared, so this same tick's death sweep (combat phase,
+    /// after the command drain) marks them dead with NO score
+    /// credit to anyone — `credit_destruction` only fires off a
+    /// killer — while the INF-11 loss counters still count the
+    /// losses, exactly as for a deliberate delete. The sweep's
+    /// own side paths ride along unchanged: a dying monk drops
+    /// his relic, a dying Ram ejects its (equally swept)
+    /// passengers, herdables leave carcasses.
+    ///
+    /// What does NOT die: the Town Center entity and every
+    /// placed building — in this architecture the Town Center
+    /// is a building that happens to be an entity, and VIC-11's
+    /// letter is that the resigned player's buildings remain
+    /// standing on the map (inert, owner unchanged). Their
+    /// production queues are dropped here (no refund — the
+    /// player has left; the stockpile is inert), and the inert
+    /// half is enforced where buildings act: the economy phase
+    /// skips a resigned owner's queues, the weapon steps skip a
+    /// resigned owner's buildings and Town Center, and the
+    /// relic trickle skips a resigned owner's Monasteries.
+    /// Garrisoned units are units: their ids are lifted out of
+    /// every garrison list (Town Centers, buildings, Rams)
+    /// before the sweep, so no host keeps a dead passenger.
+    /// Trade is untouched: `can_trade` never consults this
+    /// flag, so a resigned player's Markets stay valid depots
+    /// for the survivors (TRD-07).
+    fn issue_resign(&mut self, player: u8) {
+        if !self.can_resign(player) {
+            return;
+        }
+        let slot = player_slot(player).expect("validated by can_resign");
+        self.players[slot].resigned = true;
+        // The units about to be swept (every owned unit except
+        // the Town Center — a building, it stands), computed
+        // first so the garrison lifts below are plain id checks.
+        let swept: Vec<u32> = self
+            .entities
+            .iter()
+            .filter(|e| e.owner == player && !e.dead && e.kind != EntityKind::TownCenter)
+            .map(|e| e.id)
+            .collect();
+        let tc_ids: Vec<u32> = self
+            .tc_states
+            .iter()
+            .filter(|s| {
+                self.entity_index(s.tc_id)
+                    .map(|i| self.entities[i].owner == player)
+                    .unwrap_or(false)
+            })
+            .map(|s| s.tc_id)
+            .collect();
+        // Drop the resigned player's production queues: the
+        // Town Centers' and the placed buildings' alike — and
+        // lift the swept units out of their garrison lists.
+        for s in &mut self.tc_states {
+            if tc_ids.contains(&s.tc_id) {
+                s.queue.clear();
+                s.progress = 0;
+                s.garrison.retain(|id| !swept.contains(id));
+            }
+        }
+        for b in &mut self.buildings {
+            if b.owner == player {
+                b.queue.clear();
+                b.train_progress = 0;
+            }
+            if !b.garrison.is_empty() {
+                b.garrison.retain(|id| !swept.contains(id));
+            }
+        }
+        // Mobile hosts (Battering Rams) carry their garrison on
+        // the entity record: lift the swept units out of every
+        // Ram, whichever side owns the Ram.
+        for e in &mut self.entities {
+            if !e.garrison.is_empty() {
+                e.garrison.retain(|id| !swept.contains(id));
+            }
+        }
+        // The sweep itself: every owned unit except the Town
+        // Center (a building — it stands) goes to the death
+        // path with no killer credited.
+        for e in &mut self.entities {
+            if e.owner == player && !e.dead && e.kind != EntityKind::TownCenter {
+                e.garrisoned_in = None;
+                e.last_hit_by = None;
+                e.last_hit_owner = None;
+                e.hp = I16F16::ZERO;
+            }
         }
     }
 
@@ -4071,6 +4210,7 @@ impl Sim {
         };
         let b = &self.buildings[bi];
         b.complete
+            && !self.is_resigned(b.owner)
             && b.kind.is_production()
             && b.kind.trains(kind)
             && self.age_of(b.owner) >= kind.train_age()
@@ -4128,6 +4268,7 @@ impl Sim {
             _ => return false,
         };
         queue < TRAIN_QUEUE_CAP
+            && !self.is_resigned(owner)
             && self.population_of(owner) < self.population_cap_of(owner)
             && self.stockpile_of(owner).amount(ResourceKind::Food) >= VILLAGER_FOOD_COST
     }
@@ -4171,6 +4312,11 @@ impl Sim {
     /// `Locked`; queue at cap → `QueueFull`; funds short →
     /// `NoFunds`. TEC-07's prerequisites, in order.
     fn check_research(&self, owner: u8, tech: TechId, queue: &[ProdEntry]) -> ResearchBlock {
+        // VIC-11: a resigned player's buildings stand inert —
+        // no new research starts there.
+        if self.is_resigned(owner) {
+            return ResearchBlock::Locked;
+        }
         if self.has_tech(owner, tech) {
             return ResearchBlock::AlreadyDone;
         }
@@ -5779,6 +5925,7 @@ impl Sim {
                 Command::DepositRelic { entity, building } => {
                     self.issue_deposit_relic(entity, building)
                 }
+                Command::Resign { player } => self.issue_resign(player),
             }
         }
 
@@ -6020,6 +6167,7 @@ impl Sim {
         //    human's commands) and replays bit-identically.
         if matches!(self.mode, MatchMode::AiEasy | MatchMode::AiNormal)
             && self.tick % ai::config(self.mode).cadence == 0
+            && !self.is_resigned(entity::OWNER_OPPONENT)
         {
             ai::decide(self);
         }
@@ -8471,6 +8619,12 @@ impl Sim {
                 Some(i) if !self.entities[i].dead => self.entities[i].owner,
                 _ => continue,
             };
+            // VIC-11: a resigned player's Town Center stands
+            // inert — its queue (already dropped at resignation)
+            // never accrues again.
+            if self.is_resigned(owner) {
+                continue;
+            }
             let si = self
                 .tc_states
                 .iter()
@@ -8502,6 +8656,11 @@ impl Sim {
                 continue;
             }
             let owner = self.buildings[bi].owner;
+            // VIC-11: a resigned player's buildings stand inert —
+            // their queues never accrue again.
+            if self.is_resigned(owner) {
+                continue;
+            }
             let head = self.buildings[bi].queue[0];
             if matches!(head, ProdEntry::Unit(_))
                 && self.living_population_of(owner) >= self.population_cap_of(owner)
@@ -9973,6 +10132,16 @@ impl Sim {
             // mode-eliminated in stays byte-identical.
             if p.mode_out {
                 h.write_u8(1);
+            }
+            // VIC-11: the resignation flag, written only while
+            // set — marker 0xD1 right after mode_out's byte, so
+            // a stream in which nobody resigns (the golden
+            // scenario included) stays byte-identical, and a
+            // resigned stream can never silently agree with an
+            // unresigned one (mode_out's byte is 1, never 0xD1,
+            // and the two flags' bytes land in a fixed order).
+            if p.resigned {
+                h.write_u8(0xD1);
             }
         }
         // TRD-02: the global exchange rates join the hash once any

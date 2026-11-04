@@ -1524,6 +1524,11 @@ impl Sim {
             if b.kind != BuildingKind::Monastery || !b.complete || b.relics.is_empty() {
                 continue;
             }
+            // VIC-11: a resigned player's buildings stand inert —
+            // their Monasteries pay no trickle.
+            if self.is_resigned(b.owner) {
+                continue;
+            }
             let total = self.buildings[bi].relic_gold_remainder
                 + self.buildings[bi].relics.len() as i64 * RELIC_GOLD_PER_MIN * 65_536;
             let pay = total / 3_600;

@@ -198,6 +198,29 @@ impl WasmSim {
         self.inner.match_state().tag() as u32
     }
 
+    /// Resign the match for a player seat (VIC-11): the seat's
+    /// owner byte (0 = first player, 2 = opponent). The command
+    /// is queued like every other and applies at the next tick
+    /// boundary — the seat's units are swept to the death path
+    /// with no score credit, and their buildings remain standing
+    /// inert. Returns whether the order *would* be accepted
+    /// against the current state (a UI affordance; the sim
+    /// re-validates when the command is applied).
+    pub fn push_resign(&mut self, owner: u32) -> bool {
+        let ok = self.inner.can_resign(owner as u8);
+        if ok {
+            self.inner.push_command(Command::Resign {
+                player: owner as u8,
+            });
+        }
+        ok
+    }
+
+    /// Whether a player seat has resigned (VIC-11).
+    pub fn resigned_for(&self, owner: u32) -> bool {
+        self.inner.is_resigned(owner as u8)
+    }
+
     /// Advance exactly one 60 Hz tick. Returns the per-tick state hash
     /// as a 16-character hex string.
     pub fn tick(&mut self) -> String {

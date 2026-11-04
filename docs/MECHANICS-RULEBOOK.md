@@ -3826,7 +3826,39 @@ Docks remain valid trade targets (TRD-07).
 *Source:* GAP 8.10; wiki, Gold (trade with resigned players). · *Impl:*
 resignation is a command that sweeps own units to the death path
 (without score credit to anyone) and flags the player inactive. ·
-*Status:* **MISSING**.
+*Impl (VIC-11 package):* shipped — `Command::Resign { player }`
+(owner byte, named explicitly like Tribute's seats) applies at the
+tick boundary: it flags the player `resigned` (hashed only while
+set, marker 0xD1 after `mode_out`'s byte, so a resignation-free
+stream — the golden scenario included — stays byte-identical;
+save v15 carries the flag and command tag 48), drops the player's
+production queues, lifts their garrisoned units out of every host,
+and zeroes every owned unit's HP with `last_hit_by` cleared — the
+Delete discipline — so the same tick's death sweep removes them
+with no VIC-04 credit and no INF-11 kill credited (losses still
+count). The Town Center entity and every placed building are NOT
+swept: they remain standing, owner unchanged, and inert — the
+economy phase and the weapon steps skip a resigned owner's
+queues and weapons, no new training or research is accepted
+there, the relic trickle skips their Monasteries, and the AI step
+no longer drives a resigned opponent. `match_state` reads the
+flag as the resigning player's loss (human Defeat checked first,
+as with every ending). Elimination (VIC-01) already left
+buildings standing; pinned here too. Trade is untouched:
+`can_trade` never consults the flag, so a resigned player's
+Markets remain valid depots and a full round trip against one is
+pinned by `vic11_tests` (TRD-07's resigned clause). Client: the
+pause menu's existing Resign button now also serves local
+matches — locally it issues `{t:'resign'}` through the ordinary
+order path (`push_resign(localOwner)`, replay-recorded); online
+it keeps its relay flow, and the same semantic command is valid
+in lockstep bundles (netplay validate/apply name the resigning
+seat from the bundle owner). Pinned by `vic11_tests` (10 tests:
+sweep + outcome both seats, no-credit, garrison sweep, ruins
+standing/owned/inert incl. a resigned tower never firing,
+elimination ruins, resigned-Market round trip, ignored/invalid
+resignations, conditional hash, save round-trip incl. a pending
+command). · *Status:* **MATCHES**.
 
 **VIC-12 — Allied Victory pools team outcomes.** With Allied Victory
 enabled, a team wins or loses together: conquest requires eliminating
@@ -4717,6 +4749,15 @@ batch is stamped with a group id and a speed cap at issue
 MATCHES. The book stands at 223 rules, 190 / 15 / 18.
 The table below equals the body.
 
+updated 2026-11-04 for VIC-11 (bot-loop builder):
+resignation leaves ruins — `Command::Resign` sweeps the
+resigning player's units to the death path with no score
+credit and flags them inactive; their buildings remain
+standing, inert and owned, and their Markets remain valid
+trade targets (see the rule's Impl note) — VIC-11 moves
+MISSING → MATCHES. The book stands at 223 rules,
+191 / 15 / 17. The table below equals the body.
+
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
 | 1 | Simulation & time (SIM) | 12 | 12 | 0 | 0 |
@@ -4734,10 +4775,10 @@ The table below equals the body.
 | 13 | Trade, market & tribute (TRD) | 8 | 8 | 0 | 0 |
 | 14 | Garrison, transport & repair (GAR) | 10 | 9 | 0 | 1 |
 | 15 | AI behavior & difficulty (AI) | 9 | 8 | 0 | 1 |
-| 16 | Victory, scoring & game modes (VIC) | 12 | 6 | 0 | 6 |
+| 16 | Victory, scoring & game modes (VIC) | 12 | 7 | 0 | 5 |
 | 17 | Multiplayer determinism (NET) | 11 | 9 | 1 | 1 |
 | 18 | Information rules (INF) | 13 | 12 | 1 | 0 |
-| | **Total** | **223** | **190** | **15** | **18** |
+| | **Total** | **223** | **191** | **15** | **17** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer
