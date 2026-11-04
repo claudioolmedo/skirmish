@@ -50,6 +50,7 @@ use crate::econ::ResourceKind;
 use crate::entity::EntityKind;
 use crate::grid;
 use crate::tech::TechId;
+use crate::formation::FormationKind;
 use crate::{Command, MatchMode, QueuedOrder, Sim, Stance, VictorySettings};
 
 /// A `Sim` owned by JavaScript. One instance per match.
@@ -249,6 +250,36 @@ impl WasmSim {
             x: I16F16::from_num(x),
             y: I16F16::from_num(y),
         });
+    }
+
+    /// Order one entity to move to a world point IN FORMATION
+    /// (MOV-07): `formation` is the FormationKind tag (0 line,
+    /// 1 box, 2 staggered, 3 flank). Issued for every member of
+    /// the group in one batch, the orders form a formation
+    /// group in the sim, which assigns destination slots by
+    /// class layer at order time. An unknown tag drops the
+    /// order (the client validates 0..=3 before it sends).
+    /// Like `push_move`, acceptance is the sim's business when
+    /// the command applies.
+    pub fn push_formation_move(&mut self, entity: u32, x: f64, y: f64, formation: u8) {
+        let Some(formation) = FormationKind::from_tag(formation) else {
+            return;
+        };
+        self.inner.push_command(Command::FormationMove {
+            entity,
+            x: I16F16::from_num(x),
+            y: I16F16::from_num(y),
+            formation,
+        });
+    }
+
+    /// Whether the entity could accept a formation move right
+    /// now (MOV-07): the move family's orderable rule. The
+    /// client's formation path reads the sim's answer through
+    /// the queued form's acceptance; this getter exists for
+    /// tests and tooling.
+    pub fn entity_can_formation_move(&self, entity: u32) -> bool {
+        self.inner.can_formation_move(entity)
     }
 
     /// Order a villager to work a resource node (gather → haul → deposit
@@ -1421,6 +1452,30 @@ impl WasmSim {
             QueuedOrder::Move {
                 x: I16F16::from_num(x),
                 y: I16F16::from_num(y),
+            },
+        )
+    }
+
+    /// Queue a formation move behind the entity's current
+    /// order (MOV-07 / SEL-12): it executes — and takes its
+    /// slot — when the entity goes idle, alongside the group
+    /// that executes with it.
+    pub fn push_formation_move_queued(
+        &mut self,
+        entity: u32,
+        x: f64,
+        y: f64,
+        formation: u8,
+    ) -> bool {
+        let Some(formation) = FormationKind::from_tag(formation) else {
+            return false;
+        };
+        self.push_queued(
+            entity,
+            QueuedOrder::FormationMove {
+                x: I16F16::from_num(x),
+                y: I16F16::from_num(y),
+                formation,
             },
         )
     }

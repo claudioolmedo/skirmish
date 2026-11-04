@@ -178,6 +178,10 @@ export function validateCommand(c) {
   if (!c || typeof c !== 'object' || typeof c.t !== 'string') return false;
   switch (c.t) {
     case 'move': return isInt(c.e) && isNum(c.x) && isNum(c.y);
+    // MOV-07: a formation move — move's shape plus the
+    // formation tag (0 line, 1 box, 2 staggered, 3 flank).
+    case 'formation_move': return isInt(c.e) && isNum(c.x) && isNum(c.y)
+      && isInt(c.f) && c.f <= 3;
     case 'gather': return isInt(c.e) && isInt(c.n);
     case 'attack': return isInt(c.e) && isInt(c.tg);
     case 'attackb': return isInt(c.e) && isInt(c.b);
@@ -284,6 +288,9 @@ export function applyCommand(sim, cmd, owner, tcOf) {
     case 'move': return cmd.q
       ? sim.push_move_queued(cmd.e, cmd.x, cmd.y)
       : sim.push_move(cmd.e, cmd.x, cmd.y);
+    case 'formation_move': return cmd.q
+      ? sim.push_formation_move_queued(cmd.e, cmd.x, cmd.y, cmd.f)
+      : sim.push_formation_move(cmd.e, cmd.x, cmd.y, cmd.f);
     case 'gather': return cmd.q
       ? sim.push_gather_queued(cmd.e, cmd.n)
       : sim.push_gather(cmd.e, cmd.n);

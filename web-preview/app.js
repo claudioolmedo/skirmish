@@ -61,6 +61,9 @@ import {
   createControlGroups, createTapTracker, nextInCycle,
 } from './play/groups.js';
 import {
+  FORMATIONS, createFormationChoice, formationApplies,
+} from './play/formation.js';
+import {
   TURN_TICKS as NET_TURN_TICKS, REJOIN_GRACE_MS, LOAD_TIMEOUT_MS,
   PEER_STALL_TIMEOUT_MS,
   GAME_SPEED, GAME_SPEEDS, isGameSpeed, TICK_MS, advanceTicks,
@@ -591,6 +594,11 @@ const SELECTION_CAP = 60;
 // double-tap-to-center gesture.
 const controlGroups = createControlGroups();
 const groupTaps = createTapTracker();
+// Battle formations (MOV-07): the standing formation choice
+// for move orders — client-side setting only (play/formation.js
+// is pure logic); the sim assigns the slots. Null (the default)
+// keeps the long-standing keep-your-offset group move.
+const formationChoice = createFormationChoice();
 // Idle-key cycling memory (SEL-08/09): the last id each key handed
 // out, so pressing again moves to the NEXT idle unit.
 let idleCycleVil = -1;
@@ -3929,6 +3937,11 @@ function applyLocalOrder(cmd) {
     case 'move': return cmd.q
       ? sim.push_move_queued(cmd.e, cmd.x, cmd.y)
       : sim.push_move(cmd.e, cmd.x, cmd.y);
+    // MOV-07: a formation move — the formation tag rides the
+    // order; the sim assigns the group's slots.
+    case 'formation_move': return cmd.q
+      ? sim.push_formation_move_queued(cmd.e, cmd.x, cmd.y, cmd.f)
+      : sim.push_formation_move(cmd.e, cmd.x, cmd.y, cmd.f);
     case 'gather': return cmd.q
       ? sim.push_gather_queued(cmd.e, cmd.n)
       : sim.push_gather(cmd.e, cmd.n);
@@ -4103,6 +4116,7 @@ function resetSim(mode = matchMode) {
   // idle-key cycling memory belong to the old game.
   controlGroups.clear();
   groupTaps.reset();
+  formationChoice.clear(); // MOV-07: the formation choice too
   idleCycleVil = -1;
   idleCycleMil = -1;
 
@@ -7594,7 +7608,21 @@ async function main() {
       };
     }
     let groundMoveSent = false;
+    // MOV-07: with a formation chosen, a group ground move
+    // names the SHARED destination and the formation on every
+    // member's order — no per-unit offsets (the offsets are
+    // the formation's own slots, which the sim assigns by
+    // class layer at order time).
+    const useFormation = formationApplies(formationChoice, targets.length);
     const sendMove = (id) => {
+      if (useFormation) {
+        const sent = issue({
+          t: 'formation_move', e: id, x: wx, y: wy,
+          f: formationChoice.tag(), q: queued || undefined,
+        });
+        if (sent) groundMoveSent = true;
+        return sent;
+      }
       const [mx, my] = moveDest ? moveDest(id) : [wx, wy];
       const sent = issue({ t: 'move', e: id, x: mx, y: my, q: queued || undefined });
       if (sent) groundMoveSent = true;
@@ -12289,6 +12317,14 @@ function runCommandButton(id, times = 1) {
       flash(t('flash.convertArm'));
     }
     playAudioCue('click');
+  } else if (id.startsWith('formation-')) {
+    // MOV-07: set (or clear) the standing formation choice —
+    // a client-side setting like the build page, applied at
+    // once, issuing nothing: it names the shape of the NEXT
+    // group ground move. renderCommands repaints the faces.
+    formationChoice.choose(id.slice('formation-'.length));
+    renderCommands();
+    playAudioCue('click');
   } else if (id.startsWith('stance-')) {
     // CMB-09: set the stance of every selected military unit —
     // a setting, applied at once, no targeting.
@@ -12643,6 +12679,9 @@ function renderCommands() {
     selUnits.some((id) => st.kinds[id] === 18 && st.owners[id] === localOwner) ? 1 : 0,
     scoutSel ? selScouts.join('.') : -1, scoutAuto ? 1 : 0,
     selMil.length ? selMil.join('.') : -1, milStance, orderArm || '',
+    // MOV-07: the standing formation choice is panel state —
+    // its pressed face must repaint when it changes.
+    formationChoice.current() || '',
     placement ? placement.kind : -1,
     // TRD-01..03: on the Market panel the prices ARE the state —
     // any player's trade moves them, so they join the signature
@@ -13512,6 +13551,22 @@ function renderCommands() {
         active: milStance === tag,
         key: badgeForButton({ context, id: bid }),
         title: t(titleKey),
+      })),
+    );
+    // MOV-07: the formation row — four faces under the stance
+    // row. The formation is a standing choice, not an order:
+    // pressing a face issues nothing; the next ground move of
+    // 2+ selected units travels in that formation (the sim
+    // assigns slots by class layer). Pressing the active
+    // face again clears the choice (the stance discipline).
+    // Unbadged and mouse-only, like the garrison buttons:
+    // the grid's letters belong to the orders above.
+    cmdGrid.append(
+      ...FORMATIONS.map((fm) => cmdButton({
+        id: `formation-${fm.id}`, icon: `i-formation-${fm.id}`,
+        label: t(fm.labelKey),
+        active: formationChoice.current() === fm.id, key: null,
+        title: t(fm.titleKey),
       })),
     );
   }

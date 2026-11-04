@@ -752,8 +752,8 @@ pinned at both levels (`steer.rs`
 `separation_can_be_suppressed_for_an_engaged_attacker`; `sim/tests/
 combat.rs` `separation_is_suppressed_while_a_melee_unit_attacks`).
 The formation half has no instance yet — formations themselves are
-MOV-07, still missing — the same no-instance pattern as CMB-15's
-garrison clause.)
+MOV-07 (shipped 2026-11-04, see its note) — the same no-instance
+pattern as CMB-15's garrison clause.)
 
 **MOV-05 — Collision radius is unit data.** Units occupy a small circle
 for steering purposes; the documented typical radius is ≈0.2 tiles
@@ -828,7 +828,54 @@ on arrival.
 slot assignment is a pure function of (group composition in id order,
 formation kind, destination, facing) computed at order time — deterministic
 and hash-safe since slots are just per-unit targets. · *Status:*
-**MISSING**.
+**MATCHES** (shipped 2026-11-04, MOV-07 package: the pure function is
+`formation::assign_slots` (`sim/src/formation.rs`) — integer/fixed-point
+math only, no floats, no RNG, facing quantized to the 8 directions of
+MOV-09 from a constant table. Layers are keyed on the unit table
+(`layer_of`): 0 melee front (range-0 military), 1 civilians, 2 ranged
+(any row with range > 0), 3 siege and monks (tested before the range
+rule — Mangonels and Scorpions carry ranges). Each layer starts a
+fresh row, rows hold up to ⌈√n⌉ members centered on the anchor, row
+depths are centered on the destination, spacing 2.0 world units.
+Staggered shifts odd rows half a step to the facing's right; Box
+reorders the back layer's tail cells center-first, so monks/siege
+sit center-back; Flank splits the melee into left/right wings one
+spacing ahead of the center block and degenerates to Line with no
+melee. A single member's slot is the destination itself in every
+formation. Order path, mirroring MOV-06's batch reconstruction: the
+client sends one `FormationMove` command per member carrying the
+SHARED destination and the formation tag; the sim collects them in
+a formation session ending at the same two finalize moments (the
+command drain, the queue advance) and re-aims each member's
+ordinary `MoveOrder` at its slot. Slots are ordinary move targets,
+so the state hash covers them through fields it already covers —
+there is no new hashed state, and a match that never orders a
+formation hashes byte-identically (the golden hash does not move;
+the determinism suite pins it). A member is re-aimed only while
+its live order still targets the issued destination (a superseded
+order is untouched), and a slot that cannot be pathed falls back
+to the shared destination, then to the standing order. Formation
+groups also earn the MOV-06 treatment: a shared group id and the
+slowest member's speed cap. Scope, deliberately minimal: plain
+moves only — attack-move and patrol legs are not formation orders;
+the client's formation choice is a standing setting (a minimal
+four-button row in the command panel, in the existing style, with
+en/pt-BR/es labels), and the client names a formation only on
+orders for 2+ units, so a lone unit's order stays a plain move
+byte-for-byte. Save v15 carries the two new codec tags (Command
+48, QueuedOrder 11); no record layout changes. Pinned by
+`sim/src/formation_tests.rs` (15 tests: layer classification,
+line layering and centering, purity in id order, facing rotation,
+box center-back monk, staggered half-step, flank wings, the
+single-member destination, batch slot targets, arrival holding
+shape, the lone-move identity, queued formation execution, plain
+batches untouched, replay twins, save round-trip),
+`sim/tests/formation.rs` (3 tests on the standard opening: the
+group forms up with the Scout ahead, a lone formation move targets
+the destination, the formed opening travel replays bit-
+identically) and `web-preview/play/formation.test.mjs` (3 tests:
+the four-formation vocabulary, the toggle discipline, formations
+naming orders only for groups of 2+)).
 
 **MOV-08 — Long moves collapse into column.** On moves longer than ~30
 tiles, a formed group narrows into a file/column for travel and re-forms
@@ -4749,14 +4796,21 @@ batch is stamped with a group id and a speed cap at issue
 MATCHES. The book stands at 223 rules, 190 / 15 / 18.
 The table below equals the body.
 
-updated 2026-11-04 for VIC-11 (bot-loop builder):
+updated 2026-11-04 for VIC-11 + MOV-07 (landed together
+by the bot loop; MOV-07's command codec renumbered
+48 -> 49 at landing, both packages having taken tag 48):
 resignation leaves ruins — `Command::Resign` sweeps the
 resigning player's units to the death path with no score
 credit and flags them inactive; their buildings remain
 standing, inert and owned, and their Markets remain valid
 trade targets (see the rule's Impl note) — VIC-11 moves
-MISSING → MATCHES. The book stands at 223 rules,
-191 / 15 / 17. The table below equals the body.
+MISSING → MATCHES; and formed groups receive destination
+slots by class layer — melee front, ranged/siege behind,
+monks/siege center-back of a box — from the pure
+`formation::assign_slots` function at order time (see the
+rule's Impl note) — MOV-07 moves MISSING → MATCHES. The
+book stands at 223 rules, 192 / 15 / 16. The table below
+equals the body.
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
@@ -4764,7 +4818,7 @@ MISSING → MATCHES. The book stands at 223 rules,
 | 2 | Map, terrain & elevation (MAP) | 13 | 9 | 4 | 0 |
 | 3 | Visibility & exploration (VIS) | 10 | 9 | 0 | 1 |
 | 4 | Selection & orders (SEL) | 17 | 16 | 1 | 0 |
-| 5 | Movement, pathfinding & collision (MOV) | 12 | 6 | 3 | 3 |
+| 5 | Movement, pathfinding & collision (MOV) | 12 | 7 | 3 | 2 |
 | 6 | Economy & drop-off (ECO) | 17 | 16 | 0 | 1 |
 | 7 | Buildings & placement (BLD) | 20 | 17 | 2 | 1 |
 | 8 | Combat & damage (CMB) | 17 | 17 | 0 | 0 |
@@ -4778,7 +4832,7 @@ MISSING → MATCHES. The book stands at 223 rules,
 | 16 | Victory, scoring & game modes (VIC) | 12 | 7 | 0 | 5 |
 | 17 | Multiplayer determinism (NET) | 11 | 9 | 1 | 1 |
 | 18 | Information rules (INF) | 13 | 12 | 1 | 0 |
-| | **Total** | **223** | **191** | **15** | **17** |
+| | **Total** | **223** | **192** | **15** | **16** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer

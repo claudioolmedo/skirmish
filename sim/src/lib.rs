@@ -53,6 +53,7 @@ mod classes;
 mod combat;
 mod econ;
 mod entity;
+mod formation;
 mod garrison;
 mod grid;
 mod hash;
@@ -109,6 +110,8 @@ mod victory_relic_tests;
 mod group_speed_tests;
 #[cfg(test)]
 mod vic11_tests;
+#[cfg(test)]
+mod formation_tests;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
@@ -138,6 +141,7 @@ pub use entity::{
     is_player_owner, BellSnapshot, Dropoff, Entity, EntityKind, GarrisonRef, MoveOrder,
     QueuedOrder, Stance, Task, OWNER_GAIA, OWNER_OPPONENT, OWNER_PLAYER,
 };
+pub use formation::{assign_slots, facing_vectors, layer_of, FormationKind, FormationMember};
 pub use grid::{Grid, CELL_SIZE, GRID_DIM, TERRAIN_LAND, TERRAIN_WATER, WORLD_HALF};
 pub use mapgen::GeneratedMap;
 pub use hash::Fnv1a64;
@@ -313,6 +317,39 @@ struct PendingGroup {
     members: Vec<PendingGroupMember>,
 }
 
+/// One member of a pending MOV-07 formation group, recorded
+/// while a formation session is open (the same two moments as
+/// the MOV-06 grouping session). Plain session bookkeeping:
+/// never hashed, never saved; the session is always empty
+/// between ticks.
+struct PendingFormationMember {
+    idx: usize,
+    /// The RAW destination as issued (linkage is judged on the
+    /// player's click geometry, as in MOV-06).
+    raw_x: I16F16,
+    raw_y: I16F16,
+    /// The RESOLVED destination the order was installed with —
+    /// at finalize time a member is re-aimed only while its
+    /// live order still targets this point.
+    dest_x: I16F16,
+    dest_y: I16F16,
+    /// The member's own steering speed at issue (for the
+    /// MOV-06 group cap the formation group also earns).
+    speed: I16F16,
+}
+
+/// A pending MOV-07 formation group: every same-owner,
+/// same-formation order recorded in the open session whose
+/// raw destinations link within `GROUP_LINK_DIST`.
+/// Finalized at session end by `Sim::finalize_formations`:
+/// slots are computed by `formation::assign_slots` and each
+/// member's order is re-aimed at its slot.
+struct PendingFormation {
+    owner: u8,
+    formation: FormationKind,
+    members: Vec<PendingFormationMember>,
+}
+
 /// Commands are *data*, pushed by the outside world and applied in FIFO
 /// order at tick start. This shape is what makes future lockstep
 /// multiplayer and replays possible: a match is (seed, settings,
@@ -337,6 +374,24 @@ pub enum Command {
     /// For a villager this also cancels its gather task (the carry is
     /// kept, un-deposited). The Town Center ignores `Move`.
     Move { entity: u32, x: I16F16, y: I16F16 },
+    /// Order one entity to move to a world point IN FORMATION
+    /// (MOV-07): the entity joins the tick's formation session
+    /// under the named formation kind; at session end the group
+    /// (2+ same-owner, same-formation orders whose destinations
+    /// link, the MOV-06 batch rule) receives destination slots
+    /// by class layer from `formation::assign_slots` — a pure
+    /// function of the group composition in id order, the
+    /// formation kind, the shared destination and the facing —
+    /// and each member's order is re-aimed at its own slot. A
+    /// lone formation order is exactly a plain `Move`. Like
+    /// `Move`, a villager's gather task is cancelled (the carry
+    /// is kept) and the Town Center ignores it.
+    FormationMove {
+        entity: u32,
+        x: I16F16,
+        y: I16F16,
+        formation: FormationKind,
+    },
     /// Order a villager to work a resource node: gather, haul to the
     /// Town Center, deposit, repeat, until re-commanded or the node is
     /// gone. Ignored for non-villagers, unknown ids, and depleted nodes.
@@ -1275,6 +1330,12 @@ pub struct Sim {
     /// movement phase, and always empty between phases, so it is
     /// neither hashed nor saved.
     group_session: Vec<PendingGroup>,
+    /// MOV-07 formation session (transient): the pending
+    /// formation groups recorded alongside the MOV-06 grouping
+    /// session, finalized at the same two moments. Never
+    /// hashed, never saved — the slots it computes live in the
+    /// members' ordinary move orders.
+    formation_session: Vec<PendingFormation>,
     /// Projectiles in flight (M3), in spawn order.
     projectiles: Vec<Projectile>,
     /// The scripted opponent's bookkeeping (M5) — wave scheduling
@@ -1440,6 +1501,7 @@ impl Sim {
             next_building_id: 0,
             next_group_id: 1,
             group_session: Vec::new(),
+            formation_session: Vec::new(),
             projectiles: Vec::new(),
             ai: ai::AiState::default(),
             fog: [vec![0; cell_total], vec![0; cell_total]],
@@ -5576,6 +5638,7 @@ impl Sim {
         }
         match order {
             QueuedOrder::Move { .. } => true,
+            QueuedOrder::FormationMove { .. } => true,
             QueuedOrder::Gather { node } => {
                 self.entities[idx].kind == EntityKind::Villager
                     && self.node_index(node).is_some()
@@ -5722,6 +5785,7 @@ impl Sim {
             QueuedOrder::AttackMove { x, y } => Some((x, y)),
             QueuedOrder::Patrol { x, y } => Some((x, y)),
             QueuedOrder::AttackGround { x, y } => Some((x, y)),
+            QueuedOrder::FormationMove { x, y, .. } => Some((x, y)),
             QueuedOrder::Convert { target } => self.entity_pos(target),
             QueuedOrder::ConvertBuilding { building } => self.building_pos(building),
         }
@@ -5837,6 +5901,12 @@ impl Sim {
             match command {
                 Command::Noop => {}
                 Command::Move { entity, x, y } => self.issue_move(entity, x, y),
+                Command::FormationMove {
+                    entity,
+                    x,
+                    y,
+                    formation,
+                } => self.issue_formation_move(entity, x, y, formation),
                 Command::Gather { entity, node } => self.issue_gather(entity, node),
                 Command::TrainVillager => self.issue_train_villager(),
                 Command::TrainVillagerAt { tc } => self.issue_train_villager_at(tc),
@@ -5934,6 +6004,7 @@ impl Sim {
         //     orders (the stamps must be in place for this very
         //     tick's steering, and in the hash this tick returns).
         self.finalize_groups();
+        self.finalize_formations();
 
         // 2. Movement. Steering is decided from an immutable snapshot,
         //    then integrated — two phases keep borrows simple and the
@@ -6314,6 +6385,152 @@ impl Sim {
         }
     }
 
+    /// MOV-07: record a freshly issued formation move order as
+    /// a potential formation-group member in the open formation
+    /// session. Called by `apply_formation_move` only — the
+    /// formation twin of `record_group_member`, with the same
+    /// batch semantics: one issue action IS one application
+    /// batch, so (owner, formation kind, destination linkage)
+    /// recovers exactly the click's selection.
+    fn record_formation_member(
+        &mut self,
+        idx: usize,
+        formation: FormationKind,
+        raw: (I16F16, I16F16),
+        dest: (I16F16, I16F16),
+    ) {
+        let owner = self.entities[idx].owner;
+        let speed = self.current_speed(idx);
+        let member = PendingFormationMember {
+            idx,
+            raw_x: raw.0,
+            raw_y: raw.1,
+            dest_x: dest.0,
+            dest_y: dest.1,
+            speed,
+        };
+        // A re-issue supersedes, exactly as in MOV-06.
+        for g in &mut self.formation_session {
+            g.members.retain(|m| m.idx != idx);
+        }
+        for g in &mut self.formation_session {
+            if g.owner != owner || g.formation != formation {
+                continue;
+            }
+            let links = g
+                .members
+                .iter()
+                .any(|m| steer::vec_len(raw.0 - m.raw_x, raw.1 - m.raw_y) <= GROUP_LINK_DIST);
+            if links {
+                g.members.push(member);
+                return;
+            }
+        }
+        self.formation_session.push(PendingFormation {
+            owner,
+            formation,
+            members: vec![member],
+        });
+    }
+
+    /// MOV-07: close the formation session — every pending
+    /// group with 2+ surviving members receives destination
+    /// slots by class layer (`formation::assign_slots`, a pure
+    /// function of the group composition in id order, the
+    /// formation kind, the shared destination and the facing
+    /// from the group's centroid toward it), and each member's
+    /// live order is re-aimed at its own slot. A member is
+    /// re-aimed only while its live order still targets the
+    /// destination recorded at issue (a superseded order
+    /// belongs to its newer order). A slot that cannot be
+    /// pathed falls back to the shared destination, and from
+    /// there to the order the member already holds — a failed
+    /// slot never wedges the group. The group also earns the
+    /// MOV-06 treatment: a shared group id from the same
+    /// allocator and the slowest member's speed as the cap,
+    /// stamped under the same rule (only on members the cap
+    /// actually clamps), so a formed group also ARRIVES in
+    /// shape. Slots are ordinary move targets: no new hashed
+    /// state exists, and a stream that never orders a
+    /// formation is byte-identical to before MOV-07.
+    fn finalize_formations(&mut self) {
+        let groups = std::mem::take(&mut self.formation_session);
+        for g in groups {
+            if g.members.len() < 2 {
+                continue;
+            }
+            // The shared destination: the mean of the members'
+            // raw destinations (the client sends one point for
+            // the whole group; the mean keeps the anchor exact
+            // even if a member's click point drifted a hair).
+            let n = g.members.len() as i64;
+            let (mut ax, mut ay) = (0i64, 0i64);
+            let (mut cx, mut cy) = (0i64, 0i64);
+            for m in &g.members {
+                ax += m.raw_x.to_bits() as i64;
+                ay += m.raw_y.to_bits() as i64;
+                let e = &self.entities[m.idx];
+                cx += e.pos_x.to_bits() as i64;
+                cy += e.pos_y.to_bits() as i64;
+            }
+            let anchor = (
+                I16F16::from_bits((ax / n) as i32),
+                I16F16::from_bits((ay / n) as i32),
+            );
+            let facing = (
+                I16F16::from_bits((ax / n - cx / n) as i32),
+                I16F16::from_bits((ay / n - cy / n) as i32),
+            );
+            let members: Vec<FormationMember> = g
+                .members
+                .iter()
+                .map(|m| FormationMember {
+                    id: self.entities[m.idx].id,
+                    kind: self.entities[m.idx].kind,
+                })
+                .collect();
+            let slots = formation::assign_slots(&members, g.formation, anchor, facing);
+            let cap = g
+                .members
+                .iter()
+                .map(|m| m.speed)
+                .min()
+                .expect("a group with members has a slowest speed");
+            let gid = self.next_group_id;
+            self.next_group_id = self.next_group_id.wrapping_add(1).max(1);
+            for (m, (_, slot)) in g.members.iter().zip(slots.iter()) {
+                if self.entities[m.idx].dead {
+                    continue;
+                }
+                let still_targets = match &self.entities[m.idx].order {
+                    Some(o) => (o.target_x, o.target_y) == (m.dest_x, m.dest_y),
+                    None => false,
+                };
+                if !still_targets {
+                    continue;
+                }
+                // Re-aim at the slot; fall back to the shared
+                // destination, then to the standing order.
+                if !self.set_move_order(m.idx, slot.0, slot.1)
+                    && (slot.0, slot.1) != anchor
+                {
+                    let _ = self.set_move_order(m.idx, anchor.0, anchor.1);
+                }
+                // MOV-06 stamp, on the same terms as
+                // `finalize_groups`: only a member the cap
+                // actually clamps, and only while an order
+                // stands to carry it.
+                if self.current_speed(m.idx) <= cap {
+                    continue;
+                }
+                if let Some(o) = self.entities[m.idx].order.as_mut() {
+                    o.group_id = gid;
+                    o.group_cap = cap;
+                }
+            }
+        }
+    }
+
     /// The speed steering uses for an entity this tick: its table
     /// speed, except a boar with an attack target, which uses its
     /// faster chase speed.
@@ -6440,6 +6657,98 @@ impl Sim {
                 e.stance_anchor_x = tx;
                 e.stance_anchor_y = ty;
             }
+        }
+    }
+
+    /// Apply a `FormationMove` command (MOV-07): the replace
+    /// semantics of `issue_move` (the queue clears), then the
+    /// move mechanics of `apply_move` — the same cancellations
+    /// (work, combat, standing orders, trade, heal, conversion,
+    /// relic errands) — except the installed order joins the
+    /// formation session instead of the MOV-06 grouping
+    /// session: at session end the group is re-aimed at its
+    /// formation slots (see `finalize_formations`).
+    fn issue_formation_move(
+        &mut self,
+        entity: u32,
+        x: I16F16,
+        y: I16F16,
+        formation: FormationKind,
+    ) {
+        let idx = match self.entity_index(entity) {
+            Some(i) => i,
+            None => return,
+        };
+        if !self.orderable(idx) {
+            return;
+        }
+        self.entities[idx].order_queue.clear();
+        self.entities[idx].order_from_queue = false;
+        self.apply_formation_move(idx, x, y, formation);
+    }
+
+    /// The mechanics of a formation move order, shared by the
+    /// `FormationMove` command and queued-order execution
+    /// (which must not clear the rest of the queue behind it).
+    /// The cancellation block mirrors `apply_move` field for
+    /// field — a formation move is a plain move whose target
+    /// is refined at session end, so it must end exactly the
+    /// same tasks a plain move ends.
+    fn apply_formation_move(
+        &mut self,
+        idx: usize,
+        x: I16F16,
+        y: I16F16,
+        formation: FormationKind,
+    ) {
+        {
+            let e = &mut self.entities[idx];
+            e.task = Task::Idle;
+            e.task_node = None;
+            e.task_building = None;
+            e.task_dropoff = None;
+            e.clear_combat();
+            e.auto_explore = false;
+            e.auto_target = None;
+            e.attack_move = None;
+            e.patrol.clear();
+            e.patrol_next = 0;
+            e.trade_target = None;
+            e.trade_loaded = false;
+            e.heal_target = None;
+            e.heal_remainder = 0;
+            e.conversion_target = None;
+            e.conversion_target_building = None;
+            e.ci_progress = 0;
+            e.ci_ticks = 0;
+            e.relic_pickup_target = None;
+            e.relic_deposit_target = None;
+        }
+        let installed = self.install_move_destination(idx, x, y);
+        if let Some(dest) = installed {
+            self.record_formation_member(idx, formation, (x, y), dest);
+        }
+        // CMB-09: a Defensive unit's post follows its explicit
+        // move orders — the formation move is one (its post is
+        // the issued destination; the slot refinement at
+        // session end is a group refinement, not a new order).
+        if self.entities[idx].stance == Stance::Defensive {
+            if let Some((tx, ty)) = installed {
+                let e = &mut self.entities[idx];
+                e.stance_anchor_x = tx;
+                e.stance_anchor_y = ty;
+            }
+        }
+    }
+
+    /// Would a `FormationMove` command be accepted right now?
+    /// The move family's rule (the `orderable` gate) — the
+    /// WASM layer's acceptance mirror and the queued form's
+    /// light validation; the command re-validates on apply.
+    pub fn can_formation_move(&self, entity: u32) -> bool {
+        match self.entity_index(entity) {
+            Some(idx) => self.orderable(idx),
+            None => false,
         }
     }
 
@@ -7910,6 +8219,7 @@ impl Sim {
         // complete on the same tick execute together here) —
         // stamp their groups before the next tick steers them.
         self.finalize_groups();
+        self.finalize_formations();
     }
 
     /// Execute one queued order for entity `idx` — the apply-half of
@@ -7923,6 +8233,13 @@ impl Sim {
                     return false;
                 }
                 self.apply_move(idx, x, y);
+                true
+            }
+            QueuedOrder::FormationMove { x, y, formation } => {
+                if !self.orderable(idx) {
+                    return false;
+                }
+                self.apply_formation_move(idx, x, y, formation);
                 true
             }
             QueuedOrder::Gather { node } => {
@@ -10479,6 +10796,16 @@ impl Sim {
                     }
                     QueuedOrder::Convert { target } => h.write_u32(target),
                     QueuedOrder::ConvertBuilding { building } => h.write_u32(building),
+                    // MOV-07: the queued formation move — its
+                    // point plus the formation tag, appended
+                    // after the existing arms; a queue with no
+                    // formation move in it hashes exactly as
+                    // before.
+                    QueuedOrder::FormationMove { x, y, formation } => {
+                        h.write_i32(x.to_bits());
+                        h.write_i32(y.to_bits());
+                        h.write_u8(formation.tag());
+                    }
                 }
             }
             // INF-09: the current order's queue provenance

@@ -35,6 +35,7 @@ use crate::grid::{Grid, GRID_DIM};
 use crate::market::Market;
 use crate::rng::Pcg32;
 use crate::tech::{Age, ProdEntry, TechId};
+use crate::formation::FormationKind;
 use crate::{Command, MatchMode, PlayerState, Sim, TcState, VictorySettings};
 
 /// File magic: "SKSV" (Skirmish Save).
@@ -110,12 +111,19 @@ const MAGIC: &[u8; 4] = b"SKSV";
 /// predated the v11 settings round-trip; without this block a
 /// mid-KotH save could never pass the load-time hash check,
 /// the countdown being hashed state in KotH matches.)
-/// Version 15: VIC-11 — each player record carries the
-/// `resigned` flag right after `mode_out` (hashed while set, so
-/// a post-resignation save could never pass the load-time hash
-/// check without it), and the command codec gains
-/// `Command::Resign` at tag 48 (append-only, like every tag
-/// before it).
+/// Version 15: VIC-11 + MOV-07 (landed together) — each
+/// player record carries the `resigned` flag right after
+/// `mode_out` (hashed while set, so a post-resignation save
+/// could never pass the load-time hash check without it), and
+/// the command codec gains `Command::Resign` at tag 48 and
+/// `Command::FormationMove` at tag 49 (append-only, like every
+/// tag before it; MOV-07 was renumbered 48 -> 49 at landing
+/// because both builder packages had taken 48). The
+/// queued-order codec gains its queued form of FormationMove
+/// (QueuedOrder tag 11). No other record layout changes:
+/// formation slots live in ordinary move orders, so a v15
+/// save with no formation order pending is laid out exactly
+/// as v14 apart from the version word and the resigned flag.
 const SAVE_VERSION: u32 = 15;
 
 /// Little-endian byte writer over a growable buffer.
@@ -256,6 +264,12 @@ impl W {
             QueuedOrder::Convert { target } => self.u32(target),
             // Castle P5c: QueuedOrder::ConvertBuilding (tag 10).
             QueuedOrder::ConvertBuilding { building } => self.u32(building),
+            // MOV-07: QueuedOrder::FormationMove (tag 11).
+            QueuedOrder::FormationMove { x, y, formation } => {
+                self.fx(x);
+                self.fx(y);
+                self.u8(formation.tag());
+            }
         }
     }
     fn bell_snapshot(&mut self, v: Option<BellSnapshot>) {
@@ -579,6 +593,20 @@ impl W {
             Command::Resign { player } => {
                 self.u8(48);
                 self.u8(player);
+            }
+            // MOV-07: Command::FormationMove (tag 49 at
+            // landing; see the version-15 note above).
+            Command::FormationMove {
+                entity,
+                x,
+                y,
+                formation,
+            } => {
+                self.u8(49);
+                self.u32(entity);
+                self.fx(x);
+                self.fx(y);
+                self.u8(formation.tag());
             }
         }
     }
@@ -1053,6 +1081,12 @@ impl<'a> R<'a> {
             10 => Some(QueuedOrder::ConvertBuilding {
                 building: self.u32()?,
             }),
+            // MOV-07: QueuedOrder::FormationMove (tag 11).
+            11 => Some(QueuedOrder::FormationMove {
+                x: self.fx()?,
+                y: self.fx()?,
+                formation: FormationKind::from_tag(self.u8()?)?,
+            }),
             _ => None,
         }
     }
@@ -1294,6 +1328,13 @@ impl<'a> R<'a> {
             }),
             48 => Some(Command::Resign {
                 player: self.u8()?,
+            }),
+            // MOV-07: Command::FormationMove (tag 49 at landing).
+            49 => Some(Command::FormationMove {
+                entity: self.u32()?,
+                x: self.fx()?,
+                y: self.fx()?,
+                formation: FormationKind::from_tag(self.u8()?)?,
             }),
             _ => None,
         }
@@ -1814,6 +1855,7 @@ impl Sim {
             next_building_id,
             next_group_id,
             group_session: Vec::new(),
+            formation_session: Vec::new(),
             projectiles,
             ai: crate::ai::AiState { next_wave_tick },
             fog,

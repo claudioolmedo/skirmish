@@ -526,6 +526,16 @@ pub enum QueuedOrder {
     /// buildings live in their own id space, so the queued form
     /// carries its own variant, like Repair's.
     ConvertBuilding { building: u32 },
+    /// Move in formation to a world point (MOV-07): the queued
+    /// form of the FormationMove command (SEL-12) — executes
+    /// exactly like a freshly issued one when the entity
+    /// becomes idle; the slot is computed at execution, from
+    /// the group that executes together.
+    FormationMove {
+        x: I16F16,
+        y: I16F16,
+        formation: crate::formation::FormationKind,
+    },
 }
 
 impl QueuedOrder {
@@ -546,6 +556,7 @@ impl QueuedOrder {
             QueuedOrder::AttackGround { .. } => 8,
             QueuedOrder::Convert { .. } => 9,
             QueuedOrder::ConvertBuilding { .. } => 10,
+            QueuedOrder::FormationMove { .. } => 11,
         }
     }
 }
