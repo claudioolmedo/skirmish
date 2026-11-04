@@ -9650,16 +9650,23 @@ function drawMonument(b) {
   const w = (r[0] - l[0]) / 2; // screen half-width of the footprint diamond
   const h = (bt[1] - t[1]) / 2; // screen half-height
   const lift = (pts, dy) => pts.map(([x, y]) => [x, y - dy]);
+  // Bot-loop fix (2026-11-04): the tier-side calls below lift ONE
+  // point, not a point list — feeding a single [x, y] to lift()
+  // iterated the point itself and threw on the y number, killing
+  // the frame loop (rAF is rescheduled only at the end of frame())
+  // in every King of the Hill match: the match froze and ignored
+  // all orders. lift1 is the single-point form.
+  const lift1 = ([x, y], dy) => [x, y - dy];
   const scaled = (pts, f) => pts.map(([x, y]) => [sx + (x - sx) * f, sy + (y - sy) * f]);
   // Ground slab + two stepped tiers.
   poly([t, r, bt, l], '#6e6250');
   const slabA = scaled([t, r, bt, l], 0.82);
-  poly([slabA[3], slabA[2], lift(slabA[2], h * 0.30), lift(slabA[3], h * 0.30)], '#7d7261');
-  poly([slabA[1], slabA[2], lift(slabA[2], h * 0.30), lift(slabA[1], h * 0.30)], '#8d8271');
+  poly([slabA[3], slabA[2], lift1(slabA[2], h * 0.30), lift1(slabA[3], h * 0.30)], '#7d7261');
+  poly([slabA[1], slabA[2], lift1(slabA[2], h * 0.30), lift1(slabA[1], h * 0.30)], '#8d8271');
   poly(lift(slabA, h * 0.30), '#9a8f7c');
   const slabB = lift(scaled([t, r, bt, l], 0.56), h * 0.30);
-  poly([slabB[3], slabB[2], lift(slabB[2], h * 0.26), lift(slabB[3], h * 0.26)], '#8d8271');
-  poly([slabB[1], slabB[2], lift(slabB[2], h * 0.26), lift(slabB[1], h * 0.26)], '#9a8f7c');
+  poly([slabB[3], slabB[2], lift1(slabB[2], h * 0.26), lift1(slabB[3], h * 0.26)], '#8d8271');
+  poly([slabB[1], slabB[2], lift1(slabB[2], h * 0.26), lift1(slabB[1], h * 0.26)], '#9a8f7c');
   poly(lift(slabB, h * 0.26), '#a89d88');
   // The obelisk: two faces tapering to the pyramidion.
   const baseY = sy - h * 0.56;
