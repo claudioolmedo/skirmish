@@ -242,6 +242,21 @@ export class WasmSim {
      */
     idle_villagers_for(owner: number): Uint32Array;
     /**
+     * Package I's Monument holder for the client's readout: the
+     * owner byte of the player currently holding the Monument
+     * (0 = first player, 2 = opponent), the Gaia tag while it
+     * stands wild, or -1 while no Monument exists (setting off,
+     * Sandbox). Landing addition, mirroring the VIC-03 pair
+     * above — the builder tree shipped the sim accessors only.
+     */
+    koth_owner(): number;
+    /**
+     * Package I's KotH clock for the client's readout: ticks
+     * left on the Monument countdown (the full countdown while
+     * nobody holds it; it only runs while a player holds).
+     */
+    koth_ticks_left(): number;
+    /**
      * NET-09: rebuild a sim from `save_game`'s bytes. Returns
      * `None` (JS `undefined`) for anything that is not an intact
      * save of a known version — the sim verifies the restored
@@ -308,16 +323,20 @@ export class WasmSim {
     static new_match(seed: number, mode_tag: number): WasmSim;
     /**
      * Create a match under explicit victory settings (Package C:
-     * VIC-05/06/07): `new_match` plus the conditions chosen at
-     * setup. `time_limit_ticks` is the match clock in 60 Hz ticks
-     * (0 = none), `score_target` the VIC-04 total that wins on
-     * reaching it (0 = none), and `flags` packs the mode switches
-     * — bit 0 = Regicide (VIC-06), bit 1 = Sudden Death (VIC-07),
-     * bit 2 = Relic victory (VIC-03, added by that package; bits
-     * 0/1 keep their Package C meanings).
-     * All-zeros settings are exactly `new_match` (plain Conquest).
-     * In Sandbox mode the settings are inert, like the mode's
-     * other match machinery.
+     * VIC-05/06/07; VIC-03 and Package I add the rest): `new_match`
+     * plus the conditions chosen at setup. `time_limit_ticks` is
+     * the match clock in 60 Hz ticks (0 = none), `score_target`
+     * the VIC-04 total that wins on reaching it (0 = none), and
+     * `flags` packs the mode switches — bit 0 = Regicide
+     * (VIC-06), bit 1 = Sudden Death (VIC-07), bit 2 = Relic
+     * victory (VIC-03), bit 3 = Death Match (VIC-09), bit 4 =
+     * Empire Wars (VIC-10), bit 5 = King of the Hill (VIC-08).
+     * (Package I's builder tree packed its three modes at bits
+     * 2/3/4; bit 2 was taken by VIC-03 on current main, so the
+     * landing shifts them to 3/4/5 — bits 0/1/2 keep their
+     * meanings.) All-zeros settings are exactly `new_match`
+     * (plain Conquest). In Sandbox mode the settings are inert,
+     * like the mode's other match machinery.
      */
     static new_match_victory(seed: number, mode_tag: number, time_limit_ticks: number, score_target: number, flags: number): WasmSim;
     /**
@@ -1335,6 +1354,8 @@ export interface InitOutput {
     readonly wasmsim_idle_military_for: (a: number, b: number) => [number, number];
     readonly wasmsim_idle_villagers: (a: number) => [number, number];
     readonly wasmsim_idle_villagers_for: (a: number, b: number) => [number, number];
+    readonly wasmsim_koth_owner: (a: number) => number;
+    readonly wasmsim_koth_ticks_left: (a: number) => number;
     readonly wasmsim_load_game: (a: number, b: number) => number;
     readonly wasmsim_market_prices: (a: number) => [number, number];
     readonly wasmsim_market_rates: (a: number) => [number, number];

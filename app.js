@@ -188,6 +188,8 @@ const resPop = document.getElementById('res-pop');
 const resAge = document.getElementById('res-age'); // M6: the player's age
 const relicCountdownChip = document.getElementById('relic-countdown-chip'); // VIC-03: the relic countdown readout
 const relicCountdownVal = document.getElementById('relic-countdown');
+const kothCountdownChip = document.getElementById('koth-countdown-chip'); // Package I: the Monument countdown readout
+const kothCountdownVal = document.getElementById('koth-countdown');
 const pauseBtn = document.getElementById('pause-btn');
 // Diplomacy (Package K): the top-bar button and its overlay —
 // the overlay is a live panel, never a pause (see refreshDiplo).
@@ -267,6 +269,9 @@ const victoryInputs = document.querySelectorAll('input[name="victory-mode"]');
 const vicTimeInput = document.getElementById('vic-time');
 const vicScoreInput = document.getElementById('vic-score');
 const vicRelicInput = document.getElementById('vic-relic'); // VIC-03: the relic-victory checkbox
+const vicDeathMatchInput = document.getElementById('vic-deathmatch'); // Package I: the Death Match checkbox
+const vicEmpireWarsInput = document.getElementById('vic-empirewars'); // Package I: the Empire Wars checkbox
+const vicKothInput = document.getElementById('vic-koth'); // Package I: the King of the Hill checkbox
 // End-of-match feedback block (2026-10-19): refs + state. The
 // send goes to the relay's /feedback; once it succeeds the form
 // never shows again (localStorage skirmish2.feedbackDone) — the
@@ -373,23 +378,26 @@ function pngIcon(png, cls) {
 // 20 wood / 30 stone; BUILD_SIZE reads 1, the span's ACROSS edge —
 // the span itself is resolved by the sim and read back through
 // gate_states());
-// 20 monastery (Castle P5a — 175 wood, 3×3, no prerequisite).
+// 20 monastery (Castle P5a — 175 wood, 3×3, no prerequisite);
+// 21 monument (Package I, AI-09/VIC-08 — the King of the Hill
+// Monument: unconstructible, placed by the sim at the map
+// center in KotH matches only; cost rows 0, footprint 4×4).
 // Costs and footprints mirror the sim (MECHANICS-STUDY §5; the
 // palisade row is the current DE wiki row — 3 wood per segment).
-const BUILD_COST = [25, 60, 175, 100, 100, 100, 175, 175, 150, 3, 35, 25, 175, 275, 0, 0, 200, 200, 20, 0, 175];
+const BUILD_COST = [25, 60, 175, 100, 100, 100, 175, 175, 150, 3, 35, 25, 175, 275, 0, 0, 200, 200, 20, 0, 175, 0];
 // Stone paid at placement, by kind tag (BLD-18's two defensive
 // structures, the Town Center, the Stone Wall and the Castle
 // cost stone; every other entry 0).
-const BUILD_COST_STONE = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 125, 5, 0, 100, 5, 650, 0, 0, 0, 30, 0];
+const BUILD_COST_STONE = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 125, 5, 0, 100, 5, 650, 0, 0, 0, 30, 0, 0];
 const BUILD_I18N = ['house', 'farm', 'barracks', 'lumber', 'mill',
   'mining', 'range', 'stable', 'blacksmith', 'palisade', 'watchtower',
-  'outpost', 'market', 'towncenter', 'stonewall', 'castle', 'university', 'siegeworkshop', 'palisadegate', 'stonegate', 'monastery'];
+  'outpost', 'market', 'towncenter', 'stonewall', 'castle', 'university', 'siegeworkshop', 'palisadegate', 'stonegate', 'monastery', 'monument'];
 let BUILD_NAME = ['House', 'Farm', 'Barracks', 'Lumber Camp', 'Mill',
   'Mining Camp', 'Archery Range', 'Stable', 'Blacksmith', 'Palisade Wall',
-  'Watch Tower', 'Outpost', 'Market', 'Town Center', 'Stone Wall', 'Castle', 'University', 'Siege Workshop', 'Palisade Gate', 'Stone Gate', 'Monastery'];
+  'Watch Tower', 'Outpost', 'Market', 'Town Center', 'Stone Wall', 'Castle', 'University', 'Siege Workshop', 'Palisade Gate', 'Stone Gate', 'Monastery', 'Monument'];
 // Farm footprint is 3 (DE-documented; Claudio's decision
 // 2026-10-22, superseding the earlier 2x2 specification).
-const BUILD_SIZE = [2, 3, 3, 2, 2, 2, 3, 3, 3, 1, 1, 1, 4, 4, 1, 4, 4, 4, 1, 1, 3];
+const BUILD_SIZE = [2, 3, 3, 2, 2, 2, 3, 3, 3, 1, 1, 1, 4, 4, 1, 4, 4, 4, 1, 1, 3, 4];
 // The wall kinds (BLD-13 palisade, BLD-20 stone): 1×1 segments
 // placed by dragged lines, not single footprints.
 function isWallKind(kind) { return kind === 9 || kind === 14; }
@@ -402,14 +410,14 @@ const GATE_OF_WALL = { 9: 18, 14: 19 };
 const WALL_OF_GATE = { 18: 9, 19: 14 };
 const BUILD_ICON = ['i-house', 'i-farm', 'i-tc', 'i-lumber', 'i-mill',
   'i-mining', 'i-range', 'i-stable', 'i-blacksmith', 'i-palisade',
-  'i-watchtower', 'i-outpost', 'i-market', 'i-tc', 'i-stonewall', 'i-castle', 'i-university', 'i-siegeworkshop', 'i-palisade', 'i-stonewall', 'i-monastery'];
+  'i-watchtower', 'i-outpost', 'i-market', 'i-tc', 'i-stonewall', 'i-castle', 'i-university', 'i-siegeworkshop', 'i-palisade', 'i-stonewall', 'i-monastery', 'i-monument'];
 // The PNG set above, per building kind tag (same order as
 // BUILD_ICON): command buttons and building portraits.
 const BUILD_PNG = ['house.png', 'farm.png', 'barracks.png', 'lumber-camp.png',
   'mill.png', 'mining-camp.png', 'archery-range.png', 'stable.png',
   'blacksmith.png', 'palisade-wall.png', 'watchtower.png', 'outpost.png',
   'market.png', 'town-center.png', 'stone-wall.png', 'castle.png', 'university.png',
-  'siege-workshop.png', 'palisade-wall.png', 'stone-wall.png', 'monastery.png'];
+  'siege-workshop.png', 'palisade-wall.png', 'stone-wall.png', 'monastery.png', 'monument.png'];
 // Building max HP by kind tag (the sim's building table, study
 // §5) — for the enemy-building info panel (M5). The palisade
 // entry is its Dark-Age value (150; 250 from Feudal, BLD-13 —
@@ -418,7 +426,7 @@ const BUILD_PNG = ['house.png', 'farm.png', 'barracks.png', 'lumber-camp.png',
 // gates follow the same convention: 240 is the Palisade Gate's
 // Dark column (400 from Feudal), 1650 the Stone Gate's Feudal
 // column (2700 from Castle).
-const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200, 150, 850, 500, 1800, 2400, 1080, 4800, 2100, 1800, 240, 1650, 2100];
+const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200, 150, 850, 500, 1800, 2400, 1080, 4800, 2100, 1800, 240, 1650, 2100, 4800];
 // the Watch Tower's 850 is its pre-Castle value (BLD-18).
 // WASM build commands by kind tag (M6 completes the set; BLD-13
 // adds the palisade's single-segment form — dragged lines go
@@ -639,7 +647,13 @@ let matchEnded = false; // the victory/defeat overlay is up; the sim holds
 //   relicVictory:   VIC-03 — garrisoning every relic on the map
 //                   starts the map-size countdown; holding them
 //                   to expiry wins, losing any one cancels it
-const VICTORY_DEFAULT = { timeLimitTicks: 0, scoreTarget: 0, regicide: false, suddenDeath: false, relicVictory: false };
+//   deathMatch:     VIC-09 (Package I) — both players open on
+//                   the Death Match stockpiles (20k/20k/10k/5k)
+//   empireWars:     VIC-10 (Package I) — Feudal start with the
+//                   pre-built town and 27 tasked villagers
+//   kingOfTheHill:  VIC-08 (Package I) — hold the central
+//                   Monument by presence for the countdown
+const VICTORY_DEFAULT = { timeLimitTicks: 0, scoreTarget: 0, regicide: false, suddenDeath: false, relicVictory: false, deathMatch: false, empireWars: false, kingOfTheHill: false };
 let chosenVictory = { ...VICTORY_DEFAULT }; // the pause menu's pick (local matches, on Restart)
 let matchVictory = { ...VICTORY_DEFAULT }; // the settings the current sim was built with
 
@@ -655,17 +669,23 @@ function normalizeVictory(v) {
     regicide: v.regicide === true,
     suddenDeath: v.suddenDeath === true,
     relicVictory: v.relicVictory === true,
+    deathMatch: v.deathMatch === true,
+    empireWars: v.empireWars === true,
+    kingOfTheHill: v.kingOfTheHill === true,
   };
 }
 function victoryIsDefault(v) {
   const n = normalizeVictory(v);
-  return n.timeLimitTicks === 0 && n.scoreTarget === 0 && !n.regicide && !n.suddenDeath && !n.relicVictory;
+  return n.timeLimitTicks === 0 && n.scoreTarget === 0 && !n.regicide && !n.suddenDeath && !n.relicVictory
+    && !n.deathMatch && !n.empireWars && !n.kingOfTheHill;
 }
 /// The WASM ABI flags packing (bit 0 Regicide, bit 1 Sudden
-/// Death, bit 2 Relic victory — bits 0/1 keep their Package C
-/// meanings).
+/// Death, bit 2 Relic victory, bit 3 Death Match, bit 4 Empire
+/// Wars, bit 5 King of the Hill — bits 0/1 keep their Package C
+/// meanings, bit 2 VIC-03's; Package I's modes sit at 3/4/5).
 function victoryFlags(v) {
-  return (v.regicide ? 1 : 0) | (v.suddenDeath ? 2 : 0) | (v.relicVictory ? 4 : 0);
+  return (v.regicide ? 1 : 0) | (v.suddenDeath ? 2 : 0) | (v.relicVictory ? 4 : 0)
+    | (v.deathMatch ? 8 : 0) | (v.empireWars ? 16 : 0) | (v.kingOfTheHill ? 32 : 0);
 }
 /// The one construction path for every match sim: default
 /// settings build exactly the pre-Package-C sim; anything else
@@ -688,16 +708,22 @@ function victoryMeta(v) {
 /// ('conquest' | 'regicide' | 'sudden') plus the VIC-05 numbers
 /// as typed (minutes → 60 Hz ticks) plus the VIC-03 relic
 /// toggle (a checkbox — it combines with any kind, like the
-/// numbers do).
-function victoryFromPick(kind, minutes, score, relic) {
+/// numbers do) plus the Package I mode toggles (checkboxes the
+/// same way — Death Match / Empire Wars / King of the Hill
+/// combine with any condition kind).
+function victoryFromPick(kind, minutes, score, relic, modes) {
   const mins = Number(minutes);
   const pts = Number(score);
+  const m = modes && typeof modes === 'object' ? modes : {};
   return normalizeVictory({
     timeLimitTicks: Number.isFinite(mins) && mins > 0 ? Math.floor(mins) * 3600 : 0,
     scoreTarget: Number.isFinite(pts) && pts > 0 ? Math.floor(pts) : 0,
     regicide: kind === 'regicide',
     suddenDeath: kind === 'sudden',
     relicVictory: relic === true,
+    deathMatch: m.deathMatch === true,
+    empireWars: m.empireWars === true,
+    kingOfTheHill: m.kingOfTheHill === true,
   });
 }
 /// The inverse pick, for reflecting a settings object into the
@@ -709,17 +735,23 @@ function victoryPickOf(v) {
     minutes: n.timeLimitTicks ? Math.round(n.timeLimitTicks / 3600) : 0,
     score: n.scoreTarget || 0,
     relicVictory: n.relicVictory,
+    deathMatch: n.deathMatch,
+    empireWars: n.empireWars,
+    kingOfTheHill: n.kingOfTheHill,
   };
 }
 /// The short localized label for summaries (the room's config
-/// line): the condition kind plus any clock / score / relic
-/// suffixes.
+/// line): the condition kind plus any clock / score / relic /
+/// Package I mode suffixes.
 function victoryLabel(v) {
   const n = normalizeVictory(v);
   let label = t(n.regicide ? 'victory.regicide' : n.suddenDeath ? 'victory.sudden' : 'victory.conquest');
   if (n.timeLimitTicks) label += ' · ' + t('victory.minutes', { n: Math.round(n.timeLimitTicks / 3600) });
   if (n.scoreTarget) label += ' · ' + t('victory.points', { n: n.scoreTarget });
   if (n.relicVictory) label += ' · ' + t('victory.relic');
+  if (n.deathMatch) label += ' · ' + t('victory.deathMatch');
+  if (n.empireWars) label += ' · ' + t('victory.empireWars');
+  if (n.kingOfTheHill) label += ' · ' + t('victory.kingOfTheHill');
   return label;
 }
 
@@ -5752,7 +5784,12 @@ function createGame() {
     netUi.createVictory ? netUi.createVictory.value : 'conquest',
     netUi.createVictoryTime ? netUi.createVictoryTime.value : 0,
     netUi.createVictoryScore ? netUi.createVictoryScore.value : 0,
-    netUi.createVictoryRelic ? netUi.createVictoryRelic.checked : false);
+    netUi.createVictoryRelic ? netUi.createVictoryRelic.checked : false,
+    {
+      deathMatch: netUi.createVictoryDeathMatch ? netUi.createVictoryDeathMatch.checked : false,
+      empireWars: netUi.createVictoryEmpireWars ? netUi.createVictoryEmpireWars.checked : false,
+      kingOfTheHill: netUi.createVictoryKoth ? netUi.createVictoryKoth.checked : false,
+    });
   net.region = net.selectedRegion || net.region || regionList[0].id;
   net.room = makeRoomId();
   // The room lives in memory from here — the address bar stays
@@ -6308,6 +6345,9 @@ function applyStaticStrings() {
   setText('vic-time-txt', 'victory.time');
   setText('vic-score-txt', 'victory.score');
   setText('vic-relic-txt', 'victory.relic');
+  setText('vic-deathmatch-txt', 'victory.deathMatch');
+  setText('vic-empirewars-txt', 'victory.empireWars');
+  setText('vic-koth-txt', 'victory.kingOfTheHill');
   setText('victory-note', 'pause.victoryNote');
   setAttr('quality-row', 'aria-label', 'pause.visualQuality');
   setText('quality-title', 'pause.quality');
@@ -6445,6 +6485,9 @@ function applyStaticStrings() {
   setText('set-victory-time-name', 'victory.time');
   setText('set-victory-score-name', 'victory.score');
   setText('set-victory-relic-name', 'victory.relic');
+  setText('set-victory-deathmatch-name', 'victory.deathMatch');
+  setText('set-victory-empirewars-name', 'victory.empireWars');
+  setText('set-victory-koth-name', 'victory.kingOfTheHill');
   setText('set-players-name', 'set.players');
   setText('set-guest-name', 'set.guestSlot');
   const slotOptions = {
@@ -6551,6 +6594,9 @@ async function main() {
     if (vicTimeInput) vicTimeInput.value = String(pick.minutes);
     if (vicScoreInput) vicScoreInput.value = String(pick.score);
     if (vicRelicInput) vicRelicInput.checked = pick.relicVictory;
+    if (vicDeathMatchInput) vicDeathMatchInput.checked = pick.deathMatch;
+    if (vicEmpireWarsInput) vicEmpireWarsInput.checked = pick.empireWars;
+    if (vicKothInput) vicKothInput.checked = pick.kingOfTheHill;
   }
   function readVictoryInputs() {
     const chosen = document.querySelector('input[name="victory-mode"]:checked');
@@ -6558,12 +6604,20 @@ async function main() {
       chosen ? chosen.value : 'conquest',
       vicTimeInput ? vicTimeInput.value : 0,
       vicScoreInput ? vicScoreInput.value : 0,
-      vicRelicInput ? vicRelicInput.checked : false);
+      vicRelicInput ? vicRelicInput.checked : false,
+      {
+        deathMatch: vicDeathMatchInput ? vicDeathMatchInput.checked : false,
+        empireWars: vicEmpireWarsInput ? vicEmpireWarsInput.checked : false,
+        kingOfTheHill: vicKothInput ? vicKothInput.checked : false,
+      });
   }
   for (const inp of victoryInputs) inp.addEventListener('change', readVictoryInputs);
   if (vicTimeInput) vicTimeInput.addEventListener('change', readVictoryInputs);
   if (vicScoreInput) vicScoreInput.addEventListener('change', readVictoryInputs);
   if (vicRelicInput) vicRelicInput.addEventListener('change', readVictoryInputs);
+  if (vicDeathMatchInput) vicDeathMatchInput.addEventListener('change', readVictoryInputs);
+  if (vicEmpireWarsInput) vicEmpireWarsInput.addEventListener('change', readVictoryInputs);
+  if (vicKothInput) vicKothInput.addEventListener('change', readVictoryInputs);
   syncVictoryInputs();
   playing = false; // no match exists until one is entered
   paused = false;
@@ -6805,6 +6859,9 @@ async function main() {
     createVictoryTime: document.getElementById('create-victory-time'),
     createVictoryScore: document.getElementById('create-victory-score'),
     createVictoryRelic: document.getElementById('create-victory-relic'),
+    createVictoryDeathMatch: document.getElementById('create-victory-deathmatch'),
+    createVictoryEmpireWars: document.getElementById('create-victory-empirewars'),
+    createVictoryKoth: document.getElementById('create-victory-koth'),
     roomSection: document.getElementById('room-section'),
     slotHost: document.getElementById('slot-host'),
     slotGuest: document.getElementById('slot-guest'),
@@ -9573,6 +9630,60 @@ function drawCorpse(site, now) {
 const TALL_FIRE_Y = { 10: 10.2, 11: 6.2, 15: 6.6 };
 const TALL_BAR_Y = { 10: 11.8, 11: 8.0, 15: 8.2 };
 
+// Package I (AI-09 / VIC-08): the King of the Hill Monument —
+// original vector art: a stepped stone base and a tapering
+// obelisk with a gold pyramidion, drawn in the footprint's
+// isometric frame like every other building. While a player
+// holds it (the building's owner byte, flipped by the sim's
+// presence sweep) a pennant in the holder's cloth flies from
+// the tip; while Gaia holds it the stone stands bare. The
+// Monument is never under construction and never damaged, so
+// no stage or fire treatment applies.
+function drawMonument(b) {
+  const [sx, sy] = worldToScreen(b.x, b.y);
+  const half = (b.size * CS) / 2;
+  shadow(sx, sy, half * 1.45 * camS);
+  const t = worldToScreen(b.x - half, b.y - half);
+  const r = worldToScreen(b.x + half, b.y - half);
+  const bt = worldToScreen(b.x + half, b.y + half);
+  const l = worldToScreen(b.x - half, b.y + half);
+  const w = (r[0] - l[0]) / 2; // screen half-width of the footprint diamond
+  const h = (bt[1] - t[1]) / 2; // screen half-height
+  const lift = (pts, dy) => pts.map(([x, y]) => [x, y - dy]);
+  const scaled = (pts, f) => pts.map(([x, y]) => [sx + (x - sx) * f, sy + (y - sy) * f]);
+  // Ground slab + two stepped tiers.
+  poly([t, r, bt, l], '#6e6250');
+  const slabA = scaled([t, r, bt, l], 0.82);
+  poly([slabA[3], slabA[2], lift(slabA[2], h * 0.30), lift(slabA[3], h * 0.30)], '#7d7261');
+  poly([slabA[1], slabA[2], lift(slabA[2], h * 0.30), lift(slabA[1], h * 0.30)], '#8d8271');
+  poly(lift(slabA, h * 0.30), '#9a8f7c');
+  const slabB = lift(scaled([t, r, bt, l], 0.56), h * 0.30);
+  poly([slabB[3], slabB[2], lift(slabB[2], h * 0.26), lift(slabB[3], h * 0.26)], '#8d8271');
+  poly([slabB[1], slabB[2], lift(slabB[2], h * 0.26), lift(slabB[1], h * 0.26)], '#9a8f7c');
+  poly(lift(slabB, h * 0.26), '#a89d88');
+  // The obelisk: two faces tapering to the pyramidion.
+  const baseY = sy - h * 0.56;
+  const bw = w * 0.30;
+  const tipY = baseY - h * 2.5;
+  const capY = tipY + h * 0.34;
+  poly([[sx - bw, baseY], [sx, baseY + bw * 0.5], [sx, capY + bw * 0.08], [sx - bw * 0.16, capY]], '#a89d88');
+  poly([[sx + bw, baseY], [sx, baseY + bw * 0.5], [sx, capY + bw * 0.08], [sx + bw * 0.16, capY]], '#8d8271');
+  // Gold pyramidion.
+  poly([[sx - bw * 0.16, capY], [sx + bw * 0.16, capY], [sx, tipY]], '#d8b34a');
+  // The holder's pennant (owner 0 = first player, 2 = foe;
+  // 1 = Gaia, bare stone).
+  if (b.owner === 0 || b.owner === 2) {
+    const cloth = b.owner === foeOwner() ? ENEMY_CLOTH : '#31579e';
+    ctx.strokeStyle = '#3a2c1c';
+    ctx.lineWidth = Math.max(1, 0.10 * camS);
+    ctx.beginPath();
+    ctx.moveTo(sx, tipY);
+    ctx.lineTo(sx, tipY - h * 0.52);
+    ctx.stroke();
+    poly([[sx, tipY - h * 0.52], [sx + w * 0.30, tipY - h * 0.38], [sx, tipY - h * 0.24]], cloth);
+  }
+}
+
 function drawBuilding(b, all) {
   if (b.kind === 1) {
     // Farm under construction: bare tilled plot + progress bar.
@@ -9585,6 +9696,8 @@ function drawBuilding(b, all) {
     progressBar(sx, sy - 5.1 * camS, b.progress);
   } else if (b.kind === 2) {
     drawBarracks(b);
+  } else if (b.kind === 21) {
+    drawMonument(b);
   } else if (isGateKind(b.kind)) {
     drawGate(b, all);
   } else if (b.kind === 9) {
@@ -11852,6 +11965,27 @@ function updateTopBar() {
       relicCountdownChip.hidden = false;
     } else {
       relicCountdownChip.hidden = true;
+    }
+  }
+  // Package I: the Monument countdown readout, in the VIC-03
+  // chip's style — it appears only while a player holds the
+  // Monument (the countdown runs only then; while Gaia holds
+  // it the clock stands at the full countdown and no chip
+  // shows), naming the holder and the game time left, and
+  // hides the tick the hold is lost or the match ends.
+  if (kothCountdownChip && kothCountdownVal) {
+    const holder = sim && typeof sim.koth_owner === 'function'
+      ? sim.koth_owner() : -1;
+    if ((holder === 0 || holder === 2) && typeof sim.koth_ticks_left === 'function') {
+      const secs = Math.ceil(sim.koth_ticks_left() / 60);
+      const mm = String(Math.floor(secs / 60)).padStart(2, '0');
+      const ss = String(secs % 60).padStart(2, '0');
+      kothCountdownVal.textContent = t(
+        holder === localOwner ? 'victory.kothCountdown' : 'victory.kothCountdownFoe',
+        { time: `${mm}:${ss}` });
+      kothCountdownChip.hidden = false;
+    } else {
+      kothCountdownChip.hidden = true;
     }
   }
   // Warn tint when housed (reason 3) or simply at the cap.
