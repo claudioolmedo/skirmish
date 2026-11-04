@@ -13443,6 +13443,23 @@ function queueCancelChips(kind, id, codes) {
 }
 
 function updateSelPanel() {
+  // Dead-Town-Center bookkeeping (bot-loop, 2026-11-03): a razed
+  // Town Center drops the selection, exactly as a dead animal
+  // does below. Without this the panel of a destroyed TC stayed
+  // up forever, offering Train / Town Bell / Ungarrison buttons
+  // all greyed with the sim's generic dead-TC refusal ("The
+  // training queue is full") — a live session read that zombie
+  // panel as a Town Bell soft-lock: the TC was gone, its
+  // garrison ejected unharmed, and no defeat screen was owed
+  // (the player still had living units), so nothing ever
+  // replaced the dead panel.
+  if (selectedBuilding && selectedBuilding.type === 'tc') {
+    const stc = entityState();
+    const tcId = selectedBuilding.id;
+    if (tcId >= stc.count || stc.hp[tcId * 2] < 1) {
+      selectedBuilding = null;
+    }
+  }
   // Info-selected animal bookkeeping, before anything reads the
   // selection: a dead animal drops the selection; one that
   // converts to us mid-selection becomes a real unit selection
