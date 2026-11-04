@@ -777,8 +777,47 @@ by speed.
 *Source:* GAP 1.10; Pottinger (groups have shared state: destination,
 arrival). · *Impl:* at order issue, stamp the order with a group id and a
 speed cap = min over members; steering clamps to the cap. Requires the
-order queue (SEL-12) data model. · *Status:* **MISSING** (every unit paths
-and travels independently at full speed).
+order queue (SEL-12) data model. · *Status:* **MATCHES** (shipped
+2026-11-04, MOV-06 package: the client issues a group order as one
+command per selected unit in one synchronous click handler (one
+lockstep turn online), so the sim reconstructs the group at order
+issue from the application batch itself — same owner, same move
+kind (plain Move, or an AttackMove's issued leg), destinations
+linking within the client's own group-offset spread (offsets are
+clamped to 6 world units, so members' destinations are never
+more than 12 apart; `GROUP_LINK_DIST`). `apply_move` /
+`apply_attack_move` record each issued order into the tick's
+grouping session (the command drain, and the queue advance for
+Shift-queued groups — the SEL-12 data model this note required);
+at session end each group of 2+ earns the next group id and
+stamps its members' `MoveOrder`s with the cap = min over
+members' speeds at issue, and the movement phase clamps a
+stamped order's steering speed to the cap. Scope, deliberately
+minimal: Patrol (a standing loop whose legs are re-issued
+internally forever), Gather and the other per-target work
+orders are not move orders and are not grouped; an attack-move's
+resumed legs after a fight are internal walks and are not
+grouped either (the group has broken up fighting). The stamp is
+fixed at issue — a member dying or leaving does not recompute
+the survivors' cap — and it ends with the order: arrival clears
+it and every replacement order is built fresh unstamped, so no
+unit slows forever. Hash discipline: the stamp is written only
+while it stands, behind marker 0xC2, and only on members the
+cap actually clamps — the slowest member(s) travel unstamped
+and an equal-speed group stamps nobody — so single-unit orders
+and every default stream stay byte-identical (the golden hash
+does not move; the determinism suite pins it). Save v13 carries
+the stamp and the group-id allocator. Pinned by
+`sim/src/group_speed_tests.rs` (16 tests: stamp + cruise clamp,
+together-arrival with its formation-offset tolerance stated,
+solo/equal-speed/separate-batch/other-owner non-groups,
+client-offset destinations, queued groups, attack-move legs,
+the same-batch reissue leaving the group, death keeping the
+issue-time stamp, cap release on replacement and on arrival,
+save round-trip, replay twins) and `sim/tests/group_speed.rs`
+(4 tests on the standard opening: Scout clamped to the
+Villager, solo-vs-grouped distance, release after arrival,
+save + twins)).
 
 **MOV-07 — Formations assign slots by class layer.** A group ordered in
 formation (Line, Box, Staggered, Flank) receives destination slots:
@@ -4611,13 +4650,20 @@ awaits teams (VIC-12).
 The book stands at 223 rules, 189 / 15 / 19. The table
 below equals the body.
 
+updated 2026-11-04 for MOV-06 (bot-loop builder): group
+moves travel at their slowest member's speed — the order
+batch is stamped with a group id and a speed cap at issue
+(see the rule's Impl note) — MOV-06 moves MISSING →
+MATCHES. The book stands at 223 rules, 190 / 15 / 18.
+The table below equals the body.
+
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
 | 1 | Simulation & time (SIM) | 12 | 12 | 0 | 0 |
 | 2 | Map, terrain & elevation (MAP) | 13 | 9 | 4 | 0 |
 | 3 | Visibility & exploration (VIS) | 10 | 9 | 0 | 1 |
 | 4 | Selection & orders (SEL) | 17 | 16 | 1 | 0 |
-| 5 | Movement, pathfinding & collision (MOV) | 12 | 5 | 3 | 4 |
+| 5 | Movement, pathfinding & collision (MOV) | 12 | 6 | 3 | 3 |
 | 6 | Economy & drop-off (ECO) | 17 | 16 | 0 | 1 |
 | 7 | Buildings & placement (BLD) | 20 | 17 | 2 | 1 |
 | 8 | Combat & damage (CMB) | 17 | 17 | 0 | 0 |
@@ -4631,7 +4677,7 @@ below equals the body.
 | 16 | Victory, scoring & game modes (VIC) | 12 | 6 | 0 | 6 |
 | 17 | Multiplayer determinism (NET) | 11 | 9 | 1 | 1 |
 | 18 | Information rules (INF) | 13 | 12 | 1 | 0 |
-| | **Total** | **223** | **189** | **15** | **19** |
+| | **Total** | **223** | **190** | **15** | **18** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer

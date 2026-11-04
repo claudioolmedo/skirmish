@@ -1179,4 +1179,22 @@ pub struct MoveOrder {
     /// completed his order while he was still ~4.3 units from the
     /// trunk and he chopped from a full tile away (2026-10-24).
     pub arrive: I16F16,
+    /// MOV-06 group stamp: the temporary group this order belongs
+    /// to, stamped at order issue when several units received the
+    /// same move order in one issue action (see `Sim`'s grouping
+    /// session). `0` = no group (every internal order, every
+    /// single-unit order, and — by design — the slowest member(s)
+    /// of a group, who need no clamp). Plain data — part of the
+    /// hashed state, written only while stamped (see `Sim::hash`).
+    pub group_id: u32,
+    /// MOV-06 speed cap: the slowest member's speed at issue
+    /// time, in the same world-units-per-tick scale as the unit
+    /// table. Steering clamps a stamped order's speed to this
+    /// (`Sim`'s movement phase), so the group advances no faster
+    /// than its slowest member and arrives together. Meaningful
+    /// only while `group_id != 0`; the stamp is fixed at issue —
+    /// a member dying or leaving does not recompute it, and any
+    /// new order replaces the stamp with the new order's own
+    /// (usually none), which is how the cap ends.
+    pub group_cap: I16F16,
 }

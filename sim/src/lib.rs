@@ -105,6 +105,8 @@ mod conscription_tests;
 mod bowsaw_tests;
 #[cfg(test)]
 mod victory_relic_tests;
+#[cfg(test)]
+mod group_speed_tests;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
@@ -223,6 +225,64 @@ const MAX_POS: I16F16 = I16F16::from_bits(15_663_104);
 /// further `Queue` commands are ignored. (An implementation bound —
 /// the rulebook records no cap for the reference game.)
 pub const ORDER_QUEUE_CAP: usize = 16;
+
+/// MOV-06: how close two move-order destinations in one issue
+/// batch must be to count as one group order (world units). The
+/// client issues a group order as one command per selected unit,
+/// each destination keeping the unit's offset from the group
+/// centroid CLAMPED TO 6 world units (see `orderAt` /
+/// `attemptOrderGround` in web-preview/app.js), so two members'
+/// destinations are never more than 12 units apart; destinations
+/// farther apart than this are separate orders that merely
+/// arrived in the same tick.
+const GROUP_LINK_DIST: I16F16 = I16F16::from_bits(786_432); // 12.0
+
+/// The kind of player order a MOV-06 group can form over: a plain
+/// move, or an attack-move's issued leg. (Patrol is a standing
+/// loop whose legs are re-issued internally forever, and Gather /
+/// work orders are per-target assignments — neither is a "move
+/// order" in MOV-06's sense; see the rulebook note.)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GroupOrderKind {
+    Move,
+    AttackMove,
+}
+
+/// One member of a pending MOV-06 group, recorded while a
+/// grouping session is open (the command drain, or the queue
+/// advance — the two moments player orders are applied in a
+/// batch). Plain bookkeeping for the session only: never hashed,
+/// never saved; the session is always empty between ticks.
+struct PendingGroupMember {
+    /// Entity index (entities never reindex, so this is stable
+    /// for the session's lifetime).
+    idx: usize,
+    /// The RAW destination as issued (grouping is judged on the
+    /// player's click geometry, before the blocked-cell snap).
+    raw_x: I16F16,
+    raw_y: I16F16,
+    /// The RESOLVED destination the order was installed with —
+    /// at finalize time a member is stamped only while its live
+    /// order still targets this point, so an order superseded
+    /// inside the same batch is never stamped by its predecessor.
+    dest_x: I16F16,
+    dest_y: I16F16,
+    /// The member's own steering speed at issue (its effective
+    /// table speed — `Sim::current_speed`).
+    speed: I16F16,
+}
+
+/// A pending MOV-06 group: every same-owner, same-kind move
+/// order recorded in the open session whose raw destinations
+/// link to this group's destinations (single-linkage within
+/// `GROUP_LINK_DIST`). Finalized at session end: with 2+ members
+/// it earns a group id and stamps its members (see
+/// `Sim::finalize_groups`).
+struct PendingGroup {
+    owner: u8,
+    kind: GroupOrderKind,
+    members: Vec<PendingGroupMember>,
+}
 
 /// Commands are *data*, pushed by the outside world and applied in FIFO
 /// order at tick start. This shape is what makes future lockstep
@@ -1088,6 +1148,19 @@ pub struct Sim {
     /// farms, M5 destruction), so ids cannot be derived from the list
     /// length.
     next_building_id: u32,
+    /// Next MOV-06 group id. Ids start at 1 (`0` on a move order
+    /// means "no group"). An allocator like `next_building_id`:
+    /// saved (so a restored match never reissues a live group's
+    /// id) but not hashed — the ids enter the hash only through
+    /// the stamped orders themselves, while a stamp stands.
+    next_group_id: u32,
+    /// MOV-06 grouping session (transient): the pending groups
+    /// recorded while player orders are being applied in a batch
+    /// (the tick's command drain, or the queue advance).
+    /// Finalized — stamped or discarded — before the tick's
+    /// movement phase, and always empty between phases, so it is
+    /// neither hashed nor saved.
+    group_session: Vec<PendingGroup>,
     /// Projectiles in flight (M3), in spawn order.
     projectiles: Vec<Projectile>,
     /// The scripted opponent's bookkeeping (M5) — wave scheduling
@@ -1249,6 +1322,8 @@ impl Sim {
             }],
             buildings: Vec::new(),
             next_building_id: 0,
+            next_group_id: 1,
+            group_session: Vec::new(),
             projectiles: Vec::new(),
             ai: ai::AiState::default(),
             fog: [vec![0; cell_total], vec![0; cell_total]],
@@ -4246,6 +4321,12 @@ impl Sim {
         }
         if let Some(dest) = self.install_move_destination(idx, x, y) {
             self.entities[idx].attack_move = Some(dest);
+            // MOV-06: the attack-move's issued leg is a move
+            // order — it joins the grouping session like one.
+            // (The standing order's later resume legs are
+            // internal `set_move_order` walks and are not
+            // grouped: after a fight the group has broken up.)
+            self.record_group_member(idx, GroupOrderKind::AttackMove, (x, y), dest);
         }
     }
 
@@ -4969,6 +5050,12 @@ impl Sim {
             }
         }
 
+        // 1.5 MOV-06: the command drain was one issue batch —
+        //     stamp its groups now, before movement consumes the
+        //     orders (the stamps must be in place for this very
+        //     tick's steering, and in the hash this tick returns).
+        self.finalize_groups();
+
         // 2. Movement. Steering is decided from an immutable snapshot,
         //    then integrated — two phases keep borrows simple and the
         //    update order deterministic. The snapshot holds every
@@ -4997,7 +5084,16 @@ impl Sim {
         }
         let mut plans: Vec<(I16F16, I16F16, usize, bool)> = Vec::with_capacity(self.entities.len());
         for (i, e) in self.entities.iter().enumerate() {
-            let speed = self.current_speed(i);
+            // MOV-06: a group-stamped order steers at its cap —
+            // the group advances no faster than its slowest
+            // member. The clamp lives here, at the one speed
+            // lookup every steering call shares, so arrival
+            // slowdown and separation caps all scale from the
+            // capped speed exactly as they do from a table speed.
+            let speed = match &e.order {
+                Some(o) if o.group_id != 0 => self.current_speed(i).min(o.group_cap),
+                _ => self.current_speed(i),
+            };
             plans.push(match &e.order {
                 Some(o) if snap_idx[i] != usize::MAX => steer::steer(
                     &snapshot,
@@ -5203,6 +5299,135 @@ impl Sim {
         self.state_hash()
     }
 
+    /// MOV-06: record a freshly issued player move order as a
+    /// potential group member in the open grouping session.
+    /// Called by `apply_move` / `apply_attack_move` — the two
+    /// applies shared by direct commands and queued-order
+    /// execution, and by nothing internal (internal steering
+    /// walks through `set_move_order`, which is never recorded).
+    /// The session is opened by the tick's command drain and by
+    /// the queue advance; outside those moments no apply runs,
+    /// so recording is unconditional here.
+    ///
+    /// Why grouping is reconstructed in the sim instead of sent
+    /// by the client: the client issues a group order as one
+    /// command per selected unit, synchronously, in one click's
+    /// handler (local play) or one lockstep turn bundle
+    /// (netplay) — so one issue action IS one application batch
+    /// in this sim, and grouping by (owner, order kind,
+    /// destination proximity within the batch) recovers exactly
+    /// the click's selection, with no ABI or client change.
+    /// Two genuinely separate orders by the same owner landing
+    /// in one batch with destinations within `GROUP_LINK_DIST`
+    /// would merge — at 60 Hz that means two clicks inside one
+    /// tick, and their groups travel together either way.
+    fn record_group_member(
+        &mut self,
+        idx: usize,
+        kind: GroupOrderKind,
+        raw: (I16F16, I16F16),
+        dest: (I16F16, I16F16),
+    ) {
+        let owner = self.entities[idx].owner;
+        let speed = self.current_speed(idx);
+        let member = PendingGroupMember {
+            idx,
+            raw_x: raw.0,
+            raw_y: raw.1,
+            dest_x: dest.0,
+            dest_y: dest.1,
+            speed,
+        };
+        // A re-issue for an entity already recorded LEAVES its
+        // pending group first: the newer order superseded the
+        // grouped one, so the unit belongs to the new order's
+        // group (or to none), never to the superseded one.
+        for g in &mut self.group_session {
+            g.members.retain(|m| m.idx != idx);
+        }
+        // Join the first open group of the same owner and kind
+        // whose destinations link to this one; else start a new
+        // pending group.
+        for g in &mut self.group_session {
+            if g.owner != owner || g.kind != kind {
+                continue;
+            }
+            let links = g
+                .members
+                .iter()
+                .any(|m| steer::vec_len(raw.0 - m.raw_x, raw.1 - m.raw_y) <= GROUP_LINK_DIST);
+            if links {
+                g.members.push(member);
+                return;
+            }
+        }
+        self.group_session.push(PendingGroup {
+            owner,
+            kind,
+            members: vec![member],
+        });
+    }
+
+    /// MOV-06: close the grouping session — every pending group
+    /// with 2+ surviving members earns the next group id and
+    /// stamps its members' live orders with the group's speed
+    /// cap (the min over members' speeds at issue). A member is
+    /// stamped only while its live order still targets the
+    /// destination recorded at issue (an order superseded inside
+    /// the same batch belongs to its newer order, not this
+    /// group), and only when the cap actually clamps it: the
+    /// slowest member(s) travel at full speed unstamped, and an
+    /// equal-speed group stamps nobody — so single-unit orders,
+    /// equal-speed groups and every non-group stream stay
+    /// byte-identical in the hash to before MOV-06, and group
+    /// state joins the hash only while a multi-unit group move
+    /// with a non-trivial cap is active. The stamp is fixed at
+    /// issue (the rulebook's Impl note): a member dying or
+    /// leaving does not recompute the survivors' cap, and the
+    /// cap ends when the order ends or is replaced — every
+    /// replacement order is built fresh by `set_move_order` with
+    /// no stamp.
+    fn finalize_groups(&mut self) {
+        let groups = std::mem::take(&mut self.group_session);
+        for g in groups {
+            if g.members.len() < 2 {
+                continue;
+            }
+            let cap = g
+                .members
+                .iter()
+                .map(|m| m.speed)
+                .min()
+                .expect("a group with members has a slowest speed");
+            let id = self.next_group_id;
+            self.next_group_id = self.next_group_id.wrapping_add(1).max(1);
+            for m in &g.members {
+                if self.entities[m.idx].dead {
+                    continue;
+                }
+                let still_targets = match &self.entities[m.idx].order {
+                    Some(o) => (o.target_x, o.target_y) == (m.dest_x, m.dest_y),
+                    None => false,
+                };
+                if !still_targets {
+                    continue;
+                }
+                // The member's own speed may have moved since
+                // issue (a passenger boarded a Ram mid-batch);
+                // stamp only a member the cap still clamps.
+                if self.current_speed(m.idx) <= cap {
+                    continue;
+                }
+                let o = self.entities[m.idx]
+                    .order
+                    .as_mut()
+                    .expect("checked above");
+                o.group_id = id;
+                o.group_cap = cap;
+            }
+        }
+    }
+
     /// The speed steering uses for an entity this tick: its table
     /// speed, except a boar with an attack target, which uses its
     /// faster chase speed.
@@ -5318,6 +5543,11 @@ impl Sim {
         // CMB-09: a Defensive unit's post follows its explicit
         // move orders — the post is the resolved destination.
         let installed = self.install_move_destination(idx, x, y);
+        // MOV-06: a player-issued move joins the open grouping
+        // session (direct and queued execution share this apply).
+        if let Some(dest) = installed {
+            self.record_group_member(idx, GroupOrderKind::Move, (x, y), dest);
+        }
         if self.entities[idx].stance == Stance::Defensive {
             if let Some((tx, ty)) = installed {
                 let e = &mut self.entities[idx];
@@ -6240,6 +6470,8 @@ impl Sim {
                 // completing the order a full generic radius
                 // short of the trunk.
                 arrive: steer::TREE_ARRIVE,
+                group_id: 0,
+                group_cap: I16F16::ZERO,
             });
             return true;
         }
@@ -6280,6 +6512,8 @@ impl Sim {
                     waypoints: wps,
                     wp_index: 0,
                     arrive: steer::TREE_ARRIVE,
+                    group_id: 0,
+                    group_cap: I16F16::ZERO,
                 });
                 return true;
             }
@@ -6784,6 +7018,12 @@ impl Sim {
                 }
             }
         }
+        // MOV-06: queued orders that executed in this advance
+        // were issued as one batch (a Shift+click group queues
+        // one order per unit in one drain; the chains that
+        // complete on the same tick execute together here) —
+        // stamp their groups before the next tick steers them.
+        self.finalize_groups();
     }
 
     /// Execute one queued order for entity `idx` — the apply-half of
@@ -7424,6 +7664,11 @@ impl Sim {
                 waypoints: wps,
                 wp_index: 0,
                 arrive: steer::WAYPOINT_REACH,
+                // Internal order (MOV-06): never a group stamp —
+                // stamps are applied only by the grouping session
+                // over player-issued orders, after issue.
+                group_id: 0,
+                group_cap: I16F16::ZERO,
             }),
             _ => None,
         };
@@ -9253,6 +9498,21 @@ impl Sim {
                     for &(wx, wy) in &o.waypoints {
                         h.write_i32(wx.to_bits());
                         h.write_i32(wy.to_bits());
+                    }
+                    // MOV-06: the group stamp (group id + speed
+                    // cap) — written ONLY while a stamp stands,
+                    // behind marker 0xC2, exactly the conditional
+                    // pattern of the VIC-03 block (0xC1, world
+                    // section). A stamp exists only on a member a
+                    // multi-unit group order actually clamps, so
+                    // single-unit orders, equal-speed groups and
+                    // every default stream hash byte-identically
+                    // to before; an active clamped group is fully
+                    // covered while it travels.
+                    if o.group_id != 0 {
+                        h.write_u8(0xC2);
+                        h.write_u32(o.group_id);
+                        h.write_i32(o.group_cap.to_bits());
                     }
                 }
             }

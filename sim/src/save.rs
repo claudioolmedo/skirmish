@@ -89,7 +89,15 @@ const MAGIC: &[u8; 4] = b"SKSV";
 /// present only while the flag is on, which the flags byte
 /// itself tells the reader, so a non-relic v12 save is laid out
 /// exactly as v11 was apart from the version word.
-const SAVE_VERSION: u32 = 12;
+/// Version 13: MOV-06 — the buildings section carries
+/// `next_group_id` right after `next_building_id` (the group-id
+/// allocator must continue where the match left off, like its
+/// building twin), and each move-order record carries its group
+/// stamp as a flag byte plus, while stamped, the group id and
+/// speed cap — a save taken mid-group-move restores the clamp,
+/// and its hash (the stamp is hashed state, marker 0xC2) still
+/// verifies at load.
+const SAVE_VERSION: u32 = 13;
 
 /// Little-endian byte writer over a growable buffer.
 struct W {
@@ -258,6 +266,14 @@ impl W {
                 for &(x, y) in &o.waypoints {
                     self.fx(x);
                     self.fx(y);
+                }
+                // MOV-06 (v13): the group stamp, flagged.
+                if o.group_id != 0 {
+                    self.u8(1);
+                    self.u32(o.group_id);
+                    self.fx(o.group_cap);
+                } else {
+                    self.u8(0);
                 }
             }
         }
@@ -650,6 +666,9 @@ impl Sim {
         }
         // --- buildings ---
         w.u32(self.next_building_id);
+        // MOV-06 (v13): the group-id allocator, beside its
+        // building twin.
+        w.u32(self.next_group_id);
         w.usize(self.buildings.len());
         for b in &self.buildings {
             w.u32(b.id);
@@ -1025,12 +1044,20 @@ impl<'a> R<'a> {
                 for _ in 0..n {
                     waypoints.push((self.fx()?, self.fx()?));
                 }
+                // MOV-06 (v13): the group stamp, flagged.
+                let (group_id, group_cap) = match self.u8()? {
+                    0 => (0, I16F16::ZERO),
+                    1 => (self.u32()?, self.fx()?),
+                    _ => return None,
+                };
                 Some(Some(MoveOrder {
                     target_x,
                     target_y,
                     waypoints,
                     wp_index,
                     arrive,
+                    group_id,
+                    group_cap,
                 }))
             }
             _ => None,
@@ -1397,6 +1424,8 @@ impl Sim {
             });
         }
         let next_building_id = r.u32()?;
+        // MOV-06 (v13): the group-id allocator.
+        let next_group_id = r.u32()?;
         let n_b = r.count(60)?;
         let mut buildings = Vec::with_capacity(n_b);
         for _ in 0..n_b {
@@ -1725,6 +1754,8 @@ impl Sim {
             tc_states,
             buildings,
             next_building_id,
+            next_group_id,
+            group_session: Vec::new(),
             projectiles,
             ai: crate::ai::AiState { next_wave_tick },
             fog,
