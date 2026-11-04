@@ -82,7 +82,14 @@ const MAGIC: &[u8; 4] = b"SKSV";
 /// Regicide / Sudden Death / timed save could never pass the
 /// load-time hash check. (The builder tree numbered its own
 /// victory-only delta v10 as well; the combined format is v11.)
-const SAVE_VERSION: u32 = 11;
+/// Version 12: VIC-03 (relic victory) — the victory flags gain
+/// bit 2 (relic victory), and a match under that setting carries
+/// its relic countdown state (holder + accrued hold ticks) right
+/// after the victory settings in the world section; the block is
+/// present only while the flag is on, which the flags byte
+/// itself tells the reader, so a non-relic v12 save is laid out
+/// exactly as v11 was apart from the version word.
+const SAVE_VERSION: u32 = 12;
 
 /// Little-endian byte writer over a growable buffer.
 struct W {
@@ -557,6 +564,18 @@ impl Sim {
         w.u64(self.victory.time_limit_ticks);
         w.u64(self.victory.score_target as u64);
         w.u8(self.victory.flags());
+        // Format v12: VIC-03's countdown state, present only
+        // while the relic-victory flag (bit 2 above) is on —
+        // hashed while a hold stands, so a save taken
+        // mid-countdown must carry it for the load-time hash
+        // check to pass.
+        if self.victory.relic_victory {
+            w.bool(self.relic_holder.is_some());
+            if let Some(holder) = self.relic_holder {
+                w.u8(holder);
+            }
+            w.u64(self.relic_hold_ticks);
+        }
         w.u32(self.grid.width());
         w.u32(self.grid.height());
         w.bytes(self.grid.terrain_bytes());
@@ -1268,6 +1287,8 @@ impl Sim {
         // Format v11: the victory settings (Package C), packed
         // exactly as `save_game` wrote them (flags: bit 0
         // Regicide, bit 1 Sudden Death — the WASM ABI packing).
+        // Format v12: bit 2 is VIC-03's relic victory, and its
+        // countdown state follows when the bit is on.
         let victory = {
             let time_limit_ticks = r.u64()?;
             let score_target = r.u64()? as i64;
@@ -1277,7 +1298,14 @@ impl Sim {
                 score_target,
                 regicide: flags & 1 != 0,
                 sudden_death: flags & 2 != 0,
+                relic_victory: flags & 4 != 0,
             }
+        };
+        let (relic_holder, relic_hold_ticks) = if victory.relic_victory {
+            let holder = if r.bool()? { Some(r.u8()?) } else { None };
+            (holder, r.u64()?)
+        } else {
+            (None, 0)
         };
         // World: the grid is the fixed rulebook size; the stored
         // dimensions must agree before any layer is read.
@@ -1686,6 +1714,8 @@ impl Sim {
             grid,
             mode,
             victory,
+            relic_holder,
+            relic_hold_ticks,
             entities,
             commands,
             stockpiles,

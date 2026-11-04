@@ -103,6 +103,8 @@ mod tribute_vision_tests;
 mod conscription_tests;
 #[cfg(test)]
 mod bowsaw_tests;
+#[cfg(test)]
+mod victory_relic_tests;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
@@ -781,6 +783,13 @@ pub struct VictorySettings {
     /// VIC-07: Sudden Death — losing the last Town Center
     /// eliminates the owner immediately, no rebuild window.
     pub sudden_death: bool,
+    /// VIC-03: Relic victory (Standard games) — a player who
+    /// garrisons *all* of the map's relics in their Monasteries
+    /// starts the map-size countdown (`RELIC_VICTORY_DURATION_TICKS`
+    /// on this game's only size, Tiny); holding them until it
+    /// expires wins, losing any one cancels it. Opt-in, like
+    /// every Package C condition: off in plain Conquest.
+    pub relic_victory: bool,
 }
 
 impl VictorySettings {
@@ -794,12 +803,37 @@ impl VictorySettings {
         *self == Self::default()
     }
 
-    /// The two mode booleans as hash bits (bit 0 regicide,
-    /// bit 1 sudden death) — the same packing the WASM ABI uses.
+    /// The mode booleans as hash bits (bit 0 regicide, bit 1
+    /// sudden death, bit 2 relic victory) — the same packing the
+    /// WASM ABI uses. Bits 0/1 keep their Package C meanings.
     fn flags(&self) -> u8 {
-        (self.regicide as u8) | ((self.sudden_death as u8) << 1)
+        (self.regicide as u8)
+            | ((self.sudden_death as u8) << 1)
+            | ((self.relic_victory as u8) << 2)
     }
 }
+
+/// VIC-03's countdown length on the map size this game ships.
+/// The duration scales with map size in DE (wiki, Relic —
+/// victory-duration table by map size, fetched 2026-11-03):
+/// one game year = 5 s of game time, so a year is 300 ticks at
+/// 60 ticks/s. The wiki's current table — expanded with the
+/// post-update-107882 MORE_MAP_SIZES sizes — runs 100 years
+/// (Miniature, 8:20 of game time) / 200 (Tiny, 16:40) / 300
+/// (Normal, 25:00) / 350 (Large, 29:10) / 400 (Huge, 33:20) /
+/// 450 (Enormous, 37:30) / 500 (Monstrous, 41:40). Only Tiny
+/// exists here (MAP-02 is DIFFERS — Tiny only, 120×120), so
+/// the live path is Tiny's 200 years = 1,000 s = 60,000 ticks;
+/// the rest of the table is recorded here for the day larger
+/// sizes land, when this becomes a lookup keyed on the map's
+/// size. (Ruling at landing, bot-loop 2026-11-03: the package
+/// was built at 30,000 ticks following the rulebook's older
+/// VIC-02 reading — 100 years (Tiny) — compiled before the
+/// MORE_MAP_SIZES expansion; the loop re-fetched the Relic
+/// article the rulebook itself cites and follows the current
+/// table, as with every DE-side change. VIC-02's note is
+/// updated in the same commit.)
+pub const RELIC_VICTORY_DURATION_TICKS: u64 = 60_000;
 
 /// One Town Center's production state (M5): its production queue,
 /// progress, and rally point. Before M5 these lived as loose fields
@@ -1008,6 +1042,19 @@ pub struct Sim {
     /// Conquest unless the match was opened with other settings.
     /// Set at construction alongside `mode`; never changes.
     victory: VictorySettings,
+    /// VIC-03's countdown state: the player currently holding
+    /// *all* of the map's relics garrisoned in their Monasteries
+    /// and how many consecutive ticks that hold has lasted.
+    /// Maintained by `relic_victory_tick` only while the
+    /// `relic_victory` setting is on (and only in a match —
+    /// Sandbox never counts down); any tick the hold does not
+    /// stand resets both fields, so a cancelled countdown starts
+    /// again from the full duration. Hashed only while a hold
+    /// stands (see `hash_parts`), so a stream with no active
+    /// countdown — every Conquest stream included — stays
+    /// byte-identical.
+    relic_holder: Option<u8>,
+    relic_hold_ticks: u64,
     /// All entities, always sorted by `id`. Never a HashMap.
     /// Entity 0 is the human Town Center; in a match the opponent's
     /// Town Center and start follow the standard layout.
@@ -1175,6 +1222,8 @@ impl Sim {
             grid,
             mode,
             victory,
+            relic_holder: None,
+            relic_hold_ticks: 0,
             entities,
             commands: Vec::new(),
             stockpiles: [Stockpile::starting(), Stockpile::starting()],
@@ -2732,7 +2781,9 @@ impl Sim {
     /// human's elimination is checked first, ties against the
     /// human): a player flagged out by a mode event (VIC-06's King
     /// death, VIC-07's last-Town-Center loss) has lost whatever
-    /// else they own; then VIC-05's score endings read the live
+    /// else they own; then VIC-03's relic ending — an expired
+    /// all-relics countdown (read only while its setting is on);
+    /// then VIC-05's score endings read the live
     /// VIC-04 totals — the target the moment it is reached, the
     /// clock at expiry. The score read runs only when a score
     /// setting is on, so a plain Conquest read never pays for it.
@@ -2748,6 +2799,13 @@ impl Sim {
         }
         if self.eliminated(entity::OWNER_OPPONENT) || self.mode_out(entity::OWNER_OPPONENT) {
             return MatchState::Victory;
+        }
+        if let Some(human_won) = self.relic_outcome() {
+            return if human_won {
+                MatchState::Victory
+            } else {
+                MatchState::Defeat
+            };
         }
         if let Some(human_won) = self.score_outcome() {
             return if human_won {
@@ -2802,6 +2860,101 @@ impl Sim {
             return Some(human > foe);
         }
         None
+    }
+
+    /// VIC-03's hold read: the player who currently garrisons
+    /// *all* of the map's relics in their Monasteries, if any.
+    /// The census is the map's live relic entities (MAP-13 spawns
+    /// five; a map with zero relics has no holder — "all of zero"
+    /// is not a hold) against each player's Monastery relic
+    /// stores (the P5d building lists the trickle reads). A relic
+    /// on the ground or in a monk's hands is in nobody's store, so
+    /// a partial or carried set never qualifies. At most one
+    /// player can qualify — the stores partition the garrisoned
+    /// relics — but the scan checks the human first, keeping the
+    /// read deterministic whatever the state.
+    fn relic_all_holder(&self) -> Option<u8> {
+        let total = self
+            .entities
+            .iter()
+            .filter(|e| e.kind == EntityKind::Relic && !e.dead)
+            .count() as u32;
+        if total == 0 {
+            return None;
+        }
+        for owner in [entity::OWNER_PLAYER, entity::OWNER_OPPONENT] {
+            let held: u32 = self
+                .buildings
+                .iter()
+                .filter(|b| b.owner == owner && b.kind == BuildingKind::Monastery)
+                .map(|b| b.relics.len() as u32)
+                .sum();
+            if held == total {
+                return Some(owner);
+            }
+        }
+        None
+    }
+
+    /// VIC-03's per-tick countdown maintenance (tick step 4.8):
+    /// while the setting is on and a match runs, the standing
+    /// all-relics hold accrues one tick; a new holder starts at
+    /// one; any tick without a hold — setting off, Sandbox, a
+    /// relic retrieved, dropped by a razed Monastery, or still on
+    /// the ground — resets the countdown outright (DE cancels
+    /// it; it does not pause). Under allied victory a team's
+    /// relics would pool (VIC-12) — no teams exist in this game
+    /// (VIS-08), so the read is per-player only.
+    fn relic_victory_tick(&mut self) {
+        if !self.victory.relic_victory || !self.mode.is_match() {
+            self.relic_holder = None;
+            self.relic_hold_ticks = 0;
+            return;
+        }
+        match self.relic_all_holder() {
+            Some(owner) if self.relic_holder == Some(owner) => {
+                self.relic_hold_ticks = self.relic_hold_ticks.saturating_add(1);
+            }
+            Some(owner) => {
+                self.relic_holder = Some(owner);
+                self.relic_hold_ticks = 1;
+            }
+            None => {
+                self.relic_holder = None;
+                self.relic_hold_ticks = 0;
+            }
+        }
+    }
+
+    /// VIC-03's ending, from the countdown state: `Some(true)`
+    /// the human's countdown has expired, `Some(false)` the
+    /// opponent's has, `None` no relic ending applies. Read only
+    /// while the setting is on, so a Conquest match holding every
+    /// relic (the ECO-16 trickle alone) never ends this way.
+    fn relic_outcome(&self) -> Option<bool> {
+        if !self.victory.relic_victory {
+            return None;
+        }
+        let holder = self.relic_holder?;
+        if self.relic_hold_ticks < RELIC_VICTORY_DURATION_TICKS {
+            return None;
+        }
+        Some(holder == entity::OWNER_PLAYER)
+    }
+
+    /// VIC-03's live countdown for the client's readout: the
+    /// holding player and the ticks left until their relic
+    /// victory, while a countdown is running under the relic
+    /// setting. `None` whenever no countdown runs (setting off,
+    /// no all-relics hold, Sandbox). At expiry the ticks left
+    /// read 0 and `match_state` has decided the match.
+    pub fn relic_countdown(&self) -> Option<(u8, u64)> {
+        if !self.victory.relic_victory || !self.mode.is_match() {
+            return None;
+        }
+        let holder = self.relic_holder?;
+        let left = RELIC_VICTORY_DURATION_TICKS.saturating_sub(self.relic_hold_ticks);
+        Some((holder, left))
     }
 
     /// AI-05 resignation: the opponent has no Town Center and no
@@ -4993,6 +5146,15 @@ impl Sim {
         //     phase, so a relic deposited this tick starts paying
         //     next tick and a retrieved one stops with this tick.
         self.relic_tick();
+
+        // 4.8 Relic victory (VIC-03): while the relic-victory
+        //     setting is on, a player garrisoning every relic on
+        //     the map in their Monasteries runs the countdown;
+        //     losing any relic cancels it. After the relic phase,
+        //     so a deposit that completes the set this tick starts
+        //     the count this tick and a retrieve this tick has
+        //     already broken it.
+        self.relic_victory_tick();
 
         // 5. Order queues (M4, SEL-12): an entity that became fully
         //    idle this tick starts its next queued order, so a chain
@@ -8743,6 +8905,18 @@ impl Sim {
             h.write_u64(self.victory.time_limit_ticks);
             h.write_u64(self.victory.score_target as u64);
             h.write_u8(self.victory.flags());
+        }
+        // VIC-03: the relic countdown state joins the hash only
+        // while a hold stands — behind marker 0xC1, the holder
+        // and the accrued ticks — so a stream with no active
+        // countdown (every plain Conquest stream, and any
+        // relic-setting stream before the set is complete) stays
+        // byte-identical, and two countdowns can never silently
+        // agree.
+        if self.relic_holder.is_some() {
+            h.write_u8(0xC1);
+            h.write_u8(self.relic_holder.unwrap_or(0));
+            h.write_u64(self.relic_hold_ticks);
         }
         // M6: per-player progression — age and the researched-tech
         // mask, in slot order. New hashed state (TEC-06: research is

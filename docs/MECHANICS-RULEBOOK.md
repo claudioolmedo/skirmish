@@ -2903,8 +2903,9 @@ heal ban, so a carrying monk still heals. The death sweep drops a
 carrier's relic at the death position; a converted carrier keeps
 carrying (the pointer names the monk, who changes owner); a destroyed
 Monastery drops its store on the ground at its position. The garrison
-count this rule maintains is the count VIC-03 will read when the
-Standard victory mode lands (VIC-02/VIC-03 stay DEFERRED). ·
+count this rule maintains is the count VIC-03 reads (the relic
+countdown landed 2026-11-03 as an opt-in victory setting;
+VIC-02's Wonder countdown stays MISSING). ·
 *Status:* **MATCHES**.
 
 **MNK-10 — Healing.** A monk heals one allied unit at a time within
@@ -3562,10 +3563,13 @@ harmlessly after the decision. · *Status:* **MATCHES**.
 **VIC-02 — Wonder victory (standard games).** In Standard victory mode,
 holding a completed Wonder starts a countdown; if the Wonder still stands
 when it expires, its owner wins. The countdown length scales with map
-size: 100 years (Tiny) to 500 years (Huge/Ludicrous), one game year =
-5 s — i.e. 8:20 to 41:40 of game time (the full table is in the Relic
-wiki article and shared with VIC-03). Destroying the Wonder cancels the
-countdown.
+size: 100 years (Miniature) to 500 years (Monstrous) — Tiny is
+200 years — one game year = 5 s — i.e. 8:20 to 41:40 of game time
+(the full table is in the Relic wiki article and shared with
+VIC-03; the size row was expanded by update 107882's
+MORE_MAP_SIZES, re-fetched 2026-11-03 — the pre-expansion reading
+of this note, 100 years (Tiny), is superseded). Destroying the
+Wonder cancels the countdown.
 *Source:* wiki, Relic (duration table by map size); GAP 8.2. · *Impl:*
 the countdown is a per-player tick counter in match state (hashed),
 started/stopped by Wonder existence events. · *Status:* **MISSING**.
@@ -3575,9 +3579,33 @@ relics garrisoned in Monasteries starts the same map-size countdown
 (VIC-02's table); losing any relic from a monastery cancels it. Under
 allied victory, a team's relics pool together.
 *Source:* wiki, Relic (victory rule + pooled team relics). · *Impl:*
-relic state lives on relic entities (MNK-09); the win checker counts
-garrisoned relics per player/team each cadence tick. · *Status:*
-**MISSING**.
+shipped (VIC-03 package, 2026-11-03) — an opt-in `VictorySettings`
+condition (`relic_victory`, WASM flags bit 2; off in plain Conquest,
+whose streams stay byte-identical: the settings join the hash only
+off-default and the countdown state only while a hold stands). Every
+tick (after the relic phase) the sim censuses the map's live relic
+entities against each player's Monastery relic stores (the P5d
+building lists): the player whose stores hold *every* relic accrues
+the countdown, from `RELIC_VICTORY_DURATION_TICKS` — Tiny's 200
+years from VIC-02's table at 1 year = 5 s (60,000 ticks; only Tiny
+exists, MAP-02); any tick without the full hold — a relic retrieved,
+a Monastery razed and its store dropped, a relic still on the ground
+or in a monk's hands — resets it outright, and a map with zero
+relics never starts ("all of zero" is not a hold). At expiry
+`match_state` decides for the holder through the same path as the
+other modes (after Conquest/mode elimination, before VIC-05's score
+endings); Sandbox never counts down. The countdown round-trips
+through saves (format v12) and the client surfaces the toggle in
+both prematch panels plus a top-bar countdown readout. Two
+recorded readings: (1) the allied-pooling clause is untestable
+today — no teams exist (VIS-08), so the census is per-player and
+pooling lands with VIC-12; (2) the duration follows VIC-02's
+table in its current form — the package was built at 30,000
+ticks under the pre-expansion reading (100 years (Tiny)); at
+landing the loop re-fetched the Relic article and ruled for
+the current table (200 years (Tiny), 60,000 ticks), updating
+VIC-02's note in the same commit; VIC-02 stays MISSING either
+way. · *Status:* **MATCHES**.
 
 **VIC-04 — The score formula.** Score is shown live and decides score
 victories (VIC-05). Total = Military + Economy + Technology + Society,
@@ -4575,6 +4603,14 @@ builder): Bow Saw + Two-Man Saw land — TEC-07 (techs chain
 by prerequisites) moves DIFFERS → MATCHES. The book stands
 at 223 rules, 188 / 15 / 20. The table below equals the body.
 
+updated 2026-11-03 for VIC-03 (bot-loop builder): relic
+victory lands — the opt-in all-relics countdown (Tiny's
+60,000 ticks from VIC-02's table, as re-fetched at landing)
+moves VIC-03 MISSING → MATCHES; the allied-pooling clause
+awaits teams (VIC-12).
+The book stands at 223 rules, 189 / 15 / 19. The table
+below equals the body.
+
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
 | 1 | Simulation & time (SIM) | 12 | 12 | 0 | 0 |
@@ -4592,10 +4628,10 @@ at 223 rules, 188 / 15 / 20. The table below equals the body.
 | 13 | Trade, market & tribute (TRD) | 8 | 8 | 0 | 0 |
 | 14 | Garrison, transport & repair (GAR) | 10 | 9 | 0 | 1 |
 | 15 | AI behavior & difficulty (AI) | 9 | 8 | 0 | 1 |
-| 16 | Victory, scoring & game modes (VIC) | 12 | 5 | 0 | 7 |
+| 16 | Victory, scoring & game modes (VIC) | 12 | 6 | 0 | 6 |
 | 17 | Multiplayer determinism (NET) | 11 | 9 | 1 | 1 |
 | 18 | Information rules (INF) | 13 | 12 | 1 | 0 |
-| | **Total** | **223** | **188** | **15** | **20** |
+| | **Total** | **223** | **189** | **15** | **19** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer

@@ -107,7 +107,9 @@ impl WasmSim {
     /// setup. `time_limit_ticks` is the match clock in 60 Hz ticks
     /// (0 = none), `score_target` the VIC-04 total that wins on
     /// reaching it (0 = none), and `flags` packs the mode switches
-    /// — bit 0 = Regicide (VIC-06), bit 1 = Sudden Death (VIC-07).
+    /// — bit 0 = Regicide (VIC-06), bit 1 = Sudden Death (VIC-07),
+    /// bit 2 = Relic victory (VIC-03, added by that package; bits
+    /// 0/1 keep their Package C meanings).
     /// All-zeros settings are exactly `new_match` (plain Conquest).
     /// In Sandbox mode the settings are inert, like the mode's
     /// other match machinery.
@@ -125,9 +127,33 @@ impl WasmSim {
             score_target: score_target as i64,
             regicide: flags & 1 != 0,
             sudden_death: flags & 2 != 0,
+            relic_victory: flags & 4 != 0,
         };
         WasmSim {
             inner: Sim::with_settings(seed as u64, mode, victory),
+        }
+    }
+
+    /// VIC-03's countdown holder for the client's readout: the
+    /// owner byte of the player whose all-relics countdown is
+    /// running (0 = first player, 2 = opponent), or -1 while no
+    /// countdown runs (setting off, no complete hold, Sandbox).
+    pub fn relic_countdown_holder(&self) -> i32 {
+        match self.inner.relic_countdown() {
+            Some((holder, _)) => holder as i32,
+            None => -1,
+        }
+    }
+
+    /// VIC-03's countdown clock for the client's readout: ticks
+    /// left until the holder's relic victory while a countdown
+    /// runs (0 at expiry, when `match_state` has decided), or 0
+    /// while no countdown runs — read it together with
+    /// `relic_countdown_holder`.
+    pub fn relic_countdown_ticks_left(&self) -> u32 {
+        match self.inner.relic_countdown() {
+            Some((_, left)) => left as u32,
+            None => 0,
         }
     }
 

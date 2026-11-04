@@ -103,6 +103,7 @@ fn victory_settings_round_trip_and_are_hashed_state() {
         score_target: 900,
         regicide: true,
         sudden_death: true,
+        relic_victory: false,
     };
     let sim = Sim::new_match_victory(42, MatchMode::TwoPlayer, settings);
     assert_eq!(sim.victory_settings(), settings);
