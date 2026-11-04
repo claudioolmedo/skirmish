@@ -6064,8 +6064,91 @@ impl Sim {
         if kind != NodeKind::Tree {
             return self.set_move_order(idx, nx, ny);
         }
-        let (tx, ty) = self.grid.world_to_cell(nx, ny);
         let from = (self.entities[idx].pos_x, self.entities[idx].pos_y);
+        if let Some((target, wps)) = self.tree_stand_order(from, node_id) {
+            let e = &mut self.entities[idx];
+            e.order = Some(MoveOrder {
+                target_x: target.0,
+                target_y: target.1,
+                waypoints: wps,
+                wp_index: 0,
+                // A tree order settles AT its stand point (see
+                // the ToNode arrival rule in `work_tick`): the
+                // tight arrival radius stops steering from
+                // completing the order a full generic radius
+                // short of the trunk.
+                arrive: steer::TREE_ARRIVE,
+            });
+            return true;
+        }
+        // Forest-interior tree (bot-loop defect, reproduced live
+        // 2026-11-03 + in the sim harness on the seed-7 map, trees
+        // 32/33): every ring cell of the target tree is blocked by
+        // other trees, so it has no standing cell at all and the
+        // order above installs nothing — the villager's assignment
+        // then died silently in `work_tick` and he idled forever
+        // beside the forest. The codebase's own doctrine (see the
+        // reachability tests) is that interior trees "are workable
+        // the AoE2 way, by chopping in from the edge": substitute
+        // the nearest workable tree — nearest to the TARGET tree,
+        // ties to the lowest node id, the ECO-09 scan discipline —
+        // and re-point the assignment at it. As edge trees deplete,
+        // ECO-09 retargeting walks the cutter inward, so the forest
+        // is still eaten toward the tree the player clicked. The
+        // candidate walk is capped (32 nearest trees) so an order
+        // stays order-time cheap; beyond the cap the old failure
+        // stands (order cleared, villager idles in `work_tick`).
+        let mut cands: Vec<(i64, u32)> = Vec::new();
+        for n in &self.nodes {
+            if n.id == node_id || n.is_depleted() || n.kind != NodeKind::Tree {
+                continue;
+            }
+            let d = steer::vec_len(n.pos_x - nx, n.pos_y - ny);
+            let db = d.to_bits() as i64;
+            cands.push((db * db, n.id));
+        }
+        cands.sort();
+        for (_, cand) in cands.into_iter().take(32) {
+            if let Some((target, wps)) = self.tree_stand_order(from, cand) {
+                self.entities[idx].task_node = Some(cand);
+                let e = &mut self.entities[idx];
+                e.order = Some(MoveOrder {
+                    target_x: target.0,
+                    target_y: target.1,
+                    waypoints: wps,
+                    wp_index: 0,
+                    arrive: steer::TREE_ARRIVE,
+                });
+                return true;
+            }
+        }
+        let e = &mut self.entities[idx];
+        e.order = None;
+        e.vel_x = I16F16::ZERO;
+        e.vel_y = I16F16::ZERO;
+        false
+    }
+
+    /// The standing order for one TREE node: the reachable ring
+    /// cell with the shortest path from `from` (ties break in fixed
+    /// ring order — the search is bounded at the tree's 8
+    /// neighbors, once per order, never per tick) and, within that
+    /// cell, the point at the trunk (see `tree_stand_point`).
+    /// `None` when every ring cell is blocked or unpathable — a
+    /// forest-interior tree, or a tree ringed by new construction.
+    fn tree_stand_order(
+        &self,
+        from: (I16F16, I16F16),
+        node_id: u32,
+    ) -> Option<((I16F16, I16F16), Vec<(I16F16, I16F16)>)> {
+        let (nx, ny) = match self.node_index(node_id) {
+            Some(ni) => {
+                let n = &self.nodes[ni];
+                (n.pos_x, n.pos_y)
+            }
+            None => return None,
+        };
+        let (tx, ty) = self.grid.world_to_cell(nx, ny);
         let mut best: Option<(usize, (I16F16, I16F16), Vec<(I16F16, I16F16)>)> = None;
         for dy in -1i32..=1 {
             for dx in -1i32..=1 {
@@ -6093,31 +6176,7 @@ impl Sim {
                 }
             }
         }
-        match best {
-            Some((_, target, wps)) => {
-                let e = &mut self.entities[idx];
-                e.order = Some(MoveOrder {
-                    target_x: target.0,
-                    target_y: target.1,
-                    waypoints: wps,
-                    wp_index: 0,
-                    // A tree order settles AT its stand point (see
-                    // the ToNode arrival rule in `work_tick`): the
-                    // tight arrival radius stops steering from
-                    // completing the order a full generic radius
-                    // short of the trunk.
-                    arrive: steer::TREE_ARRIVE,
-                });
-                true
-            }
-            None => {
-                let e = &mut self.entities[idx];
-                e.order = None;
-                e.vel_x = I16F16::ZERO;
-                e.vel_y = I16F16::ZERO;
-                false
-            }
-        }
+        best.map(|(_, stand, wps)| (stand, wps))
     }
 
     /// Apply a `TrainVillager` command: deduct the food cost and enqueue
