@@ -42,6 +42,8 @@ export const TECH_TREE = [
   { tag: 17, host: 7, age: 2, cost: [150, 0, 0, 0], secs: 40, requires: null }, // Husbandry
   // --- Lumber Camp -------------------------------------------------
   { tag: 10, host: 3, age: 1, cost: [100, 50, 0, 0], secs: 25, requires: null }, // Double-Bit Axe
+  { tag: 43, host: 3, age: 2, cost: [150, 100, 0, 0], secs: 50, requires: 10 }, // Bow Saw (TEC-07 wood chain)
+  { tag: 44, host: 3, age: 3, cost: [300, 200, 0, 0], secs: 100, requires: 43 }, // Two-Man Saw (TEC-07 wood chain)
   // --- Mining Camp -------------------------------------------------
   { tag: 11, host: 5, age: 1, cost: [100, 75, 0, 0], secs: 30, requires: null }, // Gold Mining
   { tag: 12, host: 5, age: 1, cost: [100, 75, 0, 0], secs: 30, requires: null }, // Stone Mining
