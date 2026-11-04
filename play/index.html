@@ -188,6 +188,9 @@
     <span class="res res-stone"><svg class="ui-icon"><use href="#i-stone"/></svg><span class="res-val" id="res-stone">200</span></span>
     <span class="res res-pop"><svg class="ui-icon"><use href="#i-pop"/></svg><span class="res-val" id="res-pop">3 / 5</span></span>
     <span class="res res-age" id="res-age-chip" title="Your current age"><svg class="ui-icon"><use href="#i-age"/></svg><span class="res-val" id="res-age">Dark Age</span></span>
+    <!-- VIC-03: the relic-victory countdown, shown only while an
+         all-relics countdown runs (either player's). -->
+    <span class="res res-relic-countdown" id="relic-countdown-chip" hidden><svg class="ui-icon"><use href="#i-gold"/></svg><span class="res-val" id="relic-countdown"></span></span>
   </div>
   <div class="ui-topbar-spacer"></div>
   <!-- Idle indicators (M4, INF-03): always-visible idle counts; the
@@ -320,6 +323,7 @@
     <div class="mode-row" id="victory-num-row">
       <label class="mode-opt"><span id="vic-time-txt">Time limit (minutes)</span> <input id="vic-time" type="number" min="0" max="480" step="1" value="0" size="4"></label>
       <label class="mode-opt"><span id="vic-score-txt">Score target</span> <input id="vic-score" type="number" min="0" max="100000" step="50" value="0" size="6"></label>
+      <label class="mode-opt"><input id="vic-relic" type="checkbox"> <span id="vic-relic-txt">Relic victory</span></label>
     </div>
     <p class="overlay-note" id="victory-note">Victory conditions for the next match — they apply on Restart, like the mode above. A time limit or score target can combine with any condition.</p>
     <div class="quality-row" id="speed-row" role="group" aria-label="Game speed">
@@ -643,6 +647,9 @@
             </div>
             <div class="setting-row"><span class="setting-name" id="set-victory-score-name">Score target</span>
               <input id="create-victory-score" type="number" min="0" max="100000" step="50" value="0" size="6">
+            </div>
+            <div class="setting-row"><span class="setting-name" id="set-victory-relic-name">Relic victory</span>
+              <input id="create-victory-relic" type="checkbox">
             </div>
             <div class="setting-row"><span class="setting-name" id="set-players-name">Players</span><span class="setting-value">2</span></div>
             <div class="setting-row"><span class="setting-name" id="set-guest-name">Guest slot</span>

@@ -312,7 +312,9 @@ export class WasmSim {
      * setup. `time_limit_ticks` is the match clock in 60 Hz ticks
      * (0 = none), `score_target` the VIC-04 total that wins on
      * reaching it (0 = none), and `flags` packs the mode switches
-     * — bit 0 = Regicide (VIC-06), bit 1 = Sudden Death (VIC-07).
+     * — bit 0 = Regicide (VIC-06), bit 1 = Sudden Death (VIC-07),
+     * bit 2 = Relic victory (VIC-03, added by that package; bits
+     * 0/1 keep their Package C meanings).
      * All-zeros settings are exactly `new_match` (plain Conquest).
      * In Sandbox mode the settings are inert, like the mode's
      * other match machinery.
@@ -1091,6 +1093,21 @@ export class WasmSim {
      */
     rally_points(): Float64Array;
     /**
+     * VIC-03's countdown holder for the client's readout: the
+     * owner byte of the player whose all-relics countdown is
+     * running (0 = first player, 2 = opponent), or -1 while no
+     * countdown runs (setting off, no complete hold, Sandbox).
+     */
+    relic_countdown_holder(): number;
+    /**
+     * VIC-03's countdown clock for the client's readout: ticks
+     * left until the holder's relic victory while a countdown
+     * runs (0 at expiry, when `match_state` has decided), or 0
+     * while no countdown runs — read it together with
+     * `relic_countdown_holder`.
+     */
+    relic_countdown_ticks_left(): number;
+    /**
      * Flat relic census (Castle P5d, MNK-09): per relic,
      * [id, state, holder] — state 0 on the ground (holder 0),
      * 1 carried (holder = the monk's id), 2 garrisoned
@@ -1453,6 +1470,8 @@ export interface InitOutput {
     readonly wasmsim_push_ungarrison_tc: (a: number, b: number) => number;
     readonly wasmsim_push_ungarrison_unit: (a: number, b: number) => number;
     readonly wasmsim_rally_points: (a: number) => [number, number];
+    readonly wasmsim_relic_countdown_holder: (a: number) => number;
+    readonly wasmsim_relic_countdown_ticks_left: (a: number) => number;
     readonly wasmsim_relic_states: (a: number) => [number, number];
     readonly wasmsim_research_block_at: (a: number, b: number, c: number) => number;
     readonly wasmsim_research_block_tc: (a: number, b: number) => number;

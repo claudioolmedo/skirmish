@@ -186,6 +186,8 @@ const resGold = document.getElementById('res-gold');
 const resStone = document.getElementById('res-stone');
 const resPop = document.getElementById('res-pop');
 const resAge = document.getElementById('res-age'); // M6: the player's age
+const relicCountdownChip = document.getElementById('relic-countdown-chip'); // VIC-03: the relic countdown readout
+const relicCountdownVal = document.getElementById('relic-countdown');
 const pauseBtn = document.getElementById('pause-btn');
 // Diplomacy (Package K): the top-bar button and its overlay —
 // the overlay is a live panel, never a pause (see refreshDiplo).
@@ -264,6 +266,7 @@ const modeInputs = document.querySelectorAll('input[name="match-mode"]');
 const victoryInputs = document.querySelectorAll('input[name="victory-mode"]');
 const vicTimeInput = document.getElementById('vic-time');
 const vicScoreInput = document.getElementById('vic-score');
+const vicRelicInput = document.getElementById('vic-relic'); // VIC-03: the relic-victory checkbox
 // End-of-match feedback block (2026-10-19): refs + state. The
 // send goes to the relay's /feedback; once it succeeds the form
 // never shows again (localStorage skirmish2.feedbackDone) — the
@@ -633,7 +636,10 @@ let matchEnded = false; // the victory/defeat overlay is up; the sim holds
 //   scoreTarget:    the VIC-04 total that wins on reaching it (0 = none)
 //   regicide:       each player opens with a King; losing it loses
 //   suddenDeath:    losing the last Town Center loses
-const VICTORY_DEFAULT = { timeLimitTicks: 0, scoreTarget: 0, regicide: false, suddenDeath: false };
+//   relicVictory:   VIC-03 — garrisoning every relic on the map
+//                   starts the map-size countdown; holding them
+//                   to expiry wins, losing any one cancels it
+const VICTORY_DEFAULT = { timeLimitTicks: 0, scoreTarget: 0, regicide: false, suddenDeath: false, relicVictory: false };
 let chosenVictory = { ...VICTORY_DEFAULT }; // the pause menu's pick (local matches, on Restart)
 let matchVictory = { ...VICTORY_DEFAULT }; // the settings the current sim was built with
 
@@ -648,15 +654,18 @@ function normalizeVictory(v) {
     scoreTarget: Number.isFinite(target) ? Math.min(Math.max(Math.floor(target), 0), 0x7fffffff) : 0,
     regicide: v.regicide === true,
     suddenDeath: v.suddenDeath === true,
+    relicVictory: v.relicVictory === true,
   };
 }
 function victoryIsDefault(v) {
   const n = normalizeVictory(v);
-  return n.timeLimitTicks === 0 && n.scoreTarget === 0 && !n.regicide && !n.suddenDeath;
+  return n.timeLimitTicks === 0 && n.scoreTarget === 0 && !n.regicide && !n.suddenDeath && !n.relicVictory;
 }
-/// The WASM ABI flags packing (bit 0 Regicide, bit 1 Sudden Death).
+/// The WASM ABI flags packing (bit 0 Regicide, bit 1 Sudden
+/// Death, bit 2 Relic victory — bits 0/1 keep their Package C
+/// meanings).
 function victoryFlags(v) {
-  return (v.regicide ? 1 : 0) | (v.suddenDeath ? 2 : 0);
+  return (v.regicide ? 1 : 0) | (v.suddenDeath ? 2 : 0) | (v.relicVictory ? 4 : 0);
 }
 /// The one construction path for every match sim: default
 /// settings build exactly the pre-Package-C sim; anything else
@@ -677,8 +686,10 @@ function victoryMeta(v) {
 }
 /// The prematch pick as a settings object: a condition kind
 /// ('conquest' | 'regicide' | 'sudden') plus the VIC-05 numbers
-/// as typed (minutes → 60 Hz ticks).
-function victoryFromPick(kind, minutes, score) {
+/// as typed (minutes → 60 Hz ticks) plus the VIC-03 relic
+/// toggle (a checkbox — it combines with any kind, like the
+/// numbers do).
+function victoryFromPick(kind, minutes, score, relic) {
   const mins = Number(minutes);
   const pts = Number(score);
   return normalizeVictory({
@@ -686,6 +697,7 @@ function victoryFromPick(kind, minutes, score) {
     scoreTarget: Number.isFinite(pts) && pts > 0 ? Math.floor(pts) : 0,
     regicide: kind === 'regicide',
     suddenDeath: kind === 'sudden',
+    relicVictory: relic === true,
   });
 }
 /// The inverse pick, for reflecting a settings object into the
@@ -696,15 +708,18 @@ function victoryPickOf(v) {
     kind: n.regicide ? 'regicide' : n.suddenDeath ? 'sudden' : 'conquest',
     minutes: n.timeLimitTicks ? Math.round(n.timeLimitTicks / 3600) : 0,
     score: n.scoreTarget || 0,
+    relicVictory: n.relicVictory,
   };
 }
 /// The short localized label for summaries (the room's config
-/// line): the condition kind plus any clock / score suffixes.
+/// line): the condition kind plus any clock / score / relic
+/// suffixes.
 function victoryLabel(v) {
   const n = normalizeVictory(v);
   let label = t(n.regicide ? 'victory.regicide' : n.suddenDeath ? 'victory.sudden' : 'victory.conquest');
   if (n.timeLimitTicks) label += ' · ' + t('victory.minutes', { n: Math.round(n.timeLimitTicks / 3600) });
   if (n.scoreTarget) label += ' · ' + t('victory.points', { n: n.scoreTarget });
+  if (n.relicVictory) label += ' · ' + t('victory.relic');
   return label;
 }
 
@@ -5736,7 +5751,8 @@ function createGame() {
   net.victory = victoryFromPick(
     netUi.createVictory ? netUi.createVictory.value : 'conquest',
     netUi.createVictoryTime ? netUi.createVictoryTime.value : 0,
-    netUi.createVictoryScore ? netUi.createVictoryScore.value : 0);
+    netUi.createVictoryScore ? netUi.createVictoryScore.value : 0,
+    netUi.createVictoryRelic ? netUi.createVictoryRelic.checked : false);
   net.region = net.selectedRegion || net.region || regionList[0].id;
   net.room = makeRoomId();
   // The room lives in memory from here — the address bar stays
@@ -6291,6 +6307,7 @@ function applyStaticStrings() {
   setText('vic-sudden-txt', 'victory.sudden');
   setText('vic-time-txt', 'victory.time');
   setText('vic-score-txt', 'victory.score');
+  setText('vic-relic-txt', 'victory.relic');
   setText('victory-note', 'pause.victoryNote');
   setAttr('quality-row', 'aria-label', 'pause.visualQuality');
   setText('quality-title', 'pause.quality');
@@ -6427,6 +6444,7 @@ function applyStaticStrings() {
   });
   setText('set-victory-time-name', 'victory.time');
   setText('set-victory-score-name', 'victory.score');
+  setText('set-victory-relic-name', 'victory.relic');
   setText('set-players-name', 'set.players');
   setText('set-guest-name', 'set.guestSlot');
   const slotOptions = {
@@ -6532,17 +6550,20 @@ async function main() {
     for (const inp of victoryInputs) inp.checked = inp.value === pick.kind;
     if (vicTimeInput) vicTimeInput.value = String(pick.minutes);
     if (vicScoreInput) vicScoreInput.value = String(pick.score);
+    if (vicRelicInput) vicRelicInput.checked = pick.relicVictory;
   }
   function readVictoryInputs() {
     const chosen = document.querySelector('input[name="victory-mode"]:checked');
     chosenVictory = victoryFromPick(
       chosen ? chosen.value : 'conquest',
       vicTimeInput ? vicTimeInput.value : 0,
-      vicScoreInput ? vicScoreInput.value : 0);
+      vicScoreInput ? vicScoreInput.value : 0,
+      vicRelicInput ? vicRelicInput.checked : false);
   }
   for (const inp of victoryInputs) inp.addEventListener('change', readVictoryInputs);
   if (vicTimeInput) vicTimeInput.addEventListener('change', readVictoryInputs);
   if (vicScoreInput) vicScoreInput.addEventListener('change', readVictoryInputs);
+  if (vicRelicInput) vicRelicInput.addEventListener('change', readVictoryInputs);
   syncVictoryInputs();
   playing = false; // no match exists until one is entered
   paused = false;
@@ -6783,6 +6804,7 @@ async function main() {
     createVictory: document.getElementById('create-victory'),
     createVictoryTime: document.getElementById('create-victory-time'),
     createVictoryScore: document.getElementById('create-victory-score'),
+    createVictoryRelic: document.getElementById('create-victory-relic'),
     roomSection: document.getElementById('room-section'),
     slotHost: document.getElementById('slot-host'),
     slotGuest: document.getElementById('slot-guest'),
@@ -11811,6 +11833,27 @@ function updateTopBar() {
   const pop = myPop();
   const cap = myPopCap();
   resPop.textContent = `${pop} / ${cap}`;
+  // VIC-03: the relic countdown readout — the Package C
+  // conditions ship no in-match clock, so this chip is the
+  // minimal readout in their style: it appears only while an
+  // all-relics countdown runs (either player's — DE announces
+  // the countdown to the whole table), showing whose it is and
+  // the game time left, and hides the tick it cancels or ends.
+  if (relicCountdownChip && relicCountdownVal) {
+    const holder = sim && typeof sim.relic_countdown_holder === 'function'
+      ? sim.relic_countdown_holder() : -1;
+    if (holder >= 0 && typeof sim.relic_countdown_ticks_left === 'function') {
+      const secs = Math.ceil(sim.relic_countdown_ticks_left() / 60);
+      const mm = String(Math.floor(secs / 60)).padStart(2, '0');
+      const ss = String(secs % 60).padStart(2, '0');
+      relicCountdownVal.textContent = t(
+        holder === localOwner ? 'victory.relicCountdown' : 'victory.relicCountdownFoe',
+        { time: `${mm}:${ss}` });
+      relicCountdownChip.hidden = false;
+    } else {
+      relicCountdownChip.hidden = true;
+    }
+  }
   // Warn tint when housed (reason 3) or simply at the cap.
   const housedNow = myTrainBlock() === 3 || pop >= cap;
   resPop.classList.toggle('warn', housedNow);
