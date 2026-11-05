@@ -362,8 +362,9 @@ fn cancelling_a_building_queue_entry_refunds_the_unit_cost() {
     });
     sim.tick();
     assert_eq!(sim.building_queue(rax).len(), 1);
-    // Militia cost is the current-DE 50 F / 20 G (update 141935).
-    assert_eq!(food(&sim), 150.0, "the Militia's 50 food was charged");
+    // Militia cost is 60 F / 20 G (Claudio's decision, 2026-11-05,
+    // reversing the update-141935 50 F adopted on 2026-10-21).
+    assert_eq!(food(&sim), 140.0, "the Militia's 60 food was charged");
     assert_eq!(gold(&sim), 80.0, "the Militia's 20 gold was charged");
     sim.push_command(Command::CancelQueueBuilding {
         building: rax,

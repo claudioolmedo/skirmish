@@ -195,7 +195,9 @@ for (const [name, layout] of Object.entries(LAYOUTS)) {
 // a player with 50–59 food saw a price they could not trust.
 // Every train button is pinned here so a cost change in the sim
 // table (or a stray edit in app.js) fails loudly instead of
-// drifting on the panel face.
+// drifting on the panel face. (2026-11-05: the sim charges
+// 60 F again — Claudio's decision reversed the 141935 adoption —
+// so badge, title and this pin all read 60 once more.)
 const appJsCosts = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
 function badgeCost(id) {
   const at = appJsCosts.indexOf(`id: '${id}'`);
@@ -210,7 +212,7 @@ function badgeCost(id) {
 }
 test('train badge costs match the sim table', () => {
   assert.deepEqual(badgeCost('train'), { food: 50 });
-  assert.deepEqual(badgeCost('train-militia'), { food: 50, gold: 20 });
+  assert.deepEqual(badgeCost('train-militia'), { food: 60, gold: 20 });
   assert.deepEqual(badgeCost('train-spearman'), { food: 35, wood: 25 });
   assert.deepEqual(badgeCost('train-archer'), { wood: 25, gold: 45 });
   assert.deepEqual(badgeCost('train-skirmisher'), { food: 25, wood: 35 });

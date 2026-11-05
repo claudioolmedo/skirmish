@@ -5105,6 +5105,19 @@ but no fieldable match has both allies *and* an opposing
 team, and the shared render has no live two-client proof
 yet. The counts stand: 198 / 16 / 9.
 
+updated 2026-11-05 for the Militia cost reversal — Claudio's
+decision the same day (voice call, main chat): "o custo da
+Militia fica 60F/20G — fiel ao AoE2 DE, sem exceção". The
+Militia line cost returns to 60 F / 20 G, reversing the
+2026-10-21 correction (commit 9471419) to update 141935's
+50 F / 20 G recorded earlier in this appendix. The change is
+recorded at the unit table in `sim/src/units.rs` — the
+Man-at-Arms row carries the same line cost, as the Light
+Cavalry row mirrors the Scout Cavalry's — and in the client
+(the Barracks button badge and tooltip, and the help text in
+EN/PT/ES). The rulebook carries no per-unit cost entry, so
+no rule's status changes and the counts do not move.
+
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
 | 1 | Simulation & time (SIM) | 12 | 12 | 0 | 0 |

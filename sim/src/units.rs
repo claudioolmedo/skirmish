@@ -340,10 +340,13 @@ static SCOUT_CAVALRY: UnitSpec = UnitSpec {
 /// Militia (study §3.2): HP 40, attack 4 melee, armor 0/1, RoF 2.0 s,
 /// attack delay ≈0.50 s (30 ticks), speed 0.90, LoS 4. The base tier
 /// has no bonus attacks (Man-at-Arms gains them later). Cost
-/// 50 F / 20 G — the current DE value: update 141935 (Chronicles:
-/// Battle for Greece) removed Supplies and set the Militia line to
-/// 50 F / 20 G (Age of Empires wiki, "Militia", Changelog). The
-/// M3 brief's 60 F was the pre-141935 cost; corrected 2026-10-21.
+/// 60 F / 20 G — Claudio's decision, 2026-11-05 (voice call, main
+/// chat): "o custo da Militia fica 60F/20G — fiel ao AoE2 DE, sem
+/// exceção". This reverses the 2026-10-21 correction (commit
+/// 9471419), which had adopted update 141935's 50 F / 20 G (the
+/// Chronicles: Battle for Greece patch had removed Supplies and set
+/// the line to 50 F). The owner's word is the fidelity call for
+/// this project and there is no exception path: 60 F / 20 G.
 /// Train 21 s.
 static MILITIA: UnitSpec = UnitSpec {
     max_hp: 40,
@@ -367,7 +370,7 @@ static MILITIA: UnitSpec = UnitSpec {
     radius: I16F16::from_bits(65_536),
     carcass_food: 0,
     carcass_decay_bits: 0,
-    food_cost: 50,
+    food_cost: 60,
     wood_cost: 0,
     gold_cost: 20,
     train_ticks: 1260, // 21 s
@@ -418,10 +421,13 @@ static ARCHER: UnitSpec = UnitSpec {
 /// RoF 2.0 s, speed 0.96, LoS 4. Attack delay 30 ticks matches the
 /// Militia row's adopted community value (the study's FD column
 /// reads 0 for the whole line; the shipped Militia row records the
-/// same choice). The cost fields carry the line's study cost
-/// (50 F / 20 G) but are inert: Man-at-Arms is never trained
+/// same choice). The cost fields carry the line's cost
+/// (60 F / 20 G — Claudio's 2026-11-05 decision, see the Militia
+/// row) but are inert for training: Man-at-Arms is never trained
 /// directly — it is produced by the Barracks upgrade (CLS-03), and
-/// post-upgrade Militia production spawns this row instead.
+/// post-upgrade Militia production spawns this row instead. The
+/// fields still feed the row's score value (VIC-04), exactly as
+/// the Light Cavalry row mirrors the Scout Cavalry's 80 F.
 static MAN_AT_ARMS: UnitSpec = UnitSpec {
     max_hp: 45,
     attacks: &[
@@ -448,7 +454,7 @@ static MAN_AT_ARMS: UnitSpec = UnitSpec {
     radius: I16F16::from_bits(65_536),
     carcass_food: 0,
     carcass_decay_bits: 0,
-    food_cost: 50,
+    food_cost: 60,
     wood_cost: 0,
     gold_cost: 20,
     train_ticks: 1260, // inert (upgrade-only kind); mirrors Militia

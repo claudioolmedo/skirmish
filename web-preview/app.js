@@ -12782,7 +12782,7 @@ function cmdButton({ id, icon, img, label, costIcon, cost, cost2Icon, cost2, tit
   // JUST a square with its icon — no name and no price printed
   // on the face. Name and full cost (both resources, where two
   // apply) live in the hover tooltip: every call site's title
-  // states them (e.g. 'Train Militia — 50 food · 20 gold').
+  // states them (e.g. 'Train Militia — 60 food · 20 gold').
   // The label/cost arguments stay in the signature because the
   // call sites pass them alongside the title; the face renders
   // only the glyph and the hotkey letter at its top-left corner.
@@ -13182,12 +13182,12 @@ function renderCommands() {
     cmdGrid.append(
       cmdButton({
         id: 'train-militia', icon: 'i-militia', img: 'militia.png', label: 'Militia',
-        costIcon: 'i-food', cost: 50, cost2Icon: 'i-gold', cost2: 20,
+        costIcon: 'i-food', cost: 60, cost2Icon: 'i-gold', cost2: 20,
         disabled: underConstruction || blockM === 2 || blockM === 3,
         key: badgeForButton({ context, id: 'train-militia', index: 0 }),
         title: underConstruction
           ? t('cmd.underConstruction', { name: KIND_NAME[3], building: BUILD_NAME[2] })
-          : t('cmd.trainTitle', { name: KIND_NAME[3], cost: costText([[50, 'food'], [20, 'gold']]) }) + (TRAIN_BLOCK_TITLES[blockM] ? ' ' + TRAIN_BLOCK_TITLES[blockM] : ''),
+          : t('cmd.trainTitle', { name: KIND_NAME[3], cost: costText([[60, 'food'], [20, 'gold']]) }) + (TRAIN_BLOCK_TITLES[blockM] ? ' ' + TRAIN_BLOCK_TITLES[blockM] : ''),
       }),
       // The Spearman: DE's second Barracks slot (W). A Feudal
       // unit at a Dark-Age building — the sim's train block
