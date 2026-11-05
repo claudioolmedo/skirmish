@@ -645,6 +645,18 @@ impl WasmSim {
         self.push_train_at(building, EntityKind::Monk)
     }
 
+    /// Enqueue a Fishing Ship at a completed Dock (Water W2
+    /// client slice, ECO-15 — the Dock is the Fishing Ship's only
+    /// home; 75 wood, 40 s, Dark Age — the row lives in
+    /// `units::FISHING_SHIP` and `BuildingKind::trains`). The
+    /// Dock's two researches (Fishing Lines 45, Gillnets 46) need
+    /// no dedicated export: they ride the generic
+    /// `push_research_at` by tech tag, exactly like every other
+    /// placed-building research. See `push_train_militia`.
+    pub fn push_train_fishing_ship(&mut self, building: u32) -> bool {
+        self.push_train_at(building, EntityKind::FishingShip)
+    }
+
     /// Order a Monk to heal an allied unit (Castle P5a, MNK-10):
     /// the monk walks into heal range and restores 150 HP/min
     /// until the target is whole. Returns whether the order

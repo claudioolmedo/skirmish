@@ -89,8 +89,10 @@ test('the unit draw table still routes kind 20 to drawMonk', () => {
   // its comment; index 20 itself must not move.
   assert.match(appJs, /drawMonk, \/\/ 20: Monk \(Castle P5a\)/,
     'UNIT_DRAW[20] remains drawMonk');
-  assert.match(appJs, /drawKing\]; \/\/ 22: King/,
+  assert.match(appJs, /drawKing, \/\/ 22: King/,
     'UNIT_DRAW[22] is drawKing (Package C)');
+  assert.match(appJs, /drawFishingShip\]; \/\/ 23: Fishing Ship/,
+    'UNIT_DRAW[23] is drawFishingShip (Water W2 client, ECO-15)');
 });
 
 // ------------------------------------------------------------------

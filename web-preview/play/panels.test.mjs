@@ -78,6 +78,14 @@ const LAYOUTS = {
     cells: { Q: 'research-doublebit', C: 'delete-building' },
     unplaced: [],
   },
+  // Water W2 client (ECO-15): the Dock — Train Fishing Ship, then
+  // the fishing pair on the plain top row.
+  dock: {
+    context: 'dock', page: null,
+    ids: ['train-fishing-ship', 'research-fishinglines', 'research-gillnets', 'delete-building'],
+    cells: { Q: 'train-fishing-ship', W: 'research-fishinglines', E: 'research-gillnets', C: 'delete-building' },
+    unplaced: [],
+  },
   mill: {
     context: 'mill', page: null,
     ids: ['research-horsecollar', 'delete-building'],
@@ -220,6 +228,9 @@ test('train badge costs match the sim table', () => {
   // Package D: the Trade Cart's badge must read the sim's price
   // (100 wood / 50 gold — units.rs TRADE_CART).
   assert.deepEqual(badgeCost('train-trade-cart'), { wood: 100, gold: 50 });
+  // Water W2 client (ECO-15): the Fishing Ship's badge reads the
+  // sim's 75 wood (units.rs FISHING_SHIP).
+  assert.deepEqual(badgeCost('train-fishing-ship'), { wood: 75 });
 });
 
 test('Castle P3b: the garrison buttons ride the host panels, unbadged', () => {
@@ -232,7 +243,7 @@ test('Castle P3b: the garrison buttons ride the host panels, unbadged', () => {
   const app = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
   assert.match(app, /id: 'town-bell', icon: 'i-bell'/);
   assert.match(app, /id: 'ungarrison', icon: 'i-ungarrison'/);
-  assert.match(app, /GAR_PANEL = \['tc', 'castle', 'tower', 'outpost', 'barracks', 'range', 'stable', 'siegeworkshop', 'monastery'\]/);
+  assert.match(app, /GAR_PANEL = \['tc', 'castle', 'tower', 'outpost', 'barracks', 'range', 'stable', 'siegeworkshop', 'monastery', 'dock'\]/);
   assert.match(app, /case 'garrison_b': return sim\.push_garrison_building/);
   assert.match(app, /case 'town_bell': return sim\.push_town_bell/);
   // The smart order (SEL-11's garrison context): a right-click on

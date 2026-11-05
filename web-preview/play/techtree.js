@@ -11,7 +11,7 @@
 //
 // Hosts are BuildingKind tags (sim/src/build.rs): TownCenter 13,
 // Mill 4, Barracks 2, Lumber Camp 3, Mining Camp 5, Stable 7,
-// Blacksmith 8, Market 12, University 16. Costs are
+// Blacksmith 8, Market 12, University 16, Dock 23. Costs are
 // [food, wood, gold, stone]; secs is the research time in
 // seconds (the sim's ticks / 60).
 
@@ -75,6 +75,9 @@ export const TECH_TREE = [
   { tag: 40, host: 20, age: 3, cost: [0, 0, 120, 0], secs: 65, requires: null }, // Illumination (Castle P5f)
   { tag: 41, host: 20, age: 3, cost: [0, 0, 200, 0], secs: 75, requires: null }, // Theocracy (Castle P5f)
   { tag: 42, host: 20, age: 3, cost: [550, 0, 750, 0], secs: 60, requires: 36 }, // Faith (Castle P5f)
+  // --- Dock (Water W2, ECO-15) ---------------------------------------
+  { tag: 45, host: 23, age: 1, cost: [50, 100, 0, 0], secs: 20, requires: null }, // Fishing Lines
+  { tag: 46, host: 23, age: 2, cost: [150, 200, 0, 0], secs: 45, requires: 45 }, // Gillnets
 ];
 
 /** The age-advancement tags and the age each one reaches. */

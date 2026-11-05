@@ -309,12 +309,13 @@ const COLORS = [
 
 // Node kind tags (must match the sim's NodeKind::tag): 0 tree, 1 berry,
 // 2 gold, 3 stone, 4 farm, 5 hunt carcass (boar/deer), 6 herd carcass
-// (sheep). NODE_MAX is each kind's nominal full amount in the sim (for
+// (sheep), 7 shore fish, 8 deep fish (Water W2, ECO-15 —
+// 200 / 250 food per spot, the sim's econ.rs rows). NODE_MAX is each kind's nominal full amount in the sim (for
 // the remaining-amount bar / farm crop tint) — a carcass starts at what
 // the animal was carrying, so its bar starts below full; CARRY_COLORS
 // is the load dot shown above a hauling villager.
-const NODE_MAX = [100, 125, 800, 350, 175, 340, 100];
-const CARRY_COLORS = ['#d9a05b', '#ff5da2', '#ffd700', '#c3c8cd', '#ff5da2', '#ff5da2', '#ff5da2'];
+const NODE_MAX = [100, 125, 800, 350, 175, 340, 100, 200, 250];
+const CARRY_COLORS = ['#d9a05b', '#ff5da2', '#ffd700', '#c3c8cd', '#ff5da2', '#ff5da2', '#ff5da2', '#ff5da2', '#ff5da2'];
 // Entity kind tags (must match the sim's EntityKind::tag).
 const KIND_TC = 1;
 const KIND_SHEEP = 5;
@@ -331,14 +332,14 @@ const KIND_KING = 22; // Package C: the Regicide king (VIC-06) — builder's 21 
 // before then.
 const KIND_I18N = ['villager', 'townCenter', 'scout', 'militia', 'archer',
   'sheep', 'boar', 'deer', 'manAtArms', 'spearman', 'skirmisher', 'wolf',
-  'knight', 'lightCavalry', 'cavalryArcher', 'petard', 'tradeCart', 'batteringRam', 'mangonel', 'scorpion', 'monk', 'relic', 'king'];
+  'knight', 'lightCavalry', 'cavalryArcher', 'petard', 'tradeCart', 'batteringRam', 'mangonel', 'scorpion', 'monk', 'relic', 'king', 'fishingShip'];
 let KIND_NAME = {
   0: 'Villager', 1: 'Town Center', 2: 'Scout Cavalry', 3: 'Militia',
   4: 'Archer', 5: 'Sheep', 6: 'Boar', 7: 'Deer', 8: 'Man-at-Arms',
   9: 'Spearman', 10: 'Skirmisher', 11: 'Wolf',
   12: 'Knight', 13: 'Light Cavalry', 14: 'Cavalry Archer', 15: 'Petard',
   16: 'Trade Cart', 17: 'Battering Ram', 18: 'Mangonel', 19: 'Scorpion',
-  20: 'Monk', 21: 'Relic', 22: 'King',
+  20: 'Monk', 21: 'Relic', 22: 'King', 23: 'Fishing Ship',
 };
 // Selection-panel portraits per unit kind (SVG symbol ids in
 // play/index.html).
@@ -347,7 +348,7 @@ const KIND_ICON = {
   8: 'i-militia', 9: 'i-spearman', 10: 'i-skirmisher',
   12: 'i-villager', 13: 'i-villager', 14: 'i-archer', 15: 'i-petard',
   16: 'i-trade-cart', 17: 'i-ram', 18: 'i-mangonel', 19: 'i-scorpion',
-  20: 'i-monk', 21: 'i-gold', 22: 'i-king',
+  20: 'i-monk', 21: 'i-gold', 22: 'i-king', 23: 'i-fishing-ship',
 };
 
 // Original PNG icon set (2026-10-19, AI generations via Base44 on
@@ -490,6 +491,7 @@ let TECH_NAME = {
   30: 'Heavy Plow', 31: 'Crop Rotation',
   32: 'Sanctity', 33: 'Fervor', 34: 'Herbal Medicine',
   35: 'Atonement', 36: 'Devotion',
+  45: 'Fishing Lines', 46: 'Gillnets',
 };
 // Research-block explanations, indexed by the sim's ResearchBlock
 // tag (0 ok — unused, 1 funds, 2 queue full, 3 already done,
@@ -545,6 +547,7 @@ function refreshNames() {
     39: t('tech.blockprinting'), 40: t('tech.illumination'),
     41: t('tech.theocracy'), 42: t('tech.faith'),
     43: t('tech.bowsaw'), 44: t('tech.twomansaw'),
+    45: t('tech.fishinglines'), 46: t('tech.gillnets'),
   };
   RESEARCH_BLOCK_TITLES = [
     '', t('block.noResources'), t('block.queueFullTrain'),
@@ -1466,7 +1469,7 @@ function updateEventFeed() {
   const lines = diffFeedEvents(prev, snap, {
     buildingName: (k) => BUILD_NAME[k],
     unitName: (k) => KIND_NAME[k],
-    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15, lightcavalry: 16, husbandry: 17, caravan: 19, coinage: 25, banking: 26, townwatch: 27, townpatrol: 28, conscription: 29, heavyplow: 30, croprotation: 31, sanctity: 32, fervor: 33, herbalmedicine: 34, atonement: 35, devotion: 36, redemption: 37, heresy: 38, blockprinting: 39, illumination: 40, theocracy: 41, faith: 42, bowsaw: 43, twomansaw: 44 }[key]],
+    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15, lightcavalry: 16, husbandry: 17, caravan: 19, coinage: 25, banking: 26, townwatch: 27, townpatrol: 28, conscription: 29, heavyplow: 30, croprotation: 31, sanctity: 32, fervor: 33, herbalmedicine: 34, atonement: 35, devotion: 36, redemption: 37, heresy: 38, blockprinting: 39, illumination: 40, theocracy: 41, faith: 42, bowsaw: 43, twomansaw: 44, fishinglines: 45, gillnets: 46 }[key]],
   }, feedFmt());
   feedPrev = snap;
   for (const text of lines) pushFeedLine(text);
@@ -4110,6 +4113,7 @@ function applyLocalOrder(cmd) {
         : cmd.k === 18 ? sim.push_train_mangonel(cmd.b)
         : cmd.k === 19 ? sim.push_train_scorpion(cmd.b)
         : cmd.k === 20 ? sim.push_train_monk(cmd.b)
+        : cmd.k === 23 ? sim.push_train_fishing_ship(cmd.b)
         : sim.push_train_archer(cmd.b);
     // Package D (TRD-05): task a Trade Cart to a foreign Market.
     case 'trade': return sim.push_trade(cmd.e, cmd.b);
@@ -7773,7 +7777,7 @@ async function main() {
         }
         return;
       }
-      if (!foe && selectedBuilding.type === 'building' && [2, 6, 7].includes(selectedBuilding.kind)) {
+      if (!foe && selectedBuilding.type === 'building' && [2, 6, 7, 23].includes(selectedBuilding.kind)) {
         if (issue({ t: 'rally_b', b: selectedBuilding.id, x: wx, y: wy })) {
           playAudioCue('orderBuilding');
           clickMarkers.add('ground', wx, wy, performance.now());
@@ -9380,7 +9384,66 @@ function drawCarcass(sx, sy, frac) {
   }
 }
 
-const NODE_DRAW = [drawTree, drawBerry, drawGold, drawStone, drawFarm, drawCarcass, drawCarcass];
+// A shore-fish spot (Water W2 client, ECO-15): a small shoal at the
+// surface — pale fish shapes under light ripples at the water's
+// edge. Original vector art in the node family's flat style; the
+// amount bar above it (drawn by the caller) shows the food left.
+function drawShoreFish(sx, sy, frac) {
+  const u = camS;
+  ctx.strokeStyle = 'rgba(220, 240, 250, 0.55)';
+  ctx.lineWidth = Math.max(1, 0.14 * u);
+  for (const [dx, dy, r] of [[-0.5, -0.3, 0.85], [0.45, -0.55, 0.6], [0.1, 0.05, 1.05]]) {
+    ctx.beginPath();
+    ctx.ellipse(sx + dx * u, sy + dy * u, r * u, r * 0.38 * u, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  const fish = (dx, dy, len, fill) => {
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.ellipse(sx + dx * u, sy + dy * u, len * u, len * 0.34 * u, -0.25, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(sx + (dx + len * 0.85) * u, sy + (dy - len * 0.05) * u);
+    ctx.lineTo(sx + (dx + len * 1.3) * u, sy + (dy - len * 0.42) * u);
+    ctx.lineTo(sx + (dx + len * 1.3) * u, sy + (dy + len * 0.32) * u);
+    ctx.closePath();
+    ctx.fill();
+  };
+  fish(-0.55, -0.35, 0.62, '#bcd9e4');
+  fish(0.35, -0.15, 0.5, '#a8c8da');
+  fish(-0.05, -0.7, 0.44, '#cfe6ef');
+}
+
+// A deep-sea fish spot (Water W2 client, ECO-15): a larger, darker
+// shoal further from shore — the same flat node style in deep-water
+// tones, so the two fish kinds read apart at a glance.
+function drawDeepFish(sx, sy, frac) {
+  const u = camS;
+  ctx.strokeStyle = 'rgba(170, 215, 240, 0.4)';
+  ctx.lineWidth = Math.max(1, 0.14 * u);
+  for (const [dx, dy, r] of [[-0.4, -0.35, 0.95], [0.5, -0.1, 0.7]]) {
+    ctx.beginPath();
+    ctx.ellipse(sx + dx * u, sy + dy * u, r * u, r * 0.36 * u, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  const fish = (dx, dy, len, fill) => {
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.ellipse(sx + dx * u, sy + dy * u, len * u, len * 0.36 * u, -0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(sx + (dx + len * 0.85) * u, sy + (dy - len * 0.05) * u);
+    ctx.lineTo(sx + (dx + len * 1.32) * u, sy + (dy - len * 0.45) * u);
+    ctx.lineTo(sx + (dx + len * 1.32) * u, sy + (dy + len * 0.35) * u);
+    ctx.closePath();
+    ctx.fill();
+  };
+  fish(-0.45, -0.4, 0.85, '#5e93b5');
+  fish(0.5, -0.55, 0.66, '#4d84a8');
+  fish(0.05, -0.05, 0.58, '#6ba3c2');
+}
+
+const NODE_DRAW = [drawTree, drawBerry, drawGold, drawStone, drawFarm, drawCarcass, drawCarcass, drawShoreFish, drawDeepFish];
 
 // --- Building sprites -----------------------------------------------------
 const TC_HALF = 8; // world units: TC footprint half-extent (4x4 cells x 4 wu, BLD-16)
@@ -11465,6 +11528,63 @@ function tradeCartSprite(cloth, loaded) {
   tradeCartSpriteCache.set(key, cv);
   return cv;
 }
+// The Fishing Ship (Water W2 client, ECO-15): an original vector
+// boat in the unit family's flat style — a timber hull on a soft
+// water ripple (no land shadow), a mast and a single sail in the
+// owner's color, and a net draped over the side. Presentation
+// only; the sim's domain rules keep it on water.
+function drawFishingShip(i, wx, wy) {
+  const [sx, sy] = worldToScreen(wx, wy);
+  const u = camS;
+  ctx.strokeStyle = 'rgba(220, 240, 250, 0.45)';
+  ctx.lineWidth = Math.max(1, 0.14 * u);
+  ctx.beginPath();
+  ctx.ellipse(sx, sy - 0.1 * u, 1.7 * u, 0.55 * u, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  if (selection.has(i)) drawSelRing(sx, sy, 1.9);
+  const cloth = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e';
+  // Mast + sail (owner color).
+  ctx.strokeStyle = '#6f5533';
+  ctx.lineWidth = Math.max(1, 0.16 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx, sy - 0.55 * u);
+  ctx.lineTo(sx, sy - 3.1 * u);
+  ctx.stroke();
+  ctx.fillStyle = cloth;
+  ctx.beginPath();
+  ctx.moveTo(sx + 0.12 * u, sy - 3.0 * u);
+  ctx.lineTo(sx + 1.25 * u, sy - 1.15 * u);
+  ctx.lineTo(sx + 0.12 * u, sy - 1.15 * u);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#e8dcc0';
+  ctx.beginPath();
+  ctx.moveTo(sx - 0.12 * u, sy - 2.8 * u);
+  ctx.lineTo(sx - 0.95 * u, sy - 1.15 * u);
+  ctx.lineTo(sx - 0.12 * u, sy - 1.15 * u);
+  ctx.closePath();
+  ctx.fill();
+  // Hull.
+  poly([
+    [sx - 1.55 * u, sy - 0.95 * u], [sx + 1.55 * u, sy - 0.95 * u],
+    [sx + 1.05 * u, sy - 0.05 * u], [sx - 1.05 * u, sy - 0.05 * u],
+  ], '#8a6238');
+  ctx.strokeStyle = '#5d3d20';
+  ctx.lineWidth = Math.max(1, 0.12 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx - 1.55 * u, sy - 0.95 * u);
+  ctx.lineTo(sx + 1.55 * u, sy - 0.95 * u);
+  ctx.stroke();
+  // The net over the bow side: three pale arcs.
+  ctx.strokeStyle = 'rgba(230, 230, 220, 0.85)';
+  ctx.lineWidth = Math.max(1, 0.09 * u);
+  for (const f of [0, 1, 2]) {
+    ctx.beginPath();
+    ctx.arc(sx + (0.75 + f * 0.3) * u, sy - 0.85 * u, (0.34 - f * 0.07) * u, 0.3, Math.PI - 0.6);
+    ctx.stroke();
+  }
+}
+
 function drawTradeCart(i, wx, wy) {
   const [sx, sy] = worldToScreen(wx, wy);
   const u = camS;
@@ -12443,7 +12563,7 @@ function attemptTrain(id) {
     'train-knight': 12, 'train-cavalry-archer': 14,
     'train-petard': 15, 'train-trade-cart': 16, 'train-ram': 17,
     'train-mangonel': 18, 'train-scorpion': 19,
-    'train-monk': 20,
+    'train-monk': 20, 'train-fishing-ship': 23,
   }[id];
   if (kindTag == null) return false;
   return selectedBuilding && selectedBuilding.type === 'building'
@@ -12467,7 +12587,7 @@ function flashTrainRefusal(id) {
       'train-knight': 12, 'train-cavalry-archer': 14,
       'train-petard': 15, 'train-trade-cart': 16, 'train-ram': 17,
       'train-mangonel': 18, 'train-scorpion': 19,
-      'train-monk': 20,
+      'train-monk': 20, 'train-fishing-ship': 23,
     }[id];
     const reason = sim.building_train_block(selectedBuilding.id, kindTag);
     flash(['', t('train.noResourcesUnit'),
@@ -12496,7 +12616,8 @@ function runCommandButton(id, times = 1) {
     || id === 'train-spearman' || id === 'train-skirmisher'
     || id === 'train-knight' || id === 'train-cavalry-archer'
     || id === 'train-petard' || id === 'train-trade-cart' || id === 'train-ram'
-    || id === 'train-mangonel' || id === 'train-scorpion' || id === 'train-monk') {
+    || id === 'train-mangonel' || id === 'train-scorpion' || id === 'train-monk'
+    || id === 'train-fishing-ship') {
     let done = 0;
     while (done < times && attemptTrain(id)) done++;
     if (done === 0) flashTrainRefusal(id);
@@ -12742,6 +12863,7 @@ function runCommandButton(id, times = 1) {
       'research-blockprinting': 39, 'research-illumination': 40,
       'research-theocracy': 41, 'research-faith': 42,
       'research-bowsaw': 43, 'research-twomansaw': 44,
+      'research-fishinglines': 45, 'research-gillnets': 46,
     }[id];
     if (tag != null && selectedBuilding && selectedBuilding.type === 'building') {
       if (!issue({ t: 'research_at', b: selectedBuilding.id, tech: tag })) {
@@ -12834,7 +12956,7 @@ function renderCommands() {
   // context renders nothing, never command buttons.
   const foeSel = !!selectedBuilding && selectedBuilding.owner === foeOwner();
   // M6: each production/research building gets its own context.
-  const BUILDING_CONTEXT = { 2: 'barracks', 3: 'lumbercamp', 4: 'mill', 5: 'miningcamp', 6: 'range', 7: 'stable', 8: 'blacksmith', 10: 'tower', 11: 'outpost', 12: 'market', 15: 'castle', 16: 'university', 17: 'siegeworkshop', 20: 'monastery' };
+  const BUILDING_CONTEXT = { 2: 'barracks', 3: 'lumbercamp', 4: 'mill', 5: 'miningcamp', 6: 'range', 7: 'stable', 8: 'blacksmith', 10: 'tower', 11: 'outpost', 12: 'market', 15: 'castle', 16: 'university', 17: 'siegeworkshop', 20: 'monastery', 23: 'dock' };
   const context = selUnits.length > 0
     ? (hasVillager ? 'build' : 'units')
     : selectedBuilding
@@ -12881,6 +13003,7 @@ function renderCommands() {
   const blockSc = bk && context === 'siegeworkshop' ? sim.building_train_block(bk.id, 19) : -1;
   const blockTC = bk && context === 'market' ? sim.building_train_block(bk.id, 16) : -1;
   const blockMo = bk && context === 'monastery' ? sim.building_train_block(bk.id, 20) : -1;
+  const blockFS = bk && context === 'dock' ? sim.building_train_block(bk.id, 23) : -1;
   // Research blocks: the TC set (Loom 0, Feudal 1, Wheelbarrow 6,
   // Castle 14, Hand Cart 15) and the building techs, keyed by
   // tag — Blacksmith (Fletching 2, Scale Mail 3, Padded 4,
@@ -12898,6 +13021,7 @@ function renderCommands() {
     university: [20, 21, 22, 23, 24], castle: [29],
     lumbercamp: [10, 43, 44], miningcamp: [11, 12], mill: [13], market: [19, 25, 26],
     university: [20, 21, 22, 23, 24], monastery: [32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42],
+    dock: [45, 46],
   };
   const rbB = bk && RB_TAGS[context]
     ? Object.fromEntries(RB_TAGS[context].map((t) => [t, sim.research_block_at(bk.id, t)]))
@@ -12907,7 +13031,7 @@ function renderCommands() {
   const sig = [context, Math.floor(wood), Math.floor(myStock()[0]), Math.floor(myStock()[2]),
     Math.floor(myStock()[3]),
     reason, queue, bk ? bk.id : -1, bk ? bk.queue : -1, bk && bk.complete ? 1 : 0,
-    blockM, blockSp, blockA, blockSk, blockS, blockK, blockCA, blockP, blockR, blockMg, blockSc, blockTC, blockMo, age, techMask, rbTc.join('.'), Object.values(rbB).join('.'),
+    blockM, blockSp, blockA, blockSk, blockS, blockK, blockCA, blockP, blockR, blockMg, blockSc, blockTC, blockMo, blockFS, age, techMask, rbTc.join('.'), Object.values(rbB).join('.'),
     tcQueueCodes, bkQueueCodes, buildPage || '', repairArm ? 1 : 0, healArm ? 1 : 0, convertArm ? 1 : 0,
     // Castle P3b: the garrison counts and the bell state are panel
     // state (button faces + disabled states read them).
@@ -13504,6 +13628,53 @@ function renderCommands() {
         });
       })(),
     );
+  } else if (context === 'dock') {
+    // Water W2 client (ECO-15): the Dock's panel — Train Fishing
+    // Ship (its first roster entry, Dark Age) and the fishing
+    // pair: Fishing Lines (Feudal) and Gillnets (Castle, chained
+    // from Fishing Lines). The research buttons follow the panel
+    // law: hard blocks (2/3/4) grey the button, the funds block
+    // (1) stays clickable and flashes its reason on click.
+    const underConstruction = !bk.complete;
+    const flDone = techMaskHas(techMask, 45);
+    const gnDone = techMaskHas(techMask, 46);
+    cmdGrid.append(
+      cmdButton({
+        id: 'train-fishing-ship', icon: 'i-fishing-ship', label: 'Fishing Ship',
+        costIcon: 'i-wood', cost: 75,
+        disabled: underConstruction || blockFS === 2 || blockFS === 3,
+        key: badgeForButton({ context, id: 'train-fishing-ship', index: 0 }),
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: KIND_NAME[23], building: BUILD_NAME[23] })
+          : t('cmd.trainTitleTime', { name: KIND_NAME[23], cost: costText([[75, 'wood']]), secs: 40 }) + (TRAIN_BLOCK_TITLES[blockFS] ? ' ' + TRAIN_BLOCK_TITLES[blockFS] : ''),
+      }),
+      cmdButton({
+        id: 'research-fishinglines', icon: 'i-fishinglines', label: 'Fishing Lines',
+        costIcon: 'i-food', cost: 50, cost2Icon: 'i-wood', cost2: 100,
+        disabled: underConstruction || flDone || rbB[45] === 2 || rbB[45] === 3 || rbB[45] === 4,
+        key: badgeForButton({ context, id: 'research-fishinglines', index: 1 }),
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: TECH_NAME[45], building: BUILD_NAME[23] })
+          : flDone
+            ? t('cmd.researchDone', { name: TECH_NAME[45] })
+            : age < 1
+              ? t('cmd.buildGate', { name: TECH_NAME[45], gate: t('gate.feudal') })
+              : t('cmd.fishinglinesTitle', { name: TECH_NAME[45], cost: costText([[50, 'food'], [100, 'wood']]), secs: 20 }) + (RESEARCH_BLOCK_TITLES[rbB[45]] ? ' ' + RESEARCH_BLOCK_TITLES[rbB[45]] : ''),
+      }),
+      cmdButton({
+        id: 'research-gillnets', icon: 'i-gillnets', label: 'Gillnets',
+        costIcon: 'i-food', cost: 150, cost2Icon: 'i-wood', cost2: 200,
+        disabled: underConstruction || gnDone || rbB[46] === 2 || rbB[46] === 3 || rbB[46] === 4,
+        key: badgeForButton({ context, id: 'research-gillnets', index: 2 }),
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: TECH_NAME[46], building: BUILD_NAME[23] })
+          : gnDone
+            ? t('cmd.researchDone', { name: TECH_NAME[46] })
+            : age < 2
+              ? t('cmd.buildGate', { name: TECH_NAME[46], gate: t('gate.castle') })
+              : t('cmd.gillnetsTitle', { name: TECH_NAME[46], cost: costText([[150, 'food'], [200, 'wood']]), secs: 45 }) + (RESEARCH_BLOCK_TITLES[rbB[46]] ? ' ' + RESEARCH_BLOCK_TITLES[rbB[46]] : ''),
+      }),
+    );
   } else if (context === 'blacksmith') {
     // M6: the Blacksmith's Feudal researches — the three armor /
     // arrow lines, plus Forging and Scale Barding Armor from
@@ -13759,7 +13930,7 @@ function renderCommands() {
   // leave these cells to other occupants (the TC's W/E are not
   // letters at all in the reference), so — like the building
   // Delete — they render unbadged and answer to the mouse.
-  const GAR_PANEL = ['tc', 'castle', 'tower', 'outpost', 'barracks', 'range', 'stable', 'siegeworkshop', 'monastery'];
+  const GAR_PANEL = ['tc', 'castle', 'tower', 'outpost', 'barracks', 'range', 'stable', 'siegeworkshop', 'monastery', 'dock'];
   if (GAR_PANEL.includes(context)) {
     const gCount = context === 'tc' ? sim.tc_garrison_count(panelTcId())
       : (bk ? sim.building_garrison_count(bk.id) : 0);
@@ -14021,7 +14192,7 @@ function updateSelPanel() {
   // 2026-11-01 trained Monks and saw NO queue/progress line and
   // NO cancel chip — the player could not tell the click had
   // worked, the same defect family a third time.
-  const PROD_KINDS = [2, 3, 4, 5, 6, 7, 8, 12, 15, 16, 17, 20];
+  const PROD_KINDS = [2, 3, 4, 5, 6, 7, 8, 12, 15, 16, 17, 20, 23];
   const context = selUnits.length > 0 ? 'units'
     : selectedBuilding
       ? (selectedBuilding.type === 'tc'
@@ -14031,7 +14202,7 @@ function updateSelPanel() {
       : selectedAnimal != null ? 'animal'
       : 'none';
   const singleHp = selUnits.length === 1 ? Math.floor(st.hp[selUnits[0] * 2]) : -1;
-  const TRAINS_TAG = { 2: 3, 6: 4, 7: 2, 12: 16, 15: 15, 17: 17, 20: 20 };
+  const TRAINS_TAG = { 2: 3, 6: 4, 7: 2, 12: 16, 15: 15, 17: 17, 20: 20, 23: 23 };
   const bkBlock = bk && TRAINS_TAG[bk.kind] != null
     ? sim.building_train_block(bk.id, TRAINS_TAG[bk.kind]) : -1;
   const tcQueueCodes = myTcQueue().join('.');
@@ -14101,6 +14272,11 @@ function updateSelPanel() {
         if (typeof sim.carrying_relic === 'function' && sim.carrying_relic(id) >= 0) {
           selInfo.textContent += ' · ' + t('sel.carryingRelic');
         }
+      } else if (kind === 23) {
+        // Water W2 client (ECO-15): the Fishing Ship never
+        // attacks — its line names the gather order instead of
+        // the military boilerplate.
+        selInfo.textContent = t('sel.fishingShipInfo', { hp: hpTxt });
       } else if (kind === KIND_RELIC) {
         // Castle P5d: the relic's own line (MNK-09) — what it
         // is and the one interaction it accepts.
@@ -14275,10 +14451,10 @@ function updateSelPanel() {
     const gN = isTc ? sim.tc_garrison_count(selectedBuilding.id)
       : (bk ? sim.building_garrison_count(bk.id) : 0);
     if (gN > 0) {
-      const cap = isTc ? 15 : ({ 10: 5, 11: 5, 15: 20 }[bk.kind] ?? 10);
+      const cap = isTc ? 15 : ({ 10: 5, 11: 5, 15: 20, 23: 5 }[bk.kind] ?? 10);
       let line = t('sel.garrisonLine', { n: gN, cap });
       const arrows = isTc ? sim.tc_garrison_arrows(selectedBuilding.id)
-        : (bk && (bk.kind === 10 || bk.kind === 11 || bk.kind === 15))
+        : (bk && (bk.kind === 10 || bk.kind === 11 || bk.kind === 15 || bk.kind === 23))
           ? sim.building_garrison_arrows(bk.id) : 0;
       if (arrows > 0) line += ' · ' + t('sel.garrisonArrows', { n: arrows });
       selInfo.textContent = selInfo.textContent ? `${selInfo.textContent} · ${line}` : line;
@@ -14959,7 +15135,8 @@ function draw() {
     drawScorpion, // 19: Scorpion (Castle P4c)
     drawMonk, // 20: Monk (Castle P5a)
     drawRelic, // 21: Relic (Castle P5d)
-    drawKing]; // 22: King (Package C, VIC-06)
+    drawKing, // 22: King (Package C, VIC-06)
+    drawFishingShip]; // 23: Fishing Ship (Water W2, ECO-15)
   for (let i = 0; i < count; i++) {
     const wx = pos[i * 2];
     const wy = pos[i * 2 + 1];

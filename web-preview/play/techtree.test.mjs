@@ -79,7 +79,7 @@ const KIND_TAGS = {
   ArcheryRange: 6, Stable: 7, Blacksmith: 8, PalisadeWall: 9, WatchTower: 10,
   Outpost: 11, Market: 12, TownCenter: 13, StoneWall: 14, Castle: 15,
   University: 16, SiegeWorkshop: 17, PalisadeGate: 18, StoneGate: 19,
-  Monastery: 20,
+  Monastery: 20, Monument: 21, Wonder: 22, Dock: 23,
 };
 const AGE_TAGS = { Dark: 0, Feudal: 1, Castle: 2, Imperial: 3 };
 
