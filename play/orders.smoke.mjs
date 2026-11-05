@@ -348,7 +348,8 @@ const cmdIds = () => cmdButtons().map((b) => b.id);
 const cmdBtn = (id) => cmdButtons().find((b) => b.id === id);
 
 const MIL_IDS = ['attack-move', 'patrol', 'stance-0', 'stance-1',
-  'stance-2', 'stance-3', 'auto-explore', 'stop', 'delete'];
+  'stance-2', 'stance-3', 'formation-line', 'formation-box',
+  'formation-staggered', 'formation-flank', 'auto-explore', 'stop', 'delete'];
 
 pump(3);
 

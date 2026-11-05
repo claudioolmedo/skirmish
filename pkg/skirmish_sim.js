@@ -203,6 +203,19 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Whether the entity could accept a formation move right
+     * now (MOV-07): the move family's orderable rule. The
+     * client's formation path reads the sim's answer through
+     * the queued form's acceptance; this getter exists for
+     * tests and tooling.
+     * @param {number} entity
+     * @returns {boolean}
+     */
+    entity_can_formation_move(entity) {
+        const ret = wasm.wasmsim_entity_can_formation_move(this.__wbg_ptr, entity);
+        return ret !== 0;
+    }
+    /**
      * Per-entity carried-resource tags in entity-id order:
      * 255 = hands empty; otherwise the `ResourceKind` index
      * (0 Food, 1 Wood, 2 Gold, 3 Stone). `carry_kind` is `None`
@@ -1513,6 +1526,39 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Order one entity to move to a world point IN FORMATION
+     * (MOV-07): `formation` is the FormationKind tag (0 line,
+     * 1 box, 2 staggered, 3 flank). Issued for every member of
+     * the group in one batch, the orders form a formation
+     * group in the sim, which assigns destination slots by
+     * class layer at order time. An unknown tag drops the
+     * order (the client validates 0..=3 before it sends).
+     * Like `push_move`, acceptance is the sim's business when
+     * the command applies.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @param {number} formation
+     */
+    push_formation_move(entity, x, y, formation) {
+        wasm.wasmsim_push_formation_move(this.__wbg_ptr, entity, x, y, formation);
+    }
+    /**
+     * Queue a formation move behind the entity's current
+     * order (MOV-07 / SEL-12): it executes — and takes its
+     * slot — when the entity goes idle, alongside the group
+     * that executes with it.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @param {number} formation
+     * @returns {boolean}
+     */
+    push_formation_move_queued(entity, x, y, formation) {
+        const ret = wasm.wasmsim_push_formation_move_queued(this.__wbg_ptr, entity, x, y, formation);
+        return ret !== 0;
+    }
+    /**
      * Order a unit to garrison in an own placed defensive
      * building (Castle P3b, GAR-01/SEL-11): it walks there and
      * enters on arrival. Returns whether the order *would* be
@@ -1832,6 +1878,22 @@ export class WasmSim {
      */
     push_research_wheelbarrow() {
         const ret = wasm.wasmsim_push_research_wheelbarrow(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * Resign the match for a player seat (VIC-11): the seat's
+     * owner byte (0 = first player, 2 = opponent). The command
+     * is queued like every other and applies at the next tick
+     * boundary — the seat's units are swept to the death path
+     * with no score credit, and their buildings remain standing
+     * inert. Returns whether the order *would* be accepted
+     * against the current state (a UI affordance; the sim
+     * re-validates when the command is applied).
+     * @param {number} owner
+     * @returns {boolean}
+     */
+    push_resign(owner) {
+        const ret = wasm.wasmsim_push_resign(this.__wbg_ptr, owner);
         return ret !== 0;
     }
     /**
@@ -2269,6 +2331,15 @@ export class WasmSim {
         var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
         return v1;
+    }
+    /**
+     * Whether a player seat has resigned (VIC-11).
+     * @param {number} owner
+     * @returns {boolean}
+     */
+    resigned_for(owner) {
+        const ret = wasm.wasmsim_resigned_for(this.__wbg_ptr, owner);
+        return ret !== 0;
     }
     /**
      * NET-09: serialize the full sim state as a save file

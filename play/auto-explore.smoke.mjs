@@ -374,7 +374,8 @@ console.log('PASS (1) no selection: panel empty, G inert');
 key('Comma');
 pump(2);
 assert.deepEqual(cmdIds(), ['attack-move', 'patrol', 'stance-0', 'stance-1',
-  'stance-2', 'stance-3', 'auto-explore', 'stop', 'delete'],
+  'stance-2', 'stance-3', 'formation-line', 'formation-box',
+  'formation-staggered', 'formation-flank', 'auto-explore', 'stop', 'delete'],
   'starting scout selected: the military orders (CMB-09/10/11) + AutoExplore + Stop/Delete (SEL-14)');
 const btn = () => cmdBtn('auto-explore');
 assert.ok(btn().innerHTML.includes('<span class="cmd-key">G</span>'),

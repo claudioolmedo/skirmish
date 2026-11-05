@@ -108,6 +108,14 @@ export class WasmSim {
      */
     entity_can_auto_explore(entity: number): boolean;
     /**
+     * Whether the entity could accept a formation move right
+     * now (MOV-07): the move family's orderable rule. The
+     * client's formation path reads the sim's answer through
+     * the queued form's acceptance; this getter exists for
+     * tests and tooling.
+     */
+    entity_can_formation_move(entity: number): boolean;
+    /**
      * Per-entity carried-resource tags in entity-id order:
      * 255 = hands empty; otherwise the `ResourceKind` index
      * (0 Food, 1 Wood, 2 Gold, 3 Stone). `carry_kind` is `None`
@@ -751,6 +759,25 @@ export class WasmSim {
      */
     push_force_deposit(entity: number): boolean;
     /**
+     * Order one entity to move to a world point IN FORMATION
+     * (MOV-07): `formation` is the FormationKind tag (0 line,
+     * 1 box, 2 staggered, 3 flank). Issued for every member of
+     * the group in one batch, the orders form a formation
+     * group in the sim, which assigns destination slots by
+     * class layer at order time. An unknown tag drops the
+     * order (the client validates 0..=3 before it sends).
+     * Like `push_move`, acceptance is the sim's business when
+     * the command applies.
+     */
+    push_formation_move(entity: number, x: number, y: number, formation: number): void;
+    /**
+     * Queue a formation move behind the entity's current
+     * order (MOV-07 / SEL-12): it executes — and takes its
+     * slot — when the entity goes idle, alongside the group
+     * that executes with it.
+     */
+    push_formation_move_queued(entity: number, x: number, y: number, formation: number): boolean;
+    /**
      * Order a unit to garrison in an own placed defensive
      * building (Castle P3b, GAR-01/SEL-11): it walks there and
      * enters on arrival. Returns whether the order *would* be
@@ -927,6 +954,17 @@ export class WasmSim {
      * 75 s; Feudal Age — ECO-03).
      */
     push_research_wheelbarrow(): boolean;
+    /**
+     * Resign the match for a player seat (VIC-11): the seat's
+     * owner byte (0 = first player, 2 = opponent). The command
+     * is queued like every other and applies at the next tick
+     * boundary — the seat's units are swept to the death path
+     * with no score credit, and their buildings remain standing
+     * inert. Returns whether the order *would* be accepted
+     * against the current state (a UI affordance; the sim
+     * re-validates when the command is applied).
+     */
+    push_resign(owner: number): boolean;
     /**
      * Set the auto-reseed toggle of the named Mill's owner
      * (ECO-14). False when the building is not a completed Mill.
@@ -1168,6 +1206,10 @@ export class WasmSim {
      */
     reseed_for(owner: number): Uint32Array;
     /**
+     * Whether a player seat has resigned (VIC-11).
+     */
+    resigned_for(owner: number): boolean;
+    /**
      * NET-09: serialize the full sim state as a save file
      * (magic + version + body + the state's SIM-05 hash — see
      * `Sim::save_game`). The client offers this in the pause
@@ -1331,6 +1373,7 @@ export interface InitOutput {
     readonly wasmsim_entity_auto_explore: (a: number) => [number, number];
     readonly wasmsim_entity_can_attack_ground: (a: number, b: number) => number;
     readonly wasmsim_entity_can_auto_explore: (a: number, b: number) => number;
+    readonly wasmsim_entity_can_formation_move: (a: number, b: number) => number;
     readonly wasmsim_entity_carry: (a: number) => [number, number];
     readonly wasmsim_entity_count: (a: number) => number;
     readonly wasmsim_entity_display_stats: (a: number, b: number) => [number, number];
@@ -1436,6 +1479,8 @@ export interface InitOutput {
     readonly wasmsim_push_deposit_relic: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_dequeue_reseed: (a: number, b: number) => number;
     readonly wasmsim_push_force_deposit: (a: number, b: number) => number;
+    readonly wasmsim_push_formation_move: (a: number, b: number, c: number, d: number, e: number) => void;
+    readonly wasmsim_push_formation_move_queued: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly wasmsim_push_garrison_building: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_garrison_tc: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_garrison_unit: (a: number, b: number, c: number) => number;
@@ -1463,6 +1508,7 @@ export interface InitOutput {
     readonly wasmsim_push_research_loom: (a: number) => number;
     readonly wasmsim_push_research_tc_at: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_research_wheelbarrow: (a: number) => number;
+    readonly wasmsim_push_resign: (a: number, b: number) => number;
     readonly wasmsim_push_set_auto_reseed: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_set_rally_building: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_set_rally_tc: (a: number, b: number, c: number) => number;
@@ -1499,6 +1545,7 @@ export interface InitOutput {
     readonly wasmsim_research_block_tc_at: (a: number, b: number, c: number) => number;
     readonly wasmsim_researched_techs_for: (a: number, b: number) => [number, number];
     readonly wasmsim_reseed_for: (a: number, b: number) => [number, number];
+    readonly wasmsim_resigned_for: (a: number, b: number) => number;
     readonly wasmsim_save_game: (a: number) => [number, number];
     readonly wasmsim_score_for: (a: number, b: number) => [number, number];
     readonly wasmsim_state_hash: (a: number) => [number, number];
