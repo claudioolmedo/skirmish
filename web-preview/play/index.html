@@ -296,11 +296,16 @@
       <button id="restart-btn" class="btn btn-ghost" type="button">Restart</button>
       <button id="btn-online" class="btn btn-ghost" type="button">Play online</button>
       <button id="pause-fullscreen-btn" class="btn btn-ghost" type="button">Fullscreen</button>
+      <!-- VIC-11: Resign lives in the main pause actions, NOT inside
+           #net-status: that container is only unhidden online, so a
+           button inside it could never appear in a local match even
+           though setPaused unhides the button itself (bot-loop
+           2026-11-04 live proof: no Resign control in local play). -->
+      <button id="btn-resign" class="btn btn-ghost" type="button" hidden>Resign match</button>
     </div>
     <div id="net-status" class="net-status" hidden>
       <p id="net-status-text" class="overlay-note"></p>
       <p class="overlay-note" id="net-note">An online match keeps running while this menu is open — your opponent is playing too.</p>
-      <button id="btn-resign" class="btn btn-ghost btn-sm" type="button" hidden>Resign match</button>
     </div>
     <div class="pause-actions">
       <button id="btn-report" class="btn btn-ghost btn-sm" type="button">Report a problem / Contribute</button>
