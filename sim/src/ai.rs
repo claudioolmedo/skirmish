@@ -1515,11 +1515,35 @@ fn nearest_node_pos(
 /// layout or node-id knowledge at all; neutral and dynamic nodes
 /// (mid-map forests, carcasses, farms) fall to whichever Town
 /// Center is nearer — where the work actually happened.
+///
+/// Fish spots are NOT the AI's resource set (Water W2a fix): the
+/// script has no water economy — it builds no Dock and fields no
+/// Fishing Ships (the water plan §3.6 AI branch is recorded open
+/// in the W2a handoff) — and Arabia's ponds stand ≥22 tiles from
+/// both starts, so a shore-fish spot is always a cross-map trek
+/// for a villager, never a start-package food source. While fish
+/// counted as ordinary food here, the moment the AI's berries ran
+/// out this search returned a pond spot ~144 units away instead
+/// of `None`, and `assign_idle_villagers` sent the surplus food
+/// workforce there en masse (the two sheep hunters alone are
+/// capped) instead of leaving them idle for the sheep-capture /
+/// carcass sequence that feeds the Feudal saving on land maps.
+/// Measured on seed 9 (AiNormal): first fish task at tick 28,862,
+/// the exact tick the AI-side berries hit zero; food then
+/// flatlined at ~200–280 (a ~144-unit round trip per 10 food),
+/// never reaching the 550 the Feudal pause in
+/// `plan_train_military` waits for, and the army froze at 4 —
+/// `ai_raises_army_and_wave_engages_the_human` failed with "AI
+/// never raised an army of 5". Excluding fish restores the
+/// pre-W2a search exactly: same candidates, same `None`, same
+/// hunt fallback. (A player-ordered fisherman is untouched —
+/// this is only the script's own allocator; the sim's gather and
+/// retarget rules for fish are W2a's, unchanged.)
 fn nearest_node(sim: &Sim, resource: ResourceKind, x: I16F16, y: I16F16) -> Option<u32> {
     let foe_tc = sim.tc_entity_of(OWNER_PLAYER);
     let mut best: Option<(i64, u32)> = None;
     for n in sim.nodes() {
-        if n.is_depleted() || n.resource() != resource {
+        if n.is_depleted() || n.resource() != resource || n.kind.is_fish() {
             continue;
         }
         let mine = match foe_tc {
