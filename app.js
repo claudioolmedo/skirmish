@@ -193,6 +193,8 @@ const relicCountdownChip = document.getElementById('relic-countdown-chip'); // V
 const relicCountdownVal = document.getElementById('relic-countdown');
 const kothCountdownChip = document.getElementById('koth-countdown-chip'); // Package I: the Monument countdown readout
 const kothCountdownVal = document.getElementById('koth-countdown');
+const wonderCountdownChip = document.getElementById('wonder-countdown-chip'); // VIC-02: the Wonder countdown readout
+const wonderCountdownVal = document.getElementById('wonder-countdown');
 const pauseBtn = document.getElementById('pause-btn');
 // Diplomacy (Package K): the top-bar button and its overlay —
 // the overlay is a live panel, never a pause (see refreshDiplo).
@@ -384,23 +386,29 @@ function pngIcon(png, cls) {
 // 20 monastery (Castle P5a — 175 wood, 3×3, no prerequisite);
 // 21 monument (Package I, AI-09/VIC-08 — the King of the Hill
 // Monument: unconstructible, placed by the sim at the map
-// center in KotH matches only; cost rows 0, footprint 4×4).
+// center in KotH matches only; cost rows 0, footprint 4×4);
+// 22 wonder (VIC-02 — 1000 wood PLUS 1000 stone PLUS 1000 gold:
+// BUILD_COST holds the wood, the stone rides BUILD_COST_STONE
+// and the gold BUILD_COST_GOLD; 5×5, Imperial Age).
 // Costs and footprints mirror the sim (MECHANICS-STUDY §5; the
 // palisade row is the current DE wiki row — 3 wood per segment).
-const BUILD_COST = [25, 60, 175, 100, 100, 100, 175, 175, 150, 3, 35, 25, 175, 275, 0, 0, 200, 200, 20, 0, 175, 0];
+const BUILD_COST = [25, 60, 175, 100, 100, 100, 175, 175, 150, 3, 35, 25, 175, 275, 0, 0, 200, 200, 20, 0, 175, 0, 1000];
 // Stone paid at placement, by kind tag (BLD-18's two defensive
 // structures, the Town Center, the Stone Wall and the Castle
 // cost stone; every other entry 0).
-const BUILD_COST_STONE = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 125, 5, 0, 100, 5, 650, 0, 0, 0, 30, 0, 0];
+const BUILD_COST_STONE = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 125, 5, 0, 100, 5, 650, 0, 0, 0, 30, 0, 0, 1000];
+// Gold paid at placement, by kind tag (VIC-02: the Wonder is
+// the first gold-cost kind; every other entry 0).
+const BUILD_COST_GOLD = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1000];
 const BUILD_I18N = ['house', 'farm', 'barracks', 'lumber', 'mill',
   'mining', 'range', 'stable', 'blacksmith', 'palisade', 'watchtower',
-  'outpost', 'market', 'towncenter', 'stonewall', 'castle', 'university', 'siegeworkshop', 'palisadegate', 'stonegate', 'monastery', 'monument'];
+  'outpost', 'market', 'towncenter', 'stonewall', 'castle', 'university', 'siegeworkshop', 'palisadegate', 'stonegate', 'monastery', 'monument', 'wonder'];
 let BUILD_NAME = ['House', 'Farm', 'Barracks', 'Lumber Camp', 'Mill',
   'Mining Camp', 'Archery Range', 'Stable', 'Blacksmith', 'Palisade Wall',
-  'Watch Tower', 'Outpost', 'Market', 'Town Center', 'Stone Wall', 'Castle', 'University', 'Siege Workshop', 'Palisade Gate', 'Stone Gate', 'Monastery', 'Monument'];
+  'Watch Tower', 'Outpost', 'Market', 'Town Center', 'Stone Wall', 'Castle', 'University', 'Siege Workshop', 'Palisade Gate', 'Stone Gate', 'Monastery', 'Monument', 'Wonder'];
 // Farm footprint is 3 (DE-documented; Claudio's decision
 // 2026-10-22, superseding the earlier 2x2 specification).
-const BUILD_SIZE = [2, 3, 3, 2, 2, 2, 3, 3, 3, 1, 1, 1, 4, 4, 1, 4, 4, 4, 1, 1, 3, 4];
+const BUILD_SIZE = [2, 3, 3, 2, 2, 2, 3, 3, 3, 1, 1, 1, 4, 4, 1, 4, 4, 4, 1, 1, 3, 4, 5];
 // The wall kinds (BLD-13 palisade, BLD-20 stone): 1×1 segments
 // placed by dragged lines, not single footprints.
 function isWallKind(kind) { return kind === 9 || kind === 14; }
@@ -413,14 +421,14 @@ const GATE_OF_WALL = { 9: 18, 14: 19 };
 const WALL_OF_GATE = { 18: 9, 19: 14 };
 const BUILD_ICON = ['i-house', 'i-farm', 'i-tc', 'i-lumber', 'i-mill',
   'i-mining', 'i-range', 'i-stable', 'i-blacksmith', 'i-palisade',
-  'i-watchtower', 'i-outpost', 'i-market', 'i-tc', 'i-stonewall', 'i-castle', 'i-university', 'i-siegeworkshop', 'i-palisade', 'i-stonewall', 'i-monastery', 'i-monument'];
+  'i-watchtower', 'i-outpost', 'i-market', 'i-tc', 'i-stonewall', 'i-castle', 'i-university', 'i-siegeworkshop', 'i-palisade', 'i-stonewall', 'i-monastery', 'i-monument', 'i-wonder'];
 // The PNG set above, per building kind tag (same order as
 // BUILD_ICON): command buttons and building portraits.
 const BUILD_PNG = ['house.png', 'farm.png', 'barracks.png', 'lumber-camp.png',
   'mill.png', 'mining-camp.png', 'archery-range.png', 'stable.png',
   'blacksmith.png', 'palisade-wall.png', 'watchtower.png', 'outpost.png',
   'market.png', 'town-center.png', 'stone-wall.png', 'castle.png', 'university.png',
-  'siege-workshop.png', 'palisade-wall.png', 'stone-wall.png', 'monastery.png', 'monument.png'];
+  'siege-workshop.png', 'palisade-wall.png', 'stone-wall.png', 'monastery.png', 'monument.png', 'wonder.png'];
 // Building max HP by kind tag (the sim's building table, study
 // §5) — for the enemy-building info panel (M5). The palisade
 // entry is its Dark-Age value (150; 250 from Feudal, BLD-13 —
@@ -429,7 +437,7 @@ const BUILD_PNG = ['house.png', 'farm.png', 'barracks.png', 'lumber-camp.png',
 // gates follow the same convention: 240 is the Palisade Gate's
 // Dark column (400 from Feudal), 1650 the Stone Gate's Feudal
 // column (2700 from Castle).
-const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200, 150, 850, 500, 1800, 2400, 1080, 4800, 2100, 1800, 240, 1650, 2100, 4800];
+const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200, 150, 850, 500, 1800, 2400, 1080, 4800, 2100, 1800, 240, 1650, 2100, 4800, 4800];
 // the Watch Tower's 850 is its pre-Castle value (BLD-18).
 // WASM build commands by kind tag (M6 completes the set; BLD-13
 // adds the palisade's single-segment form — dragged lines go
@@ -441,6 +449,11 @@ const PUSH_BUILD = ['push_build_house', 'push_build_farm', 'push_build_barracks'
   'push_build_market', 'push_build_town_center', 'push_build_stone_wall',
   'push_build_castle', 'push_build_university', 'push_build_siege_workshop', 'push_build_palisade_gate', 'push_build_stone_gate', 'push_build_monastery'];
 const PUSH_BUILD_QUEUED = PUSH_BUILD.map((n) => `${n}_queued`);
+// VIC-02: tag 21 (Monument) has no push form — it is
+// unconstructible, so index 21 stays empty exactly as before;
+// tag 22 is the Wonder.
+PUSH_BUILD[22] = 'push_build_wonder';
+PUSH_BUILD_QUEUED[22] = 'push_build_wonder_queued';
 // Own-building minimap colors by kind tag (M6); kinds without an
 // entry keep the minimap's parchment default, the enemy's
 // buildings are always ENEMY_COLOR.
@@ -448,7 +461,7 @@ const BUILDING_MINIMAP_COLOR = {
   3: '#8a6b42', 4: '#e5d9a8', 5: '#b9a24a', 6: '#c98f4e', 7: '#9a6a44', 8: '#6f6f76',
   9: '#7a5a34', 10: '#7a7a72', 11: '#a8843f', 12: '#b03a2e',
   13: '#d8cf9f', 14: '#8d8578', 15: '#a9a294', 16: '#7d7466', 17: '#6e5a41',
-  18: '#7a5a34', 19: '#8d8578', 20: '#b3a284',
+  18: '#7a5a34', 19: '#8d8578', 20: '#b3a284', 22: '#d4af37',
 };
 
 // Ages and technologies (M6). Age tags match the sim's Age::tag;
@@ -2660,6 +2673,7 @@ function mirrorGateValid(kind, cx, cy) {
   if (gateOrientationAt(kind, cx, cy) === null) return false;
   if (myStock()[1] < BUILD_COST[kind]) return false;
   if (myStock()[3] < BUILD_COST_STONE[kind]) return false;
+  if (myStock()[2] < BUILD_COST_GOLD[kind]) return false;
   return true;
 }
 
@@ -2691,6 +2705,7 @@ function mirrorValid(kind, cx, cy) {
   // Blacksmith standing (Castle P4a, BLD-15's chain).
   if (kind === 17 && (myAge() < 2 || !ownDone.some((b) => b.kind === 8))) return false;
   if (kind === 20 && myAge() < 2) return false; // Monastery is Castle Age (Castle P5a); no prerequisite building
+  if (kind === 22 && myAge() < 3) return false; // Wonder is Imperial Age (VIC-02); no prerequisite building
   if ((kind === 6 || kind === 7) && !ownDone.some((b) => b.kind === 2)) return false;
   // Any standing building's footprint (square range overlap).
   for (const b of buildings) {
@@ -2722,6 +2737,7 @@ function mirrorValid(kind, cx, cy) {
   }
   if (myStock()[1] < BUILD_COST[kind]) return false;
   if (myStock()[3] < BUILD_COST_STONE[kind]) return false;
+  if (myStock()[2] < BUILD_COST_GOLD[kind]) return false;
   return true;
 }
 
@@ -6811,7 +6827,14 @@ async function main() {
       openLobby(null);
       return;
     }
-    setInMatch(false); // back to the menu: chrome hides again
+    // The pause menu over a fresh match IS this client's menu
+    // (see the handler's header note) — so the game view stays ON
+    // screen under it. Clearing .in-match here (bot-loop live
+    // proof, 2026-11-04) opened the pause menu over a black page,
+    // and closing it then left a black screen with no game and no
+    // menu: reload was the only recovery. Resume/✕ from here must
+    // land in the visible fresh match, like the lobby return path.
+    setInMatch(true); // fresh match stays visible under the menu
     resetSim(builtMode || matchMode);
     playing = true;
     setPaused(true);
@@ -12046,6 +12069,26 @@ function updateTopBar() {
       kothCountdownChip.hidden = true;
     }
   }
+  // VIC-02: the Wonder countdown readout, in the VIC-03
+  // chip's style — it appears only while a completed Wonder's
+  // countdown runs (either player's), naming the holder and
+  // the game time left, and hides the tick the Wonder falls
+  // or the match ends.
+  if (wonderCountdownChip && wonderCountdownVal) {
+    const holder = sim && typeof sim.wonder_countdown_holder === 'function'
+      ? sim.wonder_countdown_holder() : -1;
+    if (holder >= 0 && typeof sim.wonder_countdown_ticks_left === 'function') {
+      const secs = Math.ceil(sim.wonder_countdown_ticks_left() / 60);
+      const mm = String(Math.floor(secs / 60)).padStart(2, '0');
+      const ss = String(secs % 60).padStart(2, '0');
+      wonderCountdownVal.textContent = t(
+        holder === localOwner ? 'victory.wonderCountdown' : 'victory.wonderCountdownFoe',
+        { time: `${mm}:${ss}` });
+      wonderCountdownChip.hidden = false;
+    } else {
+      wonderCountdownChip.hidden = true;
+    }
+  }
   // Warn tint when housed (reason 3) or simply at the cap.
   const housedNow = myTrainBlock() === 3 || pop >= cap;
   resPop.classList.toggle('warn', housedNow);
@@ -12695,8 +12738,10 @@ function renderCommands() {
   // Castle P3c: the military build page carries nine kinds —
   // its grid grows a fourth row for the University (see
   // PAGE_KEYS.mil in hotkeys.js); every other panel keeps the
-  // canonical three rows.
-  cmdGrid.classList.toggle('grid-tall', context === 'build' && buildPage === 'mil');
+  // canonical three rows. VIC-02: the economic page grows the
+  // same fourth row for the Wonder (see PAGE_KEYS.eco).
+  cmdGrid.classList.toggle('grid-tall',
+    context === 'build' && (buildPage === 'mil' || buildPage === 'eco'));
   if (context === 'build') {
     // M6: the full building set. Availability gates mirror the sim:
     // Farms need a completed Mill; the Feudal buildings show locked
@@ -12730,6 +12775,9 @@ function renderCommands() {
       // Castle P5a: the Monastery is Castle Age, with NO
       // prerequisite building (the dossier's row) — age gate only.
       else if (kind === 20 && age < 2) gate = t('gate.castle');
+      // VIC-02: the Wonder is Imperial Age, with NO prerequisite
+      // building (the dossier's row) — age gate only.
+      else if (kind === 22 && age < 3) gate = t('gate.imperial');
       else if (kind === 13 && age < 2) gate = t('gate.castle');
       else if (kind === 1 && !hasMill) gate = t('gate.mill');
       // The Feudal kinds (BLD-18: the Watch Tower joins them;
@@ -12743,12 +12791,14 @@ function renderCommands() {
       else if (kind === 12 && !hasMill) gate = t('gate.mill');
       const lacksWood = wood < BUILD_COST[shown];
       const lacksStone = myStock()[3] < BUILD_COST_STONE[shown];
+      const lacksGold = myStock()[2] < BUILD_COST_GOLD[shown];
       const costParts = [];
       if (BUILD_COST[shown] > 0) costParts.push([BUILD_COST[shown], 'wood']);
       if (BUILD_COST_STONE[shown] > 0) costParts.push([BUILD_COST_STONE[shown], 'stone']);
+      if (BUILD_COST_GOLD[shown] > 0) costParts.push([BUILD_COST_GOLD[shown], 'gold']);
       const baseTitle = gate
         ? t('cmd.buildGate', { name: BUILD_NAME[shown], gate })
-        : t(lacksWood || lacksStone ? 'cmd.buildNeeds' : 'cmd.buildOk',
+        : t(lacksWood || lacksStone || lacksGold ? 'cmd.buildNeeds' : 'cmd.buildOk',
           { name: BUILD_NAME[shown], cost: costText(costParts) });
       return cmdButton({
         id: `build-${kind}`, icon: BUILD_ICON[shown], img: BUILD_PNG[shown], label: BUILD_NAME[shown],
@@ -12757,7 +12807,7 @@ function renderCommands() {
         // (BLD-20). The full price always rides the title.
         costIcon: BUILD_COST[shown] > 0 ? 'i-wood' : 'i-stone',
         cost: BUILD_COST[shown] > 0 ? BUILD_COST[shown] : BUILD_COST_STONE[shown],
-        disabled: !!gate || lacksWood || lacksStone,
+        disabled: !!gate || lacksWood || lacksStone || lacksGold,
         active: !!placement && (placement.kind === kind || placement.kind === gateKind),
         key: badgeForButton({ context, page: buildPage, id: `build-${kind}` }),
         title: gateKind != null ? `${baseTitle} ${t('cmd.gateHint')}` : baseTitle,

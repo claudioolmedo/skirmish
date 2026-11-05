@@ -640,7 +640,8 @@ export class WasmSim {
      * `flags` packs the mode switches — bit 0 = Regicide
      * (VIC-06), bit 1 = Sudden Death (VIC-07), bit 2 = Relic
      * victory (VIC-03), bit 3 = Death Match (VIC-09), bit 4 =
-     * Empire Wars (VIC-10), bit 5 = King of the Hill (VIC-08).
+     * Empire Wars (VIC-10), bit 5 = King of the Hill (VIC-08),
+     * bit 6 = Wonder victory (VIC-02).
      * (Package I's builder tree packed its three modes at bits
      * 2/3/4; bit 2 was taken by VIC-03 on current main, so the
      * landing shifts them to 3/4/5 — bits 0/1/2 keep their
@@ -1407,6 +1408,31 @@ export class WasmSim {
      */
     push_build_watch_tower_queued(entity, x, y) {
         const ret = wasm.wasmsim_push_build_watch_tower_queued(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Order a villager to build a Wonder (1000 wood + 1000
+     * stone + 1000 gold, 5×5; Imperial Age, no prerequisite
+     * building — VIC-02) — see `push_build_house`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_wonder(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_wonder(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Queue a Wonder build (Imperial Age — VIC-02) — see
+     * `push_build_house_queued`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_wonder_queued(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_wonder_queued(this.__wbg_ptr, entity, x, y);
         return ret !== 0;
     }
     /**
@@ -2634,6 +2660,30 @@ export class WasmSim {
      */
     villager_count() {
         const ret = wasm.wasmsim_villager_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * VIC-02's countdown holder for the client's readout: the
+     * owner byte of the player whose completed Wonder's
+     * countdown is running (0 = first player, 2 = opponent), or
+     * -1 while no countdown runs (setting off, no completed
+     * Wonder standing, Sandbox). Mirrors the VIC-03 pair above.
+     * @returns {number}
+     */
+    wonder_countdown_holder() {
+        const ret = wasm.wasmsim_wonder_countdown_holder(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * VIC-02's countdown clock for the client's readout: ticks
+     * left until the holder's wonder victory while a countdown
+     * runs (0 at expiry, when `match_state` has decided), or 0
+     * while no countdown runs — read it together with
+     * `wonder_countdown_holder`.
+     * @returns {number}
+     */
+    wonder_countdown_ticks_left() {
+        const ret = wasm.wasmsim_wonder_countdown_ticks_left(this.__wbg_ptr);
         return ret >>> 0;
     }
     /**

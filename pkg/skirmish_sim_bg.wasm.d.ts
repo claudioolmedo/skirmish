@@ -114,6 +114,8 @@ export const wasmsim_push_build_university_queued: (a: number, b: number, c: num
 export const wasmsim_push_build_wall_line: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
 export const wasmsim_push_build_watch_tower: (a: number, b: number, c: number, d: number) => number;
 export const wasmsim_push_build_watch_tower_queued: (a: number, b: number, c: number, d: number) => number;
+export const wasmsim_push_build_wonder: (a: number, b: number, c: number, d: number) => number;
+export const wasmsim_push_build_wonder_queued: (a: number, b: number, c: number, d: number) => number;
 export const wasmsim_push_cancel_queue_building: (a: number, b: number, c: number) => number;
 export const wasmsim_push_cancel_queue_tc: (a: number, b: number, c: number) => number;
 export const wasmsim_push_convert: (a: number, b: number, c: number) => number;
@@ -216,6 +218,8 @@ export const wasmsim_train_queue_len: (a: number) => number;
 export const wasmsim_tribute_fee_pct_for: (a: number, b: number) => number;
 export const wasmsim_unit_garrison_count: (a: number, b: number) => number;
 export const wasmsim_villager_count: (a: number) => number;
+export const wasmsim_wonder_countdown_holder: (a: number) => number;
+export const wasmsim_wonder_countdown_ticks_left: (a: number) => number;
 export const wasmsim_wood: (a: number) => number;
 export const wasmsim_world_half: (a: number) => number;
 export const __wbindgen_externrefs: WebAssembly.Table;

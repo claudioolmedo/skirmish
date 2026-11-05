@@ -141,6 +141,7 @@ const LAYOUTS = {
     cells: {
       Q: 'build-0', W: 'build-4', E: 'build-1',
       A: 'build-3', S: 'build-5', D: 'build-12', Z: 'build-13', X: 'build-15', C: 'page-back',
+      V: 'build-22',
     },
     unplaced: ['stop', 'delete'],
   },

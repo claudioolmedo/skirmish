@@ -65,10 +65,10 @@ test('both prematch surfaces offer the three modes', () => {
 });
 
 test('the Monument has client tables at tag 21 and a draw routine', () => {
-  assert.ok(appJs.includes("'monastery', 'monument']"), 'BUILD_I18N names tag 21');
-  assert.ok(appJs.includes("'Monastery', 'Monument']"), 'BUILD_NAME names tag 21');
-  assert.ok(appJs.includes("'i-monastery', 'i-monument']"), 'BUILD_ICON has the monument symbol');
-  assert.ok(appJs.includes("'monastery.png', 'monument.png']"), 'BUILD_PNG has the monument portrait');
+  assert.ok(appJs.includes("'monastery', 'monument', 'wonder']"), 'BUILD_I18N names tag 21 (the Wonder follows at 22, VIC-02)');
+  assert.ok(appJs.includes("'Monastery', 'Monument', 'Wonder']"), 'BUILD_NAME names tag 21');
+  assert.ok(appJs.includes("'i-monastery', 'i-monument', 'i-wonder']"), 'BUILD_ICON has the monument symbol');
+  assert.ok(appJs.includes("'monastery.png', 'monument.png', 'wonder.png']"), 'BUILD_PNG has the monument portrait');
   assert.ok(appJs.includes('} else if (b.kind === 21) {\n    drawMonument(b);'),
     'drawBuilding routes kind 21 to drawMonument');
   assert.ok(fnBody('function drawMonument(').includes('b.owner === foeOwner() ? ENEMY_CLOTH'),
@@ -81,6 +81,18 @@ test('the KotH countdown chip reads the sim readout pair', () => {
   assert.ok(appJs.includes("sim.koth_ticks_left()"), 'the chip reads koth_ticks_left');
   assert.ok(appJs.includes("'victory.kothCountdown'"), 'own-hold label');
   assert.ok(appJs.includes("'victory.kothCountdownFoe'"), 'foe-hold label');
+});
+
+test('the Wonder countdown chip reads the sim readout pair (VIC-02)', () => {
+  assert.ok(indexHtml.includes('id="wonder-countdown-chip"'), 'the chip exists in the top bar');
+  assert.ok(appJs.includes("sim.wonder_countdown_holder()"), 'the chip reads wonder_countdown_holder');
+  assert.ok(appJs.includes("sim.wonder_countdown_ticks_left()"), 'the chip reads wonder_countdown_ticks_left');
+  assert.ok(appJs.includes("'victory.wonderCountdown'"), 'own-hold label');
+  assert.ok(appJs.includes("'victory.wonderCountdownFoe'"), 'foe-hold label');
+  for (const key of ['building.wonder', 'victory.wonderCountdown', 'victory.wonderCountdownFoe']) {
+    const hits = i18nJs.split(`'${key}':`).length - 1;
+    assert.equal(hits, 3, `${key} is translated in EN/PT/ES`);
+  }
 });
 
 test('the mode labels exist in all three locales', () => {
