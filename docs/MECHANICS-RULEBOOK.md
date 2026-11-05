@@ -409,9 +409,27 @@ tests pin that the enemy start reads unexplored for both players. ·
 shared automatically (the old Cartography technology that once gated this
 was removed from DE). Team visibility is the union over the team.
 *Source:* Technology wiki (Cartography listed among removed/cut generic
-technologies); GAP 8.7 (older gated model, superseded). · *Impl:* merge
-per-team on the client; the sim still tracks per-player truth. ·
-*Status:* **MISSING** (no teams exist yet — 1v1 and Sandbox only).
+technologies); GAP 8.7 (older gated model, superseded). · *Impl:* the
+union is implemented in the sim (Teams T1 sim core): `TeamSettings`
+carries a team id per slot (`NO_TEAM` = unaffiliated — two unaffiliated
+players are enemies, not allies), `allied()` / `team_of()` read it, and
+`visibility_shared(owner)` is the cell-wise union (max) over the team
+members' fog grids — a derived read, never stored: the per-player grids
+remain the hashed truth, `recompute_visibility`, the AI's
+`cell_visible_to` window (VIS-09) and the score's explored-% term all
+keep reading per-player truth. The settings join the hash only while
+non-default (marker 0xC4, after the victory block) and ride save v17
+the same way, so default (distinct-team) streams are byte-identical to
+before. Proven in staged sims (`sim/src/teams_tests.rs`: defaults
+identical cell-for-cell, a staged same-team union over separate truth,
+NO_TEAM not allied, conditional-hash localization, save round-trip).
+What does not exist yet: the client does not render from the shared
+read (the WASM `fog_for` / room team-pick plumbing is the next T1
+slice), and no fieldable match has both allies *and* an opposing team
+— that shape waits on the multi-seat program, so the union's only
+fieldable configurations are ally-only. · *Status:* **DIFFERS** (the
+union works and is proven in the sim; MATCHES waits on a fieldable
+match that has both allies and opponents).
 
 **VIS-09 — Fog hides information, not truth.** In the lockstep model every
 client simulates the whole world; fog is a presentation filter. Gameplay
@@ -4915,11 +4933,35 @@ the mechanical Status count over the rule bodies is
 table below
 equals the body.
 
+updated 2026-11-05 for Teams T1 sim core (bot-loop
+builder): team settings land in the sim — `TeamSettings`
+carries a team id per player slot (`NO_TEAM` = unaffiliated;
+two unaffiliated players are enemies, not allies),
+`allied()` / `team_of()` read it, and
+`visibility_shared(owner)` is the cell-wise union (max) over
+the team members' per-player fog grids — a derived read,
+never stored: the per-player grids remain the hashed truth,
+and `recompute_visibility`, the AI's `cell_visible_to`
+window and the score's explored-% term keep reading
+per-player truth. VIS-08 moves MISSING → DIFFERS: the union
+works and is proven in staged sims, but the client does not
+render the shared read yet (the WASM `fog_for` / room
+team-pick plumbing is the next T1 slice) and no fieldable
+match has both allies *and* an opposing team — that shape
+waits on the multi-seat program. The settings join the hash
+only while non-default (marker 0xC4, after the victory
+block) and ride save v17 the same way, so default
+(distinct-team) streams are byte-identical to before. The
+book's Appendix table stands at 223 rules, 194 / 16 / 13
+(the VIS-08 flip applied to its section row); the
+mechanical Status count over the rule bodies is
+198 / 16 / 9.
+
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
 | 1 | Simulation & time (SIM) | 12 | 12 | 0 | 0 |
 | 2 | Map, terrain & elevation (MAP) | 13 | 9 | 4 | 0 |
-| 3 | Visibility & exploration (VIS) | 10 | 9 | 0 | 1 |
+| 3 | Visibility & exploration (VIS) | 10 | 9 | 1 | 0 |
 | 4 | Selection & orders (SEL) | 17 | 16 | 1 | 0 |
 | 5 | Movement, pathfinding & collision (MOV) | 12 | 8 | 3 | 1 |
 | 6 | Economy & drop-off (ECO) | 17 | 16 | 0 | 1 |
@@ -4935,7 +4977,7 @@ equals the body.
 | 16 | Victory, scoring & game modes (VIC) | 12 | 8 | 0 | 4 |
 | 17 | Multiplayer determinism (NET) | 11 | 9 | 1 | 1 |
 | 18 | Information rules (INF) | 13 | 12 | 1 | 0 |
-| | **Total** | **223** | **194** | **15** | **14** |
+| | **Total** | **223** | **194** | **16** | **13** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer

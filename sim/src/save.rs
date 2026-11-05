@@ -36,7 +36,7 @@ use crate::market::Market;
 use crate::rng::Pcg32;
 use crate::tech::{Age, ProdEntry, TechId};
 use crate::formation::FormationKind;
-use crate::{Command, MatchMode, PlayerState, Sim, TcState, VictorySettings};
+use crate::{Command, MatchMode, PlayerState, Sim, TcState, TeamSettings, VictorySettings};
 
 /// File magic: "SKSV" (Skirmish Save).
 const MAGIC: &[u8; 4] = b"SKSV";
@@ -135,7 +135,19 @@ const MAGIC: &[u8; 4] = b"SKSV";
 /// accumulator (VIC-02's gold cost leg), written for every
 /// building like its wood/stone twins — 0 for every kind with
 /// no gold cost, so it round-trips the hash unchanged.
-const SAVE_VERSION: u32 = 16;
+/// Version 17: Teams T1 (VIS-08's foundation) — the world
+/// section carries the team settings (two team bytes, in slot
+/// order) right after the victory settings, the block present
+/// only while the settings are non-default (distinct teams).
+/// Its presence cannot be inferred from any byte already
+/// written — the victory flags byte's one free bit (bit 7) is
+/// reserved for allied victory (T2) — so an explicit one-byte
+/// presence flag is written in every v17 save (0 = default
+/// teams, no block follows; 1 = the two team bytes follow),
+/// which the reader never has to guess. A default-teams v17
+/// save is therefore laid out exactly as v16 apart from the
+/// version word and that one presence byte.
+const SAVE_VERSION: u32 = 17;
 
 /// Little-endian byte writer over a growable buffer.
 struct W {
@@ -644,6 +656,19 @@ impl Sim {
         w.u64(self.victory.time_limit_ticks);
         w.u64(self.victory.score_target as u64);
         w.u8(self.victory.flags());
+        // Format v17: Teams T1 — the explicit presence byte,
+        // then the team block (two team bytes, slot order) only
+        // while the settings are non-default; the settings are
+        // hashed while non-default, so a non-default save must
+        // carry them for the load-time hash check to pass (see
+        // the version-17 note at SAVE_VERSION).
+        if !self.teams.is_default() {
+            w.bool(true);
+            w.u8(self.teams.teams[0]);
+            w.u8(self.teams.teams[1]);
+        } else {
+            w.bool(false);
+        }
         // Format v12: VIC-03's countdown state, present only
         // while the relic-victory flag (bit 2 above) is on —
         // hashed while a hold stands, so a save taken
@@ -1446,6 +1471,16 @@ impl Sim {
                 wonder_victory: flags & 64 != 0,
             }
         };
+        // Format v17: Teams T1 — the presence byte written in
+        // every v17 save, then the team block while present
+        // (see the version-17 note at SAVE_VERSION).
+        let teams = if r.bool()? {
+            TeamSettings {
+                teams: [r.u8()?, r.u8()?],
+            }
+        } else {
+            TeamSettings::default()
+        };
         let (relic_holder, relic_hold_ticks) = if victory.relic_victory {
             let holder = if r.bool()? { Some(r.u8()?) } else { None };
             (holder, r.u64()?)
@@ -1877,6 +1912,7 @@ impl Sim {
             grid,
             mode,
             victory,
+            teams,
             relic_holder,
             relic_hold_ticks,
             wonder_holder,

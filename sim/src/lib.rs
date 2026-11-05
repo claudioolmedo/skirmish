@@ -114,6 +114,8 @@ mod group_speed_tests;
 mod vic11_tests;
 #[cfg(test)]
 mod formation_tests;
+#[cfg(test)]
+mod teams_tests;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
@@ -1039,6 +1041,56 @@ impl VictorySettings {
     }
 }
 
+/// A player slot with no team (Teams T1, VIS-08): DE's "–" lobby
+/// pick. Two `NO_TEAM` players are *enemies*, not allies by
+/// default — unaffiliated is a real value, not the absence of one.
+pub const NO_TEAM: u8 = 0xFF;
+
+/// The team assignment a match runs under (Teams T1, VIS-08's
+/// foundation): one team id per player slot. Like the victory
+/// settings, this is part of the match's definition from tick 0:
+/// it enters through the constructor (and, in the full T1
+/// plumbing, the netplay handshake), never changes mid-match, and
+/// joins the state hash only when non-default (see `hash_parts`),
+/// so a default stream stays byte-identical to the pre-T1 stream.
+///
+/// The default is *distinct* teams — slot 0 on team 1, slot 1 on
+/// team 2 — which is exactly the configuration the game has
+/// always shipped: two seats, no allies. `locked_teams` is
+/// deliberately NOT a field here: NET-11's stance table does not
+/// exist until T3, and a lock with nothing to lock would be dead
+/// state still demanding hash/save bytes (execution plan T1.2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TeamSettings {
+    /// Team id per player slot, in slot order (slot 0 = the
+    /// human seat, slot 1 = the opponent seat — see
+    /// `player_slot`). `NO_TEAM` = allied with nobody.
+    pub teams: [u8; 2],
+}
+
+impl Default for TeamSettings {
+    /// Distinct teams: the shipped-today configuration.
+    fn default() -> Self {
+        Self { teams: [1, 2] }
+    }
+}
+
+impl TeamSettings {
+    /// Distinct teams (the default): each seat its own team.
+    pub fn distinct() -> Self {
+        Self::default()
+    }
+
+    /// Whether these are the default (distinct-teams) settings.
+    /// Literal equality with the default, like
+    /// `VictorySettings::is_default`: a swapped pair such as
+    /// `[2, 1]` is behaviorally distinct-teamed too, but its ids
+    /// are different match-definition state and hash as such.
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// VIC-03's countdown length on the map size this game ships.
 /// The duration scales with map size in DE (wiki, Relic —
 /// victory-duration table by map size, fetched 2026-11-03):
@@ -1285,6 +1337,10 @@ pub struct Sim {
     /// Conquest unless the match was opened with other settings.
     /// Set at construction alongside `mode`; never changes.
     victory: VictorySettings,
+    /// The team assignment in force (Teams T1): distinct teams
+    /// unless the match was opened with other settings. Set at
+    /// construction alongside `victory`; never changes.
+    teams: TeamSettings,
     /// VIC-03's countdown state: the player currently holding
     /// *all* of the map's relics garrisoned in their Monasteries
     /// and how many consecutive ticks that hold has lasted.
@@ -1441,6 +1497,20 @@ impl Sim {
     /// its own derived stream, so combat's draw sequence is
     /// untouched by however many candidates generation tried.
     pub fn with_settings(seed: u64, mode: MatchMode, victory: VictorySettings) -> Self {
+        Self::with_settings_teams(seed, mode, victory, TeamSettings::default())
+    }
+
+    /// The shared constructor with explicit team settings
+    /// (Teams T1): `with_settings` plus the per-slot team ids
+    /// (VIS-08's foundation). Every older constructor passes
+    /// `TeamSettings::default()` (distinct teams), under which
+    /// the match is byte-identical to before T1.
+    pub fn with_settings_teams(
+        seed: u64,
+        mode: MatchMode,
+        victory: VictorySettings,
+        teams: TeamSettings,
+    ) -> Self {
         let rng = Pcg32::new(seed);
         let map = mapgen::generate(seed);
         let grid = map.grid.clone();
@@ -1509,6 +1579,7 @@ impl Sim {
             grid,
             mode,
             victory,
+            teams,
             relic_holder: None,
             relic_hold_ticks: 0,
             wonder_holder: None,
@@ -1632,6 +1703,43 @@ impl Sim {
     /// The victory conditions this match runs under (Package C).
     pub fn victory_settings(&self) -> VictorySettings {
         self.victory
+    }
+
+    /// The team assignment this match runs under (Teams T1).
+    pub fn team_settings(&self) -> TeamSettings {
+        self.teams
+    }
+
+    /// The team id of a player seat (Teams T1): the seat's raw
+    /// team byte, which may be `NO_TEAM` (unaffiliated). Gaia and
+    /// unknown tags have no team: `None`.
+    pub fn team_of(&self, owner: u8) -> Option<u8> {
+        player_slot(owner).map(|slot| self.teams.teams[slot])
+    }
+
+    /// Whether two *distinct* player seats are allies (Teams T1,
+    /// VIS-08): they share a team id, and that id is not
+    /// `NO_TEAM` — two unaffiliated players are enemies, not
+    /// allies by default (DE's "–" pick, spec §3.1). A seat is
+    /// never its own ally; Gaia is nobody's ally.
+    pub fn allied(&self, a: u8, b: u8) -> bool {
+        if a == b {
+            return false;
+        }
+        self.same_team(a, b)
+    }
+
+    /// Whether two player seats stand on the same team (Teams
+    /// T1): equal team ids, and not `NO_TEAM`. Unlike `allied`,
+    /// this one is reflexive — a teamed seat shares a team with
+    /// itself — which is the form team-scope folds (the T2
+    /// victory pooling) read. Gaia and unknown tags share no team
+    /// with anyone.
+    pub fn same_team(&self, a: u8, b: u8) -> bool {
+        match (self.team_of(a), self.team_of(b)) {
+            (Some(ta), Some(tb)) => ta == tb && ta != NO_TEAM,
+            _ => false,
+        }
     }
 
     /// VIC-09 (Package I): the Death Match stockpile delta —
@@ -2408,6 +2516,46 @@ impl Sim {
             Some(slot) => &self.fog[slot],
             None => &[],
         }
+    }
+
+    /// A player's *shared* visibility grid (Teams T1, VIS-08):
+    /// the cell-wise maximum over the per-player fog grids of the
+    /// owner's whole team (2 visible beats 1 explored beats 0) —
+    /// teammates' line of sight is the union over the team. This
+    /// is a derived read, never stored state: the per-player
+    /// grids stay the hashed truth (`recompute_visibility` is
+    /// untouched), so saves and replays reproduce the union for
+    /// free. Under the default distinct teams the union is the
+    /// owner's own grid, cell for cell. The AI's window
+    /// (`cell_visible_to`) and the score's explored-% term keep
+    /// reading per-player truth, exactly as before — only a
+    /// presentation consumer (the WASM `fog_for` read, in the
+    /// full T1 plumbing) reads the shared grid. Gaia (and unknown
+    /// tags) have no grid: an empty vector.
+    pub fn visibility_shared(&self, owner: u8) -> Vec<u8> {
+        let Some(slot) = player_slot(owner) else {
+            return Vec::new();
+        };
+        let mut out = self.fog[slot].clone();
+        for other_slot in 0..2usize {
+            if other_slot == slot {
+                continue;
+            }
+            let other_owner = if other_slot == 0 {
+                entity::OWNER_PLAYER
+            } else {
+                entity::OWNER_OPPONENT
+            };
+            if !self.allied(owner, other_owner) {
+                continue;
+            }
+            for (cell, &v) in out.iter_mut().zip(self.fog[other_slot].iter()) {
+                if v > *cell {
+                    *cell = v;
+                }
+            }
+        }
+        out
     }
 
     /// One cell's visibility state for a player (0/1/2 as in
@@ -10679,6 +10827,20 @@ impl Sim {
             h.write_u64(self.victory.time_limit_ticks);
             h.write_u64(self.victory.score_target as u64);
             h.write_u8(self.victory.flags());
+        }
+        // Teams T1: the team settings join the hash only when
+        // non-default (distinct teams), behind marker 0xC4 —
+        // grepped free in `hash_parts` at build time (taken:
+        // 0xAE, 0xB0–0xBE, 0xC1 relic, 0xC2 MOV-06 stamp, 0xC3
+        // wonder, 0xD1 resignation, 0xF1 queue provenance) —
+        // right after the victory block, so a default stream —
+        // the golden scenario included — stays byte-identical to
+        // the pre-T1 stream, and two matches under different team
+        // settings can never silently agree.
+        if !self.teams.is_default() {
+            h.write_u8(0xC4);
+            h.write_u8(self.teams.teams[0]);
+            h.write_u8(self.teams.teams[1]);
         }
         // VIC-03: the relic countdown state joins the hash only
         // while a hold stands — behind marker 0xC1, the holder

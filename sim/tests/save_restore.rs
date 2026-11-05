@@ -7,7 +7,9 @@
 //! tick for tick). Corrupt or foreign bytes are refused whole.
 
 use fixed::types::I16F16;
-use skirmish_sim::{Command, MatchMode, Sim};
+use skirmish_sim::{
+    Command, MatchMode, Sim, TeamSettings, VictorySettings, OWNER_OPPONENT, OWNER_PLAYER,
+};
 
 /// Drive a match into a genuinely mid-game state: villagers
 /// working, a queue running, units moving — then save it.
@@ -90,6 +92,29 @@ fn restored_match_continues_deterministically() {
         let hb = restored.tick();
         assert_eq!(ha, hb, "restored match diverged at +{tick} ticks");
     }
+}
+
+#[test]
+fn save_restore_preserves_non_default_teams() {
+    // Teams T1 (save v17): a match opened on one shared team
+    // restores with its team settings intact — hash equality
+    // after restore and a byte-identical re-save.
+    let mut sim = Sim::with_settings_teams(
+        42,
+        MatchMode::TwoPlayer,
+        VictorySettings::conquest(),
+        TeamSettings { teams: [1, 1] },
+    );
+    for _ in 0..300 {
+        sim.tick();
+    }
+    assert!(sim.allied(OWNER_PLAYER, OWNER_OPPONENT));
+    let bytes = sim.save_game();
+    let restored = Sim::load_game(&bytes).expect("a v17 save we wrote must load");
+    assert_eq!(restored.state_hash(), sim.state_hash());
+    assert_eq!(restored.team_settings(), TeamSettings { teams: [1, 1] });
+    assert!(restored.allied(OWNER_PLAYER, OWNER_OPPONENT));
+    assert_eq!(restored.save_game(), bytes);
 }
 
 #[test]
