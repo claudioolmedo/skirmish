@@ -373,7 +373,18 @@ export class WasmSim {
     }
     /**
      * The fog-of-war grid of a specific player — `fog` for an
-     * explicit seat.
+     * explicit seat. Teams T1 (VIS-08): this serves the seat's
+     * SHARED grid (`visibility_shared` — the cell-wise union
+     * over its team), because every consumer of the per-seat
+     * read is a presentation consumer (the main view, the
+     * minimap, replay fog) and DE renders teammates' line of
+     * sight as one shared picture. Under the default distinct
+     * teams the union is the seat's own grid cell for cell, so
+     * 1v1 rendering is unchanged; the per-player grids stay the
+     * hashed truth underneath. The seat-0 `fog()` above keeps
+     * serving the own grid: its only caller is the non-seat-aware
+     * local path, which never runs under team settings (local
+     * matches build with default teams).
      * @param {number} owner
      * @returns {Uint8Array}
      */
@@ -657,6 +668,37 @@ export class WasmSim {
      */
     static new_match_victory(seed, mode_tag, time_limit_ticks, score_target, flags) {
         const ret = wasm.wasmsim_new_match_victory(seed, mode_tag, time_limit_ticks, score_target, flags);
+        return WasmSim.__wrap(ret);
+    }
+    /**
+     * Create a match under explicit victory settings AND team
+     * settings (Teams T1, VIS-08): `new_match_victory` plus the
+     * per-slot team ids packed in `teams` — slot 0's team in
+     * bits 0–7, slot 1's in bits 8–15, `0xFF` per byte =
+     * `NO_TEAM` (unaffiliated; two unaffiliated players are
+     * enemies, not allies). This is a NEW export rather than a
+     * widened `new_match_victory`: a caller built against the
+     * old signature would pass no sixth argument, and a packed
+     * 0 read as teams `[0, 0]` would silently ally the seats —
+     * the old export keeps its exact meaning, and the client
+     * falls back to it when this one is absent (a stale wasm),
+     * losing the team pick exactly the way a stale wasm loses
+     * the victory settings, with netplay's construction-hash
+     * check refusing a mixed pair. The packed default
+     * (distinct teams, `1 | (2 << 8)` = 513) builds a sim
+     * identical to `new_match_victory`'s: the settings join the
+     * hash only while non-default, so default streams — the
+     * golden included — do not move.
+     * @param {number} seed
+     * @param {number} mode_tag
+     * @param {number} time_limit_ticks
+     * @param {number} score_target
+     * @param {number} flags
+     * @param {number} teams
+     * @returns {WasmSim}
+     */
+    static new_match_victory_teams(seed, mode_tag, time_limit_ticks, score_target, flags, teams) {
+        const ret = wasm.wasmsim_new_match_victory_teams(seed, mode_tag, time_limit_ticks, score_target, flags, teams);
         return WasmSim.__wrap(ret);
     }
     /**

@@ -900,12 +900,66 @@ export function createSession({
 }
 
 // ---------------------------------------------------------------------
+// Teams meta (Teams T1, VIS-08)
+//
+// The match's team assignment — one team id per player slot,
+// [host, guest] — travels exactly where the victory settings
+// travel: the host's 'start' handshake (and its 'hello'
+// advertisement and the resync), and the replay header. These
+// helpers are the validation boundary for that field on arrival:
+// a team id is one byte (0..255, 0xFF = NO_TEAM, unaffiliated),
+// and anything malformed — wrong shape, out of range, not an
+// array at all — falls back to the DEFAULT pair wholesale (the
+// guestSlotOf discipline: junk must never ally two seats, seal a
+// seat, or break a rebuild by accident). The default is distinct
+// teams, [1, 2] — the configuration the game has always shipped.
+
+export const DEFAULT_TEAMS = [1, 2];
+export const NO_TEAM = 0xff;
+
+/// The team pair a foreign value amounts to: itself (copied)
+/// when it is exactly two byte-sized integers, the default pair
+/// otherwise.
+export function normalizeTeams(v) {
+  if (Array.isArray(v) && v.length === 2
+    && v.every((t) => Number.isInteger(t) && t >= 0 && t <= 0xff)) {
+    return [v[0], v[1]];
+  }
+  return [...DEFAULT_TEAMS];
+}
+
+/// Whether a value amounts to the default (distinct-teams)
+/// assignment after normalization.
+export function teamsIsDefault(v) {
+  const t = normalizeTeams(v);
+  return t[0] === DEFAULT_TEAMS[0] && t[1] === DEFAULT_TEAMS[1];
+}
+
+/// Pack a team pair into the WASM constructor's u32 word:
+/// slot 0's team in bits 0–7, slot 1's in bits 8–15. The default
+/// pair packs as 513.
+export function packTeams(v) {
+  const t = normalizeTeams(v);
+  return (t[0] | (t[1] << 8)) >>> 0;
+}
+
+/// The team pair a packed constructor word carries (the inverse
+/// of packTeams; high bits past the two team bytes are ignored).
+export function unpackTeams(packed) {
+  if (!Number.isInteger(packed) || packed < 0) return [...DEFAULT_TEAMS];
+  return [packed & 0xff, (packed >> 8) & 0xff];
+}
+
+// ---------------------------------------------------------------------
 // Recorder / replay
 //
 // One format for online and local matches:
-//   { kind:'skirmish2-replay', v:1, seed, modeTag, region?, 
-//     seats:[owner0, owner1?], result?, ticks, 
+//   { kind:'skirmish2-replay', v:1, seed, modeTag, region?,
+//     seats:[owner0, owner1?], result?, ticks, victory?, teams?,
 //     events:[{tick, s0:[cmds], s1?:[cmds]}] }
+// (`victory?` and `teams?` ride only while non-default — the
+// recording keeps its pre-Package-C shape under default settings,
+// and playback normalizes whatever it finds, junk to defaults.)
 // Playback re-executes: construct the sim from (seed, modeTag),
 // then at each event tick apply s0 then s1 (slot order — the same
 // order the session used), ticking in between. Fog in the viewer is
