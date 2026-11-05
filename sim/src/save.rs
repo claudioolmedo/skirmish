@@ -147,6 +147,17 @@ const MAGIC: &[u8; 4] = b"SKSV";
 /// which the reader never has to guess. A default-teams v17
 /// save is therefore laid out exactly as v16 apart from the
 /// version word and that one presence byte.
+/// Teams T2 (VIC-12) note, recorded on this version — NO new
+/// version: the victory flags byte above gains bit 7 (allied
+/// victory), which the existing flags write/parse carries
+/// with no layout change, and while that flag is on the
+/// relic/wonder countdown holders stored by the v12/v16
+/// blocks are scope keys (team ids; see `Sim`'s holder
+/// fields) instead of owner tags — a team id and an owner
+/// tag are both one byte, so the existing (holder, ticks)
+/// pairs express the re-keyed state exactly, and the flag
+/// itself round-trips in the same block that tells the
+/// reader which meaning the byte carries.
 const SAVE_VERSION: u32 = 17;
 
 /// Little-endian byte writer over a growable buffer.
@@ -1469,6 +1480,10 @@ impl Sim {
                 empire_wars: flags & 16 != 0,
                 king_of_the_hill: flags & 32 != 0,
                 wonder_victory: flags & 64 != 0,
+                // Format v17 (Teams T2): bit 7 is VIC-12's
+                // allied victory; no layout change (see the
+                // version-17 note at SAVE_VERSION).
+                allied_victory: flags & 128 != 0,
             }
         };
         // Format v17: Teams T1 — the presence byte written in

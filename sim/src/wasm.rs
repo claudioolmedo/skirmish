@@ -66,6 +66,7 @@ fn victory_from_flags(time_limit_ticks: u32, score_target: i32, flags: u32) -> V
         empire_wars: flags & 16 != 0,
         king_of_the_hill: flags & 32 != 0,
         wonder_victory: flags & 64 != 0,
+        allied_victory: flags & 128 != 0,
     }
 }
 
@@ -138,7 +139,8 @@ impl WasmSim {
     /// (VIC-06), bit 1 = Sudden Death (VIC-07), bit 2 = Relic
     /// victory (VIC-03), bit 3 = Death Match (VIC-09), bit 4 =
     /// Empire Wars (VIC-10), bit 5 = King of the Hill (VIC-08),
-    /// bit 6 = Wonder victory (VIC-02).
+    /// bit 6 = Wonder victory (VIC-02), bit 7 = Allied Victory
+    /// (VIC-12, Teams T2).
     /// (Package I's builder tree packed its three modes at bits
     /// 2/3/4; bit 2 was taken by VIC-03 on current main, so the
     /// landing shifts them to 3/4/5 — bits 0/1/2 keep their

@@ -3764,7 +3764,13 @@ Two match-ending details stand: if both players fall on the same
 tick the human loses (defeat is checked first), and AI resignation
 (AI-05) ends the match as a win. The match state is hash-covered and
 exposed as ongoing / victory / defeat; the sim keeps ticking
-harmlessly after the decision. · *Status:* **MATCHES**.
+harmlessly after the decision. The team clause in this
+rule's text landed with VIC-12 (Teams T2, 2026-11-05): under
+allied victory the predicate folds to *team* elimination —
+a team is out when every member is out by any combination
+of elimination, a mode event (VIC-06/07) or resignation
+(VIC-11) — and the per-player form above is unchanged while
+the setting is off. · *Status:* **MATCHES**.
 
 **VIC-02 — Wonder victory (standard games).** In Standard victory mode,
 holding a completed Wonder starts a countdown; if the Wonder still stands
@@ -3809,9 +3815,11 @@ while the flag is on, and the building record gains the gold
 repair accumulator) and the client surfaces a build-menu entry
 (the economic page's fourth row, key V) plus a top-bar countdown
 readout mirroring VIC-03's chip. Recorded readings: (1) the
-allied-victory clause has no surface yet — no teams exist
-(VIS-08), so the census is per-player and pooling lands with
-VIC-12, as VIC-03 recorded; the tracked hold is a single
+allied-victory clause landed with VIC-12 (Teams T2,
+2026-11-05), as VIC-03 recorded it would: under allied
+victory any member's completed Wonder holds for the team
+and the tracked holder re-keys to the team — the census is
+per-player while the setting is off; the tracked hold is a single
 (holder, ticks) pair on the relic state's shape, so if both
 players stand completed Wonders the human's hold is tracked
 and the foe's accrues only once it breaks — DE runs the two
@@ -3848,9 +3856,12 @@ other modes (after Conquest/mode elimination, before VIC-05's score
 endings); Sandbox never counts down. The countdown round-trips
 through saves (format v12) and the client surfaces the toggle in
 both prematch panels plus a top-bar countdown readout. Two
-recorded readings: (1) the allied-pooling clause is untestable
-today — no teams exist (VIS-08), so the census is per-player and
-pooling lands with VIC-12; (2) the duration follows VIC-02's
+recorded readings: (1) the allied-pooling clause landed with
+VIC-12 (Teams T2, 2026-11-05): under allied victory the
+census pools the team's Monastery stores (a team's stores
+together holding every relic is the hold) and the tracked
+holder re-keys to the team — per-player while the setting
+is off; (2) the duration follows VIC-02's
 table in its current form — the package was built at 30,000
 ticks under the pre-expansion reading (100 years (Tiny)); at
 landing the loop re-fetched the Relic article and ruled for
@@ -3901,8 +3912,12 @@ table, so it contributes 0 by data; (4) Society is 20% of
 Castles/Wonders constructed — no such kind exists yet, so the
 term is structurally 0; (5) the Town Center contributes 0 to
 surviving value — its table cost is 0 (it is never built here);
-(6) team score (the mean) has no surface yet — matches are
-1v1/1-seat affairs, so no team exists to average; the live
+(6) team score (the mean) gained its surface with VIC-12
+(Teams T2, 2026-11-05): `team_score_for(team)` returns the
+mean of the members' scores (each category the floored mean
+of the members' categories, the total the floored mean of
+their totals), and VIC-05's endings compare team means
+while allied victory is on; the live
 in-game score display DE shows has no surface here either —
 the breakdown ships on the end-of-match screen only. ·
 *Status:* **MATCHES** (the formula as pinned; the six readings
@@ -3922,7 +3937,12 @@ reached, the clock at expiry. Two readings recorded (the sources pin
 neither): the winner is the higher total in both modes — a target both
 players have reached on the same read goes to the higher total — and
 on an exact tie there is no winner yet, so a tied match plays on, past
-its limit if need be, until the tie breaks. · *Status:* **MATCHES**.
+its limit if need be, until the tie breaks. Under allied victory
+(VIC-12, Teams T2, 2026-11-05) both endings compare *team* means
+(VIC-04's team score) instead of the two totals: the target is
+reached by a team mean reaching it, and an all-allied match's sole
+team wins by reaching the target or by standing (trivially highest)
+at expiry. · *Status:* **MATCHES**.
 
 **VIC-06 — Regicide.** Each player starts with a King unit (CLS-06). A
 player whose King dies is eliminated immediately, whatever else they
@@ -4067,8 +4087,51 @@ command). · *Status:* **MATCHES**.
 enabled, a team wins or loses together: conquest requires eliminating
 every opposing player, relic/Wonder countdowns read team state (VIC-03),
 and team score is the mean (VIC-04).
-*Source:* GAP 8.7; wiki, Relic. · *Impl:* win predicates take a
-(team | player) scope from match settings. · *Status:* **MISSING**.
+*Source:* GAP 8.7; wiki, Diplomacy (the "Allied Victory" box, in the
+AoE II section; the shared-condition paragraph with the Wonder
+example, re-fetched 2026-11-05); wiki, Victory (conquest = one
+player, or every remaining player allied with allied victory,
+remaining; time-limit/score go to "the player or team"); wiki,
+Score (the team mean, at VIC-04). · *Impl:* shipped (Teams T2,
+2026-11-05) — an opt-in `VictorySettings` condition
+(`allied_victory`, WASM flags bit 7, the flags byte's last free
+bit), off in plain Conquest, whose streams stay byte-identical:
+the settings join the hash only off-default inside the existing
+victory block (no new hash bytes) and ride the existing save
+flags byte (no new save version — the relic/Wonder holder pairs
+below carry the re-keyed byte as-is). With the setting on,
+`match_state` folds every predicate from player to victory
+scope (the seat plus its allies, per T1's `allied()`; a
+`NO_TEAM` seat's scope is itself alone): conquest, mode-out
+and resignation fold to team elimination (every member out,
+by any mix of the three per-player outs; AI resignation stays
+a per-seat out feeding the fold, read after seat 0's team as
+before); the relic census sums the team's Monastery stores
+and the Wonder census reads any member's completed Wonder,
+both tracked holders re-keying to the team while the setting
+is on (owner tags while off — the field's meaning follows
+the settings); score endings compare team means through
+`team_score_for` (VIC-04's mean); the King of the Hill
+outcome reads the team of `koth_winner`. Every per-player
+predicate underneath is unchanged, so with the setting off —
+or with distinct teams, where every scope is a singleton —
+each outcome is today's, pinned outcome-for-outcome by the
+T2 suite against the off path. The client surfaces the
+checkbox in both prematch panels beside the relic opt-in
+(Package C's pattern), the label in EN/PT/ES. Recorded
+readings: (1) pooling is proven on staged two-seat sims in
+both configurations (same-team pooling and distinct-team
+equivalence) and is selectable in the shipped prematch
+panel; (2) no shipped match can field a team of 2+ *against*
+another team, so pooled outcomes are exercised in the
+allied-vs-nobody and 1v1-equivalence shapes until the
+multi-seat program exists; (3) the single-pair countdown
+limitation stands as recorded under VIC-02 (pooling does
+not lift it), and the Regicide/resignation team scope is
+the per-player reading the dossier adopted (its registers
+#6/#7: DE's team form is UNVERIFIED, the per-player out
+feeding the team fold is the conservative reading). ·
+*Status:* **MATCHES**.
 
 ---
 
@@ -5011,6 +5074,23 @@ book's Appendix table stands at 223 rules, 194 / 16 / 13
 mechanical Status count over the rule bodies is
 198 / 16 / 9.
 
+Update, 2026-11-05 for Teams T2 (bot-loop builder): allied
+victory pooling lands (VIC-12) — the `VictorySettings` flag
+at bit 7, `match_state`'s team-scope fold over the unchanged
+per-player predicates, pooled relic/Wonder censuses with
+team-keyed holders, `team_score_for` (VIC-04's mean) feeding
+VIC-05's pooled endings, the KotH team-of-winner read, and
+the prematch checkbox in both panels. VIC-12 moves
+MISSING → MATCHES; the VIC-01/02/03/04/05 notes are amended
+in place to discharge their recorded pooling deferrals (no
+status moves there). No new hash bytes and no save version:
+the flags byte the victory block already carries takes
+bit 7, and the (holder, ticks) pairs carry the re-keyed
+byte. The book's Appendix table stands at 223 rules,
+195 / 16 / 12 (the VIC-12 flip applied to its section row);
+the mechanical Status count over the rule bodies is
+202 / 15 / 6.
+
 Client-slice update, 2026-11-05 (Teams T1 client, bot-loop
 builder): the deferred client half of T1 lands — the WASM
 `fog_for` read serves `visibility_shared`, the new
@@ -5042,10 +5122,10 @@ yet. The counts stand: 198 / 16 / 9.
 | 13 | Trade, market & tribute (TRD) | 8 | 8 | 0 | 0 |
 | 14 | Garrison, transport & repair (GAR) | 10 | 9 | 0 | 1 |
 | 15 | AI behavior & difficulty (AI) | 9 | 8 | 0 | 1 |
-| 16 | Victory, scoring & game modes (VIC) | 12 | 8 | 0 | 4 |
+| 16 | Victory, scoring & game modes (VIC) | 12 | 9 | 0 | 3 |
 | 17 | Multiplayer determinism (NET) | 11 | 9 | 1 | 1 |
 | 18 | Information rules (INF) | 13 | 12 | 1 | 0 |
-| | **Total** | **223** | **194** | **16** | **13** |
+| | **Total** | **223** | **195** | **16** | **12** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer

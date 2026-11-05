@@ -279,6 +279,7 @@ const vicRelicInput = document.getElementById('vic-relic'); // VIC-03: the relic
 const vicDeathMatchInput = document.getElementById('vic-deathmatch'); // Package I: the Death Match checkbox
 const vicEmpireWarsInput = document.getElementById('vic-empirewars'); // Package I: the Empire Wars checkbox
 const vicKothInput = document.getElementById('vic-koth'); // Package I: the King of the Hill checkbox
+const vicAlliedInput = document.getElementById('vic-allied'); // Teams T2 (VIC-12): the Allied Victory checkbox
 // End-of-match feedback block (2026-10-19): refs + state. The
 // send goes to the relay's /feedback; once it succeeds the form
 // never shows again (localStorage skirmish2.feedbackDone) — the
@@ -682,7 +683,11 @@ let matchEnded = false; // the victory/defeat overlay is up; the sim holds
 //                   pre-built town and 27 tasked villagers
 //   kingOfTheHill:  VIC-08 (Package I) — hold the central
 //                   Monument by presence for the countdown
-const VICTORY_DEFAULT = { timeLimitTicks: 0, scoreTarget: 0, regicide: false, suddenDeath: false, relicVictory: false, deathMatch: false, empireWars: false, kingOfTheHill: false };
+//   alliedVictory:  VIC-12 (Teams T2) — win/lose predicates
+//                   pool over the player's team (flags bit 7);
+//                   an independent checkbox, like DE's: being
+//                   allied and sharing victory are separate
+const VICTORY_DEFAULT = { timeLimitTicks: 0, scoreTarget: 0, regicide: false, suddenDeath: false, relicVictory: false, deathMatch: false, empireWars: false, kingOfTheHill: false, alliedVictory: false };
 let chosenVictory = { ...VICTORY_DEFAULT }; // the pause menu's pick (local matches, on Restart)
 let matchVictory = { ...VICTORY_DEFAULT }; // the settings the current sim was built with
 
@@ -701,20 +706,25 @@ function normalizeVictory(v) {
     deathMatch: v.deathMatch === true,
     empireWars: v.empireWars === true,
     kingOfTheHill: v.kingOfTheHill === true,
+    alliedVictory: v.alliedVictory === true,
   };
 }
 function victoryIsDefault(v) {
   const n = normalizeVictory(v);
   return n.timeLimitTicks === 0 && n.scoreTarget === 0 && !n.regicide && !n.suddenDeath && !n.relicVictory
-    && !n.deathMatch && !n.empireWars && !n.kingOfTheHill;
+    && !n.deathMatch && !n.empireWars && !n.kingOfTheHill && !n.alliedVictory;
 }
 /// The WASM ABI flags packing (bit 0 Regicide, bit 1 Sudden
 /// Death, bit 2 Relic victory, bit 3 Death Match, bit 4 Empire
-/// Wars, bit 5 King of the Hill — bits 0/1 keep their Package C
-/// meanings, bit 2 VIC-03's; Package I's modes sit at 3/4/5).
+/// Wars, bit 5 King of the Hill, bit 7 Allied Victory — bits
+/// 0/1 keep their Package C meanings, bit 2 VIC-03's; Package
+/// I's modes sit at 3/4/5; bit 6 is the sim's Wonder victory,
+/// which the prematch surface does not pack; Teams T2 takes
+/// the last free bit, 7).
 function victoryFlags(v) {
   return (v.regicide ? 1 : 0) | (v.suddenDeath ? 2 : 0) | (v.relicVictory ? 4 : 0)
-    | (v.deathMatch ? 8 : 0) | (v.empireWars ? 16 : 0) | (v.kingOfTheHill ? 32 : 0);
+    | (v.deathMatch ? 8 : 0) | (v.empireWars ? 16 : 0) | (v.kingOfTheHill ? 32 : 0)
+    | (v.alliedVictory ? 128 : 0);
 }
 /// The one construction path for every match sim: default
 /// settings build exactly the pre-Package-C sim; anything else
@@ -763,6 +773,7 @@ function victoryFromPick(kind, minutes, score, relic, modes) {
     deathMatch: m.deathMatch === true,
     empireWars: m.empireWars === true,
     kingOfTheHill: m.kingOfTheHill === true,
+    alliedVictory: m.alliedVictory === true,
   });
 }
 /// The inverse pick, for reflecting a settings object into the
@@ -777,6 +788,7 @@ function victoryPickOf(v) {
     deathMatch: n.deathMatch,
     empireWars: n.empireWars,
     kingOfTheHill: n.kingOfTheHill,
+    alliedVictory: n.alliedVictory,
   };
 }
 /// The short localized label for summaries (the room's config
@@ -791,6 +803,7 @@ function victoryLabel(v) {
   if (n.deathMatch) label += ' · ' + t('victory.deathMatch');
   if (n.empireWars) label += ' · ' + t('victory.empireWars');
   if (n.kingOfTheHill) label += ' · ' + t('victory.kingOfTheHill');
+  if (n.alliedVictory) label += ' · ' + t('victory.alliedVictory');
   return label;
 }
 
@@ -5996,6 +6009,7 @@ function createGame() {
       deathMatch: netUi.createVictoryDeathMatch ? netUi.createVictoryDeathMatch.checked : false,
       empireWars: netUi.createVictoryEmpireWars ? netUi.createVictoryEmpireWars.checked : false,
       kingOfTheHill: netUi.createVictoryKoth ? netUi.createVictoryKoth.checked : false,
+      alliedVictory: netUi.createVictoryAllied ? netUi.createVictoryAllied.checked : false,
     });
   net.region = net.selectedRegion || net.region || regionList[0].id;
   net.room = makeRoomId();
@@ -6559,6 +6573,7 @@ function applyStaticStrings() {
   setText('vic-deathmatch-txt', 'victory.deathMatch');
   setText('vic-empirewars-txt', 'victory.empireWars');
   setText('vic-koth-txt', 'victory.kingOfTheHill');
+  setText('vic-allied-txt', 'victory.alliedVictory');
   setText('victory-note', 'pause.victoryNote');
   setAttr('quality-row', 'aria-label', 'pause.visualQuality');
   setText('quality-title', 'pause.quality');
@@ -6699,6 +6714,7 @@ function applyStaticStrings() {
   setText('set-victory-deathmatch-name', 'victory.deathMatch');
   setText('set-victory-empirewars-name', 'victory.empireWars');
   setText('set-victory-koth-name', 'victory.kingOfTheHill');
+  setText('set-victory-allied-name', 'victory.alliedVictory');
   setText('set-players-name', 'set.players');
   setText('set-guest-name', 'set.guestSlot');
   const slotOptions = {
@@ -6812,6 +6828,7 @@ async function main() {
     if (vicDeathMatchInput) vicDeathMatchInput.checked = pick.deathMatch;
     if (vicEmpireWarsInput) vicEmpireWarsInput.checked = pick.empireWars;
     if (vicKothInput) vicKothInput.checked = pick.kingOfTheHill;
+    if (vicAlliedInput) vicAlliedInput.checked = pick.alliedVictory;
   }
   function readVictoryInputs() {
     const chosen = document.querySelector('input[name="victory-mode"]:checked');
@@ -6824,6 +6841,7 @@ async function main() {
         deathMatch: vicDeathMatchInput ? vicDeathMatchInput.checked : false,
         empireWars: vicEmpireWarsInput ? vicEmpireWarsInput.checked : false,
         kingOfTheHill: vicKothInput ? vicKothInput.checked : false,
+        alliedVictory: vicAlliedInput ? vicAlliedInput.checked : false,
       });
   }
   for (const inp of victoryInputs) inp.addEventListener('change', readVictoryInputs);
@@ -6833,6 +6851,7 @@ async function main() {
   if (vicDeathMatchInput) vicDeathMatchInput.addEventListener('change', readVictoryInputs);
   if (vicEmpireWarsInput) vicEmpireWarsInput.addEventListener('change', readVictoryInputs);
   if (vicKothInput) vicKothInput.addEventListener('change', readVictoryInputs);
+  if (vicAlliedInput) vicAlliedInput.addEventListener('change', readVictoryInputs);
   syncVictoryInputs();
   playing = false; // no match exists until one is entered
   paused = false;
@@ -7084,6 +7103,7 @@ async function main() {
     createVictoryDeathMatch: document.getElementById('create-victory-deathmatch'),
     createVictoryEmpireWars: document.getElementById('create-victory-empirewars'),
     createVictoryKoth: document.getElementById('create-victory-koth'),
+    createVictoryAllied: document.getElementById('create-victory-allied'),
     roomSection: document.getElementById('room-section'),
     slotHost: document.getElementById('slot-host'),
     slotGuest: document.getElementById('slot-guest'),

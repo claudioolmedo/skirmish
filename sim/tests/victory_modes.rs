@@ -114,6 +114,9 @@ fn victory_settings_round_trip_and_are_hashed_state() {
         // round-trip (off here — this test's subject is the
         // Package C conditions).
         wonder_victory: false,
+        // VIC-12 (Teams T2): allied victory rides the same
+        // round-trip (off here, same reason).
+        allied_victory: false,
     };
     let sim = Sim::new_match_victory(42, MatchMode::TwoPlayer, settings);
     assert_eq!(sim.victory_settings(), settings);

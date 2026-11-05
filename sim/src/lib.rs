@@ -116,6 +116,8 @@ mod vic11_tests;
 mod formation_tests;
 #[cfg(test)]
 mod teams_tests;
+#[cfg(test)]
+mod victory_teams_tests;
 mod water_w1_tests;
 
 #[cfg(target_arch = "wasm32")]
@@ -988,6 +990,21 @@ pub struct VictorySettings {
     /// "Standard" flag exists — each Standard condition is its
     /// own opt-in, the VIC-03 precedent.
     pub wonder_victory: bool,
+    /// VIC-12 (Teams T2): Allied Victory — with this opt-in on,
+    /// every win/lose predicate in `match_state` lifts from the
+    /// player to the player's team (TEAMS-SPEC §4): conquest,
+    /// mode-out and resignation fold to team elimination, the
+    /// relic and Wonder censuses pool the team's stores/Wonders
+    /// (their countdown holders re-key to the team), score
+    /// endings compare team means (VIC-04), and the King of the
+    /// Hill outcome reads the winner's team. The checkbox is
+    /// independent of the team assignment itself (DE, wiki,
+    /// Diplomacy: the "Allied Victory" box is separate from being
+    /// allied) — with it off, or with distinct teams (every team
+    /// a singleton), every predicate is the per-player one,
+    /// literally the same code folded over one member. Opt-in
+    /// like every Standard condition: off in plain Conquest.
+    pub allied_victory: bool,
 }
 
 impl VictorySettings {
@@ -1028,11 +1045,15 @@ impl VictorySettings {
     /// The mode booleans as hash bits (bit 0 regicide, bit 1
     /// sudden death, bit 2 relic victory, bit 3 death match,
     /// bit 4 empire wars, bit 5 king of the hill, bit 6 wonder
-    /// victory) — the same packing the WASM ABI uses. Bits 0/1
-    /// keep their Package C meanings and bit 2 VIC-03's;
-    /// Package I's builder tree packed its modes at bits 2/3/4,
-    /// shifted to 3/4/5 at this landing because bit 2 was taken;
-    /// VIC-02 takes the next free bit, 6.
+    /// victory, bit 7 allied victory) — the same packing the
+    /// WASM ABI uses. Bits 0/1 keep their Package C meanings and
+    /// bit 2 VIC-03's; Package I's builder tree packed its modes
+    /// at bits 2/3/4, shifted to 3/4/5 at this landing because
+    /// bit 2 was taken; VIC-02 takes bit 6 and Teams T2 (VIC-12)
+    /// the last free bit, 7 — the flags byte the conditional
+    /// hash block already writes carries it, so allied victory
+    /// needs no new hash bytes (off = today's block; on = the
+    /// block with a different flags byte).
     fn flags(&self) -> u8 {
         (self.regicide as u8)
             | ((self.sudden_death as u8) << 1)
@@ -1041,6 +1062,7 @@ impl VictorySettings {
             | ((self.empire_wars as u8) << 4)
             | ((self.king_of_the_hill as u8) << 5)
             | ((self.wonder_victory as u8) << 6)
+            | ((self.allied_victory as u8) << 7)
     }
 }
 
@@ -1344,9 +1366,16 @@ pub struct Sim {
     /// unless the match was opened with other settings. Set at
     /// construction alongside `victory`; never changes.
     teams: TeamSettings,
-    /// VIC-03's countdown state: the player currently holding
+    /// VIC-03's countdown state: the holder currently holding
     /// *all* of the map's relics garrisoned in their Monasteries
-    /// and how many consecutive ticks that hold has lasted.
+    /// and how many consecutive ticks that hold has lasted. The
+    /// byte's meaning follows the settings (Teams T2, VIC-12):
+    /// while allied victory is off it is the holding player's
+    /// owner tag; while it is on it is the holding *scope's key*
+    /// — the team's id for a teamed scope, the owner tag for a
+    /// `NO_TEAM` singleton scope (0xFF cannot distinguish two
+    /// unaffiliated holders, so the singleton keys by its seat;
+    /// see `scope_key`).
     /// Maintained by `relic_victory_tick` only while the
     /// `relic_victory` setting is on (and only in a match —
     /// Sandbox never counts down); any tick the hold does not
@@ -1357,9 +1386,12 @@ pub struct Sim {
     /// byte-identical.
     relic_holder: Option<u8>,
     relic_hold_ticks: u64,
-    /// VIC-02's countdown state: the player with a completed
+    /// VIC-02's countdown state: the holder with a completed
     /// Wonder standing and how many consecutive ticks that has
-    /// lasted. The exact mirror of the relic pair above:
+    /// lasted. The byte's meaning follows the settings exactly
+    /// as the relic pair's does (owner tag while allied victory
+    /// is off, scope key while it is on — Teams T2, VIC-12).
+    /// The exact mirror of the relic pair above:
     /// maintained by `wonder_victory_tick` only while the
     /// `wonder_victory` setting is on (and only in a match);
     /// any tick without a standing completed Wonder resets both
@@ -3240,6 +3272,42 @@ impl Sim {
         }
     }
 
+    /// VIC-04's team surface (Teams T2, VIC-12): the score of
+    /// one team — the arithmetic mean of its members' scores
+    /// (wiki, Score: "Each team has a shared team score, which
+    /// is the arithmetic mean of the individual scores"). Each
+    /// category is the floored mean of the members' categories
+    /// and `total` is the floored mean of the members' totals —
+    /// the total VIC-05's pooled endings compare, per the plan's
+    /// reading that only the total is compared. A singleton
+    /// team's mean is its member's score, cell for cell; a team
+    /// with no members here (an id no seat carries, or
+    /// `NO_TEAM` — unaffiliated seats share no team score)
+    /// reads the zero score. The per-player breakdown surface
+    /// (`score_for`) is untouched: this is a derived read.
+    pub fn team_score_for(&self, team: u8) -> Score {
+        if team == NO_TEAM {
+            return Score::default();
+        }
+        let members: Vec<Score> = [entity::OWNER_PLAYER, entity::OWNER_OPPONENT]
+            .into_iter()
+            .filter(|&o| self.team_of(o) == Some(team))
+            .map(|o| self.score_for(o))
+            .collect();
+        if members.is_empty() {
+            return Score::default();
+        }
+        let n = members.len() as i64;
+        let mean = |f: fn(&Score) -> i64| members.iter().map(|m| f(m)).sum::<i64>() / n;
+        Score {
+            military: mean(|m| m.military),
+            economy: mean(|m| m.economy),
+            technology: mean(|m| m.technology),
+            society: mean(|m| m.society),
+            total: mean(|m| m.total),
+        }
+    }
+
     /// What kind of game this is (M5).
     pub fn mode(&self) -> MatchMode {
         self.mode
@@ -3830,6 +3898,121 @@ impl Sim {
         }
     }
 
+    /// Whether `member` stands in `owner`'s victory scope
+    /// (Teams T2, VIC-12): the seat itself, or a distinct seat
+    /// allied with it (`allied` — same team, never `NO_TEAM`).
+    /// A `NO_TEAM` seat's scope is itself alone, so two
+    /// unaffiliated seats never pool.
+    fn scope_contains(&self, owner: u8, member: u8) -> bool {
+        member == owner || self.allied(owner, member)
+    }
+
+    /// The key a victory scope is tracked under (Teams T2,
+    /// VIC-12): the team's id for a teamed scope; for a
+    /// `NO_TEAM` singleton scope, the seat's owner tag — 0xFF
+    /// is every unaffiliated seat's team byte and cannot
+    /// distinguish two singleton holders, so the singleton
+    /// keys by its seat. Countdown holders store this key
+    /// while allied victory is on (see the holder fields).
+    fn scope_key(&self, owner: u8) -> u8 {
+        match self.team_of(owner) {
+            Some(t) if t != NO_TEAM => t,
+            _ => owner,
+        }
+    }
+
+    /// Whether one seat is out of the match (Teams T2, VIC-12):
+    /// the three existing per-player outs, unchanged — VIC-01
+    /// elimination, a VIC-06/07 mode event, VIC-11 resignation —
+    /// plus, for the opponent seat, AI resignation (AI-05),
+    /// which stays a per-seat event feeding the fold as that
+    /// seat's out.
+    fn player_out(&self, owner: u8) -> bool {
+        self.eliminated(owner)
+            || self.mode_out(owner)
+            || self.is_resigned(owner)
+            || (owner == entity::OWNER_OPPONENT && self.ai_resigned())
+    }
+
+    /// Whether `owner`'s whole victory scope is out (Teams T2,
+    /// VIC-12): every member out by any combination of the
+    /// per-player outs (one eliminated, one resigned still
+    /// ends the team). The pooled form of VIC-01's predicate.
+    fn scope_out(&self, owner: u8) -> bool {
+        [entity::OWNER_PLAYER, entity::OWNER_OPPONENT]
+            .into_iter()
+            .filter(|&m| self.scope_contains(owner, m))
+            .all(|m| self.player_out(m))
+    }
+
+    /// Whether every seat outside `owner`'s scope is out, and
+    /// at least one such seat exists (Teams T2, VIC-12): the
+    /// pooled "one team remaining" win. In an all-allied match
+    /// (both seats one team) there is no opposing seat, so this
+    /// never fires — the match can then only be lost, by the
+    /// team's own elimination, exactly the staged shape the
+    /// T2 tests pin.
+    fn opposing_scopes_out(&self, owner: u8) -> bool {
+        let mut any = false;
+        for m in [entity::OWNER_PLAYER, entity::OWNER_OPPONENT] {
+            if !self.scope_contains(owner, m) {
+                any = true;
+                if !self.scope_out(m) {
+                    return false;
+                }
+            }
+        }
+        any
+    }
+
+    /// The pooled outcome read (Teams T2, VIC-12): `match_state`
+    /// under allied victory. Seat 0's *team* is checked first —
+    /// the both-fall precedence survives pooling (the team's
+    /// defeat beats every other ending, AI resignation folded
+    /// in as the foe seat's out, never ahead of it) — then the
+    /// King of the Hill winner's team, then team elimination,
+    /// then the pooled relic / Wonder / score endings, whose
+    /// own reads branch on the same setting. With distinct
+    /// teams every scope is a singleton and each step is
+    /// today's per-player step verbatim.
+    fn match_state_pooled(&self) -> MatchState {
+        if self.scope_out(entity::OWNER_PLAYER) {
+            return MatchState::Defeat;
+        }
+        if let Some(winner) = self.koth_winner {
+            return if self.scope_contains(entity::OWNER_PLAYER, winner) {
+                MatchState::Victory
+            } else {
+                MatchState::Defeat
+            };
+        }
+        if self.opposing_scopes_out(entity::OWNER_PLAYER) {
+            return MatchState::Victory;
+        }
+        if let Some(human_won) = self.relic_outcome() {
+            return if human_won {
+                MatchState::Victory
+            } else {
+                MatchState::Defeat
+            };
+        }
+        if let Some(human_won) = self.wonder_outcome() {
+            return if human_won {
+                MatchState::Victory
+            } else {
+                MatchState::Defeat
+            };
+        }
+        if let Some(human_won) = self.score_outcome() {
+            return if human_won {
+                MatchState::Victory
+            } else {
+                MatchState::Defeat
+            };
+        }
+        MatchState::Ongoing
+    }
+
     /// The match outcome from the human's seat (VIC-01): in a
     /// match, a player with no living population units and no
     /// building capable of producing units (Town Center or a
@@ -3859,6 +4042,9 @@ impl Sim {
     pub fn match_state(&self) -> MatchState {
         if !self.mode.is_match() {
             return MatchState::Ongoing;
+        }
+        if self.victory.allied_victory {
+            return self.match_state_pooled();
         }
         if self.eliminated(entity::OWNER_PLAYER)
             || self.mode_out(entity::OWNER_PLAYER)
@@ -4043,8 +4229,66 @@ impl Sim {
         if target <= 0 && limit == 0 {
             return None;
         }
+        if self.victory.allied_victory {
+            return self.score_outcome_pooled(target, limit);
+        }
         let human = self.score_for(entity::OWNER_PLAYER).total;
         let foe = self.score_for(entity::OWNER_OPPONENT).total;
+        if human == foe {
+            return None;
+        }
+        if target > 0 && (human >= target || foe >= target) {
+            return Some(human > foe);
+        }
+        if limit > 0 && self.tick >= limit {
+            return Some(human > foe);
+        }
+        None
+    }
+
+    /// VIC-05's pooled endings (Teams T2, VIC-12): the same
+    /// two readings as the per-player form, over team means —
+    /// the human scope's mean total against the best opposing
+    /// scope's mean total (with two seats there is at most one
+    /// opposing scope; its mean is `team_score_for`'s total by
+    /// construction). The target is reached by a *team mean*
+    /// (wiki, Victory: score-target goes to "the player or
+    /// team that reaches the designated score", the team score
+    /// being VIC-04's mean); an exact tie still has no winner
+    /// and plays on. An all-allied match has no opposing scope:
+    /// the sole team wins by reaching the target or by standing
+    /// (trivially highest) at expiry, as its pooled relic and
+    /// Wonder holds already win.
+    fn score_outcome_pooled(&self, target: i64, limit: u64) -> Option<bool> {
+        let mean_total = |owner: u8| -> i64 {
+            let members: Vec<i64> = [entity::OWNER_PLAYER, entity::OWNER_OPPONENT]
+                .into_iter()
+                .filter(|&m| self.scope_contains(owner, m))
+                .map(|m| self.score_for(m).total)
+                .collect();
+            members.iter().sum::<i64>() / members.len() as i64
+        };
+        let human = mean_total(entity::OWNER_PLAYER);
+        let mut foe: Option<i64> = None;
+        for m in [entity::OWNER_PLAYER, entity::OWNER_OPPONENT] {
+            if !self.scope_contains(entity::OWNER_PLAYER, m) {
+                let t = mean_total(m);
+                foe = Some(foe.map_or(t, |f: i64| f.max(t)));
+            }
+        }
+        let Some(foe) = foe else {
+            // No opposing scope (all-allied match): the sole
+            // team is the highest score there is — it wins by
+            // reaching the target, or at the clock's expiry,
+            // the same way its pooled relic/Wonder holds win.
+            if target > 0 && human >= target {
+                return Some(true);
+            }
+            if limit > 0 && self.tick >= limit {
+                return Some(true);
+            }
+            return None;
+        };
         if human == foe {
             return None;
         }
@@ -4091,22 +4335,69 @@ impl Sim {
         None
     }
 
+    /// VIC-03's pooled hold read (Teams T2, VIC-12): the key of
+    /// the scope whose Monastery stores *together* hold every
+    /// live relic, if any — the per-player census summed over
+    /// each scope's members (TEAMS-SPEC §4: a team holds all
+    /// relics when its members' stores together hold every
+    /// live relic). Scopes are scanned human-first, like the
+    /// per-player read, so the result is deterministic; split
+    /// stores across *opposing* scopes never qualify.
+    fn relic_scope_holder(&self) -> Option<u8> {
+        let total = self
+            .entities
+            .iter()
+            .filter(|e| e.kind == EntityKind::Relic && !e.dead)
+            .count() as u32;
+        if total == 0 {
+            return None;
+        }
+        let mut seen: Vec<u8> = Vec::new();
+        for owner in [entity::OWNER_PLAYER, entity::OWNER_OPPONENT] {
+            let key = self.scope_key(owner);
+            if seen.contains(&key) {
+                continue;
+            }
+            seen.push(key);
+            let held: u32 = [entity::OWNER_PLAYER, entity::OWNER_OPPONENT]
+                .into_iter()
+                .filter(|&m| self.scope_contains(owner, m))
+                .flat_map(|m| {
+                    self.buildings
+                        .iter()
+                        .filter(move |b| b.owner == m && b.kind == BuildingKind::Monastery)
+                })
+                .map(|b| b.relics.len() as u32)
+                .sum();
+            if held == total {
+                return Some(key);
+            }
+        }
+        None
+    }
+
     /// VIC-03's per-tick countdown maintenance (tick step 4.8):
     /// while the setting is on and a match runs, the standing
     /// all-relics hold accrues one tick; a new holder starts at
     /// one; any tick without a hold — setting off, Sandbox, a
     /// relic retrieved, dropped by a razed Monastery, or still on
     /// the ground — resets the countdown outright (DE cancels
-    /// it; it does not pause). Under allied victory a team's
-    /// relics would pool (VIC-12) — no teams exist in this game
-    /// (VIS-08), so the read is per-player only.
+    /// it; it does not pause). Under allied victory (VIC-12,
+    /// Teams T2) the census pools the team's Monastery stores
+    /// and the tracked holder is the scope's key; with it off
+    /// the read is per-player, exactly as shipped.
     fn relic_victory_tick(&mut self) {
         if !self.victory.relic_victory || !self.mode.is_match() {
             self.relic_holder = None;
             self.relic_hold_ticks = 0;
             return;
         }
-        match self.relic_all_holder() {
+        let census = if self.victory.allied_victory {
+            self.relic_scope_holder()
+        } else {
+            self.relic_all_holder()
+        };
+        match census {
             Some(owner) if self.relic_holder == Some(owner) => {
                 self.relic_hold_ticks = self.relic_hold_ticks.saturating_add(1);
             }
@@ -4134,6 +4425,9 @@ impl Sim {
         if self.relic_hold_ticks < RELIC_VICTORY_DURATION_TICKS {
             return None;
         }
+        if self.victory.allied_victory {
+            return Some(holder == self.scope_key(entity::OWNER_PLAYER));
+        }
         Some(holder == entity::OWNER_PLAYER)
     }
 
@@ -4142,7 +4436,10 @@ impl Sim {
     /// victory, while a countdown is running under the relic
     /// setting. `None` whenever no countdown runs (setting off,
     /// no all-relics hold, Sandbox). At expiry the ticks left
-    /// read 0 and `match_state` has decided the match.
+    /// read 0 and `match_state` has decided the match. While
+    /// allied victory is on the holder byte is the holding
+    /// scope's key (the team id — see the holder field), not
+    /// an owner tag.
     pub fn relic_countdown(&self) -> Option<(u8, u64)> {
         if !self.victory.relic_victory || !self.mode.is_match() {
             return None;
@@ -4178,22 +4475,60 @@ impl Sim {
         None
     }
 
+    /// VIC-02's pooled hold read (Teams T2, VIC-12): the key
+    /// of the scope with a completed Wonder standing, if any —
+    /// *any member's* completed Wonder holds for the team
+    /// (TEAMS-SPEC §4; the Diplomacy article's allied-victory
+    /// example is exactly a Wonder countdown shared with an
+    /// ally). Scopes are scanned human-first, like the
+    /// per-player read, so simultaneous opposing-team Wonders
+    /// keep the shipped single-pair limitation (human side
+    /// tracked first) — pooling does not lift it.
+    fn wonder_scope_holder(&self) -> Option<u8> {
+        let mut seen: Vec<u8> = Vec::new();
+        for owner in [entity::OWNER_PLAYER, entity::OWNER_OPPONENT] {
+            let key = self.scope_key(owner);
+            if seen.contains(&key) {
+                continue;
+            }
+            seen.push(key);
+            let holds = [entity::OWNER_PLAYER, entity::OWNER_OPPONENT]
+                .into_iter()
+                .filter(|&m| self.scope_contains(owner, m))
+                .any(|m| {
+                    self.buildings.iter().any(|b| {
+                        b.owner == m && b.kind == BuildingKind::Wonder && b.complete
+                    })
+                });
+            if holds {
+                return Some(key);
+            }
+        }
+        None
+    }
+
     /// VIC-02's per-tick countdown maintenance (tick step 4.9,
     /// right after VIC-03's 4.8): while the setting is on and a
     /// match runs, a standing completed Wonder accrues one tick;
     /// a new holder starts at one; any tick without one —
     /// setting off, Sandbox, the Wonder razed or deleted —
     /// resets the countdown outright (DE cancels it; it does not
-    /// pause). Under allied victory a team's Wonders would pool
-    /// (VIC-12) — no teams exist in this game (VIS-08), so the
-    /// read is per-player only, like VIC-03's.
+    /// pause). Under allied victory (VIC-12, Teams T2) any
+    /// member's completed Wonder holds for the team and the
+    /// tracked holder is the scope's key; with it off the read
+    /// is per-player, exactly as shipped, like VIC-03's.
     fn wonder_victory_tick(&mut self) {
         if !self.victory.wonder_victory || !self.mode.is_match() {
             self.wonder_holder = None;
             self.wonder_hold_ticks = 0;
             return;
         }
-        match self.wonder_holder_owner() {
+        let census = if self.victory.allied_victory {
+            self.wonder_scope_holder()
+        } else {
+            self.wonder_holder_owner()
+        };
+        match census {
             Some(owner) if self.wonder_holder == Some(owner) => {
                 self.wonder_hold_ticks = self.wonder_hold_ticks.saturating_add(1);
             }
@@ -4221,6 +4556,9 @@ impl Sim {
         if self.wonder_hold_ticks < WONDER_VICTORY_DURATION_TICKS {
             return None;
         }
+        if self.victory.allied_victory {
+            return Some(holder == self.scope_key(entity::OWNER_PLAYER));
+        }
         Some(holder == entity::OWNER_PLAYER)
     }
 
@@ -4230,6 +4568,9 @@ impl Sim {
     /// setting. `None` whenever no countdown runs (setting off,
     /// no completed Wonder standing, Sandbox). At expiry the
     /// ticks left read 0 and `match_state` has decided the match.
+    /// While allied victory is on the holder byte is the
+    /// holding scope's key (the team id — see the holder
+    /// field), not an owner tag.
     pub fn wonder_countdown(&self) -> Option<(u8, u64)> {
         if !self.victory.wonder_victory || !self.mode.is_match() {
             return None;
