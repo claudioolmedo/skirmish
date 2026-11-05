@@ -489,6 +489,19 @@ export class WasmSim {
      */
     push_build_castle_queued(entity: number, x: number, y: number): boolean;
     /**
+     * Order a villager to build a Dock (150 wood, 3×3; Dark Age,
+     * no prerequisite building — Water W1, BLD-14): the point
+     * names the footprint's anchor cell, and the sim accepts
+     * only a shoreline straddle (the grid's Dock predicate) —
+     * see `push_build_house`.
+     */
+    push_build_dock(entity: number, x: number, y: number): boolean;
+    /**
+     * Queue a Dock build (Dark Age — Water W1, BLD-14) — see
+     * `push_build_house_queued`.
+     */
+    push_build_dock_queued(entity: number, x: number, y: number): boolean;
+    /**
      * Order a villager to build a Farm (60 wood) — see
      * `push_build_house`.
      */
@@ -1462,6 +1475,8 @@ export interface InitOutput {
     readonly wasmsim_push_build_blacksmith_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_castle: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_castle_queued: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_dock: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_dock_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_farm: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_farm_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_house: (a: number, b: number, c: number, d: number) => number;

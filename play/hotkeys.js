@@ -81,7 +81,8 @@
 //       9 Palisade Wall, 10 Watch Tower, 11 Outpost (BLD-18),
 //       12 Market (BLD-19), 14 Stone Wall (BLD-20), 15 Castle
 //       (Castle P3a), 16 University (Castle P3c), 17 Siege
-//       Workshop (Castle P4a), 18 Monastery (Castle P5a; the
+//       Workshop (Castle P4a), 20 Monastery (Castle P5a), 22
+//       Wonder (VIC-02), 23 Dock (Water W1, BLD-14; the
 //       tags are the sim's — append only).
 // PAGE_KINDS is the pages' GRID (render) order: slot 0 first.
 // Kind 13 (Town Center, Castle Age) closes the economic page —
@@ -90,15 +91,17 @@
 // beside it: the military page already fills all nine cells.
 // Kind 22 (the Wonder, VIC-02) then overflows the economic page
 // the way the University overflowed the military one: a fourth
-// row, first cell.
+// row, first cell. Kind 23 (the Dock, Water W1) takes the fourth
+// row's second cell beside it — the Dock is an economic build in
+// DE (the villager menu's first page), and this page is its home.
 export const PAGE_KINDS = {
-  eco: [0, 4, 1, 3, 5, 12, 13, 15, 22],
+  eco: [0, 4, 1, 3, 5, 12, 13, 15, 22, 23],
   mil: [2, 6, 7, 8, 9, 10, 11, 14, 16, 17, 20],
 };
 
 /** Which build page a building kind belongs to ('eco' | 'mil'). */
 export const PAGE_FOR_KIND = {
-  0: 'eco', 1: 'eco', 3: 'eco', 4: 'eco', 5: 'eco', 12: 'eco', 13: 'eco', 15: 'eco', 22: 'eco',
+  0: 'eco', 1: 'eco', 3: 'eco', 4: 'eco', 5: 'eco', 12: 'eco', 13: 'eco', 15: 'eco', 22: 'eco', 23: 'eco',
   2: 'mil', 6: 'mil', 7: 'mil', 8: 'mil', 9: 'mil', 10: 'mil', 11: 'mil', 14: 'mil', 16: 'mil', 17: 'mil', 20: 'mil',
 };
 
@@ -119,6 +122,7 @@ export const PAGE_KEYS = {
     KeyZ: 13, // Town Center — slot 6 (Castle Age; Z is DE's own TC build letter — the wiki's DE build table — and slot 6 IS the Z cell. The old T "initial" badge and the Lumber Camp's silent Z alias (its go-to letter) both died here: the cell's letter rules.)
     KeyX: 15, // Castle — slot 7 (Castle P3a; the page's last free cell — the Military page is full at 8 kinds + Back, so the Castle closes the Economic page beside the Town Center, the other Castle-Age build)
     KeyV: 22, // Wonder — slot 8 (VIC-02; the page's nine kinds overflow the 3×3, so the Wonder opens a fourth row under the House — V, the free letter under the page's first column, on the University's mil-page precedent. Its home is this page: the other statement building, the Castle, landed here too.)
+    KeyN: 23, // Dock — slot 9 (Water W1; the fourth row's second cell, under the Mill. The fourth row's cells are lettered V N M on both pages — B names no grid cell (its only life is the Barracks' silent alias on the mil page), so the Dock takes N, the Siege Workshop's letter on the other page.)
     KeyC: 'back', // Back — the last slot
   },
   mil: {
@@ -139,7 +143,7 @@ export const PAGE_KEYS = {
 
 /** The one letter shown as a button's key badge on an armed page. */
 export const PAGE_BADGE = {
-  eco: { 0: 'Q', 4: 'W', 1: 'E', 3: 'A', 5: 'S', 12: 'D', 13: 'Z', 15: 'X', 22: 'V' },
+  eco: { 0: 'Q', 4: 'W', 1: 'E', 3: 'A', 5: 'S', 12: 'D', 13: 'Z', 15: 'X', 22: 'V', 23: 'N' },
   mil: { 2: 'Q', 6: 'W', 7: 'E', 8: 'A', 9: 'S', 10: 'D', 11: 'Z', 14: 'X', 16: 'V', 17: 'N', 20: 'M' },
 };
 
@@ -486,7 +490,8 @@ export const GRID_CELLS = {
   // PAGE_KEYS.mil) — the University's V opened it; Castle P4a's
   // Siege Workshop takes its second cell (N); Castle P5a's
   // Monastery completes the row (M). VIC-02: the Wonder's V
-  // opens the same row on the economic page; the renderer adds
+  // opens the same row on the economic page; Water W1's Dock
+  // takes its second cell (N) there; the renderer adds
   // the fourth row for either build page.
   V: [4, 1],
   N: [4, 2],

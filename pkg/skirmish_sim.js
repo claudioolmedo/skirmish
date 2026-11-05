@@ -950,6 +950,33 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Order a villager to build a Dock (150 wood, 3×3; Dark Age,
+     * no prerequisite building — Water W1, BLD-14): the point
+     * names the footprint's anchor cell, and the sim accepts
+     * only a shoreline straddle (the grid's Dock predicate) —
+     * see `push_build_house`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_dock(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_dock(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Queue a Dock build (Dark Age — Water W1, BLD-14) — see
+     * `push_build_house_queued`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_dock_queued(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_dock_queued(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
      * Order a villager to build a Farm (60 wood) — see
      * `push_build_house`.
      * @param {number} entity
