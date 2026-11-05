@@ -9,7 +9,9 @@
 //! gone. The grid is now the rulebook's 2-player map size — Tiny,
 //! 120×120 tiles (MAP-02) — at the sim's long-standing scale of one
 //! cell = one tile = 4 world units, and its contents are *generated*
-//! per match by `mapgen`: a terrain layer (land/water, MAP-03/08), a
+//! per match by `mapgen`: a terrain layer (land/deep water, plus
+//! the shallows tag and the two movement domains of the W1 grid
+//! half — MAP-03/08, MOV-11), a
 //! per-cell height layer (MAP-05), and a node-block layer for live
 //! trees (MAP-04: a tree is its cell's block until depleted). The
 //! dynamic building layer from M2.5 stays as it was. A bare `Grid::new`
@@ -34,9 +36,31 @@ pub const GRID_DIM: u32 = 120;
 
 /// Terrain tag: ordinary land — every land unit may stand here.
 pub const TERRAIN_LAND: u8 = 0;
-/// Terrain tag: water — impassable to land units (MAP-08: no wading;
-/// ships do not exist yet, so water is a pure obstacle in M7).
+/// Terrain tag: deep water — impassable to land units, passable to
+/// ships (MAP-08).
 pub const TERRAIN_WATER: u8 = 1;
+/// Terrain tag: shallows — the amphibious terrain (W1 grid half):
+/// passable to BOTH land units and ships. Pinned at Passo 0 from
+/// WATER-SPEC §1: the AoE2 manual's Terrain list ("Shallows —
+/// Water passable by land units and ships"), the wiki Ship article
+/// lead (ships "can also pass shallow water and beach terrain"),
+/// and the amphibious map articles (Bog Islands / Rivers / Salt
+/// Marsh: shallows "traversed by both domains"). This supersedes
+/// MAP-08's study-era "no wading" parenthetical; the rulebook
+/// text amendment rides the complete-W1 commit, not this one.
+pub const TERRAIN_SHALLOWS: u8 = 2;
+
+/// The movement domain a path query runs for (W1 grid half). The
+/// domain is a *parameter* of the passability/A* functions, never
+/// a fork of them: one grid, one A*, two passability readings.
+/// Land is the domain every pre-water caller means; Water is the
+/// ships' domain (no ship kinds exist yet — W2 adds the first
+/// consumer; the grid half ships the domain itself plus tests).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Domain {
+    Land,
+    Water,
+}
 /// Highest elevation level the generator produces (MAP-05: the
 /// reference's per-tile height byte has 7 levels; Skirmish's Arabia
 /// hills use 0..=4 — see `mapgen`).
@@ -65,8 +89,9 @@ fn cell_count() -> usize {
 /// of cells blocked by placed buildings (M2.5).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Grid {
-    /// Per-cell terrain tag (`TERRAIN_LAND` / `TERRAIN_WATER`),
-    /// row-major. Set once by the generator; never changes in play.
+    /// Per-cell terrain tag (`TERRAIN_LAND` / `TERRAIN_WATER` /
+    /// `TERRAIN_SHALLOWS`), row-major. Set once by the generator;
+    /// never changes in play.
     terrain: Vec<u8>,
     /// Per-cell elevation level, 0..=`MAX_HEIGHT`, row-major.
     /// MAP-06's combat factor reads it; gentle elevation never
@@ -107,23 +132,63 @@ impl Grid {
     }
 
     /// Out-of-bounds counts as blocked: the world edge is a wall
-    /// (MAP-11). A cell is blocked when it is water, holds a live
-    /// tree, or a placed building occupies it.
-    pub fn is_blocked(&self, x: u32, y: u32) -> bool {
+    /// (MAP-11). Passability is domain-relative (W1 grid half):
+    ///
+    /// - `Land`: blocked by deep water, a live tree (node block),
+    ///   or a placed building (dynamic). Shallows are passable —
+    ///   land units wade (WATER-SPEC §1).
+    /// - `Water`: blocked by land or a placed building (a Dock
+    ///   footprint blocks its water cells — ships do not sail
+    ///   through Docks). The node-block layer never blocks water:
+    ///   trees never stand on water, and fish nodes are economy
+    ///   state, not grid blocks. Shallows and deep water are both
+    ///   passable.
+    pub fn is_blocked_for(&self, domain: Domain, x: u32, y: u32) -> bool {
         if x >= GRID_DIM || y >= GRID_DIM {
             return true;
         }
         let i = Self::idx(x, y);
-        self.terrain[i] == TERRAIN_WATER || self.node_block[i] != 0 || self.dynamic[i] != 0
+        match domain {
+            Domain::Land => {
+                self.terrain[i] == TERRAIN_WATER || self.node_block[i] != 0 || self.dynamic[i] != 0
+            }
+            Domain::Water => self.terrain[i] == TERRAIN_LAND || self.dynamic[i] != 0,
+        }
     }
 
-    /// Whether the terrain itself blocks this cell (water). Out of
-    /// bounds counts as terrain-blocked (the edge is a wall).
+    /// Whether a cell is blocked for a land unit — the pre-water
+    /// reading every existing caller means. Exactly
+    /// `is_blocked_for(Domain::Land, …)`.
+    pub fn is_blocked(&self, x: u32, y: u32) -> bool {
+        self.is_blocked_for(Domain::Land, x, y)
+    }
+
+    /// Whether the cell is deep water. Out of bounds counts as
+    /// deep water (the edge is a wall). Shallows are NOT deep
+    /// water: `is_water` stays the deep-water test the land
+    /// flood, the corner rule and map validation already mean.
     pub fn is_water(&self, x: u32, y: u32) -> bool {
         if x >= GRID_DIM || y >= GRID_DIM {
             return true;
         }
         self.terrain[Self::idx(x, y)] == TERRAIN_WATER
+    }
+
+    /// Whether the cell is shallows — the amphibious tag both
+    /// domains enter. Out of bounds is never shallows.
+    pub fn is_shallows(&self, x: u32, y: u32) -> bool {
+        if x >= GRID_DIM || y >= GRID_DIM {
+            return false;
+        }
+        self.terrain[Self::idx(x, y)] == TERRAIN_SHALLOWS
+    }
+
+    /// Whether the cell is on the water side of a shoreline:
+    /// deep water or shallows. The Dock placement predicate and
+    /// the shoreline helpers of the complete W1 read this; the
+    /// grid half ships the predicate, not the Dock.
+    pub fn is_water_side(&self, x: u32, y: u32) -> bool {
+        self.is_water(x, y) || self.is_shallows(x, y)
     }
 
     /// The terrain tag of a cell (out of bounds reads as water —
@@ -143,7 +208,20 @@ impl Grid {
     /// of dropping the order (the reference game's behavior: a
     /// click on a tree or a building walks the unit up to it).
     pub fn nearest_free_cell(&self, x: u32, y: u32, max_ring: u32) -> Option<(u32, u32)> {
-        if !self.is_blocked(x, y) {
+        self.nearest_free_cell_for(Domain::Land, x, y, max_ring)
+    }
+
+    /// `nearest_free_cell` for an explicit domain (W1 grid half):
+    /// "free" reads through `is_blocked_for`, so a water-domain
+    /// search lands on water-side cells, a land search on land.
+    pub fn nearest_free_cell_for(
+        &self,
+        domain: Domain,
+        x: u32,
+        y: u32,
+        max_ring: u32,
+    ) -> Option<(u32, u32)> {
+        if !self.is_blocked_for(domain, x, y) {
             return Some((x, y));
         }
         for r in 1..=max_ring as i32 {
@@ -156,7 +234,7 @@ impl Grid {
                     if nx < 0 || ny < 0 {
                         continue;
                     }
-                    if !self.is_blocked(nx as u32, ny as u32) {
+                    if !self.is_blocked_for(domain, nx as u32, ny as u32) {
                         return Some((nx as u32, ny as u32));
                     }
                 }
@@ -349,10 +427,12 @@ impl Grid {
         &self.dynamic
     }
 
-    /// Statically impassable cells as row-major bytes (0/1): water
-    /// or a live tree. This is the WASM `obstacles()` view the client
-    /// mirrors for its placement ghost — terrain truth, without the
-    /// building layer (the client reads buildings separately).
+    /// Statically impassable cells as row-major bytes (0/1): deep
+    /// water or a live tree — the LAND domain's static view.
+    /// Shallows are land-passable, so they are not obstacles here.
+    /// This is the WASM `obstacles()` view the client mirrors for
+    /// its placement ghost — terrain truth, without the building
+    /// layer (the client reads buildings separately).
     pub fn blocked_bytes(&self) -> Vec<u8> {
         (0..cell_count())
             .map(|i| {
@@ -374,6 +454,17 @@ impl Grid {
         self.find_path_through(from, to, &[])
     }
 
+    /// A* from one world point to another for an explicit domain
+    /// (W1 grid half). `find_path` is this with `Domain::Land`.
+    pub fn find_path_for(
+        &self,
+        domain: Domain,
+        from: (I16F16, I16F16),
+        to: (I16F16, I16F16),
+    ) -> Option<Vec<(I16F16, I16F16)>> {
+        self.find_path_through_for(domain, from, to, &[])
+    }
+
     /// A* from one world point to another, treating the cells of
     /// `passable` as unblocked wherever the grid's layers say
     /// blocked (Package J, BLD-13: the querying unit's OWN gate
@@ -390,12 +481,28 @@ impl Grid {
         to: (I16F16, I16F16),
         passable: &[(u32, u32)],
     ) -> Option<Vec<(I16F16, I16F16)>> {
+        self.find_path_through_for(Domain::Land, from, to, passable)
+    }
+
+    /// `find_path_through` for an explicit domain (W1 grid half).
+    /// The `passable` gate exemption is a land-domain mechanism
+    /// (Package J): on the water domain it is ignored — ships own
+    /// no gates, and a water A* must not inherit land's gate-free
+    /// cell logic.
+    pub fn find_path_through_for(
+        &self,
+        domain: Domain,
+        from: (I16F16, I16F16),
+        to: (I16F16, I16F16),
+        passable: &[(u32, u32)],
+    ) -> Option<Vec<(I16F16, I16F16)>> {
         let start = self.world_to_cell(from.0, from.1);
         let goal = self.world_to_cell(to.0, to.1);
-        if self.is_blocked(goal.0, goal.1) && !passable.contains(&goal) {
+        let goal_exempt = domain == Domain::Land && passable.contains(&goal);
+        if self.is_blocked_for(domain, goal.0, goal.1) && !goal_exempt {
             return None;
         }
-        let cells = self.astar_cells(start, goal, passable)?;
+        let cells = self.astar_cells(domain, start, goal, passable)?;
         let mut waypoints: Vec<(I16F16, I16F16)> = cells
             .iter()
             .skip(1)
@@ -409,9 +516,15 @@ impl Grid {
     /// A* over cell indices. Returns the cell trail from start to goal.
     /// `passable` cells (Package J: the querier's own gates) count
     /// as unblocked for the building layer only — see
-    /// `find_path_through`.
+    /// `find_path_through`. The domain selects the passability
+    /// reading (`is_blocked_for`); the land-only special cases
+    /// inside (gate exemption, cliff seal, corner rule) are gated
+    /// on `Domain::Land` explicitly, so a water A* inherits none
+    /// of them — its corner rule is the mirror image (land or a
+    /// building on either orthogonal neighbor bars the diagonal).
     fn astar_cells(
         &self,
+        domain: Domain,
         start: (u32, u32),
         goal: (u32, u32),
         passable: &[(u32, u32)],
@@ -510,17 +623,21 @@ impl Grid {
                 // Package J: the querier's own gate cells are
                 // passable to it (they lift their building block
                 // for the owner's approach) — every other layer
-                // still applies to them.
-                let gate_free = passable.contains(&(nx, ny))
+                // still applies to them. Land domain only (W1):
+                // ships own no gates.
+                let gate_free = domain == Domain::Land
+                    && passable.contains(&(nx, ny))
                     && !self.is_water(nx, ny)
                     && !self.is_node_blocked(nx, ny);
-                if self.is_blocked(nx, ny) && !gate_free {
+                if self.is_blocked_for(domain, nx, ny) && !gate_free {
                     continue;
                 }
                 // MAP-07: a cliff border is impassable — the step
                 // may not cross one, diagonally included (the
-                // corner rule inside `move_crosses_cliff`).
-                if self.move_crosses_cliff((cx, cy), (nx, ny)) {
+                // corner rule inside `move_crosses_cliff`). Land
+                // domain only (W1): elevation is a land layer;
+                // water movement never reads it.
+                if domain == Domain::Land && self.move_crosses_cliff((cx, cy), (nx, ny)) {
                     continue;
                 }
                 // Corner cutting: a diagonal step is barred by a
@@ -536,9 +653,21 @@ impl Grid {
                 // Package J: the querier's own gate cell is not a
                 // hard corner for it either (same exemption).
                 if dx != 0 && dy != 0 {
-                    let hard = |x: u32, y: u32| {
-                        (self.is_water(x, y) || self.is_dynamic(x, y))
-                            && !passable.contains(&(x, y))
+                    // The corner rule is domain-mirrored (W1): for
+                    // land a HARD corner is deep water or a building;
+                    // for water it is land or a building. Shallows
+                    // are never a hard corner (both domains enter
+                    // them), and a tree never is one on either
+                    // domain (land: the M7 trunk rule above; water:
+                    // the node layer does not exist there).
+                    let hard = |x: u32, y: u32| match domain {
+                        Domain::Land => {
+                            (self.is_water(x, y) || self.is_dynamic(x, y))
+                                && !passable.contains(&(x, y))
+                        }
+                        Domain::Water => {
+                            self.terrain_at(x, y) == TERRAIN_LAND || self.is_dynamic(x, y)
+                        }
                     };
                     if hard((cx as i32 + dx) as u32, cy) || hard(cx, (cy as i32 + dy) as u32) {
                         continue;
@@ -732,5 +861,224 @@ mod tests {
         // A segment inside one cell never crosses.
         let c = g.cell_center(60, 45);
         assert!(!g.segment_crosses_cliff(c, c));
+    }
+
+    // ---- W1 grid half: domains + shallows (MOV-11) ----
+
+    #[test]
+    fn domain_blocked_matrix_covers_shallows() {
+        let mut g = Grid::new();
+        // One probe cell per case, all on row 60.
+        g.set_terrain(10, 60, TERRAIN_WATER); // deep water
+        g.set_terrain(11, 60, TERRAIN_SHALLOWS); // shallows
+        // (12,60) stays plain land.
+        g.set_terrain(13, 60, TERRAIN_WATER);
+        g.set_node_block(13, 60, true); // node flag on a water cell
+        g.set_terrain(14, 60, TERRAIN_SHALLOWS);
+        g.set_dynamic(14, 60, true); // building (Dock proxy) on shallows
+        g.set_node_block(15, 60, true); // tree on land
+
+        // Land domain: refuses deep water, crosses shallows.
+        assert!(g.is_blocked_for(Domain::Land, 10, 60), "land in deep water");
+        assert!(!g.is_blocked_for(Domain::Land, 11, 60), "land wades shallows");
+        assert!(!g.is_blocked_for(Domain::Land, 12, 60), "land on land");
+        assert!(g.is_blocked_for(Domain::Land, 13, 60), "land: water+node");
+        assert!(g.is_blocked_for(Domain::Land, 14, 60), "land: building blocks");
+        assert!(g.is_blocked_for(Domain::Land, 15, 60), "land: tree blocks");
+        // Water domain: refuses land, crosses shallows and deep water.
+        assert!(!g.is_blocked_for(Domain::Water, 10, 60), "ship in deep water");
+        assert!(!g.is_blocked_for(Domain::Water, 11, 60), "ship in shallows");
+        assert!(g.is_blocked_for(Domain::Water, 12, 60), "ship on land");
+        assert!(
+            !g.is_blocked_for(Domain::Water, 13, 60),
+            "node layer never blocks water (fish are econ state)"
+        );
+        assert!(g.is_blocked_for(Domain::Water, 14, 60), "ship: building blocks");
+        assert!(g.is_blocked_for(Domain::Water, 15, 60), "ship: land blocks");
+        // The legacy reading is exactly the land domain, everywhere.
+        for &(x, y) in &[(10, 60), (11, 60), (12, 60), (13, 60), (14, 60), (15, 60)] {
+            assert_eq!(g.is_blocked(x, y), g.is_blocked_for(Domain::Land, x, y));
+        }
+        // Shallows predicates: shallows are water-side, never deep water.
+        assert!(g.is_shallows(11, 60));
+        assert!(!g.is_water(11, 60));
+        assert!(g.is_water_side(11, 60));
+        assert!(g.is_water_side(10, 60));
+        assert!(!g.is_water_side(12, 60));
+        // Out of bounds walls both domains.
+        assert!(g.is_blocked_for(Domain::Land, 120, 0));
+        assert!(g.is_blocked_for(Domain::Water, 120, 0));
+    }
+
+    #[test]
+    fn land_astar_crosses_shallows_but_not_deep_water() {
+        let mut g = Grid::new();
+        // A deep-water column at x = 60, rows 20..=99, whose only
+        // crossing is a shallows ford at rows 58..=60.
+        for y in 20..=99u32 {
+            g.set_terrain(60, y, TERRAIN_WATER);
+        }
+        for y in 58..=60u32 {
+            g.set_terrain(60, y, TERRAIN_SHALLOWS);
+        }
+        let from = g.cell_center(30, 59);
+        let to = g.cell_center(90, 59);
+        let path = g
+            .find_path_for(Domain::Land, from, to)
+            .expect("land must cross at the shallows ford");
+        let mut crossed_shallows = false;
+        for &(wx, wy) in &path[..path.len() - 1] {
+            let (cx, cy) = g.world_to_cell(wx, wy);
+            assert!(!g.is_water(cx, cy), "land waypoint in deep water");
+            assert!(
+                !g.is_blocked_for(Domain::Land, cx, cy),
+                "land waypoint on a blocked cell"
+            );
+            if g.is_shallows(cx, cy) {
+                crossed_shallows = true;
+            }
+        }
+        assert!(crossed_shallows, "the path must use the ford");
+        // The legacy entry point agrees bit-for-bit on land queries.
+        assert_eq!(g.find_path(from, to), g.find_path_for(Domain::Land, from, to));
+        // Seal the ford and extend the column across the whole
+        // map height: deep water everywhere — no land path at all.
+        for y in 0..GRID_DIM {
+            g.set_terrain(60, y, TERRAIN_WATER);
+        }
+        assert!(g.find_path_for(Domain::Land, from, to).is_none());
+        assert!(g.find_path(from, to).is_none());
+    }
+
+    #[test]
+    fn water_astar_crosses_shallows_and_deep_but_not_land() {
+        let mut g = Grid::new();
+        // Two deep-water pools joined by a shallows channel, in a
+        // land sea: pool A x 30..=40, channel x 41..=43, pool B
+        // x 44..=54, all rows 55..=65.
+        for y in 55..=65u32 {
+            for x in 30..=40u32 {
+                g.set_terrain(x, y, TERRAIN_WATER);
+            }
+            for x in 41..=43u32 {
+                g.set_terrain(x, y, TERRAIN_SHALLOWS);
+            }
+            for x in 44..=54u32 {
+                g.set_terrain(x, y, TERRAIN_WATER);
+            }
+        }
+        let from = g.cell_center(35, 60);
+        let to = g.cell_center(49, 60);
+        let path = g
+            .find_path_for(Domain::Water, from, to)
+            .expect("a ship must sail pool to pool through the shallows");
+        let mut crossed_shallows = false;
+        for &(wx, wy) in &path[..path.len() - 1] {
+            let (cx, cy) = g.world_to_cell(wx, wy);
+            assert!(
+                !g.is_blocked_for(Domain::Water, cx, cy),
+                "ship waypoint on a blocked cell"
+            );
+            assert!(
+                g.terrain_at(cx, cy) != TERRAIN_LAND,
+                "ship waypoint on land"
+            );
+            if g.is_shallows(cx, cy) {
+                crossed_shallows = true;
+            }
+        }
+        assert!(crossed_shallows, "the sailing must use the channel");
+        // A ship ordered onto land finds no path (the goal itself
+        // is land-blocked for the water domain).
+        let ashore = g.cell_center(70, 60);
+        assert!(g.find_path_for(Domain::Water, from, ashore).is_none());
+        // Mirror pin: a land unit ordered into the pool's deep
+        // water finds no path either.
+        let bank = g.cell_center(20, 60);
+        assert!(g.find_path_for(Domain::Land, bank, from).is_none());
+        assert!(g.find_path(bank, from).is_none());
+    }
+
+    #[test]
+    fn water_astar_respects_buildings_corners_and_ignores_land_layers() {
+        // Buildings block water: a dynamic wall across a channel
+        // with a one-cell gap sails through the gap; sealed, none.
+        let mut g = Grid::new();
+        for y in 40..=80u32 {
+            for x in 55..=65u32 {
+                g.set_terrain(x, y, TERRAIN_WATER);
+            }
+        }
+        for y in 40..=80u32 {
+            if y != 60 {
+                g.set_dynamic(60, y, true);
+            }
+        }
+        let west = g.cell_center(57, 60);
+        let east = g.cell_center(63, 60);
+        let path = g
+            .find_path_for(Domain::Water, west, east)
+            .expect("a ship must sail the gap in the building wall");
+        for &(wx, wy) in &path[..path.len() - 1] {
+            let (cx, cy) = g.world_to_cell(wx, wy);
+            assert!(!g.is_dynamic(cx, cy), "ship waypoint inside a building");
+        }
+        g.set_dynamic(60, 60, true);
+        assert!(g.find_path_for(Domain::Water, west, east).is_none());
+
+        // Corner rule on water: a diagonal pinched between two
+        // land cells is refused — with no other water around, the
+        // pinched goal is unreachable.
+        let mut g2 = Grid::new();
+        g2.set_terrain(50, 50, TERRAIN_WATER);
+        g2.set_terrain(51, 51, TERRAIN_WATER);
+        // (51,50) and (50,51) stay land: both orthogonal neighbors.
+        assert!(
+            g2.find_path_for(Domain::Water, g2.cell_center(50, 50), g2.cell_center(51, 51))
+                .is_none(),
+            "a ship must not cut the land corner diagonally"
+        );
+        // Free one orthogonal neighbor to shallows: the diagonal opens.
+        g2.set_terrain(51, 50, TERRAIN_SHALLOWS);
+        assert!(
+            g2.find_path_for(Domain::Water, g2.cell_center(50, 50), g2.cell_center(51, 51))
+                .is_some(),
+            "shallows are not a hard corner for ships"
+        );
+
+        // Cliffs are inert on water: a water column whose heights
+        // step by 4 across the middle (a cliff for land) sails
+        // straight through — elevation is a land layer.
+        let mut g3 = Grid::new();
+        for y in 30..=50u32 {
+            g3.set_terrain(60, y, TERRAIN_WATER);
+            if y <= 40 {
+                g3.set_height(60, y, 4);
+            }
+        }
+        assert!(g3.is_cliff_between(60, 40, 60, 41), "fixture is a cliff");
+        assert!(
+            g3.find_path_for(Domain::Water, g3.cell_center(60, 45), g3.cell_center(60, 35))
+                .is_some(),
+            "a cliff must not seal water movement"
+        );
+        // Node flags are inert on water: a fish-flagged cell (node
+        // block on deep water) is sailed over, not routed around.
+        let mut g4 = Grid::new();
+        for y in 55..=65u32 {
+            for x in 30..=50u32 {
+                g4.set_terrain(x, y, TERRAIN_WATER);
+            }
+        }
+        g4.set_node_block(40, 60, true);
+        let straight = g4
+            .find_path_for(Domain::Water, g4.cell_center(35, 60), g4.cell_center(45, 60))
+            .expect("a ship sails over a fish cell");
+        assert!(
+            straight
+                .iter()
+                .any(|&p| g4.world_to_cell(p.0, p.1) == (40, 60)),
+            "the ship must pass over the node-flagged cell"
+        );
     }
 }

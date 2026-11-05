@@ -147,7 +147,9 @@ pub use formation::{
     assign_column_slots, assign_slots, column_anchor_points, facing_vectors, is_long_move,
     layer_of, FormationKind, FormationMember,
 };
-pub use grid::{Grid, CELL_SIZE, GRID_DIM, TERRAIN_LAND, TERRAIN_WATER, WORLD_HALF};
+pub use grid::{
+    Domain, Grid, CELL_SIZE, GRID_DIM, TERRAIN_LAND, TERRAIN_SHALLOWS, TERRAIN_WATER, WORLD_HALF,
+};
 pub use mapgen::GeneratedMap;
 pub use hash::Fnv1a64;
 pub use rng::Pcg32;
