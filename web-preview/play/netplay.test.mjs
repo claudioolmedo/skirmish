@@ -16,6 +16,7 @@ import {
   createRelayClient, probeRegionPing,
   makeRoomId, buildPlayUrl, parsePlayParams, linkJoinRoom,
   pickFastestRegion, REGIONS,
+  DEFAULT_TEAMS, NO_TEAM, normalizeTeams, teamsIsDefault, packTeams, unpackTeams,
 } from './netplay.js';
 import * as netplay from './netplay.js';
 
@@ -882,6 +883,61 @@ test('recorder: local commands group by tick', () => {
   const r = rec.finish({});
   assert.equal(r.events.length, 2);
   assert.equal(r.events[0].s0.length, 2);
+});
+
+// ------------------------------------------------------- teams meta
+// Teams T1 (VIS-08): the team assignment rides the handshake and
+// the replay header as a [host, guest] pair of team bytes. The
+// validation boundary is normalizeTeams: junk falls back to the
+// distinct-teams default wholesale — never to an accidental ally.
+
+test('teams meta: normalizeTeams keeps valid pairs and defaults junk', () => {
+  assert.deepEqual(DEFAULT_TEAMS, [1, 2]);
+  assert.equal(NO_TEAM, 0xff);
+  assert.deepEqual(normalizeTeams([1, 2]), [1, 2]);
+  assert.deepEqual(normalizeTeams([1, 1]), [1, 1]);
+  assert.deepEqual(normalizeTeams([0xff, 0xff]), [0xff, 0xff]);
+  assert.deepEqual(normalizeTeams([0, 255]), [0, 255]);
+  // Junk of every shape -> the distinct-teams default.
+  for (const junk of [undefined, null, 42, 'ally', {}, [1], [1, 2, 3],
+    [1, 256], [1, -1], [1.5, 2], ['1', 2], [null, 2], [NaN, 2]]) {
+    assert.deepEqual(normalizeTeams(junk), [1, 2], JSON.stringify(junk));
+  }
+  // The result is a copy — mutating it cannot poison the default.
+  const t = normalizeTeams([1, 1]);
+  t[0] = 9;
+  assert.deepEqual(normalizeTeams(undefined), [1, 2]);
+  assert.equal(teamsIsDefault([1, 2]), true);
+  assert.equal(teamsIsDefault(undefined), true);
+  assert.equal(teamsIsDefault([1, 1]), false);
+  assert.equal(teamsIsDefault([2, 1]), false);
+});
+
+test('teams meta: packTeams packs slot bytes for the WASM constructor', () => {
+  // Slot 0 in bits 0-7, slot 1 in bits 8-15 (the wasm.rs scheme).
+  assert.equal(packTeams([1, 2]), 1 | (2 << 8));
+  assert.equal(packTeams([1, 2]), 513);
+  assert.equal(packTeams([1, 1]), 257);
+  assert.equal(packTeams([0xff, 0xff]), 0xffff);
+  assert.equal(packTeams('junk'), 513, 'junk packs as the default pair');
+  // unpackTeams is the exact inverse over the two team bytes.
+  for (const pair of [[1, 2], [1, 1], [0, 0], [0xff, 0xff], [3, 17]]) {
+    assert.deepEqual(unpackTeams(packTeams(pair)), pair);
+  }
+  assert.deepEqual(unpackTeams(-1), [1, 2]);
+  assert.deepEqual(unpackTeams(1.5), [1, 2]);
+});
+
+test('teams meta: a replay carrying teams stays a valid replay', () => {
+  const rec = createRecorder({ seed: 5, modeTag: 3, seats: [0, 2], teams: [1, 1] });
+  const replay = rec.finish({ ticks: 30 });
+  assert.deepEqual(replay.teams, [1, 1], 'the recorder meta carries the pair');
+  assert.equal(isReplay(replay), true);
+  assert.deepEqual(replayEvents(replay), []);
+  // Playback normalizes whatever the header holds (app.js does;
+  // the discipline is pinned here at the codec's own helpers).
+  assert.deepEqual(normalizeTeams(replay.teams), [1, 1]);
+  assert.deepEqual(normalizeTeams({ ...replay, teams: 'junk' }.teams), [1, 2]);
 });
 
 // ---------------------------------------------------------------- transport / probe

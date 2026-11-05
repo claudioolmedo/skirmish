@@ -20,6 +20,12 @@ import {
   slotAiMode,
   slotLabel,
   roomConfigText,
+  TEAM_PICKS,
+  isTeamPick,
+  teamPickOf,
+  teamsForPick,
+  teamPickForTeams,
+  teamLabel,
 } from './room.js';
 
 test('checkPassword accepts only the exact password', () => {
@@ -170,4 +176,60 @@ test('roomConfigText: the configuration summary line', () => {
   // SIM-11: a non-standard match speed shows in the summary.
   assert.equal(roomConfigText({ guestSlot: 'open', speed: 2 }),
     '1v1 · Arabia · Conquest · Guest: Open · Speed: 2×');
+});
+
+// --- Teams T1: the guest seat's team pick -------------------------
+
+test('team picks: the two values, junk falls back to opponent', () => {
+  assert.deepEqual(TEAM_PICKS, ['opponent', 'ally']);
+  for (const p of TEAM_PICKS) assert.equal(isTeamPick(p), true, p);
+  assert.equal(isTeamPick('same'), false);
+  assert.equal(isTeamPick(''), false);
+  assert.equal(isTeamPick(null), false);
+  assert.equal(teamPickOf('ally'), 'ally');
+  assert.equal(teamPickOf('opponent'), 'opponent');
+  assert.equal(teamPickOf('nonsense'), 'opponent');
+  assert.equal(teamPickOf(undefined), 'opponent');
+  assert.equal(teamLabel('ally'), 'Ally');
+  assert.equal(teamLabel('opponent'), 'Opponent');
+  assert.equal(teamLabel('junk'), 'Opponent');
+});
+
+test('teamsForPick: opponent is distinct teams, ally is one shared team', () => {
+  assert.deepEqual(teamsForPick('opponent'), [1, 2]);
+  assert.deepEqual(teamsForPick('ally'), [1, 1]);
+  assert.deepEqual(teamsForPick('junk'), [1, 2]);
+  // A fresh array every call — callers store these.
+  assert.notEqual(teamsForPick('ally'), teamsForPick('ally'));
+});
+
+test('teamPickForTeams: only a genuine shared team reads ally', () => {
+  assert.equal(teamPickForTeams([1, 1]), 'ally');
+  assert.equal(teamPickForTeams([7, 7]), 'ally');
+  assert.equal(teamPickForTeams([1, 2]), 'opponent');
+  assert.equal(teamPickForTeams([2, 1]), 'opponent');
+  // NO_TEAM x NO_TEAM is NOT allied (DE's "-" pick: unaffiliated
+  // players are enemies, not allies by default).
+  assert.equal(teamPickForTeams([0xff, 0xff]), 'opponent');
+  assert.equal(teamPickForTeams([0xff, 1]), 'opponent');
+  // Malformed input reads opponent, never ally.
+  assert.equal(teamPickForTeams([1]), 'opponent');
+  assert.equal(teamPickForTeams([1, 1, 1]), 'opponent');
+  assert.equal(teamPickForTeams(['1', '1']), 'opponent');
+  assert.equal(teamPickForTeams(null), 'opponent');
+  assert.equal(teamPickForTeams(undefined), 'opponent');
+});
+
+test('roomConfigText: an allied guest seat gains the team segment', () => {
+  // The default opponent pick changes nothing — the line is
+  // byte-identical to the pre-T1 summary.
+  assert.equal(roomConfigText({ guestSlot: 'open', teamPick: 'opponent' }),
+    '1v1 · Arabia · Conquest · Guest: Open · Speed: 1.7×');
+  assert.equal(roomConfigText({ guestSlot: 'open', teamPick: 'junk' }),
+    '1v1 · Arabia · Conquest · Guest: Open · Speed: 1.7×');
+  assert.equal(roomConfigText({ guestSlot: 'open', teamPick: 'ally' }),
+    '1v1 · Arabia · Conquest · Guest: Open · Speed: 1.7× · Team: Ally');
+  // The segment localizes through the caller's strings bundle.
+  assert.equal(roomConfigText({ guestSlot: 'open', teamPick: 'ally' }, { teamAlly: 'Time: Aliado' }),
+    '1v1 · Arabia · Conquest · Guest: Open · Speed: 1.7× · Time: Aliado');
 });

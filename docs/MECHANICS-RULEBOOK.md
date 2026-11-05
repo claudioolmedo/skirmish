@@ -441,13 +441,26 @@ the same way, so default (distinct-team) streams are byte-identical to
 before. Proven in staged sims (`sim/src/teams_tests.rs`: defaults
 identical cell-for-cell, a staged same-team union over separate truth,
 NO_TEAM not allied, conditional-hash localization, save round-trip).
-What does not exist yet: the client does not render from the shared
-read (the WASM `fog_for` / room team-pick plumbing is the next T1
-slice), and no fieldable match has both allies *and* an opposing team
-— that shape waits on the multi-seat program, so the union's only
-fieldable configurations are ally-only. · *Status:* **DIFFERS** (the
-union works and is proven in the sim; MATCHES waits on a fieldable
-match that has both allies and opponents).
+The client slice has since landed (T1 client): the WASM `fog_for`
+per-seat read serves the shared grid (every consumer of it — main
+view, minimap, replay fog — is a presentation consumer, and under
+distinct teams the union is the own grid cell for cell, so 1v1
+rendering is unchanged), the constructor export
+`new_match_victory_teams` carries the packed team word (slot 0 in
+bits 0–7, slot 1 in bits 8–15) with the client's `buildMatchSim`
+falling back to the older exports on a stale wasm, and the room's
+guest seat carries the host's team pick (Opponent default / Ally)
+through the hello advertisement, the 'start' handshake, the resync
+and the replay header (`teams` meta, junk → defaults). A same-team
+two-client room is therefore fieldable — two humans, one team, no
+enemy: a co-op sandbox match. What still does not exist: a fieldable
+match with both allies *and* an opposing team — that shape waits on
+the multi-seat program, so the union's only fieldable configurations
+remain ally-only, and no live two-client proof of the shared render
+has been run yet (staged sims + unit pins only). · *Status:*
+**DIFFERS** (the union works, is proven in the sim and is now
+rendered by the client in a fieldable ally-only room; MATCHES waits
+on a fieldable match that has both allies and opponents).
 
 **VIS-09 — Fog hides information, not truth.** In the lockstep model every
 client simulates the whole world; fog is a presentation filter. Gameplay
@@ -4997,6 +5010,20 @@ book's Appendix table stands at 223 rules, 194 / 16 / 13
 (the VIS-08 flip applied to its section row); the
 mechanical Status count over the rule bodies is
 198 / 16 / 9.
+
+Client-slice update, 2026-11-05 (Teams T1 client, bot-loop
+builder): the deferred client half of T1 lands — the WASM
+`fog_for` read serves `visibility_shared`, the new
+constructor export `new_match_victory_teams` carries the
+packed team word with the stale-wasm fallback in the
+client's `buildMatchSim`, and the room's guest-seat team
+pick (Opponent / Ally) rides the hello, the 'start'
+handshake, the resync and the replay header. VIS-08's
+Status does not move: it stays DIFFERS, its note rewritten
+in place — a same-team two-client room is now fieldable,
+but no fieldable match has both allies *and* an opposing
+team, and the shared render has no live two-client proof
+yet. The counts stand: 198 / 16 / 9.
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|

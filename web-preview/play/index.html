@@ -726,6 +726,19 @@
               </select>
             </label>
           </div>
+          <!-- Teams T1: the guest seat's team pick — the host's
+               alone, beside the guest-slot control, and shown only
+               for a human guest seat (an AI seat is an opponent by
+               construction; solo has no second seat). Opponent is
+               the default: distinct teams, the game as shipped. -->
+          <div id="team-control-row" class="slot-control-row" hidden>
+            <label class="slot-control-label"><span id="team-control-txt">Guest team</span>
+              <select id="guest-team-select" class="slot-select">
+                <option value="opponent" selected>Opponent — separate teams</option>
+                <option value="ally">Ally — same team, shared vision</option>
+              </select>
+            </label>
+          </div>
           <p id="room-listed-line" class="overlay-note">Listed in the Lobby Browser — anyone can join.</p>
           <p id="room-private-line" class="overlay-note" hidden>🔒 Private room — guests need the invite link and the password.</p>
           <div id="pw-row" class="pw-row" hidden>

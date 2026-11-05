@@ -127,6 +127,57 @@ export function slotLabel(slot, s = null) {
   }
 }
 
+// --- Teams T1: the guest seat's team pick ---------------------------
+//
+// Beside the guest slot, the host picks the guest seat's TEAM
+// (Teams T1, VIS-08): 'opponent' (the default — distinct teams,
+// the game as it has always shipped) or 'ally' (the guest seat
+// shares the host's team, so the two clients render one shared
+// line of sight). The pick is a room-level choice like the slot
+// itself: the host sets it, it rides the 'start' handshake as the
+// sim's team settings, and it exists only for a human guest seat
+// — an AI seat is an opponent by construction (an allied AI seat
+// cannot exist, and an enemy AI on your team is a contradiction
+// the UI must not offer), and solo play has no second seat at all.
+
+export const TEAM_PICKS = ['opponent', 'ally'];
+
+export function isTeamPick(v) {
+  return TEAM_PICKS.includes(v);
+}
+
+/// The pick value, or 'opponent' for anything unrecognized — a
+/// junk value must never ally two seats by accident (the
+/// guestSlotOf discipline).
+export function teamPickOf(v) {
+  return isTeamPick(v) ? v : 'opponent';
+}
+
+/// The sim's per-slot team ids for a pick, in slot order (slot 0
+/// = host, slot 1 = guest): distinct teams [1, 2] for an
+/// opponent, one shared team [1, 1] for an ally. A fresh array
+/// every call — callers store and spread these.
+export function teamsForPick(pick) {
+  return teamPickOf(pick) === 'ally' ? [1, 1] : [1, 2];
+}
+
+/// The pick a pair of per-slot team ids amounts to: 'ally' only
+/// for a genuine shared team (equal ids, and not NO_TEAM 0xFF —
+/// two unaffiliated players are enemies, not allies). Anything
+/// else — distinct ids, malformed input — reads 'opponent'.
+export function teamPickForTeams(teams) {
+  if (!Array.isArray(teams) || teams.length !== 2) return 'opponent';
+  const [a, b] = teams;
+  if (!Number.isInteger(a) || !Number.isInteger(b)) return 'opponent';
+  return a === b && a !== 0xff ? 'ally' : 'opponent';
+}
+
+export function teamLabel(pick, s = null) {
+  return teamPickOf(pick) === 'ally'
+    ? ((s && s.ally) || 'Ally')
+    : ((s && s.opponent) || 'Opponent');
+}
+
 /// The room screen's configuration summary line, e.g.
 /// "1v1 · Arabia · Conquest · Guest: AI · Normal". The settings
 /// shown are the game's facts today (map, players) plus the
@@ -134,12 +185,18 @@ export function slotLabel(slot, s = null) {
 /// and the victory conditions (Package C: VIC-05/06/07 — a
 /// ready label composed by the caller, kind plus any clock /
 /// score suffixes). From the guest's own seat the guest part
-/// simply reads "You".
-export function roomConfigText({ guestSlot = 'open', selfIsGuest = false, speed = 1.7, victory = 'Conquest' } = {}, s = null) {
+/// simply reads "You". Teams T1: an allied guest seat adds its
+/// segment (`s.teamAlly`, composed by the caller like the other
+/// localized pieces); the default opponent pick adds nothing —
+/// default rooms read exactly as before.
+export function roomConfigText({ guestSlot = 'open', selfIsGuest = false, speed = 1.7, victory = 'Conquest', teamPick = 'opponent' } = {}, s = null) {
   const guest = selfIsGuest
     ? ((s && s.you) || 'You')
     : slotLabel(guestSlot, s && s.slot);
   // SIM-11: the match speed is part of the configuration summary.
   const speedTxt = `${speed}×`;
-  return s && s.format ? s.format(guest, speedTxt, victory) : `1v1 · Arabia · ${victory} · Guest: ${guest} · Speed: ${speedTxt}`;
+  const base = s && s.format ? s.format(guest, speedTxt, victory) : `1v1 · Arabia · ${victory} · Guest: ${guest} · Speed: ${speedTxt}`;
+  return teamPickOf(teamPick) === 'ally'
+    ? `${base} · ${(s && s.teamAlly) || 'Team: Ally'}`
+    : base;
 }

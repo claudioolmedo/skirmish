@@ -51,7 +51,33 @@ use crate::entity::EntityKind;
 use crate::grid;
 use crate::tech::TechId;
 use crate::formation::FormationKind;
-use crate::{Command, MatchMode, QueuedOrder, Sim, Stance, VictorySettings};
+use crate::{Command, MatchMode, QueuedOrder, Sim, Stance, TeamSettings, VictorySettings};
+
+/// Unpack the victory flags word shared by the `new_match_victory`
+/// family (see that export's comment for the bit meanings).
+fn victory_from_flags(time_limit_ticks: u32, score_target: i32, flags: u32) -> VictorySettings {
+    VictorySettings {
+        time_limit_ticks: time_limit_ticks as u64,
+        score_target: score_target as i64,
+        regicide: flags & 1 != 0,
+        sudden_death: flags & 2 != 0,
+        relic_victory: flags & 4 != 0,
+        death_match: flags & 8 != 0,
+        empire_wars: flags & 16 != 0,
+        king_of_the_hill: flags & 32 != 0,
+        wonder_victory: flags & 64 != 0,
+    }
+}
+
+/// Unpack the Teams T1 team word: slot 0's team id in bits 0–7,
+/// slot 1's in bits 8–15 (`0xFF` = `NO_TEAM`, unaffiliated — DE's
+/// "–" pick). The default configuration (distinct teams, slot 0
+/// on team 1 and slot 1 on team 2) packs as `1 | (2 << 8)` = 513.
+fn teams_from_packed(packed: u32) -> TeamSettings {
+    TeamSettings {
+        teams: [(packed & 0xFF) as u8, ((packed >> 8) & 0xFF) as u8],
+    }
+}
 
 /// A `Sim` owned by JavaScript. One instance per match.
 #[wasm_bindgen]
@@ -128,19 +154,43 @@ impl WasmSim {
         flags: u32,
     ) -> WasmSim {
         let mode = MatchMode::from_tag(mode_tag as u8).unwrap_or(MatchMode::Sandbox);
-        let victory = VictorySettings {
-            time_limit_ticks: time_limit_ticks as u64,
-            score_target: score_target as i64,
-            regicide: flags & 1 != 0,
-            sudden_death: flags & 2 != 0,
-            relic_victory: flags & 4 != 0,
-            death_match: flags & 8 != 0,
-            empire_wars: flags & 16 != 0,
-            king_of_the_hill: flags & 32 != 0,
-            wonder_victory: flags & 64 != 0,
-        };
+        let victory = victory_from_flags(time_limit_ticks, score_target, flags);
         WasmSim {
             inner: Sim::with_settings(seed as u64, mode, victory),
+        }
+    }
+
+    /// Create a match under explicit victory settings AND team
+    /// settings (Teams T1, VIS-08): `new_match_victory` plus the
+    /// per-slot team ids packed in `teams` — slot 0's team in
+    /// bits 0–7, slot 1's in bits 8–15, `0xFF` per byte =
+    /// `NO_TEAM` (unaffiliated; two unaffiliated players are
+    /// enemies, not allies). This is a NEW export rather than a
+    /// widened `new_match_victory`: a caller built against the
+    /// old signature would pass no sixth argument, and a packed
+    /// 0 read as teams `[0, 0]` would silently ally the seats —
+    /// the old export keeps its exact meaning, and the client
+    /// falls back to it when this one is absent (a stale wasm),
+    /// losing the team pick exactly the way a stale wasm loses
+    /// the victory settings, with netplay's construction-hash
+    /// check refusing a mixed pair. The packed default
+    /// (distinct teams, `1 | (2 << 8)` = 513) builds a sim
+    /// identical to `new_match_victory`'s: the settings join the
+    /// hash only while non-default, so default streams — the
+    /// golden included — do not move.
+    #[wasm_bindgen]
+    pub fn new_match_victory_teams(
+        seed: u32,
+        mode_tag: u32,
+        time_limit_ticks: u32,
+        score_target: i32,
+        flags: u32,
+        teams: u32,
+    ) -> WasmSim {
+        let mode = MatchMode::from_tag(mode_tag as u8).unwrap_or(MatchMode::Sandbox);
+        let victory = victory_from_flags(time_limit_ticks, score_target, flags);
+        WasmSim {
+            inner: Sim::with_settings_teams(seed as u64, mode, victory, teams_from_packed(teams)),
         }
     }
 
@@ -2362,9 +2412,20 @@ impl WasmSim {
     }
 
     /// The fog-of-war grid of a specific player — `fog` for an
-    /// explicit seat.
+    /// explicit seat. Teams T1 (VIS-08): this serves the seat's
+    /// SHARED grid (`visibility_shared` — the cell-wise union
+    /// over its team), because every consumer of the per-seat
+    /// read is a presentation consumer (the main view, the
+    /// minimap, replay fog) and DE renders teammates' line of
+    /// sight as one shared picture. Under the default distinct
+    /// teams the union is the seat's own grid cell for cell, so
+    /// 1v1 rendering is unchanged; the per-player grids stay the
+    /// hashed truth underneath. The seat-0 `fog()` above keeps
+    /// serving the own grid: its only caller is the non-seat-aware
+    /// local path, which never runs under team settings (local
+    /// matches build with default teams).
     pub fn fog_for(&self, owner: u32) -> Vec<u8> {
-        self.inner.visibility(owner as u8).to_vec()
+        self.inner.visibility_shared(owner as u8)
     }
 
     /// Ids of a specific player's idle villagers.

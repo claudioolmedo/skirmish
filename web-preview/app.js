@@ -71,6 +71,7 @@ import {
   createSession, createRecorder, replayEvents, isReplay,
   createRelayClient, probeRegionPing, makeRoomId, buildPlayUrl,
   linkJoinRoom, pickFastestRegion, REGIONS as NET_REGIONS,
+  normalizeTeams, packTeams, teamsIsDefault,
 } from './play/netplay.js';
 import {
   cleanDisplayName, readStoredName, writeStoredName, displayName,
@@ -86,6 +87,7 @@ import {
   checkPassword, peerAdmitted, guestAdmitted, canToggleReady,
   startGate, guestSlotOf, slotIsAi, slotSealed, slotAiMode,
   slotLabel, roomConfigText,
+  teamPickOf, teamsForPick, teamPickForTeams,
 } from './play/room.js';
 import {
   PAGE_KINDS, resolveHotkey, badgeForButton, panelCellFor, GRID_CELLS, edgePan,
@@ -719,8 +721,18 @@ function victoryFlags(v) {
 /// goes through the victory export. (A stale wasm build without
 /// the export degrades to Conquest locally — and netplay's
 /// construction-hash check refuses the mismatch, as designed.)
-function buildMatchSim(seed, modeTag, victory) {
+/// Teams T1: a non-default team assignment rides the teams
+/// export when the wasm carries it; a stale wasm without that
+/// export falls through to the victory/plain paths below, losing
+/// the team pick the same way it loses victory settings — and a
+/// mixed pair (one stale, one current) is refused by the same
+/// construction-hash check, since non-default teams are hashed.
+function buildMatchSim(seed, modeTag, victory, teams) {
   const v = normalizeVictory(victory);
+  const t = normalizeTeams(teams);
+  if (!teamsIsDefault(t) && typeof WasmSim.new_match_victory_teams === 'function') {
+    return WasmSim.new_match_victory_teams(seed, modeTag, v.timeLimitTicks, v.scoreTarget, victoryFlags(v), packTeams(t));
+  }
   if (victoryIsDefault(v) || typeof WasmSim.new_match_victory !== 'function') {
     return WasmSim.new_match(seed, modeTag);
   }
@@ -780,6 +792,32 @@ function victoryLabel(v) {
   if (n.empireWars) label += ' · ' + t('victory.empireWars');
   if (n.kingOfTheHill) label += ' · ' + t('victory.kingOfTheHill');
   return label;
+}
+
+// --- Teams T1: team settings (VIS-08) --------------------------------------
+// The team assignment is part of the match definition from tick
+// 0, exactly like the victory conditions: one team id per player
+// slot, entering through the sim constructor
+// (WasmSim.new_match_victory_teams, packed by netplay's
+// packTeams), never changing mid-match, and — in netplay —
+// riding the 'start' handshake like the victory settings do, so
+// both peers build the identical sim (the construction hash
+// check would refuse anything else; non-default teams are
+// hashed). The default is distinct teams [1, 2] — the
+// configuration the game has always shipped — and a
+// default-settings build is byte-identical to the pre-T1 game.
+// The ONLY surface in T1 is the room's guest-seat team pick
+// (play/room.js): the host sets the guest seat Opponent (default)
+// or Ally (same team — the two clients then render the shared
+// line of sight the sim's fog_for serves). Solo vs-AI gets no
+// team surface: an allied AI seat cannot exist, and an AI-room
+// match likewise always builds with default teams.
+const TEAMS_DEFAULT = [1, 2];
+let matchTeams = [...TEAMS_DEFAULT]; // the settings the current sim was built with
+/// The replay-meta fragment: distinct-team recordings stay
+/// exactly the pre-T1 shape; anything else carries its pair.
+function teamMeta(t) {
+  return teamsIsDefault(t) ? {} : { teams: [...normalizeTeams(t)] };
 }
 
 // --- M8: lockstep multiplayer -------------------------------------------
@@ -4161,9 +4199,12 @@ function resetSim(mode = matchMode) {
   // chosen victory settings (inert in Sandbox, like the rest of
   // the match machinery).
   matchVictory = normalizeVictory(chosenVictory);
+  // Teams T1: local matches have no team surface — they always
+  // build under the default distinct teams.
+  matchTeams = [...TEAMS_DEFAULT];
   sim = mode === 'sandbox'
     ? new WasmSim(seed)
-    : buildMatchSim(seed, MODE_TAG[mode], matchVictory);
+    : buildMatchSim(seed, MODE_TAG[mode], matchVictory, matchTeams);
   // M8: every local match records its command stream — the end
   // overlay (and the pause menu) can download it as a replay.
   // SIM-11: a fresh local match takes the pause menu's chosen speed.
@@ -4171,6 +4212,7 @@ function resetSim(mode = matchMode) {
   localRecorder = createRecorder({
     seed, modeTag: MODE_TAG[mode], seats: [0], view: 0, speed: matchSpeed,
     ...victoryMeta(matchVictory),
+    ...teamMeta(matchTeams),
   });
   seenBuildings.clear(); // M7: last-known enemy buildings are per-match
   resetScoreHistory(); // INF-11: timeline + revealed-map flag are per-match
@@ -4733,11 +4775,15 @@ async function hostStartMatch() {
   // and ride the handshake, like the speed — the guest builds
   // from the same settings and the hash0 check verifies it.
   matchVictory = normalizeVictory(net.victory);
-  net.pendingSim = buildMatchSim(net.seed, MODE_TAG.online, matchVictory);
+  // Teams T1: the host's team assignment (the room's guest-seat
+  // team pick) rides the same handshake the same way.
+  matchTeams = normalizeTeams(net.teams);
+  net.pendingSim = buildMatchSim(net.seed, MODE_TAG.online, matchVictory, matchTeams);
   net.client.send({
     type: 'start', seed: net.seed, hash0: net.pendingSim.state_hash(),
     speed: isGameSpeed(net.speed) ? net.speed : GAME_SPEED, // SIM-11: the host's setting paces both clients
     victory: { ...matchVictory }, // Package C: the host's victory settings
+    teams: [...matchTeams], // Teams T1: the host's team assignment
   });
   // The host's own build IS its verification — it is loaded.
   markSelfLoaded();
@@ -4766,7 +4812,12 @@ async function guestHandleStart(msg) {
   // check below still verifies the construction either way).
   net.victory = normalizeVictory(msg.victory);
   matchVictory = net.victory;
-  const candidate = buildMatchSim(msg.seed, MODE_TAG.online, matchVictory);
+  // Teams T1: build under the host's team assignment the same
+  // way (an older host sends none — distinct teams stand, and
+  // junk normalizes to defaults, never to an accidental ally).
+  net.teams = normalizeTeams(msg.teams);
+  matchTeams = net.teams;
+  const candidate = buildMatchSim(msg.seed, MODE_TAG.online, matchVictory, matchTeams);
   if (candidate.state_hash() !== msg.hash0) {
     // Same seed, different construction hash: the two builds
     // disagree — lockstep would desync on turn 0. That is a
@@ -4813,7 +4864,10 @@ async function hostStartAiMatch() {
   if (net !== mine || net.phase !== 'starting') return; // cancelled mid-load
   net.seed = (Math.random() * 0x7fffffff) >>> 0;
   matchVictory = normalizeVictory(net.victory);
-  net.pendingSim = buildMatchSim(net.seed, MODE_TAG[mode], matchVictory);
+  // Teams T1: an AI seat is an opponent by construction — the
+  // room's team pick never applies here, whatever it says.
+  matchTeams = [...TEAMS_DEFAULT];
+  net.pendingSim = buildMatchSim(net.seed, MODE_TAG[mode], matchVictory, matchTeams);
   // The host's own build is its verification — and the AI seat
   // counts as loaded the moment that build verifies: there is
   // no second load to wait for.
@@ -4837,7 +4891,7 @@ function beginAiMatch(mode) {
   // a peer dropping out of the loading phase.
   net.phase = 'ended';
   teardownNet(); // clears the load timer, closes the room socket
-  aiRoom = { mode, seed, speed, victory: { ...matchVictory } };
+  aiRoom = { mode, seed, speed, victory: { ...matchVictory }, teams: [...matchTeams] };
   adoptAiMatch(candidate, mode, seed);
 }
 
@@ -4855,6 +4909,7 @@ function adoptAiMatch(candidate, mode, seed) {
   localRecorder = createRecorder({
     seed, modeTag: MODE_TAG[mode], seats: [0], view: 0, speed: matchSpeed,
     ...victoryMeta(matchVictory),
+    ...teamMeta(matchTeams),
   });
   setInMatch(true); // the match begins: the game appears
   setPaused(false);
@@ -4869,7 +4924,8 @@ function restartAiMatch() {
   if (!aiRoom) return;
   const { mode, seed } = aiRoom;
   matchVictory = normalizeVictory(aiRoom.victory);
-  adoptAiMatch(buildMatchSim(seed, MODE_TAG[mode], matchVictory), mode, seed);
+  matchTeams = normalizeTeams(aiRoom.teams);
+  adoptAiMatch(buildMatchSim(seed, MODE_TAG[mode], matchVictory, matchTeams), mode, seed);
 }
 
 function beginOnlineMatch() {
@@ -4886,6 +4942,7 @@ function beginOnlineMatch() {
     seats: [0, 2], view: owner,
     speed: isGameSpeed(net.speed) ? net.speed : GAME_SPEED, // SIM-11
     ...victoryMeta(matchVictory), // Package C
+    ...teamMeta(matchTeams), // Teams T1
   });
   net.session = makeNetSession();
   net.phase = 'playing';
@@ -4927,6 +4984,7 @@ function roomConfigStrings() {
     slot: slotStrings(),
     you: t('room.you'),
     format: (guest, speed, victory) => t('room.config', { guest, speed, victory }),
+    teamAlly: t('room.teamAlly'), // Teams T1: the allied segment
   };
 }
 function lobbyStrings() {
@@ -4983,6 +5041,7 @@ function renderRoom() {
       guestSlot: slot, selfIsGuest: !isHost,
       speed: isGameSpeed(net.speed) ? net.speed : GAME_SPEED, // SIM-11
       victory: victoryLabel(net.victory), // Package C
+      teamPick: teamPickForTeams(net.teams), // Teams T1
     }, roomConfigStrings());
   }
   // M12: the guest-seat selector is the host's alone, and it
@@ -4993,6 +5052,20 @@ function renderRoom() {
     if (netUi.roomGuestSlot) {
       netUi.roomGuestSlot.value = slot;
       netUi.roomGuestSlot.disabled = net.phase !== 'lobby'
+        || !!net.peerPresent || !!net.doorGuest;
+    }
+  }
+  // Teams T1: the guest seat's team pick — the host's alone,
+  // beside the guest-seat selector, with the same lock (the pick
+  // cannot change out from under a present guest; the guest
+  // adopts the binding copy from 'start' in any case). It shows
+  // only for a human guest seat: an AI seat is an opponent by
+  // construction and a closed seat has nobody to team with.
+  if (netUi.teamControlRow) {
+    netUi.teamControlRow.hidden = !isHost || slotIsAi(slot) || slot === 'closed';
+    if (netUi.roomGuestTeam) {
+      netUi.roomGuestTeam.value = teamPickForTeams(net.teams);
+      netUi.roomGuestTeam.disabled = net.phase !== 'lobby'
         || !!net.peerPresent || !!net.doorGuest;
     }
   }
@@ -5101,7 +5174,12 @@ async function rejoinFromResync(msg) {
   // desync from the frontier.
   net.victory = normalizeVictory(msg.victory);
   matchVictory = net.victory;
-  const fresh = buildMatchSim(msg.seed, MODE_TAG.online, matchVictory);
+  // Teams T1: the rebuild must equally run under the match's
+  // team assignment (the resync carries it) or an allied match
+  // would rebuild as distinct teams and desync the same way.
+  net.teams = normalizeTeams(msg.teams);
+  matchTeams = net.teams;
+  const fresh = buildMatchSim(msg.seed, MODE_TAG.online, matchVictory, matchTeams);
   adoptSim(fresh, owner);
   const byTick = new Map();
   for (const e of msg.events || []) byTick.set(e.tick, e);
@@ -5120,6 +5198,7 @@ async function rejoinFromResync(msg) {
     seats: [0, 2], view: owner,
     speed: isGameSpeed(net.speed) ? net.speed : GAME_SPEED,
     ...victoryMeta(matchVictory), // Package C
+    ...teamMeta(matchTeams), // Teams T1
   });
   net.recorder.seed(msg.events || []);
   net.session = makeNetSession();
@@ -5139,6 +5218,7 @@ function sendResync() {
     yourSlot: net.role === 'host' ? 1 : 0,
     events: snapshot.events,
     victory: { ...matchVictory }, // Package C: the match's settings, for the rebuild
+    teams: [...matchTeams], // Teams T1: the match's team assignment, for the rebuild
   });
 }
 
@@ -5395,6 +5475,11 @@ function onNetMessage(msg) {
       if (net.role === 'guest' && msg.victory) {
         net.victory = normalizeVictory(msg.victory);
       }
+      // Teams T1: the host's advertised team assignment, the
+      // same display-only adoption.
+      if (net.role === 'guest' && msg.teams) {
+        net.teams = normalizeTeams(msg.teams);
+      }
       // M12: a sealed guest seat (AI / Closed) admits no human —
       // a late hello on a stale link is told the room is full,
       // exactly like a third opener of a two-human room.
@@ -5407,7 +5492,7 @@ function onNetMessage(msg) {
         net.helloReplied = true;
         net.client.send({
           type: 'hello', v: 1, role: net.role, name: myName(),
-          ...(net.role === 'host' ? { victory: { ...normalizeVictory(net.victory) } } : {}),
+          ...(net.role === 'host' ? { victory: { ...normalizeVictory(net.victory) }, teams: [...normalizeTeams(net.teams)] } : {}),
         });
       }
       // M10 private rooms: a guest at the door of a private room
@@ -5661,6 +5746,17 @@ function setGuestSlot(value) {
   renderRoom();
 }
 
+/// Host: set the guest seat's team (Teams T1 — the room screen's
+/// team pick). The pick is host-local room state like the guest
+/// slot: the guest learns the binding copy from the 'start'
+/// handshake (and the display copy from the host's hello). A junk
+/// value normalizes to Opponent, never to an accidental ally.
+function setTeamPick(value) {
+  if (!net || net.role !== 'host') return;
+  net.teams = teamsForPick(teamPickOf(value));
+  renderRoom();
+}
+
 function connectToRoom() {
   // M10: the HOST's create connection carries the private flag —
   // the room registers in the directory as locked (listed, like
@@ -5685,7 +5781,7 @@ function connectToRoom() {
       // the 'start' handshake). Older clients ignore the field.
       net.client.send({
         type: 'hello', v: 1, role: net.role, name: myName(),
-        ...(net.role === 'host' ? { victory: { ...normalizeVictory(net.victory) } } : {}),
+        ...(net.role === 'host' ? { victory: { ...normalizeVictory(net.victory) }, teams: [...normalizeTeams(net.teams)] } : {}),
       });
       if (net.role === 'host') {
         // M12: a sealed seat changes what "created" means — the
@@ -5762,6 +5858,7 @@ function openLobby(join) {
     guestSlot: 'open', // M12: the second seat — Open / AI / Closed
     speed: GAME_SPEED, // SIM-11: the match speed (host's Create Lobby pick)
     victory: { ...VICTORY_DEFAULT }, // Package C: the victory settings (host's Create Lobby pick; the guest adopts the host's)
+    teams: [...TEAMS_DEFAULT], // Teams T1: the team assignment (host's room team pick; the guest adopts the host's)
     // M10 room model. The password lives ONLY in the host
     // client's memory (net.password), set at create time; it is
     // never persisted and never sent anywhere — guests send
@@ -6149,9 +6246,13 @@ async function startPlayback(rec) {
   // them in its meta and rebuilds under them; older recordings
   // have none and replay as the Conquest they were.
   matchVictory = normalizeVictory(rec.victory);
+  // Teams T1: a recording made under a team assignment carries
+  // it the same way; older recordings have none and replay as
+  // the distinct-team matches they were (junk → defaults).
+  matchTeams = normalizeTeams(rec.teams);
   sim = rec.modeTag === 0
     ? new WasmSim(rec.seed)
-    : buildMatchSim(rec.seed, rec.modeTag, matchVictory);
+    : buildMatchSim(rec.seed, rec.modeTag, matchVictory, matchTeams);
   playback = {
     rec, events, idx: 0, owners,
     view: typeof rec.view === 'number' ? rec.view : owners[0],
@@ -6613,6 +6714,10 @@ function applyStaticStrings() {
   setText('btn-create-game', 'lobby.create');
   setText('room-title-h', 'room.title');
   setText('slot-control-txt', 'set.guestSlot');
+  setText('team-control-txt', 'set.guestTeam');
+  setOptions('guest-team-select', {
+    opponent: 'team.opponentOption', ally: 'team.allyOption',
+  });
   setText('room-listed-line', 'room.listedLine');
   setText('room-private-line', 'room.privateLine');
   setPlaceholder('pw-input', 'room.pwPlaceholder');
@@ -6985,6 +7090,8 @@ async function main() {
     roomConfigLine: document.getElementById('room-config-line'),
     slotControlRow: document.getElementById('slot-control-row'),
     roomGuestSlot: document.getElementById('guest-slot-select'),
+    teamControlRow: document.getElementById('team-control-row'),
+    roomGuestTeam: document.getElementById('guest-team-select'),
     roomListedLine: document.getElementById('room-listed-line'),
     roomPrivateLine: document.getElementById('room-private-line'),
     pwRow: document.getElementById('pw-row'),
@@ -7116,6 +7223,13 @@ async function main() {
   if (netUi.roomGuestSlot) {
     netUi.roomGuestSlot.addEventListener('change', () => {
       setGuestSlot(netUi.roomGuestSlot.value);
+    });
+  }
+  // Teams T1: the room screen's guest-team pick (host only; the
+  // binding copy rides the 'start' handshake).
+  if (netUi.roomGuestTeam) {
+    netUi.roomGuestTeam.addEventListener('change', () => {
+      setTeamPick(netUi.roomGuestTeam.value);
     });
   }
   // M10: the room screen's one button toggles ready; the host's
