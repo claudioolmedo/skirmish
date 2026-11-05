@@ -881,7 +881,46 @@ naming orders only for groups of 2+)).
 tiles, a formed group narrows into a file/column for travel and re-forms
 near the destination.
 *Source:* GAP 2.10. · *Impl:* a slot-layout switch keyed on order distance
-in the same assignment function as MOV-07. · *Status:* **MISSING**.
+in the same assignment function as MOV-07. · *Status:* **MATCHES**
+(shipped 2026-11-04, MOV-08 package: the switch lives in
+`formation` (`sim/src/formation.rs`) beside MOV-07's assignment —
+`is_long_move` keys on the group's centroid-to-destination distance
+against the documented ~30 tiles (120 world units at 4 per tile;
+"longer than" is strict, so exactly 30 tiles stays formed), and
+`assign_column_slots` lays the same (layer, id) placement order out
+one-wide: a file along the facing, one spacing apart, melee at the
+head, siege/monks at the tail. In `Sim::finalize_formations` a long
+group's orders are routed through their column slots at two travel
+anchors (`column_anchor_points`): the file assembles a geometry
+margin ahead of the centroid and re-forms the same margin short of
+the destination, and because both anchors' slots carry identical
+offsets the long leg between them translates the file unchanged,
+while the final leg spreads it back into the chosen formation —
+each member's order target stays its MOV-07 formation slot, and
+the column exists only in the order's waypoint trail
+(`set_move_order_via` concatenates the A* legs), so there is no
+new hashed state and no codec change (save stays v15). A member
+whose column route cannot be pathed falls back to the direct slot
+order, then to the shared destination, exactly as a short move
+does; the MOV-06 group cap stamps the routed order as before.
+The margin is 16 world units (4 tiles) at each end — no DE source
+pins the re-form distance, so this is a flagged GEOMETRY constant
+(the smallest margin giving the file a full formation-depth of
+travel to spread back into shape), not a game value; no cost,
+stat or balance number was touched. Scope, deliberately minimal:
+formation moves only, like MOV-07 — plain MOV-06 group moves and
+attack-move/patrol legs do not collapse. A stream that never
+orders a long formation move hashes byte-identically to before
+this package (the golden hash does not move; the determinism
+suite pins it). Pinned by `sim/src/formation_tests.rs` (7 new
+tests: the strict 30-tile threshold, the single file in layer
+order at 2.0 spacing, the anchor geometry in two facings, the
+routed waypoint trails through both column slots, travel that
+arrives re-formed at the destination, replay twins, save
+round-trip) and `sim/tests/formation.rs` (1 new test on the
+standard opening: a 40+-cell group move routes the Scout and
+villagers through their column slots while their targets stay
+formation slots)).
 
 **MOV-09 — Facing is one of 8 directions.** A unit has a facing (8-way);
 it attacks and is rendered in its facing; melee engagement turns the unit
@@ -4812,13 +4851,23 @@ rule's Impl note) — MOV-07 moves MISSING → MATCHES. The
 book stands at 223 rules, 192 / 15 / 16. The table below
 equals the body.
 
+updated 2026-11-04 for MOV-08 (bot-loop builder): long
+formed moves collapse into column — past the documented
+~30 tiles the group's orders route through one-wide
+column slots at an assembly anchor ahead of the centroid
+and a re-form anchor short of the destination, then
+spread back into the chosen formation (see the rule's
+Impl note) — MOV-08 moves MISSING → MATCHES. The book
+stands at 223 rules, 193 / 15 / 15. The table below
+equals the body.
+
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
 | 1 | Simulation & time (SIM) | 12 | 12 | 0 | 0 |
 | 2 | Map, terrain & elevation (MAP) | 13 | 9 | 4 | 0 |
 | 3 | Visibility & exploration (VIS) | 10 | 9 | 0 | 1 |
 | 4 | Selection & orders (SEL) | 17 | 16 | 1 | 0 |
-| 5 | Movement, pathfinding & collision (MOV) | 12 | 7 | 3 | 2 |
+| 5 | Movement, pathfinding & collision (MOV) | 12 | 8 | 3 | 1 |
 | 6 | Economy & drop-off (ECO) | 17 | 16 | 0 | 1 |
 | 7 | Buildings & placement (BLD) | 20 | 17 | 2 | 1 |
 | 8 | Combat & damage (CMB) | 17 | 17 | 0 | 0 |
@@ -4832,7 +4881,7 @@ equals the body.
 | 16 | Victory, scoring & game modes (VIC) | 12 | 7 | 0 | 5 |
 | 17 | Multiplayer determinism (NET) | 11 | 9 | 1 | 1 |
 | 18 | Information rules (INF) | 13 | 12 | 1 | 0 |
-| | **Total** | **223** | **192** | **15** | **16** |
+| | **Total** | **223** | **193** | **15** | **15** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer

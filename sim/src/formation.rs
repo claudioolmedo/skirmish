@@ -22,6 +22,17 @@
 //! a half-spacing step along the facing's forward/right unit
 //! vectors, accumulated in i64 raw bits — no floats, no RNG,
 //! no iteration over unordered containers anywhere.
+//!
+//! MOV-08 lives here too: on a move longer than ~30 tiles a
+//! formed group narrows into a file/column for travel and
+//! re-forms near the destination. The column is the same
+//! assignment machinery with a one-wide layout
+//! (`assign_column_slots`), and the travel/re-form anchors
+//! are pure geometry (`column_anchor_points`) — the sim
+//! routes each member's ordinary move order through its
+//! column slots at both anchors on the way to its formation
+//! slot, so the column, too, is just per-unit move targets
+//! and no new hashed state exists.
 
 use fixed::types::I16F16;
 
@@ -77,6 +88,70 @@ impl FormationKind {
 /// steps (1.0 world unit) so a rank can center exactly on the
 /// destination with integer math.
 const HALF_SPACING_BITS: i64 = 65_536; // 1.0 world unit
+
+/// MOV-08's documented threshold: a formed move longer than
+/// ~30 tiles collapses into column. One tile is 4 world
+/// units, so the switch sits at 120.0 world units from the
+/// group's centroid to the destination anchor. "Longer
+/// than" is strict: a move of exactly 30 tiles stays formed.
+pub const LONG_MOVE_DISTANCE: I16F16 = I16F16::from_bits(7_864_320); // 120.0
+
+/// MOV-08 geometry margin, in half-spacing steps (1 step =
+/// 1.0 world unit): the column assembles this far ahead of
+/// the group's centroid and re-forms this far short of the
+/// destination — 16 world units = 4 tiles at each end. No DE
+/// source pins the re-form distance; this is the smallest
+/// margin that gives the file a full formation-depth of
+/// travel to spread back into shape on the final leg, and
+/// it is a GEOMETRY constant, not a game value (it touches
+/// no cost, stat or balance number).
+const COLUMN_MARGIN_STEPS: i64 = 16;
+
+/// Whether a formed move of this centroid-to-destination
+/// distance is a MOV-08 long move (see `LONG_MOVE_DISTANCE`).
+pub fn is_long_move(distance: I16F16) -> bool {
+    distance > LONG_MOVE_DISTANCE
+}
+
+/// MOV-08's two travel anchors for a long move, as
+/// (assembly, re-form): the assembly anchor stands
+/// `COLUMN_MARGIN_STEPS` ahead of the group centroid along
+/// the (quantized) facing, the re-form anchor the same
+/// margin short of the destination. Column slots computed
+/// at the two anchors carry identical offsets, so the leg
+/// between them translates the file without reshaping it.
+/// Pure integer geometry, like the rest of this module.
+pub fn column_anchor_points(
+    centroid: (I16F16, I16F16),
+    dest: (I16F16, I16F16),
+    facing: (I16F16, I16F16),
+) -> ((I16F16, I16F16), (I16F16, I16F16)) {
+    let (fwd, right) = facing_vectors(facing.0, facing.1);
+    let c = (centroid.0.to_bits() as i64, centroid.1.to_bits() as i64);
+    let d = (dest.0.to_bits() as i64, dest.1.to_bits() as i64);
+    let a = cell_point(
+        c,
+        fwd,
+        right,
+        Cell {
+            lat: 0,
+            depth: COLUMN_MARGIN_STEPS,
+        },
+    );
+    let r = cell_point(
+        d,
+        fwd,
+        right,
+        Cell {
+            lat: 0,
+            depth: -COLUMN_MARGIN_STEPS,
+        },
+    );
+    (
+        (I16F16::from_bits(a.0 as i32), I16F16::from_bits(a.1 as i32)),
+        (I16F16::from_bits(r.0 as i32), I16F16::from_bits(r.1 as i32)),
+    )
+}
 
 /// The class layer a kind fights from (MOV-07's layering):
 /// 0 = melee front (range-0 military: infantry, cavalry, the
@@ -276,13 +351,7 @@ pub fn assign_slots(
     let (fwd, right) = facing_vectors(facing.0, facing.1);
     let anchor = (dest.0.to_bits() as i64, dest.1.to_bits() as i64);
 
-    // Sorted placement order: by id first (the composition's
-    // canonical order), then stably by layer — within a layer,
-    // id order is preserved.
-    let mut order: Vec<usize> = (0..n).collect();
-    order.sort_by_key(|&i| members[i].id);
-    order.sort_by_key(|&i| layer_of(members[i].kind));
-
+    let order = placement_order(members);
     let sorted_layers: Vec<u8> = order.iter().map(|&i| layer_of(members[i].kind)).collect();
     let cols = ceil_sqrt(n);
     let cells = match formation {
@@ -316,6 +385,32 @@ pub fn assign_slots(
         FormationKind::Flank => flank_cells(members, &order),
     };
 
+    slots_from_cells(members, &order, &cells, anchor, fwd, right)
+}
+
+/// The canonical placement order shared by every layout:
+/// by id first (the composition's canonical order), then
+/// stably by layer — within a layer, id order is preserved.
+/// Placement position `i` in the returned order takes cell
+/// `i` of the layout's cell list.
+fn placement_order(members: &[FormationMember]) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..members.len()).collect();
+    order.sort_by_key(|&i| members[i].id);
+    order.sort_by_key(|&i| layer_of(members[i].kind));
+    order
+}
+
+/// Turn a layout's cells (in placement order) into slots:
+/// one (id, slot) pair per member, in the INPUT order.
+fn slots_from_cells(
+    members: &[FormationMember],
+    order: &[usize],
+    cells: &[Cell],
+    anchor: (i64, i64),
+    fwd: (i64, i64),
+    right: (i64, i64),
+) -> Vec<(u32, (I16F16, I16F16))> {
+    let n = members.len();
     let mut out: Vec<(u32, (I16F16, I16F16))> = vec![(0, (I16F16::ZERO, I16F16::ZERO)); n];
     for (slot_idx, &member_idx) in order.iter().enumerate() {
         let (x, y) = cell_point(anchor, fwd, right, cells[slot_idx]);
@@ -328,6 +423,39 @@ pub fn assign_slots(
         );
     }
     out
+}
+
+/// MOV-08's column assignment: the same placement order as
+/// `assign_slots` (melee front, then civilians, ranged,
+/// siege/monks at the back) laid out one-wide — a file
+/// along the facing, centered on the anchor, members one
+/// spacing apart. This is `layered_cells` with a column
+/// count of 1: every member is its own row, so the file's
+/// head is the front layer and its tail the back layer,
+/// exactly the order the group marches in. A single
+/// member's column slot is the anchor itself, as in every
+/// formation.
+pub fn assign_column_slots(
+    members: &[FormationMember],
+    anchor_point: (I16F16, I16F16),
+    facing: (I16F16, I16F16),
+) -> Vec<(u32, (I16F16, I16F16))> {
+    let n = members.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    if n == 1 {
+        return vec![(members[0].id, anchor_point)];
+    }
+    let (fwd, right) = facing_vectors(facing.0, facing.1);
+    let anchor = (
+        anchor_point.0.to_bits() as i64,
+        anchor_point.1.to_bits() as i64,
+    );
+    let order = placement_order(members);
+    let sorted_layers: Vec<u8> = order.iter().map(|&i| layer_of(members[i].kind)).collect();
+    let cells = layered_cells(&sorted_layers, 1, false);
+    slots_from_cells(members, &order, &cells, anchor, fwd, right)
 }
 
 /// Flank cells, in placement order for the sorted members:

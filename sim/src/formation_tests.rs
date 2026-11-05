@@ -14,7 +14,10 @@
 //! the travel corridor.
 
 use crate::entity::{Entity, EntityKind, OWNER_PLAYER};
-use crate::formation::{assign_slots, layer_of, FormationKind, FormationMember};
+use crate::formation::{
+    assign_column_slots, assign_slots, column_anchor_points, is_long_move, layer_of, FormationKind,
+    FormationMember,
+};
 use crate::{Command, QueuedOrder, Sim};
 use fixed::types::I16F16;
 
@@ -221,6 +224,67 @@ fn a_single_member_gets_the_destination_itself() {
     }
 }
 
+// --- MOV-08: the column switch ----------------------------------------
+
+#[test]
+fn the_long_move_threshold_is_thirty_tiles() {
+    // 30 tiles = 120 world units; "longer than ~30 tiles"
+    // is strict — exactly 30 tiles stays formed.
+    assert!(!is_long_move(fx(119.0)));
+    assert!(!is_long_move(fx(120.0)));
+    assert!(is_long_move(fx(121.0)));
+    assert!(is_long_move(fx(200.0)));
+}
+
+#[test]
+fn column_slots_form_a_single_file_in_layer_order() {
+    let members = [
+        member(12, EntityKind::Archer),
+        member(10, EntityKind::Militia),
+        member(13, EntityKind::Monk),
+        member(11, EntityKind::Militia),
+    ];
+    let slots = assign_column_slots(&members, (fx(0.0), fx(0.0)), (fx(1.0), fx(0.0)));
+    // One file along the facing: every slot shares the
+    // anchor's lateral coordinate (y, facing east)...
+    for (_, s) in &slots {
+        assert_eq!(s.1, fx(0.0), "column slot off the file line: {s:?}");
+    }
+    // ...spaced one spacing (2.0) apart, centered on the
+    // anchor, melee at the head, monk at the tail.
+    let xs: Vec<f64> = [10, 11, 12, 13].iter().map(|&id| f(slot_of(&slots, id).0)).collect();
+    assert_eq!(xs, vec![3.0, 1.0, -1.0, -3.0], "file order/spacing wrong: {xs:?}");
+    // Purity: input order and repetition change nothing.
+    let mut rev = members;
+    rev.reverse();
+    let slots2 = assign_column_slots(&rev, (fx(0.0), fx(0.0)), (fx(1.0), fx(0.0)));
+    for id in [10, 11, 12, 13] {
+        assert_eq!(slot_of(&slots, id), slot_of(&slots2, id));
+    }
+}
+
+#[test]
+fn column_anchors_straddle_the_move() {
+    // East: the assembly anchor stands 16 world units ahead
+    // of the centroid, the re-form anchor 16 short of the
+    // destination — the flagged MOV-08 geometry margin.
+    let (assembly, reform) = column_anchor_points(
+        (fx(0.0), fx(0.0)),
+        (fx(200.0), fx(0.0)),
+        (fx(1.0), fx(0.0)),
+    );
+    assert_eq!(assembly, (fx(16.0), fx(0.0)));
+    assert_eq!(reform, (fx(184.0), fx(0.0)));
+    // North (y-down): the margins follow the facing.
+    let (assembly, reform) = column_anchor_points(
+        (fx(0.0), fx(0.0)),
+        (fx(0.0), fx(-200.0)),
+        (fx(0.0), fx(-1.0)),
+    );
+    assert_eq!(assembly, (fx(0.0), fx(-16.0)));
+    assert_eq!(reform, (fx(0.0), fx(-184.0)));
+}
+
 // --- Sim integration ---------------------------------------------------
 
 fn ent(sim: &Sim, id: u32) -> &Entity {
@@ -382,6 +446,146 @@ fn formation_travel_replays_bit_identically() {
         sim.state_hash()
     };
     assert_eq!(run(), run(), "formation travel broke replay determinism");
+}
+
+/// Stage the same layered trio as `stage_trio`, but with
+/// the destination 52 cells east of the Monk — a centroid-
+/// to-destination distance of ~200 world units, well past
+/// MOV-08's 30-tile (120 wu) threshold.
+fn stage_long_trio(sim: &mut Sim) -> (I16F16, I16F16) {
+    let (y, x0) = free_row(sim, 60);
+    spawn(sim, 900, EntityKind::Militia, (x0 + 4, y));
+    spawn(sim, 901, EntityKind::Archer, (x0 + 2, y));
+    spawn(sim, 902, EntityKind::Monk, (x0, y));
+    sim.grid().cell_center(x0 + 52, y)
+}
+
+fn trio_members() -> [FormationMember; 3] {
+    [
+        member(900, EntityKind::Militia),
+        member(901, EntityKind::Archer),
+        member(902, EntityKind::Monk),
+    ]
+}
+
+/// The geometry the finalizer will compute for the staged
+/// trio: centroid and facing from the members' positions.
+fn trio_geometry(sim: &Sim, dest: (I16F16, I16F16)) -> ((I16F16, I16F16), (I16F16, I16F16)) {
+    let (mut cx, mut cy) = (0i64, 0i64);
+    for id in [900, 901, 902] {
+        let e = ent(sim, id);
+        cx += e.pos_x.to_bits() as i64;
+        cy += e.pos_y.to_bits() as i64;
+    }
+    let centroid = (
+        I16F16::from_bits((cx / 3) as i32),
+        I16F16::from_bits((cy / 3) as i32),
+    );
+    let facing = (dest.0 - centroid.0, dest.1 - centroid.1);
+    (centroid, facing)
+}
+
+#[test]
+fn long_formation_move_routes_through_its_column_slots() {
+    let mut sim = Sim::new(7);
+    let (dx, dy) = stage_long_trio(&mut sim);
+    let (centroid, facing) = trio_geometry(&sim, (dx, dy));
+    let members = trio_members();
+    let (assembly, reform) = column_anchor_points(centroid, (dx, dy), facing);
+    let assembly_slots = assign_column_slots(&members, assembly, facing);
+    let reform_slots = assign_column_slots(&members, reform, facing);
+    let final_slots = assign_slots(&members, FormationKind::Line, (dx, dy), facing);
+    for id in [900, 901, 902] {
+        sim.push_command(formation_cmd(id, dx, dy, FormationKind::Line));
+    }
+    sim.tick();
+    for id in [900, 901, 902] {
+        let o = ent(&sim, id).order.as_ref().expect("no order");
+        // The order's TARGET is still its formation slot...
+        assert_eq!(
+            (o.target_x, o.target_y),
+            slot_of(&final_slots, id),
+            "unit {id}'s target is not its formation slot"
+        );
+        // ...but its waypoint trail passes through BOTH of
+        // its column slots (assembly and re-form anchors).
+        assert!(
+            o.waypoints.contains(&slot_of(&assembly_slots, id)),
+            "unit {id}'s trail misses its assembly column slot {:?}: {:?}",
+            slot_of(&assembly_slots, id),
+            o.waypoints
+        );
+        assert!(
+            o.waypoints.contains(&slot_of(&reform_slots, id)),
+            "unit {id}'s trail misses its re-form column slot {:?}",
+            slot_of(&reform_slots, id)
+        );
+    }
+}
+
+#[test]
+fn long_formation_group_travels_and_reforms_at_the_destination() {
+    let mut sim = Sim::new(7);
+    let (dx, dy) = stage_long_trio(&mut sim);
+    for id in [900, 901, 902] {
+        sim.push_command(formation_cmd(id, dx, dy, FormationKind::Line));
+    }
+    let mut arrived = false;
+    for _ in 0..12000 {
+        sim.tick();
+        if [900, 901, 902].iter().all(|&id| ent(&sim, id).order.is_none()) {
+            arrived = true;
+            break;
+        }
+    }
+    assert!(arrived, "the long formation move never arrived");
+    let p = |id: u32| (f(ent(&sim, id).pos_x), f(ent(&sim, id).pos_y));
+    let (mx, _) = p(900);
+    let (ax, _) = p(901);
+    let (kx, _) = p(902);
+    // Re-formed near the destination: the arrived shape is
+    // the formation's layering, not the column's file.
+    assert!(mx > ax && ax > kx, "the arrived shape is not re-formed: {mx}, {ax}, {kx}");
+    for id in [900, 901, 902] {
+        let (px, py) = p(id);
+        assert!((px - f(dx)).hypot(py - f(dy)) <= 4.0, "unit {id} drifted from the formation: ({px}, {py}) vs ({}, {})", f(dx), f(dy));
+    }
+}
+
+#[test]
+fn long_formation_travel_replays_bit_identically() {
+    let run = || {
+        let mut sim = Sim::new(7);
+        let (dx, dy) = stage_long_trio(&mut sim);
+        for id in [900, 901, 902] {
+            sim.push_command(formation_cmd(id, dx, dy, FormationKind::Box));
+        }
+        for _ in 0..900 {
+            sim.tick();
+        }
+        sim.state_hash()
+    };
+    assert_eq!(run(), run(), "long column travel broke replay determinism");
+}
+
+#[test]
+fn long_formation_orders_round_trip_through_a_save() {
+    let mut sim = Sim::new(7);
+    let (dx, dy) = stage_long_trio(&mut sim);
+    for id in [900, 901, 902] {
+        sim.push_command(formation_cmd(id, dx, dy, FormationKind::Line));
+    }
+    sim.tick();
+    let bytes = sim.save_game();
+    let hash_before = sim.state_hash();
+    let mut restored = Sim::load_game(&bytes).expect("long formation save did not restore");
+    assert_eq!(restored.state_hash(), hash_before, "restored hash differs");
+    // The restored column route keeps travelling identically.
+    for _ in 0..240 {
+        sim.tick();
+        restored.tick();
+    }
+    assert_eq!(sim.state_hash(), restored.state_hash(), "restored column travel diverged");
 }
 
 #[test]

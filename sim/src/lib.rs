@@ -141,7 +141,10 @@ pub use entity::{
     is_player_owner, BellSnapshot, Dropoff, Entity, EntityKind, GarrisonRef, MoveOrder,
     QueuedOrder, Stance, Task, OWNER_GAIA, OWNER_OPPONENT, OWNER_PLAYER,
 };
-pub use formation::{assign_slots, facing_vectors, layer_of, FormationKind, FormationMember};
+pub use formation::{
+    assign_column_slots, assign_slots, column_anchor_points, facing_vectors, is_long_move,
+    layer_of, FormationKind, FormationMember,
+};
 pub use grid::{Grid, CELL_SIZE, GRID_DIM, TERRAIN_LAND, TERRAIN_WATER, WORLD_HALF};
 pub use mapgen::GeneratedMap;
 pub use hash::Fnv1a64;
@@ -6453,6 +6456,24 @@ impl Sim {
     /// shape. Slots are ordinary move targets: no new hashed
     /// state exists, and a stream that never orders a
     /// formation is byte-identical to before MOV-07.
+    ///
+    /// MOV-08: when the group's centroid-to-destination
+    /// distance exceeds the documented ~30 tiles
+    /// (`formation::is_long_move`), each member's order is
+    /// instead routed THROUGH its column slots
+    /// (`formation::assign_column_slots`) at the two travel
+    /// anchors (`formation::column_anchor_points`): the file
+    /// assembles just ahead of the centroid, travels the long
+    /// leg in column — the two anchors' slots carry identical
+    /// offsets, so that leg translates the file unchanged —
+    /// and spreads back into its formation slot on the short
+    /// final leg from the re-form anchor. The order's target
+    /// stays the formation slot and the column lives only in
+    /// its waypoint trail, so this, too, adds no hashed state
+    /// beyond the order fields the hash already covers; a
+    /// member whose column route cannot be pathed falls back
+    /// to the direct slot order, then to the anchor, exactly
+    /// as a short move does.
     fn finalize_formations(&mut self) {
         let groups = std::mem::take(&mut self.formation_session);
         for g in groups {
@@ -6477,6 +6498,10 @@ impl Sim {
                 I16F16::from_bits((ax / n) as i32),
                 I16F16::from_bits((ay / n) as i32),
             );
+            let centroid = (
+                I16F16::from_bits((cx / n) as i32),
+                I16F16::from_bits((cy / n) as i32),
+            );
             let facing = (
                 I16F16::from_bits((ax / n - cx / n) as i32),
                 I16F16::from_bits((ay / n - cy / n) as i32),
@@ -6490,6 +6515,22 @@ impl Sim {
                 })
                 .collect();
             let slots = formation::assign_slots(&members, g.formation, anchor, facing);
+            // MOV-08: the long-move column switch, keyed on
+            // the group's order distance (centroid → anchor).
+            let distance = steer::vec_len(anchor.0 - centroid.0, anchor.1 - centroid.1);
+            let column: Option<(
+                Vec<(u32, (I16F16, I16F16))>,
+                Vec<(u32, (I16F16, I16F16))>,
+            )> = if formation::is_long_move(distance) {
+                let (assembly, reform) =
+                    formation::column_anchor_points(centroid, anchor, facing);
+                Some((
+                    formation::assign_column_slots(&members, assembly, facing),
+                    formation::assign_column_slots(&members, reform, facing),
+                ))
+            } else {
+                None
+            };
             let cap = g
                 .members
                 .iter()
@@ -6498,7 +6539,8 @@ impl Sim {
                 .expect("a group with members has a slowest speed");
             let gid = self.next_group_id;
             self.next_group_id = self.next_group_id.wrapping_add(1).max(1);
-            for (m, (_, slot)) in g.members.iter().zip(slots.iter()) {
+            for (i, m) in g.members.iter().enumerate() {
+                let slot = slots[i].1;
                 if self.entities[m.idx].dead {
                     continue;
                 }
@@ -6509,9 +6551,24 @@ impl Sim {
                 if !still_targets {
                     continue;
                 }
+                // MOV-08: on a long move, route the order
+                // through this member's two column slots on
+                // the way to its formation slot; if any leg
+                // of that route cannot be pathed, fall
+                // through to the direct re-aim below.
+                let routed = match &column {
+                    Some((assembly_slots, reform_slots)) => self.set_move_order_via(
+                        m.idx,
+                        &[assembly_slots[i].1, reform_slots[i].1],
+                        slot.0,
+                        slot.1,
+                    ),
+                    None => false,
+                };
                 // Re-aim at the slot; fall back to the shared
                 // destination, then to the standing order.
-                if !self.set_move_order(m.idx, slot.0, slot.1)
+                if !routed
+                    && !self.set_move_order(m.idx, slot.0, slot.1)
                     && (slot.0, slot.1) != anchor
                 {
                     let _ = self.set_move_order(m.idx, anchor.0, anchor.1);
@@ -8894,6 +8951,47 @@ impl Sim {
             }
         }
         installed
+    }
+
+    /// MOV-08: install a move order toward `(x, y)` routed
+    /// through the `via` points in order — the waypoint trail
+    /// is the concatenation of the A* legs (position → via₁ →
+    /// … → target), each leg computed with the same gate
+    /// pass-through as `set_move_order`, and the order's
+    /// target is the final point. Returns false — and leaves
+    /// the standing order untouched, unlike `set_move_order`'s
+    /// clearing failure — when any leg cannot be pathed, so
+    /// the caller can fall back to a direct order. Used by
+    /// the formation finalizer to route a long move through
+    /// its column slots: the column exists only in the trail,
+    /// never in any new state.
+    fn set_move_order_via(
+        &mut self,
+        idx: usize,
+        via: &[(I16F16, I16F16)],
+        x: I16F16,
+        y: I16F16,
+    ) -> bool {
+        let gates = self.gate_cells_of(self.entities[idx].owner);
+        let mut from = (self.entities[idx].pos_x, self.entities[idx].pos_y);
+        let mut waypoints: Vec<(I16F16, I16F16)> = Vec::new();
+        for &point in via.iter().chain(std::iter::once(&(x, y))) {
+            match self.grid.find_path_through(from, point, &gates) {
+                Some(mut leg) if !leg.is_empty() => waypoints.append(&mut leg),
+                _ => return false,
+            }
+            from = point;
+        }
+        self.entities[idx].order = Some(MoveOrder {
+            target_x: x,
+            target_y: y,
+            waypoints,
+            wp_index: 0,
+            arrive: steer::WAYPOINT_REACH,
+            group_id: 0,
+            group_cap: I16F16::ZERO,
+        });
+        true
     }
 
     /// The economy phase of a tick: carcass decay (M3), training
