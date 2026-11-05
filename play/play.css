@@ -216,7 +216,21 @@ html, body {
   border-color: rgba(67, 48, 15, 0.55);
 }
 .overlay-card .btn-ghost:hover { border-color: #8a5a10; color: #8a5a10; }
-.pause-actions { display: flex; gap: 10px; justify-content: center; }
+/* The pause menu's first action row carries SIX .btn buttons
+   (Resume / How to play / Restart / Play online / Fullscreen /
+   Resign match): at the .btn size (15px, 18px side padding) their
+   natural widths sum to ~725px against the card's 460px content
+   box (520px max-width − 2×30px padding), and the second row's
+   five .btn-sm buttons sum to ~810px. Without wrapping the row
+   cannot fit: the flex items are squeezed/overflow the card edge
+   and the last button's label is clipped — live proof #155
+   (bot-loop, 2026-11-05) read the Resign button as "Resig matc"
+   at the panel's right edge. Wrapping (the .mode-row /
+   .quality-btns rows in this same menu already wrap) lets each
+   row break into lines at natural button widths, so every label
+   renders in full in EN/PT/ES; rows that already fit on one line
+   are unchanged. Presentation only. */
+.pause-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
 
 /* Match mode choice (M5): the Sandbox / AI Easy / AI Normal radios
    on the start card, in the same parchment-chip language as the
