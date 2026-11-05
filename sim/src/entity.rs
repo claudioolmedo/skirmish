@@ -141,6 +141,24 @@ pub enum EntityKind {
     /// lives in the unit row's `regicide_unit` flag (CLS-06), not
     /// in special code paths beyond the death sweep's flag check.
     King,
+    /// The Fishing Ship (Water W2a, ECO-15): the Dark Age civilian
+    /// ship trained at the Dock — it gathers food from fish nodes
+    /// on the water domain and deposits at a Dock only. It has NO
+    /// attack at all (the CLS-08 pattern, like the Monk): its unit
+    /// row's attack table is empty. It is the first member of the
+    /// SHIP armor class (CLS-07 narrows: the class existed
+    /// memberless since the class table landed). Class membership
+    /// decision (WATER-EXECUTION-PLAN §0.5, pinned 2026-11-05):
+    /// the wiki Ship article says all ships except the Fishing
+    /// Ship carry the Ships class, yet the Fishing Ship "takes the
+    /// exact same bonus damage from all units except the Fire
+    /// Galley, as if it were a regular ship" — and the Fire
+    /// Galley's update-169123 changelog records it LOSING its
+    /// attack bonus vs ships entirely, so the one excepted row no
+    /// longer exists in current DE. The ship therefore carries
+    /// SHIP and every anti-ship row (the Dock's shelter arrows,
+    /// the Watch Tower's +7) applies to it uniformly.
+    FishingShip,
 }
 
 impl EntityKind {
@@ -158,6 +176,9 @@ impl EntityKind {
     /// 22 = king (VIC-06 — the builder tree's 21 collided with
     /// the Relic on current main; renumbered 21 -> 22 at this
     /// landing, appended after the Relic, so no tag moved).
+    /// 23 = fishing ship (Water W2a, ECO-15 — appended after the
+    /// King, so no tag moved; verified first free on the W2a base
+    /// `7e0d294`, where 0–22 were taken).
     pub fn tag(self) -> u8 {
         match self {
             EntityKind::Villager => 0,
@@ -183,6 +204,7 @@ impl EntityKind {
             EntityKind::Monk => 20,
             EntityKind::Relic => 21,
             EntityKind::King => 22,
+            EntityKind::FishingShip => 23,
         }
     }
 
@@ -212,6 +234,7 @@ impl EntityKind {
             20 => Some(EntityKind::Monk),
             21 => Some(EntityKind::Relic),
             22 => Some(EntityKind::King),
+            23 => Some(EntityKind::FishingShip),
             _ => None,
         }
     }
@@ -235,6 +258,21 @@ impl EntityKind {
             | EntityKind::Scorpion => crate::tech::Age::Castle,
             | EntityKind::Monk => crate::tech::Age::Castle,
             _ => crate::tech::Age::Dark,
+        }
+    }
+
+    /// The movement domain this kind travels in (Water W2a,
+    /// MOV-11): the Fishing Ship is the first water-domain kind —
+    /// every path query a unit makes consults this lookup
+    /// (`Sim::set_move_order` and kin), and every land kind
+    /// defaults to Land, so no existing row changes. The domain
+    /// is DERIVED from the kind, never stored (the water plan's
+    /// hash discipline: no new hashed state for a land-only
+    /// match).
+    pub fn domain(self) -> crate::grid::Domain {
+        match self {
+            EntityKind::FishingShip => crate::grid::Domain::Water,
+            _ => crate::grid::Domain::Land,
         }
     }
 
@@ -271,6 +309,7 @@ impl EntityKind {
                 | EntityKind::Scorpion
                 | EntityKind::Monk
                 | EntityKind::King
+                | EntityKind::FishingShip
         )
     }
 
@@ -295,6 +334,7 @@ impl EntityKind {
                 | EntityKind::Mangonel
                 | EntityKind::Scorpion
                 | EntityKind::Monk
+                | EntityKind::FishingShip
         )
     }
 

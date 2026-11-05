@@ -119,6 +119,8 @@ mod teams_tests;
 #[cfg(test)]
 mod victory_teams_tests;
 mod water_w1_tests;
+#[cfg(test)]
+mod water_w2a_tests;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
@@ -3642,6 +3644,18 @@ impl Sim {
         kind: BuildingKind,
     ) -> Option<crate::build::BuildingWeapon> {
         let mut w = kind.weapon()?;
+        if kind == BuildingKind::Dock {
+            // Water W2a: the Dock's attack table is age-keyed —
+            // the anti-ship bonus steps +0/2/3/4 by the OWNER's
+            // Age (the table lives in `build.rs` beside the
+            // weapon row).
+            w.attacks = match self.age_of(owner) {
+                crate::tech::Age::Dark => crate::build::DOCK_ATTACKS_DARK,
+                crate::tech::Age::Feudal => crate::build::DOCK_ATTACKS_FEUDAL,
+                crate::tech::Age::Castle => crate::build::DOCK_ATTACKS_CASTLE,
+                crate::tech::Age::Imperial => crate::build::DOCK_ATTACKS_IMPERIAL,
+            };
+        }
         if kind == BuildingKind::WatchTower && self.has_tech(owner, TechId::Fletching) {
             w.attacks = crate::build::WATCH_TOWER_FLETCHING_ATTACKS;
             w.range_max += I16F16::from_num(4); // +1 tile (TEC-06)
@@ -3796,14 +3810,36 @@ impl Sim {
         from_x: I16F16,
         from_y: I16F16,
     ) -> Option<Dropoff> {
+        self.deposit_target_for(owner, kind, from_x, from_y, EntityKind::Villager)
+    }
+
+    /// `deposit_target` for a named gatherer kind (Water W2a,
+    /// ECO-15): a Fishing Ship deposits at a Dock ONLY — never at
+    /// a Town Center or a camp (the plan §5 pin: "a Fishing Ship
+    /// beside a Mill does not deposit"; DE's Dock is the ships'
+    /// sole drop-off, WATER-SPEC §4). Every other gatherer reads
+    /// the standing search above, unchanged.
+    fn deposit_target_for(
+        &self,
+        owner: u8,
+        kind: ResourceKind,
+        from_x: I16F16,
+        from_y: I16F16,
+        gatherer: EntityKind,
+    ) -> Option<Dropoff> {
         let mut best: Option<(i64, Dropoff)> = None;
-        if let Some(tc) = self.tc_entity_of(owner) {
-            let d = steer::vec_len(tc.pos_x - from_x, tc.pos_y - from_y);
-            let db = d.to_bits() as i64;
-            best = Some((db * db, Dropoff::TownCenter));
+        if gatherer != EntityKind::FishingShip {
+            if let Some(tc) = self.tc_entity_of(owner) {
+                let d = steer::vec_len(tc.pos_x - from_x, tc.pos_y - from_y);
+                let db = d.to_bits() as i64;
+                best = Some((db * db, Dropoff::TownCenter));
+            }
         }
         for b in &self.buildings {
             if b.owner != owner || !b.complete || !b.kind.accepts(kind) {
+                continue;
+            }
+            if gatherer == EntityKind::FishingShip && b.kind != BuildingKind::Dock {
                 continue;
             }
             let d = self.distance_to_footprint(from_x, from_y, b.pos_x, b.pos_y, b.kind);
@@ -5229,12 +5265,17 @@ impl Sim {
         match tech {
             TechId::FeudalAge => {
                 self.players[slot].age = Age::Feudal;
+                // Water W2a: the Dock's shelter-arrow cap is
+                // age-keyed — an age-up recomputes every Dock.
+                self.recompute_dock_arrows_for(owner);
             }
             TechId::CastleAge => {
                 self.players[slot].age = Age::Castle;
+                self.recompute_dock_arrows_for(owner);
             }
             TechId::ImperialAge => {
                 self.players[slot].age = Age::Imperial;
+                self.recompute_dock_arrows_for(owner);
             }
             TechId::Loom => {
                 self.players[slot].techs |= tech.bit();
@@ -6787,7 +6828,16 @@ impl Sim {
             let cell = self
                 .grid
                 .world_to_cell(self.entities[idx].pos_x, self.entities[idx].pos_y);
-            if self.grid.is_blocked(cell.0, cell.1) {
+            // Water W2a (MOV-11): the integrity reading is the
+            // entity's own DOMAIN — the land view calls deep
+            // water blocked and land open, which displaced a
+            // Fishing Ship out of its pond onto the bank on its
+            // first tick (and would strand every ship at the
+            // shore edge of any pond big enough to sail). Land
+            // kinds read Domain::Land, identical to the standing
+            // `is_blocked`, so no land behavior moves.
+            let domain = self.entities[idx].kind.domain();
+            if self.grid.is_blocked_for(domain, cell.0, cell.1) {
                 self.displace_out_of_blocked(idx);
             }
         }
@@ -8261,11 +8311,27 @@ impl Sim {
             Some(i) => i,
             None => return,
         };
-        if self.entities[idx].kind != EntityKind::Villager || self.entities[idx].dead {
+        if self.entities[idx].dead {
             return;
         }
+        // The gatherer/node pairing gate (Water W2a, ECO-15):
+        // villagers work every land node plus SHORE fish (never
+        // deep fish — no bank reaches it); a Fishing Ship works
+        // fish only, of either kind. Every other kind gathers
+        // nothing.
+        let gatherer = self.entities[idx].kind;
         match self.node_index(node) {
-            Some(ni) if !self.nodes[ni].is_depleted() => {}
+            Some(ni) if !self.nodes[ni].is_depleted() => {
+                let nk = self.nodes[ni].kind;
+                let allowed = match gatherer {
+                    EntityKind::Villager => !nk.is_fish() || nk == NodeKind::ShoreFish,
+                    EntityKind::FishingShip => nk.is_fish(),
+                    _ => false,
+                };
+                if !allowed {
+                    return;
+                }
+            }
             _ => return,
         }
         self.entities[idx].order_queue.clear();
@@ -8300,7 +8366,7 @@ impl Sim {
                     let e = &self.entities[idx];
                     (e.owner, e.pos_x, e.pos_y)
                 };
-                match self.deposit_target(owner, k, px, py) {
+                match self.deposit_target_for(owner, k, px, py, self.entities[idx].kind) {
                     Some(target) => {
                         self.entities[idx].task = Task::Returning;
                         self.entities[idx].task_dropoff = Some(target);
@@ -8348,6 +8414,41 @@ impl Sim {
             }
             None => return false,
         };
+        if kind == NodeKind::ShoreFish
+            && self.entities[idx].kind.domain() == Domain::Land
+        {
+            // Water W2a (ECO-15): a fisherman walks to the BANK,
+            // not into the spot — when the spot's own cell is
+            // deep water (unenterable on the land domain), the
+            // order targets the first ring cell the fisherman
+            // can stand on, in the ring scan's fixed order; the
+            // ToNode arrival rule certifies from beside the
+            // spot. A shallows spot is enterable and takes the
+            // plain order below.
+            let (fx, fy) = self.grid.world_to_cell(nx, ny);
+            if self.grid.is_blocked_for(Domain::Land, fx, fy) {
+                for dy in -1i32..=1 {
+                    for dx in -1i32..=1 {
+                        if dx == 0 && dy == 0 {
+                            continue;
+                        }
+                        let (cx, cy) = (fx as i32 + dx, fy as i32 + dy);
+                        if cx < 0 || cy < 0 || cx >= GRID_DIM as i32 || cy >= GRID_DIM as i32 {
+                            continue;
+                        }
+                        let (cx, cy) = (cx as u32, cy as u32);
+                        if self.grid.is_blocked_for(Domain::Land, cx, cy) {
+                            continue;
+                        }
+                        let p = self.grid.cell_center(cx, cy);
+                        if self.set_move_order(idx, p.0, p.1) {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }
+        }
         if kind != NodeKind::Tree {
             return self.set_move_order(idx, nx, ny);
         }
@@ -9146,6 +9247,20 @@ impl Sim {
                 }
             }
         }
+        // Water W2a (ECO-15): a Fishing Ship rallied onto a fish
+        // node starts fishing on spawn — the villager branch's
+        // shape, on the water domain (the pairing check mirrors
+        // the gather order gate's).
+        if self.entities[idx].kind == EntityKind::FishingShip {
+            if let Some(nid) = rally_node {
+                if let Some(ni) = self.node_index(nid) {
+                    if self.nodes[ni].kind.is_fish() && !self.nodes[ni].is_depleted() {
+                        self.begin_gather(idx, nid);
+                        return;
+                    }
+                }
+            }
+        }
         self.set_move_order(idx, rx, ry);
     }
 
@@ -9562,7 +9677,7 @@ impl Sim {
     /// order; `from` itself is never returned — callers use this
     /// to displace a unit out of a blocked cell. Bounded; `None`
     /// if the whole neighborhood is solid.
-    fn nearest_open_cell(&self, from: (u32, u32)) -> Option<(u32, u32)> {
+    fn nearest_open_cell(&self, from: (u32, u32), domain: Domain) -> Option<(u32, u32)> {
         for r in 1..=8i32 {
             for dy in -r..=r {
                 for dx in -r..=r {
@@ -9574,7 +9689,10 @@ impl Sim {
                         continue;
                     }
                     let (x, y) = (x as u32, y as u32);
-                    if !self.grid.is_blocked(x, y) {
+                    // Water W2a: "open" reads on the displaced
+                    // entity's domain (a ship displaces to water,
+                    // never to the bank).
+                    if !self.grid.is_blocked_for(domain, x, y) {
                         return Some((x, y));
                     }
                 }
@@ -9592,7 +9710,8 @@ impl Sim {
         let cell = self
             .grid
             .world_to_cell(self.entities[idx].pos_x, self.entities[idx].pos_y);
-        if let Some((nx, ny)) = self.nearest_open_cell(cell) {
+        let domain = self.entities[idx].kind.domain();
+        if let Some((nx, ny)) = self.nearest_open_cell(cell, domain) {
             let (wx, wy) = self.grid.cell_center(nx, ny);
             let e = &mut self.entities[idx];
             e.pos_x = wx;
@@ -9625,8 +9744,21 @@ impl Sim {
         // the block as the owner approaches. In a world without
         // gates of this owner the search is the plain one,
         // unchanged.
-        let gates = self.gate_cells_of(self.entities[idx].owner);
-        let order = match self.grid.find_path_through((px, py), (x, y), &gates) {
+        // Water W2a (MOV-11): the search runs on the mover's own
+        // DOMAIN (the kind→domain lookup) — a ship paths over
+        // water and refuses land exactly as a land unit refuses
+        // deep water; land kinds read Domain::Land, so every
+        // existing caller's search is the plain one, unchanged.
+        let domain = self.entities[idx].kind.domain();
+        let gates = if domain == Domain::Land {
+            self.gate_cells_of(self.entities[idx].owner)
+        } else {
+            Vec::new()
+        };
+        let order = match self
+            .grid
+            .find_path_through_for(domain, (px, py), (x, y), &gates)
+        {
             Some(wps) if !wps.is_empty() => Some(MoveOrder {
                 target_x: x,
                 target_y: y,
@@ -9673,11 +9805,18 @@ impl Sim {
         x: I16F16,
         y: I16F16,
     ) -> bool {
-        let gates = self.gate_cells_of(self.entities[idx].owner);
+        // Water W2a: the legs run on the mover's domain, like
+        // `set_move_order` (the gate exemption is land-only).
+        let domain = self.entities[idx].kind.domain();
+        let gates = if domain == Domain::Land {
+            self.gate_cells_of(self.entities[idx].owner)
+        } else {
+            Vec::new()
+        };
         let mut from = (self.entities[idx].pos_x, self.entities[idx].pos_y);
         let mut waypoints: Vec<(I16F16, I16F16)> = Vec::new();
         for &point in via.iter().chain(std::iter::once(&(x, y))) {
-            match self.grid.find_path_through(from, point, &gates) {
+            match self.grid.find_path_through_for(domain, from, point, &gates) {
                 Some(mut leg) if !leg.is_empty() => waypoints.append(&mut leg),
                 _ => return false,
             }
@@ -9815,7 +9954,15 @@ impl Sim {
             }
         }
         for idx in 0..self.entities.len() {
-            if self.entities[idx].kind == EntityKind::Villager
+            // Water W2a (ECO-15): the work machine is the
+            // gatherer's, not the villager's — a tasked Fishing
+            // Ship runs the same phase machine on the water
+            // domain (ECO-15's own impl note prescribes the
+            // verbatim reuse). The kind set is exactly the two
+            // gatherer kinds; every other kind's tick is
+            // untouched.
+            if (self.entities[idx].kind == EntityKind::Villager
+                || self.entities[idx].kind == EntityKind::FishingShip)
                 && !self.entities[idx].dead
                 && self.entities[idx].garrisoned_in.is_none()
             {
@@ -9854,12 +10001,17 @@ impl Sim {
         let (cx0, cy0) = (b.pos_x, b.pos_y);
         let (rally, rally_node) = (b.rally, b.rally_node);
         let owner = b.owner; // the unit belongs to the building's player (M5)
+        // Water W2a (ECO-15): the spawn scan reads the unit's
+        // DOMAIN — a Fishing Ship spawns on a water ring cell of
+        // its Dock, never beached on the shore side; land kinds
+        // read the standing land check, unchanged.
+        let domain = kind.domain();
         let mut pos = None;
         for (cx, cy) in build::ring_cells(ax, ay, size) {
             if cx >= GRID_DIM || cy >= GRID_DIM {
                 continue;
             }
-            if !self.grid.is_blocked(cx, cy) {
+            if !self.grid.is_blocked_for(domain, cx, cy) {
                 pos = Some(self.grid.cell_center(cx, cy));
                 break;
             }
@@ -9874,7 +10026,7 @@ impl Sim {
             ] {
                 let p = (cx0 + ox, cy0 + oy);
                 let (ccx, ccy) = self.grid.world_to_cell(p.0, p.1);
-                if !self.grid.is_blocked(ccx, ccy) {
+                if !self.grid.is_blocked_for(domain, ccx, ccy) {
                     pos = Some(p);
                     break;
                 }
@@ -9992,7 +10144,31 @@ impl Sim {
                     && (d <= stand_limit
                         || (self.entities[idx].order.is_none()
                             && d <= I16F16::from_bits(288_358))); // 4.4, crowded case only
-                if d <= GATHER_RANGE || at_tree_stand {
+                // Water W2a (ECO-15): a fisherman on the bank —
+                // a shore-fish spot can sit on a deep-water cell
+                // beside the shore, which the land domain cannot
+                // enter; a land gatherer standing in a ring cell
+                // of the spot has arrived, exactly the tree-stand
+                // reading (the gather-adjacency test accepts
+                // "beside" for shore fish). A ship needs no such
+                // rule: the spot's cell is open water to it and
+                // the plain range test certifies.
+                let beside_shore_fish = {
+                    let ni = self.node_index(node_id).expect("live node checked");
+                    if self.nodes[ni].kind == NodeKind::ShoreFish
+                        && self.entities[idx].kind.domain() == Domain::Land
+                    {
+                        let (vx, vy) = self.grid.world_to_cell(
+                            self.entities[idx].pos_x,
+                            self.entities[idx].pos_y,
+                        );
+                        let (fx, fy) = self.grid.world_to_cell(nx, ny);
+                        vx.abs_diff(fx) <= 1 && vy.abs_diff(fy) <= 1
+                    } else {
+                        false
+                    }
+                };
+                if d <= GATHER_RANGE || at_tree_stand || beside_shore_fish {
                     let e = &mut self.entities[idx];
                     e.task = Task::Gathering;
                     e.order = None;
@@ -10039,10 +10215,19 @@ impl Sim {
                 // (TEC-06 percentage patches, applied at lookup):
                 // Double-Bit Axe on trees, Gold / Stone Mining on
                 // their mines (tech::patched_gather_rate).
+                // Water W2a (ECO-15): the rate keys on the
+                // GATHERER as well — fish rates are per (node,
+                // gatherer) rows, and the fishing pair patches
+                // the ship's rows only.
                 let owner_techs = player_slot(self.entities[idx].owner)
                     .map(|s| self.players[s].techs)
                     .unwrap_or(0);
-                let rate = crate::tech::patched_gather_rate(self.nodes[ni].kind, owner_techs);
+                let gatherer = self.entities[idx].kind;
+                let rate = crate::tech::patched_gather_rate_for(
+                    self.nodes[ni].kind,
+                    gatherer,
+                    owner_techs,
+                );
                 // Carry capacity is the node's, not a global (ECO-03):
                 // 35 from a hunt carcass, 10 elsewhere — scaled by
                 // the gatherer's owner's Wheelbarrow (13 / 44) when
@@ -10051,11 +10236,27 @@ impl Sim {
                 // re-tasked) has negative room: `take` clamps to
                 // nothing and the full check below sends it home to
                 // deposit first.
+                // Water W2a (ECO-15): a Fishing Ship's cap is the
+                // SHIP's, not the node's — 15 food, +5 per fishing
+                // tech (the flat carry patch, the Wheelbarrow
+                // pattern; the node's tiered table is the
+                // villager's and never reads for a ship).
                 let wheelbarrow = owner_techs & TechId::Wheelbarrow.bit() != 0;
                 let hand_cart = owner_techs & TechId::HandCart.bit() != 0;
-                let mut cap = self.nodes[ni]
-                    .kind
-                    .carry_cap_tiered(wheelbarrow, hand_cart);
+                let mut cap = if gatherer == EntityKind::FishingShip {
+                    let mut c = crate::econ::FISHING_SHIP_CARRY_CAPACITY;
+                    if owner_techs & TechId::FishingLines.bit() != 0 {
+                        c += I16F16::from_num(5);
+                    }
+                    if owner_techs & TechId::Gillnets.bit() != 0 {
+                        c += I16F16::from_num(5);
+                    }
+                    c
+                } else {
+                    self.nodes[ni]
+                        .kind
+                        .carry_cap_tiered(wheelbarrow, hand_cart)
+                };
                 // Heavy Plow (ECO-14): "Villagers carry +1 food"
                 // (wiki, Heavy Plow) — read as the farm harvest:
                 // one more food in the load when the node is a
@@ -10114,7 +10315,9 @@ impl Sim {
                     (e.owner, e.carry_kind, e.pos_x, e.pos_y)
                 };
                 let target = match kind {
-                    Some(k) => self.deposit_target(owner, k, px, py),
+                    Some(k) => {
+                        self.deposit_target_for(owner, k, px, py, self.entities[idx].kind)
+                    }
                     None => None,
                 };
                 match target {
@@ -10941,20 +11144,45 @@ impl Sim {
     /// scan, strictly-nearer replaces). Returns whether a new
     /// assignment was made.
     fn retarget_after_depletion(&mut self, idx: usize, dead_node: u32) -> bool {
-        let (resource, dx, dy) = match self.node_index(dead_node) {
+        let (resource, dx, dy, dead_kind) = match self.node_index(dead_node) {
             Some(ni) => {
                 let n = &self.nodes[ni];
-                (n.resource(), n.pos_x, n.pos_y)
+                (n.resource(), n.pos_x, n.pos_y, n.kind)
             }
             None => return false,
+        };
+        // Water W2a (ECO-15): the fish family retargets INSIDE
+        // itself — a Fishing Ship whose spot depletes retargets
+        // the nearest fish of either kind (a pond is one fishing
+        // ground), and a fisherman on a dead shore spot looks for
+        // another shore spot, never wandering to a berry bush
+        // because both are "food". The radius is the fish
+        // family's own constant (`FISH_RETARGET_RADIUS`).
+        let fish_family = dead_kind.is_fish() || self.entities[idx].kind == EntityKind::FishingShip;
+        let radius = if fish_family {
+            econ::FISH_RETARGET_RADIUS
+        } else {
+            econ::RETARGET_RADIUS
         };
         let mut best: Option<(i64, u32)> = None; // (distance² bits, id)
         for n in &self.nodes {
             if n.id == dead_node || n.is_depleted() || n.resource() != resource {
                 continue;
             }
+            if fish_family {
+                // Ships take either fish kind; a villager takes
+                // shore fish only (the order gate's pairing).
+                let ok = if self.entities[idx].kind == EntityKind::FishingShip {
+                    n.kind.is_fish()
+                } else {
+                    n.kind == NodeKind::ShoreFish
+                };
+                if !ok {
+                    continue;
+                }
+            }
             let d = steer::vec_len(n.pos_x - dx, n.pos_y - dy);
-            if d > econ::RETARGET_RADIUS {
+            if d > radius {
                 continue;
             }
             let db = d.to_bits() as i64;
@@ -11013,7 +11241,7 @@ impl Sim {
             (e.owner, e.carry_kind, e.pos_x, e.pos_y)
         };
         let target = match kind {
-            Some(k) => self.deposit_target(owner, k, px, py),
+            Some(k) => self.deposit_target_for(owner, k, px, py, self.entities[idx].kind),
             None => None,
         };
         match target {

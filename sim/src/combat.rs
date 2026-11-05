@@ -2278,6 +2278,14 @@ impl Sim {
             return;
         }
         let (owner, bx, by, size) = (b.owner, b.pos_x, b.pos_y, b.kind.footprint_size());
+        // Water W2a (BLD-14/GAR-06 pattern): the Dock's weapon
+        // exists ONLY while shelter-garrisoned — an empty Dock
+        // never acquires or looses (its stored arrow count is 0
+        // in Dark Age too, where the cap is 0: the gate reads
+        // the garrison list, the arrows gate the volley below).
+        if b.kind == crate::build::BuildingKind::Dock && b.garrison.is_empty() {
+            return;
+        }
         let Some(w) = self.building_weapon(owner, b.kind) else {
             return;
         };
@@ -2430,11 +2438,20 @@ impl Sim {
         let b = &self.buildings[bi];
         // GAR-05: the stored garrison arrow count overrides the
         // profile's base volley while it is set (towers/Castle).
-        let volley = if b.garrison_arrows > 0 {
+        // Water W2a: for the Dock the stored count IS the volley,
+        // always — 0 stored arrows (Dark Age's cap, or a shelter
+        // over the cap's count) looses nothing: there is no base
+        // arrow the sources give an ungarrisoned-by-arrows Dock.
+        let volley = if b.kind == crate::build::BuildingKind::Dock {
+            b.garrison_arrows
+        } else if b.garrison_arrows > 0 {
             b.garrison_arrows
         } else {
             w.volley
         };
+        if volley == 0 {
+            return;
+        }
         if let Some(st) = b.weapon_strike_tick {
             if tick >= st {
                 self.building_weapon_release(bi, &w, volley);

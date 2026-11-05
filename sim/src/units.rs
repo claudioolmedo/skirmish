@@ -168,6 +168,7 @@ pub fn spec(kind: EntityKind) -> &'static UnitSpec {
         EntityKind::Monk => &MONK,
         EntityKind::Relic => &RELIC,
         EntityKind::King => &KING,
+        EntityKind::FishingShip => &FISHING_SHIP,
     }
 }
 
@@ -789,6 +790,48 @@ static KING: UnitSpec = UnitSpec {
     train_ticks: 0,
     regicide_unit: true,
     immune_conversion: true,
+    regenerates: 0,
+};
+
+/// Fishing Ship (Water W2a, ECO-15; wiki, Ship list fresh crawl
+/// 2026-11-05 via WATER-SPEC §3.1 — post-update-169123 values):
+/// HP 50 (the pre-overhaul 60 is superseded, SPEC §8.3), armor
+/// 1/1, NO attack, speed 1.26 tiles/s, LoS 5, cost 75 wood,
+/// train 40 s at the Dock (Dark Age). Class: SHIP — the first
+/// member (see the kind's §0.5 membership note in `entity.rs`).
+/// Radius 1.6 world units (0.4 tiles): DE's collision size for
+/// the ship is 0.4 (wiki, Fishing Ship changelog, update 81058);
+/// read as this row's radius it is an implementation constant
+/// in the plan's §8.9 sense (no DE source documents separation
+/// behavior on water), recorded as such.
+static FISHING_SHIP: UnitSpec = UnitSpec {
+    max_hp: 50,
+    attacks: NO_ATTACKS,
+    armor_melee: 1,
+    armor_pierce: 1,
+    armor_building: 0,
+    classes: cls::mask(&[cls::SHIP]),
+    range_max: I16F16::ZERO,
+    range_min: I16F16::ZERO,
+    reload_ticks: 0,
+    attack_delay_ticks: 0,
+    accuracy: 100,
+    projectile_speed: I16F16::ZERO,
+    scatter: I16F16::ZERO,
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
+    speed: I16F16::from_bits(5_505), // 1.26 tiles/s (absolute scale, see header)
+    los: I16F16::from_bits(1_310_720), // 20 (5 tiles)
+    radius: I16F16::from_bits(104_858), // 1.6 (0.4 tiles — see row docs)
+    carcass_food: 0,
+    carcass_decay_bits: 0,
+    food_cost: 0,
+    wood_cost: 75,
+    gold_cost: 0,
+    train_ticks: 2400, // 40 s
+    regicide_unit: false,
+    immune_conversion: false,
     regenerates: 0,
 };
 

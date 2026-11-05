@@ -103,6 +103,41 @@ fn nodes_are_reachable_from_town_center() {
         let (cx, cy) = sim.grid().world_to_cell(n.pos_x, n.pos_y);
         let reachable = if n.kind == NodeKind::Tree {
             flood[(cy * dim + cx) as usize]
+        } else if n.kind.is_fish() {
+            // Water W2a (ECO-15): a fish spot is not land-reachable
+            // by design — its reachability reading is the water
+            // plan's (§3.3.3): the cell is water-side and its pond
+            // (water-side component) reaches a shore beside the
+            // flooded landmass. Shore fish stand in the flood
+            // itself (shallows are land-passable).
+            if !sim.grid().is_water_side(cx, cy) {
+                false
+            } else if n.kind == NodeKind::ShoreFish && !flood[(cy * dim + cx) as usize] {
+                false
+            } else {
+                let mut seen = vec![false; (dim * dim) as usize];
+                let mut stack = vec![(cx, cy)];
+                seen[(cy * dim + cx) as usize] = true;
+                let mut shore_reached = false;
+                while let Some((ccx, ccy)) = stack.pop() {
+                    for (dx, dy) in [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)] {
+                        let (nx, ny) = (ccx as i32 + dx, ccy as i32 + dy);
+                        if nx < 0 || ny < 0 || nx >= dim as i32 || ny >= dim as i32 {
+                            continue;
+                        }
+                        let (nx, ny) = (nx as u32, ny as u32);
+                        let i = (ny * dim + nx) as usize;
+                        if flood[i] {
+                            shore_reached = true;
+                        }
+                        if !seen[i] && sim.grid().is_water_side(nx, ny) {
+                            seen[i] = true;
+                            stack.push((nx, ny));
+                        }
+                    }
+                }
+                shore_reached
+            }
         } else {
             sim.grid()
                 .find_path((tc.pos_x, tc.pos_y), (n.pos_x, n.pos_y))

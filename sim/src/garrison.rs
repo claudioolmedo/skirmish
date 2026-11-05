@@ -287,12 +287,29 @@ impl Sim {
                 None => return Vec::new(),
             },
         };
+        // Water W2a: a Dock host's exits are WATER cells — the
+        // only units inside a Dock are Fishing Ships, and a ship
+        // placed on a land ring cell would be beached. Every
+        // other host keeps the land reading.
+        let dock_host = matches!(host, GarrisonRef::Building(bid)
+            if self.building_index(bid)
+                .map(|bi| self.buildings[bi].kind == BuildingKind::Dock)
+                .unwrap_or(false));
+        let cell_free = |cx: u32, cy: u32| {
+            if dock_host {
+                !self
+                    .grid
+                    .is_blocked_for(crate::grid::Domain::Water, cx, cy)
+            } else {
+                !self.grid.is_blocked(cx, cy)
+            }
+        };
         let mut out = Vec::new();
         for (cx, cy) in crate::build::ring_cells(anchor.0, anchor.1, size) {
             if cx >= crate::GRID_DIM || cy >= crate::GRID_DIM {
                 continue;
             }
-            if !self.grid.is_blocked(cx, cy) {
+            if cell_free(cx, cy) {
                 out.push(self.grid.cell_center(cx, cy));
             }
         }
@@ -304,7 +321,14 @@ impl Sim {
                 (I16F16::ZERO, half),
                 (I16F16::ZERO, -half),
             ] {
-                out.push((cx0 + ox, cy0 + oy));
+                let p = (cx0 + ox, cy0 + oy);
+                if dock_host {
+                    let (ccx, ccy) = self.grid.world_to_cell(p.0, p.1);
+                    if ccx >= crate::GRID_DIM || ccy >= crate::GRID_DIM || !cell_free(ccx, ccy) {
+                        continue;
+                    }
+                }
+                out.push(p);
             }
         }
         out
@@ -369,6 +393,21 @@ impl Sim {
                 contributed += self.contributed_dps_bits(owner, k);
             }
         }
+        // Water W2a: the Dock's arrows are AGE-KEYED, not
+        // DPS-derived — min(sheltered Fishing Ships, the age
+        // cap 0/3/4/5) — so its recompute short-circuits the
+        // DPS path below (a Fishing Ship contributes no ranged
+        // DPS row; the cap discipline is the documented one).
+        if kind_tag == Some(BuildingKind::Dock) {
+            let cap = crate::build::dock_arrow_cap(self.age_of(owner));
+            let total = (ids.len() as u32).min(cap);
+            if let GarrisonRef::Building(bid) = host {
+                if let Some(bi) = self.building_index(bid) {
+                    self.buildings[bi].garrison_arrows = total;
+                }
+            }
+            return;
+        }
         let weapon = match kind_tag {
             Some(k) => k.weapon(),
             None => Some(crate::TOWN_CENTER_WEAPON),
@@ -419,6 +458,22 @@ impl Sim {
                 }
             }
             GarrisonRef::Unit(_) => unreachable!("returned above"),
+        }
+    }
+
+    /// Water W2a: recompute every Dock shelter arrow count of
+    /// `owner` — called when the owner's Age advances, since the
+    /// Dock cap is age-keyed and an age-up is a garrison-relevant
+    /// event the per-change recompute cannot see.
+    pub(crate) fn recompute_dock_arrows_for(&mut self, owner: u8) {
+        let docks: Vec<u32> = self
+            .buildings
+            .iter()
+            .filter(|b| b.owner == owner && b.kind == BuildingKind::Dock)
+            .map(|b| b.id)
+            .collect();
+        for bid in docks {
+            self.recompute_garrison_arrows(GarrisonRef::Building(bid));
         }
     }
 
@@ -542,6 +597,38 @@ impl Sim {
             e.patrol_next = 0;
             e.garrison_target = Some(host);
             e.garrison_prod_entry = prod_entry;
+        }
+        // Water W2a: a water-domain unit (a Fishing Ship
+        // sheltering in a Dock) approaches over water — the
+        // host's exit points ARE its water standing points, and
+        // the first one reachable on the water domain is the
+        // approach (the Ram's live-geometry discipline, on the
+        // domain axis). Land walkers keep the paths below.
+        if self.entities[idx].kind.domain() == crate::grid::Domain::Water {
+            let (px, py) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
+            let approach = self
+                .host_exit_points(host)
+                .into_iter()
+                .find(|p| {
+                    self.grid
+                        .find_path_for(crate::grid::Domain::Water, (px, py), *p)
+                        .is_some()
+                });
+            match approach {
+                Some((gx, gy)) => {
+                    self.set_move_order(idx, gx, gy);
+                }
+                None => {
+                    // No reachable water standing point: aim at
+                    // the host center's water edge — the arrival
+                    // test in the garrison tick reads the live
+                    // footprint distance, not the order's end.
+                    if let Some((_, bx, by, _)) = self.host_geometry(host) {
+                        self.set_move_order(idx, bx, by);
+                    }
+                }
+            }
+            return true;
         }
         // Walk to a standing point beside the host.
         let approach = match host {

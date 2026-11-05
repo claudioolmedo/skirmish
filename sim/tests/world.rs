@@ -184,6 +184,58 @@ fn starts_connect_and_every_resource_is_reachable() {
             if d2(c, htc) >= d2(c, otc) {
                 continue; // the opponent's package — symmetric by construction
             }
+            // Water W2a (ECO-15): fish are water resources — the
+            // landmass reading cannot hold for a deep-fish cell.
+            // Their reachability reading is the water plan's
+            // (§3.3.3): the cell is water-side, and its pond
+            // (the water-side component containing it) reaches a
+            // shore — a water-side cell beside the flooded
+            // landmass, where a Dock can stand and a ship can
+            // sail from. Shore fish also stand in the flood
+            // itself (shallows are land-passable).
+            if n.kind.is_fish() {
+                assert!(
+                    sim.grid().is_water_side(c.0, c.1),
+                    "seed {seed}: fish node {} ({:?}) off water",
+                    n.id,
+                    n.kind
+                );
+                if n.kind == NodeKind::ShoreFish {
+                    assert!(
+                        flood[(c.1 * GRID_DIM + c.0) as usize],
+                        "seed {seed}: shore fish {} off the shared landmass",
+                        n.id
+                    );
+                }
+                let mut seen = vec![false; (GRID_DIM * GRID_DIM) as usize];
+                let mut stack = vec![c];
+                seen[(c.1 * GRID_DIM + c.0) as usize] = true;
+                let mut shore_reached = false;
+                while let Some((cx, cy)) = stack.pop() {
+                    for (dx, dy) in [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)] {
+                        let (nx, ny) = (cx as i32 + dx, cy as i32 + dy);
+                        if nx < 0 || ny < 0 || nx >= GRID_DIM as i32 || ny >= GRID_DIM as i32 {
+                            continue;
+                        }
+                        let (nx, ny) = (nx as u32, ny as u32);
+                        let i = (ny * GRID_DIM + nx) as usize;
+                        if flood[i] {
+                            shore_reached = true;
+                        }
+                        if !seen[i] && sim.grid().is_water_side(nx, ny) {
+                            seen[i] = true;
+                            stack.push((nx, ny));
+                        }
+                    }
+                }
+                assert!(
+                    shore_reached,
+                    "seed {seed}: fish node {} ({:?}) in a pond with no reachable shore",
+                    n.id,
+                    n.kind
+                );
+                continue;
+            }
             assert!(
                 flood[(c.1 * GRID_DIM + c.0) as usize],
                 "seed {seed}: node {} ({:?}) off the shared landmass",

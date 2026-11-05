@@ -1252,13 +1252,30 @@ on the same plot instead of retiring, its farmer reassigned
 to build it, and the fresh node is stamped on completion as
 any new farm's. · *Status:* **MATCHES**.
 
-**ECO-15 — Fishing.** Villagers gather shore fish at 0.426/s. Fishing
-Ships gather from fish spots (0.280/s shore, 0.487/s deep-sea) and deposit
-at a Dock (ECO-06). Fish Traps are floating farm-analogs built by Fishing
-Ships on water (food amount UNVERIFIED in the sources consulted).
-*Source:* MECHANICS-STUDY §6.1; GAP 3.8. · *Impl:* needs water (MAP-08),
-ship units, and the Dock drop-off mask; the gather phase machine is
-reused verbatim for ships. · *Status:* **MISSING**.
+**ECO-15 — Fishing.** Villagers gather shore fish at 0.43/s. Fishing
+Ships gather from fish spots (0.24/s shore, 0.42/s deep-sea, carry 15)
+and deposit at a Dock only (ECO-06). Fish Traps are floating
+farm-analogs built by Fishing Ships on water (715 food).
+*Source:* MECHANICS-STUDY §6.1; GAP 3.8. · *Impl:* shipped (Water
+W2a, 2026-11-05) — the rates above are the post-update-169123
+values (wiki, Fishing Ship, Collection rate, fetched 2026-11-05);
+the study's 0.280/0.487 ship rates and the 0.426 villager figure
+are superseded (0.426 rounds to the wiki Villager table's 0.43).
+The Fishing Ship (EntityKind tag 23) trains at the Dock for
+75 wood / 40 s, works fish nodes through the standing gather
+phase machine on the water domain (rates keyed per (node,
+gatherer) — `NodeKind::gather_rate_for`), deposits at a Dock
+only, and shelters in the Dock (capacity 5, age-keyed arrows
+0/3/4/5 with +0/2/3/4 vs Ships). Mapgen stocks each pond with
+shore fish (200 food, on shallows) and deep fish (250 food),
+mirror-symmetrically, up to 4 + 4 per pond — the per-pond counts
+are a named implementation constant (no DE Arabia fish layout
+exists in the sources). Fishing Lines (50 F / 100 W, Feudal) and
+Gillnets (150 F / 200 W, Castle) each give ships +10% gather
+rate and +5 carry, stacking multiplicatively. The Fish Trap
+clause is W2b's extension (building-on-water + the Dock reseed
+desk); it is the one part of this entry not yet in the tree.
+Pinned by `sim/src/water_w2a_tests.rs`. · *Status:* **MATCHES**.
 
 **ECO-16 — Relics trickle gold.** A relic garrisoned in a Monastery
 generates 0.5 gold per second (30/min) for its owner, continuously, until
@@ -2616,8 +2633,14 @@ armor values and the Fire Ship's short-range spray follow the same
 CMB-01 math on water (MOV-11). Demolition Ships are blast units whose
 attack is their own destruction.
 *Source:* MECHANICS-STUDY §1.3 (ship classes), §3 (naval lines via GAP
-6.10). · *Impl:* nothing structural — classes + domain data. · *Status:*
-**MISSING** (no water, no ships).
+6.10). · *Impl:* nothing structural — classes + domain data. Water
+W2a (2026-11-05) lands the first member: the Fishing Ship carries
+the SHIP class (the §0.5 membership pin in
+`sim/src/entity.rs` — post-169123 the Fire Galley exception no
+longer exists, so the class applies uniformly), and the Dock's
+shelter arrows and the Watch Tower's anti-ship row now have a
+target. The combat lines themselves are W3. · *Status:*
+**MISSING** (first member only; the ecology lands in W3).
 
 **CLS-08 — The Monk class has no attack.** Monks belong to their own
 class (which other monks' Atonement and various bonuses key off); their

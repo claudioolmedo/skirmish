@@ -363,6 +363,29 @@ fn golden_hash_regression() {
     // while a Monastery holds relics or a trickle remainder —
     // the golden script builds no Monastery and tasks no monk.
     //
+    // Water W2a (ECO-15, deliberate update):
+    // 4f2a70b0c1ab724c -> f89f443f9bd8a7fc. Step attribution: the
+    // ONLY change entering this scenario is mapgen's fish
+    // placement — seed 42's pond gains 8 shore-fish and 8
+    // deep-fish nodes (a pure function of the rimmed terrain, no
+    // RNG draws), and node records are hashed world state.
+    // Probe: with ONLY `fish_placement` returning empty, all 13
+    // probed seeds return bit-identically to their post-W1
+    // hashes (42 -> exactly 4f2a70b0c1ab724c; dry seeds 4/5/7/8
+    // are bit-identical with fish ON: 2cd6fd18ceb431f7 /
+    // ffd8694781a4fe4a / b0710082475bbec6 / 5ee1792fa42ef14f).
+    // Nothing else in the package enters this scenario: no
+    // commands are issued (the ship, the Dock shelter and the
+    // fishing techs are never built), and the domain-keyed grid
+    // integrity pass reads Domain::Land for every land kind,
+    // identical to the standing land reading. The probe also
+    // caught this package's completion fix: fish nodes first
+    // landed under map validation's land-flood clause for
+    // neutral nodes, which rejected every pond candidate
+    // wholesale (all probed pond seeds fell through to dry
+    // maps); fish cells now validate as water-side, per the
+    // water plan §3.3.3.
+    //
     // Water W1 complete (2026-11-05, deliberate update):
     // f7af9c0fd33ac54c -> 4f2a70b0c1ab724c. Step attribution: the
     // ONLY change entering this scenario is mapgen's shallows
@@ -385,5 +408,5 @@ fn golden_hash_regression() {
         hash = sim.tick();
     }
     assert_eq!(sim.tick_count(), 360);
-    assert_eq!(format!("{:016x}", hash), "4f2a70b0c1ab724c");
+    assert_eq!(format!("{:016x}", hash), "f89f443f9bd8a7fc");
 }

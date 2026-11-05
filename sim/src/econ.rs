@@ -86,6 +86,23 @@ pub enum NodeKind {
     /// shepherd rate with the standard carry capacity (10) and the
     /// slower herdable decay.
     CarcassHerd,
+    /// Shore fish (Water W2a, ECO-15): a fish spot on a shallows
+    /// cell or a water cell beside the shore — the only fish a
+    /// villager can work (from the bank or wading the shallows).
+    /// 200 food (wiki, Shore Fish, AoE II section — fetched
+    /// 2026-11-05 at W2 Passo 0: "they only yield 200 food, the
+    /// least valuable fish in the series", tied with Perches and
+    /// Box Turtles).
+    ShoreFish,
+    /// Deep-sea fish (Water W2a, ECO-15): a fish spot on an
+    /// interior water cell, workable by Fishing Ships only.
+    /// 250 food — the generic deep-fish amount (wiki, Fishing:
+    /// "Dolphins and Marlins have 350 food, Box Turtles have 200
+    /// food, and all the others have 250 food", fetched
+    /// 2026-11-05 at W2 Passo 0; the species spread 225–350
+    /// exists in DE but the generic roster fields one deep kind,
+    /// at the article's "all the others" value).
+    DeepFish,
 }
 
 impl NodeKind {
@@ -99,6 +116,8 @@ impl NodeKind {
             NodeKind::Farm => ResourceKind::Food,
             NodeKind::CarcassHunt => ResourceKind::Food,
             NodeKind::CarcassHerd => ResourceKind::Food,
+            NodeKind::ShoreFish => ResourceKind::Food,
+            NodeKind::DeepFish => ResourceKind::Food,
         }
     }
 
@@ -118,6 +137,9 @@ impl NodeKind {
             NodeKind::Farm => 175,
             NodeKind::CarcassHunt => 340,
             NodeKind::CarcassHerd => 100,
+            // Fish amounts pinned at W2 Passo 0 (see the kind docs).
+            NodeKind::ShoreFish => 200,
+            NodeKind::DeepFish => 250,
         })
     }
 
@@ -133,7 +155,48 @@ impl NodeKind {
             // Hunt 0.408/s (study §6.1); shepherd 0.330/s (SPEC §2.2).
             NodeKind::CarcassHunt => 446,
             NodeKind::CarcassHerd => 360,
+            // Fish (Water W2a, ECO-15): the nominal row is the
+            // VILLAGER's shore rate 0.43/s for ShoreFish and the
+            // ship's deep rate 0.42/s for DeepFish — fishing is
+            // the one family whose rate keys on the GATHERER, so
+            // the work machine reads `gather_rate_for`; this base
+            // row only serves gatherer-blind readers.
+            NodeKind::ShoreFish => 470,
+            NodeKind::DeepFish => 459,
         })
+    }
+
+    /// The gather rate of `gatherer` working this node (Water
+    /// W2a, ECO-15): every family except fish ignores the
+    /// gatherer and reads the base row. Fish rates are per
+    /// (node, gatherer) — post-update-169123 values from the
+    /// wiki Fishing Ship article's Collection rate section
+    /// (fetched 2026-11-05 at W2 Passo 0, confirming WATER-SPEC
+    /// §4 against the article, not only its prose summary):
+    /// a Fishing Ship takes 0.24/s from shore fish and 0.42/s
+    /// from deep-sea fish; a villager takes 0.43/s from shore
+    /// fish (the ECO-15 amendment: the study's 0.426 rounds to
+    /// the wiki Villager table's 0.43). A villager can never be
+    /// tasked on deep fish (the order gate refuses), so that
+    /// pairing reads the ship row and is unreachable in play.
+    /// Raw bits (rate × 65536 / 60): 0.24 → 262, 0.42 → 459,
+    /// 0.43 → 470.
+    pub fn gather_rate_for(self, gatherer: crate::entity::EntityKind) -> I16F16 {
+        use crate::entity::EntityKind;
+        match (self, gatherer) {
+            (NodeKind::ShoreFish, EntityKind::FishingShip) => I16F16::from_bits(262),
+            (NodeKind::DeepFish, EntityKind::FishingShip) => I16F16::from_bits(459),
+            (NodeKind::ShoreFish, _) => I16F16::from_bits(470),
+            _ => self.gather_rate(),
+        }
+    }
+
+    /// Whether this node kind is a fish spot (Water W2a): the
+    /// gather gate, the retarget family and the drop-off rules
+    /// key on this family test rather than matching the two
+    /// kinds at every call site.
+    pub fn is_fish(self) -> bool {
+        matches!(self, NodeKind::ShoreFish | NodeKind::DeepFish)
     }
 
     /// How much a villager can carry away from this node before it
@@ -174,7 +237,9 @@ impl NodeKind {
 
     /// Stable tag for the state hash and the WASM node array:
     /// 0 tree, 1 berry, 2 gold, 3 stone, 4 farm, 5 hunt carcass,
-    /// 6 herdable carcass.
+    /// 6 herdable carcass, 7 shore fish, 8 deep fish (Water W2a —
+    /// appended after the carcass pair; verified first free on
+    /// the W2a base, where 0–6 were taken).
     pub fn tag(self) -> u8 {
         match self {
             NodeKind::Tree => 0,
@@ -184,6 +249,8 @@ impl NodeKind {
             NodeKind::Farm => 4,
             NodeKind::CarcassHunt => 5,
             NodeKind::CarcassHerd => 6,
+            NodeKind::ShoreFish => 7,
+            NodeKind::DeepFish => 8,
         }
     }
 }
@@ -330,6 +397,20 @@ pub const WHEELBARROW_HUNT_CARRY_CAPACITY: I16F16 = I16F16::from_bits(2_883_584)
 pub const HAND_CART_CARRY_CAPACITY: I16F16 = I16F16::from_bits(1_310_720); // 20
 /// Hand Cart hunt carry capacity (ECO-03): 66 (wiki table).
 pub const HAND_CART_HUNT_CARRY_CAPACITY: I16F16 = I16F16::from_bits(4_325_376); // 66
+/// A Fishing Ship's base carry capacity (Water W2a, ECO-15):
+/// 15 food (wiki, Fishing Ship, Collection rate — pinned at W2
+/// Passo 0). Fishing Lines and Gillnets each add +5 (the flat
+/// carry patch in the work machine, the Wheelbarrow pattern).
+pub const FISHING_SHIP_CARRY_CAPACITY: I16F16 = I16F16::from_bits(983_040); // 15
+/// ECO-09's retarget radius for fish (Water W2a): when a fish
+/// spot depletes, the gatherer retargets the nearest fish of
+/// EITHER kind — a pond is one fishing ground, and a radius-2
+/// pond spans ~20 world units shore to shore, beyond the land
+/// family's 12-unit cluster radius. DE's exact retarget
+/// behavior for ships is not documented in the sources
+/// consulted; 24 units (6 cells) is a named implementation
+/// constant in the ECO-09 tradition, recorded as such.
+pub const FISH_RETARGET_RADIUS: I16F16 = I16F16::from_bits(1_572_864); // 24.0
 /// Villager training cost: 50 food, deducted when the order is enqueued.
 pub const VILLAGER_FOOD_COST: I16F16 = I16F16::from_bits(3_276_800); // 50
 /// Villager training time: 25 s at 60 Hz.

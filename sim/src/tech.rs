@@ -355,11 +355,25 @@ pub enum TechId {
     /// (TEC-07's wood chain; chains from Bow Saw, TEC-07).
     /// Tag 44.
     TwoManSaw,
+    /// Dock, Feudal: Fishing Ships gather +10% faster and carry
+    /// +5 (Water W2a, ECO-15; new in DE update 169123 as
+    /// Gillnets' precursor — wiki, Ship tech table + Fishing
+    /// Ship Further statistics, fetched 2026-11-05). Tag 45.
+    FishingLines,
+    /// Dock, Castle: Fishing Ships gather a further +10% faster
+    /// and carry a further +5 (Water W2a, ECO-15; chains from
+    /// Fishing Lines — the wiki technology nav orders the pair
+    /// "Fishing Lines → Gillnets"). Cost/time pinned at W2
+    /// Passo 0: 150 food / 200 wood, 45 s (the tech-list
+    /// summary cross-checked against the Forgotten Empires
+    /// changelog's original "(200 wood, 150 food)" line).
+    /// Tag 46.
+    Gillnets,
 }
 
 impl TechId {
     /// All technologies, in tag order.
-    pub const ALL: [TechId; 45] = [
+    pub const ALL: [TechId; 47] = [
         TechId::Loom,
         TechId::FeudalAge,
         TechId::Fletching,
@@ -405,6 +419,8 @@ impl TechId {
         TechId::Faith,
         TechId::BowSaw,
         TechId::TwoManSaw,
+        TechId::FishingLines,
+        TechId::Gillnets,
     ];
 
     /// Stable tag: 0 loom, 1 feudal age, 2 fletching, 3 scale mail,
@@ -451,6 +467,10 @@ impl TechId {
     /// 42 faith (Castle P5f — appended after P5c's 37/38.)
     /// 43 bow saw, 44 two-man saw (TEC-07 wood chain —
     /// appended after P5f's 39–42, so no tag moved.)
+    /// 45 fishing lines, 46 gillnets (Water W2a — the Dock's
+    /// fishing pair, appended after the wood chain's 43/44;
+    /// verified first free on the W2a base, where ALL held 45
+    /// entries, tags 0–44.)
     pub fn tag(self) -> u8 {
         match self {
             TechId::Loom => 0,
@@ -498,6 +518,8 @@ impl TechId {
             TechId::Faith => 42,
             TechId::BowSaw => 43,
             TechId::TwoManSaw => 44,
+            TechId::FishingLines => 45,
+            TechId::Gillnets => 46,
         }
     }
 
@@ -566,6 +588,10 @@ impl TechId {
             | TechId::Illumination
             | TechId::Theocracy
             | TechId::Faith => TechHost::Building(BuildingKind::Monastery),
+            // Water W2a: the fishing pair is researched at the Dock.
+            TechId::FishingLines | TechId::Gillnets => {
+                TechHost::Building(BuildingKind::Dock)
+            }
         }
     }
 
@@ -608,7 +634,10 @@ impl TechId {
             | TechId::MurderHoles
             | TechId::TreadmillCrane
             | TechId::Masonry
-            | TechId::FortifiedWall => Age::Castle,
+            | TechId::FortifiedWall
+            // Water W2a: Gillnets is Castle Age research (its
+            // precursor Fishing Lines falls to the Feudal default).
+            | TechId::Gillnets => Age::Castle,
             _ => Age::Feudal,
         }
     }
@@ -643,6 +672,11 @@ impl TechId {
             // Bow Saw / Two-Man Saw — verified 2026-11-03).
             TechId::BowSaw => Some(TechId::DoubleBitAxe),
             TechId::TwoManSaw => Some(TechId::BowSaw),
+            // Water W2a: Gillnets is the further upgrade of
+            // Fishing Lines (wiki technology nav: "Fishing
+            // Lines → Gillnets"; WATER-SPEC §5 names Fishing
+            // Lines Gillnets' precursor).
+            TechId::Gillnets => Some(TechId::FishingLines),
             _ => None,
         }
     }
@@ -698,6 +732,8 @@ impl TechId {
             TechId::Faith => 3600, // 60 s (wiki, Faith — verified 2026-11-03)
             TechId::BowSaw => 3000, // 50 s (wiki, Bow Saw — verified 2026-11-03)
             TechId::TwoManSaw => 6000, // 100 s (wiki, Two-Man Saw — verified 2026-11-03)
+            TechId::FishingLines => 1200, // 20 s (wiki, Technology table — WATER-SPEC §5)
+            TechId::Gillnets => 2700, // 45 s (pinned at W2 Passo 0 — see the tag docs)
         }
     }
 
@@ -750,6 +786,8 @@ impl TechId {
             TechId::Faith => (550, 0, 750, 0), // wiki, Faith (update 99311) — verified 2026-11-03
             TechId::BowSaw => (150, 100, 0, 0), // wiki, Bow Saw — verified 2026-11-03
             TechId::TwoManSaw => (300, 200, 0, 0), // wiki, Two-Man Saw — verified 2026-11-03
+            TechId::FishingLines => (50, 100, 0, 0), // wiki, Technology table — WATER-SPEC §5
+            TechId::Gillnets => (150, 200, 0, 0), // pinned at W2 Passo 0 — see the tag docs
         }
     }
 }
@@ -856,6 +894,37 @@ pub fn patched_gather_rate(kind: NodeKind, techs: u64) -> I16F16 {
     };
     let base = kind.gather_rate();
     I16F16::from_bits(((base.to_bits() as i64 * pct) / 100) as i32)
+}
+
+/// The gather rate of `gatherer` working `kind` under the
+/// researched set `techs` (Water W2a, ECO-15): the gatherer-keyed
+/// form the work machine reads. Non-fish families ignore the
+/// gatherer and read the standing table above. For fish worked
+/// by a Fishing Ship, Fishing Lines and Gillnets each multiply
+/// the running rate by 110/100, applied sequentially with the
+/// wood chain's truncating step discipline (TEC-06/TEC-08's
+/// multiplicative stacking): shore 262 → 288 → 316 bits, deep
+/// 459 → 504 → 554 bits. A villager's shore-fish rate takes no
+/// fishing patch — the pair's wiki text scopes both techs to
+/// Fishing Ships.
+pub fn patched_gather_rate_for(
+    kind: NodeKind,
+    gatherer: crate::entity::EntityKind,
+    techs: u64,
+) -> I16F16 {
+    if !kind.is_fish() {
+        return patched_gather_rate(kind, techs);
+    }
+    let mut bits = kind.gather_rate_for(gatherer).to_bits() as i64;
+    if gatherer == crate::entity::EntityKind::FishingShip {
+        if techs & TechId::FishingLines.bit() != 0 {
+            bits = bits * 110 / 100;
+        }
+        if techs & TechId::Gillnets.bit() != 0 {
+            bits = bits * 110 / 100;
+        }
+    }
+    I16F16::from_bits(bits as i32)
 }
 
 /// Where a technology is researched (see `TechId::host`).
@@ -1042,7 +1111,10 @@ mod tests {
         // TEC-07 wood chain: Bow Saw / Two-Man Saw append at 43/44.
         assert_eq!(TechId::from_tag(43), Some(TechId::BowSaw));
         assert_eq!(TechId::from_tag(44), Some(TechId::TwoManSaw));
-        assert_eq!(TechId::from_tag(45), None);
+        // Water W2a: the Dock fishing pair appends at 45/46.
+        assert_eq!(TechId::from_tag(45), Some(TechId::FishingLines));
+        assert_eq!(TechId::from_tag(46), Some(TechId::Gillnets));
+        assert_eq!(TechId::from_tag(47), None);
     }
 
     #[test]
@@ -1190,7 +1262,9 @@ mod tests {
         // those, and P5c's Redemption/Heresy (37/38) after those,
         // and P5f's Imperial row (39–42) after those, and the
         // TEC-07 wood chain (43/44) last, so ALL now holds 45.
-        assert_eq!(TechId::ALL.len(), 45);
+        // (Water W2a appends the Dock fishing pair at 45/46 —
+        // ALL now holds 47; the count lives in the W2a test.)
+        assert_eq!(TechId::ALL.len(), 47);
         // ECO-14: the farm gather lookup meets the farm's own
         // 0.4 food/s work-rate cap — the base farm rate sits
         // below it today, so the clamped value is the base rate,
@@ -1276,8 +1350,11 @@ mod tests {
         // The new tags append; no earlier tag moved.
         assert_eq!(TechId::from_tag(43), Some(TechId::BowSaw));
         assert_eq!(TechId::from_tag(44), Some(TechId::TwoManSaw));
-        assert_eq!(TechId::from_tag(45), None);
-        assert_eq!(TechId::ALL.len(), 45);
+        // Water W2a appends the Dock fishing pair at 45/46.
+        assert_eq!(TechId::from_tag(45), Some(TechId::FishingLines));
+        assert_eq!(TechId::from_tag(46), Some(TechId::Gillnets));
+        assert_eq!(TechId::from_tag(47), None);
+        assert_eq!(TechId::ALL.len(), 47);
     }
 
     #[test]

@@ -223,10 +223,9 @@ pub const DOCK_PRODUCTION_GARRISON_CAPACITY: u32 = 10;
 /// The Dock's shelter garrison capacity (Water W1, BLD-14): up
 /// to 5 Fishing Ships may shelter in a Dock since DE update
 /// 169123, and the Dock then fires like a garrisoned Town Center
-/// (WATER-SPEC §2). A DIFFERENT mechanism from the production
-/// garrison above — recorded as data in W1 and wired with the
-/// Fishing Ship in W2 (eligibility, arrows and the conditional
-/// weapon are W2's slice); nothing reads this constant yet.
+/// (WATER-SPEC §2). Recorded as data in W1; wired in W2a —
+/// `garrison_capacity` reads it as the Dock's one garrison list
+/// (see that column's W2a note on the production figure above).
 pub const DOCK_SHELTER_GARRISON_CAPACITY: u32 = 5;
 /// The Wonder's build range: its 5×5 footprint is 20 units wide,
 /// so a builder on a corner ring cell stands ≈17.0 units from
@@ -905,6 +904,10 @@ impl BuildingKind {
                 // Castle P5a: the Monk trains at the Monastery
                 // only (MNK-01).
                 | (BuildingKind::Monastery, EntityKind::Monk)
+                // Water W2a (ECO-15): the Fishing Ship trains at
+                // the Dock only — the Dock's first roster entry
+                // (its table stood empty through W1).
+                | (BuildingKind::Dock, EntityKind::FishingShip)
         )
     }
 
@@ -1055,6 +1058,14 @@ impl BuildingKind {
             // Castle fires its base volley of 5 (GAR-05's extra
             // garrison arrows layer on in P3c, not here).
             BuildingKind::Castle => Some(CASTLE_WEAPON),
+            // Water W2a: the Dock's CONDITIONAL weapon — the row
+            // exists, but the firing step in `combat.rs` returns
+            // early while the Dock's shelter garrison is empty
+            // (the GAR-06 pattern: the weapon exists only while
+            // shelter-garrisoned; the age-keyed attack table and
+            // arrow cap layer on in `Sim::building_weapon` and
+            // the garrison arrow recompute).
+            BuildingKind::Dock => Some(DOCK_WEAPON),
             _ => None,
         }
     }
@@ -1075,13 +1086,19 @@ impl BuildingKind {
             | BuildingKind::Stable
             | BuildingKind::SiegeWorkshop
             | BuildingKind::Monastery => Some(10),
-            // Water W1 (BLD-14): the Dock's PRODUCTION garrison
-            // (10, GAR-08 — entry only via the rally spawn, which
-            // cannot occur until the Dock trains in W2). The
-            // 5-ship shelter garrison is a separate mechanism
-            // (`DOCK_SHELTER_GARRISON_CAPACITY`), wired in W2 —
-            // it is NOT this column.
-            BuildingKind::Dock => Some(DOCK_PRODUCTION_GARRISON_CAPACITY),
+            // Water W2a (BLD-14/ECO-15): the Dock's ONE garrison
+            // list is its SHELTER garrison — 5 Fishing Ships
+            // (`DOCK_SHELTER_GARRISON_CAPACITY`), entered by
+            // direct order or by a rally set on the Dock itself.
+            // W1 recorded the production capacity (10, the
+            // manual's rally-entry figure) as data beside it;
+            // the water plan's R4 discipline — one list, kind-
+            // scoped eligibility/capacity, or it does not ship —
+            // resolves the pair onto the shelter row now that a
+            // ship exists to shelter: `DOCK_PRODUCTION_GARRISON_
+            // CAPACITY` stays as the recorded DE figure, and the
+            // 10-deep rally entry for combat ships is W3 scope.
+            BuildingKind::Dock => Some(DOCK_SHELTER_GARRISON_CAPACITY),
             _ => None,
         }
     }
@@ -1106,11 +1123,6 @@ impl BuildingKind {
                 | BuildingKind::Stable
                 | BuildingKind::SiegeWorkshop
                 | BuildingKind::Monastery
-                // Water W1 (BLD-14): the Dock's garrison column
-                // is its production garrison (see
-                // `garrison_capacity`); the shelter garrison is
-                // W2's separate wire-up, not this predicate.
-                | BuildingKind::Dock
         )
     }
 
@@ -1125,6 +1137,15 @@ impl BuildingKind {
             BuildingKind::Castle => {
                 kind.is_foot_garrisonable() || kind.is_mounted_garrisonable()
             }
+            // Water W2a: the Dock's shelter garrison admits the
+            // Fishing Ship only (the GAR-01 data column for the
+            // shelter row — eligibility-as-data, read by the
+            // generic `can_garrison` path like every other
+            // host's). It is not a *defensive* garrison for the
+            // Town Bell's shelter scan (`is_defensive_garrison`
+            // stays false for the Dock): the bell shelters
+            // villagers, and no villager can enter a Dock.
+            BuildingKind::Dock => kind == crate::entity::EntityKind::FishingShip,
             _ => false,
         }
     }
@@ -1748,6 +1769,63 @@ pub const TOWN_CENTER_WEAPON: BuildingWeapon = BuildingWeapon {
     scatter: I16F16::from_bits(131_072),         // 2.0
     volley: 1,
 };
+
+/// The Dock's shelter weapon (Water W2a, BLD-14/GAR-05-shaped):
+/// the Dock fires like a garrisoned Town Center while Fishing
+/// Ships shelter inside (DE update 169123 + the 177723 arrow
+/// re-tune, WATER-SPEC §2). The profile reuses the Town Center
+/// weapon's adopted constants (5 pierce, RoF 2.0 s, the shared
+/// flight profile); the RANGE is the TC's 6 tiles by the same
+/// analogy — the sources consulted pin the arrow counts and the
+/// anti-ship bonus, not the Dock's range, so the range is an
+/// adopted constant, recorded here. The age-keyed pieces layer
+/// on elsewhere: the attack table's anti-ship bonus (+0/2/3/4
+/// vs Ships by Age) is picked per owner age in
+/// `Sim::building_weapon` from the `DOCK_ATTACKS_*` tables, and
+/// the arrow CAP (0/3/4/5 by Age) is `dock_arrow_cap`, applied
+/// by the garrison arrow recompute. The `volley` placeholder is
+/// 1 like the TC's — the firing step always looses the stored
+/// arrow count for this kind, and never fires it ungarrisoned.
+pub const DOCK_WEAPON: BuildingWeapon = BuildingWeapon {
+    attacks: &[(crate::classes::PIERCE, 5)],
+    range_max: I16F16::from_bits(1_572_864), // 24.0 = 6 tiles (TC analogy — see docs)
+    range_min: I16F16::ZERO,
+    reload_ticks: 120,                       // 2.0 s
+    attack_delay_ticks: 21,
+    accuracy: 100,
+    projectile_speed: I16F16::from_bits(32_768), // 0.5
+    scatter: I16F16::from_bits(131_072),         // 2.0
+    volley: 1,
+};
+
+/// The Dock's attack tables by the owner's Age (Water W2a):
+/// 5 pierce at every age; the anti-ship bonus is +0/2/3/4 vs
+/// Ships across Dark/Feudal/Castle/Imperial (WATER-SPEC §2 —
+/// wiki, Dock article, update 177723 re-tune).
+pub const DOCK_ATTACKS_DARK: &[(u8, i32)] = &[(crate::classes::PIERCE, 5)];
+pub const DOCK_ATTACKS_FEUDAL: &[(u8, i32)] =
+    &[(crate::classes::PIERCE, 5), (crate::classes::SHIP, 2)];
+pub const DOCK_ATTACKS_CASTLE: &[(u8, i32)] =
+    &[(crate::classes::PIERCE, 5), (crate::classes::SHIP, 3)];
+pub const DOCK_ATTACKS_IMPERIAL: &[(u8, i32)] =
+    &[(crate::classes::PIERCE, 5), (crate::classes::SHIP, 4)];
+
+/// The Dock's maximum shelter arrows by the owner's Age (Water
+/// W2a): 0/3/4/5 across Dark/Feudal/Castle/Imperial (WATER-SPEC
+/// §2 — wiki, Dock article, updates 169123 + 177723). The stored
+/// arrow count is min(sheltered Fishing Ships, this cap) — one
+/// arrow per sheltered ship up to the cap, the Town Center's
+/// per-villager reading (its own DPS equality) carried to the
+/// one shelter kind the Dock admits; the sources pin the cap,
+/// not a per-ship contribution, and that is recorded here.
+pub fn dock_arrow_cap(age: crate::tech::Age) -> u32 {
+    match age {
+        crate::tech::Age::Dark => 0,
+        crate::tech::Age::Feudal => 3,
+        crate::tech::Age::Castle => 4,
+        crate::tech::Age::Imperial => 5,
+    }
+}
 
 /// The Watch Tower's attack table with Fletching researched
 /// (TEC-06's tower line: +1 attack — the pierce component; the
@@ -2664,16 +2742,26 @@ mod tests {
         assert!(!k.accepts(ResourceKind::Wood));
         assert!(!k.accepts(ResourceKind::Gold));
         assert!(!k.accepts(ResourceKind::Stone));
-        assert_eq!(k.garrison_capacity(), Some(DOCK_PRODUCTION_GARRISON_CAPACITY));
+        // Water W2a: the one garrison list is the SHELTER list
+        // (capacity 5); the production figure (10) stays recorded
+        // as DE data beside it. The Dock is not a production
+        // garrison (manual shelter entry is its path) and not a
+        // defensive garrison for the bell scan.
+        assert_eq!(k.garrison_capacity(), Some(DOCK_SHELTER_GARRISON_CAPACITY));
         assert_eq!(DOCK_PRODUCTION_GARRISON_CAPACITY, 10);
         assert_eq!(DOCK_SHELTER_GARRISON_CAPACITY, 5);
-        assert!(k.is_production_garrison());
+        assert!(!k.is_production_garrison());
         assert!(!k.is_defensive_garrison());
+        assert!(k.admits_defensive(EntityKind::FishingShip));
+        assert!(!k.admits_defensive(EntityKind::Villager));
         assert_eq!(k.placement(), Placement::Shoreline);
         assert_eq!(BuildingKind::Barracks.placement(), Placement::Normal);
-        // No weapon in W1: the Dock fires only while
-        // shelter-garrisoned, and that wire-up is W2's.
-        assert!(k.weapon().is_none());
+        // Water W2a: the Dock carries its conditional shelter
+        // weapon (it fires only while shelter-garrisoned — the
+        // gate lives in the combat step, not in this row).
+        assert!(k.weapon().is_some());
+        // Water W2a: the Dock trains the Fishing Ship (ECO-15).
+        assert!(k.trains(EntityKind::FishingShip));
     }
 
     #[test]

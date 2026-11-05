@@ -1423,6 +1423,9 @@ fn node_kind_from_tag(tag: u8) -> Option<NodeKind> {
         4 => Some(NodeKind::Farm),
         5 => Some(NodeKind::CarcassHunt),
         6 => Some(NodeKind::CarcassHerd),
+        // Water W2a (ECO-15): the fish kinds (tags 7/8).
+        7 => Some(NodeKind::ShoreFish),
+        8 => Some(NodeKind::DeepFish),
         _ => None,
     }
 }

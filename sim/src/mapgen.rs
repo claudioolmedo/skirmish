@@ -141,6 +141,143 @@ fn rim_ponds(terrain: &mut [u8]) {
     }
 }
 
+/// Water W2a (ECO-15): the per-pond fish caps. An implementation
+/// constant, recorded here — Arabia carries no documented DE
+/// fish layout (WATER-SPEC §8.10: fish counts per pond are not
+/// in the sources consulted), so the roster fields a bounded,
+/// symmetric spread: up to 4 shore spots and 4 deep spots per
+/// pond.
+pub const MAX_SHORE_FISH_PER_POND: usize = 4;
+pub const MAX_DEEP_FISH_PER_POND: usize = 4;
+
+/// Water W2a (ECO-15): fish placement over a finished, rimmed
+/// terrain grid — a pure function of the terrain (no RNG), so
+/// dry seeds keep their hashes and pond seeds gain fish
+/// deterministically. Ponds are the 4-connected water-region
+/// components (shallows included); they are processed in
+/// mirror pairs: the selection runs on one half and mirrors
+/// through the map's own symmetry (`rot`), so both players'
+/// ponds stock identically — the fairness discipline every
+/// mirrored element of this generator already obeys. Per pond:
+/// shore spots on shallows cells orthogonally adjacent to deep
+/// water (the fisherman's bank and the ship's shallow ground in
+/// one cell), deep spots on deep cells with no land
+/// orthogonally adjacent (open water), each kind thinned to
+/// its cap by an even stride over the pond's row-major order.
+fn fish_placement(terrain: &[u8]) -> Vec<(NodeKind, u32, u32)> {
+    let d = GRID_DIM as usize;
+    let at = |x: usize, y: usize| terrain[y * d + x];
+    let is_water = |t: u8| t == TERRAIN_WATER || t == TERRAIN_SHALLOWS;
+    // 4-connected water components, discovered in scan order.
+    let mut comp_of = vec![u32::MAX; d * d];
+    let mut comps: Vec<Vec<(u32, u32)>> = Vec::new();
+    for y in 0..d {
+        for x in 0..d {
+            if !is_water(at(x, y)) || comp_of[y * d + x] != u32::MAX {
+                continue;
+            }
+            let id = comps.len() as u32;
+            let mut cells = Vec::new();
+            let mut stack = vec![(x, y)];
+            comp_of[y * d + x] = id;
+            while let Some((cx, cy)) = stack.pop() {
+                cells.push((cx as u32, cy as u32));
+                for (nx, ny) in [
+                    (cx.wrapping_sub(1), cy),
+                    (cx + 1, cy),
+                    (cx, cy.wrapping_sub(1)),
+                    (cx, cy + 1),
+                ] {
+                    if nx >= d || ny >= d || comp_of[ny * d + nx] != u32::MAX {
+                        continue;
+                    }
+                    if is_water(at(nx, ny)) {
+                        comp_of[ny * d + nx] = id;
+                        stack.push((nx, ny));
+                    }
+                }
+            }
+            cells.sort_unstable();
+            comps.push(cells);
+        }
+    }
+    let mut out: Vec<(NodeKind, u32, u32)> = Vec::new();
+    let mut done = vec![false; comps.len()];
+    for ci in 0..comps.len() {
+        if done[ci] {
+            continue;
+        }
+        done[ci] = true;
+        // The component's mirror twin (ponds are placed mirrored;
+        // a self-mirrored component is its own twin).
+        let twin_sorted: Vec<(u32, u32)> = {
+            let mut t: Vec<(u32, u32)> = comps[ci].iter().map(|&(x, y)| rot(x, y)).collect();
+            t.sort_unstable();
+            t
+        };
+        for cj in 0..comps.len() {
+            if !done[cj] && comps[cj] == twin_sorted {
+                done[cj] = true;
+                break;
+            }
+        }
+        let select = |cells: &[(u32, u32)]| -> Vec<(NodeKind, u32, u32)> {
+            let mut shore: Vec<(u32, u32)> = Vec::new();
+            let mut deep: Vec<(u32, u32)> = Vec::new();
+            for &(x, y) in cells {
+                let (xu, yu) = (x as usize, y as usize);
+                let adj: [(usize, usize); 4] = [
+                    (xu.wrapping_sub(1), yu),
+                    (xu + 1, yu),
+                    (xu, yu.wrapping_sub(1)),
+                    (xu, yu + 1),
+                ];
+                let adj_land = adj
+                    .iter()
+                    .any(|&(nx, ny)| nx < d && ny < d && !is_water(at(nx, ny)));
+                let adj_deep = adj
+                    .iter()
+                    .any(|&(nx, ny)| nx < d && ny < d && at(nx, ny) == TERRAIN_WATER);
+                if at(xu, yu) == TERRAIN_SHALLOWS && adj_deep {
+                    shore.push((x, y));
+                }
+                if at(xu, yu) == TERRAIN_WATER && !adj_land {
+                    deep.push((x, y));
+                }
+            }
+            let thin = |v: &[(u32, u32)], cap: usize| -> Vec<(u32, u32)> {
+                if v.len() <= cap {
+                    return v.to_vec();
+                }
+                // Even stride over the row-major order: take
+                // indices floor(i * len / cap), i in 0..cap.
+                (0..cap).map(|i| v[i * v.len() / cap]).collect()
+            };
+            let mut picked: Vec<(NodeKind, u32, u32)> = thin(&shore, MAX_SHORE_FISH_PER_POND)
+                .into_iter()
+                .map(|(x, y)| (NodeKind::ShoreFish, x, y))
+                .collect();
+            picked.extend(
+                thin(&deep, MAX_DEEP_FISH_PER_POND)
+                    .into_iter()
+                    .map(|(x, y)| (NodeKind::DeepFish, x, y)),
+            );
+            picked
+        };
+        let picked = select(&comps[ci]);
+        for &(kind, x, y) in &picked {
+            out.push((kind, x, y));
+            let (mx, my) = rot(x, y);
+            if (mx, my) != (x, y) {
+                out.push((kind, mx, my));
+            }
+        }
+    }
+    out.sort_by_key(|&(kind, x, y)| (kind.tag(), x, y));
+    out.dedup();
+    out
+}
+
 /// The 180° rotational mirror of a cell through the map center.
 fn rot(x: u32, y: u32) -> (u32, u32) {
     (GRID_DIM - 1 - x, GRID_DIM - 1 - y)
@@ -306,6 +443,11 @@ fn build(sub_seed: u64) -> Option<GeneratedMap> {
         }
     }
 
+    // Water W2a (ECO-15): fish placement — over the finished,
+    // rimmed terrain, a pure function of it (no RNG draws, so
+    // the candidate stream and every dry seed stay untouched).
+    g.neutral.extend(fish_placement(&g.terrain));
+
     let pkg_a = StartPackage {
         tc_cell: tc_a,
         nodes: std::mem::take(&mut g.nodes_a),
@@ -457,7 +599,23 @@ pub fn validate(map: &GeneratedMap) -> bool {
             return false;
         }
     }
-    for &(_, x, y) in &map.neutral_nodes {
+    for &(kind, x, y) in &map.neutral_nodes {
+        // Water W2a (ECO-15): fish spots are water nodes by
+        // design — the land flood can never reach a deep-fish
+        // cell, so the flood requirement above would reject
+        // every pond candidate outright (measured: with the
+        // fish extension live and this clause unamended, every
+        // pond seed fell through to a dry candidate and Arabia
+        // lost its ponds entirely). A fish cell's validation is
+        // the water-side reading (plan §3.3.3): the cell is
+        // water-side (deep water or shallows) — it stands in the
+        // pond its placement read it from.
+        if kind.is_fish() {
+            if !grid.is_water_side(x, y) {
+                return false;
+            }
+            continue;
+        }
         if !seen[idx(x, y)] {
             return false;
         }
@@ -736,10 +894,21 @@ fn fallback() -> GeneratedMap {
             }
         }
     }
+    // Water W2a (ECO-15): the template's two fixed ponds stock
+    // fish by the same pure placement (read back off the grid).
+    let terrain_now: Vec<u8> = {
+        let mut v = Vec::with_capacity((GRID_DIM * GRID_DIM) as usize);
+        for y in 0..GRID_DIM {
+            for x in 0..GRID_DIM {
+                v.push(grid.terrain_at(x, y));
+            }
+        }
+        v
+    };
     GeneratedMap {
         grid,
         starts: [pkg_a, pkg_b],
-        neutral_nodes: Vec::new(),
+        neutral_nodes: fish_placement(&terrain_now),
         // MAP-13: the template's five relics — two mirrored
         // pairs and the equal-distance center cell (59, 26:
         // Chebyshev 34 from both Town Centers), all on free
