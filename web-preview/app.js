@@ -6827,7 +6827,14 @@ async function main() {
       openLobby(null);
       return;
     }
-    setInMatch(false); // back to the menu: chrome hides again
+    // The pause menu over a fresh match IS this client's menu
+    // (see the handler's header note) — so the game view stays ON
+    // screen under it. Clearing .in-match here (bot-loop live
+    // proof, 2026-11-04) opened the pause menu over a black page,
+    // and closing it then left a black screen with no game and no
+    // menu: reload was the only recovery. Resume/✕ from here must
+    // land in the visible fresh match, like the lobby return path.
+    setInMatch(true); // fresh match stays visible under the menu
     resetSim(builtMode || matchMode);
     playing = true;
     setPaused(true);

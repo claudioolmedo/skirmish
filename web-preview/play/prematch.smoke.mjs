@@ -431,5 +431,28 @@ const roomSocket = () =>
   console.log('PASS (7) front-door lobby: no ✕ to a black page; ✕ returns over a live match');
 }
 
+// (8) Regression (bot-loop, 2026-11-04): end screen → Back to menu
+//     black-screened the page. The local endMenuBtn path cleared
+//     .in-match and then opened the pause menu over the fresh
+//     match it had just reset — so the menu floated over a black
+//     page, and closing it (✕/Resume only hide the menu) left a
+//     black screen with no game and no menu, reload the only
+//     recovery. Back to menu must open the pause menu over the
+//     VISIBLE fresh match, and closing it must land in that match.
+{
+  const tab = makeTab('https://skirmish.online/play/');
+  await boot(tab);
+  tab.el('btn-solo').click();
+  await sleep(1500);
+  assert.equal(inMatch(tab), true, 'solo match started');
+  tab.el('end-menu-btn').click();
+  assert.equal(inMatch(tab), true, 'back to menu keeps the fresh match on screen under the pause menu');
+  assert.equal(tab.el('pause-menu').style.display, 'flex', 'pause menu open over the fresh match');
+  tab.el('menu-close').click();
+  assert.equal(tab.el('pause-menu').style.display, 'none', 'closing the menu hides it');
+  assert.equal(inMatch(tab), true, 'closing the back-to-menu pause lands IN the fresh match, not on a black page');
+  console.log('PASS (8) end screen → Back to menu → close: fresh match visible throughout, no black screen');
+}
+
 console.log('PREMATCH SMOKE: all cases passed');
 process.exit(0);
