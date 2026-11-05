@@ -196,6 +196,23 @@ pub const SIEGE_WORKSHOP_BUILD_TICKS: u64 = 2400;
 pub const MONASTERY_WOOD_COST: I16F16 = I16F16::from_bits(11_468_800); // 175
 /// Monastery build time: 40 s at 60 Hz (Castle P5a; same source).
 pub const MONASTERY_BUILD_TICKS: u64 = 2400;
+/// Wonder wood cost: 1000 (VIC-02; AoE wiki, Building comparative
+/// table via the Wonder dossier, fetched 2026-11-04).
+pub const WONDER_WOOD_COST: I16F16 = I16F16::from_bits(65_536_000); // 1000
+/// Wonder stone cost: 1000 (VIC-02; same source).
+pub const WONDER_STONE_COST: I16F16 = I16F16::from_bits(65_536_000); // 1000
+/// Wonder gold cost: 1000 (VIC-02; same source) — the first
+/// building priced in gold at placement; `gold_cost` is the cost
+/// model's third leg, on BLD-18's stone pattern.
+pub const WONDER_GOLD_COST: I16F16 = I16F16::from_bits(65_536_000); // 1000
+/// Wonder build time: 3500 s at 60 Hz (VIC-02; same source).
+pub const WONDER_BUILD_TICKS: u64 = 210_000;
+/// The Wonder's build range: its 5×5 footprint is 20 units wide,
+/// so a builder on a corner ring cell stands ≈17.0 units from
+/// the center ((10+2)·√2) — 18.0 covers the whole ring plus
+/// steering's arrival shortfall, in the geometry of the ranges
+/// above.
+pub const WONDER_BUILD_RANGE: I16F16 = I16F16::from_bits(1_179_648); // 18.0
 /// Population room from one completed Castle: +20 (Castle P3a;
 /// same source).
 pub const CASTLE_POP_SUPPORT: u32 = 20;
@@ -395,6 +412,20 @@ pub enum BuildingKind {
     /// — it is never bought, so VIC-04's surviving-value and
     /// razing terms stay 0 for it, as its table presence requires.
     Monument,
+    /// VIC-02: the Wonder — the Imperial Age's victory building.
+    /// 1000 wood / 1000 stone / 1000 gold, 3500 s build, 5×5,
+    /// 4800 HP (flat), armor 3/10, LoS 8; Imperial Age, no
+    /// building prerequisite (AoE wiki, Building comparative
+    /// table via the Wonder dossier, fetched 2026-11-04). It
+    /// trains nothing, fires nothing and holds no garrison; its
+    /// whole function is the VIC-02 countdown — under the
+    /// wonder-victory setting, a completed Wonder starts its
+    /// owner's countdown (see `Sim::wonder_victory_tick`). Like
+    /// the Monastery it can never be converted (MNK-08's list
+    /// names Wonders). Multiple Wonders are allowed; the
+    /// countdown is an existence census, so extras change
+    /// nothing.
+    Wonder,
 }
 
 impl BuildingKind {
@@ -410,7 +441,7 @@ impl BuildingKind {
     /// renumbered at the bot-loop landing: the builder's 18 was
     /// already the Palisade Gate here), 21 = monument (Package I —
     /// renumbered at this landing: the builder's 16 was already
-    /// the University here). Tags are an ABI
+    /// the University here), 22 = wonder (VIC-02). Tags are an ABI
     /// contract — append only, never renumber.
     pub fn tag(self) -> u8 {
         match self {
@@ -436,6 +467,7 @@ impl BuildingKind {
             BuildingKind::StoneGate => 19,
             BuildingKind::Monastery => 20,
             BuildingKind::Monument => 21,
+            BuildingKind::Wonder => 22,
         }
     }
 
@@ -464,6 +496,7 @@ impl BuildingKind {
             19 => Some(BuildingKind::StoneGate),
             20 => Some(BuildingKind::Monastery),
             21 => Some(BuildingKind::Monument),
+            22 => Some(BuildingKind::Wonder),
             _ => None,
         }
     }
@@ -531,6 +564,8 @@ impl BuildingKind {
             // price exists; the row reads 0 so cost sums (repair,
             // VIC-04 value) never invent one.
             BuildingKind::Monument => I16F16::ZERO,
+            // VIC-02: the Wonder's 1000 wood.
+            BuildingKind::Wonder => WONDER_WOOD_COST,
         }
     }
 
@@ -551,14 +586,29 @@ impl BuildingKind {
             BuildingKind::Castle => CASTLE_STONE_COST,
             // Package J: 30 stone (walls dossier §5).
             BuildingKind::StoneGate => STONE_GATE_STONE_COST,
+            // VIC-02: the Wonder's 1000 stone.
+            BuildingKind::Wonder => WONDER_STONE_COST,
+            _ => I16F16::ZERO,
+        }
+    }
+
+    /// Gold paid at placement time (VIC-02: the Wonder is the
+    /// first kind priced in gold at all — 1000; every other kind
+    /// reads 0, so the placement/repair/refund paths that sum all
+    /// three resources are behavior-identical for them, exactly
+    /// as BLD-18's stone leg was for the wood-only kinds).
+    pub fn gold_cost(self) -> I16F16 {
+        match self {
+            BuildingKind::Wonder => WONDER_GOLD_COST,
             _ => I16F16::ZERO,
         }
     }
 
     /// Total placement cost across resources (VIC-04's razing
-    /// credit unit: resources, summed).
+    /// credit unit: resources, summed — wood + stone + gold, so
+    /// the Wonder's full 3000 counts toward Society).
     pub fn total_cost(self) -> I16F16 {
-        self.wood_cost() + self.stone_cost()
+        self.wood_cost() + self.stone_cost() + self.gold_cost()
     }
 
     /// Ticks of active building needed to complete.
@@ -589,6 +639,8 @@ impl BuildingKind {
             // complete at match creation. The row exists only so
             // the placed record's full-progress value is defined.
             BuildingKind::Monument => 1,
+            // VIC-02: 3500 s (Wonder dossier).
+            BuildingKind::Wonder => WONDER_BUILD_TICKS,
         }
     }
 
@@ -675,6 +727,9 @@ impl BuildingKind {
             // class (adopted — the wiki gives the Monument the
             // Wonder's appearance and no separate footprint).
             | BuildingKind::Monument => 4,
+            // VIC-02: the Wonder is the game's only 5×5 kind
+            // (Wonder dossier: the DE footprint).
+            BuildingKind::Wonder => 5,
         }
     }
 
@@ -700,6 +755,10 @@ impl BuildingKind {
             // The University (Castle P3c) is the fourth, the
             // Siege Workshop (Castle P4a) the fifth.
             TOWN_CENTER_BUILD_RANGE
+        } else if self == BuildingKind::Wonder {
+            // VIC-02: the 5×5 kind's own range (see the
+            // constant's geometry note).
+            WONDER_BUILD_RANGE
         } else if self.footprint_size() == 3 {
             BARRACKS_BUILD_RANGE
         } else if self.footprint_size() == 1 {
@@ -789,6 +848,10 @@ impl BuildingKind {
             | BuildingKind::University
             | BuildingKind::SiegeWorkshop
             | BuildingKind::Monastery => Age::Castle,
+            // VIC-02 (BLD-15): the Wonder is Imperial-born, with
+            // no prerequisite building (`requires_building` reads
+            // None for it, like the Castle's row).
+            BuildingKind::Wonder => Age::Imperial,
             _ => Age::Dark,
         }
     }
@@ -848,6 +911,9 @@ impl BuildingKind {
             // (wiki, Monument — DE update 141935 raised it from
             // the original 4).
             BuildingKind::Monument => 8,
+            // VIC-02: the Wonder's line of sight is 8 (Wonder
+            // dossier, Building comparative table).
+            BuildingKind::Wonder => 8,
             BuildingKind::WatchTower => 10,
             BuildingKind::Outpost => match age {
                 Age::Dark => 6,
@@ -1173,6 +1239,10 @@ impl BuildingKind {
             // ever consulted in play; adopted at the Castle's
             // row rather than invented at another number.
             BuildingKind::Monument => 4800,
+            // VIC-02: 4800 HP, flat (Wonder dossier — the wiki
+            // row carries a single HP figure, no per-Age split;
+            // `max_hp_at` falls through to this row at every Age).
+            BuildingKind::Wonder => 4800,
         }
     }
 
@@ -1267,6 +1337,9 @@ impl BuildingKind {
             // Castle P5a: the Monastery's melee armor is 2
             // (dossier §5.6, wiki Monastery infobox).
             BuildingKind::Monastery => 2,
+            // VIC-02: the Wonder's melee armor is 3 (Wonder
+            // dossier) — flat; no per-Age step is documented.
+            BuildingKind::Wonder => 3,
             BuildingKind::TownCenter => 3,
             _ => 0,
         }
@@ -1330,6 +1403,9 @@ impl BuildingKind {
             // Castle P5a: the Monastery's pierce armor is 9
             // (dossier §5.6, wiki Monastery infobox).
             BuildingKind::Monastery => 9,
+            // VIC-02: the Wonder's pierce armor is 10 (Wonder
+            // dossier) — flat, like its melee row.
+            BuildingKind::Wonder => 10,
             BuildingKind::TownCenter => 5,
             _ => 7,
         }
@@ -1617,6 +1693,13 @@ pub struct Building {
     /// every wood-only kind. Reset to 0 at full HP. Part of the
     /// hashed state (written only while nonzero).
     pub repair_stone_remainder: i64,
+    /// Repair gold-drip accumulator (BLD-07 × VIC-02): the gold
+    /// third of the repair drip for gold-cost buildings (the
+    /// Wonder alone today), in the same numerator form as
+    /// `repair_cost_remainder`. Zero for every kind without a
+    /// gold cost. Reset to 0 at full HP. Part of the hashed
+    /// state (written only while nonzero).
+    pub repair_gold_remainder: i64,
     /// Treadmill Crane construction-rate remainder (Castle P3c,
     /// TEC-09): the ×6/5 construction scalar does not divide the
     /// thirds rate evenly, so the sub-third remainder carries
@@ -2224,6 +2307,7 @@ mod tests {
             repair_hp_remainder: 0,
             repair_cost_remainder: 0,
             repair_stone_remainder: 0,
+            repair_gold_remainder: 0,
             build_rate_remainder: 0,
             gate_along_x: true,
             queue_rate_remainder: 0,

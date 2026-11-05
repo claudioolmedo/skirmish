@@ -111,7 +111,8 @@ impl WasmSim {
     /// `flags` packs the mode switches — bit 0 = Regicide
     /// (VIC-06), bit 1 = Sudden Death (VIC-07), bit 2 = Relic
     /// victory (VIC-03), bit 3 = Death Match (VIC-09), bit 4 =
-    /// Empire Wars (VIC-10), bit 5 = King of the Hill (VIC-08).
+    /// Empire Wars (VIC-10), bit 5 = King of the Hill (VIC-08),
+    /// bit 6 = Wonder victory (VIC-02).
     /// (Package I's builder tree packed its three modes at bits
     /// 2/3/4; bit 2 was taken by VIC-03 on current main, so the
     /// landing shifts them to 3/4/5 — bits 0/1/2 keep their
@@ -136,6 +137,7 @@ impl WasmSim {
             death_match: flags & 8 != 0,
             empire_wars: flags & 16 != 0,
             king_of_the_hill: flags & 32 != 0,
+            wonder_victory: flags & 64 != 0,
         };
         WasmSim {
             inner: Sim::with_settings(seed as u64, mode, victory),
@@ -160,6 +162,30 @@ impl WasmSim {
     /// `relic_countdown_holder`.
     pub fn relic_countdown_ticks_left(&self) -> u32 {
         match self.inner.relic_countdown() {
+            Some((_, left)) => left as u32,
+            None => 0,
+        }
+    }
+
+    /// VIC-02's countdown holder for the client's readout: the
+    /// owner byte of the player whose completed Wonder's
+    /// countdown is running (0 = first player, 2 = opponent), or
+    /// -1 while no countdown runs (setting off, no completed
+    /// Wonder standing, Sandbox). Mirrors the VIC-03 pair above.
+    pub fn wonder_countdown_holder(&self) -> i32 {
+        match self.inner.wonder_countdown() {
+            Some((holder, _)) => holder as i32,
+            None => -1,
+        }
+    }
+
+    /// VIC-02's countdown clock for the client's readout: ticks
+    /// left until the holder's wonder victory while a countdown
+    /// runs (0 at expiry, when `match_state` has decided), or 0
+    /// while no countdown runs — read it together with
+    /// `wonder_countdown_holder`.
+    pub fn wonder_countdown_ticks_left(&self) -> u32 {
+        match self.inner.wonder_countdown() {
             Some((_, left)) => left as u32,
             None => 0,
         }
@@ -1286,6 +1312,13 @@ impl WasmSim {
         self.push_build(entity, BuildingKind::Monastery, x, y)
     }
 
+    /// Order a villager to build a Wonder (1000 wood + 1000
+    /// stone + 1000 gold, 5×5; Imperial Age, no prerequisite
+    /// building — VIC-02) — see `push_build_house`.
+    pub fn push_build_wonder(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build(entity, BuildingKind::Wonder, x, y)
+    }
+
     /// Buy one lot (100) of a commodity at a completed Market
     /// (TRD-01..03): `resource_tag` is the `ResourceKind` tag
     /// (food 1, wood 2, stone 4 — gold is never a commodity).
@@ -1667,6 +1700,12 @@ impl WasmSim {
     /// `push_build_house_queued`.
     pub fn push_build_monastery_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
         self.push_build_queued(entity, BuildingKind::Monastery, x, y)
+    }
+
+    /// Queue a Wonder build (Imperial Age — VIC-02) — see
+    /// `push_build_house_queued`.
+    pub fn push_build_wonder_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build_queued(entity, BuildingKind::Wonder, x, y)
     }
 
     /// Queue a Market build — see `push_build_house_queued`.

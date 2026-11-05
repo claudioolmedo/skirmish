@@ -124,7 +124,18 @@ const MAGIC: &[u8; 4] = b"SKSV";
 /// formation slots live in ordinary move orders, so a v15
 /// save with no formation order pending is laid out exactly
 /// as v14 apart from the version word and the resigned flag.
-const SAVE_VERSION: u32 = 15;
+/// Version 16: VIC-02 (wonder victory) — the victory flags
+/// gain bit 6 (wonder victory), and a match under that setting
+/// carries its wonder countdown state (holder + accrued hold
+/// ticks) right after VIC-03's block in the world section; the
+/// block is present only while the flag is on, which the flags
+/// byte itself tells the reader, so a non-wonder v16 save is
+/// laid out exactly as v15 was apart from the version word and
+/// the next delta: the building record gains the repair gold
+/// accumulator (VIC-02's gold cost leg), written for every
+/// building like its wood/stone twins — 0 for every kind with
+/// no gold cost, so it round-trips the hash unchanged.
+const SAVE_VERSION: u32 = 16;
 
 /// Little-endian byte writer over a growable buffer.
 struct W {
@@ -645,6 +656,18 @@ impl Sim {
             }
             w.u64(self.relic_hold_ticks);
         }
+        // Format v16: VIC-02's countdown state, present only
+        // while the wonder-victory flag (bit 6 above) is on —
+        // hashed while a hold stands, so a save taken
+        // mid-countdown must carry it for the load-time hash
+        // check to pass.
+        if self.victory.wonder_victory {
+            w.bool(self.wonder_holder.is_some());
+            if let Some(holder) = self.wonder_holder {
+                w.u8(holder);
+            }
+            w.u64(self.wonder_hold_ticks);
+        }
         // Format v14: Package I's King of the Hill countdown
         // state, present only while the KotH flag (bit 5 above)
         // is on — hashed in KotH matches, so a save taken
@@ -750,6 +773,8 @@ impl Sim {
             w.i64(b.repair_hp_remainder);
             w.i64(b.repair_cost_remainder);
             w.i64(b.repair_stone_remainder);
+            // Format v16: VIC-02's repair gold accumulator.
+            w.i64(b.repair_gold_remainder);
             w.i64(b.build_rate_remainder);
             w.i64(b.queue_rate_remainder);
             w.bool(b.complete);
@@ -1402,6 +1427,9 @@ impl Sim {
         // Format v14: bits 3/4/5 are Package I's Death Match /
         // Empire Wars / King of the Hill, and the KotH countdown
         // state follows VIC-03's block when bit 5 is on.
+        // Format v16: bit 6 is VIC-02's wonder victory, and its
+        // countdown state follows VIC-03's block when bit 6 is
+        // on (before the KotH block, exactly as written).
         let victory = {
             let time_limit_ticks = r.u64()?;
             let score_target = r.u64()? as i64;
@@ -1415,9 +1443,16 @@ impl Sim {
                 death_match: flags & 8 != 0,
                 empire_wars: flags & 16 != 0,
                 king_of_the_hill: flags & 32 != 0,
+                wonder_victory: flags & 64 != 0,
             }
         };
         let (relic_holder, relic_hold_ticks) = if victory.relic_victory {
+            let holder = if r.bool()? { Some(r.u8()?) } else { None };
+            (holder, r.u64()?)
+        } else {
+            (None, 0)
+        };
+        let (wonder_holder, wonder_hold_ticks) = if victory.wonder_victory {
             let holder = if r.bool()? { Some(r.u8()?) } else { None };
             (holder, r.u64()?)
         } else {
@@ -1538,6 +1573,7 @@ impl Sim {
             let repair_hp_remainder = r.i64()?;
             let repair_cost_remainder = r.i64()?;
             let repair_stone_remainder = r.i64()?;
+            let repair_gold_remainder = r.i64()?;
             let build_rate_remainder = r.i64()?;
             let queue_rate_remainder = r.i64()?;
             let complete = r.bool()?;
@@ -1577,6 +1613,7 @@ impl Sim {
                 repair_hp_remainder,
                 repair_cost_remainder,
                 repair_stone_remainder,
+                repair_gold_remainder,
                 build_rate_remainder,
                 queue_rate_remainder,
                 complete,
@@ -1842,6 +1879,8 @@ impl Sim {
             victory,
             relic_holder,
             relic_hold_ticks,
+            wonder_holder,
+            wonder_hold_ticks,
             koth_ticks_left,
             koth_winner,
             entities,

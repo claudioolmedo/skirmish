@@ -372,12 +372,12 @@ impl Sim {
     /// on DE's never list), enemy-owned and player-owned; and its
     /// kind must not be on the never-even-with-Redemption list:
     /// Town Centers, Castles, Monasteries, walls, gates, Farms
-    /// (and Wonders / Kreposts / Fortified Churches / Fish Traps —
-    /// kinds that do not exist here, named in DE's list and
-    /// refused by construction when they land, as the unit arm
-    /// documents). Everything else — House, Barracks, camps,
-    /// Market, Blacksmith, ranges, Stable, towers, University,
-    /// Siege Workshop — converts.
+    /// and Wonders (VIC-02 — the Wonder joins the list as it
+    /// lands, exactly as this doc's earlier form promised for
+    /// the then-absent kinds; Kreposts / Fortified Churches /
+    /// Fish Traps still do not exist here). Everything else —
+    /// House, Barracks, camps, Market, Blacksmith, ranges,
+    /// Stable, towers, University, Siege Workshop — converts.
     fn eligible_building(&self, monk_owner: u8, bi: usize) -> bool {
         if !self.redemption_researched(monk_owner) {
             return false;
@@ -399,6 +399,7 @@ impl Sim {
                 | BuildingKind::PalisadeGate
                 | BuildingKind::StoneGate
                 | BuildingKind::Farm
+                | BuildingKind::Wonder
         )
     }
 

@@ -2151,6 +2151,7 @@ mod tests {
             repair_hp_remainder: 0,
             repair_cost_remainder: 0,
             repair_stone_remainder: 0,
+            repair_gold_remainder: 0,
             build_rate_remainder: 0,
             gate_along_x: true,
             queue_rate_remainder: 0,

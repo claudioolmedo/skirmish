@@ -107,6 +107,8 @@ mod bowsaw_tests;
 #[cfg(test)]
 mod victory_relic_tests;
 #[cfg(test)]
+mod victory_wonder_tests;
+#[cfg(test)]
 mod group_speed_tests;
 #[cfg(test)]
 mod vic11_tests;
@@ -969,6 +971,16 @@ pub struct VictorySettings {
     /// runs the map-size countdown, and the holder when it
     /// expires wins.
     pub king_of_the_hill: bool,
+    /// VIC-02: Wonder victory (Standard games) — a player with a
+    /// completed Wonder standing starts the map-size countdown
+    /// (`WONDER_VICTORY_DURATION_TICKS` on this game's only size,
+    /// Tiny — the shared VIC-02/VIC-03 duration table); holding
+    /// it until it expires wins, and losing the Wonder (razed
+    /// or deleted) cancels it outright. Opt-in per condition,
+    /// like VIC-03: off in plain Conquest, and no combined
+    /// "Standard" flag exists — each Standard condition is its
+    /// own opt-in, the VIC-03 precedent.
+    pub wonder_victory: bool,
 }
 
 impl VictorySettings {
@@ -1008,11 +1020,12 @@ impl VictorySettings {
 
     /// The mode booleans as hash bits (bit 0 regicide, bit 1
     /// sudden death, bit 2 relic victory, bit 3 death match,
-    /// bit 4 empire wars, bit 5 king of the hill) — the same
-    /// packing the WASM ABI uses. Bits 0/1 keep their Package C
-    /// meanings and bit 2 VIC-03's; Package I's builder tree
-    /// packed its modes at bits 2/3/4, shifted to 3/4/5 at this
-    /// landing because bit 2 was taken.
+    /// bit 4 empire wars, bit 5 king of the hill, bit 6 wonder
+    /// victory) — the same packing the WASM ABI uses. Bits 0/1
+    /// keep their Package C meanings and bit 2 VIC-03's;
+    /// Package I's builder tree packed its modes at bits 2/3/4,
+    /// shifted to 3/4/5 at this landing because bit 2 was taken;
+    /// VIC-02 takes the next free bit, 6.
     fn flags(&self) -> u8 {
         (self.regicide as u8)
             | ((self.sudden_death as u8) << 1)
@@ -1020,6 +1033,7 @@ impl VictorySettings {
             | ((self.death_match as u8) << 3)
             | ((self.empire_wars as u8) << 4)
             | ((self.king_of_the_hill as u8) << 5)
+            | ((self.wonder_victory as u8) << 6)
     }
 }
 
@@ -1044,6 +1058,14 @@ impl VictorySettings {
 /// table, as with every DE-side change. VIC-02's note is
 /// updated in the same commit.)
 pub const RELIC_VICTORY_DURATION_TICKS: u64 = 60_000;
+
+/// VIC-02's countdown length: the Wonder victory shares VIC-03's
+/// duration table (the rulebook's VIC-02/VIC-03 entries read the
+/// same map-size years — DE runs both Standard countdowns on the
+/// one table), so on Tiny it is the same 200 years = 60,000
+/// ticks. A named constant of its own so each rule's duration
+/// stays readable at its use site.
+pub const WONDER_VICTORY_DURATION_TICKS: u64 = 60_000;
 
 /// One Town Center's production state (M5): its production queue,
 /// progress, and rally point. Before M5 these lived as loose fields
@@ -1274,6 +1296,18 @@ pub struct Sim {
     /// byte-identical.
     relic_holder: Option<u8>,
     relic_hold_ticks: u64,
+    /// VIC-02's countdown state: the player with a completed
+    /// Wonder standing and how many consecutive ticks that has
+    /// lasted. The exact mirror of the relic pair above:
+    /// maintained by `wonder_victory_tick` only while the
+    /// `wonder_victory` setting is on (and only in a match);
+    /// any tick without a standing completed Wonder resets both
+    /// fields, so a cancelled countdown starts again from the
+    /// full duration. Hashed only while a hold stands (see
+    /// `hash_parts`), so a stream with no active countdown —
+    /// every Conquest stream included — stays byte-identical.
+    wonder_holder: Option<u8>,
+    wonder_hold_ticks: u64,
     /// Package I (VIC-08): the King of the Hill countdown still
     /// to run, in ticks. Starts at `KOTH_COUNTDOWN_TICKS` and
     /// decreases only while a player owns the Monument; a
@@ -1475,6 +1509,8 @@ impl Sim {
             victory,
             relic_holder: None,
             relic_hold_ticks: 0,
+            wonder_holder: None,
+            wonder_hold_ticks: 0,
             koth_ticks_left: KOTH_COUNTDOWN_TICKS,
             koth_winner: None,
             entities,
@@ -1845,6 +1881,7 @@ impl Sim {
             repair_hp_remainder: 0,
             repair_cost_remainder: 0,
             repair_stone_remainder: 0,
+            repair_gold_remainder: 0,
             // Landing: the fields the Building record gained on
             // main since Package I's base (build-rate remainder,
             // gate orientation, queue-rate remainder, the two
@@ -3694,6 +3731,13 @@ impl Sim {
                 MatchState::Defeat
             };
         }
+        if let Some(human_won) = self.wonder_outcome() {
+            return if human_won {
+                MatchState::Victory
+            } else {
+                MatchState::Defeat
+            };
+        }
         if let Some(human_won) = self.score_outcome() {
             return if human_won {
                 MatchState::Victory
@@ -3952,6 +3996,93 @@ impl Sim {
         }
         let holder = self.relic_holder?;
         let left = RELIC_VICTORY_DURATION_TICKS.saturating_sub(self.relic_hold_ticks);
+        Some((holder, left))
+    }
+
+    /// VIC-02's hold read: the player with a completed Wonder
+    /// standing, if any. The census is the live building list —
+    /// a Wonder still rising (a foundation) never qualifies, and
+    /// a Wonder that left the list (razed, or deleted by its
+    /// owner) breaks the hold the tick the census runs. At most
+    /// one player can hold at a time in the countdown's sense —
+    /// the census reads existence per owner, human first, so if
+    /// both players stand a completed Wonder the human's hold is
+    /// the tracked one and the foe's accrues only once the
+    /// human's breaks (the relic census's deterministic-scan
+    /// discipline, on the one countdown state the settings
+    /// carry). Multiple Wonders of one owner change nothing:
+    /// existence, not count, is the hold.
+    fn wonder_holder_owner(&self) -> Option<u8> {
+        for owner in [entity::OWNER_PLAYER, entity::OWNER_OPPONENT] {
+            if self
+                .buildings
+                .iter()
+                .any(|b| b.owner == owner && b.kind == BuildingKind::Wonder && b.complete)
+            {
+                return Some(owner);
+            }
+        }
+        None
+    }
+
+    /// VIC-02's per-tick countdown maintenance (tick step 4.9,
+    /// right after VIC-03's 4.8): while the setting is on and a
+    /// match runs, a standing completed Wonder accrues one tick;
+    /// a new holder starts at one; any tick without one —
+    /// setting off, Sandbox, the Wonder razed or deleted —
+    /// resets the countdown outright (DE cancels it; it does not
+    /// pause). Under allied victory a team's Wonders would pool
+    /// (VIC-12) — no teams exist in this game (VIS-08), so the
+    /// read is per-player only, like VIC-03's.
+    fn wonder_victory_tick(&mut self) {
+        if !self.victory.wonder_victory || !self.mode.is_match() {
+            self.wonder_holder = None;
+            self.wonder_hold_ticks = 0;
+            return;
+        }
+        match self.wonder_holder_owner() {
+            Some(owner) if self.wonder_holder == Some(owner) => {
+                self.wonder_hold_ticks = self.wonder_hold_ticks.saturating_add(1);
+            }
+            Some(owner) => {
+                self.wonder_holder = Some(owner);
+                self.wonder_hold_ticks = 1;
+            }
+            None => {
+                self.wonder_holder = None;
+                self.wonder_hold_ticks = 0;
+            }
+        }
+    }
+
+    /// VIC-02's ending, from the countdown state: `Some(true)`
+    /// the human's countdown has expired, `Some(false)` the
+    /// opponent's has, `None` no wonder ending applies. Read
+    /// only while the setting is on, so a Conquest match with a
+    /// Wonder standing never ends this way.
+    fn wonder_outcome(&self) -> Option<bool> {
+        if !self.victory.wonder_victory {
+            return None;
+        }
+        let holder = self.wonder_holder?;
+        if self.wonder_hold_ticks < WONDER_VICTORY_DURATION_TICKS {
+            return None;
+        }
+        Some(holder == entity::OWNER_PLAYER)
+    }
+
+    /// VIC-02's live countdown for the client's readout: the
+    /// holding player and the ticks left until their wonder
+    /// victory, while a countdown is running under the wonder
+    /// setting. `None` whenever no countdown runs (setting off,
+    /// no completed Wonder standing, Sandbox). At expiry the
+    /// ticks left read 0 and `match_state` has decided the match.
+    pub fn wonder_countdown(&self) -> Option<(u8, u64)> {
+        if !self.victory.wonder_victory || !self.mode.is_match() {
+            return None;
+        }
+        let holder = self.wonder_holder?;
+        let left = WONDER_VICTORY_DURATION_TICKS.saturating_sub(self.wonder_hold_ticks);
         Some((holder, left))
     }
 
@@ -4903,17 +5034,28 @@ impl Sim {
         if self.buildings[bi].kind == BuildingKind::Monument {
             return;
         }
-        let (complete, owner, wood, stone) = {
+        let (complete, owner, wood, stone, gold) = {
             let b = &self.buildings[bi];
-            (b.complete, b.owner, b.kind.wood_cost(), b.kind.stone_cost())
+            (
+                b.complete,
+                b.owner,
+                b.kind.wood_cost(),
+                b.kind.stone_cost(),
+                b.kind.gold_cost(),
+            )
         };
         if !complete {
             // BLD-02: a foundation refunds its FULL cost — wood
             // and, for BLD-18's stone-cost kinds, stone (every
-            // earlier kind's stone reads 0).
+            // earlier kind's stone reads 0), and for VIC-02's
+            // gold-cost kind, gold (every other kind's gold
+            // reads 0).
             self.stockpile_mut(owner).add(ResourceKind::Wood, wood);
             if stone > I16F16::ZERO {
                 self.stockpile_mut(owner).add(ResourceKind::Stone, stone);
+            }
+            if gold > I16F16::ZERO {
+                self.stockpile_mut(owner).add(ResourceKind::Gold, gold);
             }
         }
         self.destroy_building(building);
@@ -6210,6 +6352,13 @@ impl Sim {
         //     the count this tick and a retrieve this tick has
         //     already broken it.
         self.relic_victory_tick();
+
+        // 4.9 Wonder victory (VIC-02): while the wonder-victory
+        //     setting is on, a player with a completed Wonder
+        //     standing runs the countdown; losing the Wonder
+        //     cancels it. After the relic phase, in VIC-03's own
+        //     position style.
+        self.wonder_victory_tick();
 
         // 5. Order queues (M4, SEL-12): an entity that became fully
         //    idle this tick starts its next queued order, so a chain
@@ -7903,7 +8052,8 @@ impl Sim {
 
     /// Place one validated foundation for builder `idx`: charge
     /// the builder's owner the kind's wood cost (and its stone
-    /// cost, for the stone-cost kinds), register the
+    /// cost, for the stone-cost kinds, and its gold cost for the
+    /// gold-cost kind), register the
     /// building (blocking its footprint cells when the kind is
     /// solid), and return its id. The caller assigns the builder.
     /// Shared by `apply_build` (single placement) and
@@ -7923,8 +8073,12 @@ impl Sim {
         // re-checked BEFORE either spend lands, so a failure can
         // never take the wood and refuse the building (the P1
         // inline placement's guarantee, carried into the shared
-        // path).
+        // path). VIC-02: the gold leg joins the re-check on the
+        // same terms (the Wonder is the first gold-cost kind).
         if self.stockpile_of(builder_owner).amount(ResourceKind::Stone) < kind.stone_cost() {
+            return None;
+        }
+        if self.stockpile_of(builder_owner).amount(ResourceKind::Gold) < kind.gold_cost() {
             return None;
         }
         if !self
@@ -7947,6 +8101,24 @@ impl Sim {
         {
             self.stockpile_mut(builder_owner)
                 .add(ResourceKind::Wood, kind.wood_cost());
+            return None;
+        }
+        // Gold-cost kinds spend their gold last (VIC-02: the
+        // Wonder alone) — if the gold spend ever failed after
+        // wood and stone went through, both are refunded, on the
+        // stone leg's belt-and-braces terms; kinds without a
+        // gold cost skip it and behave exactly as before.
+        if kind.gold_cost() > I16F16::ZERO
+            && !self
+                .stockpile_mut(builder_owner)
+                .spend(ResourceKind::Gold, kind.gold_cost())
+        {
+            self.stockpile_mut(builder_owner)
+                .add(ResourceKind::Wood, kind.wood_cost());
+            if kind.stone_cost() > I16F16::ZERO {
+                self.stockpile_mut(builder_owner)
+                    .add(ResourceKind::Stone, kind.stone_cost());
+            }
             return None;
         }
         // Package J: a gate's orientation resolves here exactly
@@ -8015,6 +8187,7 @@ impl Sim {
             repair_hp_remainder: 0,
             repair_cost_remainder: 0,
             repair_stone_remainder: 0,
+            repair_gold_remainder: 0,
             build_rate_remainder: 0,
             gate_along_x,
             queue_rate_remainder: 0,
@@ -8663,11 +8836,16 @@ impl Sim {
         // The cost must be payable at placement — by the *builder's*
         // owner (M5: each player builds from their own stockpile).
         // The stone half likewise, for the stone-cost kinds
-        // (BLD-18's tower and outpost; the Town Center, Castle P1).
+        // (BLD-18's tower and outpost; the Town Center, Castle P1),
+        // and the gold third for the gold-cost kind (VIC-02's
+        // Wonder — every other kind reads 0 and passes trivially).
         if self.stockpile_of(builder_owner).amount(ResourceKind::Wood) < kind.wood_cost() {
             return BuildVerdict::Reject;
         }
         if self.stockpile_of(builder_owner).amount(ResourceKind::Stone) < kind.stone_cost() {
+            return BuildVerdict::Reject;
+        }
+        if self.stockpile_of(builder_owner).amount(ResourceKind::Gold) < kind.gold_cost() {
             return BuildVerdict::Reject;
         }
         // Reachable-ish: at least one ring cell stands open and the
@@ -8705,6 +8883,11 @@ impl Sim {
             return BuildVerdict::Reject;
         }
         if self.stockpile_of(builder_owner).amount(ResourceKind::Stone) < kind.stone_cost() {
+            return BuildVerdict::Reject;
+        }
+        // VIC-02: the gold leg, for uniformity with the square
+        // path — gates read 0 gold and pass trivially.
+        if self.stockpile_of(builder_owner).amount(ResourceKind::Gold) < kind.gold_cost() {
             return BuildVerdict::Reject;
         }
         // Reachable-ish: at least one ring cell of the span
@@ -9885,7 +10068,10 @@ impl Sim {
             // Wood for every kind; stone too for BLD-18's
             // stone-cost kinds (their stone accumulator rides
             // alongside — for wood-only kinds it stays 0 and the
-            // stone spend is a no-op of 0).
+            // stone spend is a no-op of 0); gold likewise for
+            // VIC-02's gold-cost kind (the Wonder — every other
+            // kind's gold accumulator stays 0 and its gold spend
+            // is a no-op of 0).
             let cost_den = max_hp_bits * 65_536;
             let cost_acc = self.buildings[bi].repair_cost_remainder
                 + kind.wood_cost().to_bits() as i64
@@ -9899,6 +10085,12 @@ impl Sim {
                     * build::REPAIR_COST_FRACTION.to_bits() as i64;
             let stone_drip = stone_acc / cost_den;
             let stone_rem = stone_acc % cost_den;
+            let gold_acc = self.buildings[bi].repair_gold_remainder
+                + kind.gold_cost().to_bits() as i64
+                    * restored
+                    * build::REPAIR_COST_FRACTION.to_bits() as i64;
+            let gold_drip = gold_acc / cost_den;
+            let gold_rem = gold_acc % cost_den;
             if !self
                 .stockpile_mut(owner)
                 .spend(ResourceKind::Wood, I16F16::from_bits(drip as i32))
@@ -9921,12 +10113,27 @@ impl Sim {
                 unfunded.push(self.buildings[bi].id);
                 continue;
             }
+            if !self
+                .stockpile_mut(owner)
+                .spend(ResourceKind::Gold, I16F16::from_bits(gold_drip as i32))
+            {
+                // The wood and stone went through but the gold
+                // did not: refund both so the tick is atomic, on
+                // the stone leg's terms.
+                self.stockpile_mut(owner)
+                    .add(ResourceKind::Wood, I16F16::from_bits(drip as i32));
+                self.stockpile_mut(owner)
+                    .add(ResourceKind::Stone, I16F16::from_bits(stone_drip as i32));
+                unfunded.push(self.buildings[bi].id);
+                continue;
+            }
             let done = restored == missing;
             let b = &mut self.buildings[bi];
             b.hp = I16F16::from_bits((hp_bits + restored) as i32);
             b.repair_hp_remainder = if done { 0 } else { hp_rem };
             b.repair_cost_remainder = if done { 0 } else { cost_rem };
             b.repair_stone_remainder = if done { 0 } else { stone_rem };
+            b.repair_gold_remainder = if done { 0 } else { gold_rem };
             if done {
                 finished.push(b.id);
             }
@@ -10483,6 +10690,18 @@ impl Sim {
             h.write_u8(self.relic_holder.unwrap_or(0));
             h.write_u64(self.relic_hold_ticks);
         }
+        // VIC-02: the wonder countdown state joins the hash only
+        // while a hold stands — behind marker 0xC3, the holder
+        // and the accrued ticks — the VIC-03 discipline verbatim
+        // (0xC1 is the relic block above; 0xC2 is MOV-06's group
+        // stamp in the entity section), so a stream with no
+        // active wonder countdown stays byte-identical, and two
+        // countdowns can never silently agree.
+        if self.wonder_holder.is_some() {
+            h.write_u8(0xC3);
+            h.write_u8(self.wonder_holder.unwrap_or(0));
+            h.write_u64(self.wonder_hold_ticks);
+        }
         // Package I (VIC-08): the King of the Hill countdown and
         // its decided winner join the hash in KotH matches only —
         // the Monument building itself (owner included) is
@@ -10738,6 +10957,17 @@ impl Sim {
             if b.repair_stone_remainder != 0 {
                 h.write_u8(0xB7);
                 h.write_u64(b.repair_stone_remainder as u64);
+            }
+            // VIC-02: the repair gold accumulator — written ONLY
+            // while nonzero, behind marker 0xBC (the building
+            // section's next free byte: 0xB7 stone, 0xB5 build
+            // rate, 0xB4 queue rate, 0xB6 weapon, 0xBB gate and
+            // 0xB8 relic store are taken in this section), so a
+            // match with no gold-cost building under repair stays
+            // byte-identical to before.
+            if b.repair_gold_remainder != 0 {
+                h.write_u8(0xBC);
+                h.write_u64(b.repair_gold_remainder as u64);
             }
             // Castle P3c: the Treadmill Crane rate remainder —
             // written ONLY while nonzero, behind a marker byte
@@ -11866,6 +12096,7 @@ mod tests {
             repair_hp_remainder: 0,
             repair_cost_remainder: 0,
             repair_stone_remainder: 0,
+            repair_gold_remainder: 0,
             build_rate_remainder: 0,
             gate_along_x: true,
             queue_rate_remainder: 0,
@@ -11981,6 +12212,7 @@ mod tests {
             repair_hp_remainder: 0,
             repair_cost_remainder: 0,
             repair_stone_remainder: 0,
+            repair_gold_remainder: 0,
             build_rate_remainder: 0,
             gate_along_x: true,
             queue_rate_remainder: 0,
@@ -12035,6 +12267,7 @@ mod tests {
             repair_hp_remainder: 0,
             repair_cost_remainder: 0,
             repair_stone_remainder: 0,
+            repair_gold_remainder: 0,
             build_rate_remainder: 0,
             gate_along_x: true,
             queue_rate_remainder: 0,

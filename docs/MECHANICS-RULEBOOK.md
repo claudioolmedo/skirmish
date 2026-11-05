@@ -3030,7 +3030,7 @@ carrying (the pointer names the monk, who changes owner); a destroyed
 Monastery drops its store on the ground at its position. The garrison
 count this rule maintains is the count VIC-03 reads (the relic
 countdown landed 2026-11-03 as an opt-in victory setting;
-VIC-02's Wonder countdown stays MISSING). ·
+VIC-02's Wonder countdown landed 2026-11-04 the same way). ·
 *Status:* **MATCHES**.
 
 **MNK-10 — Healing.** A monk heals one allied unit at a time within
@@ -3705,8 +3705,53 @@ MORE_MAP_SIZES, re-fetched 2026-11-03 — the pre-expansion reading
 of this note, 100 years (Tiny), is superseded). Destroying the
 Wonder cancels the countdown.
 *Source:* wiki, Relic (duration table by map size); GAP 8.2. · *Impl:*
-the countdown is a per-player tick counter in match state (hashed),
-started/stopped by Wonder existence events. · *Status:* **MISSING**.
+shipped (VIC-02 package, 2026-11-04) — an opt-in `VictorySettings`
+condition (`wonder_victory`, WASM flags bit 6; a per-condition
+opt-in on VIC-03's precedent, no combined "Standard" flag), off in
+plain Conquest, whose streams stay byte-identical: the settings
+join the hash only off-default and the countdown state only while
+a hold stands (marker 0xC3). The Wonder itself is a buildable
+building (kind tag 22) on the pinned wiki row (WONDER-DOSSIER,
+fetched 2026-11-04): 1000 wood / 1000 stone / 1000 gold, 3500 s
+build, 5×5, 4800 HP flat, 3 melee / 10 pierce armor, LoS 8,
+Imperial Age with no prerequisite building, unconvertible
+(MNK-08's never-list), no Standard Buildings armor class. Its
+gold leg extends the cost model exactly as BLD-18's stone leg
+did — a `gold_cost()` that reads 0 for every pre-existing kind —
+threaded through placement (atomic three-resource spend and
+refund), the foundation delete-refund and the repair drip (a
+`repair_gold_remainder` beside its stone twin), and
+`total_cost()` now returns the Wonder's full 3000 toward VIC-04
+Society. Every tick (after the relic census) the sim censuses
+COMPLETED Wonders standing: the player with one accrues the
+countdown from `WONDER_VICTORY_DURATION_TICKS` — Tiny's 200
+years from this rule's own table at 1 year = 5 s (60,000 ticks,
+the row VIC-03 shares); a foundation never counts, and the tick
+the last Wonder falls or is deleted the countdown resets
+outright, never pauses. At expiry `match_state` decides for the
+holder through the same path as the other modes (after
+Conquest/mode elimination and the relic outcome, before VIC-05's
+score endings); Sandbox never counts down. The countdown
+round-trips through saves (format v16; the block rides only
+while the flag is on, and the building record gains the gold
+repair accumulator) and the client surfaces a build-menu entry
+(the economic page's fourth row, key V) plus a top-bar countdown
+readout mirroring VIC-03's chip. Recorded readings: (1) the
+allied-victory clause has no surface yet — no teams exist
+(VIS-08), so the census is per-player and pooling lands with
+VIC-12, as VIC-03 recorded; the tracked hold is a single
+(holder, ticks) pair on the relic state's shape, so if both
+players stand completed Wonders the human's hold is tracked
+and the foe's accrues only once it breaks — DE runs the two
+countdowns simultaneously, a difference the one-pair state
+forces and a teams-era revisit can lift; (2) the announcement
+and reveal-on-construction behaviour DE shows when a Wonder
+rises is presentation this package defers (the dossier's
+scoping call); (3) VIC-04's Society term can now price the
+Wonder at its full 3000 through `total_cost()`, but
+`score_for`'s Society computation itself is untouched here —
+it still reads structurally 0, and wiring it is VIC-04
+follow-up, not this rule's. · *Status:* **MATCHES**.
 
 **VIC-03 — Relic victory (standard games).** Holding *all* of the map's
 relics garrisoned in Monasteries starts the same map-size countdown
@@ -4851,14 +4896,23 @@ rule's Impl note) — MOV-07 moves MISSING → MATCHES. The
 book stands at 223 rules, 192 / 15 / 16. The table below
 equals the body.
 
-updated 2026-11-04 for MOV-08 (bot-loop builder): long
-formed moves collapse into column — past the documented
-~30 tiles the group's orders route through one-wide
-column slots at an assembly anchor ahead of the centroid
-and a re-form anchor short of the destination, then
-spread back into the chosen formation (see the rule's
-Impl note) — MOV-08 moves MISSING → MATCHES. The book
-stands at 223 rules, 193 / 15 / 15. The table below
+updated 2026-11-04 for MOV-08 (bot-loop builder, landed
+2026-11-04) and VIC-02 (bot-loop builder, landed by the
+hourly loop on top of MOV-08): MOV-08 — long formed moves
+collapse into column past ~30 tiles (see the rule's Impl
+note) — moves MISSING -> MATCHES; VIC-02 — wonder victory
+lands: the Wonder building (kind tag 22: 1000 wood / 1000
+stone / 1000 gold, 3500 s, 5x5, 4800 HP flat, Imperial Age)
+and its opt-in countdown (Tiny's 60,000 ticks from the
+rule's own table, the row VIC-03 shares) move VIC-02
+MISSING -> MATCHES; the gold cost leg extends the cost
+model (a `gold_cost()` reading 0 for every pre-existing
+kind), and the announcement/reveal presentation is
+deferred (see the rule's Impl note). The book's Appendix table stands at 223 rules,
+194 / 15 / 14 (both flips applied to their section rows);
+the mechanical Status count over the rule bodies is
+198 / 15 / 10. The
+table below
 equals the body.
 
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
@@ -4878,10 +4932,10 @@ equals the body.
 | 13 | Trade, market & tribute (TRD) | 8 | 8 | 0 | 0 |
 | 14 | Garrison, transport & repair (GAR) | 10 | 9 | 0 | 1 |
 | 15 | AI behavior & difficulty (AI) | 9 | 8 | 0 | 1 |
-| 16 | Victory, scoring & game modes (VIC) | 12 | 7 | 0 | 5 |
+| 16 | Victory, scoring & game modes (VIC) | 12 | 8 | 0 | 4 |
 | 17 | Multiplayer determinism (NET) | 11 | 9 | 1 | 1 |
 | 18 | Information rules (INF) | 13 | 12 | 1 | 0 |
-| | **Total** | **223** | **193** | **15** | **15** |
+| | **Total** | **223** | **194** | **15** | **14** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer

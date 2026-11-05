@@ -110,6 +110,10 @@ fn victory_settings_round_trip_and_are_hashed_state() {
         death_match: false,
         empire_wars: false,
         king_of_the_hill: false,
+        // VIC-02: the wonder condition rides the same
+        // round-trip (off here — this test's subject is the
+        // Package C conditions).
+        wonder_victory: false,
     };
     let sim = Sim::new_match_victory(42, MatchMode::TwoPlayer, settings);
     assert_eq!(sim.victory_settings(), settings);
