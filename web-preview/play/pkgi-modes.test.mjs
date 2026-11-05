@@ -65,10 +65,10 @@ test('both prematch surfaces offer the three modes', () => {
 });
 
 test('the Monument has client tables at tag 21 and a draw routine', () => {
-  assert.ok(appJs.includes("'monastery', 'monument', 'wonder']"), 'BUILD_I18N names tag 21 (the Wonder follows at 22, VIC-02)');
-  assert.ok(appJs.includes("'Monastery', 'Monument', 'Wonder']"), 'BUILD_NAME names tag 21');
-  assert.ok(appJs.includes("'i-monastery', 'i-monument', 'i-wonder']"), 'BUILD_ICON has the monument symbol');
-  assert.ok(appJs.includes("'monastery.png', 'monument.png', 'wonder.png']"), 'BUILD_PNG has the monument portrait');
+  assert.ok(appJs.includes("'monastery', 'monument', 'wonder', 'dock']"), 'BUILD_I18N names tag 21 (the Wonder follows at 22, VIC-02; the Dock appends at 23, Water W1)');
+  assert.ok(appJs.includes("'Monastery', 'Monument', 'Wonder', 'Dock']"), 'BUILD_NAME names tag 21');
+  assert.ok(appJs.includes("'i-monastery', 'i-monument', 'i-wonder', 'i-dock']"), 'BUILD_ICON has the monument symbol');
+  assert.ok(appJs.includes("'monastery.png', 'monument.png', 'wonder.png', 'dock.png']"), 'BUILD_PNG has the monument portrait');
   assert.ok(appJs.includes('} else if (b.kind === 21) {\n    drawMonument(b);'),
     'drawBuilding routes kind 21 to drawMonument');
   assert.ok(fnBody('function drawMonument(').includes('b.owner === foeOwner() ? ENEMY_CLOTH'),

@@ -390,25 +390,28 @@ function pngIcon(png, cls) {
 // 22 wonder (VIC-02 — 1000 wood PLUS 1000 stone PLUS 1000 gold:
 // BUILD_COST holds the wood, the stone rides BUILD_COST_STONE
 // and the gold BUILD_COST_GOLD; 5×5, Imperial Age).
+// 23 dock (Water W1, BLD-14 — 150 wood, 3×3, Dark Age; its
+// footprint must straddle a shoreline — the ghost mirror's
+// shoreline case in mirrorValid; food-only drop-off).
 // Costs and footprints mirror the sim (MECHANICS-STUDY §5; the
 // palisade row is the current DE wiki row — 3 wood per segment).
-const BUILD_COST = [25, 60, 175, 100, 100, 100, 175, 175, 150, 3, 35, 25, 175, 275, 0, 0, 200, 200, 20, 0, 175, 0, 1000];
+const BUILD_COST = [25, 60, 175, 100, 100, 100, 175, 175, 150, 3, 35, 25, 175, 275, 0, 0, 200, 200, 20, 0, 175, 0, 1000, 150];
 // Stone paid at placement, by kind tag (BLD-18's two defensive
 // structures, the Town Center, the Stone Wall and the Castle
 // cost stone; every other entry 0).
-const BUILD_COST_STONE = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 125, 5, 0, 100, 5, 650, 0, 0, 0, 30, 0, 0, 1000];
+const BUILD_COST_STONE = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 125, 5, 0, 100, 5, 650, 0, 0, 0, 30, 0, 0, 1000, 0];
 // Gold paid at placement, by kind tag (VIC-02: the Wonder is
 // the first gold-cost kind; every other entry 0).
-const BUILD_COST_GOLD = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1000];
+const BUILD_COST_GOLD = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1000, 0];
 const BUILD_I18N = ['house', 'farm', 'barracks', 'lumber', 'mill',
   'mining', 'range', 'stable', 'blacksmith', 'palisade', 'watchtower',
-  'outpost', 'market', 'towncenter', 'stonewall', 'castle', 'university', 'siegeworkshop', 'palisadegate', 'stonegate', 'monastery', 'monument', 'wonder'];
+  'outpost', 'market', 'towncenter', 'stonewall', 'castle', 'university', 'siegeworkshop', 'palisadegate', 'stonegate', 'monastery', 'monument', 'wonder', 'dock'];
 let BUILD_NAME = ['House', 'Farm', 'Barracks', 'Lumber Camp', 'Mill',
   'Mining Camp', 'Archery Range', 'Stable', 'Blacksmith', 'Palisade Wall',
-  'Watch Tower', 'Outpost', 'Market', 'Town Center', 'Stone Wall', 'Castle', 'University', 'Siege Workshop', 'Palisade Gate', 'Stone Gate', 'Monastery', 'Monument', 'Wonder'];
+  'Watch Tower', 'Outpost', 'Market', 'Town Center', 'Stone Wall', 'Castle', 'University', 'Siege Workshop', 'Palisade Gate', 'Stone Gate', 'Monastery', 'Monument', 'Wonder', 'Dock'];
 // Farm footprint is 3 (DE-documented; Claudio's decision
 // 2026-10-22, superseding the earlier 2x2 specification).
-const BUILD_SIZE = [2, 3, 3, 2, 2, 2, 3, 3, 3, 1, 1, 1, 4, 4, 1, 4, 4, 4, 1, 1, 3, 4, 5];
+const BUILD_SIZE = [2, 3, 3, 2, 2, 2, 3, 3, 3, 1, 1, 1, 4, 4, 1, 4, 4, 4, 1, 1, 3, 4, 5, 3];
 // The wall kinds (BLD-13 palisade, BLD-20 stone): 1×1 segments
 // placed by dragged lines, not single footprints.
 function isWallKind(kind) { return kind === 9 || kind === 14; }
@@ -421,14 +424,14 @@ const GATE_OF_WALL = { 9: 18, 14: 19 };
 const WALL_OF_GATE = { 18: 9, 19: 14 };
 const BUILD_ICON = ['i-house', 'i-farm', 'i-tc', 'i-lumber', 'i-mill',
   'i-mining', 'i-range', 'i-stable', 'i-blacksmith', 'i-palisade',
-  'i-watchtower', 'i-outpost', 'i-market', 'i-tc', 'i-stonewall', 'i-castle', 'i-university', 'i-siegeworkshop', 'i-palisade', 'i-stonewall', 'i-monastery', 'i-monument', 'i-wonder'];
+  'i-watchtower', 'i-outpost', 'i-market', 'i-tc', 'i-stonewall', 'i-castle', 'i-university', 'i-siegeworkshop', 'i-palisade', 'i-stonewall', 'i-monastery', 'i-monument', 'i-wonder', 'i-dock'];
 // The PNG set above, per building kind tag (same order as
 // BUILD_ICON): command buttons and building portraits.
 const BUILD_PNG = ['house.png', 'farm.png', 'barracks.png', 'lumber-camp.png',
   'mill.png', 'mining-camp.png', 'archery-range.png', 'stable.png',
   'blacksmith.png', 'palisade-wall.png', 'watchtower.png', 'outpost.png',
   'market.png', 'town-center.png', 'stone-wall.png', 'castle.png', 'university.png',
-  'siege-workshop.png', 'palisade-wall.png', 'stone-wall.png', 'monastery.png', 'monument.png', 'wonder.png'];
+  'siege-workshop.png', 'palisade-wall.png', 'stone-wall.png', 'monastery.png', 'monument.png', 'wonder.png', 'dock.png'];
 // Building max HP by kind tag (the sim's building table, study
 // §5) — for the enemy-building info panel (M5). The palisade
 // entry is its Dark-Age value (150; 250 from Feudal, BLD-13 —
@@ -437,7 +440,7 @@ const BUILD_PNG = ['house.png', 'farm.png', 'barracks.png', 'lumber-camp.png',
 // gates follow the same convention: 240 is the Palisade Gate's
 // Dark column (400 from Feudal), 1650 the Stone Gate's Feudal
 // column (2700 from Castle).
-const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200, 150, 850, 500, 1800, 2400, 1080, 4800, 2100, 1800, 240, 1650, 2100, 4800, 4800];
+const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200, 150, 850, 500, 1800, 2400, 1080, 4800, 2100, 1800, 240, 1650, 2100, 4800, 4800, 1800];
 // the Watch Tower's 850 is its pre-Castle value (BLD-18).
 // WASM build commands by kind tag (M6 completes the set; BLD-13
 // adds the palisade's single-segment form — dragged lines go
@@ -454,6 +457,9 @@ const PUSH_BUILD_QUEUED = PUSH_BUILD.map((n) => `${n}_queued`);
 // tag 22 is the Wonder.
 PUSH_BUILD[22] = 'push_build_wonder';
 PUSH_BUILD_QUEUED[22] = 'push_build_wonder_queued';
+// Water W1 (BLD-14): tag 23 is the Dock.
+PUSH_BUILD[23] = 'push_build_dock';
+PUSH_BUILD_QUEUED[23] = 'push_build_dock_queued';
 // Own-building minimap colors by kind tag (M6); kinds without an
 // entry keep the minimap's parchment default, the enemy's
 // buildings are always ENEMY_COLOR.
@@ -461,7 +467,7 @@ const BUILDING_MINIMAP_COLOR = {
   3: '#8a6b42', 4: '#e5d9a8', 5: '#b9a24a', 6: '#c98f4e', 7: '#9a6a44', 8: '#6f6f76',
   9: '#7a5a34', 10: '#7a7a72', 11: '#a8843f', 12: '#b03a2e',
   13: '#d8cf9f', 14: '#8d8578', 15: '#a9a294', 16: '#7d7466', 17: '#6e5a41',
-  18: '#7a5a34', 19: '#8d8578', 20: '#b3a284', 22: '#d4af37',
+  18: '#7a5a34', 19: '#8d8578', 20: '#b3a284', 22: '#d4af37', 23: '#4a7a96',
 };
 
 // Ages and technologies (M6). Age tags match the sim's Age::tag;
@@ -1636,6 +1642,11 @@ const BUILDING_ART_FILES = {
   // finished art over the foundation diamond.
   watchtower: 'watch-tower.png',
   outpost: 'outpost.png',
+  // Water W1: complete art only, same contract — an original
+  // programmatic blockout (timber pier deck on posts, hut and
+  // loading crane) generated for this package; construction
+  // clip-reveals it.
+  dock: 'dock.png',
   // Castle P3a: complete art only, same contract — an original
   // programmatic blockout (stone keep, twin towers, battlements)
   // generated for this package; construction clip-reveals it.
@@ -1670,6 +1681,7 @@ const BUILDING_ART_KEY = {
   13: 'tc',
   14: 'stonewall',
   15: 'castle',
+  23: 'dock', // Water W1 (BLD-14)
 };
 // The settle cap: the loading gate waits for the art, but a hung
 // image (stalled connection) must never block a match longer
@@ -2420,7 +2432,8 @@ const worldToScreen = (wx, wy) => {
 
 let sim, HALF, GW, GH, CS, OBST;
 // M7 world layers (flat row-major, one byte per cell, indexed
-// gy * GW + gx): terrain (0 land / 1 water), heights (0..=4), and
+// gy * GW + gx): terrain (0 land / 1 deep water / 2 shallows —
+// Water W1), heights (0..=4), and
 // the LOCAL player's fog grid (0 unexplored / 1 explored /
 // 2 visible) — the only knowledge this client renders from.
 let TERRAIN = null, HEIGHTS = null, FOG = null;
@@ -2474,10 +2487,13 @@ function refreshWorldLayers() {
   for (let gy = 0; gy < GH; gy++) {
     for (let gx = 0; gx < GW; gx++) {
       const i = gy * GW + gx;
-      if (TERRAIN[i] === 1) continue;
+      // Water-side cells (deep water 1, shallows 2) are not
+      // shoreline sand themselves; a LAND cell touching either
+      // is (Water W1: the shallows rim fronts the same coast).
+      if (TERRAIN[i] === 1 || TERRAIN[i] === 2) continue;
       for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
         const nx = gx + dx, ny = gy + dy;
-        if (nx >= 0 && ny >= 0 && nx < GW && ny < GH && TERRAIN[ny * GW + nx] === 1) {
+        if (nx >= 0 && ny >= 0 && nx < GW && ny < GH && TERRAIN[ny * GW + nx] >= 1) {
           SHORE.add(i);
           break;
         }
@@ -2677,9 +2693,62 @@ function mirrorGateValid(kind, cx, cy) {
   return true;
 }
 
+// Client mirror of the sim's Dock placement (Water W1, BLD-14):
+// the grid predicate's shoreline straddle, read off the terrain
+// layer — at least one footprint cell water-side (deep water or
+// shallows) and at least one land-side (land, or a shallows cell
+// orthogonally adjacent to land) — plus the standing checks the
+// square mirror runs (no Town Center reserve, no live node, no
+// tree on a land/shallows cell, no building overlap) and the
+// price. The sim re-validates every order itself.
+function mirrorDockValid(cx, cy) {
+  const kind = 23;
+  const size = BUILD_SIZE[kind];
+  if (cx < 0 || cy < 0 || cx + size > GW || cy + size > GH) return false;
+  const buildings = buildingList();
+  for (const b of buildings) {
+    const bs = b.size || BUILD_SIZE[b.kind] || 2;
+    if (cx < b.cellX + bs && b.cellX < cx + size &&
+        cy < b.cellY + bs && b.cellY < cy + size) return false;
+  }
+  const tcReserved = tcReservedCells();
+  const nodes = nodeList();
+  const landNeighbor = (x, y) => [[1, 0], [-1, 0], [0, 1], [0, -1]]
+    .some(([dx, dy]) => {
+      const nx = x + dx, ny = y + dy;
+      return nx >= 0 && ny >= 0 && nx < GW && ny < GH && TERRAIN[ny * GW + nx] === 0;
+    });
+  let waterSide = false;
+  let landSide = false;
+  for (let dy = 0; dy < size; dy++) {
+    for (let dx = 0; dx < size; dx++) {
+      const x = cx + dx, y = cy + dy;
+      const t = TERRAIN[y * GW + x];
+      if (t >= 1) waterSide = true;
+      if (t === 0 || (t === 2 && landNeighbor(x, y))) landSide = true;
+      if (tcReserved.has(y * GW + x)) return false;
+      // A tree (the static obstacle layer on a non-deep cell)
+      // or a live resource node refuses, as in the sim.
+      if (t !== 1 && OBST[y * GW + x]) return false;
+      for (const n of nodes) {
+        if (n.amount <= 0) continue;
+        const nc = worldToCell(n.x, n.y);
+        if (nc[0] === x && nc[1] === y) return false;
+      }
+    }
+  }
+  if (!waterSide || !landSide) return false;
+  if (myStock()[1] < BUILD_COST[kind]) return false;
+  if (myStock()[3] < BUILD_COST_STONE[kind]) return false;
+  if (myStock()[2] < BUILD_COST_GOLD[kind]) return false;
+  return true;
+}
+
 function mirrorValid(kind, cx, cy) {
   // Package J: a gate's mirror is its span rule, not the square.
   if (isGateKind(kind)) return mirrorGateValid(kind, cx, cy);
+  // Water W1 (BLD-14): the Dock's mirror is its shoreline rule.
+  if (kind === 23) return mirrorDockValid(cx, cy);
   const size = BUILD_SIZE[kind];
   if (cx < 0 || cy < 0 || cx + size > GW || cy + size > GH) return false;
   const buildings = buildingList();
@@ -10061,6 +10130,7 @@ const NEW_BUILDING_STYLE = {
   16: { wall: '#a89a7c', wall2: '#8a7c60', roof: '#8c3f34' }, // University: ivory stone + deep red roof (Castle P3c)
   17: { wall: '#7a6248', wall2: '#5f4c36', roof: '#4a3b2a' }, // Siege Workshop: heavy dark timber (Castle P4a)
   20: { wall: '#b3a284', wall2: '#94835f', roof: '#7a5c2e' }, // Monastery: pale stone + bronze-gold roof (Castle P5a; kind 20 since the landing renumber — 18/19 are the gates)
+  23: { wall: '#8a6b42', wall2: '#6f5533', roof: '#7a3e2c' }, // Dock: pier timber + rust-red roof (Water W1; fallback if the art has not landed)
 };
 
 function drawNewBuilding(b) {
@@ -14547,6 +14617,10 @@ function draw() {
       const hgt = HEIGHTS[fi];
       let base;
       if (TERRAIN[fi] === 1) base = (gx + gy) % 2 ? '#2a639c' : '#2e6da8';
+      // Water W1 (MAP-08): shallows (tag 2) render as lighter
+      // water — the amphibious rim a player can wade and a Dock
+      // can straddle; presentation only, no sim consequence.
+      else if (TERRAIN[fi] === 2) base = (gx + gy) % 2 ? '#63a4cf' : '#6dadd8';
       else if (SHORE.has(fi)) base = '#b8a06a';
       else base = (gx + gy) % 2 ? '#3f7a37' : '#457f3b';
       if (hgt > 0) {

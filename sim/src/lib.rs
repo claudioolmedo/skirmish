@@ -116,21 +116,24 @@ mod vic11_tests;
 mod formation_tests;
 #[cfg(test)]
 mod teams_tests;
+mod water_w1_tests;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
 
 pub use build::{
     build_rate_thirds, gate_span_cells, repair_rate_hp_per_min, wall_line_cells, Building,
-    BuildingKind, ARCHERY_RANGE_BUILD_TICKS, ARCHERY_RANGE_WOOD_COST, BARRACKS_BUILD_TICKS,
-    BARRACKS_WOOD_COST, BLACKSMITH_BUILD_TICKS, BLACKSMITH_WOOD_COST, BUILD_RANGE,
-    CAMP_BUILD_TICKS, CAMP_WOOD_COST, CASTLE_BUILD_TICKS, CASTLE_POP_SUPPORT, CASTLE_STONE_COST,
-    FARM_BUILD_TICKS, FARM_WOOD_COST, FOOTPRINT_CELLS, GATE_BUILD_RANGE, GATE_OPEN_RADIUS,
-    GATE_SPAN_CELLS, HOUSE_BUILD_TICKS, HOUSE_POP_SUPPORT, HOUSE_WOOD_COST,
-    PALISADE_GATE_BUILD_TICKS, PALISADE_GATE_HP_DARK, PALISADE_GATE_WOOD_COST,
-    REPAIR_COST_FRACTION, REPAIR_HP_PER_MIN_EXTRA, REPAIR_HP_PER_MIN_FIRST, STABLE_BUILD_TICKS,
-    STABLE_WOOD_COST, STONE_GATE_BUILD_TICKS, STONE_GATE_HP_FEUDAL, STONE_GATE_STONE_COST,
-    TC_REPAIR_FULL_WOOD, TC_REPAIR_RANGE, TOWN_CENTER_POP_SUPPORT, TOWN_CENTER_WEAPON,
+    BuildingKind, Placement, ARCHERY_RANGE_BUILD_TICKS, ARCHERY_RANGE_WOOD_COST,
+    BARRACKS_BUILD_TICKS, BARRACKS_WOOD_COST, BLACKSMITH_BUILD_TICKS, BLACKSMITH_WOOD_COST,
+    BUILD_RANGE, CAMP_BUILD_TICKS, CAMP_WOOD_COST, CASTLE_BUILD_TICKS, CASTLE_POP_SUPPORT,
+    CASTLE_STONE_COST, DOCK_BUILD_TICKS, DOCK_PRODUCTION_GARRISON_CAPACITY,
+    DOCK_SHELTER_GARRISON_CAPACITY, DOCK_WOOD_COST, FARM_BUILD_TICKS, FARM_WOOD_COST,
+    FOOTPRINT_CELLS, GATE_BUILD_RANGE, GATE_OPEN_RADIUS, GATE_SPAN_CELLS, HOUSE_BUILD_TICKS,
+    HOUSE_POP_SUPPORT, HOUSE_WOOD_COST, PALISADE_GATE_BUILD_TICKS, PALISADE_GATE_HP_DARK,
+    PALISADE_GATE_WOOD_COST, REPAIR_COST_FRACTION, REPAIR_HP_PER_MIN_EXTRA,
+    REPAIR_HP_PER_MIN_FIRST, STABLE_BUILD_TICKS, STABLE_WOOD_COST, STONE_GATE_BUILD_TICKS,
+    STONE_GATE_HP_FEUDAL, STONE_GATE_STONE_COST, TC_REPAIR_FULL_WOOD, TC_REPAIR_RANGE,
+    TOWN_CENTER_POP_SUPPORT, TOWN_CENTER_WEAPON,
 };
 pub use combat::{
     compute_damage, compute_damage_elev, compute_damage_hit, elevation_factor,
@@ -8881,6 +8884,19 @@ impl Sim {
         if ax + size > GRID_DIM || ay + size > GRID_DIM {
             return BuildVerdict::Reject;
         }
+        // Water W1 (BLD-14): a Shoreline kind (the Dock) must
+        // straddle a shoreline under the grid's one predicate
+        // implementation — terrain straddle plus unobstructed
+        // cells. The standing checks below (cliff straddle, Town
+        // Center reserve, standing units, live nodes, registry
+        // overlap, price, reach) then run for the Dock exactly as
+        // for every other kind; only the per-cell terrain reading
+        // differs (see the footprint loop).
+        if kind.placement() == crate::build::Placement::Shoreline
+            && !self.grid.dock_placement_ok(ax, ay, size)
+        {
+            return BuildVerdict::Reject;
+        }
         // Town Center footprint reservation (BLD-16, 2026-10-19): a
         // living Town Center's 4x4 is PASSABLE to units — the TC is
         // an entity and never enters the blocking grid — but its
@@ -8922,8 +8938,19 @@ impl Sim {
             }
         }
         for &(cx, cy) in &cells {
-            // Walls and already-blocking buildings.
-            if self.grid.is_blocked(cx, cy) {
+            // Walls and already-blocking buildings. Water W1
+            // (BLD-14): the terrain reading is per placement
+            // class — a Normal footprint admits no deep water
+            // (`is_blocked`'s land reading) and no shallows
+            // (buildings are not constructed on shallows); a
+            // Shoreline footprint (the Dock) admits any terrain
+            // its predicate already straddled, but no tree and
+            // no building on any cell.
+            if kind.placement() == crate::build::Placement::Shoreline {
+                if self.grid.is_node_blocked(cx, cy) || self.grid.is_dynamic(cx, cy) {
+                    return BuildVerdict::Reject;
+                }
+            } else if self.grid.is_blocked(cx, cy) || self.grid.is_shallows(cx, cy) {
                 return BuildVerdict::Reject;
             }
             // Any living Town Center's reserved 4x4 cell (BLD-16:

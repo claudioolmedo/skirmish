@@ -179,6 +179,35 @@ test('fog base: per-cell terrain under fog states (M7)', () => {
   assert.deepEqual([fills[6 * GW + 6].x, fills[6 * GW + 6].y], [6, 6]);
 });
 
+test('fog base: shallows (terrain 2, Water W1) render as lighter water', () => {
+  const fills = [];
+  const ctx = {
+    fillStyle: '', strokeStyle: '', lineWidth: 1,
+    beginPath() {}, moveTo() {}, lineTo() {}, closePath() {},
+    fill() {}, stroke() {}, clip() {}, save() {}, restore() {},
+    arc() {}, strokeRect() {},
+    setTransform() {},
+    fillRect(x, y, w, h) { fills.push({ x, y, fill: this.fillStyle }); },
+  };
+  const g = createMinimap({ worldHalf: 240, width: 220, height: 124, pad: 2 });
+  const GW = 120, GH = 120;
+  const terrain = new Uint8Array(GW * GH);
+  const heights = new Uint8Array(GW * GH);
+  const fog = new Uint8Array(GW * GH);
+  terrain[5 * GW + 5] = 2; // a shallows cell...
+  fog[5 * GW + 5] = 2;     // ...currently visible
+  terrain[6 * GW + 6] = 2; // a shallows cell...
+  fog[6 * GW + 6] = 1;     // ...explored only
+  renderMinimap(ctx, g, {
+    gridW: GW, gridH: GH, cellSize: 4,
+    obstacles: new Uint8Array(GW * GH),
+    terrain, heights, fog,
+    nodes: [], buildings: [], entities: [], cam: null,
+  });
+  assert.equal(fills[5 * GW + 5].fill, '#6dadd8', 'visible shallows = light water');
+  assert.equal(fills[6 * GW + 6].fill, '#3d5a74', 'explored shallows = dim light water');
+});
+
 test('renderMinimap: the INF-01 alert X paints only while its blink is lit', () => {
   const g = createMinimap({ worldHalf: H, ...MM });
   const base = makeStubCtx();

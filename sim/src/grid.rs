@@ -191,6 +191,124 @@ impl Grid {
         self.is_water(x, y) || self.is_shallows(x, y)
     }
 
+    /// The terrain tag of a possibly out-of-bounds neighbour
+    /// position: out of bounds reads as deep water, exactly as
+    /// `terrain_at` reads the edge (the wall at the world's edge).
+    fn terrain_at_signed(&self, x: i32, y: i32) -> u8 {
+        if x < 0 || y < 0 || x >= GRID_DIM as i32 || y >= GRID_DIM as i32 {
+            return TERRAIN_WATER;
+        }
+        self.terrain_at(x as u32, y as u32)
+    }
+
+    /// Whether cell `(x, y)` has an orthogonal (4-neighbour) cell
+    /// whose terrain tag is exactly `tag` (out-of-bounds neighbours
+    /// read as deep water, per `terrain_at_signed`).
+    fn has_terrain_neighbor4(&self, x: u32, y: u32, tag: u8) -> bool {
+        [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)]
+            .iter()
+            .any(|&(dx, dy)| self.terrain_at_signed(x as i32 + dx, y as i32 + dy) == tag)
+    }
+
+    /// Whether a cell stands on a shoreline (complete W1): a land
+    /// cell orthogonally adjacent to a water-side cell, or a
+    /// water-side cell orthogonally adjacent to land — the mirror
+    /// pair in one predicate. Orthogonal adjacency is the grid's
+    /// standing shoreline reading (the same 4-neighbourhood the
+    /// mapgen flood walks); a merely diagonal touch is not a
+    /// shore. A shallows cell beside land is a shore cell (it is
+    /// water-side, and it touches land).
+    pub fn is_shore(&self, x: u32, y: u32) -> bool {
+        if x >= GRID_DIM || y >= GRID_DIM {
+            return false;
+        }
+        if self.terrain_at(x, y) == TERRAIN_LAND {
+            [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dy)| {
+                let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                // Out of bounds is water-side (the edge wall reads
+                // as deep water), so an edge land cell is a shore.
+                (nx < 0 || ny < 0 || nx >= GRID_DIM as i32 || ny >= GRID_DIM as i32)
+                    || self.is_water_side(nx as u32, ny as u32)
+            })
+        } else if self.is_water_side(x, y) {
+            self.has_terrain_neighbor4(x, y, TERRAIN_LAND)
+        } else {
+            false
+        }
+    }
+
+    /// Whether a cell counts toward the LAND side of the Dock
+    /// predicate (complete W1, plan §0.3): a land cell, or a
+    /// shallows cell orthogonally adjacent to land ("land-adjacent
+    /// shallows" — a Dock may stand wholly in the shallows ring
+    /// beside a coast, per the wiki's "in shallow water or on
+    /// shallows, next to the coast"). Deep water never counts.
+    fn is_dock_land_side(&self, x: u32, y: u32) -> bool {
+        self.terrain_at(x, y) == TERRAIN_LAND
+            || (self.is_shallows(x, y) && self.has_terrain_neighbor4(x, y, TERRAIN_LAND))
+    }
+
+    /// The terrain half of the Dock placement predicate (complete
+    /// W1, plan §0.3 — the pinned contract): a `size`×`size`
+    /// footprint anchored at `(ax, ay)` straddles a shoreline iff
+    /// at least one footprint cell is water-side (deep water or
+    /// shallows) AND at least one footprint cell is land-side
+    /// (land, or land-adjacent shallows — `is_dock_land_side`).
+    /// A shallows cell beside land counts toward BOTH sides (it
+    /// is amphibious ground beside a coast). All-water in open
+    /// sea refuses (no land side); all-land refuses (no water
+    /// side); a footprint whose only land-side cell is one corner
+    /// accepts — the predicate is the contract, corners included.
+    /// Terrain only: the obstruction half (nodes, buildings,
+    /// cliffs) is `dock_placement_ok`; mapgen validation reads
+    /// this half, so a rimmed pond's Dock site is a terrain fact
+    /// that package placement on the shore ring cannot revoke.
+    pub fn dock_terrain_ok(&self, ax: u32, ay: u32, size: u32) -> bool {
+        if ax + size > GRID_DIM || ay + size > GRID_DIM {
+            return false;
+        }
+        let mut water_side = false;
+        let mut land_side = false;
+        for dy in 0..size {
+            for dx in 0..size {
+                let (cx, cy) = (ax + dx, ay + dy);
+                if self.is_water_side(cx, cy) {
+                    water_side = true;
+                }
+                if self.is_dock_land_side(cx, cy) {
+                    land_side = true;
+                }
+            }
+        }
+        water_side && land_side
+    }
+
+    /// The Dock placement predicate (complete W1, plan §3.1.3):
+    /// the terrain straddle (`dock_terrain_ok`) AND every
+    /// footprint cell unobstructed — no live tree (node block) and
+    /// no building (dynamic layer) on any cell, water-side cells
+    /// included (a Dock may not swallow a tree on its land corner,
+    /// and ships' water is building-free by the same layer). This
+    /// is the one implementation `Sim::validate_build`, the
+    /// client's ghost-mirror data and mapgen's soak all read;
+    /// `validate_build` additionally runs BLD-01's standing
+    /// checks (Town Center reserve, standing units, live resource
+    /// nodes, the building registry's overlap, price, reach).
+    pub fn dock_placement_ok(&self, ax: u32, ay: u32, size: u32) -> bool {
+        if !self.dock_terrain_ok(ax, ay, size) {
+            return false;
+        }
+        for dy in 0..size {
+            for dx in 0..size {
+                let (cx, cy) = (ax + dx, ay + dy);
+                if self.is_node_blocked(cx, cy) || self.is_dynamic(cx, cy) {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
     /// The terrain tag of a cell (out of bounds reads as water —
     /// the wall at the world's edge).
     pub fn terrain_at(&self, x: u32, y: u32) -> u8 {
@@ -1080,5 +1198,126 @@ mod tests {
                 .any(|&p| g4.world_to_cell(p.0, p.1) == (40, 60)),
             "the ship must pass over the node-flagged cell"
         );
+    }
+
+    // ---- Complete W1: shoreline + Dock predicate (BLD-14) ----
+
+    /// A pond fixture: deep-water 3×3 core at (50..=52, 50..=52)
+    /// ringed by shallows, in open land.
+    fn pond_grid() -> Grid {
+        let mut g = Grid::new();
+        for y in 49..=53u32 {
+            for x in 49..=53u32 {
+                g.set_terrain(x, y, TERRAIN_SHALLOWS);
+            }
+        }
+        for y in 50..=52u32 {
+            for x in 50..=52u32 {
+                g.set_terrain(x, y, TERRAIN_WATER);
+            }
+        }
+        g
+    }
+
+    #[test]
+    fn shore_predicate_mirrors_both_sides() {
+        let g = pond_grid();
+        // Land beside shallows is shore; the shallows ring beside
+        // land is shore; the deep core (no land neighbour) is not;
+        // open land far away is not.
+        assert!(g.is_shore(48, 51), "land beside the shallows ring");
+        assert!(g.is_shore(49, 51), "shallows beside land");
+        assert!(!g.is_shore(51, 51), "deep core touches no land");
+        assert!(!g.is_shore(30, 30), "open land is not a shore");
+        // A diagonal-only touch is not a shore (orthogonal rule):
+        // (48,48) touches the ring's corner cell (49,49) diagonally.
+        assert!(!g.is_shore(48, 48), "diagonal touch is not a shore");
+    }
+
+    #[test]
+    fn dock_predicate_straddles_and_refuses_the_pure_sides() {
+        let g = pond_grid();
+        // Straddling the rim: land + shallows + deep in one 3×3.
+        assert!(g.dock_placement_ok(48, 50, 3), "rim straddle accepts");
+        // Corner-land case (plan §0.3: the predicate is the
+        // contract): on a quadrant coast (land only for x ≤ 49 and
+        // y ≤ 49, deep water beyond), the 3×3 anchored at (49,49)
+        // has exactly ONE land cell — its corner — and accepts.
+        let mut quad = Grid::new();
+        for y in 0..GRID_DIM {
+            for x in 0..GRID_DIM {
+                if x > 49 || y > 49 {
+                    quad.set_terrain(x, y, TERRAIN_WATER);
+                }
+            }
+        }
+        assert!(quad.dock_placement_ok(49, 49, 3), "corner-land accepts");
+        assert!(!quad.dock_placement_ok(50, 50, 3), "past the corner: no land side");
+        // All-water in the pond's deep core area refuses (no land
+        // side): a 3×3 of pure deep water.
+        let mut sea = Grid::new();
+        for y in 40..=60u32 {
+            for x in 40..=60u32 {
+                sea.set_terrain(x, y, TERRAIN_WATER);
+            }
+        }
+        assert!(!sea.dock_placement_ok(50, 50, 3), "open sea refuses");
+        // All-land refuses (no water side).
+        assert!(!g.dock_placement_ok(20, 20, 3), "dry land refuses");
+        // A footprint of shallows + deep water whose shallows
+        // touch land accepts with NO land cell at all: the
+        // shallows cells adjacent to land are land-side (the
+        // wiki's "on shallows, next to the coast" form). On the
+        // pond fixture, anchor (49,49) covers only the shallows
+        // ring and the deep core.
+        assert!(g.dock_placement_ok(49, 49, 3), "rim-only footprint beside land accepts");
+        let rim_only = {
+            let mut g2 = Grid::new();
+            // A shallows strip x 60..=62 beside land on both sides.
+            for y in 55..=65u32 {
+                for x in 60..=62u32 {
+                    g2.set_terrain(x, y, TERRAIN_SHALLOWS);
+                }
+            }
+            g2
+        };
+        assert!(
+            rim_only.dock_placement_ok(60, 58, 3),
+            "a 3x3 wholly in coast-adjacent shallows accepts"
+        );
+        // A shallows patch adrift in a deep-water sea (no land
+        // within reach of any footprint cell) refuses: its
+        // shallows are water-side only, never land-side.
+        let mut float = Grid::new();
+        for y in 50..=70u32 {
+            for x in 55..=70u32 {
+                float.set_terrain(x, y, TERRAIN_WATER);
+            }
+        }
+        for y in 58..=60u32 {
+            for x in 60..=62u32 {
+                float.set_terrain(x, y, TERRAIN_SHALLOWS);
+            }
+        }
+        assert!(
+            !float.dock_placement_ok(60, 58, 3),
+            "shallows adrift in deep water (no land adjacency) refuse"
+        );
+    }
+
+    #[test]
+    fn dock_predicate_refuses_obstructed_cells() {
+        let mut g = pond_grid();
+        // A tree on the land corner of a straddling footprint.
+        g.set_node_block(48, 50, true);
+        assert!(!g.dock_placement_ok(48, 50, 3), "tree on the footprint refuses");
+        assert!(g.dock_terrain_ok(48, 50, 3), "the terrain half still reads true");
+        g.set_node_block(48, 50, false);
+        // A building on a shallows cell refuses too.
+        g.set_dynamic(49, 51, true);
+        assert!(!g.dock_placement_ok(48, 50, 3), "building on the footprint refuses");
+        // Out-of-bounds anchors refuse.
+        assert!(!g.dock_placement_ok(118, 50, 3));
+        assert!(!g.dock_placement_ok(50, 118, 3));
     }
 }

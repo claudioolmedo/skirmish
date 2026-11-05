@@ -173,8 +173,12 @@ placed on it.
 layer in `Grid` beside the blocked layers (land / water); passability
 for the one domain that exists (land) is derived: water blocks
 movement and placement, land admits both. The compile-time wall layout
-is gone. · *Status:* **DIFFERS** (only land and water exist as types —
-dirt/sand/snow/ice/beach/shallows are not distinct terrains yet;
+is gone. Extended (Water W1, 2026-11-05): a third type, shallows
+(terrain tag 2), with its own passability row — both movement domains
+enter it, buildings may not stand on it except the Dock (MAP-08 as
+amended, BLD-14); it renders as lighter water on the client and
+minimap. · *Status:* **DIFFERS** (land, deep water and shallows exist
+as types — dirt/sand/snow/ice/beach are not distinct terrains yet;
 shorelines render as sand on the client only).
 
 **MAP-04 — Forests are resource and obstacle at once.** A forest tile holds
@@ -238,16 +242,30 @@ and the determinism golden re-pinned with step attribution
 authored heights alone). · *Status:* **MATCHES**.
 
 **MAP-08 — Water belongs to ships.** Deep water admits only ships;
-shallows admit ships (and, in the reference, nothing else — there is no
-wading). Land units path only on land. The shoreline is where the domains
-meet; Docks are placed straddling it (BLD-14).
-*Source:* GAP 7.5. · *Impl:* shipped in part (M7) — water is a terrain
-type: land units path only on land (A* and placement both refuse it),
-and generated ponds are validated (clear of starts, never severing the
-landmass). The water domain itself — ships, shallows, Docks (BLD-14),
-fishing (ECO-15) — is not built: Arabia v1 carries water as terrain
-only, sparingly (0–2 small ponds, some seeds have none). · *Status:*
-**DIFFERS**.
+shallows are amphibious — they admit ships *and* land units (land units
+wade). Land units path on land and shallows, never on deep water. The
+shoreline is where the domains meet; Docks are placed straddling it
+(BLD-14).
+*Source:* GAP 7.5; amended 2026-11-05 (Water W1) — this entry's former
+"no wading" parenthetical was a study error. The pinned evidence for
+the amphibious reading: the AoE2 manual's Terrain list ("Shallows —
+Water passable by land units and ships"); the wiki Ship article's lead
+(ships pass shallow water; land terrains other than shallows/beach are
+closed to them); the wiki Bog Islands, Rivers and Salt Marsh map
+articles (shallows traversed by both domains); the wiki Dock and
+Building articles (the Dock is built "in shallow water or on
+shallows, next to the coast"; buildings are otherwise not constructed
+on shallows). · *Impl:* shipped (Water W1, 2026-11-05) — terrain tag 2
+(`TERRAIN_SHALLOWS`) beside land/deep water; the domain-parameterized
+grid (MOV-11) admits shallows to both domains and deep water to the
+water domain only; Normal building placement refuses deep water *and*
+shallows, the Dock alone straddles (BLD-14). Mapgen rims every pond's
+outermost water ring into shallows, and validation requires each pond
+to carry a rim and at least one terrain-legal Dock site; the land
+flood seals on deep water alone. Ships themselves (CLS-07) and
+fishing (ECO-15) are W2 — the domain they will move in is this one.
+Arabia v1 still carries water sparingly (0–2 small ponds, some seeds
+have none). · *Status:* **MATCHES**.
 
 **MAP-09 — Generated maps guarantee fair starts.** A random-map script
 places, per player: a Town Center start, a nearby woodline, a berry patch,
@@ -964,9 +982,15 @@ unused here) path on separate passability grids; a unit only ever paths
 inside its own domain. Crossing domains happens only by transport (GAR-10)
 or at a Dock.
 *Source:* OPENAGE-RESEARCH §2.1 (one grid per movement type); GAP 6.10. ·
-*Impl:* `Grid` gains a domain dimension when water lands (M7); the A*
-itself is shared code. · *Status:* **MISSING** (single land grid; no
-water).
+*Impl:* shipped (Water W1, 2026-11-05) — the domain is a parameter, not
+a fork: `Grid::is_blocked_for(Domain, …)` with one shared A*
+(`find_path_for` / `find_path_through_for` / `nearest_free_cell_for`);
+Land is blocked by deep water, Water by land, and shallows are admitted
+by both (MAP-08 as amended). The A*'s gate/corner/cliff special cases
+are land-domain only. The grid half landed bit-identical on the golden
+hash; every existing mover is a land kind, so the water domain's first
+movers are W2's ships, and the transport crossing (GAR-09/GAR-10) is
+W4. · *Status:* **MATCHES**.
 
 **MOV-12 — Pathing failure means hold position.** If no path exists to an
 order's target, the unit stays where it is (its work state retries on later
@@ -1643,9 +1667,26 @@ above.
 **BLD-14 — Docks straddle the shoreline.** A Dock's footprint must cover
 both land and water tiles. It is the production building for ships and
 the drop-off for fishing (ECO-15).
-*Source:* GAP 4.14, 6.10. · *Impl:* a placement predicate in the building
-table ("shoreline") evaluated by `validate_build` against the terrain
-layer (M7). · *Status:* **MISSING**.
+*Source:* GAP 4.14, 6.10; wiki Dock article (placement line: built "in
+shallow water or on shallows, next to the coast"). · *Impl:* shipped
+(Water W1, 2026-11-05) — `BuildingKind::Dock` (tag 23): Dark Age, no
+prerequisite, 150 wood, 35 s build, 3×3, 1 800 HP, armor melee
+0/1/2/3 and pierce 7/8/9/10 by Age, LoS 8 (the Dock article's
+update-169123 changelog value; the comparative table's 6 is stale),
+population support 0. Placement is the building table's first terrain
+predicate kind (`Placement::Shoreline`, evaluated by `validate_build`
+against the terrain layer, one implementation read by the client
+ghost mirror and mapgen validation): a 3×3 placement is legal iff
+≥1 footprint cell is water-side (deep water or shallows) AND ≥1
+footprint cell is land or land-adjacent shallows AND every footprint
+cell is unobstructed (BLD-01's standing checks on top). The predicate
+is the contract: an all-water 3×3 in open sea refuses, all-land
+refuses, a single corner land cell accepts. Drop-off: food-only in
+ECO-06's mask, as data — it goes live with fishing (W2). Production
+host with an empty train table in W1 (ships are W2); production
+garrison 10 and Fishing-Ship shelter 5 recorded as data constants,
+neither list wired until W2; no weapon in W1 (the Dock fires only
+while shelter-garrisoned, W2). · *Status:* **MATCHES**.
 
 **BLD-15 — Buildings are gated by age and prerequisites.** Each building
 kind has an available Age and, where applicable, a prerequisite building

@@ -362,11 +362,28 @@ fn golden_hash_regression() {
     // off the ground, and the building 0xB8 relic block only
     // while a Monastery holds relics or a trickle remainder —
     // the golden script builds no Monastery and tasks no monk.
+    //
+    // Water W1 complete (2026-11-05, deliberate update):
+    // f7af9c0fd33ac54c -> 4f2a70b0c1ab724c. Step attribution: the
+    // ONLY change entering this scenario is mapgen's shallows
+    // rim — seed 42's pond (26 deep-water cells) keeps a 10-cell
+    // deep core and its outer ring becomes TERRAIN_SHALLOWS (16
+    // cells; deep + shallows is conserved exactly, a pure terrain
+    // relabel that draws no RNG), and terrain is hashed world
+    // state. Probe: with ONLY the rim rewrite and its validation
+    // clause disabled, the golden returns to exactly
+    // f7af9c0fd33ac54c — and so do all twelve other probed seeds
+    // (dry seeds 4/5/7/8 are bit-identical with the rim ON:
+    // 2cd6fd18ceb431f7 / ffd8694781a4fe4a / b0710082475bbec6 /
+    // 5ee1792fa42ef14f). Nothing else in the package enters this
+    // scenario: no commands are issued, the Dock row is data no
+    // script builds, and the grid half's domain A* landed
+    // bit-identical on its own commit.
     let mut sim = Sim::new(42);
     let mut hash = 0;
     for _ in 0..360 {
         hash = sim.tick();
     }
     assert_eq!(sim.tick_count(), 360);
-    assert_eq!(format!("{:016x}", hash), "f7af9c0fd33ac54c");
+    assert_eq!(format!("{:016x}", hash), "4f2a70b0c1ab724c");
 }

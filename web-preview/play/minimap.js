@@ -110,6 +110,10 @@ export const MM_LAND = ['#3d6030', '#466b34', '#527a3c', '#5f8a46', '#6d9a52'];
 export const MM_LAND_DIM = ['#1e3019', '#22361c', '#284020', '#2f4a26', '#37542c'];
 export const MM_WATER = '#2e6da8';
 export const MM_WATER_DIM = '#1d3a56';
+// Water W1 (MAP-08): shallows (terrain tag 2) — the main view's
+// lighter water, in full and pre-dimmed variants.
+export const MM_SHALLOWS = '#6dadd8';
+export const MM_SHALLOWS_DIM = '#3d5a74';
 export const BUILDING_COLOR = '#e8e3d5'; // own buildings when no color is given
 export const VIEWPORT_COLOR = 'rgba(255, 255, 255, 0.9)';
 export const SELECTED_COLOR = '#ffcf4d'; // matches the main view's selection gold
@@ -195,6 +199,7 @@ export function renderMinimap(ctx, g, state) {
           const f = state.fog[i];
           if (f === 0) ctx.fillStyle = SHROUD_COLOR;
           else if (state.terrain[i] === 1) ctx.fillStyle = f === 2 ? MM_WATER : MM_WATER_DIM;
+          else if (state.terrain[i] === 2) ctx.fillStyle = f === 2 ? MM_SHALLOWS : MM_SHALLOWS_DIM;
           else {
             const h = Math.min(4, (state.heights && state.heights[i]) || 0);
             ctx.fillStyle = f === 2 ? MM_LAND[h] : MM_LAND_DIM[h];

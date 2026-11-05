@@ -1319,6 +1319,15 @@ impl WasmSim {
         self.push_build(entity, BuildingKind::Wonder, x, y)
     }
 
+    /// Order a villager to build a Dock (150 wood, 3×3; Dark Age,
+    /// no prerequisite building — Water W1, BLD-14): the point
+    /// names the footprint's anchor cell, and the sim accepts
+    /// only a shoreline straddle (the grid's Dock predicate) —
+    /// see `push_build_house`.
+    pub fn push_build_dock(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build(entity, BuildingKind::Dock, x, y)
+    }
+
     /// Buy one lot (100) of a commodity at a completed Market
     /// (TRD-01..03): `resource_tag` is the `ResourceKind` tag
     /// (food 1, wood 2, stone 4 — gold is never a commodity).
@@ -1706,6 +1715,12 @@ impl WasmSim {
     /// `push_build_house_queued`.
     pub fn push_build_wonder_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
         self.push_build_queued(entity, BuildingKind::Wonder, x, y)
+    }
+
+    /// Queue a Dock build (Dark Age — Water W1, BLD-14) — see
+    /// `push_build_house_queued`.
+    pub fn push_build_dock_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build_queued(entity, BuildingKind::Dock, x, y)
     }
 
     /// Queue a Market build — see `push_build_house_queued`.

@@ -207,6 +207,27 @@ pub const WONDER_STONE_COST: I16F16 = I16F16::from_bits(65_536_000); // 1000
 pub const WONDER_GOLD_COST: I16F16 = I16F16::from_bits(65_536_000); // 1000
 /// Wonder build time: 3500 s at 60 Hz (VIC-02; same source).
 pub const WONDER_BUILD_TICKS: u64 = 210_000;
+/// Dock construction cost: 150 wood (Water W1, BLD-14; AoE wiki,
+/// Building comparative table via WATER-SPEC §2, fetched
+/// 2026-11-05).
+pub const DOCK_WOOD_COST: I16F16 = I16F16::from_bits(9_830_400); // 150
+/// Dock build time: 35 s at 60 Hz (Water W1, BLD-14; same source).
+pub const DOCK_BUILD_TICKS: u64 = 2100;
+/// The Dock's production garrison capacity (Water W1, BLD-14):
+/// 10 ships, entered only via the rally point on creation — the
+/// GAR-08 pattern every production building carries (AoE2 manual,
+/// Dock capacity line, via WATER-SPEC §2). Recorded as data in
+/// W1 (`garrison_capacity` reads it); the Dock trains nothing
+/// until W2, so no entry path exists yet.
+pub const DOCK_PRODUCTION_GARRISON_CAPACITY: u32 = 10;
+/// The Dock's shelter garrison capacity (Water W1, BLD-14): up
+/// to 5 Fishing Ships may shelter in a Dock since DE update
+/// 169123, and the Dock then fires like a garrisoned Town Center
+/// (WATER-SPEC §2). A DIFFERENT mechanism from the production
+/// garrison above — recorded as data in W1 and wired with the
+/// Fishing Ship in W2 (eligibility, arrows and the conditional
+/// weapon are W2's slice); nothing reads this constant yet.
+pub const DOCK_SHELTER_GARRISON_CAPACITY: u32 = 5;
 /// The Wonder's build range: its 5×5 footprint is 20 units wide,
 /// so a builder on a corner ring cell stands ≈17.0 units from
 /// the center ((10+2)·√2) — 18.0 covers the whole ring plus
@@ -274,6 +295,17 @@ pub const TOWN_CENTER_BUILD_TICKS: u64 = 9000;
 /// wide, so a builder on a corner ring cell can stand ~14.1 units
 /// from the center — 15.0 covers the whole ring.
 pub const TOWN_CENTER_BUILD_RANGE: I16F16 = I16F16::from_bits(983_040); // 15.0
+
+/// A building kind's placement-terrain classification (Water
+/// W1, BLD-14): how `Sim::validate_build` reads the terrain
+/// layer for the kind's footprint. See `BuildingKind::placement`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Placement {
+    /// Dry land only: no deep water, no shallows.
+    Normal,
+    /// Must straddle a shoreline (the Dock predicate).
+    Shoreline,
+}
 
 /// A buildable building kind.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -426,6 +458,23 @@ pub enum BuildingKind {
     /// countdown is an existence census, so extras change
     /// nothing.
     Wonder,
+    /// Water W1 (BLD-14): the Dock — the water domain's building.
+    /// Dark Age, no prerequisite building; 150 wood, 35 s build,
+    /// 3×3, 1800 HP (flat), armor melee 0/1/2/3 and pierce
+    /// 7/8/9/10 by Age, LoS 8 (the Dock article's update-169123
+    /// changelog value — the Building comparative table's 6 is
+    /// stale, WATER-SPEC §8.4). Its footprint must straddle a
+    /// shoreline (the grid's Dock predicate, `Grid::dock_placement_ok`)
+    /// — the one placement-predicate kind beside the gates. It is
+    /// the ships' production host (trains nothing until W2 adds
+    /// the Fishing Ship), a food-only drop-off (ECO-06 mask —
+    /// live when fishermen/fishing exist, W2), and holds a
+    /// production garrison of 10 (GAR-08 data); the 5-ship
+    /// shelter garrison and its conditional arrows are W2's
+    /// wire-up (see `DOCK_SHELTER_GARRISON_CAPACITY`). Population
+    /// support 0 (WATER-SPEC §2: the comparative table's 10 is
+    /// its garrison column, not population).
+    Dock,
 }
 
 impl BuildingKind {
@@ -441,8 +490,10 @@ impl BuildingKind {
     /// renumbered at the bot-loop landing: the builder's 18 was
     /// already the Palisade Gate here), 21 = monument (Package I —
     /// renumbered at this landing: the builder's 16 was already
-    /// the University here), 22 = wonder (VIC-02). Tags are an ABI
-    /// contract — append only, never renumber.
+    /// the University here), 22 = wonder (VIC-02), 23 = dock
+    /// (Water W1, BLD-14 — the plan's allocation, verified free
+    /// on the W1 base). Tags are an ABI contract — append only,
+    /// never renumber.
     pub fn tag(self) -> u8 {
         match self {
             BuildingKind::House => 0,
@@ -468,6 +519,7 @@ impl BuildingKind {
             BuildingKind::Monastery => 20,
             BuildingKind::Monument => 21,
             BuildingKind::Wonder => 22,
+            BuildingKind::Dock => 23,
         }
     }
 
@@ -497,6 +549,7 @@ impl BuildingKind {
             20 => Some(BuildingKind::Monastery),
             21 => Some(BuildingKind::Monument),
             22 => Some(BuildingKind::Wonder),
+            23 => Some(BuildingKind::Dock),
             _ => None,
         }
     }
@@ -515,6 +568,20 @@ impl BuildingKind {
     /// from unit proximity, never stored (see the variants).
     pub fn is_gate(self) -> bool {
         matches!(self, BuildingKind::PalisadeGate | BuildingKind::StoneGate)
+    }
+
+    /// The placement-terrain classification of this kind (Water
+    /// W1, BLD-14 — `validate_build`'s first terrain-predicate
+    /// kind): `Normal` kinds stand on dry land only (no deep
+    /// water and no shallows in the footprint — buildings are
+    /// not constructed on shallows, the one Dock excepted);
+    /// `Shoreline` (the Dock alone) must straddle a shoreline
+    /// under the grid's Dock predicate.
+    pub fn placement(self) -> Placement {
+        match self {
+            BuildingKind::Dock => Placement::Shoreline,
+            _ => Placement::Normal,
+        }
     }
 
     /// The wall segment kind of this gate's family (Package J):
@@ -566,6 +633,8 @@ impl BuildingKind {
             BuildingKind::Monument => I16F16::ZERO,
             // VIC-02: the Wonder's 1000 wood.
             BuildingKind::Wonder => WONDER_WOOD_COST,
+            // Water W1 (BLD-14): the Dock's 150 wood.
+            BuildingKind::Dock => DOCK_WOOD_COST,
         }
     }
 
@@ -641,6 +710,8 @@ impl BuildingKind {
             BuildingKind::Monument => 1,
             // VIC-02: 3500 s (Wonder dossier).
             BuildingKind::Wonder => WONDER_BUILD_TICKS,
+            // Water W1 (BLD-14): 35 s (WATER-SPEC §2).
+            BuildingKind::Dock => DOCK_BUILD_TICKS,
         }
     }
 
@@ -711,7 +782,9 @@ impl BuildingKind {
             | BuildingKind::Stable
             | BuildingKind::Blacksmith
             // Castle P5a: the Monastery is 3×3 (dossier §5.6).
-            | BuildingKind::Monastery => 3,
+            | BuildingKind::Monastery
+            // Water W1 (BLD-14): the Dock is 3×3 (WATER-SPEC §2).
+            | BuildingKind::Dock => 3,
             // The placed 4×4 kinds: the Market, the Town Center
             // construction record (the standing Town Center is an
             // entity, not a kind — BLD-16), the Castle
@@ -785,6 +858,11 @@ impl BuildingKind {
                 | BuildingKind::Market
                 | BuildingKind::SiegeWorkshop
                 | BuildingKind::Monastery
+                // Water W1 (BLD-14): the Dock is the ships'
+                // production host — it holds a rally point like
+                // every producing building; its train table is
+                // empty until W2 lands the Fishing Ship.
+                | BuildingKind::Dock
         )
     }
 
@@ -914,6 +992,11 @@ impl BuildingKind {
             // VIC-02: the Wonder's line of sight is 8 (Wonder
             // dossier, Building comparative table).
             BuildingKind::Wonder => 8,
+            // Water W1 (BLD-14): the Dock's line of sight is 8 —
+            // the Dock article's update-169123 changelog value;
+            // the Building comparative table's 6 is stale
+            // (WATER-SPEC §8.4; plan Passo 0.4 takes 8).
+            BuildingKind::Dock => 8,
             BuildingKind::WatchTower => 10,
             BuildingKind::Outpost => match age {
                 Age::Dark => 6,
@@ -992,6 +1075,13 @@ impl BuildingKind {
             | BuildingKind::Stable
             | BuildingKind::SiegeWorkshop
             | BuildingKind::Monastery => Some(10),
+            // Water W1 (BLD-14): the Dock's PRODUCTION garrison
+            // (10, GAR-08 — entry only via the rally spawn, which
+            // cannot occur until the Dock trains in W2). The
+            // 5-ship shelter garrison is a separate mechanism
+            // (`DOCK_SHELTER_GARRISON_CAPACITY`), wired in W2 —
+            // it is NOT this column.
+            BuildingKind::Dock => Some(DOCK_PRODUCTION_GARRISON_CAPACITY),
             _ => None,
         }
     }
@@ -1016,6 +1106,11 @@ impl BuildingKind {
                 | BuildingKind::Stable
                 | BuildingKind::SiegeWorkshop
                 | BuildingKind::Monastery
+                // Water W1 (BLD-14): the Dock's garrison column
+                // is its production garrison (see
+                // `garrison_capacity`); the shelter garrison is
+                // W2's separate wire-up, not this predicate.
+                | BuildingKind::Dock
         )
     }
 
@@ -1071,7 +1166,12 @@ impl BuildingKind {
     pub fn is_dropoff(self) -> bool {
         matches!(
             self,
-            BuildingKind::LumberCamp | BuildingKind::Mill | BuildingKind::MiningCamp
+            BuildingKind::LumberCamp
+                | BuildingKind::Mill
+                | BuildingKind::MiningCamp
+                // Water W1 (BLD-14): the Dock is a drop-off —
+                // food only (see `accepts`).
+                | BuildingKind::Dock
         )
     }
 
@@ -1086,6 +1186,12 @@ impl BuildingKind {
             BuildingKind::MiningCamp => {
                 resource == ResourceKind::Gold || resource == ResourceKind::Stone
             }
+            // Water W1 (BLD-14): the Dock accepts FOOD only —
+            // the ECO-06 mask extension the fishing economy
+            // deposits through (Fishing Ships and shore-fish
+            // fishermen, WATER-SPEC §2/§4). The row is data in
+            // W1; it goes live when fishing exists (W2).
+            BuildingKind::Dock => resource == ResourceKind::Food,
             _ => false,
         }
     }
@@ -1109,6 +1215,11 @@ impl BuildingKind {
                 | BuildingKind::Castle
                 | BuildingKind::SiegeWorkshop
                 | BuildingKind::Monastery
+                // Water W1 (BLD-14): the Dock is the ships'
+                // production building (its roster lands in W2) —
+                // VIC-01 counts the capability, as it does the
+                // Town Center foundation's.
+                | BuildingKind::Dock
         )
     }
 
@@ -1243,6 +1354,10 @@ impl BuildingKind {
             // row carries a single HP figure, no per-Age split;
             // `max_hp_at` falls through to this row at every Age).
             BuildingKind::Wonder => 4800,
+            // Water W1 (BLD-14): 1800 HP, flat (WATER-SPEC §2 —
+            // the comparative table lists no age scaling for the
+            // Dock's HP; `max_hp_at` falls through at every Age).
+            BuildingKind::Dock => 1800,
         }
     }
 
@@ -1366,6 +1481,12 @@ impl BuildingKind {
             // BLD-19: the Market's Imperial step (3 melee).
             (BuildingKind::Market, Age::Imperial) => 3,
             (BuildingKind::TownCenter, Age::Imperial) => 6,
+            // Water W1 (BLD-14): the Dock's melee steps —
+            // 0/1/2/3 by Age (WATER-SPEC §2, Building comparative
+            // table); the Dark 0 is `armor_melee`'s fall-through.
+            (BuildingKind::Dock, Age::Feudal) => 1,
+            (BuildingKind::Dock, Age::Castle) => 2,
+            (BuildingKind::Dock, Age::Imperial) => 3,
             _ => self.armor_melee(),
         }
     }
@@ -1430,6 +1551,12 @@ impl BuildingKind {
             // BLD-19: the Market's Imperial step (10 pierce).
             (BuildingKind::Market, Age::Imperial) => 10,
             (BuildingKind::TownCenter, Age::Imperial) => 8,
+            // Water W1 (BLD-14): the Dock's pierce steps —
+            // 7/8/9/10 by Age (WATER-SPEC §2, Building comparative
+            // table); the Dark 7 is `armor_pierce`'s fall-through.
+            (BuildingKind::Dock, Age::Feudal) => 8,
+            (BuildingKind::Dock, Age::Castle) => 9,
+            (BuildingKind::Dock, Age::Imperial) => 10,
             _ => self.armor_pierce(),
         }
     }
@@ -2494,6 +2621,59 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn dock_row_is_the_water_spec_row() {
+        // Water W1 (BLD-14; WATER-SPEC §2, AoE wiki Building
+        // comparative table + Dock changelog, fetched 2026-11-05).
+        let k = BuildingKind::Dock;
+        assert_eq!(k.tag(), 23);
+        assert_eq!(BuildingKind::from_tag(23), Some(k));
+        assert_eq!(k.wood_cost(), DOCK_WOOD_COST);
+        assert_eq!(DOCK_WOOD_COST, I16F16::from_num(150));
+        assert_eq!(k.stone_cost(), I16F16::ZERO);
+        assert_eq!(k.gold_cost(), I16F16::ZERO);
+        assert_eq!(k.build_ticks(), 2100); // 35 s
+        assert_eq!(k.footprint_size(), 3);
+        assert_eq!(k.age_required(), Age::Dark);
+        assert_eq!(k.requires_building(), None);
+        // HP 1800 flat at every Age; armor steps by Age.
+        for age in [Age::Dark, Age::Feudal, Age::Castle, Age::Imperial] {
+            assert_eq!(k.max_hp_at(age), 1800);
+        }
+        assert_eq!(k.armor_melee_at(Age::Dark), 0);
+        assert_eq!(k.armor_melee_at(Age::Feudal), 1);
+        assert_eq!(k.armor_melee_at(Age::Castle), 2);
+        assert_eq!(k.armor_melee_at(Age::Imperial), 3);
+        assert_eq!(k.armor_pierce_at(Age::Dark), 7);
+        assert_eq!(k.armor_pierce_at(Age::Feudal), 8);
+        assert_eq!(k.armor_pierce_at(Age::Castle), 9);
+        assert_eq!(k.armor_pierce_at(Age::Imperial), 10);
+        // LoS 8 (Passo 0.4: the changelog value, not the stale
+        // comparative table's 6).
+        assert_eq!(k.sight_tiles_at(Age::Dark), 8);
+        // Population 0; production host that trains nothing yet;
+        // food-only drop-off; production garrison data 10.
+        assert_eq!(k.pop_support(), 0);
+        assert!(k.is_production());
+        assert!(k.produces_units());
+        assert!(!k.trains(EntityKind::Villager));
+        assert!(k.is_dropoff());
+        assert!(k.accepts(ResourceKind::Food));
+        assert!(!k.accepts(ResourceKind::Wood));
+        assert!(!k.accepts(ResourceKind::Gold));
+        assert!(!k.accepts(ResourceKind::Stone));
+        assert_eq!(k.garrison_capacity(), Some(DOCK_PRODUCTION_GARRISON_CAPACITY));
+        assert_eq!(DOCK_PRODUCTION_GARRISON_CAPACITY, 10);
+        assert_eq!(DOCK_SHELTER_GARRISON_CAPACITY, 5);
+        assert!(k.is_production_garrison());
+        assert!(!k.is_defensive_garrison());
+        assert_eq!(k.placement(), Placement::Shoreline);
+        assert_eq!(BuildingKind::Barracks.placement(), Placement::Normal);
+        // No weapon in W1: the Dock fires only while
+        // shelter-garrisoned, and that wire-up is W2's.
+        assert!(k.weapon().is_none());
     }
 
     #[test]

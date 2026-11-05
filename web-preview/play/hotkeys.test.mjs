@@ -225,9 +225,9 @@ test('go-to: Ctrl+letter jumps to a building type, in any context', () => {
 
 test('every building sits on exactly one page, in grid order, with a working badge', () => {
   assert.deepEqual([...PAGE_KINDS.eco, ...PAGE_KINDS.mil].sort((a, b) => a - b),
-    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 22], 'the two pages partition the twenty buildings (gates 18/19 are placed from the wall line, not the pages; the Monument 21 is unconstructible)');
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 22, 23], 'the two pages partition the twenty-one buildings (gates 18/19 are placed from the wall line, not the pages; the Monument 21 is unconstructible)');
   // Grid (render) order: the slots run Q W E / A S / ... in order.
-  assert.deepEqual(PAGE_KINDS.eco, [0, 4, 1, 3, 5, 12, 13, 15, 22], 'economic: House, Mill, Farm, Lumber, Mining, Market, Town Center, Castle, Wonder');
+  assert.deepEqual(PAGE_KINDS.eco, [0, 4, 1, 3, 5, 12, 13, 15, 22, 23], 'economic: House, Mill, Farm, Lumber, Mining, Market, Town Center, Castle, Wonder, Dock (Water W1 — fourth row, second cell, key N)');
   assert.deepEqual(PAGE_KINDS.mil, [2, 6, 7, 8, 9, 10, 11, 14, 16, 17, 20],
     'military: Barracks, Range, Stable, Blacksmith, Palisade Wall, Watch Tower, Outpost, Stone Wall, University, Siege Workshop, Monastery');
   for (const [page, kinds] of Object.entries(PAGE_KINDS)) {

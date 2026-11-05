@@ -37,7 +37,13 @@
 //! to start B, so the relic race is exactly fair like the starts. Water exists in the
 //! vocabulary as small ponds (0–2 mirrored pairs), always ≥ 22
 //! tiles from a start (MAP-08 terrain support; fishing is trimmed —
-//! see ARCHITECTURE.md's M7 section).
+//! see ARCHITECTURE.md's M7 section). Complete W1 (2026-11-05):
+//! every pond's outermost water ring — the water cells
+//! orthogonally adjacent to land — becomes SHALLOWS, the
+//! amphibious terrain both domains enter (MAP-08 as amended;
+//! see `rim_ponds`), and validation requires every pond to
+//! carry that rim and at least one terrain-legal Dock site
+//! (BLD-14).
 //!
 //! Generation *validates* deterministically before a map is accepted
 //! (see `validate`): a land path connects the two starts, every
@@ -55,7 +61,7 @@
 
 use crate::econ::NodeKind;
 use crate::entity::EntityKind;
-use crate::grid::{Grid, GRID_DIM, MAX_HEIGHT, TERRAIN_LAND, TERRAIN_WATER};
+use crate::grid::{Grid, GRID_DIM, MAX_HEIGHT, TERRAIN_LAND, TERRAIN_SHALLOWS, TERRAIN_WATER};
 use crate::rng::Pcg32;
 
 /// Bounded regeneration attempts before the fallback template.
@@ -95,6 +101,44 @@ pub struct GeneratedMap {
 
 fn idx(x: u32, y: u32) -> usize {
     (y * GRID_DIM + x) as usize
+}
+
+/// Rim every pond in a terrain field with shallows (complete W1):
+/// each deep-water cell orthogonally adjacent to land becomes
+/// `TERRAIN_SHALLOWS` — the pond's outermost ring, the amphibious
+/// ground of MAP-08. Orthogonal adjacency is the shoreline
+/// reading the grid's predicates use (`Grid::is_shore`); a
+/// diagonal-only touch does not rim a cell, so even the smallest
+/// pond (a radius-1 plus) keeps a deep core. The pass is a pure
+/// function of the pre-pass field: the conversion test reads
+/// LAND only, and a converted cell is no longer deep water, so
+/// in-place application cannot cascade inward.
+fn rim_ponds(terrain: &mut [u8]) {
+    let mut rim: Vec<usize> = Vec::new();
+    for y in 0..GRID_DIM {
+        for x in 0..GRID_DIM {
+            let i = idx(x, y);
+            if terrain[i] != TERRAIN_WATER {
+                continue;
+            }
+            let beside_land = [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .any(|&(dx, dy)| {
+                    let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                    nx >= 0
+                        && ny >= 0
+                        && nx < GRID_DIM as i32
+                        && ny < GRID_DIM as i32
+                        && terrain[idx(nx as u32, ny as u32)] == TERRAIN_LAND
+                });
+            if beside_land {
+                rim.push(i);
+            }
+        }
+    }
+    for i in rim {
+        terrain[i] = TERRAIN_SHALLOWS;
+    }
 }
 
 /// The 180° rotational mirror of a cell through the map center.
@@ -169,6 +213,12 @@ fn build(sub_seed: u64) -> Option<GeneratedMap> {
     for _ in 0..ponds {
         g.place_pond(tc_a, tc_b);
     }
+    // Complete W1: rim every pond with shallows (the amphibious
+    // ring a Dock straddles and land units wade). A pure terrain
+    // rewrite of the placed ponds — it draws no RNG and claims no
+    // cells, so the rest of generation is untouched, and dry
+    // seeds (no pond) stay bit-identical by construction.
+    rim_ponds(&mut g.terrain);
 
     // Claim the 3×3 around each Town Center: the start's villagers
     // and Scout spawn on its edge cells, so nothing may generate
@@ -239,8 +289,9 @@ fn build(sub_seed: u64) -> Option<GeneratedMap> {
     for y in 0..GRID_DIM {
         for x in 0..GRID_DIM {
             let i = idx(x, y);
-            if g.terrain[i] == TERRAIN_WATER {
-                grid.set_terrain(x, y, TERRAIN_WATER);
+            if g.terrain[i] != TERRAIN_LAND {
+                // Deep water and (complete W1) the shallows rims.
+                grid.set_terrain(x, y, g.terrain[i]);
             }
             grid.set_height(x, y, g.height[i]);
         }
@@ -422,7 +473,10 @@ pub fn validate(map: &GeneratedMap) -> bool {
             return false;
         }
     }
-    // No water near either start.
+    // No water near either start. (Deep water only, as always:
+    // `is_water` is the deep tag — a shallows rim cell is wadeable
+    // ground, not the seal this clearance guards; the deep core
+    // it rings stands at least as far out by construction.)
     for pkg in &map.starts {
         for y in 0..GRID_DIM {
             for x in 0..GRID_DIM {
@@ -435,6 +489,15 @@ pub fn validate(map: &GeneratedMap) -> bool {
             }
         }
     }
+    // Complete W1: every pond carries its shallows rim and offers
+    // at least one terrain-legal Dock site (BLD-14) — a pond a
+    // Dock could never straddle fails the candidate. The flood
+    // above already treats shallows as land-passable (it seals on
+    // deep water alone, `is_water`), which is the plan's
+    // validation reading of the rim.
+    if !ponds_have_rims_and_docks(grid) {
+        return false;
+    }
     // Height steps: the blurred hills step by at most 2 between
     // neighbors; a step of 3 or more is an authored cliff border
     // (MAP-07, see `author_cliffs`) — legal by design, so there
@@ -444,16 +507,117 @@ pub fn validate(map: &GeneratedMap) -> bool {
     true
 }
 
+/// Complete W1 validation helper: every pond (a 4-connected
+/// water-side region containing deep water) carries a shallows
+/// rim (at least one shallows cell) and is served by at least
+/// one terrain-legal 3×3 Dock site (`Grid::dock_terrain_ok` —
+/// the terrain half of the predicate, so shore-ring package
+/// placement cannot revoke a pond's site). Maps with no pond
+/// pass vacuously.
+fn ponds_have_rims_and_docks(grid: &Grid) -> bool {
+    // Label the water-side regions (deep water + shallows).
+    let n = (GRID_DIM * GRID_DIM) as usize;
+    let mut region = vec![u32::MAX; n];
+    let mut regions: Vec<(bool, bool)> = Vec::new(); // (has deep, has shallows)
+    for y in 0..GRID_DIM {
+        for x in 0..GRID_DIM {
+            let i = idx(x, y);
+            if region[i] != u32::MAX || !grid.is_water_side(x, y) {
+                continue;
+            }
+            let id = regions.len() as u32;
+            let (mut deep, mut shal) = (false, false);
+            let mut stack = vec![(x, y)];
+            region[i] = id;
+            while let Some((cx, cy)) = stack.pop() {
+                if grid.is_water(cx, cy) {
+                    deep = true;
+                }
+                if grid.is_shallows(cx, cy) {
+                    shal = true;
+                }
+                for (dx, dy) in [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)] {
+                    let (nx, ny) = (cx as i32 + dx, cy as i32 + dy);
+                    if nx < 0 || ny < 0 || nx >= GRID_DIM as i32 || ny >= GRID_DIM as i32 {
+                        continue;
+                    }
+                    let (nx, ny) = (nx as u32, ny as u32);
+                    let ni = idx(nx, ny);
+                    if region[ni] == u32::MAX && grid.is_water_side(nx, ny) {
+                        region[ni] = id;
+                        stack.push((nx, ny));
+                    }
+                }
+            }
+            regions.push((deep, shal));
+        }
+    }
+    if regions.iter().all(|&(deep, _)| !deep) {
+        return true; // no pond on the map
+    }
+    // A pond without a rim fails outright.
+    if regions.iter().any(|&(deep, shal)| deep && !shal) {
+        return false;
+    }
+    // Mark the regions any terrain-legal Dock site serves.
+    let mut served = vec![false; regions.len()];
+    for ay in 0..GRID_DIM - 2 {
+        for ax in 0..GRID_DIM - 2 {
+            if !grid.dock_terrain_ok(ax, ay, 3) {
+                continue;
+            }
+            for dy in 0..3 {
+                for dx in 0..3 {
+                    let r = region[idx(ax + dx, ay + dy)];
+                    if r != u32::MAX {
+                        served[r as usize] = true;
+                    }
+                }
+            }
+        }
+    }
+    regions
+        .iter()
+        .enumerate()
+        .all(|(i, &(deep, _))| !deep || served[i])
+}
+
 /// The fixed fallback template: used only if every randomized
 /// candidate fails validation (a generator bug, by construction of
 /// the retry loop). Hand-authored from the §2.3 band midpoints on
-/// flat level-1 ground with no water — valid by construction, and
-/// still passed through `validate` by the caller path in tests.
+/// flat level-1 ground — valid by construction, and still passed
+/// through `validate` by the caller path in tests. Complete W1:
+/// the template gains one fixed pond-with-rim (and its rotational
+/// mirror), so the fallback carries the water domain too.
 fn fallback() -> GeneratedMap {
     let mut grid = Grid::new();
     for y in 0..GRID_DIM {
         for x in 0..GRID_DIM {
             grid.set_height(x, y, 1);
+        }
+    }
+    // The fixed ponds (complete W1): radius-2 discs at (60, 20)
+    // and its rotational mirror (59, 99) — mid-map ground clear
+    // of both starts (Chebyshev ≥ 39 from each Town Center, past
+    // the 22-tile water clearance with the deep core innermost),
+    // of every package element and of the template's relics. The
+    // rim rule is `rim_ponds`' own: a disc cell orthogonally
+    // adjacent to land becomes shallows; the plus-shaped core
+    // stays deep.
+    for &(pcx, pcy) in &[(60i32, 20i32), (59, 99)] {
+        let mut disc: Vec<(u32, u32)> = Vec::new();
+        for dy in -2..=2i32 {
+            for dx in -2..=2i32 {
+                if dx * dx + dy * dy <= 4 {
+                    disc.push(((pcx + dx) as u32, (pcy + dy) as u32));
+                }
+            }
+        }
+        for &(x, y) in &disc {
+            let rim = [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .any(|&(dx, dy)| !disc.contains(&((x as i32 + dx) as u32, (y as i32 + dy) as u32)));
+            grid.set_terrain(x, y, if rim { TERRAIN_SHALLOWS } else { TERRAIN_WATER });
         }
     }
     let tc_a = (26u32, 60u32);
@@ -1515,6 +1679,72 @@ mod tests {
     fn fallback_template_validates() {
         let m = fallback();
         assert!(validate(&m), "the fallback template must always validate");
+    }
+
+    #[test]
+    fn ponds_carry_shallows_rims_over_seeds() {
+        // Complete W1 soak (plan §5): across a spread of seeds,
+        // every pond (any deep water) carries a shallows rim,
+        // every map validates (which now includes the rim +
+        // Dock-site requirement), and dry seeds stay dry — no
+        // shallows without a pond.
+        let mut pond_seeds = 0;
+        let mut dry_seeds = 0;
+        for seed in 1..=24u64 {
+            let m = generate(seed);
+            assert!(validate(&m), "seed {seed}: generated map must validate");
+            let deep = m.grid.terrain_bytes().iter().filter(|&&t| t == TERRAIN_WATER).count();
+            let shal = m
+                .grid
+                .terrain_bytes()
+                .iter()
+                .filter(|&&t| t == TERRAIN_SHALLOWS)
+                .count();
+            if deep > 0 {
+                pond_seeds += 1;
+                assert!(
+                    shal > 0,
+                    "seed {seed}: a pond without a shallows rim ({deep} deep, 0 shallows)"
+                );
+                // Every pond offers a terrain-legal Dock site
+                // (validate's own check, restated as a soak pin).
+                assert!(
+                    ponds_have_rims_and_docks(&m.grid),
+                    "seed {seed}: a pond with no legal Dock site"
+                );
+            } else {
+                dry_seeds += 1;
+                assert_eq!(shal, 0, "seed {seed}: shallows without a pond");
+            }
+        }
+        assert!(pond_seeds > 0, "the soak never saw a pond");
+        assert!(dry_seeds > 0, "the soak never saw a dry seed");
+    }
+
+    #[test]
+    fn fallback_pond_is_rimmed_and_dockable() {
+        // Complete W1: the hand-authored template's fixed pond
+        // carries the rim rule too — a deep core ringed by
+        // shallows, with a legal Dock placement on its shore.
+        let m = fallback();
+        let deep = m.grid.terrain_bytes().iter().filter(|&&t| t == TERRAIN_WATER).count();
+        let shal = m
+            .grid
+            .terrain_bytes()
+            .iter()
+            .filter(|&&t| t == TERRAIN_SHALLOWS)
+            .count();
+        assert_eq!(deep, 10, "two ponds × a plus-shaped deep core of 5");
+        assert_eq!(shal, 16, "two ponds × a rim of 8");
+        let mut dockable = false;
+        for ay in 14..=24u32 {
+            for ax in 54..=64u32 {
+                if m.grid.dock_placement_ok(ax, ay, 3) {
+                    dockable = true;
+                }
+            }
+        }
+        assert!(dockable, "no legal Dock site on the template pond's shore");
     }
 }
 
