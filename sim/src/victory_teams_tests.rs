@@ -18,8 +18,8 @@ use crate::{
 };
 use fixed::types::I16F16;
 
-const SAME: TeamSettings = TeamSettings { teams: [1, 1] };
-const DISTINCT: TeamSettings = TeamSettings { teams: [1, 2] };
+const SAME: TeamSettings = TeamSettings { teams: [1, 1], locked_teams: true };
+const DISTINCT: TeamSettings = TeamSettings { teams: [1, 2], locked_teams: true };
 
 fn settings(allied: bool) -> VictorySettings {
     VictorySettings {
