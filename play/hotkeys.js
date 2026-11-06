@@ -193,8 +193,10 @@ export const PANEL_BUTTONS = {
   // Water W2 client (ECO-15): the Dock's panel — Train Fishing
   // Ship, then its two fishing researches (Fishing Lines,
   // Gillnets), the plain positional grid like every production
-  // panel.
-  dock: ['train-fishing-ship', 'research-fishinglines', 'research-gillnets'],
+  // panel. Water W3a appends the four Feudal combat ships
+  // after them (CLS-07).
+  dock: ['train-fishing-ship', 'research-fishinglines', 'research-gillnets',
+    'train-galley', 'train-fire-galley', 'train-demolition-raft', 'train-hulk'],
 };
 
 // The slot letter of every button on every building panel
@@ -388,6 +390,13 @@ export const PANEL_KEYS = {
     'train-fishing-ship': ['KeyQ', 'Q'],
     'research-fishinglines': ['KeyW', 'W'],
     'research-gillnets': ['KeyE', 'E'],
+    // Water W3a (CLS-07): the Feudal combat ships take the
+    // grid's second row and the third row's first cell — the
+    // plain positional grid continues (A S D, then Z).
+    'train-galley': ['KeyA', 'A'],
+    'train-fire-galley': ['KeyS', 'S'],
+    'train-demolition-raft': ['KeyD', 'D'],
+    'train-hulk': ['KeyZ', 'Z'],
   },
 };
 export const POSITION_CODES = ['KeyQ', 'KeyW', 'KeyE'];

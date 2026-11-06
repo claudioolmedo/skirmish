@@ -69,7 +69,7 @@ test('replays record and restore non-default victory settings', () => {
 test('the King kind is wired into the client tables', () => {
   assert.ok(appJs.includes("22: 'King'"), 'KIND_NAME carries the King at tag 22');
   assert.ok(appJs.includes("22: 'i-king'"), 'KIND_ICON carries the King portrait');
-  assert.ok(appJs.includes("'monk', 'relic', 'king', 'fishingShip']"), 'KIND_I18N: king keeps index 22 (relic keeps 21); Water W2 appended fishingShip at 23');
+  assert.ok(appJs.includes("'monk', 'relic', 'king', 'fishingShip', 'galley'"), 'KIND_I18N: king keeps index 22 (relic keeps 21); Water W2 appended fishingShip at 23, Water W3a the combat ships at 24-27');
   assert.ok(appJs.includes('const KIND_KING = 22;'), 'the KIND_KING constant matches the sim tag');
   assert.ok(indexHtml.includes('id="i-king"'), 'the crown symbol exists in the page');
 });

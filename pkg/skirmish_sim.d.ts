@@ -1147,6 +1147,16 @@ export class WasmSim {
      */
     push_train_cavalry_archer(building: number): boolean;
     /**
+     * Train a Demolition Raft at a Dock (Water W3a, CLS-07).
+     * See `push_train_militia`.
+     */
+    push_train_demolition_raft(building: number): boolean;
+    /**
+     * Train a Fire Galley at a Dock (Water W3a, CLS-07). See
+     * `push_train_militia`.
+     */
+    push_train_fire_galley(building: number): boolean;
+    /**
      * Enqueue a Fishing Ship at a completed Dock (Water W2
      * client slice, ECO-15 — the Dock is the Fishing Ship's only
      * home; 75 wood, 40 s, Dark Age — the row lives in
@@ -1157,6 +1167,16 @@ export class WasmSim {
      * placed-building research. See `push_train_militia`.
      */
     push_train_fishing_ship(building: number): boolean;
+    /**
+     * Train a Galley at a Dock (Water W3a, CLS-07). See
+     * `push_train_militia`.
+     */
+    push_train_galley(building: number): boolean;
+    /**
+     * Train a Hulk at a Dock (Water W3a, CLS-07). See
+     * `push_train_militia`.
+     */
+    push_train_hulk(building: number): boolean;
     /**
      * Enqueue a Knight at a completed Stable (Castle P2 —
      * `can_train_at` carries the Castle Age gate). See
@@ -1681,7 +1701,11 @@ export interface InitOutput {
     readonly wasmsim_push_train_archer: (a: number, b: number) => number;
     readonly wasmsim_push_train_battering_ram: (a: number, b: number) => number;
     readonly wasmsim_push_train_cavalry_archer: (a: number, b: number) => number;
+    readonly wasmsim_push_train_demolition_raft: (a: number, b: number) => number;
+    readonly wasmsim_push_train_fire_galley: (a: number, b: number) => number;
     readonly wasmsim_push_train_fishing_ship: (a: number, b: number) => number;
+    readonly wasmsim_push_train_galley: (a: number, b: number) => number;
+    readonly wasmsim_push_train_hulk: (a: number, b: number) => number;
     readonly wasmsim_push_train_knight: (a: number, b: number) => number;
     readonly wasmsim_push_train_mangonel: (a: number, b: number) => number;
     readonly wasmsim_push_train_militia: (a: number, b: number) => number;

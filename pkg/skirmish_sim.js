@@ -2216,6 +2216,26 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Train a Demolition Raft at a Dock (Water W3a, CLS-07).
+     * See `push_train_militia`.
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_train_demolition_raft(building) {
+        const ret = wasm.wasmsim_push_train_demolition_raft(this.__wbg_ptr, building);
+        return ret !== 0;
+    }
+    /**
+     * Train a Fire Galley at a Dock (Water W3a, CLS-07). See
+     * `push_train_militia`.
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_train_fire_galley(building) {
+        const ret = wasm.wasmsim_push_train_fire_galley(this.__wbg_ptr, building);
+        return ret !== 0;
+    }
+    /**
      * Enqueue a Fishing Ship at a completed Dock (Water W2
      * client slice, ECO-15 — the Dock is the Fishing Ship's only
      * home; 75 wood, 40 s, Dark Age — the row lives in
@@ -2229,6 +2249,26 @@ export class WasmSim {
      */
     push_train_fishing_ship(building) {
         const ret = wasm.wasmsim_push_train_fishing_ship(this.__wbg_ptr, building);
+        return ret !== 0;
+    }
+    /**
+     * Train a Galley at a Dock (Water W3a, CLS-07). See
+     * `push_train_militia`.
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_train_galley(building) {
+        const ret = wasm.wasmsim_push_train_galley(this.__wbg_ptr, building);
+        return ret !== 0;
+    }
+    /**
+     * Train a Hulk at a Dock (Water W3a, CLS-07). See
+     * `push_train_militia`.
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_train_hulk(building) {
+        const ret = wasm.wasmsim_push_train_hulk(this.__wbg_ptr, building);
         return ret !== 0;
     }
     /**
