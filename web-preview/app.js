@@ -3200,6 +3200,12 @@ addEventListener('keydown', (e) => {
       closeChatInput();
     } else if (helpOverlay.style.display !== 'none') {
       helpOverlay.style.display = 'none';
+    } else if (diploOverlay && diploOverlay.style.display !== 'none') {
+      setDiplo(false); // live panels are step-2 transient panels too
+    } else if (scoreOverlay && scoreOverlay.style.display !== 'none') {
+      setScore(false);
+    } else if (techtreeOverlay && techtreeOverlay.style.display !== 'none') {
+      setTechTree(false);
     } else if (selection.size || selectedBuilding || selectedAnimal != null) {
       selectUnits(new Set()); // deselect units / building / animal
     }
