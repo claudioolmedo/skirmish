@@ -103,7 +103,7 @@ fn save_restore_preserves_non_default_teams() {
         42,
         MatchMode::TwoPlayer,
         VictorySettings::conquest(),
-        TeamSettings { teams: [1, 1] },
+        TeamSettings { teams: [1, 1], ..Default::default() },
     );
     for _ in 0..300 {
         sim.tick();
@@ -112,7 +112,7 @@ fn save_restore_preserves_non_default_teams() {
     let bytes = sim.save_game();
     let restored = Sim::load_game(&bytes).expect("a v17 save we wrote must load");
     assert_eq!(restored.state_hash(), sim.state_hash());
-    assert_eq!(restored.team_settings(), TeamSettings { teams: [1, 1] });
+    assert_eq!(restored.team_settings(), TeamSettings { teams: [1, 1], ..Default::default() });
     assert!(restored.allied(OWNER_PLAYER, OWNER_OPPONENT));
     assert_eq!(restored.save_game(), bytes);
 }

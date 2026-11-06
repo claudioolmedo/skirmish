@@ -453,7 +453,13 @@ guest seat carries the host's team pick (Opponent default / Ally)
 through the hello advertisement, the 'start' handshake, the resync
 and the replay header (`teams` meta, junk → defaults). A same-team
 two-client room is therefore fieldable — two humans, one team, no
-enemy: a co-op sandbox match. What still does not exist: a fieldable
+enemy: a co-op sandbox match. Teams T3a (2026-11-05, NET-11)
+refines the union's key under *unlocked* diplomacy: the shared
+read unions exactly when the two seats' stance rows are
+**mutually** Ally (a one-sided Ally shares vision in neither
+direction — adopted ruling, TEAMS-SPEC register #11,
+UNVERIFIED); locked matches are mutual by construction, so
+every configuration above reads unchanged. What still does not exist: a fieldable
 match with both allies *and* an opposing team — that shape waits on
 the multi-seat program, so the union's only fieldable configurations
 remain ally-only, and no live two-client proof of the shared render
@@ -1687,7 +1693,14 @@ and the sim exports `gate_states()` for the derived state.
 Pinned by `sim/tests/gates.rs` (table rows, segment
 replacement, orientation, enemy rejection, derived open/close
 + owner passage + enemy exclusion, foundation blocking, combat
-damage, determinism). *Remaining follow-on:* the Fortified
+damage, determinism). Since Teams T3a (2026-11-05, NET-11) the
+derived state reads the gate owner's diplomacy row, so this
+rule's own "owner and their allies" clause is implemented: an
+Ally-row unit at the span opens the gate like the owner's, an
+Enemy-row unit holds it shut, and a Neutral-row unit neither
+opens it nor holds it shut (adopted reading — TEAMS-SPEC
+register #9, UNVERIFIED in DE; two cases in `gates.rs` pin the
+ally and neutral arms). *Remaining follow-on:* the Fortified
 Gate (the Fortified Wall University upgrade's gate form) is
 still out of scope — it rides the University tech line.
 *Source:* GAP 4.12, 4.13; wiki pages above. · *Status:*
@@ -2128,8 +2141,16 @@ villagers never auto-acquire. Since the orders & stances package
 runs under attack-move and patrol orders — a Stand Ground unit
 (the starting Scout's default) acquires only inside its attack
 range, a No Attack unit never acquires, and Scouts acquire like
-any military unit within their stance. Tests: `combat::cmb08_*`,
-`orders_stances::*`. · *Status:* **MATCHES**.
+any military unit within their stance. Since Teams T3a
+(2026-11-05, NET-11) the chain's "enemy" is the diplomacy
+table's one hostile predicate, consulted at all three
+acquisition sites (this unit chain, the building weapons and
+the Town Center weapon): under an Enemy row the chain is
+exactly the one above; under a Neutral row only the target
+side's *military units* qualify (villagers, the Town Center
+and buildings are never auto-acquired); under an Ally row
+nothing qualifies. Tests: `combat::cmb08_*`,
+`orders_stances::*`, `diplomacy_tests::*`. · *Status:* **MATCHES**.
 
 **CMB-09 — Stances govern pursuit, not damage.** Four stances:
 *Aggressive* — pursue targets indefinitely. *Defensive* — engage nearby
@@ -3147,7 +3168,14 @@ touches the target's orders or any faith state. Pinned by
 `heal_order_chases_an_out_of_range_target`, `heal_exclusions_hold`,
 `heal_auto_task_picks_nearest_then_lowest_id` and
 `healing_never_touches_the_targets_orders` in
-`sim/src/monastery_p5a_tests.rs`. · *Status:* **MATCHES**.
+`sim/src/monastery_p5a_tests.rs`. Since Teams T3a (2026-11-05,
+NET-11) "allied unit" names a second owner: a unit whose owner
+the monk's owner holds an **Ally** diplomacy stance toward is
+healable on the same terms (the auto-task's scan and the Heal
+order share the one eligibility function); Neutral- and
+Enemy-row owners are never healable. Pinned by
+`diplomacy_tests::heal_and_conversion_follow_the_stance_row`.
+· *Status:* **MATCHES**.
 
 **MNK-11 — Heresy turns conversion into death.** If a player with Heresy
 would lose a unit to conversion, the unit dies instead of changing sides.
@@ -3648,7 +3676,14 @@ count (buildings and other herdables never hold a herd). A wild sheep
 converts to the player with the most units in range (an exact tie
 holds — the sources name no tie-break, so holding is the adopted
 deterministic choice); an owned sheep transfers only when its owner
-has no unit in range and an enemy does. Conversion clears the sheep's
+has no unit in range and an enemy does. Since Teams T3a
+(2026-11-05, NET-11) "enemy" here is literal about teams: the
+stealing side must be *not allied* to the owner — read off the
+stealer's diplomacy stance row toward the owner, whose
+initial value is Ally exactly for teammates — so an ally's
+passing unit never steals (pinned by
+`diplomacy_tests::sheep_stealing_requires_a_non_ally`).
+Conversion clears the sheep's
 orders — it stops and waits for its new owner. The capture radius is
 UNVERIFIED as a number in the sources (the rule is stated as proximity
 / "next to it") — re-checked in the 2026-10-22 verification sweep
@@ -4328,10 +4363,88 @@ which proves chat content never appears in a signaling frame, and
 (CMB-08), gates (BLD-13), and trade (TRD-07 — mostly by ignoring it).
 Changing stance is a command; the table is hashed state. In locked-team
 matches it cannot change.
-*Source:* GAP 10.3. · *Impl:* a small per-match table in `Sim`;
-M8 shipped 1v1 only, where "everyone else is an enemy" remains the
-implicit row — the table lands with team games. · *Status:*
-**MISSING**.
+*Source:* GAP 10.3; wiki, Diplomacy (fetched 2026-11-05 for the
+Teams dossier: the directed table — "player 1 is set to ally
+towards player 2, however, player 2's stance is enemy towards
+player 1" is a legal state — the three stances, Neutral's
+military-only auto-attack scope + its trivia confirmation,
+Locked Teams, and the diplomacy tab showing the other players'
+stance towards you). · *Impl:* shipped in Teams T3a (2026-11-05).
+The table is a directed `[[u8; 2]; 2]` on `Sim` (tags 0 Ally /
+1 Neutral / 2 Enemy), initialized from T1's team assignment at
+construction (same team → Ally, anything else — distinct teams
+or `NO_TEAM` — → Enemy) and read through `stance_for(viewer,
+other)`. `TeamSettings` gains `locked_teams` (default true, DE's
+standard-games posture): while locked the table is frozen and
+stance changes are refused. Changing stance is a command —
+`Command::SetDiplomacy { player, target, stance }` (pending-
+command codec tag 50, append-only; the sender is named in the
+command exactly like `Resign`'s seat, because the lockstep wire
+form names no sender — the bundle's owner supplies it at the
+WASM boundary, the `push_resign`/`push_tribute` discipline; the
+plan's literal variant name `SetStance` was already CMB-09's
+per-unit stance command in this tree, so the diplomacy variant
+carries its own name). A change alters only the sender's row;
+it is refused whole when locked, when either seat is
+self/Gaia/unknown, or when the stance tag is invalid.
+Consumers consult ONE predicate, `can_auto_acquire(viewer,
+target_owner, target_is_military_unit)`: Enemy → the full
+CMB-08 chain as always; Neutral → military units only (no
+villagers, no Town Center, no buildings auto-acquired);
+Ally → never acquired. It is consulted at all three CMB-08
+acquisition sites in `combat.rs` (the unit chain, the building
+weapons, the Town Center weapon), and the same row drives:
+explicit attack validation (Ally-owned units and buildings are
+refused — DE's "cannot attack an ally" clause, stated verbatim
+in the wiki's AoE section and adopted for AoE II, spec register
+#2; Neutral-owned targets stay orderable — manual tasking is
+the documented neutral behavior); gates (BLD-13's derived open
+state: an Ally-row unit opens like the owner's, an Enemy-row
+unit holds shut, a Neutral-row unit **neither opens nor holds
+shut** — adopted reading, register #9, UNVERIFIED in DE);
+monk healing (MNK-10: Ally-row owners' units are healable,
+Neutral/Enemy are not); conversion (Enemy- and Neutral-row
+targets convertible — Neutral adopted, register #10,
+UNVERIFIED; Ally-row never); and herdable stealing (AI-06: the
+stealing side must be not-allied to the owner, read off the
+stealer's stance row, whose initial value is Ally exactly for
+teammates). Trade (TRD-07) and tribute (TRD-04) are untouched —
+stance-independent in DE, as this rule's own text says of
+trade. Under unlocked diplomacy the shared-vision read
+(VIS-08) keys on the **mutual** Ally pair — both rows Ally —
+so a one-sided Ally shares vision in neither direction
+(adopted ruling, register #11, UNVERIFIED); locked matches are
+mutual by construction and read exactly T1's team union.
+*Hash/save:* the stance table joins the hash only while a cell
+differs from its construction-derived initial value, behind
+marker 0xC5 (the two off-diagonal cells in slot order), and
+`locked_teams = false` extends the T1 settings block (marker
+0xC4 gains the lock byte) — so every default stream (locked,
+distinct teams, Enemy/Enemy) is byte-identical to before and
+the golden hash does not move; a stance changed back to its
+initial value leaves no trace. Save v18: the team block gains
+the lock byte, the stance cells ride while the settings are
+unlocked or any cell differs (explicit presence byte — the
+condition is stated verbatim in the v18 header comment), and
+tag 50 restores a stance change queued across a save. The
+table's reachable non-default states in shipped matches are
+the unlocked 1v1 shapes (Neutral, one-sided Ally) and the
+same-team locked default; multi-party tables await the
+multi-seat program. Pinned by `sim/src/diplomacy_tests.rs`
+(12 tests: construction derivations, locked refusal with
+stream-identical hashes, invalid-order refusals, neutral
+military-only acquisition with explicit tasking preserved,
+one-sided Ally directionality, heal/conversion per row, sheep
+non-stealing by allies, mutual-Ally vision, hash-trace and
+save/queued-command round-trips) plus two gate cases in
+`sim/tests/gates.rs` (ally opens; neutral neither opens nor
+holds shut). The diplomacy panel's stance controls and the
+prematch unlocked-teams toggle are the T3b client package —
+this rule is about match state, and the state, command,
+consumers, hash and save are what land here; the panel already
+paints the table's data through the `stance_for` WASM export
+this package adds (with `push_set_diplomacy`). · *Status:*
+**MATCHES**.
 
 ---
 
@@ -5141,6 +5254,34 @@ Cavalry row mirrors the Scout Cavalry's — and in the client
 EN/PT/ES). The rulebook carries no per-unit cost entry, so
 no rule's status changes and the counts do not move.
 
+updated 2026-11-05 for Teams T3a (bot-loop builder):
+diplomacy lands in the sim — the directed stance table
+(Ally / Neutral / Enemy, initialized from the team
+assignment), `locked_teams` on `TeamSettings` (default
+locked), the `SetDiplomacy` command (codec tag 50; the
+plan's `SetStance` name was CMB-09's in this tree), and the
+one hostile predicate consulted by CMB-08's three
+acquisition sites, explicit attack validation, gates
+(BLD-13), monk heal/conversion and sheep stealing (AI-06),
+with trade and tribute untouched; under unlocked diplomacy
+the VIS-08 union keys on the mutual Ally pair. NET-11
+moves MISSING → MATCHES: every clause of its text — table,
+command, hashed state, locked-immutable, consulted by
+targeting and gates, ignored by trade — has a shipped
+instance, with two adopted readings recorded in its note
+(neutral units and gates; neutral conversion). The table
+joins the hash only while a cell differs from its initial
+value (marker 0xC5) and the settings block gains the lock
+byte, so default streams are byte-identical and the golden
+hash does not move; save v18 carries the lock and the
+stance cells (presence-flagged, condition in the version
+comment) plus the tag-50 queued command. The book's
+Appendix table stands at 223 rules, 196 / 16 / 11 (the
+NET-11 flip applied to its section row on the landing
+tree); the mechanical Status count over the rule bodies
+on the landing tree (bot-loop, 2026-11-05) is 204 / 15 / 4
+(NET-11 composing over the T2/W2a convoy's 203 / 15 / 5).
+
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
 | 1 | Simulation & time (SIM) | 12 | 12 | 0 | 0 |
@@ -5159,9 +5300,9 @@ no rule's status changes and the counts do not move.
 | 14 | Garrison, transport & repair (GAR) | 10 | 9 | 0 | 1 |
 | 15 | AI behavior & difficulty (AI) | 9 | 8 | 0 | 1 |
 | 16 | Victory, scoring & game modes (VIC) | 12 | 9 | 0 | 3 |
-| 17 | Multiplayer determinism (NET) | 11 | 9 | 1 | 1 |
+| 17 | Multiplayer determinism (NET) | 11 | 10 | 1 | 0 |
 | 18 | Information rules (INF) | 13 | 12 | 1 | 0 |
-| | **Total** | **223** | **195** | **16** | **12** |
+| | **Total** | **223** | **196** | **16** | **11** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer
@@ -5170,7 +5311,8 @@ elevation, fog) with M7, so the remaining greenfield is concentrated
 in the systems whose content has not been built yet — monks (§12),
 trade (§13), garrison's transports (§14 remainder), the water domain (ships, docks,
 fishing), and cliffs. Multiplayer's transport (§17) landed with M8;
-its remaining gaps are snapshots (NET-09) and diplomacy (NET-11).
+its remaining gap is snapshots (NET-09) — diplomacy (NET-11)
+landed with Teams T3a.
 
 ---
 

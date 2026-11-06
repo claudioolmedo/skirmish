@@ -18,7 +18,7 @@ fn allied_sim(seed: u64) -> Sim {
         seed,
         MatchMode::TwoPlayer,
         VictorySettings::conquest(),
-        TeamSettings { teams: [1, 1] },
+        TeamSettings { teams: [1, 1], ..Default::default() },
     )
 }
 
@@ -168,6 +168,7 @@ fn no_team_players_are_not_allies() {
         VictorySettings::conquest(),
         TeamSettings {
             teams: [NO_TEAM, NO_TEAM],
+            ..Default::default()
         },
     );
     assert_eq!(sim.team_of(OWNER_PLAYER), Some(NO_TEAM));
@@ -187,6 +188,7 @@ fn no_team_players_are_not_allies() {
         VictorySettings::conquest(),
         TeamSettings {
             teams: [NO_TEAM, 1],
+            ..Default::default()
         },
     );
     assert!(!mixed.allied(OWNER_PLAYER, OWNER_OPPONENT));
@@ -243,7 +245,7 @@ fn non_default_teams_change_the_hash_only_in_the_settings_block() {
         9,
         MatchMode::TwoPlayer,
         VictorySettings::conquest(),
-        TeamSettings { teams: [2, 1] },
+        TeamSettings { teams: [2, 1], ..Default::default() },
     );
     assert!(!swapped.team_settings().is_default());
     assert!(!swapped.allied(OWNER_PLAYER, OWNER_OPPONENT));

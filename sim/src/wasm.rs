@@ -74,9 +74,15 @@ fn victory_from_flags(time_limit_ticks: u32, score_target: i32, flags: u32) -> V
 /// slot 1's in bits 8–15 (`0xFF` = `NO_TEAM`, unaffiliated — DE's
 /// "–" pick). The default configuration (distinct teams, slot 0
 /// on team 1 and slot 1 on team 2) packs as `1 | (2 << 8)` = 513.
+/// Teams T3a grows the word by one bit: **bit 16 = unlocked
+/// teams** (NET-11) — set means `locked_teams = false`. Every
+/// pre-T3a packed word has bit 16 clear and therefore reads
+/// locked, the default posture, so existing clients keep their
+/// exact behavior against this wasm.
 fn teams_from_packed(packed: u32) -> TeamSettings {
     TeamSettings {
         teams: [(packed & 0xFF) as u8, ((packed >> 8) & 0xFF) as u8],
+        locked_teams: packed & (1 << 16) == 0,
     }
 }
 
@@ -298,6 +304,45 @@ impl WasmSim {
     /// Whether a player seat has resigned (VIC-11).
     pub fn resigned_for(&self, owner: u32) -> bool {
         self.inner.is_resigned(owner as u8)
+    }
+
+    /// The diplomacy stance one seat holds toward another
+    /// (Teams T3a, NET-11): 0 = Ally, 1 = Neutral, 2 = Enemy —
+    /// the directed table's cell for (viewer, other), so the
+    /// diplomacy panel can paint both my row and the incoming
+    /// row (DE shows others' stance towards you). -1 for a
+    /// non-player seat. (This is the diplomacy table, NOT
+    /// CMB-09's per-unit stance.)
+    pub fn stance_for(&self, viewer: u32, other: u32) -> i32 {
+        match self.inner.stance_for(viewer as u8, other as u8) {
+            Some(tag) => tag as i32,
+            None => -1,
+        }
+    }
+
+    /// Set a diplomacy stance (Teams T3a, NET-11): the sender
+    /// seat (`player`, an owner byte — in lockstep this is the
+    /// bundle's owner, supplied by the transport exactly like
+    /// `push_tribute`'s sender) sets its own row toward
+    /// `target` to `stance` (0 Ally / 1 Neutral / 2 Enemy).
+    /// Queued like every command and re-validated at apply
+    /// time; refused whole while teams are locked. Returns
+    /// whether the order *would* be accepted now (the
+    /// `push_resign` affordance discipline). Named
+    /// `push_set_diplomacy`, not the plan's `push_set_stance`:
+    /// that export is CMB-09's per-unit stance in this tree.
+    pub fn push_set_diplomacy(&mut self, player: u32, target: u32, stance: u32) -> bool {
+        let ok = self
+            .inner
+            .can_set_diplomacy(player as u8, target as u8, stance as u8);
+        if ok {
+            self.inner.push_command(Command::SetDiplomacy {
+                player: player as u8,
+                target: target as u8,
+                stance: stance as u8,
+            });
+        }
+        ok
     }
 
     /// Advance exactly one 60 Hz tick. Returns the per-tick state hash

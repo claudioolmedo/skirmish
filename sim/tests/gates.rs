@@ -568,3 +568,140 @@ fn gate_scenario_is_deterministic() {
     let mut b = Sim::with_mode(49, MatchMode::TwoPlayer);
     assert_eq!(script(&mut a), script(&mut b));
 }
+
+// ------------------------------------------------------------------
+// Teams T3a (NET-11): the gate's derived open state reads the
+// gate owner's stance row — an Ally-row unit opens it like the
+// owner's own (BLD-13's ally clause, implemented), and a
+// Neutral-row unit neither opens it nor holds it shut (the
+// adopted reading of TEAMS-SPEC register #9, pinned as adopted).
+// Existing cases above are unmodified.
+
+use skirmish_sim::{TeamSettings, VictorySettings, STANCE_NEUTRAL};
+
+fn teams_sim(seed: u64, teams: TeamSettings) -> Sim {
+    Sim::with_settings_teams(seed, MatchMode::TwoPlayer, VictorySettings::conquest(), teams)
+}
+
+#[test]
+fn ally_unit_opens_the_gate_like_the_owners() {
+    let mut sim = teams_sim(
+        50,
+        TeamSettings {
+            teams: [1, 1],
+            ..Default::default()
+        },
+    );
+    let vil = villagers_of(&sim, OWNER_PLAYER)[0];
+    let (ax, ay) = open_run_near_tc(&sim, OWNER_PLAYER, vil, 8);
+    raise_line(&mut sim, vil, ax, ay, 8);
+    raise_gate(&mut sim, vil, PGATE, ax + 2, ay);
+    let g = gate_of(&sim, OWNER_PLAYER).unwrap().clone();
+    // Send the owner away: the gate closes behind them.
+    let tc = ent(&sim, find_id(&sim, OWNER_PLAYER, EntityKind::TownCenter));
+    let (hx, hy) = (tc.pos_x, tc.pos_y);
+    sim.push_command(Command::Move {
+        entity: vil,
+        x: hx,
+        y: hy,
+    });
+    let closed = run_until(&mut sim, 60_000, |s| {
+        let g = gate_of(s, OWNER_PLAYER).unwrap();
+        !s.gate_is_open(g)
+    });
+    assert!(closed, "gate never closed after the owner left");
+    // The ALLY seat's Scout rides to the gate's center: the
+    // gate opens for it exactly as for the owner's own unit.
+    let scout = find_id(&sim, OWNER_OPPONENT, EntityKind::ScoutCavalry);
+    sim.push_command(Command::Move {
+        entity: scout,
+        x: g.pos_x,
+        y: g.pos_y,
+    });
+    let opened = run_until(&mut sim, 60_000, |s| {
+        let g = gate_of(s, OWNER_PLAYER).unwrap();
+        s.gate_is_open(g)
+    });
+    assert!(opened, "gate never opened for an ally at the span");
+}
+
+#[test]
+fn neutral_unit_neither_opens_nor_holds_shut() {
+    let mut sim = teams_sim(
+        51,
+        TeamSettings {
+            teams: [1, 2],
+            locked_teams: false,
+        },
+    );
+    let vil = villagers_of(&sim, OWNER_PLAYER)[0];
+    let (ax, ay) = open_run_near_tc(&sim, OWNER_PLAYER, vil, 8);
+    raise_line(&mut sim, vil, ax, ay, 8);
+    raise_gate(&mut sim, vil, PGATE, ax + 2, ay);
+    let g = gate_of(&sim, OWNER_PLAYER).unwrap().clone();
+    // The owner sets their row toward the opponent to Neutral.
+    sim.push_command(Command::SetDiplomacy {
+        player: OWNER_PLAYER,
+        target: OWNER_OPPONENT,
+        stance: STANCE_NEUTRAL,
+    });
+    sim.tick();
+    assert_eq!(
+        sim.stance_for(OWNER_PLAYER, OWNER_OPPONENT),
+        Some(STANCE_NEUTRAL)
+    );
+    // Owner away first (gate closed), then the neutral Scout
+    // rides into the open radius: the gate stays closed — a
+    // neutral unit does not open it.
+    let tc = ent(&sim, find_id(&sim, OWNER_PLAYER, EntityKind::TownCenter));
+    let (hx, hy) = (tc.pos_x, tc.pos_y);
+    sim.push_command(Command::Move {
+        entity: vil,
+        x: hx,
+        y: hy,
+    });
+    let closed = run_until(&mut sim, 60_000, |s| {
+        let g = gate_of(s, OWNER_PLAYER).unwrap();
+        !s.gate_is_open(g)
+    });
+    assert!(closed, "gate never closed after the owner left");
+    let scout = find_id(&sim, OWNER_OPPONENT, EntityKind::ScoutCavalry);
+    let (ex, ey) = cell_point(&sim, g.cell_x + 1, g.cell_y - 1);
+    sim.push_command(Command::Move {
+        entity: scout,
+        x: ex,
+        y: ey,
+    });
+    let near = run_until(&mut sim, 60_000, |s| {
+        let e = ent(s, scout);
+        let dx = f(e.pos_x - g.pos_x);
+        let dy = f(e.pos_y - g.pos_y);
+        dx * dx + dy * dy <= 30.0
+    });
+    assert!(near, "neutral scout never reached the gate radius");
+    for _ in 0..300 {
+        sim.tick();
+        let g = gate_of(&sim, OWNER_PLAYER).unwrap();
+        assert!(
+            !sim.gate_is_open(g),
+            "a neutral unit alone must not open the gate"
+        );
+    }
+    // Now the owner walks to the gate WHILE the neutral unit
+    // stands in the radius: the gate opens — a neutral unit
+    // does not hold it shut either (an enemy would).
+    sim.push_command(Command::Move {
+        entity: vil,
+        x: g.pos_x,
+        y: g.pos_y,
+    });
+    let opened = run_until(&mut sim, 60_000, |s| {
+        let e = ent(s, scout);
+        let dx = f(e.pos_x - g.pos_x);
+        let dy = f(e.pos_y - g.pos_y);
+        let scout_near = dx * dx + dy * dy <= 30.0;
+        let g = gate_of(s, OWNER_PLAYER).unwrap();
+        scout_near && s.gate_is_open(g)
+    });
+    assert!(opened, "gate stayed shut with the owner present and only a neutral near");
+}

@@ -163,12 +163,22 @@ impl Sim {
 
     /// Whether the entity at `ti` is a valid heal target for
     /// `owner`'s monks (MNK-10's exclusions): alive, owned by the
-    /// monk's owner, in the field (not garrisoned), not the Town
-    /// Center (a building for this rule), not a SIEGE-class unit,
-    /// and below its effective maximum HP.
+    /// monk's owner — or, since Teams T3a (NET-11), by a player
+    /// the monk's owner holds an **Ally** stance toward
+    /// (MNK-10's text always said "allied unit"; the Ally row
+    /// gives that word a second owner it can name) — in the
+    /// field (not garrisoned), not the Town Center (a building
+    /// for this rule), not a SIEGE-class unit, and below its
+    /// effective maximum HP. Neutral- and Enemy-row owners are
+    /// never healable.
     fn healable_target(&self, owner: u8, ti: usize) -> bool {
         let t = &self.entities[ti];
-        if t.dead || t.owner != owner || t.garrisoned_in.is_some() {
+        if t.dead || t.garrisoned_in.is_some() {
+            return false;
+        }
+        if t.owner != owner
+            && self.stance_for(owner, t.owner) != Some(crate::STANCE_ALLY)
+        {
             return false;
         }
         if t.kind == EntityKind::TownCenter {
@@ -300,6 +310,14 @@ impl Sim {
         if t.dead || t.garrisoned_in.is_some() || t.owner == monk_owner {
             return false;
         }
+        // Teams T3a (NET-11): an Ally-row owner's units are not
+        // convertible (conversion is an enemy act); a
+        // Neutral-row owner's units ARE — the adopted reading
+        // of spec register #10 (UNVERIFIED on the DE side,
+        // recorded in NET-11's note).
+        if self.stance_for(monk_owner, t.owner) == Some(crate::STANCE_ALLY) {
+            return false;
+        }
         if crate::player_slot(t.owner).is_none() {
             return false; // Gaia: animals, herdables, wildlife.
         }
@@ -384,6 +402,13 @@ impl Sim {
         }
         let b = &self.buildings[bi];
         if !b.complete || b.owner == monk_owner {
+            return false;
+        }
+        // Teams T3a (NET-11): Ally-row buildings are not
+        // convertible either — the building arm of the unit
+        // rule in `eligible_target` (Neutral stays convertible,
+        // the same adopted reading).
+        if self.stance_for(monk_owner, b.owner) == Some(crate::STANCE_ALLY) {
             return false;
         }
         if crate::player_slot(b.owner).is_none() {

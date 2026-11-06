@@ -158,7 +158,33 @@ const MAGIC: &[u8; 4] = b"SKSV";
 /// pairs express the re-keyed state exactly, and the flag
 /// itself round-trips in the same block that tells the
 /// reader which meaning the byte carries.
-const SAVE_VERSION: u32 = 17;
+/// Version 18: Teams T3a (NET-11) — three deltas, all in the
+/// world section right after the victory settings, plus one
+/// codec tag. (1) The v17 team block gains the `locked_teams`
+/// byte after the two team bytes; the block's presence flag
+/// now reads "settings non-default in either field" (team ids
+/// or the lock), so an unlocked match with default team ids
+/// still round-trips its lock — its settings are hashed (the
+/// extended 0xC4 block), so a save that dropped the lock could
+/// never pass the load-time hash check. (2) The diplomacy
+/// stance block follows the team block: an explicit one-byte
+/// presence flag in every v18 save, then — only while the
+/// flag is set — the two off-diagonal stance cells in slot
+/// order (viewer 0 → other 1, viewer 1 → other 0). The flag
+/// is set exactly while the settings are unlocked **or** any
+/// cell differs from its construction-derived initial value
+/// (the v15 discipline: stance state is hashed while it
+/// differs, so a post-change save could never pass the
+/// load-time hash check without the cells); a locked match
+/// whose cells never moved writes no cells, and its layout is
+/// v17's apart from the version word, the lock byte inside a
+/// present team block, and this one presence byte. The reader
+/// never guesses: the flag is always there, and an unknown
+/// stance tag in a present block refuses the save whole.
+/// (3) The pending-command codec gains `Command::SetDiplomacy`
+/// at tag 50, append-only, so a save taken between frames with
+/// a stance change queued restores it.
+const SAVE_VERSION: u32 = 18;
 
 /// Little-endian byte writer over a growable buffer.
 struct W {
@@ -642,6 +668,19 @@ impl W {
                 self.fx(y);
                 self.u8(formation.tag());
             }
+            // Teams T3a: the diplomacy command (NET-11) at
+            // tag 50, append-only — sender seat, target seat,
+            // stance tag, in that order.
+            Command::SetDiplomacy {
+                player,
+                target,
+                stance,
+            } => {
+                self.u8(50);
+                self.u8(player);
+                self.u8(target);
+                self.u8(stance);
+            }
         }
     }
 }
@@ -673,12 +712,27 @@ impl Sim {
         // hashed while non-default, so a non-default save must
         // carry them for the load-time hash check to pass (see
         // the version-17 note at SAVE_VERSION).
+        // Format v18: Teams T3a — the block gains the
+        // `locked_teams` byte, and "non-default" now covers the
+        // lock too (see the version-18 note at SAVE_VERSION).
         if !self.teams.is_default() {
             w.bool(true);
             w.u8(self.teams.teams[0]);
             w.u8(self.teams.teams[1]);
+            w.bool(self.teams.locked_teams);
         } else {
             w.bool(false);
+        }
+        // Format v18: Teams T3a — the diplomacy stance block:
+        // the explicit presence byte, then the two off-diagonal
+        // cells (slot order) only while the settings are
+        // unlocked or a cell differs from its initial value —
+        // exactly the condition the version-18 note states.
+        let stance_block = !self.teams.locked_teams || self.stance_differs_from_initial();
+        w.bool(stance_block);
+        if stance_block {
+            w.u8(self.stance[0][1]);
+            w.u8(self.stance[1][0]);
         }
         // Format v12: VIC-03's countdown state, present only
         // while the relic-victory flag (bit 2 above) is on —
@@ -1397,6 +1451,12 @@ impl<'a> R<'a> {
                 y: self.fx()?,
                 formation: FormationKind::from_tag(self.u8()?)?,
             }),
+            // Teams T3a: Command::SetDiplomacy (tag 50).
+            50 => Some(Command::SetDiplomacy {
+                player: self.u8()?,
+                target: self.u8()?,
+                stance: self.u8()?,
+            }),
             _ => None,
         }
     }
@@ -1492,12 +1552,33 @@ impl Sim {
         // Format v17: Teams T1 — the presence byte written in
         // every v17 save, then the team block while present
         // (see the version-17 note at SAVE_VERSION).
+        // Format v18: Teams T3a — a present team block carries
+        // the `locked_teams` byte after the two team bytes.
         let teams = if r.bool()? {
             TeamSettings {
                 teams: [r.u8()?, r.u8()?],
+                locked_teams: r.bool()?,
             }
         } else {
             TeamSettings::default()
+        };
+        // Format v18: Teams T3a — the stance block's presence
+        // byte, then the two off-diagonal cells while present,
+        // laid over the construction-derived initial table.
+        // An unknown stance tag refuses the save whole (the
+        // unknown-tag discipline every codec here follows).
+        let stance = {
+            let mut table = crate::initial_stance_table(&teams);
+            if r.bool()? {
+                let c01 = r.u8()?;
+                let c10 = r.u8()?;
+                if c01 > crate::STANCE_ENEMY || c10 > crate::STANCE_ENEMY {
+                    return None;
+                }
+                table[0][1] = c01;
+                table[1][0] = c10;
+            }
+            table
         };
         let (relic_holder, relic_hold_ticks) = if victory.relic_victory {
             let holder = if r.bool()? { Some(r.u8()?) } else { None };
@@ -1931,6 +2012,7 @@ impl Sim {
             mode,
             victory,
             teams,
+            stance,
             relic_holder,
             relic_hold_ticks,
             wonder_holder,

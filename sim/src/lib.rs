@@ -118,6 +118,8 @@ mod formation_tests;
 mod teams_tests;
 #[cfg(test)]
 mod victory_teams_tests;
+#[cfg(test)]
+mod diplomacy_tests;
 mod water_w1_tests;
 #[cfg(test)]
 mod water_w2a_tests;
@@ -808,6 +810,23 @@ pub enum Command {
     /// already resigned is ignored whole. In Sandbox there is
     /// no match to resign, so the command is ignored there too.
     Resign { player: u8 },
+    /// Set a diplomacy stance (Teams T3a, NET-11): `player` —
+    /// an owner byte, named explicitly like `Resign`'s seat
+    /// because the wire form names no sender (the bundle's
+    /// owner supplies it at the WASM boundary) — sets *their
+    /// own row* of the directed stance table toward `target`
+    /// (the other player's owner byte) to `stance` (a diplomacy
+    /// tag: `STANCE_ALLY` 0, `STANCE_NEUTRAL` 1, `STANCE_ENEMY`
+    /// 2). The table is directed: this changes only the
+    /// sender's row, never the target's row back. Refused whole
+    /// when teams are locked (the default — DE's standard-games
+    /// posture), when either seat is self/Gaia/unknown, or when
+    /// the stance tag is invalid — the house style for invalid
+    /// orders. (The plan named this variant `SetStance`; that
+    /// name is CMB-09's per-unit stance command in this tree,
+    /// so the diplomacy variant carries its own name and the
+    /// append-only codec tag 50.)
+    SetDiplomacy { player: u8, target: u8, stance: u8 },
 }
 
 /// ECO-14: one farm reseed costs 60 wood (MECHANICS-STUDY §6.3:
@@ -1083,23 +1102,65 @@ pub const NO_TEAM: u8 = 0xFF;
 ///
 /// The default is *distinct* teams — slot 0 on team 1, slot 1 on
 /// team 2 — which is exactly the configuration the game has
-/// always shipped: two seats, no allies. `locked_teams` is
-/// deliberately NOT a field here: NET-11's stance table does not
-/// exist until T3, and a lock with nothing to lock would be dead
-/// state still demanding hash/save bytes (execution plan T1.2).
+/// always shipped: two seats, no allies. Teams T3a adds
+/// `locked_teams` (NET-11): DE's Locked Teams option, default
+/// **true** (the standard-games posture) — while locked, the
+/// stance table is frozen at its team-derived initial state
+/// and `SetDiplomacy` commands are refused.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TeamSettings {
     /// Team id per player slot, in slot order (slot 0 = the
     /// human seat, slot 1 = the opponent seat — see
     /// `player_slot`). `NO_TEAM` = allied with nobody.
     pub teams: [u8; 2],
+    /// NET-11's lock (Teams T3a): true = the diplomacy stance
+    /// table cannot change mid-match.
+    pub locked_teams: bool,
 }
 
 impl Default for TeamSettings {
-    /// Distinct teams: the shipped-today configuration.
+    /// Distinct teams, locked: the shipped-today configuration.
     fn default() -> Self {
-        Self { teams: [1, 2] }
+        Self {
+            teams: [1, 2],
+            locked_teams: true,
+        }
     }
+}
+
+/// Diplomacy stance tags (Teams T3a, NET-11): the directed
+/// stance table's cell values, in the plan's append-only tag
+/// order — 0 = Ally, 1 = Neutral, 2 = Enemy. (Not to be
+/// confused with `entity::Stance`, CMB-09's per-unit combat
+/// stance — a different table entirely.)
+pub const STANCE_ALLY: u8 = 0;
+/// See `STANCE_ALLY`.
+pub const STANCE_NEUTRAL: u8 = 1;
+/// See `STANCE_ALLY`.
+pub const STANCE_ENEMY: u8 = 2;
+
+/// The construction-derived initial stance table for a team
+/// assignment (Teams T3a, NET-11): same team → Ally, anything
+/// else (distinct teams, `NO_TEAM` on either side) → Enemy, in
+/// both directions; the self cells carry Ally and are never
+/// read or written (self-stance is fixed and never stored as
+/// state that can change). A pure function of the team
+/// settings, so the "differs from initial" hash/save condition
+/// needs no stored copy of the initial table.
+fn initial_stance_table(teams: &TeamSettings) -> [[u8; 2]; 2] {
+    let mut table = [[STANCE_ENEMY; 2]; 2];
+    for viewer in 0..2 {
+        for other in 0..2 {
+            if viewer == other {
+                table[viewer][other] = STANCE_ALLY;
+            } else if teams.teams[viewer] == teams.teams[other]
+                && teams.teams[viewer] != NO_TEAM
+            {
+                table[viewer][other] = STANCE_ALLY;
+            }
+        }
+    }
+    table
 }
 
 impl TeamSettings {
@@ -1368,6 +1429,16 @@ pub struct Sim {
     /// unless the match was opened with other settings. Set at
     /// construction alongside `victory`; never changes.
     teams: TeamSettings,
+    /// The directed diplomacy stance table (Teams T3a, NET-11):
+    /// `stance[viewer slot][other slot]`, a `STANCE_*` tag per
+    /// cell. Initialized from `teams` at construction (same
+    /// team → Ally, else Enemy); the self cells are fixed Ally
+    /// and never change. Mutated only by `SetDiplomacy`
+    /// commands, and only while teams are unlocked. Hashed
+    /// only while a cell differs from its construction-derived
+    /// initial value (see `hash_parts`), so a locked match —
+    /// the golden included — stays byte-identical.
+    stance: [[u8; 2]; 2],
     /// VIC-03's countdown state: the holder currently holding
     /// *all* of the map's relics garrisoned in their Monasteries
     /// and how many consecutive ticks that hold has lasted. The
@@ -1616,6 +1687,7 @@ impl Sim {
             grid,
             mode,
             victory,
+            stance: initial_stance_table(&teams),
             teams,
             relic_holder: None,
             relic_hold_ticks: 0,
@@ -1777,6 +1849,97 @@ impl Sim {
             (Some(ta), Some(tb)) => ta == tb && ta != NO_TEAM,
             _ => false,
         }
+    }
+
+    /// The diplomacy stance `viewer` holds toward `other`
+    /// (Teams T3a, NET-11): a `STANCE_*` tag from the directed
+    /// table — my row toward you says nothing about your row
+    /// toward me. A seat's stance toward itself reads Ally (the
+    /// fixed self cell). Gaia and unknown tags have no stance:
+    /// `None`.
+    pub fn stance_for(&self, viewer: u8, other: u8) -> Option<u8> {
+        let (Some(v), Some(o)) = (player_slot(viewer), player_slot(other)) else {
+            return None;
+        };
+        Some(self.stance[v][o])
+    }
+
+    /// Whether any stance cell differs from its
+    /// construction-derived initial value (Teams T3a) — the
+    /// condition under which the stance table joins the hash
+    /// and the save. A locked match can never differ.
+    pub fn stance_differs_from_initial(&self) -> bool {
+        self.stance != initial_stance_table(&self.teams)
+    }
+
+    /// Whether `a`'s vision is shared with `b` (Teams T3a's
+    /// ruling on the T1 read, spec §5.2 / register #11): while
+    /// teams are locked the stance rows are team-derived and
+    /// mutual by construction, so sharing is exactly T1's
+    /// `allied()`; while unlocked, sharing keys on the
+    /// **mutual** Ally pair — both rows Ally. A one-sided Ally
+    /// shares vision in neither direction (adopted ruling,
+    /// UNVERIFIED on the DE side, recorded in NET-11's note).
+    fn shares_vision_with(&self, a: u8, b: u8) -> bool {
+        if self.teams.locked_teams {
+            return self.allied(a, b);
+        }
+        self.stance_for(a, b) == Some(STANCE_ALLY)
+            && self.stance_for(b, a) == Some(STANCE_ALLY)
+    }
+
+    /// The NET-11 hostile predicate for AUTO-ACQUISITION (Teams
+    /// T3a) — the one function every CMB-08 acquisition site
+    /// consults, so stance logic lives in exactly one place:
+    /// **Enemy** → the full chain as always (any unit, the Town
+    /// Center, other buildings); **Neutral** → military units
+    /// only (`target_is_military_unit`; villagers, the Town
+    /// Center and buildings are never auto-acquired); **Ally**
+    /// → never acquired. Self and non-player owners are never
+    /// auto-acquired through this predicate (Gaia predators
+    /// qualify at the call sites by their own rule, as before).
+    pub fn can_auto_acquire(
+        &self,
+        viewer: u8,
+        target_owner: u8,
+        target_is_military_unit: bool,
+    ) -> bool {
+        if viewer == target_owner || !entity::is_player_owner(target_owner) {
+            return false;
+        }
+        match self.stance_for(viewer, target_owner) {
+            Some(STANCE_ALLY) => false,
+            Some(STANCE_NEUTRAL) => target_is_military_unit,
+            // Enemy — and any cell the table cannot hold in a
+            // validated state — keeps the shipped behavior.
+            _ => true,
+        }
+    }
+
+    /// Whether a `SetDiplomacy` command would be accepted right
+    /// now (Teams T3a, NET-11): teams unlocked, both seats real
+    /// players, target not self, and a valid stance tag.
+    pub fn can_set_diplomacy(&self, player: u8, target: u8, stance: u8) -> bool {
+        if self.teams.locked_teams {
+            return false;
+        }
+        if player == target || stance > STANCE_ENEMY {
+            return false;
+        }
+        player_slot(player).is_some() && player_slot(target).is_some()
+    }
+
+    /// Apply a `SetDiplomacy` command (Teams T3a): set the
+    /// sender's own row toward the target. One-directional by
+    /// construction — the target's row is theirs to set.
+    pub(crate) fn issue_set_diplomacy(&mut self, player: u8, target: u8, stance: u8) {
+        if !self.can_set_diplomacy(player, target, stance) {
+            return;
+        }
+        let (Some(v), Some(o)) = (player_slot(player), player_slot(target)) else {
+            return;
+        };
+        self.stance[v][o] = stance;
     }
 
     /// VIC-09 (Package I): the Death Match stockpile delta —
@@ -2583,7 +2746,11 @@ impl Sim {
             } else {
                 entity::OWNER_OPPONENT
             };
-            if !self.allied(owner, other_owner) {
+            // Teams T3a: under unlocked diplomacy the union
+            // keys on the mutual-Ally pair (see
+            // `shares_vision_with`); locked matches read
+            // exactly T1's team union.
+            if !self.shares_vision_with(owner, other_owner) {
                 continue;
             }
             for (cell, &v) in out.iter_mut().zip(self.fog[other_slot].iter()) {
@@ -4877,6 +5044,19 @@ impl Sim {
         if !entity::is_player_owner(a.owner) || units::spec(a.kind).attacks.is_empty() {
             return false;
         }
+        // Teams T3a (NET-11): an Ally-row owner's units and
+        // buildings can never be attack-ordered — DE's "cannot
+        // attack an ally" clause (spec §5.2; the AoE II-side
+        // restatement is UNVERIFIED register #2, adopted).
+        // Neutral-row targets stay orderable: manual tasking is
+        // the documented neutral behavior. Own sheep (ECO-13)
+        // and Gaia stay orderable exactly as before.
+        if entity::is_player_owner(t.owner)
+            && t.owner != a.owner
+            && self.stance_for(a.owner, t.owner) == Some(STANCE_ALLY)
+        {
+            return false;
+        }
         t.owner == entity::OWNER_GAIA
             || t.owner != a.owner
             || t.kind == EntityKind::Sheep
@@ -6222,6 +6402,12 @@ impl Sim {
         if self.buildings[bi].kind == BuildingKind::Monument {
             return false;
         }
+        // Teams T3a (NET-11): Ally-row buildings are refused,
+        // like Ally-row units in `can_attack`; Neutral-row
+        // buildings stay orderable (manual tasking).
+        if self.stance_for(a.owner, self.buildings[bi].owner) == Some(STANCE_ALLY) {
+            return false;
+        }
         self.buildings[bi].owner != a.owner
             && entity::is_player_owner(self.buildings[bi].owner)
     }
@@ -6676,6 +6862,11 @@ impl Sim {
                     self.issue_deposit_relic(entity, building)
                 }
                 Command::Resign { player } => self.issue_resign(player),
+                Command::SetDiplomacy {
+                    player,
+                    target,
+                    stance,
+                } => self.issue_set_diplomacy(player, target, stance),
             }
         }
 
@@ -8149,6 +8340,19 @@ impl Sim {
 
     /// The derived open state of the gate building `b` (see the
     /// section note): an owner unit near, no foreign unit near.
+    ///
+    /// Teams T3a (NET-11) extends the owner side by the gate
+    /// owner's stance row (spec §5.2): an **Ally**-row player's
+    /// unit at the span opens the gate like the owner's own
+    /// (BLD-13's text always said "owner and their allies" —
+    /// the ally clause gains its implementation here); an
+    /// **Enemy**-row unit holds it shut, as every foreign unit
+    /// did before. A **Neutral**-row unit neither opens it nor
+    /// holds it shut — the adopted reading of spec register #9
+    /// (UNVERIFIED on the DE side; it is not the owner's side,
+    /// and it is not an enemy), pinned as adopted in
+    /// `diplomacy_tests`. Non-player units (Gaia) hold it shut
+    /// exactly as before.
     pub fn gate_is_open(&self, b: &build::Building) -> bool {
         if !b.kind.is_gate() || !b.complete {
             return false;
@@ -8167,11 +8371,18 @@ impl Sim {
             if dx * dx + dy * dy > r * r {
                 continue;
             }
-            if e.owner == b.owner {
+            if e.owner == b.owner
+                || self.stance_for(b.owner, e.owner) == Some(STANCE_ALLY)
+            {
                 own_near = true;
+            } else if self.stance_for(b.owner, e.owner) == Some(STANCE_NEUTRAL) {
+                // Adopted reading (register #9): a neutral unit
+                // neither opens the gate nor holds it shut.
+                continue;
             } else {
-                // Any foreign unit inside the radius holds the
-                // gate shut, whatever the owner side shows.
+                // Any enemy (or non-player) unit inside the
+                // radius holds the gate shut, whatever the owner
+                // side shows.
                 return false;
             }
         }
@@ -11433,10 +11644,31 @@ impl Sim {
         // the golden scenario included — stays byte-identical to
         // the pre-T1 stream, and two matches under different team
         // settings can never silently agree.
+        // Teams T3a extends the block with the `locked_teams`
+        // byte: unlocked teams are non-default too, so the block
+        // now rides while the settings are non-default in either
+        // field (ids or lock). Default streams are untouched.
         if !self.teams.is_default() {
             h.write_u8(0xC4);
             h.write_u8(self.teams.teams[0]);
             h.write_u8(self.teams.teams[1]);
+            h.write_u8(self.teams.locked_teams as u8);
+        }
+        // Teams T3a (NET-11): the diplomacy stance table joins
+        // the hash only while a cell differs from its
+        // construction-derived initial value, behind marker
+        // 0xC5 (grepped free at build time — 0xC1–0xC4 are the
+        // relic / MOV-06 / wonder / teams blocks above), the two
+        // off-diagonal cells in slot order (viewer 0 → other 1,
+        // viewer 1 → other 0; self cells are never written). A
+        // locked match can never differ, so every locked stream
+        // — the golden included — stays byte-identical, and a
+        // stance changed back to its initial value leaves the
+        // stream exactly as if it had never changed.
+        if self.stance_differs_from_initial() {
+            h.write_u8(0xC5);
+            h.write_u8(self.stance[0][1]);
+            h.write_u8(self.stance[1][0]);
         }
         // VIC-03: the relic countdown state joins the hash only
         // while a hold stands — behind marker 0xC1, the holder

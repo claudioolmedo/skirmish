@@ -546,7 +546,16 @@ impl Sim {
                 } else {
                     OWNER_PLAYER
                 };
-                if near[foe as usize] > 0 {
+                // Teams T3a (NET-11, AI-06): the stealing side
+                // must be *not allied* to the owner — read off
+                // the foe's stance row toward the owner, whose
+                // construction-derived initial value is Ally
+                // exactly for teammates, so an ally's passing
+                // unit never steals, under locked teams or
+                // unlocked diplomacy alike.
+                if near[foe as usize] > 0
+                    && self.stance_for(foe, cur) != Some(crate::STANCE_ALLY)
+                {
                     Some(foe)
                 } else {
                     None
@@ -940,9 +949,12 @@ impl Sim {
                 if t.dead || t.id == e.id || t.garrisoned_in.is_some() {
                     continue;
                 }
+                // Teams T3a (NET-11): player targets qualify
+                // through the one hostile predicate — Enemy the
+                // full chain, Neutral military units only, Ally
+                // never (see `Sim::can_auto_acquire`).
                 let qualifies = t.kind == EntityKind::Boar
-                    || (is_player_owner(t.owner)
-                        && t.owner != owner
+                    || (self.can_auto_acquire(owner, t.owner, t.kind.is_military())
                         && t.kind != EntityKind::TownCenter);
                 if !qualifies {
                     continue;
@@ -972,10 +984,12 @@ impl Sim {
             // can rank it below every unit.)
             let mut best_tc: Option<(i64, u32)> = None;
             for t in &self.entities {
+                // Teams T3a: the TC is a building for the
+                // predicate — Neutral/Ally TCs are never
+                // auto-acquired, Enemy TCs are as always.
                 if t.dead
                     || t.kind != EntityKind::TownCenter
-                    || !is_player_owner(t.owner)
-                    || t.owner == owner
+                    || !self.can_auto_acquire(owner, t.owner, false)
                 {
                     continue;
                 }
@@ -1004,7 +1018,9 @@ impl Sim {
             // treats them as such.
             let mut best_b: Option<(i64, u32)> = None;
             for b in &self.buildings {
-                if !is_player_owner(b.owner) || b.owner == owner {
+                // Teams T3a: buildings are the predicate's
+                // non-military arm — Enemy only.
+                if !self.can_auto_acquire(owner, b.owner, false) {
                     continue;
                 }
                 if b.kind == BuildingKind::Farm {
@@ -2351,7 +2367,7 @@ impl Sim {
                 if e.dead || e.kind == EntityKind::TownCenter || e.garrisoned_in.is_some() {
                     continue;
                 }
-                let hostile_unit = is_player_owner(e.owner) && e.owner != owner;
+                let hostile_unit = self.can_auto_acquire(owner, e.owner, e.kind.is_military());
                 if !hostile_unit && e.kind != EntityKind::Boar {
                     continue;
                 }
@@ -2380,7 +2396,7 @@ impl Sim {
                     if e.dead || e.kind != EntityKind::TownCenter {
                         continue;
                     }
-                    if !is_player_owner(e.owner) || e.owner == owner {
+                    if !self.can_auto_acquire(owner, e.owner, false) {
                         continue;
                     }
                     let d = Self::footprint_edge_dist(bx, by, half, e.pos_x, e.pos_y);
@@ -2396,7 +2412,7 @@ impl Sim {
                 // (Farms excluded, as in CMB-08).
                 let mut bestb: Option<(i64, u32, I16F16)> = None;
                 for ob in &self.buildings {
-                    if ob.owner == owner || ob.kind == BuildingKind::Farm {
+                    if !self.can_auto_acquire(owner, ob.owner, false) || ob.kind == BuildingKind::Farm {
                         continue;
                     }
                     let thalf = I16F16::from_num(ob.kind.footprint_size() as i32 * 2);
@@ -2693,7 +2709,7 @@ impl Sim {
                 if e.dead || e.kind == EntityKind::TownCenter || e.garrisoned_in.is_some() {
                     continue;
                 }
-                let hostile_unit = is_player_owner(e.owner) && e.owner != owner;
+                let hostile_unit = self.can_auto_acquire(owner, e.owner, e.kind.is_military());
                 if !hostile_unit && e.kind != EntityKind::Boar {
                     continue;
                 }
@@ -2721,7 +2737,7 @@ impl Sim {
                     if e.dead || e.kind != EntityKind::TownCenter {
                         continue;
                     }
-                    if !is_player_owner(e.owner) || e.owner == owner {
+                    if !self.can_auto_acquire(owner, e.owner, false) {
                         continue;
                     }
                     let d = Self::footprint_edge_dist(bx, by, half, e.pos_x, e.pos_y);
@@ -2735,7 +2751,7 @@ impl Sim {
             if target_unit.is_none() {
                 let mut bestb: Option<(i64, u32, I16F16)> = None;
                 for ob in &self.buildings {
-                    if ob.owner == owner || ob.kind == BuildingKind::Farm {
+                    if !self.can_auto_acquire(owner, ob.owner, false) || ob.kind == BuildingKind::Farm {
                         continue;
                     }
                     let thalf = I16F16::from_num(ob.kind.footprint_size() as i32 * 2);
