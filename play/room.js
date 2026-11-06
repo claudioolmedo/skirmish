@@ -188,15 +188,24 @@ export function teamLabel(pick, s = null) {
 /// simply reads "You". Teams T1: an allied guest seat adds its
 /// segment (`s.teamAlly`, composed by the caller like the other
 /// localized pieces); the default opponent pick adds nothing —
-/// default rooms read exactly as before.
-export function roomConfigText({ guestSlot = 'open', selfIsGuest = false, speed = 1.7, victory = 'Conquest', teamPick = 'opponent' } = {}, s = null) {
+/// default rooms read exactly as before. Teams T3b: an unlocked
+/// room adds its segment the same way (`s.teamsUnlocked`).
+export function roomConfigText({ guestSlot = 'open', selfIsGuest = false, speed = 1.7, victory = 'Conquest', teamPick = 'opponent', teamsUnlocked = false } = {}, s = null) {
   const guest = selfIsGuest
     ? ((s && s.you) || 'You')
     : slotLabel(guestSlot, s && s.slot);
   // SIM-11: the match speed is part of the configuration summary.
   const speedTxt = `${speed}×`;
-  const base = s && s.format ? s.format(guest, speedTxt, victory) : `1v1 · Arabia · ${victory} · Guest: ${guest} · Speed: ${speedTxt}`;
-  return teamPickOf(teamPick) === 'ally'
-    ? `${base} · ${(s && s.teamAlly) || 'Team: Ally'}`
-    : base;
+  let base = s && s.format ? s.format(guest, speedTxt, victory) : `1v1 · Arabia · ${victory} · Guest: ${guest} · Speed: ${speedTxt}`;
+  if (teamPickOf(teamPick) === 'ally') {
+    base = `${base} · ${(s && s.teamAlly) || 'Team: Ally'}`;
+  }
+  // Teams T3b (NET-11): an unlocked-teams room names the posture
+  // in the summary, like the allied pick does; the default
+  // locked posture adds nothing — default rooms read exactly as
+  // before. Only the literal true counts (junk never unlocks).
+  if (teamsUnlocked === true) {
+    base = `${base} · ${(s && s.teamsUnlocked) || 'Unlocked teams'}`;
+  }
+  return base;
 }

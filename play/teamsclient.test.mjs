@@ -55,8 +55,8 @@ test('buildMatchSim routes non-default teams to the teams export, with fallback'
   const body = fnBody('function buildMatchSim(');
   assert.ok(body.includes("typeof WasmSim.new_match_victory_teams === 'function'"),
     'the stale-wasm guard checks for the new export');
-  assert.ok(body.includes('WasmSim.new_match_victory_teams(seed, modeTag, v.timeLimitTicks, v.scoreTarget, victoryFlags(v), packTeams(t))'),
-    'the teams export is called with the packed word');
+  assert.ok(body.includes('WasmSim.new_match_victory_teams(seed, modeTag, v.timeLimitTicks, v.scoreTarget, victoryFlags(v), packTeamsWithLock(t, u))'),
+    'the teams export is called with the packed word (T3b: packTeamsWithLock — the pair bytes plus bit 16 while unlocked)');
   assert.ok(body.includes('WasmSim.new_match_victory(seed, modeTag, v.timeLimitTicks, v.scoreTarget, victoryFlags(v))'),
     'default teams keep the pre-T1 victory construction');
   assert.ok(body.includes('WasmSim.new_match(seed, modeTag)'),

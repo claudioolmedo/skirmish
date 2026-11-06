@@ -72,6 +72,7 @@ import {
   createRelayClient, probeRegionPing, makeRoomId, buildPlayUrl,
   linkJoinRoom, pickFastestRegion, REGIONS as NET_REGIONS,
   normalizeTeams, packTeams, teamsIsDefault,
+  packTeamsWithLock, normalizeTeamsUnlocked,
 } from './play/netplay.js';
 import {
   cleanDisplayName, readStoredName, writeStoredName, displayName,
@@ -280,6 +281,7 @@ const vicDeathMatchInput = document.getElementById('vic-deathmatch'); // Package
 const vicEmpireWarsInput = document.getElementById('vic-empirewars'); // Package I: the Empire Wars checkbox
 const vicKothInput = document.getElementById('vic-koth'); // Package I: the King of the Hill checkbox
 const vicAlliedInput = document.getElementById('vic-allied'); // Teams T2 (VIC-12): the Allied Victory checkbox
+const vicUnlockedInput = document.getElementById('vic-unlocked'); // Teams T3b (NET-11): the Unlocked Teams checkbox (pause menu)
 // End-of-match feedback block (2026-10-19): refs + state. The
 // send goes to the relay's /feedback; once it succeeds the form
 // never shows again (localStorage skirmish2.feedbackDone) — the
@@ -740,11 +742,19 @@ function victoryFlags(v) {
 /// the team pick the same way it loses victory settings — and a
 /// mixed pair (one stale, one current) is refused by the same
 /// construction-hash check, since non-default teams are hashed.
-function buildMatchSim(seed, modeTag, victory, teams) {
+function buildMatchSim(seed, modeTag, victory, teams, teamsUnlocked = false) {
   const v = normalizeVictory(victory);
   const t = normalizeTeams(teams);
-  if (!teamsIsDefault(t) && typeof WasmSim.new_match_victory_teams === 'function') {
-    return WasmSim.new_match_victory_teams(seed, modeTag, v.timeLimitTicks, v.scoreTarget, victoryFlags(v), packTeams(t));
+  const u = normalizeTeamsUnlocked(teamsUnlocked);
+  // Teams T3b: unlocked teams is non-default state even with the
+  // default team ids (T3a's is_default includes the lock), so an
+  // unlocked match must take the teams export too — its packed
+  // word carries bit 16 (packTeamsWithLock). A stale wasm
+  // without the export degrades exactly as it does for the team
+  // pick: the lock is lost locally and netplay's
+  // construction-hash check refuses a mixed pair.
+  if ((!teamsIsDefault(t) || u) && typeof WasmSim.new_match_victory_teams === 'function') {
+    return WasmSim.new_match_victory_teams(seed, modeTag, v.timeLimitTicks, v.scoreTarget, victoryFlags(v), packTeamsWithLock(t, u));
   }
   if (victoryIsDefault(v) || typeof WasmSim.new_match_victory !== 'function') {
     return WasmSim.new_match(seed, modeTag);
@@ -827,13 +837,31 @@ function victoryLabel(v) {
 // or Ally (same team — the two clients then render the shared
 // line of sight the sim's fog_for serves). Solo vs-AI gets no
 // team surface: an allied AI seat cannot exist, and an AI-room
-// match likewise always builds with default teams.
+// match likewise always builds with default teams. Teams T3b
+// adds the lock's surface (the prematch/room unlocked toggle)
+// and the diplomacy panel's stance controls on top of the same
+// plumbing; an AI-room match likewise always builds locked.
 const TEAMS_DEFAULT = [1, 2];
 let matchTeams = [...TEAMS_DEFAULT]; // the settings the current sim was built with
-/// The replay-meta fragment: distinct-team recordings stay
-/// exactly the pre-T1 shape; anything else carries its pair.
-function teamMeta(t) {
-  return teamsIsDefault(t) ? {} : { teams: [...normalizeTeams(t)] };
+// Teams T3b (NET-11): the lock half of the team settings —
+// false = locked (DE's standard posture, the shipped default),
+// true = unlocked (the diplomacy panel's stance selectors issue
+// real commands). It rides beside the pair everywhere the pair
+// rides (handshake, resync, replay meta) and enters the sim as
+// bit 16 of the packed teams word. `chosenTeamsUnlocked` is the
+// pause menu's pick for local matches, applied on Restart like
+// the victory pick beside it.
+let matchTeamsUnlocked = false;
+let chosenTeamsUnlocked = false;
+/// The replay-meta fragment: distinct-team locked recordings
+/// stay exactly the pre-T1 shape; anything else carries its
+/// pair, plus the unlocked flag while unlocked.
+function teamMeta(t, unlocked = false) {
+  const u = normalizeTeamsUnlocked(unlocked);
+  if (teamsIsDefault(t) && !u) return {};
+  return u
+    ? { teams: [...normalizeTeams(t)], teamsUnlocked: true }
+    : { teams: [...normalizeTeams(t)] };
 }
 
 // --- M8: lockstep multiplayer -------------------------------------------
@@ -957,12 +985,32 @@ function buildDiplo() {
   }
 }
 
+/// The localized name of a diplomacy stance tag (Teams T3a's
+/// STANCE_* tags: 0 Ally / 1 Neutral / 2 Enemy), or the em dash
+/// for a non-player seat (the ABI's -1).
+function diploStanceName(tag) {
+  if (tag === 0) return t('diplo.ally');
+  if (tag === 1) return t('diplo.neutral');
+  if (tag === 2) return t('diplo.enemy');
+  return '—';
+}
+
 /// Repaint the diplomacy screen from the sim's public fields:
 /// both rows (stance, Age, score total, population) and the
 /// tribute desk (the local fee, and each resource's send button
 /// armed exactly when the sim would accept a 100 tribute —
 /// holdings ≥ 30 and ≥ amount + fee; the sim re-validates at
 /// apply time regardless).
+/// Teams T3b (NET-11): the stance cells are real data now — my
+/// row toward the foe and the incoming row (the foe's stance
+/// toward me, which DE's diplomacy tab also shows) read through
+/// the T3a ABI (`stance_for`). In an unlocked match the foe row
+/// carries a stance selector issuing {t:'diplomacy'} through
+/// the ordinary command path; in a locked match the selector
+/// renders disabled and the panel states the lock — the panel
+/// never offers a control the sim will refuse. A stale wasm
+/// without the ABI reads as locked with the pre-T3b Enemy
+/// placeholder, exactly the degradation the constructor has.
 function refreshDiplo() {
   if (!sim || !diploOverlay || diploOverlay.style.display === 'none') return;
   buildDiplo();
@@ -978,6 +1026,28 @@ function refreshDiplo() {
   set('diplo-foe-age', AGE_NAMES[sim.age_for(foeOwner())] || AGE_NAMES[0]);
   set('diplo-foe-score', foeScore[4]);
   set('diplo-foe-pop', sim.population_for(foeOwner()));
+  // Teams T3b: stance cells + selector from the ABI.
+  const hasStanceAbi = typeof sim.stance_for === 'function';
+  const myStance = hasStanceAbi ? sim.stance_for(localOwner, foeOwner()) : -1;
+  const incoming = hasStanceAbi ? sim.stance_for(foeOwner(), localOwner) : -1;
+  if (hasStanceAbi) {
+    set('diplo-foe-stance', diploStanceName(myStance));
+    set('diplo-foe-incoming', diploStanceName(incoming));
+  }
+  const diploUnlocked = hasStanceAbi && matchTeamsUnlocked && !playback;
+  const stanceSel = document.getElementById('diplo-foe-stance-select');
+  if (stanceSel) {
+    stanceSel.disabled = !diploUnlocked;
+    if (myStance === 0 || myStance === 1 || myStance === 2) {
+      stanceSel.value = String(myStance);
+    }
+    const optKeys = ['diplo.ally', 'diplo.neutral', 'diplo.enemy'];
+    for (let tag = 0; tag <= 2; tag++) {
+      const opt = document.getElementById(`diplo-stance-opt-${tag}`);
+      if (opt) opt.textContent = t(optKeys[tag]);
+    }
+  }
+  set('diplo-lock-note', t(diploUnlocked ? 'diplo.unlockedNote' : 'diplo.lockedNote'));
   const fee = sim.tribute_fee_pct_for(localOwner);
   set('diplo-fee-note', t('diplo.feeNote', { pct: fee }));
   const stock = myStock();
@@ -3113,7 +3183,9 @@ addEventListener('keydown', (e) => {
     // stack runs. Where the API does not exist the browser may
     // still take Esc for fullscreen/pointer-lock exit — the
     // stack above is unchanged and no error is raised.
-    if (placement) {
+    if (flareArm) {
+      setFlareArm(false); // Teams T3b: Esc disarms an armed flare
+    } else if (placement) {
       placement = null;
     } else if (repairArm) {
       repairArm = false;
@@ -4173,6 +4245,15 @@ function applyLocalOrder(cmd) {
     // client's seat; online the same command rides the bundle and
     // netplay's applier names the sender from the bundle's owner.
     case 'tribute': return sim.push_tribute(localOwner, cmd.to, cmd.r, cmd.a);
+    // Teams T3b (NET-11): a diplomacy stance change — locally
+    // the sender is this client's seat (as tribute's); online
+    // the same command rides the bundle and netplay's applier
+    // names the sender from the bundle's owner. The sim
+    // re-validates (locked teams refuse whole). Guarded: a
+    // stale wasm without the T3a export refuses cleanly.
+    case 'diplomacy': return typeof sim.push_set_diplomacy === 'function'
+      ? sim.push_set_diplomacy(localOwner, cmd.to, cmd.s)
+      : false;
     // ECO-14 (wave-1 leftovers): the Mill reseed desk — the sim
     // derives the owner from the named Mill.
     case 'queue_reseed': return sim.push_queue_reseed(cmd.b);
@@ -4219,9 +4300,19 @@ function resetSim(mode = matchMode) {
   // Teams T1: local matches have no team surface — they always
   // build under the default distinct teams.
   matchTeams = [...TEAMS_DEFAULT];
+  // Teams T3b: local matches DO get the lock's surface — the
+  // pause menu's unlocked toggle (chosenTeamsUnlocked, applied
+  // on Restart like the victory pick) decides whether the
+  // diplomacy panel's selector can change the local player's
+  // stance toward the AI seat. Sandbox keeps the plain
+  // constructor (locked by construction, its settings inert
+  // like the mode's other match machinery), so it records
+  // locked — the panel must never offer a control the sim
+  // will refuse.
+  matchTeamsUnlocked = mode === 'sandbox' ? false : chosenTeamsUnlocked;
   sim = mode === 'sandbox'
     ? new WasmSim(seed)
-    : buildMatchSim(seed, MODE_TAG[mode], matchVictory, matchTeams);
+    : buildMatchSim(seed, MODE_TAG[mode], matchVictory, matchTeams, matchTeamsUnlocked);
   // M8: every local match records its command stream — the end
   // overlay (and the pause menu) can download it as a replay.
   // SIM-11: a fresh local match takes the pause menu's chosen speed.
@@ -4229,7 +4320,7 @@ function resetSim(mode = matchMode) {
   localRecorder = createRecorder({
     seed, modeTag: MODE_TAG[mode], seats: [0], view: 0, speed: matchSpeed,
     ...victoryMeta(matchVictory),
-    ...teamMeta(matchTeams),
+    ...teamMeta(matchTeams, matchTeamsUnlocked),
   });
   seenBuildings.clear(); // M7: last-known enemy buildings are per-match
   resetScoreHistory(); // INF-11: timeline + revealed-map flag are per-match
@@ -4256,6 +4347,8 @@ function resetSim(mode = matchMode) {
   healArm = false;
   convertArm = false;
   wallAnchor = null;
+  flareMarkers = []; // Teams T3b: flare markers are per-match
+  flareArm = false;
   // M4 client state resets with the match: control groups and the
   // idle-key cycling memory belong to the old game.
   controlGroups.clear();
@@ -4373,6 +4466,8 @@ function adoptSim(newSim, owner) {
   healArm = false;
   convertArm = false;
   wallAnchor = null;
+  flareMarkers = []; // Teams T3b: flare markers are per-match
+  flareArm = false;
   controlGroups.clear();
   groupTaps.reset();
   idleCycleVil = -1;
@@ -4795,12 +4890,16 @@ async function hostStartMatch() {
   // Teams T1: the host's team assignment (the room's guest-seat
   // team pick) rides the same handshake the same way.
   matchTeams = normalizeTeams(net.teams);
-  net.pendingSim = buildMatchSim(net.seed, MODE_TAG.online, matchVictory, matchTeams);
+  // Teams T3b: the host's unlocked-teams toggle rides the same
+  // handshake the same way (junk/absent = locked).
+  matchTeamsUnlocked = normalizeTeamsUnlocked(net.teamsUnlocked);
+  net.pendingSim = buildMatchSim(net.seed, MODE_TAG.online, matchVictory, matchTeams, matchTeamsUnlocked);
   net.client.send({
     type: 'start', seed: net.seed, hash0: net.pendingSim.state_hash(),
     speed: isGameSpeed(net.speed) ? net.speed : GAME_SPEED, // SIM-11: the host's setting paces both clients
     victory: { ...matchVictory }, // Package C: the host's victory settings
     teams: [...matchTeams], // Teams T1: the host's team assignment
+    teamsUnlocked: matchTeamsUnlocked, // Teams T3b: the lock posture
   });
   // The host's own build IS its verification — it is loaded.
   markSelfLoaded();
@@ -4834,7 +4933,12 @@ async function guestHandleStart(msg) {
   // junk normalizes to defaults, never to an accidental ally).
   net.teams = normalizeTeams(msg.teams);
   matchTeams = net.teams;
-  const candidate = buildMatchSim(msg.seed, MODE_TAG.online, matchVictory, matchTeams);
+  // Teams T3b: build under the host's lock posture the same way
+  // (an older host sends none — locked stands, and junk
+  // normalizes to locked, never to an accidental unlock).
+  net.teamsUnlocked = normalizeTeamsUnlocked(msg.teamsUnlocked);
+  matchTeamsUnlocked = net.teamsUnlocked;
+  const candidate = buildMatchSim(msg.seed, MODE_TAG.online, matchVictory, matchTeams, matchTeamsUnlocked);
   if (candidate.state_hash() !== msg.hash0) {
     // Same seed, different construction hash: the two builds
     // disagree — lockstep would desync on turn 0. That is a
@@ -4884,7 +4988,11 @@ async function hostStartAiMatch() {
   // Teams T1: an AI seat is an opponent by construction — the
   // room's team pick never applies here, whatever it says.
   matchTeams = [...TEAMS_DEFAULT];
-  net.pendingSim = buildMatchSim(net.seed, MODE_TAG[mode], matchVictory, matchTeams);
+  // Teams T3b: an AI-room match likewise always builds locked —
+  // the room's unlocked toggle is a human-guest-seat surface,
+  // like the team pick beside it.
+  matchTeamsUnlocked = false;
+  net.pendingSim = buildMatchSim(net.seed, MODE_TAG[mode], matchVictory, matchTeams, matchTeamsUnlocked);
   // The host's own build is its verification — and the AI seat
   // counts as loaded the moment that build verifies: there is
   // no second load to wait for.
@@ -4908,7 +5016,7 @@ function beginAiMatch(mode) {
   // a peer dropping out of the loading phase.
   net.phase = 'ended';
   teardownNet(); // clears the load timer, closes the room socket
-  aiRoom = { mode, seed, speed, victory: { ...matchVictory }, teams: [...matchTeams] };
+  aiRoom = { mode, seed, speed, victory: { ...matchVictory }, teams: [...matchTeams], teamsUnlocked: matchTeamsUnlocked };
   adoptAiMatch(candidate, mode, seed);
 }
 
@@ -4926,7 +5034,7 @@ function adoptAiMatch(candidate, mode, seed) {
   localRecorder = createRecorder({
     seed, modeTag: MODE_TAG[mode], seats: [0], view: 0, speed: matchSpeed,
     ...victoryMeta(matchVictory),
-    ...teamMeta(matchTeams),
+    ...teamMeta(matchTeams, matchTeamsUnlocked),
   });
   setInMatch(true); // the match begins: the game appears
   setPaused(false);
@@ -4942,7 +5050,8 @@ function restartAiMatch() {
   const { mode, seed } = aiRoom;
   matchVictory = normalizeVictory(aiRoom.victory);
   matchTeams = normalizeTeams(aiRoom.teams);
-  adoptAiMatch(buildMatchSim(seed, MODE_TAG[mode], matchVictory, matchTeams), mode, seed);
+  matchTeamsUnlocked = normalizeTeamsUnlocked(aiRoom.teamsUnlocked);
+  adoptAiMatch(buildMatchSim(seed, MODE_TAG[mode], matchVictory, matchTeams, matchTeamsUnlocked), mode, seed);
 }
 
 function beginOnlineMatch() {
@@ -4959,7 +5068,7 @@ function beginOnlineMatch() {
     seats: [0, 2], view: owner,
     speed: isGameSpeed(net.speed) ? net.speed : GAME_SPEED, // SIM-11
     ...victoryMeta(matchVictory), // Package C
-    ...teamMeta(matchTeams), // Teams T1
+    ...teamMeta(matchTeams, matchTeamsUnlocked), // Teams T1 + T3b
   });
   net.session = makeNetSession();
   net.phase = 'playing';
@@ -5002,6 +5111,7 @@ function roomConfigStrings() {
     you: t('room.you'),
     format: (guest, speed, victory) => t('room.config', { guest, speed, victory }),
     teamAlly: t('room.teamAlly'), // Teams T1: the allied segment
+    teamsUnlocked: t('room.teamsUnlocked'), // Teams T3b: the unlocked segment
   };
 }
 function lobbyStrings() {
@@ -5059,6 +5169,7 @@ function renderRoom() {
       speed: isGameSpeed(net.speed) ? net.speed : GAME_SPEED, // SIM-11
       victory: victoryLabel(net.victory), // Package C
       teamPick: teamPickForTeams(net.teams), // Teams T1
+      teamsUnlocked: normalizeTeamsUnlocked(net.teamsUnlocked), // Teams T3b
     }, roomConfigStrings());
   }
   // M12: the guest-seat selector is the host's alone, and it
@@ -5083,6 +5194,20 @@ function renderRoom() {
     if (netUi.roomGuestTeam) {
       netUi.roomGuestTeam.value = teamPickForTeams(net.teams);
       netUi.roomGuestTeam.disabled = net.phase !== 'lobby'
+        || !!net.peerPresent || !!net.doorGuest;
+    }
+  }
+  // Teams T3b: the unlocked-teams toggle — the host's alone,
+  // beside the team pick, with the same visibility and lock (the
+  // posture cannot change out from under a present guest; the
+  // guest adopts the binding copy from 'start' in any case). It
+  // shows only for a human guest seat, for the same reason the
+  // team pick does.
+  if (netUi.unlockedControlRow) {
+    netUi.unlockedControlRow.hidden = !isHost || slotIsAi(slot) || slot === 'closed';
+    if (netUi.roomTeamsUnlocked) {
+      netUi.roomTeamsUnlocked.checked = normalizeTeamsUnlocked(net.teamsUnlocked);
+      netUi.roomTeamsUnlocked.disabled = net.phase !== 'lobby'
         || !!net.peerPresent || !!net.doorGuest;
     }
   }
@@ -5196,7 +5321,13 @@ async function rejoinFromResync(msg) {
   // would rebuild as distinct teams and desync the same way.
   net.teams = normalizeTeams(msg.teams);
   matchTeams = net.teams;
-  const fresh = buildMatchSim(msg.seed, MODE_TAG.online, matchVictory, matchTeams);
+  // Teams T3b: the rebuild must equally run under the match's
+  // lock posture (the resync carries it) or an unlocked match
+  // would rebuild locked and desync the same way (the stance
+  // table's hash bytes differ by construction).
+  net.teamsUnlocked = normalizeTeamsUnlocked(msg.teamsUnlocked);
+  matchTeamsUnlocked = net.teamsUnlocked;
+  const fresh = buildMatchSim(msg.seed, MODE_TAG.online, matchVictory, matchTeams, matchTeamsUnlocked);
   adoptSim(fresh, owner);
   const byTick = new Map();
   for (const e of msg.events || []) byTick.set(e.tick, e);
@@ -5215,7 +5346,7 @@ async function rejoinFromResync(msg) {
     seats: [0, 2], view: owner,
     speed: isGameSpeed(net.speed) ? net.speed : GAME_SPEED,
     ...victoryMeta(matchVictory), // Package C
-    ...teamMeta(matchTeams), // Teams T1
+    ...teamMeta(matchTeams, matchTeamsUnlocked), // Teams T1 + T3b
   });
   net.recorder.seed(msg.events || []);
   net.session = makeNetSession();
@@ -5236,6 +5367,7 @@ function sendResync() {
     events: snapshot.events,
     victory: { ...matchVictory }, // Package C: the match's settings, for the rebuild
     teams: [...matchTeams], // Teams T1: the match's team assignment, for the rebuild
+    teamsUnlocked: matchTeamsUnlocked, // Teams T3b: the match's lock posture, for the rebuild
   });
 }
 
@@ -5497,6 +5629,11 @@ function onNetMessage(msg) {
       if (net.role === 'guest' && msg.teams) {
         net.teams = normalizeTeams(msg.teams);
       }
+      // Teams T3b: the host's advertised lock posture, the same
+      // display-only adoption (the room summary names it).
+      if (net.role === 'guest' && msg.teamsUnlocked !== undefined) {
+        net.teamsUnlocked = normalizeTeamsUnlocked(msg.teamsUnlocked);
+      }
       // M12: a sealed guest seat (AI / Closed) admits no human —
       // a late hello on a stale link is told the room is full,
       // exactly like a third opener of a two-human room.
@@ -5509,7 +5646,7 @@ function onNetMessage(msg) {
         net.helloReplied = true;
         net.client.send({
           type: 'hello', v: 1, role: net.role, name: myName(),
-          ...(net.role === 'host' ? { victory: { ...normalizeVictory(net.victory) }, teams: [...normalizeTeams(net.teams)] } : {}),
+          ...(net.role === 'host' ? { victory: { ...normalizeVictory(net.victory) }, teams: [...normalizeTeams(net.teams)], teamsUnlocked: normalizeTeamsUnlocked(net.teamsUnlocked) } : {}),
         });
       }
       // M10 private rooms: a guest at the door of a private room
@@ -5733,6 +5870,17 @@ function onNetMessage(msg) {
       // relay forwarded it untouched, like every envelope.
       if (chatLink) chatLink.handleSignal(msg);
       break;
+    case 'flare':
+      // Teams T3b (INF-04, NET-10): the peer's Signal Allies
+      // flare. The session never consumes it (not a command);
+      // the sender is the peer by construction — the only other
+      // seat in the room — so the marker paints in the peer's
+      // player color and the cue plays. Only mid-match: a stray
+      // flare in any other phase paints nothing.
+      if (net.phase === 'playing') {
+        showFlare(msg.x, msg.y, foeOwner(), true);
+      }
+      break;
     default:
       break;
   }
@@ -5774,6 +5922,17 @@ function setTeamPick(value) {
   renderRoom();
 }
 
+/// Host: set the room's lock posture (Teams T3b — the room
+/// screen's unlocked-teams toggle). Host-local room state like
+/// the team pick: the guest learns the binding copy from the
+/// 'start' handshake (and the display copy from the host's
+/// hello). Only the literal true unlocks — anything else locks.
+function setTeamsUnlocked(value) {
+  if (!net || net.role !== 'host') return;
+  net.teamsUnlocked = value === true;
+  renderRoom();
+}
+
 function connectToRoom() {
   // M10: the HOST's create connection carries the private flag —
   // the room registers in the directory as locked (listed, like
@@ -5798,7 +5957,7 @@ function connectToRoom() {
       // the 'start' handshake). Older clients ignore the field.
       net.client.send({
         type: 'hello', v: 1, role: net.role, name: myName(),
-        ...(net.role === 'host' ? { victory: { ...normalizeVictory(net.victory) }, teams: [...normalizeTeams(net.teams)] } : {}),
+        ...(net.role === 'host' ? { victory: { ...normalizeVictory(net.victory) }, teams: [...normalizeTeams(net.teams)], teamsUnlocked: normalizeTeamsUnlocked(net.teamsUnlocked) } : {}),
       });
       if (net.role === 'host') {
         // M12: a sealed seat changes what "created" means — the
@@ -5876,6 +6035,7 @@ function openLobby(join) {
     speed: GAME_SPEED, // SIM-11: the match speed (host's Create Lobby pick)
     victory: { ...VICTORY_DEFAULT }, // Package C: the victory settings (host's Create Lobby pick; the guest adopts the host's)
     teams: [...TEAMS_DEFAULT], // Teams T1: the team assignment (host's room team pick; the guest adopts the host's)
+    teamsUnlocked: false, // Teams T3b: the lock posture (host's create/room toggle; the guest adopts the host's)
     // M10 room model. The password lives ONLY in the host
     // client's memory (net.password), set at create time; it is
     // never persisted and never sent anywhere — guests send
@@ -6015,6 +6175,10 @@ function createGame() {
       kingOfTheHill: netUi.createVictoryKoth ? netUi.createVictoryKoth.checked : false,
       alliedVictory: netUi.createVictoryAllied ? netUi.createVictoryAllied.checked : false,
     });
+  // Teams T3b: the host's unlocked-teams pick from the same
+  // settings box — it rides the 'start' handshake to the guest
+  // (the room screen carries its twin toggle).
+  net.teamsUnlocked = !!(netUi.createTeamsUnlocked && netUi.createTeamsUnlocked.checked);
   net.region = net.selectedRegion || net.region || regionList[0].id;
   net.room = makeRoomId();
   // The room lives in memory from here — the address bar stays
@@ -6268,9 +6432,13 @@ async function startPlayback(rec) {
   // it the same way; older recordings have none and replay as
   // the distinct-team matches they were (junk → defaults).
   matchTeams = normalizeTeams(rec.teams);
+  // Teams T3b: a recording made unlocked carries its posture
+  // the same way; older recordings have none and replay as the
+  // locked matches they were (junk → locked).
+  matchTeamsUnlocked = normalizeTeamsUnlocked(rec.teamsUnlocked);
   sim = rec.modeTag === 0
     ? new WasmSim(rec.seed)
-    : buildMatchSim(rec.seed, rec.modeTag, matchVictory, matchTeams);
+    : buildMatchSim(rec.seed, rec.modeTag, matchVictory, matchTeams, matchTeamsUnlocked);
   playback = {
     rec, events, idx: 0, owners,
     view: typeof rec.view === 'number' ? rec.view : owners[0],
@@ -6415,6 +6583,11 @@ function downloadSave() {
 function adoptLoadedSim(loaded) {
   const tag = loaded.mode();
   const mode = tag === 1 ? 'easy' : tag === 2 ? 'normal' : 'sandbox';
+  // Teams T3b: a save's lock posture lives inside the sim and
+  // the ABI exposes no read for it, so the panel conservatively
+  // renders its selector disabled for a loaded match — never
+  // offer a control whose acceptance this client cannot know.
+  matchTeamsUnlocked = false;
   matchMode = mode;
   builtMode = mode;
   matchEnded = false;
@@ -6519,12 +6692,18 @@ function applyStaticStrings() {
   setAttr('diplo-close', 'aria-label', 'diplo.close');
   setText('diplo-col-player', 'diplo.player');
   setText('diplo-col-stance', 'diplo.stance');
+  setText('diplo-col-incoming', 'diplo.incoming');
   setText('diplo-col-age', 'diplo.age');
   setText('diplo-col-score', 'diplo.score');
   setText('diplo-col-pop', 'diplo.population');
   setText('diplo-you-name', 'diplo.you');
   setText('diplo-foe-name', 'diplo.opponent');
-  setText('diplo-foe-stance', 'diplo.enemy');
+  // Teams T3b: applyLocale no longer paints the foe stance cell
+  // — refreshDiplo owns it now (real ABI data, not the pre-T3b
+  // hardcoded "Enemy" literal, which remains only as the
+  // pre-sim placeholder in the HTML).
+  setText('flare-btn-label', 'flare.button');
+  setTitle('flare-btn', 'flare.title');
   setText('diplo-tribute-title', 'diplo.tribute');
   setText('diplo-tribute-note', 'diplo.tributeNote');
   // Score + Technology Tree (INF-11 + INF-06): the top-bar
@@ -6578,6 +6757,7 @@ function applyStaticStrings() {
   setText('vic-empirewars-txt', 'victory.empireWars');
   setText('vic-koth-txt', 'victory.kingOfTheHill');
   setText('vic-allied-txt', 'victory.alliedVictory');
+  setText('vic-unlocked-txt', 'set.unlockedTeams');
   setText('victory-note', 'pause.victoryNote');
   setAttr('quality-row', 'aria-label', 'pause.visualQuality');
   setText('quality-title', 'pause.quality');
@@ -6719,6 +6899,7 @@ function applyStaticStrings() {
   setText('set-victory-empirewars-name', 'victory.empireWars');
   setText('set-victory-koth-name', 'victory.kingOfTheHill');
   setText('set-victory-allied-name', 'victory.alliedVictory');
+  setText('set-teams-unlocked-name', 'set.unlockedTeams');
   setText('set-players-name', 'set.players');
   setText('set-guest-name', 'set.guestSlot');
   const slotOptions = {
@@ -6735,6 +6916,7 @@ function applyStaticStrings() {
   setText('room-title-h', 'room.title');
   setText('slot-control-txt', 'set.guestSlot');
   setText('team-control-txt', 'set.guestTeam');
+  setText('unlocked-control-txt', 'set.unlockedTeams');
   setOptions('guest-team-select', {
     opponent: 'team.opponentOption', ally: 'team.allyOption',
   });
@@ -6833,6 +7015,9 @@ async function main() {
     if (vicEmpireWarsInput) vicEmpireWarsInput.checked = pick.empireWars;
     if (vicKothInput) vicKothInput.checked = pick.kingOfTheHill;
     if (vicAlliedInput) vicAlliedInput.checked = pick.alliedVictory;
+    // Teams T3b: the unlocked toggle beside the victory boxes is
+    // team settings, not victory settings — it syncs alongside.
+    if (vicUnlockedInput) vicUnlockedInput.checked = chosenTeamsUnlocked;
   }
   function readVictoryInputs() {
     const chosen = document.querySelector('input[name="victory-mode"]:checked');
@@ -6847,6 +7032,9 @@ async function main() {
         kingOfTheHill: vicKothInput ? vicKothInput.checked : false,
         alliedVictory: vicAlliedInput ? vicAlliedInput.checked : false,
       });
+    // Teams T3b: the unlocked toggle updates its own pick on
+    // every change, applied on Restart like the victory pick.
+    chosenTeamsUnlocked = vicUnlockedInput ? vicUnlockedInput.checked : false;
   }
   for (const inp of victoryInputs) inp.addEventListener('change', readVictoryInputs);
   if (vicTimeInput) vicTimeInput.addEventListener('change', readVictoryInputs);
@@ -6856,6 +7044,7 @@ async function main() {
   if (vicEmpireWarsInput) vicEmpireWarsInput.addEventListener('change', readVictoryInputs);
   if (vicKothInput) vicKothInput.addEventListener('change', readVictoryInputs);
   if (vicAlliedInput) vicAlliedInput.addEventListener('change', readVictoryInputs);
+  if (vicUnlockedInput) vicUnlockedInput.addEventListener('change', readVictoryInputs);
   syncVictoryInputs();
   playing = false; // no match exists until one is entered
   paused = false;
@@ -6867,8 +7056,37 @@ async function main() {
   // Diplomacy (Package K): its own top-bar door, toggling like
   // the Menu button — and, unlike the menu, it never pauses.
   if (diploBtn) diploBtn.addEventListener('click', () => setDiplo(diploOverlay.style.display === 'none'));
+  // Teams T3b (NET-11): the foe row's stance selector — enabled
+  // only in unlocked matches (refreshDiplo owns the disabled
+  // state); a change issues the diplomacy command through the
+  // ordinary path (issue → applyLocalOrder locally, the bundle
+  // online), and the panel repaints from the sim's table.
+  const diploStanceSelect = document.getElementById('diplo-foe-stance-select');
+  if (diploStanceSelect) {
+    diploStanceSelect.addEventListener('change', () => {
+      const tag = Number(diploStanceSelect.value);
+      if (tag === 0 || tag === 1 || tag === 2) {
+        if (issue({ t: 'diplomacy', to: foeOwner(), s: tag })) {
+          playAudioCue('click');
+        }
+        refreshDiplo();
+      }
+    });
+  }
   const diploClose = document.getElementById('diplo-close');
   if (diploClose) diploClose.addEventListener('click', () => setDiplo(false));
+  // Teams T3b (INF-04): the Signal Allies button beside the
+  // minimap arms a one-shot flare click (minimap or world);
+  // clicking it again disarms. In solo/AI matches it still arms
+  // — the sender sees their own marker (presentation only).
+  const flareBtn = document.getElementById('flare-btn');
+  if (flareBtn) {
+    flareBtn.addEventListener('click', () => {
+      if (!playing || playback) return;
+      setFlareArm(!flareArm);
+      if (flareArm) flash(t('flare.armed'));
+    });
+  }
   // Score + Technology Tree (INF-11 + INF-06): top-bar doors
   // like diplomacy's — toggle open/closed, never pause.
   if (scoreBtn) scoreBtn.addEventListener('click', () => setScore(scoreOverlay.style.display === 'none'));
@@ -7108,6 +7326,7 @@ async function main() {
     createVictoryEmpireWars: document.getElementById('create-victory-empirewars'),
     createVictoryKoth: document.getElementById('create-victory-koth'),
     createVictoryAllied: document.getElementById('create-victory-allied'),
+    createTeamsUnlocked: document.getElementById('create-teams-unlocked'),
     roomSection: document.getElementById('room-section'),
     slotHost: document.getElementById('slot-host'),
     slotGuest: document.getElementById('slot-guest'),
@@ -7116,6 +7335,8 @@ async function main() {
     roomGuestSlot: document.getElementById('guest-slot-select'),
     teamControlRow: document.getElementById('team-control-row'),
     roomGuestTeam: document.getElementById('guest-team-select'),
+    unlockedControlRow: document.getElementById('unlocked-control-row'),
+    roomTeamsUnlocked: document.getElementById('room-teams-unlocked'),
     roomListedLine: document.getElementById('room-listed-line'),
     roomPrivateLine: document.getElementById('room-private-line'),
     pwRow: document.getElementById('pw-row'),
@@ -7254,6 +7475,13 @@ async function main() {
   if (netUi.roomGuestTeam) {
     netUi.roomGuestTeam.addEventListener('change', () => {
       setTeamPick(netUi.roomGuestTeam.value);
+    });
+  }
+  // Teams T3b: the room screen's unlocked-teams toggle (host
+  // only; the create panel's twin is read by createGame itself).
+  if (netUi.roomTeamsUnlocked) {
+    netUi.roomTeamsUnlocked.addEventListener('change', () => {
+      setTeamsUnlocked(netUi.roomTeamsUnlocked.checked);
     });
   }
   // M10: the room screen's one button toggles ready; the host's
@@ -7496,6 +7724,14 @@ async function main() {
     if (ev.button === 2) {
       const w = minimapPointerWorld(ev);
       if (w) smartOrderAt(w[0], w[1], ev.shiftKey);
+      return;
+    }
+    // Teams T3b (INF-04): with a flare armed, this left-click
+    // places the flare instead of jumping the camera.
+    if (flareArm) {
+      const w = minimapPointerWorld(ev);
+      setFlareArm(false);
+      if (w) sendFlare(w[0], w[1]);
       return;
     }
     mmDrag = true;
@@ -8507,6 +8743,13 @@ async function main() {
     const d = lDrag;
     lDrag = null;
     const [wx, wy] = eventWorld(ev);
+    // Teams T3b (INF-04): with a flare armed, a plain click on
+    // the world places the flare instead of selecting.
+    if (flareArm) {
+      setFlareArm(false);
+      if (!d.moved) sendFlare(wx, wy);
+      return;
+    }
     if (placement) {
       if (isWallKind(placement.kind) && d.moved && wallAnchor) {
         // BLD-13/BLD-20: a dragged wall placement commits the
@@ -12336,6 +12579,57 @@ let audioPrevSheepOwners = new Map(); // sheep conversions bleat (generated audi
 let lastAttackAlert = null; // INF-01: { x, y, at } of the latest located alert
 let audioHousedPrev = false;
 
+// --- Teams T3b: ally flares (INF-04, NET-10) ---------------------
+// A flare is a non-command net message ({type:'flare', x, y})
+// beside the command stream: it never enters a bundle, never
+// reaches the sim or the hashed state, and a replay need not
+// contain it. Receivers paint a flashing X on the minimap in
+// the SENDER's player color (seat 0 blue / seat 2 red — an
+// adopted presentation choice, not a DE claim) reusing the
+// INF-01 alert painter and its adopted 6 s lifetime / 500 ms
+// blink (play/alerts.js; DE's "a few seconds" is not pinned to
+// a number in the fetched source, spec register #3), and play
+// a cue through the audio layer (the existing 'select' synth
+// cue — no new asset; DE's flare sound is likewise unpinned).
+// Solo/AI: the recipient set is empty; the sender still sees
+// their own marker (presentation only — no DE parity is claimed
+// for self-display).
+let flareMarkers = []; // { x, y, at, color } — presentation only
+let flareArm = false; // the Signal Allies button's one-shot arm
+
+/// The minimap player color of an owner tag's seat.
+function flareColorFor(owner) {
+  return owner === 0 ? OWN_COLOR : ENEMY_COLOR;
+}
+
+/// Show a flare marker (mine or the peer's) and, for a received
+/// flare, play the cue. Markers are pruned by the frame loop's
+/// minimap paint (alertFresh owns the 6 s window).
+function showFlare(x, y, owner, received) {
+  flareMarkers.push({ x, y, at: performance.now(), color: flareColorFor(owner) });
+  if (received) playAudioCue('select');
+}
+
+/// Place my flare at a world point: my own marker shows at
+/// once (presentation), and in an online match the envelope
+/// rides the room socket to the peer. Never a command — the
+/// lockstep session is not involved, by NET-10's discipline.
+function sendFlare(x, y) {
+  showFlare(x, y, localOwner, false);
+  if (net && net.client && net.phase === 'playing') {
+    net.client.send({ type: 'flare', x, y });
+  }
+}
+
+/// Arm (or disarm) the one-shot flare click and reflect it on
+/// the button. Esc disarms too (the keydown stack's first step,
+/// beside placement).
+function setFlareArm(on) {
+  flareArm = !!on;
+  const btn = document.getElementById('flare-btn');
+  if (btn && btn.classList) btn.classList.toggle('active', flareArm);
+}
+
 function updateTopBar() {
   // Diplomacy (Package K): an open diplomacy screen stays live.
   if (diploOverlay && diploOverlay.style.display !== 'none') refreshDiplo();
@@ -15581,6 +15875,16 @@ function draw() {
           on: alertFlashOn(lastAttackAlert, performance.now()),
         }
         : null,
+      // INF-04 (Teams T3b): ally flares — the alert painter's
+      // lifetime/blink, each marker in its sender's color.
+      // Expired markers are pruned here, once per frame.
+      flares: (() => {
+        const now = performance.now();
+        flareMarkers = flareMarkers.filter((f) => alertFresh(f, now));
+        return flareMarkers.map((f) => ({
+          x: f.x, y: f.y, color: f.color, on: alertFlashOn(f, now),
+        }));
+      })(),
       cam: { s: camS, ox: camOx, oy: camOy, viewW: W, viewH: H },
     });
   }

@@ -56,8 +56,8 @@ test('the settings object carries alliedVictory end to end', () => {
 
 test('buildMatchSim passes the packed flags on both construction paths', () => {
   const body = fnBody('function buildMatchSim(');
-  assert.ok(body.includes('victoryFlags(v), packTeams(t)'),
-    'the teams export receives the flags word (allied + same-team matches)');
+  assert.ok(body.includes('victoryFlags(v), packTeamsWithLock(t, u)'),
+    'the teams export receives the flags word (allied + same-team matches; T3b packs the lock bit beside the pair)');
   assert.ok(body.includes('v.scoreTarget, victoryFlags(v))'),
     'the victory export receives the flags word (allied + distinct teams)');
 });

@@ -290,6 +290,12 @@
   <!-- bottom-right: minimap (rendered by minimap.js) -->
   <section class="ui-minimap-wrap" id="minimap-wrap" aria-label="Minimap">
     <canvas id="minimap" width="220" height="124"></canvas>
+    <!-- Teams T3b (INF-04, Signal Allies): the flare button sits
+         beside the minimap, DE's placement. It arms a one-shot
+         click (minimap or world); the flare itself travels as a
+         non-command net message (NET-10) and paints as a flashing
+         X in the sender's player color. -->
+    <button id="flare-btn" class="btn btn-ghost btn-sm" type="button" title="Signal allies — click the minimap or the world to place a flare"><span id="flare-btn-label">Signal allies</span></button>
   </section>
 </footer>
 
@@ -350,6 +356,7 @@
       <label class="mode-opt"><input id="vic-empirewars" type="checkbox"> <span id="vic-empirewars-txt">Empire Wars</span></label>
       <label class="mode-opt"><input id="vic-koth" type="checkbox"> <span id="vic-koth-txt">King of the Hill</span></label>
       <label class="mode-opt"><input id="vic-allied" type="checkbox"> <span id="vic-allied-txt">Allied victory</span></label>
+      <label class="mode-opt"><input id="vic-unlocked" type="checkbox"> <span id="vic-unlocked-txt">Unlocked teams (diplomacy)</span></label>
     </div>
     <p class="overlay-note" id="victory-note">Victory conditions for the next match — they apply on Restart, like the mode above. A time limit or score target can combine with any condition.</p>
     <div class="quality-row" id="speed-row" role="group" aria-label="Game speed">
@@ -399,13 +406,14 @@
     <h2 class="game-title-sm" id="diplo-title">Diplomacy</h2>
     <table class="diplo-table">
       <thead>
-        <tr><th id="diplo-col-player">Player</th><th id="diplo-col-stance">Stance</th><th id="diplo-col-age">Age</th><th id="diplo-col-score">Score</th><th id="diplo-col-pop">Population</th></tr>
+        <tr><th id="diplo-col-player">Player</th><th id="diplo-col-stance">Stance</th><th id="diplo-col-incoming">Stance toward you</th><th id="diplo-col-age">Age</th><th id="diplo-col-score">Score</th><th id="diplo-col-pop">Population</th></tr>
       </thead>
       <tbody>
-        <tr id="diplo-row-you"><td class="diplo-name" id="diplo-you-name">You</td><td id="diplo-you-stance">—</td><td id="diplo-you-age">Dark Age</td><td id="diplo-you-score">0</td><td id="diplo-you-pop">0</td></tr>
-        <tr id="diplo-row-foe"><td class="diplo-name" id="diplo-foe-name">Opponent</td><td id="diplo-foe-stance">Enemy</td><td id="diplo-foe-age">Dark Age</td><td id="diplo-foe-score">0</td><td id="diplo-foe-pop">0</td></tr>
+        <tr id="diplo-row-you"><td class="diplo-name" id="diplo-you-name">You</td><td id="diplo-you-stance">—</td><td id="diplo-you-incoming">—</td><td id="diplo-you-age">Dark Age</td><td id="diplo-you-score">0</td><td id="diplo-you-pop">0</td></tr>
+        <tr id="diplo-row-foe"><td class="diplo-name" id="diplo-foe-name">Opponent</td><td><span id="diplo-foe-stance">Enemy</span> <select id="diplo-foe-stance-select" class="slot-select diplo-stance-select" disabled><option id="diplo-stance-opt-0" value="0">Ally</option><option id="diplo-stance-opt-1" value="1">Neutral</option><option id="diplo-stance-opt-2" value="2" selected>Enemy</option></select></td><td id="diplo-foe-incoming">Enemy</td><td id="diplo-foe-age">Dark Age</td><td id="diplo-foe-score">0</td><td id="diplo-foe-pop">0</td></tr>
       </tbody>
     </table>
+    <p class="overlay-note" id="diplo-lock-note">Teams are locked in this match — stances cannot change.</p>
     <h3 class="diplo-sub" id="diplo-tribute-title">Tribute</h3>
     <p class="overlay-note" id="diplo-fee-note">Tribute fee: 30%</p>
     <div class="diplo-tribute-grid" id="diplo-tribute-grid"><!-- tribute buttons (app.js) --></div>
@@ -689,6 +697,9 @@
             <div class="setting-row"><span class="setting-name" id="set-victory-allied-name">Allied victory</span>
               <input id="create-victory-allied" type="checkbox">
             </div>
+            <div class="setting-row"><span class="setting-name" id="set-teams-unlocked-name">Unlocked teams (diplomacy)</span>
+              <input id="create-teams-unlocked" type="checkbox">
+            </div>
             <div class="setting-row"><span class="setting-name" id="set-players-name">Players</span><span class="setting-value">2</span></div>
             <div class="setting-row"><span class="setting-name" id="set-guest-name">Guest slot</span>
               <select id="create-guest-slot" class="slot-select">
@@ -746,6 +757,18 @@
                 <option value="opponent" selected>Opponent — separate teams</option>
                 <option value="ally">Ally — same team, shared vision</option>
               </select>
+            </label>
+          </div>
+          <!-- Teams T3b: the unlocked-teams toggle — the host's
+               alone, beside the team pick, with the same visibility
+               and lock. Default locked (DE's standard posture);
+               unlocked lets the diplomacy panel's stance selectors
+               issue real SetDiplomacy commands in-match. It rides
+               the 'start' handshake as bit 16 of the packed teams
+               word, like every match setting. -->
+          <div id="unlocked-control-row" class="slot-control-row" hidden>
+            <label class="slot-control-label"><span id="unlocked-control-txt">Unlocked teams (diplomacy)</span>
+              <input id="room-teams-unlocked" type="checkbox">
             </label>
           </div>
           <p id="room-listed-line" class="overlay-note">Listed in the Lobby Browser — anyone can join.</p>

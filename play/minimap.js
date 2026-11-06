@@ -155,6 +155,11 @@ function drawDiamond(ctx, g, cxWorld, cyWorld, halfWorld, fill) {
  *   alert:     { x, y, on } | null,  // INF-01: the latest attack
  *                        // location; `on` is the blink phase the
  *                        // caller computed (play/alerts.js)
+ *   flares:    [{ x, y, on, color }] // INF-04 (Teams T3b): ally
+ *                        // flare markers — the same flashing-X
+ *                        // painter as the alert, in the SENDER's
+ *                        // player color; lifetime/blink are the
+ *                        // caller's (play/alerts.js, 6 s adopted)
  *   cam:       { s, ox, oy, viewW, viewH } | null,  // null = no viewport rect
  * }
  *
@@ -288,6 +293,25 @@ export function renderMinimap(ctx, g, state) {
     const [mx, my] = worldToMinimap(g, state.alert.x, state.alert.y);
     const r = 5;
     ctx.strokeStyle = ALERT_COLOR;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(mx - r, my - r);
+    ctx.lineTo(mx + r, my + r);
+    ctx.moveTo(mx + r, my - r);
+    ctx.lineTo(mx - r, my + r);
+    ctx.stroke();
+  }
+
+  // INF-04 (Teams T3b): ally flares — the same flashing X as the
+  // attack alert, painted in each sender's player color so a
+  // flare never reads as an attack. The painter stays dumb: the
+  // caller computes each marker's blink phase (`on`) from
+  // play/alerts.js, exactly like the alert's.
+  for (const f of state.flares || []) {
+    if (!f || !f.on) continue;
+    const [mx, my] = worldToMinimap(g, f.x, f.y);
+    const r = 5;
+    ctx.strokeStyle = f.color || ALERT_COLOR;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(mx - r, my - r);
