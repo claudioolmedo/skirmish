@@ -1029,6 +1029,20 @@ export class WasmSim {
      */
     push_set_auto_reseed(building: number, on: boolean): boolean;
     /**
+     * Set a diplomacy stance (Teams T3a, NET-11): the sender
+     * seat (`player`, an owner byte — in lockstep this is the
+     * bundle's owner, supplied by the transport exactly like
+     * `push_tribute`'s sender) sets its own row toward
+     * `target` to `stance` (0 Ally / 1 Neutral / 2 Enemy).
+     * Queued like every command and re-validated at apply
+     * time; refused whole while teams are locked. Returns
+     * whether the order *would* be accepted now (the
+     * `push_resign` affordance discipline). Named
+     * `push_set_diplomacy`, not the plan's `push_set_stance`:
+     * that export is CMB-09's per-unit stance in this tree.
+     */
+    push_set_diplomacy(player: number, target: number, stance: number): boolean;
+    /**
      * Set a production building's rally point (M4: the Barracks).
      * Returns whether the building accepts a rally point.
      */
@@ -1292,6 +1306,16 @@ export class WasmSim {
      * zero breakdown. Behind the end-of-match score table.
      */
     score_for(owner: number): Float64Array;
+    /**
+     * The diplomacy stance one seat holds toward another
+     * (Teams T3a, NET-11): 0 = Ally, 1 = Neutral, 2 = Enemy —
+     * the directed table's cell for (viewer, other), so the
+     * diplomacy panel can paint both my row and the incoming
+     * row (DE shows others' stance towards you). -1 for a
+     * non-player seat. (This is the diplomacy table, NOT
+     * CMB-09's per-unit stance.)
+     */
+    stance_for(viewer: number, other: number): number;
     /**
      * Current state hash as hex, without advancing the sim.
      */
@@ -1600,6 +1624,7 @@ export interface InitOutput {
     readonly wasmsim_push_research_wheelbarrow: (a: number) => number;
     readonly wasmsim_push_resign: (a: number, b: number) => number;
     readonly wasmsim_push_set_auto_reseed: (a: number, b: number, c: number) => number;
+    readonly wasmsim_push_set_diplomacy: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_set_rally_building: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_set_rally_tc: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_set_rally_tc_of: (a: number, b: number, c: number, d: number) => number;
@@ -1639,6 +1664,7 @@ export interface InitOutput {
     readonly wasmsim_resigned_for: (a: number, b: number) => number;
     readonly wasmsim_save_game: (a: number) => [number, number];
     readonly wasmsim_score_for: (a: number, b: number) => [number, number];
+    readonly wasmsim_stance_for: (a: number, b: number, c: number) => number;
     readonly wasmsim_state_hash: (a: number) => [number, number];
     readonly wasmsim_state_hash_parts: (a: number) => [number, number];
     readonly wasmsim_stockpile: (a: number) => [number, number];

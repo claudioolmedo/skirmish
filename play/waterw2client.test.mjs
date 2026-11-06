@@ -89,6 +89,17 @@ test('rendering tables cover the ship and both fish nodes', () => {
   assert.equal(NODE_COLORS.length, 9);
 });
 
+test('a right-click on a fish spot orders the Fishing Ship to gather, not move', () => {
+  // The smart order's gather pairing mirrors the sim's
+  // can_gather_pair: villager (0) on any node, Fishing Ship (23)
+  // on fish nodes only (7 shore / 8 deep). Before this pin the
+  // branch tested kind 0 alone, so a ship's right-click on a
+  // fish spot degraded to a Move and the ship never fished
+  // (bot-loop live proof, 2026-11-05).
+  assert.match(app, /const gathersHere = n && \(st\.kinds\[id\] === 0\s*\|\| \(st\.kinds\[id\] === 23 && \(n\.kind === 7 \|\| n\.kind === 8\)\)\);/);
+  assert.match(app, /if \(gathersHere\) \{\s*if \(issue\(\{ t: 'gather', e: id, n: n\.id, q: queued \|\| undefined \}\)\) any = true;/);
+});
+
 test('names and strings exist in all three locales', () => {
   for (const loc of ['en', 'pt-BR', 'es']) {
     for (const key of ['unit.fishingShip', 'tech.fishinglines', 'tech.gillnets',

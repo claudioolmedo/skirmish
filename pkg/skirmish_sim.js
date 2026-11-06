@@ -2004,6 +2004,27 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Set a diplomacy stance (Teams T3a, NET-11): the sender
+     * seat (`player`, an owner byte — in lockstep this is the
+     * bundle's owner, supplied by the transport exactly like
+     * `push_tribute`'s sender) sets its own row toward
+     * `target` to `stance` (0 Ally / 1 Neutral / 2 Enemy).
+     * Queued like every command and re-validated at apply
+     * time; refused whole while teams are locked. Returns
+     * whether the order *would* be accepted now (the
+     * `push_resign` affordance discipline). Named
+     * `push_set_diplomacy`, not the plan's `push_set_stance`:
+     * that export is CMB-09's per-unit stance in this tree.
+     * @param {number} player
+     * @param {number} target
+     * @param {number} stance
+     * @returns {boolean}
+     */
+    push_set_diplomacy(player, target, stance) {
+        const ret = wasm.wasmsim_push_set_diplomacy(this.__wbg_ptr, player, target, stance);
+        return ret !== 0;
+    }
+    /**
      * Set a production building's rally point (M4: the Barracks).
      * Returns whether the building accepts a rally point.
      * @param {number} building
@@ -2479,6 +2500,22 @@ export class WasmSim {
         var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
         return v1;
+    }
+    /**
+     * The diplomacy stance one seat holds toward another
+     * (Teams T3a, NET-11): 0 = Ally, 1 = Neutral, 2 = Enemy —
+     * the directed table's cell for (viewer, other), so the
+     * diplomacy panel can paint both my row and the incoming
+     * row (DE shows others' stance towards you). -1 for a
+     * non-player seat. (This is the diplomacy table, NOT
+     * CMB-09's per-unit stance.)
+     * @param {number} viewer
+     * @param {number} other
+     * @returns {number}
+     */
+    stance_for(viewer, other) {
+        const ret = wasm.wasmsim_stance_for(this.__wbg_ptr, viewer, other);
+        return ret;
     }
     /**
      * Current state hash as hex, without advancing the sim.
