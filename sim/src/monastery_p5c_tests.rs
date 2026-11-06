@@ -106,7 +106,7 @@ fn redemption_and_heresy_rows() {
     assert_eq!(TechId::Heresy.tag(), 38);
     assert_eq!(TechId::from_tag(37), Some(TechId::Redemption));
     assert_eq!(TechId::from_tag(38), Some(TechId::Heresy));
-    assert_eq!(TechId::ALL.len(), 47, "P5f's Imperial row appends at 39–42, the TEC-07 wood chain at 43/44, Water W2a's Dock fishing pair at 45/46");
+    assert_eq!(TechId::ALL.len(), 48, "P5f's Imperial row appends at 39–42, the TEC-07 wood chain at 43/44, Water W2a's Dock fishing pair at 45/46, Water W3b's Medium Warships at 47");
     // Dossier §5.6 rows: Monastery, Castle Age.
     for t in [TechId::Redemption, TechId::Heresy] {
         assert_eq!(

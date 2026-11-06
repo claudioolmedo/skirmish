@@ -1487,8 +1487,13 @@ impl Sim {
                 // CLS-07 (Water W3a): a Demolition Raft's landed
                 // strike detonates it INSTEAD of dealing the
                 // strike — the blast is the whole attack (see
-                // `demolition_detonate`).
-                if self.entities[idx].kind == EntityKind::DemolitionRaft {
+                // `demolition_detonate`). Water W3b: the Castle
+                // tier (Demolition Ship) detonates the same way,
+                // on its own blast profile.
+                if matches!(
+                    self.entities[idx].kind,
+                    EntityKind::DemolitionRaft | EntityKind::DemolitionShip
+                ) {
                     self.demolition_detonate(idx);
                 } else {
                     self.apply_hit(attacker_id, owner, (ax, ay), &attacks, ti, false, atk_elev);
@@ -2018,7 +2023,11 @@ impl Sim {
                 // the strike, exactly as against a unit (the
                 // blast, centered on the raft, reaches the
                 // footprint's edge well inside its radius).
-                if self.entities[idx].kind == EntityKind::DemolitionRaft {
+                // Water W3b: the Demolition Ship likewise.
+                if matches!(
+                    self.entities[idx].kind,
+                    EntityKind::DemolitionRaft | EntityKind::DemolitionShip
+                ) {
                     self.demolition_detonate(idx);
                 } else {
                     self.damage_building(bid, &attacks, atk_elev, owner);
@@ -2108,16 +2117,22 @@ impl Sim {
     /// (SPEC §3.5: a demolition ship killed before reaching its
     /// target "still explodes for full damage"). The blast is
     /// centered on the raft, radius 2.5 tiles, TAPERED (the
-    /// Raft's radial decrease; the Castle-Age Demolition Ship's
-    /// untapered 3.0 profile is W3b's second profile on this
-    /// same helper), no accuracy rolls, no tree felling, and
-    /// **enemies only** — no friendly fire, where the Petard
-    /// and the Mangonel hurt everyone (CMB-12's pair, pinned by
-    /// the W3a tests both ways). Finally the raft is consumed:
-    /// its HP is set to 0 and the death sweep removes it this
-    /// same tick; its hit attribution is cleared first, so the
-    /// sweep does not read its own detonation as an enemy kill
-    /// and detonate it a second time.
+    /// Raft's radial decrease), no accuracy rolls, no tree
+    /// felling, and **enemies only** — no friendly fire, where
+    /// the Petard and the Mangonel hurt everyone (CMB-12's
+    /// pair, pinned by the W3a tests both ways). Finally the
+    /// raft is consumed: its HP is set to 0 and the death sweep
+    /// removes it this same tick; its hit attribution is
+    /// cleared first, so the sweep does not read its own
+    /// detonation as an enemy kill and detonate it a second
+    /// time.
+    ///
+    /// Water W3b: the Demolition Ship detonates through this
+    /// same path on the second profile — radius 3.0 tiles,
+    /// **untapered** (100% of its 80-melee table across the
+    /// whole radius, the Demolition Ship article's blast
+    /// falloff note via WATER-SPEC §3.3). One helper, two
+    /// profiles, selected by the detonating kind.
     fn demolition_detonate(&mut self, idx: usize) {
         let (px, py) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
         let spec = self.unit_stats(idx);
@@ -2125,6 +2140,12 @@ impl Sim {
         let attacker_id = self.entities[idx].id;
         let owner = self.entities[idx].owner;
         let atk_elev = self.entity_height(idx);
+        let (radius, taper) = match self.entities[idx].kind {
+            EntityKind::DemolitionShip => {
+                (crate::units::DEMOLITION_SHIP_BLAST_RADIUS, false)
+            }
+            _ => (crate::units::DEMOLITION_RAFT_BLAST_RADIUS, true),
+        };
         self.apply_blast(
             &attacks,
             Blast {
@@ -2132,10 +2153,10 @@ impl Sim {
                 owner,
                 threat: (px, py),
                 point: (px, py),
-                radius: crate::units::DEMOLITION_RAFT_BLAST_RADIUS,
+                radius,
                 atk_elev,
                 accuracy: None,
-                taper: true,
+                taper,
                 primary_unit: None,
                 primary_building: None,
                 skip_unit: Some(idx),
@@ -3387,7 +3408,9 @@ impl Sim {
             // ENEMY fire detonates where it died, before the
             // corpse is marked (SPEC §3.5 — "a Demolition Ship
             // that is killed before reaching its target still
-            // explodes for full damage"). The attribution test
+            // explodes for full damage"). Water W3b: the
+            // Demolition Ship rides the same check, on its own
+            // untapered profile. The attribution test
             // is the guard against double detonation: a raft
             // consumed by its own attack-path detonation arrives
             // here with its attribution cleared by
@@ -3400,7 +3423,10 @@ impl Sim {
             // recorded in the W3a handoff.)
             if !self.entities[idx].dead
                 && self.entities[idx].hp < I16F16::from_num(1)
-                && self.entities[idx].kind == EntityKind::DemolitionRaft
+                && matches!(
+                    self.entities[idx].kind,
+                    EntityKind::DemolitionRaft | EntityKind::DemolitionShip
+                )
                 && match self.entities[idx].last_hit_owner {
                     Some(lo) => {
                         lo != self.entities[idx].owner

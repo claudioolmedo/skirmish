@@ -183,6 +183,22 @@ pub enum EntityKind {
     /// melee ship that counters the Fire line (its +1 vs the
     /// FIRE_SHIP class) and takes the Forging line's patches.
     Hulk,
+    /// The War Galley (Water W3b, CLS-07): the Castle Age tier of
+    /// the Galley line — never trained directly; standing Galleys
+    /// convert in place when Medium Warships completes and later
+    /// Galley production spawns at this tier (the CLS-03 pattern,
+    /// exactly as Man-at-Arms relates to Militia).
+    WarGalley,
+    /// The Fire Ship (Water W3b, CLS-07): the Castle Age tier of
+    /// the Fire Galley line, via Medium Warships (same pattern).
+    FireShip,
+    /// The Demolition Ship (Water W3b, CLS-07): the Castle Age
+    /// tier of the Demolition Raft line — its blast is the
+    /// untapered 3.0-tile profile on the shared blast helper.
+    DemolitionShip,
+    /// The War Hulk (Water W3b, CLS-07): the Castle Age tier of
+    /// the Hulk line, via Medium Warships (same pattern).
+    WarHulk,
 }
 
 impl EntityKind {
@@ -208,6 +224,11 @@ impl EntityKind {
     /// Ship in the WATER-EXECUTION-PLAN §2 allocation order;
     /// verified first free on the W3a base `00f5864`, where
     /// 0–23 were taken).
+    /// 28 = war galley, 29 = fire ship, 30 = demolition ship,
+    /// 31 = war hulk (Water W3b, CLS-07 — the Castle Age tiers,
+    /// appended after the Feudal set in the plan §2 allocation
+    /// order; verified first free on the W3b base `1070746`,
+    /// where 0–27 were taken).
     pub fn tag(self) -> u8 {
         match self {
             EntityKind::Villager => 0,
@@ -238,6 +259,10 @@ impl EntityKind {
             EntityKind::FireGalley => 25,
             EntityKind::DemolitionRaft => 26,
             EntityKind::Hulk => 27,
+            EntityKind::WarGalley => 28,
+            EntityKind::FireShip => 29,
+            EntityKind::DemolitionShip => 30,
+            EntityKind::WarHulk => 31,
         }
     }
 
@@ -272,6 +297,10 @@ impl EntityKind {
             25 => Some(EntityKind::FireGalley),
             26 => Some(EntityKind::DemolitionRaft),
             27 => Some(EntityKind::Hulk),
+            28 => Some(EntityKind::WarGalley),
+            29 => Some(EntityKind::FireShip),
+            30 => Some(EntityKind::DemolitionShip),
+            31 => Some(EntityKind::WarHulk),
             _ => None,
         }
     }
@@ -294,6 +323,14 @@ impl EntityKind {
             | EntityKind::FireGalley
             | EntityKind::DemolitionRaft
             | EntityKind::Hulk => crate::tech::Age::Feudal,
+            // Water W3b (CLS-07): the Castle Age ship tiers are
+            // upgrade-only kinds (never trained directly — the
+            // Man-at-Arms pattern), but their availability age is
+            // Castle, the age Medium Warships is researched in.
+            EntityKind::WarGalley
+            | EntityKind::FireShip
+            | EntityKind::DemolitionShip
+            | EntityKind::WarHulk => crate::tech::Age::Castle,
             EntityKind::Knight
             | EntityKind::CavalryArcher
             | EntityKind::Petard
@@ -319,7 +356,11 @@ impl EntityKind {
             | EntityKind::Galley
             | EntityKind::FireGalley
             | EntityKind::DemolitionRaft
-            | EntityKind::Hulk => crate::grid::Domain::Water,
+            | EntityKind::Hulk
+            | EntityKind::WarGalley
+            | EntityKind::FireShip
+            | EntityKind::DemolitionShip
+            | EntityKind::WarHulk => crate::grid::Domain::Water,
             _ => crate::grid::Domain::Land,
         }
     }
@@ -362,6 +403,10 @@ impl EntityKind {
                 | EntityKind::FireGalley
                 | EntityKind::DemolitionRaft
                 | EntityKind::Hulk
+                | EntityKind::WarGalley
+                | EntityKind::FireShip
+                | EntityKind::DemolitionShip
+                | EntityKind::WarHulk
         )
     }
 
@@ -449,6 +494,10 @@ impl EntityKind {
                 | EntityKind::FireGalley
                 | EntityKind::DemolitionRaft
                 | EntityKind::Hulk
+                | EntityKind::WarGalley
+                | EntityKind::FireShip
+                | EntityKind::DemolitionShip
+                | EntityKind::WarHulk
         )
     }
 

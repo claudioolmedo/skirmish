@@ -173,6 +173,10 @@ pub fn spec(kind: EntityKind) -> &'static UnitSpec {
         EntityKind::FireGalley => &FIRE_GALLEY,
         EntityKind::DemolitionRaft => &DEMOLITION_RAFT,
         EntityKind::Hulk => &HULK,
+        EntityKind::WarGalley => &WAR_GALLEY,
+        EntityKind::FireShip => &FIRE_SHIP,
+        EntityKind::DemolitionShip => &DEMOLITION_SHIP,
+        EntityKind::WarHulk => &WAR_HULK,
     }
 }
 
@@ -252,6 +256,26 @@ pub(crate) static GALLEY_FLETCHING_ATTACKS: &[(u8, i32)] = &[
 /// article's own technology table agrees); the +1 vs Fire Ships
 /// pair is untouched.
 pub(crate) static HULK_FORGING_ATTACKS: &[(u8, i32)] =
+    &[(cls::MELEE, 5), (cls::FIRE_SHIP, 1)];
+
+/// The War Galley's attack table with Fletching researched
+/// (Water W3b, CLS-07): the same +1 pierce swap on the Castle
+/// tier's table (the wiki's War Galley article lists Fletching
+/// among its attack technologies, like the Galley's); the bonus
+/// pairs are untouched. The +1 range is patched separately —
+/// see `Sim::stats_for`.
+pub(crate) static WAR_GALLEY_FLETCHING_ATTACKS: &[(u8, i32)] = &[
+    (cls::PIERCE, 8),
+    (cls::LONG_RANGE_WARSHIP, 5),
+    (cls::STANDARD_BUILDINGS, 6),
+    (cls::RAM, 3),
+];
+
+/// The War Hulk's attack table with Forging researched (Water
+/// W3b, CLS-07): the tech's +1 melee on the Castle tier (the
+/// War Hulk article's technology table lists Forging, like the
+/// Hulk's); the +1 vs Fire Ships pair is untouched.
+pub(crate) static WAR_HULK_FORGING_ATTACKS: &[(u8, i32)] =
     &[(cls::MELEE, 5), (cls::FIRE_SHIP, 1)];
 
 /// Villager (study §3.1): HP 25, attack 3 melee, armor 0/0, RoF 2.0 s,
@@ -867,6 +891,13 @@ static FISHING_SHIP: UnitSpec = UnitSpec {
 /// is W3b's second profile on the same helper).
 pub const DEMOLITION_RAFT_BLAST_RADIUS: I16F16 = I16F16::from_bits(655_360); // 10.0 = 2.5 tiles
 
+/// The Demolition Ship's blast radius (Water W3b, CLS-07):
+/// 3.0 tiles at **100% effect across the radius** — no taper,
+/// where the Raft's profile decreases radially (wiki,
+/// Demolition Ship article's blast-falloff note via WATER-SPEC
+/// §3.3). The second blast profile on the shared helper.
+pub const DEMOLITION_SHIP_BLAST_RADIUS: I16F16 = I16F16::from_bits(786_432); // 12.0 = 3.0 tiles
+
 /// Galley (Water W3a, CLS-07; wiki, Ship list fresh crawl
 /// 2026-11-05 via WATER-SPEC §3.2 — post-update-169123 values):
 /// HP 110, armor 0/3, attack 6 pierce with +4 vs Long-Range
@@ -1062,6 +1093,210 @@ static HULK: UnitSpec = UnitSpec {
     wood_cost: 75,
     gold_cost: 35,
     train_ticks: 2520, // 42 s
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
+};
+
+/// War Galley (Water W3b, CLS-07; wiki, Ship list fresh crawl
+/// 2026-11-06 + WATER-SPEC §3.3): HP 125, armor 0/4, attack
+/// 7 pierce with +5 vs Long-Range Warships (the Galley's +4
+/// plus the War Galley article's "+1 anti-ship attack" delta —
+/// in the post-169123 ecology the anti-ship case IS the
+/// long-range class; ADOPTED, no source pins the Castle tier's
+/// own bonus row directly), +6 vs Standard Buildings / +3 vs
+/// Rams (pinned directly for this tier by the Turtle Ship
+/// comparison row the W3a handoff cites; update 169123 left the
+/// line's building/ram bonuses unchanged), range 6, RoF 3.0 s,
+/// LoS 8, train 27 s. Speed 1.36 tiles/s: the Ship list's speed
+/// cell is blank and the article's delta list over the Galley
+/// (+15 HP, +1 attack, +1 anti-ship, +1 range, −train) names
+/// no speed change — the Galley's 1.36 carries over (ADOPTED).
+/// Cost 90 W / 30 G — the line's cost does not change at the
+/// upgrade in DE's generic roster (the Dock trains this tier
+/// at the Galley's price once Medium Warships lands; in this
+/// sim the queue entry stays Galley and the spawn converts,
+/// the CLS-03 pattern, so the row's cost is the tier's data
+/// record). Classes: SHIP + LONG_RANGE_WARSHIP. Accuracy,
+/// projectile constants, attack delay and radius adopt the
+/// Galley's recorded constants on the same basis as W3a's.
+static WAR_GALLEY: UnitSpec = UnitSpec {
+    max_hp: 125,
+    attacks: &[
+        (cls::PIERCE, 7),
+        (cls::LONG_RANGE_WARSHIP, 5),
+        (cls::STANDARD_BUILDINGS, 6),
+        (cls::RAM, 3),
+    ],
+    armor_melee: 0,
+    armor_pierce: 4,
+    armor_building: 0,
+    classes: cls::mask(&[cls::SHIP, cls::LONG_RANGE_WARSHIP]),
+    range_max: I16F16::from_bits(1_572_864), // 24 (6 tiles)
+    range_min: I16F16::ZERO,
+    reload_ticks: 180, // 3.0 s
+    attack_delay_ticks: 21, // adopted (the Galley's)
+    accuracy: 80, // adopted (the Galley's)
+    projectile_speed: I16F16::from_bits(32_768), // 0.5 — design constant (see Archer)
+    scatter: I16F16::from_bits(131_072),          // 2.0 — design constant (see Archer)
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
+    speed: I16F16::from_bits(5_942), // 1.36 tiles/s (adopted — see above)
+    los: I16F16::from_bits(2_097_152), // 32 (8 tiles)
+    radius: I16F16::from_bits(104_858), // 1.6 — adopted (the Galley's)
+    carcass_food: 0,
+    carcass_decay_bits: 0,
+    food_cost: 0,
+    wood_cost: 90,
+    gold_cost: 30,
+    train_ticks: 1620, // 27 s
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
+};
+
+/// Fire Ship (Water W3b, CLS-07; wiki, Ship list fresh crawl
+/// 2026-11-06 + WATER-SPEC §3.3): HP 120, armor 2/4, attack
+/// 3 melee with +2 vs Long-Range Warships, range 2.5, RoF
+/// 0.25 s (spray-as-data, exactly the Fire Galley's model),
+/// speed 1.47 tiles/s, LoS 5, train 27 s. Cost 75 W / 45 G
+/// (the line's cost, as the War Galley's note). The pierce
+/// armor cell is blank in the fresh Ship list: 4 is ADOPTED
+/// from the update-169123 preview data (Ornlu's showcased
+/// numbers: "Fire Ship: 120 HP, 3 melee attack, 2 melee armor,
+/// 4 pierce armor") and the Fire Galley's own 4 — flagged
+/// ADOPTED/UNVERIFIED. Range and RoF are likewise blank in
+/// the list and carry the Fire Galley's documented 2.5 /
+/// 0.25 s (the Fire Ship article's trivia: the Fire line is
+/// "the only units in the game without an integer range").
+/// The +2 vs Long-Range Warships steps the Fire Galley's +1
+/// up one rung, the Galley line's own step (4 → 5) — ADOPTED
+/// on line continuity, no fetched source pins it. Classes:
+/// SHIP + FIRE_SHIP. Attack delay and radius adopt the Fire
+/// Galley's recorded constants.
+static FIRE_SHIP: UnitSpec = UnitSpec {
+    max_hp: 120,
+    attacks: &[(cls::MELEE, 3), (cls::LONG_RANGE_WARSHIP, 2)],
+    armor_melee: 2,
+    armor_pierce: 4,
+    armor_building: 0,
+    classes: cls::mask(&[cls::SHIP, cls::FIRE_SHIP]),
+    range_max: I16F16::from_bits(655_360), // 10 (2.5 tiles)
+    range_min: I16F16::ZERO,
+    reload_ticks: 15, // 0.25 s
+    attack_delay_ticks: 15, // adopted (the Fire Galley's)
+    accuracy: 100,
+    projectile_speed: I16F16::from_bits(32_768), // 0.5 — design constant (see Archer)
+    scatter: I16F16::ZERO,
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
+    speed: I16F16::from_bits(6_423), // 1.47 tiles/s
+    los: I16F16::from_bits(1_310_720), // 20 (5 tiles)
+    radius: I16F16::from_bits(104_858), // 1.6 — adopted (the Fire Galley's)
+    carcass_food: 0,
+    carcass_decay_bits: 0,
+    food_cost: 0,
+    wood_cost: 75,
+    gold_cost: 45,
+    train_ticks: 1620, // 27 s
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
+};
+
+/// Demolition Ship (Water W3b, CLS-07; wiki, Update 169123
+/// article + Demolition Ship article via WATER-SPEC §3.3):
+/// HP 50, armor 1/0, attack **80 melee delivered as its
+/// blast** — radius 3.0 tiles at 100% across the radius (no
+/// taper; `DEMOLITION_SHIP_BLAST_RADIUS`), enemies only,
+/// contact range, speed 1.52 tiles/s, LoS 6. Cost 70 W / 80 G
+/// (the line's cost, as the War Galley's note), train 31 s.
+/// Class: SHIP. CONFLICT RECORDED, NOT AVERAGED: the wiki
+/// Ship list as re-crawled 2026-11-06 shows 95 melee for this
+/// row (and 75 for the Raft, 120 for the Heavy) — the SPEC's
+/// 80, sourced from the Update 169123 article and the
+/// Demolition Ship article, governs per the dossier's source
+/// order; the discrepancy is flagged in the W3b handoff for
+/// the loop. The row's `attacks` table IS the blast table,
+/// exactly the Raft's split; reload and attack delay adopt
+/// the Raft's (the Petard's) recorded constants; radius adopts
+/// the Fishing Ship's 1.6 (implementation constant, §8.9).
+static DEMOLITION_SHIP: UnitSpec = UnitSpec {
+    max_hp: 50,
+    attacks: &[(cls::MELEE, 80)],
+    armor_melee: 1,
+    armor_pierce: 0,
+    armor_building: 0,
+    classes: cls::mask(&[cls::SHIP]),
+    range_max: I16F16::ZERO,
+    range_min: I16F16::ZERO,
+    reload_ticks: 120, // adopted (the Raft's)
+    attack_delay_ticks: 30, // adopted (the Raft's)
+    accuracy: 100,
+    projectile_speed: I16F16::ZERO,
+    scatter: I16F16::ZERO,
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
+    speed: I16F16::from_bits(6_641), // 1.52 tiles/s
+    los: I16F16::from_bits(1_572_864), // 24 (6 tiles)
+    radius: I16F16::from_bits(104_858), // 1.6 — adopted (see above)
+    carcass_food: 0,
+    carcass_decay_bits: 0,
+    food_cost: 0,
+    wood_cost: 70,
+    gold_cost: 80,
+    train_ticks: 1860, // 31 s
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
+};
+
+/// War Hulk (Water W3b, CLS-07; wiki, Ship list fresh crawl
+/// 2026-11-06 + the War Hulk article's update-185872
+/// changelog): HP 110, armor 4/1, attack 4 melee with +1 vs
+/// Fire Ships, range 1 (the melee reach constant), RoF 1.5 s,
+/// speed 1.42 tiles/s, LoS 5, train 27 s. Cost 75 W / 35 G
+/// (the line's cost, as the War Galley's note). The article's
+/// changelog pins the 185872 step directly (HP 115 → 110,
+/// melee armor 5 → 4 — the same update that took the Hulk
+/// 90 → 85 / 4 → 3 in W3a). The fresh list's attack, pierce
+/// armor, LoS and speed cells are blank for this row: attack
+/// 4 melee is the Hulk's own (no source names an attack change
+/// at this tier; the tier's documented gain is the faster
+/// 1.5 s reload the list DOES pin), pierce armor 1 and LoS 5
+/// and speed 1.42 carry the Hulk's — ADOPTED on line
+/// continuity, flagged. The +1 vs the FIRE_SHIP class carries
+/// unchanged (the class's purpose is the line's, both tiers).
+/// Class: SHIP. Attack delay and radius adopt the Hulk's.
+static WAR_HULK: UnitSpec = UnitSpec {
+    max_hp: 110,
+    attacks: &[(cls::MELEE, 4), (cls::FIRE_SHIP, 1)],
+    armor_melee: 4,
+    armor_pierce: 1,
+    armor_building: 0,
+    classes: cls::mask(&[cls::SHIP]),
+    range_max: I16F16::ZERO,
+    range_min: I16F16::ZERO,
+    reload_ticks: 90, // 1.5 s
+    attack_delay_ticks: 30, // adopted (the Hulk's)
+    accuracy: 100,
+    projectile_speed: I16F16::ZERO,
+    scatter: I16F16::ZERO,
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
+    speed: I16F16::from_bits(6_204), // 1.42 tiles/s (adopted — see above)
+    los: I16F16::from_bits(1_310_720), // 20 (5 tiles)
+    radius: I16F16::from_bits(104_858), // 1.6 — adopted (the Hulk's)
+    carcass_food: 0,
+    carcass_decay_bits: 0,
+    food_cost: 0,
+    wood_cost: 75,
+    gold_cost: 35,
+    train_ticks: 1620, // 27 s
     regicide_unit: false,
     immune_conversion: false,
     regenerates: 0,

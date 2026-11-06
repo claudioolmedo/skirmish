@@ -369,11 +369,30 @@ pub enum TechId {
     /// changelog's original "(200 wood, 150 food)" line).
     /// Tag 46.
     Gillnets,
+    /// Dock, Castle: the line-upgrade technology of update
+    /// 169123 — standing Galleys, Fire Galleys, Hulks and
+    /// Demolition Rafts convert in place to War Galleys, Fire
+    /// Ships, War Hulks and Demolition Ships, and later
+    /// production spawns at the Castle tier (Water W3b, CLS-07;
+    /// the CLS-03 pattern Man-at-Arms uses). Cost/time re-pinned
+    /// at W3b Passo 0: **150 wood / 100 gold, 50 s** (wiki,
+    /// Medium Warships article + the Longboat comparison
+    /// table's research row + the official update-169123
+    /// preview, fetched 2026-11-06 — the WATER-SPEC §5 row's
+    /// garble caveat resolved). NOTE (recorded, dossier
+    /// governs): in current DE the Demolition Raft's upgrade
+    /// is a SEPARATE Dock technology ("Demolition Ship", also
+    /// 150 W / 100 G) — the water dossier folds all four lines
+    /// into this one research (WATER-EXECUTION-PLAN §3.4
+    /// writes the conversion over all four lines), so W3b
+    /// ships the dossier's form and flags the divergence in
+    /// its handoff. Tag 47.
+    MediumWarships,
 }
 
 impl TechId {
     /// All technologies, in tag order.
-    pub const ALL: [TechId; 47] = [
+    pub const ALL: [TechId; 48] = [
         TechId::Loom,
         TechId::FeudalAge,
         TechId::Fletching,
@@ -421,6 +440,7 @@ impl TechId {
         TechId::TwoManSaw,
         TechId::FishingLines,
         TechId::Gillnets,
+        TechId::MediumWarships,
     ];
 
     /// Stable tag: 0 loom, 1 feudal age, 2 fletching, 3 scale mail,
@@ -471,6 +491,11 @@ impl TechId {
     /// fishing pair, appended after the wood chain's 43/44;
     /// verified first free on the W2a base, where ALL held 45
     /// entries, tags 0–44.)
+    /// 47 medium warships (Water W3b — the Dock's line-upgrade
+    /// technology, appended after the fishing pair in the
+    /// WATER-EXECUTION-PLAN §2 allocation; verified first free
+    /// on the W3b base `1070746`, where ALL held 47 entries,
+    /// tags 0–46.)
     pub fn tag(self) -> u8 {
         match self {
             TechId::Loom => 0,
@@ -520,6 +545,7 @@ impl TechId {
             TechId::TwoManSaw => 44,
             TechId::FishingLines => 45,
             TechId::Gillnets => 46,
+            TechId::MediumWarships => 47,
         }
     }
 
@@ -589,7 +615,8 @@ impl TechId {
             | TechId::Theocracy
             | TechId::Faith => TechHost::Building(BuildingKind::Monastery),
             // Water W2a: the fishing pair is researched at the Dock.
-            TechId::FishingLines | TechId::Gillnets => {
+            // Water W3b: Medium Warships joins them at the Dock.
+            TechId::FishingLines | TechId::Gillnets | TechId::MediumWarships => {
                 TechHost::Building(BuildingKind::Dock)
             }
         }
@@ -637,7 +664,9 @@ impl TechId {
             | TechId::FortifiedWall
             // Water W2a: Gillnets is Castle Age research (its
             // precursor Fishing Lines falls to the Feudal default).
-            | TechId::Gillnets => Age::Castle,
+            // Water W3b: Medium Warships is Castle Age research.
+            | TechId::Gillnets
+            | TechId::MediumWarships => Age::Castle,
             _ => Age::Feudal,
         }
     }
@@ -734,6 +763,7 @@ impl TechId {
             TechId::TwoManSaw => 6000, // 100 s (wiki, Two-Man Saw — verified 2026-11-03)
             TechId::FishingLines => 1200, // 20 s (wiki, Technology table — WATER-SPEC §5)
             TechId::Gillnets => 2700, // 45 s (pinned at W2 Passo 0 — see the tag docs)
+            TechId::MediumWarships => 3000, // 50 s (pinned at W3b Passo 0 — see the tag docs)
         }
     }
 
@@ -788,6 +818,7 @@ impl TechId {
             TechId::TwoManSaw => (300, 200, 0, 0), // wiki, Two-Man Saw — verified 2026-11-03
             TechId::FishingLines => (50, 100, 0, 0), // wiki, Technology table — WATER-SPEC §5
             TechId::Gillnets => (150, 200, 0, 0), // pinned at W2 Passo 0 — see the tag docs
+            TechId::MediumWarships => (0, 150, 100, 0), // pinned at W3b Passo 0 — see the tag docs
         }
     }
 }
@@ -1117,7 +1148,9 @@ mod tests {
         // Water W2a: the Dock fishing pair appends at 45/46.
         assert_eq!(TechId::from_tag(45), Some(TechId::FishingLines));
         assert_eq!(TechId::from_tag(46), Some(TechId::Gillnets));
-        assert_eq!(TechId::from_tag(47), None);
+        // Water W3b: Medium Warships appends at 47.
+        assert_eq!(TechId::from_tag(47), Some(TechId::MediumWarships));
+        assert_eq!(TechId::from_tag(48), None);
     }
 
     #[test]
@@ -1267,7 +1300,7 @@ mod tests {
         // TEC-07 wood chain (43/44) last, so ALL now holds 45.
         // (Water W2a appends the Dock fishing pair at 45/46 —
         // ALL now holds 47; the count lives in the W2a test.)
-        assert_eq!(TechId::ALL.len(), 47);
+        assert_eq!(TechId::ALL.len(), 48);
         // ECO-14: the farm gather lookup meets the farm's own
         // 0.4 food/s work-rate cap — the base farm rate sits
         // below it today, so the clamped value is the base rate,
@@ -1356,8 +1389,10 @@ mod tests {
         // Water W2a appends the Dock fishing pair at 45/46.
         assert_eq!(TechId::from_tag(45), Some(TechId::FishingLines));
         assert_eq!(TechId::from_tag(46), Some(TechId::Gillnets));
-        assert_eq!(TechId::from_tag(47), None);
-        assert_eq!(TechId::ALL.len(), 47);
+        // Water W3b appends Medium Warships at 47.
+        assert_eq!(TechId::from_tag(47), Some(TechId::MediumWarships));
+        assert_eq!(TechId::from_tag(48), None);
+        assert_eq!(TechId::ALL.len(), 48);
     }
 
     #[test]

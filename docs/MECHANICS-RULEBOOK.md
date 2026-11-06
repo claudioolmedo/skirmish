@@ -2701,12 +2701,38 @@ LONG_RANGE_WARSHIP 22 and FIRE_SHIP 23 in `classes.rs`. The
 Feudal Blacksmith/Ballistics patch rows land with them: Fletching
 swaps the Galley's attack table (+1 pierce, +1 range) and Forging
 the Hulk's (+1 melee), and Ballistics reaches the Galley line
-through the generic PRJ-05 lead. The Castle Age set (Medium
-Warships → War Galley / Fire Ship / Demolition Ship / War Hulk,
-the Demolition Ship's untapered 3.0 blast) is W3b, which flips
-this status. · *Status:*
-**MISSING** (narrowed by W3a: the Feudal ecology is in; the
-Medium Warships / Castle set is W3b).
+through the generic PRJ-05 lead. Water W3b (2026-11-06) lands
+the Castle Age set and completes the rule as documented for
+the generic roster: **Medium Warships** (TechId 47, Dock,
+Castle Age, 150 W / 100 G, 50 s — re-pinned at W3b Passo 0)
+converts standing hulls in place and later production spawns
+at the Castle tier (the CLS-03 pattern): **War Galley** (28;
+125 HP, 0/4, 7 pierce, +5 vs Long-Ranged Warships ADOPTED —
+the Galley's +4 plus the article's +1 anti-ship delta — +6
+vs buildings / +3 vs rams pinned for this tier, range 6,
+LoS 8), **Fire Ship** (29; 120 HP, 2/4 — the pierce cell is
+blank in the fresh Ship list, 4 ADOPTED from the preview data
+and the Fire Galley's own — 3 melee spray-as-data at range
+2.5 / RoF 0.25, +2 vs Long-Ranged Warships ADOPTED on line
+continuity, speed 1.47), **Demolition Ship** (30; 50 HP, 1/0,
+80 melee as its blast — radius 3.0 tiles at 100% across, NO
+taper, enemies only, on the shared blast helper beside the
+Raft's tapered profile; the fresh Ship list's 95 for this row
+conflicts with the SPEC's 80 from the Update 169123 article
+and is recorded in the W3b handoff, not averaged) and **War
+Hulk** (31; 110 HP, 4/1 per the article's update-185872
+changelog, 4 melee +1 vs the FIRE_SHIP class, RoF 1.5). The
+tier patch rows ride the same swaps (Fletching → War Galley,
+Forging → War Hulk). Two divergences are recorded, not
+hidden: current DE upgrades the Demolition Raft through a
+SEPARATE Dock technology of the same cost, where the dossier
+folds all four lines into Medium Warships (the dossier
+governs this package; flagged in the W3b handoff), and the
+Ballistics lead on the Fire line still rides the generic
+PRJ-05 release — its post-overhaul applicability remains
+UNVERIFIED, as W3a left it. The Imperial tiers (§3.4 of the
+SPEC) are a later slice, outside this rule's documented
+generic-roster scope as landed. · *Status:* **MATCHES**.
 
 **CLS-08 — The Monk class has no attack.** Monks belong to their own
 class (which other monks' Atonement and various bonuses key off); their

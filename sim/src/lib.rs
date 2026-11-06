@@ -127,6 +127,8 @@ mod water_w2a_tests;
 mod water_w2b_tests;
 #[cfg(test)]
 mod water_w3a_tests;
+#[cfg(test)]
+mod water_w3b_tests;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
@@ -3826,6 +3828,16 @@ impl Sim {
             s.attacks = units::GALLEY_FLETCHING_ATTACKS;
             s.range_max += I16F16::from_bits(262_144); // +4.0 (1 tile)
         }
+        // Water W3b (CLS-07): the same Fletching swap on the
+        // Castle tier — the War Galley article lists Fletching
+        // among its attack technologies exactly as the Galley's
+        // does (+1 pierce, the bonus pairs untouched, +1 tile of
+        // range). Ballistics reaches this tier through the same
+        // generic PRJ-05 lead as the Galley's (no patch row).
+        if kind == EntityKind::WarGalley && p.techs & TechId::Fletching.bit() != 0 {
+            s.attacks = units::WAR_GALLEY_FLETCHING_ATTACKS;
+            s.range_max += I16F16::from_bits(262_144); // +4.0 (1 tile)
+        }
         // Scale Mail Armor (study §8): infantry +1/+1 armor — the
         // Spearman is infantry and takes the patch with the line.
         if matches!(
@@ -3877,6 +3889,10 @@ impl Sim {
                 // Blast Furnace) are not in this roster yet and
                 // layer here when they land.
                 EntityKind::Hulk => s.attacks = units::HULK_FORGING_ATTACKS,
+                // Water W3b (CLS-07): the Castle tier of the
+                // Hulk line takes the same Forging swap (the War
+                // Hulk article's technology table lists Forging).
+                EntityKind::WarHulk => s.attacks = units::WAR_HULK_FORGING_ATTACKS,
                 _ => {}
             }
         }
@@ -5672,6 +5688,29 @@ impl Sim {
                 for e in &mut self.entities {
                     if e.owner == owner && e.kind == EntityKind::ScoutCavalry && !e.dead {
                         e.kind = EntityKind::LightCavalry;
+                    }
+                }
+            }
+            TechId::MediumWarships => {
+                // Water W3b (CLS-07): the Dock's line-upgrade
+                // technology — every standing ship of the four
+                // Feudal lines converts in place to its Castle
+                // tier, HP kept exactly as the CLS-03 precedent
+                // keeps it (the Man-at-Arms sweep above: current
+                // HP is untouched, the new tier's maximum simply
+                // reads off the new row). Later production spawns
+                // at the new tier (the spawn-site conversion
+                // below, the same pattern).
+                self.players[slot].techs |= tech.bit();
+                for e in &mut self.entities {
+                    if e.owner == owner && !e.dead {
+                        e.kind = match e.kind {
+                            EntityKind::Galley => EntityKind::WarGalley,
+                            EntityKind::FireGalley => EntityKind::FireShip,
+                            EntityKind::DemolitionRaft => EntityKind::DemolitionShip,
+                            EntityKind::Hulk => EntityKind::WarHulk,
+                            other => other,
+                        };
                     }
                 }
             }
@@ -10602,6 +10641,22 @@ impl Sim {
             && self.has_tech(owner, TechId::LightCavalry)
         {
             EntityKind::LightCavalry
+        } else {
+            kind
+        };
+        // The same pattern on the four ship lines (Water W3b,
+        // CLS-07): with Medium Warships researched, new Feudal
+        // hull production spawns at the Castle tier — the queue
+        // entries still say Galley / Fire Galley / Demolition
+        // Raft / Hulk.
+        let kind = if self.has_tech(owner, TechId::MediumWarships) {
+            match kind {
+                EntityKind::Galley => EntityKind::WarGalley,
+                EntityKind::FireGalley => EntityKind::FireShip,
+                EntityKind::DemolitionRaft => EntityKind::DemolitionShip,
+                EntityKind::Hulk => EntityKind::WarHulk,
+                other => other,
+            }
         } else {
             kind
         };
