@@ -316,7 +316,7 @@ fn plan_relic_fetch(sim: &mut Sim, acted: &mut Vec<u32>) {
             e.owner == me
                 && e.kind == EntityKind::Monk
                 && !e.dead
-                && e.garrisoned_in.is_none()
+                && !e.is_contained()
                 && !acted.contains(&e.id)
         })
         .map(|e| e.id)
@@ -418,7 +418,7 @@ fn plan_convert(sim: &mut Sim, acted: &mut Vec<u32>) {
             e.owner == me
                 && e.kind == EntityKind::Monk
                 && !e.dead
-                && e.garrisoned_in.is_none()
+                && !e.is_contained()
                 && e.conversion_target.is_none()
                 && e.heal_target.is_none()
                 && !acted.contains(&e.id)
@@ -1016,7 +1016,7 @@ fn plan_train_military(sim: &mut Sim, cfg: &AiConfig) {
                 e.owner == me
                     && e.kind == EntityKind::Monk
                     && !e.dead
-                    && e.garrisoned_in.is_none()
+                    && !e.is_contained()
             })
             .count() as u32
             + sim

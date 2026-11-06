@@ -177,6 +177,7 @@ pub fn spec(kind: EntityKind) -> &'static UnitSpec {
         EntityKind::FireShip => &FIRE_SHIP,
         EntityKind::DemolitionShip => &DEMOLITION_SHIP,
         EntityKind::WarHulk => &WAR_HULK,
+        EntityKind::TransportShip => &TRANSPORT_SHIP,
     }
 }
 
@@ -1297,6 +1298,48 @@ static WAR_HULK: UnitSpec = UnitSpec {
     wood_cost: 75,
     gold_cost: 35,
     train_ticks: 1620, // 27 s
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
+};
+
+/// Transport Ship (Water W4, GAR-09; wiki, Ship list fresh crawl
+/// 2026-11-05 via WATER-SPEC §3.1 — post-update-169123 values):
+/// HP 70 (the pre-overhaul 100 is superseded, SPEC §8.3), armor
+/// 0/2 (the pre-overhaul 4/8 likewise), NO attack, speed 1.45
+/// tiles/s, LoS 5, cost 125 wood, train 46 s at the Dock (Dark
+/// Age). Capacity 5 land units (WATER-SPEC §6: the wiki
+/// Transport Ship changelog's "garrison capacity of 5"; the
+/// GAP "5 → 20" progression is Chronicles-mode content, NOT
+/// standard DE — SPEC §8.6). Class: SHIP, like every ship but
+/// with no weapon. Radius adopts the Fishing Ship's 1.6 — an
+/// implementation constant (WATER-SPEC §8.9), never DE data.
+static TRANSPORT_SHIP: UnitSpec = UnitSpec {
+    max_hp: 70,
+    attacks: NO_ATTACKS,
+    armor_melee: 0,
+    armor_pierce: 2,
+    armor_building: 0,
+    classes: cls::mask(&[cls::SHIP]),
+    range_max: I16F16::ZERO,
+    range_min: I16F16::ZERO,
+    reload_ticks: 0,
+    attack_delay_ticks: 0,
+    accuracy: 100,
+    projectile_speed: I16F16::ZERO,
+    scatter: I16F16::ZERO,
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
+    speed: I16F16::from_bits(6_335), // 1.45 tiles/s (absolute scale, see header)
+    los: I16F16::from_bits(1_310_720), // 20 (5 tiles)
+    radius: I16F16::from_bits(104_858), // 1.6 — adopted (see above)
+    carcass_food: 0,
+    carcass_decay_bits: 0,
+    food_cost: 0,
+    wood_cost: 125,
+    gold_cost: 0,
+    train_ticks: 2760, // 46 s
     regicide_unit: false,
     immune_conversion: false,
     regenerates: 0,

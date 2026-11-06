@@ -199,6 +199,15 @@ pub enum EntityKind {
     /// The War Hulk (Water W3b, CLS-07): the Castle Age tier of
     /// the Hulk line, via Medium Warships (same pattern).
     WarHulk,
+    /// The Transport Ship (Water W4, GAR-09): the Dark Age
+    /// civilian ship trained at the Dock — it carries up to 5
+    /// land units between shorelines. It has NO attack at all
+    /// (the CLS-08 pattern, like the Fishing Ship). Its cargo
+    /// is NOT a garrison: the list lives on the ship entity
+    /// itself (`Entity::transport_cargo`), cargo is immune and
+    /// inert while aboard, and — the inverse of GAR-03/GAR-10 —
+    /// everything aboard DIES with the ship when it sinks.
+    TransportShip,
 }
 
 impl EntityKind {
@@ -229,6 +238,10 @@ impl EntityKind {
     /// appended after the Feudal set in the plan §2 allocation
     /// order; verified first free on the W3b base `1070746`,
     /// where 0–27 were taken).
+    /// 32 = transport ship (Water W4, GAR-09 — appended after
+    /// the Castle tiers in the plan §2 allocation order;
+    /// verified first free on the W4 base `c9d1353`, where
+    /// 0–31 were taken).
     pub fn tag(self) -> u8 {
         match self {
             EntityKind::Villager => 0,
@@ -263,6 +276,7 @@ impl EntityKind {
             EntityKind::FireShip => 29,
             EntityKind::DemolitionShip => 30,
             EntityKind::WarHulk => 31,
+            EntityKind::TransportShip => 32,
         }
     }
 
@@ -301,6 +315,7 @@ impl EntityKind {
             29 => Some(EntityKind::FireShip),
             30 => Some(EntityKind::DemolitionShip),
             31 => Some(EntityKind::WarHulk),
+            32 => Some(EntityKind::TransportShip),
             _ => None,
         }
     }
@@ -360,7 +375,8 @@ impl EntityKind {
             | EntityKind::WarGalley
             | EntityKind::FireShip
             | EntityKind::DemolitionShip
-            | EntityKind::WarHulk => crate::grid::Domain::Water,
+            | EntityKind::WarHulk
+            | EntityKind::TransportShip => crate::grid::Domain::Water,
             _ => crate::grid::Domain::Land,
         }
     }
@@ -407,6 +423,7 @@ impl EntityKind {
                 | EntityKind::FireShip
                 | EntityKind::DemolitionShip
                 | EntityKind::WarHulk
+                | EntityKind::TransportShip
         )
     }
 
@@ -436,6 +453,7 @@ impl EntityKind {
                 | EntityKind::FireGalley
                 | EntityKind::DemolitionRaft
                 | EntityKind::Hulk
+                | EntityKind::TransportShip
         )
     }
 
@@ -1077,6 +1095,39 @@ pub struct Entity {
     /// — no cached counters. Part of the hashed state, written
     /// only while non-empty.
     pub garrison: Vec<u32>,
+    // --- Transport state (Water W4, GAR-09; Transport Ship and
+    // its cargo only, inert defaults on every other kind) ---
+    /// The cargo list of a Transport Ship: the ids of the land
+    /// units aboard, in boarding order (unload order and the
+    /// sink-kills sweep both read it in this order — determinism).
+    /// This is NOT a `GarrisonRef` host list: cargo dies with
+    /// the ship (the anti-GAR-03), is never healed aboard, and
+    /// cannot leave mid-sea. Empty on every other kind and on an
+    /// empty Transport. Part of the hashed state, written only
+    /// while any transport field is non-default (marker 0xBF).
+    pub transport_cargo: Vec<u32>,
+    /// The Transport Ship this land unit is aboard, if any: the
+    /// cargo-side back-pointer (the garrison pattern). While set,
+    /// the unit is out of the field entirely, exactly as a
+    /// garrisoned unit is (GAR-02 by construction — every spatial
+    /// iteration filters on the contained predicate, which reads
+    /// this field beside `garrisoned_in`). Its stored position
+    /// stays where it boarded. Part of the hashed state (0xBF).
+    pub transported_in: Option<u32>,
+    /// The Transport Ship this land unit is walking to board, if
+    /// any: the load order's target, boarded on arrival at the
+    /// shore beside the ship (the transport tick reads the ship's
+    /// LIVE position every tick — the Ram's moving-host lesson).
+    /// Part of the hashed state (0xBF).
+    pub transport_target: Option<u32>,
+    /// An unload order stands on this Transport Ship (Water W4,
+    /// GAR-09): set by `Command::UnloadTransport`; the transport
+    /// tick sails the ship to the nearest water-side shore cell
+    /// (when it is not already beside land) and unloads there;
+    /// cleared when the cargo is out or when no free shore cell
+    /// exists at the shore it reached (the cargo holds — no
+    /// teleport, no loss). Part of the hashed state (0xBF block).
+    pub transport_unload_pending: bool,
     // --- Trade state (Package D, TRD-05..08; Trade Cart only,
     // inert defaults on every other kind) ---
     /// The home depot: the Market this cart returns its gold to —
@@ -1269,6 +1320,10 @@ impl Entity {
             bell_snapshot: None,
             garrison_heal_remainder: 0,
             garrison: Vec::new(),
+            transport_cargo: Vec::new(),
+            transported_in: None,
+            transport_target: None,
+            transport_unload_pending: false,
             trade_home: None,
             trade_target: None,
             trade_loaded: false,
@@ -1307,6 +1362,17 @@ impl Entity {
     /// The static Town Center building at a position.
     pub fn town_center(id: u32, pos_x: I16F16, pos_y: I16F16) -> Self {
         Entity::blank(id, EntityKind::TownCenter, OWNER_PLAYER, pos_x, pos_y)
+    }
+
+    /// Whether the unit is contained — out of the field inside a
+    /// host (GAR-02 by construction, Water W4): garrisoned in a
+    /// building/TC/Ram (`garrisoned_in`), or aboard a Transport
+    /// Ship (`transported_in`, GAR-09). Spatial iteration,
+    /// targeting, damage, conversion, healing and the idle counts
+    /// filter on this predicate, so a transported unit is exactly
+    /// as unreachable as a garrisoned one.
+    pub fn is_contained(&self) -> bool {
+        self.garrisoned_in.is_some() || self.transported_in.is_some()
     }
 
     /// Clear all combat engagement state (target, pending strike,

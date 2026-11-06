@@ -65,12 +65,12 @@ test('the Dock panel exists: context, train block, research rows', () => {
   assert.deepEqual(PANEL_BUTTONS.dock,
     ['train-fishing-ship', 'research-fishinglines', 'research-gillnets',
       'train-galley', 'train-fire-galley', 'train-demolition-raft', 'train-hulk',
-      'research-mediumwarships']);
+      'research-mediumwarships', 'train-transport-ship']);
 });
 
 test('the Dock is a full production + shelter host client-side', () => {
   // Selection panel production line and queue-name tag.
-  assert.match(app, /const PROD_KINDS = \[2, 3, 4, 5, 6, 7, 8, 12, 15, 16, 17, 20, 23, 24, 25, 26, 27\];/);
+  assert.match(app, /const PROD_KINDS = \[2, 3, 4, 5, 6, 7, 8, 12, 15, 16, 17, 20, 23, 24, 25, 26, 27, 32\];/);
   assert.match(app, /20: 20, 23: 23 \};/);
   // Shelter: cap 5 on the garrison line, arrows read, and the
   // ungarrison block rides the Dock panel.

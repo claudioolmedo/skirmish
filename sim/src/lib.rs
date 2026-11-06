@@ -55,6 +55,7 @@ mod econ;
 mod entity;
 mod formation;
 mod garrison;
+mod transport;
 mod grid;
 mod hash;
 mod mapgen;
@@ -129,6 +130,8 @@ mod water_w2b_tests;
 mod water_w3a_tests;
 #[cfg(test)]
 mod water_w3b_tests;
+#[cfg(test)]
+mod water_w4_tests;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
@@ -849,6 +852,26 @@ pub enum Command {
     /// W2b): with it on, a depleted Fish Trap replants itself
     /// on depletion, charging the 100 wood at that moment.
     SetAutoTrapReseed { building: u32, on: bool },
+    /// Order a land unit to load onto an own Transport Ship
+    /// (Water W4, GAR-09): the GarrisonUnit-shaped pair's first
+    /// half — the unit walks to the shoreline beside the ship
+    /// and boards on arrival (the transport tick reads the
+    /// ship's live position). Any land unit may board (domain
+    /// is the eligibility test); capacity 5. Unlike a Ram
+    /// garrison, boarding is one-way while at sea: cargo leaves
+    /// only by the ship unloading at a shore — or by dying with
+    /// it when it sinks (the anti-GAR-03). No queued form: DE's
+    /// shift-queue vocabulary for load/unload is not documented
+    /// in the dossier, so none is shipped (the Ram precedent —
+    /// it shipped no queued garrison form either).
+    LoadTransport { entity: u32, ship: u32 },
+    /// Order a Transport Ship to unload at a shoreline (Water
+    /// W4, GAR-09): the GarrisonUnit-shaped pair's second half —
+    /// the ship sails to the nearest shore if it is not beside
+    /// one, then places its whole cargo on free land cells
+    /// beside it, in cargo-list order, idle. With no free shore
+    /// cell the cargo holds whole (no teleport, no loss).
+    UnloadTransport { ship: u32 },
 }
 
 /// ECO-14: one farm reseed costs 60 wood (MECHANICS-STUDY §6.3:
@@ -2681,7 +2704,7 @@ impl Sim {
             }
             for idx in 0..self.entities.len() {
                 let e = &self.entities[idx];
-                if e.dead || e.owner != owner || e.garrisoned_in.is_some() {
+                if e.dead || e.owner != owner || e.is_contained() {
                     continue;
                 }
                 let r = if e.kind == EntityKind::TownCenter {
@@ -3267,6 +3290,10 @@ impl Sim {
             e.patrol_next = 0;
             e.garrison_target = None;
             e.garrison_prod_entry = false;
+            // Water W4 (GAR-09): a converted unit's load walk
+            // ends with its other orders (its would-be ship
+            // belongs to its old owner besides).
+            e.transport_target = None;
             e.trade_target = None;
             e.trade_loaded = false;
             e.heal_target = None;
@@ -5890,6 +5917,11 @@ impl Sim {
         // itself is kept, MNK-09).
         e.relic_pickup_target = None;
         e.relic_deposit_target = None;
+        // Water W4 (GAR-09): Stop also ends a load walk and a
+        // Transport Ship's pending unload (its sail-to-shore
+        // leg is an order like any other).
+        e.transport_target = None;
+        e.transport_unload_pending = false;
     }
 
     /// Would a `DeleteEntity` command be accepted right now?
@@ -6906,7 +6938,7 @@ impl Sim {
                     && e.order.is_none()
                     && e.attack_target.is_none()
                     && e.attack_building.is_none()
-                    && e.garrisoned_in.is_none()
+                    && !e.is_contained()
             })
             .map(|e| e.id)
             .collect()
@@ -6945,7 +6977,7 @@ impl Sim {
                     && e.patrol.is_empty()
                     && e.heal_target.is_none()
                     && e.conversion_target.is_none()
-                    && e.garrisoned_in.is_none()
+                    && !e.is_contained()
             })
             .map(|e| e.id)
             .collect()
@@ -7083,6 +7115,10 @@ impl Sim {
                 Command::SetAutoTrapReseed { building, on } => {
                     self.issue_set_auto_trap_reseed(building, on)
                 }
+                Command::LoadTransport { entity, ship } => {
+                    self.issue_load_transport(entity, ship)
+                }
+                Command::UnloadTransport { ship } => self.issue_unload_transport(ship),
             }
         }
 
@@ -7105,7 +7141,7 @@ impl Sim {
         let snapshot: Vec<steer::SnapshotEntry> = self
             .entities
             .iter()
-            .filter(|e| e.kind.is_mobile() && !e.dead && e.garrisoned_in.is_none())
+            .filter(|e| e.kind.is_mobile() && !e.dead && !e.is_contained())
             .map(|e| (e.pos_x, e.pos_y, units::spec(e.kind).radius))
             .collect();
         // Entity index -> index into the snapshot.
@@ -7113,7 +7149,7 @@ impl Sim {
         {
             let mut k = 0;
             for (i, e) in self.entities.iter().enumerate() {
-                if e.kind.is_mobile() && !e.dead && e.garrisoned_in.is_none() {
+                if e.kind.is_mobile() && !e.dead && !e.is_contained() {
                     snap_idx[i] = k;
                     k += 1;
                 }
@@ -7229,7 +7265,7 @@ impl Sim {
         //    column). No living unit ends a tick inside a blocked
         //    cell: it is displaced to the nearest open cell.
         for idx in 0..self.entities.len() {
-            if self.entities[idx].dead || self.entities[idx].garrisoned_in.is_some() {
+            if self.entities[idx].dead || self.entities[idx].is_contained() {
                 continue;
             }
             let cell = self
@@ -7279,6 +7315,15 @@ impl Sim {
         //     after economy (a unit that entered this tick is out
         //     of the field from the next tick's systems on).
         self.garrison_tick();
+
+        // 4.55 Transport (Water W4, GAR-09): pending unloads
+        //      sail to shore and discharge, load arrivals board
+        //      at the shoreline beside their ship. After
+        //      garrison (the sibling containment phase) and
+        //      after combat (a ship sunk this tick takes its
+        //      cargo with it in the death sweep, before any
+        //      boarding could be read).
+        self.transport_tick();
 
         // 4.6 Monks (Castle P5a, MNK-01/10): healing — auto-task
         //     for idle monks, the range chase, and the per-tick
@@ -7715,7 +7760,7 @@ impl Sim {
         let e = &self.entities[idx];
         // GAR-02: a garrisoned unit takes no orders — it is out of
         // the field until it ejects or is ungarrisoned.
-        !e.dead && e.owner != entity::OWNER_GAIA && e.kind.is_mobile() && e.garrisoned_in.is_none()
+        !e.dead && e.owner != entity::OWNER_GAIA && e.kind.is_mobile() && !e.is_contained()
     }
 
     /// Apply a `Move` command: clamp the target into the world, recompute
@@ -8579,7 +8624,7 @@ impl Sim {
         // the same reason the combat scans square i64 bit values.
         let r = GATE_OPEN_RADIUS.to_bits() as i64;
         for e in &self.entities {
-            if e.dead || e.garrisoned_in.is_some() || !e.kind.is_mobile() {
+            if e.dead || e.is_contained() || !e.kind.is_mobile() {
                 continue;
             }
             let dx = (e.pos_x - b.pos_x).to_bits() as i64;
@@ -9480,7 +9525,7 @@ impl Sim {
             {
                 let e = &self.entities[idx];
                 if e.dead
-                    || e.garrisoned_in.is_some()
+                    || e.is_contained()
                     || e.order_queue.is_empty()
                     || e.task != Task::Idle
                     || e.order.is_some()
@@ -10556,7 +10601,7 @@ impl Sim {
             if (self.entities[idx].kind == EntityKind::Villager
                 || self.entities[idx].kind == EntityKind::FishingShip)
                 && !self.entities[idx].dead
-                && self.entities[idx].garrisoned_in.is_none()
+                && !self.entities[idx].is_contained()
             {
                 self.work_tick(idx);
             }
@@ -11368,7 +11413,7 @@ impl Sim {
                         && e.owner == owner
                         && e.kind == EntityKind::Villager
                         && e.task_node == Some(old_node)
-                        && e.garrisoned_in.is_none()
+                        && !e.is_contained()
                 })
                 .map(|(i, _)| i)
                 .next();
@@ -11440,7 +11485,7 @@ impl Sim {
                         && e.owner == owner
                         && e.kind == EntityKind::FishingShip
                         && e.task_node == Some(old_node)
-                        && e.garrisoned_in.is_none()
+                        && !e.is_contained()
                 })
                 .map(|(i, _)| i)
                 .next();
@@ -13114,6 +13159,40 @@ impl Sim {
                         h.write_u32(b);
                     }
                 }
+            }
+            // Water W4 (GAR-09): transport state — written ONLY
+            // while any of it is in play, behind marker 0xBF
+            // (the entity section's next free byte after 0xBE),
+            // so a match with no Transport Ship ever loaded,
+            // loading or unloading hashes bit-identically to
+            // before: the ship's cargo list, the cargo unit's
+            // back-pointer and load target, and the ship's
+            // pending-unload flag.
+            if !e.transport_cargo.is_empty()
+                || e.transported_in.is_some()
+                || e.transport_target.is_some()
+                || e.transport_unload_pending
+            {
+                h.write_u8(0xBF);
+                h.write_u32(e.transport_cargo.len() as u32);
+                for &cid in &e.transport_cargo {
+                    h.write_u32(cid);
+                }
+                match e.transported_in {
+                    None => h.write_u8(0),
+                    Some(t) => {
+                        h.write_u8(1);
+                        h.write_u32(t);
+                    }
+                }
+                match e.transport_target {
+                    None => h.write_u8(0),
+                    Some(t) => {
+                        h.write_u8(1);
+                        h.write_u32(t);
+                    }
+                }
+                h.write_u8(u8::from(e.transport_unload_pending));
             }
         }
         // M3: projectiles in flight, in spawn order.

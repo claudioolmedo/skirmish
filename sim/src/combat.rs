@@ -530,7 +530,7 @@ impl Sim {
                     || u.kind == EntityKind::Sheep
                     || !u.kind.is_mobile()
                     || !is_player_owner(u.owner)
-                    || u.garrisoned_in.is_some()
+                    || u.is_contained()
                 {
                     continue;
                 }
@@ -920,7 +920,7 @@ impl Sim {
         for idx in 0..self.entities.len() {
             let e = &self.entities[idx];
             if e.dead
-                || e.garrisoned_in.is_some()
+                || e.is_contained()
                 || !is_player_owner(e.owner)
                 || !matches!(
                     e.kind,
@@ -953,7 +953,7 @@ impl Sim {
             let (px, py) = (e.pos_x, e.pos_y);
             let mut best: Option<(i64, u32)> = None; // (distance² bits, id)
             for t in &self.entities {
-                if t.dead || t.id == e.id || t.garrisoned_in.is_some() {
+                if t.dead || t.id == e.id || t.is_contained() {
                     continue;
                 }
                 // Teams T3a (NET-11): player targets qualify
@@ -1058,7 +1058,7 @@ impl Sim {
     /// their ground (order cleared) and suppress separation (MOV-04).
     fn attack_step(&mut self, idx: usize) {
         let tick = self.tick;
-        if self.entities[idx].garrisoned_in.is_some() {
+        if self.entities[idx].is_contained() {
             return; // GAR-02: a garrisoned unit does not fight
         }
         let tid = match self.entities[idx].attack_target {
@@ -1073,7 +1073,7 @@ impl Sim {
             return;
         }
         let ti = match self.entity_index(tid) {
-            Some(i) if !self.entities[i].dead && self.entities[i].garrisoned_in.is_none() => i,
+            Some(i) if !self.entities[i].dead && !self.entities[i].is_contained() => i,
             _ => {
                 self.entities[idx].clear_combat();
                 return;
@@ -1257,7 +1257,7 @@ impl Sim {
     /// order, like an unreachable attack target (CMB-06).
     fn attack_ground_step(&mut self, idx: usize) {
         let tick = self.tick;
-        if self.entities[idx].garrisoned_in.is_some() {
+        if self.entities[idx].is_contained() {
             return; // GAR-02: a garrisoned unit does not fight
         }
         let (gx, gy) = match self.entities[idx].attack_point {
@@ -1560,7 +1560,7 @@ impl Sim {
         atk_elev: u8,
         taper: Option<I16F16>,
     ) {
-        if self.entities[ti].garrisoned_in.is_some() {
+        if self.entities[ti].is_contained() {
             return; // GAR-02: garrisoned units cannot be damaged
         }
         // M6: damage reads the target's *effective* armor — Loom's
@@ -2253,7 +2253,7 @@ impl Sim {
                     // consume a stream draw either.
                     && self.entities[vi].kind != EntityKind::Relic
                     && !self.entities[vi].dead
-                    && self.entities[vi].garrisoned_in.is_none()
+                    && !self.entities[vi].is_contained()
                     && steer::vec_len(
                         self.entities[vi].pos_x - b.point.0,
                         self.entities[vi].pos_y - b.point.1,
@@ -2432,7 +2432,7 @@ impl Sim {
         let mut edge_dist: Option<I16F16> = None;
         if let Some(tid) = target_unit {
             match self.entity_index(tid) {
-                Some(ti) if !self.entities[ti].dead && self.entities[ti].garrisoned_in.is_none() => {
+                Some(ti) if !self.entities[ti].dead && !self.entities[ti].is_contained() => {
                     let t = &self.entities[ti];
                     let d = Self::footprint_edge_dist(bx, by, half, t.pos_x, t.pos_y);
                     if d > w.range_max {
@@ -2483,7 +2483,7 @@ impl Sim {
             // huntables never qualify (see the step docs).
             let mut best: Option<(i64, u32, I16F16)> = None;
             for e in &self.entities {
-                if e.dead || e.kind == EntityKind::TownCenter || e.garrisoned_in.is_some() {
+                if e.dead || e.kind == EntityKind::TownCenter || e.is_contained() {
                     continue;
                 }
                 let hostile_unit = self.can_auto_acquire(owner, e.owner, e.kind.is_military());
@@ -2621,7 +2621,7 @@ impl Sim {
         let resolved = if let Some(tid) = b.weapon_target {
             self.entity_index(tid).and_then(|ti| {
                 let t = &self.entities[ti];
-                if t.dead || t.garrisoned_in.is_some() {
+                if t.dead || t.is_contained() {
                     None
                 } else {
                     Some((
@@ -2779,7 +2779,7 @@ impl Sim {
             match self.entity_index(tid) {
                 Some(ti)
                     if !self.entities[ti].dead
-                        && self.entities[ti].garrisoned_in.is_none() =>
+                        && !self.entities[ti].is_contained() =>
                 {
                     let t = &self.entities[ti];
                     let d = Self::footprint_edge_dist(bx, by, half, t.pos_x, t.pos_y);
@@ -2825,7 +2825,7 @@ impl Sim {
             // --- acquire (the CMB-08 chain, as for towers) -------
             let mut best: Option<(i64, u32, I16F16)> = None;
             for e in &self.entities {
-                if e.dead || e.kind == EntityKind::TownCenter || e.garrisoned_in.is_some() {
+                if e.dead || e.kind == EntityKind::TownCenter || e.is_contained() {
                     continue;
                 }
                 let hostile_unit = self.can_auto_acquire(owner, e.owner, e.kind.is_military());
@@ -2941,7 +2941,7 @@ impl Sim {
         let resolved = if let Some(tid) = st.weapon_target {
             self.entity_index(tid).and_then(|ti| {
                 let t = &self.entities[ti];
-                if t.dead || t.garrisoned_in.is_some() {
+                if t.dead || t.is_contained() {
                     None
                 } else {
                     Some(((t.pos_x, t.pos_y), Some(tid), None))
@@ -3280,7 +3280,7 @@ impl Sim {
         }
         if let Some(tid) = p.intended {
             if let Some(ti) = self.entity_index(tid) {
-                if !self.entities[ti].dead && self.entities[ti].garrisoned_in.is_none() {
+                if !self.entities[ti].dead && !self.entities[ti].is_contained() {
                     let tspec = units::spec(self.entities[ti].kind);
                     let d = steer::vec_len(
                         self.entities[ti].pos_x - p.impact_x,
@@ -3303,7 +3303,7 @@ impl Sim {
                 // unit for any damage path).
                 || e.kind == EntityKind::Relic
                 || e.owner == p.owner
-                || e.garrisoned_in.is_some()
+                || e.is_contained()
             {
                 continue;
             }
@@ -3352,7 +3352,7 @@ impl Sim {
         let end_y = p.spawn_y + I16F16::from_bits((dyb * tb / lb) as i32);
         for ti in 0..self.entities.len() {
             let e = &self.entities[ti];
-            if e.dead || e.garrisoned_in.is_some() || e.owner == p.owner {
+            if e.dead || e.is_contained() || e.owner == p.owner {
                 continue; // dead, sheltered (GAR-02), or friendly — untouched
             }
             let is_primary = p.intended == Some(e.id);
@@ -3449,8 +3449,64 @@ impl Sim {
                 && self.entities[idx].kind == EntityKind::BatteringRam
                 && !self.entities[idx].garrison.is_empty()
             {
-                let ram_id = self.entities[idx].id;
-                self.eject_host(crate::entity::GarrisonRef::Unit(ram_id));
+                // Water W4 (GAR-09) nested case: a loaded Ram
+                // aboard a Transport Ship that is itself dying
+                // does NOT eject — everything aboard the ship
+                // dies with it, the Ram's passengers included
+                // (the anti-GAR-03 routing governs the whole
+                // nested load). Their HP is zeroed here; the
+                // sweep processes each death ordinarily.
+                let aboard_dying_ship = match self.entities[idx].transported_in {
+                    Some(ship) => match self.entity_index(ship) {
+                        Some(si) => {
+                            self.entities[si].dead
+                                || self.entities[si].hp < I16F16::from_num(1)
+                        }
+                        None => false,
+                    },
+                    None => false,
+                };
+                if aboard_dying_ship {
+                    let passengers = self.entities[idx].garrison.clone();
+                    for pid in passengers {
+                        if let Some(pi) = self.entity_index(pid) {
+                            if !self.entities[pi].dead {
+                                self.entities[pi].hp = I16F16::ZERO;
+                            }
+                        }
+                    }
+                } else {
+                    let ram_id = self.entities[idx].id;
+                    self.eject_host(crate::entity::GarrisonRef::Unit(ram_id));
+                }
+            }
+            // GAR-09 (Water W4): a dying Transport Ship takes
+            // its whole cargo with it — the death routing
+            // INVERTED from the Ram's branch above and from
+            // GAR-03's building ejection. Every cargo unit's HP
+            // is zeroed in cargo-list order (no attribution
+            // test: combat, a Delete and the Resign sweep all
+            // sink the ship, and the rule names no exception);
+            // the sweep then processes each cargo death through
+            // the ordinary path as it reaches it (a cargo unit
+            // earlier in id order dies on the next tick's sweep
+            // — still zero survivors, still zero ejections).
+            // The test that pins this is the one that would
+            // catch a copy-paste of the Ram's path: sink a
+            // loaded transport, assert zero survivors.
+            if !self.entities[idx].dead
+                && self.entities[idx].hp < I16F16::from_num(1)
+                && self.entities[idx].kind == EntityKind::TransportShip
+                && !self.entities[idx].transport_cargo.is_empty()
+            {
+                let cargo = std::mem::take(&mut self.entities[idx].transport_cargo);
+                for cid in cargo {
+                    if let Some(ci) = self.entity_index(cid) {
+                        if !self.entities[ci].dead {
+                            self.entities[ci].hp = I16F16::ZERO;
+                        }
+                    }
+                }
             }
             // MNK-09 (Castle P5d): a dying carrier drops its
             // relic on the ground where he died, for anyone's
@@ -3471,6 +3527,28 @@ impl Sim {
                     r.relic_garrisoned_in = None;
                     r.pos_x = px;
                     r.pos_y = py;
+                }
+            }
+            // Water W4 (GAR-09) + the Ram's nested case: a
+            // contained unit that dies (a Delete issued aboard,
+            // a Ram passenger killed by its host ship's sinking)
+            // leaves its host's list as it dies, so no list ever
+            // names a corpse.
+            if !self.entities[idx].dead
+                && self.entities[idx].hp < I16F16::from_num(1)
+            {
+                let dead_id = self.entities[idx].id;
+                if let Some(ship) = self.entities[idx].transported_in {
+                    if let Some(si) = self.entity_index(ship) {
+                        self.entities[si].transport_cargo.retain(|&c| c != dead_id);
+                    }
+                }
+                if let Some(crate::entity::GarrisonRef::Unit(host)) =
+                    self.entities[idx].garrisoned_in
+                {
+                    if let Some(hi) = self.entity_index(host) {
+                        self.entities[hi].garrison.retain(|&c| c != dead_id);
+                    }
                 }
             }
             let e = &self.entities[idx];
@@ -3495,6 +3573,13 @@ impl Sim {
                 e.clear_combat();
                 e.aggro_target = None;
                 e.returning_home = false;
+                // Water W4 (GAR-09): the corpse is contained
+                // nowhere — its pointers clear with its orders
+                // (its host's list was pruned just above).
+                e.transported_in = None;
+                e.transport_target = None;
+                e.transport_unload_pending = false;
+                e.transport_cargo.clear();
             }
             // VIC-04: the last hitter is credited with the kill —
             // the same attribution the carcass rule below uses.

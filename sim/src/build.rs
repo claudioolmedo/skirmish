@@ -974,6 +974,10 @@ impl BuildingKind {
                 | (BuildingKind::Dock, EntityKind::FireGalley)
                 | (BuildingKind::Dock, EntityKind::DemolitionRaft)
                 | (BuildingKind::Dock, EntityKind::Hulk)
+                // Water W4 (GAR-09): the Transport Ship trains at
+                // the Dock only — a Dark Age roster entry beside
+                // the Fishing Ship (WATER-SPEC §3.1).
+                | (BuildingKind::Dock, EntityKind::TransportShip)
         )
     }
 

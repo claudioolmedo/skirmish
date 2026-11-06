@@ -337,7 +337,7 @@ const KIND_KING = 22; // Package C: the Regicide king (VIC-06) — builder's 21 
 const KIND_I18N = ['villager', 'townCenter', 'scout', 'militia', 'archer',
   'sheep', 'boar', 'deer', 'manAtArms', 'spearman', 'skirmisher', 'wolf',
   'knight', 'lightCavalry', 'cavalryArcher', 'petard', 'tradeCart', 'batteringRam', 'mangonel', 'scorpion', 'monk', 'relic', 'king', 'fishingShip', 'galley',
-  'fireGalley', 'demolitionRaft', 'hulk', 'warGalley', 'fireShip', 'demolitionShip', 'warHulk'];
+  'fireGalley', 'demolitionRaft', 'hulk', 'warGalley', 'fireShip', 'demolitionShip', 'warHulk', 'transportShip'];
 let KIND_NAME = {
   0: 'Villager', 1: 'Town Center', 2: 'Scout Cavalry', 3: 'Militia',
   4: 'Archer', 5: 'Sheep', 6: 'Boar', 7: 'Deer', 8: 'Man-at-Arms',
@@ -347,6 +347,7 @@ let KIND_NAME = {
   20: 'Monk', 21: 'Relic', 22: 'King', 23: 'Fishing Ship',
   24: 'Galley', 25: 'Fire Galley', 26: 'Demolition Raft', 27: 'Hulk',
   28: 'War Galley', 29: 'Fire Ship', 30: 'Demolition Ship', 31: 'War Hulk',
+  32: 'Transport Ship',
 };
 // Selection-panel portraits per unit kind (SVG symbol ids in
 // play/index.html).
@@ -358,6 +359,7 @@ const KIND_ICON = {
   20: 'i-monk', 21: 'i-gold', 22: 'i-king', 23: 'i-fishing-ship',
   24: 'i-galley', 25: 'i-fire-galley', 26: 'i-demolition-raft', 27: 'i-hulk',
   28: 'i-war-galley', 29: 'i-fire-ship', 30: 'i-demolition-ship', 31: 'i-war-hulk',
+  32: 'i-transport-ship',
 };
 
 // Original PNG icon set (2026-10-19, AI generations via Base44 on
@@ -4257,6 +4259,7 @@ function applyLocalOrder(cmd) {
         : cmd.k === 25 ? sim.push_train_fire_galley(cmd.b)
         : cmd.k === 26 ? sim.push_train_demolition_raft(cmd.b)
         : cmd.k === 27 ? sim.push_train_hulk(cmd.b)
+        : cmd.k === 32 ? sim.push_train_transport_ship(cmd.b)
         : sim.push_train_archer(cmd.b);
     // Package D (TRD-05): task a Trade Cart to a foreign Market.
     case 'trade': return sim.push_trade(cmd.e, cmd.b);
@@ -4288,6 +4291,11 @@ function applyLocalOrder(cmd) {
     // Ram — the mobile host.
     case 'garrison_u': return sim.push_garrison_unit(cmd.e, cmd.host);
     case 'ungarrison_u': return sim.push_ungarrison_unit(cmd.host);
+    // Water W4 (GAR-09): load onto / unload from a Transport
+    // Ship — the GarrisonUnit-shaped pair, on the cargo list
+    // that is NOT a garrison (cargo dies with the ship).
+    case 'load_t': return sim.push_load_transport(cmd.e, cmd.ship);
+    case 'unload_t': return sim.push_unload_transport(cmd.ship);
     case 'town_bell': return sim.push_town_bell(cmd.tc);
     case 'auto_explore': return sim.push_auto_explore(cmd.e, cmd.on);
     case 'attackmove': return cmd.q
@@ -8249,6 +8257,29 @@ async function main() {
         if (issue({ t: 'garrison_u', e: id, host: t })) any = true;
       }
       if (any) { orderAck('order'); flash(t('flash.garrisoned')); return; }
+    }
+    // Load a Transport Ship (Water W4, GAR-09/SEL-11): a
+    // right-click on an OWN Transport Ship with land units
+    // selected loads them onto it — the same gesture the Ram
+    // takes above, on the cargo list that is not a garrison.
+    // The sim's can_load_transport gates every unit (land
+    // domain, ownership, capacity 5); ineligible members of
+    // the selection are simply refused and stay put.
+    if (t != null && st.owners[t] === localOwner && st.kinds[t] === 32) {
+      let any = false;
+      for (const id of targets) {
+        if (st.kinds[id] === 32) continue; // a ship cannot board
+        if (issue({ t: 'load_t', e: id, ship: t })) any = true;
+      }
+      if (any) { orderAck('order'); flash(t('flash.loaded')); return; }
+    }
+    // The reverse gesture: an own Transport Ship selected and
+    // a right-click on an own land unit loads THAT unit.
+    if (t != null && st.owners[t] === localOwner && targets.length === 1
+        && st.kinds[targets[0]] === 32 && st.kinds[t] !== 32) {
+      if (issue({ t: 'load_t', e: t, ship: targets[0] })) {
+        orderAck('order'); flash(t('flash.loaded')); return;
+      }
     }
     // Heal (Castle P5a, MNK-10): a right-click on an OWN wounded
     // unit with Monk(s) selected tasks every selected Monk to
@@ -12425,6 +12456,63 @@ function drawWarHulk(i, wx, wy) {
   ctx.fill();
 }
 
+// Water W4 (GAR-09): the Transport Ship — original flat vector:
+// a broad, open cargo hull (wider and plainer than the war
+// hulls, with the empty hold visible), a short mast with a
+// furled sail, and crates stacked aft. No DE art, ever.
+function drawTransportShip(i, wx, wy) {
+  const [sx, sy] = worldToScreen(wx, wy);
+  const u = camS;
+  ctx.strokeStyle = 'rgba(220, 240, 250, 0.45)';
+  ctx.lineWidth = Math.max(1, 0.14 * u);
+  ctx.beginPath();
+  ctx.ellipse(sx, sy - 0.1 * u, 1.9 * u, 0.6 * u, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  if (selection.has(i)) drawSelRing(sx, sy, 2.1);
+  const cloth = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e';
+  // Broad open hull.
+  poly([
+    [sx - 1.9 * u, sy - 1.2 * u], [sx + 1.9 * u, sy - 1.2 * u],
+    [sx + 1.35 * u, sy - 0.05 * u], [sx - 1.35 * u, sy - 0.05 * u],
+  ], '#8a6238');
+  ctx.strokeStyle = '#5d3d20';
+  ctx.lineWidth = Math.max(1, 0.13 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx - 1.9 * u, sy - 1.2 * u);
+  ctx.lineTo(sx + 1.9 * u, sy - 1.2 * u);
+  ctx.stroke();
+  // The open hold: a dark inset deck amidships.
+  poly([
+    [sx - 1.25 * u, sy - 1.2 * u], [sx + 0.7 * u, sy - 1.2 * u],
+    [sx + 0.55 * u, sy - 0.8 * u], [sx - 1.05 * u, sy - 0.8 * u],
+  ], '#4a3520');
+  // Crates stacked aft (the cargo tell).
+  poly([
+    [sx + 0.85 * u, sy - 1.65 * u], [sx + 1.55 * u, sy - 1.65 * u],
+    [sx + 1.55 * u, sy - 1.2 * u], [sx + 0.85 * u, sy - 1.2 * u],
+  ], '#a97e46');
+  poly([
+    [sx + 1.0 * u, sy - 2.0 * u], [sx + 1.45 * u, sy - 2.0 * u],
+    [sx + 1.45 * u, sy - 1.65 * u], [sx + 1.0 * u, sy - 1.65 * u],
+  ], '#96703c');
+  // Short mast with a furled (owner-color) sail bundle.
+  ctx.strokeStyle = '#6f5533';
+  ctx.lineWidth = Math.max(1, 0.16 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx - 0.35 * u, sy - 1.2 * u);
+  ctx.lineTo(sx - 0.35 * u, sy - 3.0 * u);
+  ctx.stroke();
+  ctx.fillStyle = cloth;
+  ctx.beginPath();
+  ctx.moveTo(sx - 0.85 * u, sy - 2.85 * u);
+  ctx.lineTo(sx + 0.15 * u, sy - 2.85 * u);
+  ctx.lineTo(sx + 0.05 * u, sy - 2.45 * u);
+  ctx.lineTo(sx - 0.75 * u, sy - 2.45 * u);
+  ctx.closePath();
+  ctx.fill();
+}
+
+
 function drawTradeCart(i, wx, wy) {
   const [sx, sy] = worldToScreen(wx, wy);
   const u = camS;
@@ -13457,6 +13545,7 @@ function attemptTrain(id) {
     'train-monk': 20, 'train-fishing-ship': 23,
     'train-galley': 24, 'train-fire-galley': 25,
     'train-demolition-raft': 26, 'train-hulk': 27,
+    'train-transport-ship': 32,
   }[id];
   if (kindTag == null) return false;
   return selectedBuilding && selectedBuilding.type === 'building'
@@ -13483,6 +13572,7 @@ function flashTrainRefusal(id) {
       'train-monk': 20, 'train-fishing-ship': 23,
       'train-galley': 24, 'train-fire-galley': 25,
       'train-demolition-raft': 26, 'train-hulk': 27,
+      'train-transport-ship': 32,
     }[id];
     const reason = sim.building_train_block(selectedBuilding.id, kindTag);
     flash(['', t('train.noResourcesUnit'),
@@ -13514,7 +13604,7 @@ function runCommandButton(id, times = 1) {
     || id === 'train-mangonel' || id === 'train-scorpion' || id === 'train-monk'
     || id === 'train-fishing-ship' || id === 'train-galley'
     || id === 'train-fire-galley' || id === 'train-demolition-raft'
-    || id === 'train-hulk') {
+    || id === 'train-hulk' || id === 'train-transport-ship') {
     let done = 0;
     while (done < times && attemptTrain(id)) done++;
     if (done === 0) flashTrainRefusal(id);
@@ -13651,6 +13741,13 @@ function runCommandButton(id, times = 1) {
     repairArm = false;
     placement = placement && placement.kind === 24 ? null : { kind: 24 };
     playAudioCue(placement ? 'orderBuilding' : 'click');
+  } else if (id === 'unload-transport') {
+    // Water W4 (GAR-09): unload the selected Transport Ship at
+    // a shoreline (it sails to one first if needed).
+    const selT = selectedUnits();
+    if (selT.length === 1) {
+      if (issue({ t: 'unload_t', ship: selT[0] })) playAudioCue('orderBuilding');
+    }
   } else if (id === 'ungarrison') {
     // GAR-03: voluntary ungarrison of the selected building or TC.
     // Castle P4a: a selected Ram ungarrisons the same way (its
@@ -13938,6 +14035,7 @@ function renderCommands() {
   const blockFG = bk && context === 'dock' ? sim.building_train_block(bk.id, 25) : -1;
   const blockDR = bk && context === 'dock' ? sim.building_train_block(bk.id, 26) : -1;
   const blockHu = bk && context === 'dock' ? sim.building_train_block(bk.id, 27) : -1;
+  const blockTS = bk && context === 'dock' ? sim.building_train_block(bk.id, 32) : -1;
   // Research blocks: the TC set (Loom 0, Feudal 1, Wheelbarrow 6,
   // Castle 14, Hand Cart 15) and the building techs, keyed by
   // tag — Blacksmith (Fletching 2, Scale Mail 3, Padded 4,
@@ -13965,7 +14063,7 @@ function renderCommands() {
   const sig = [context, Math.floor(wood), Math.floor(myStock()[0]), Math.floor(myStock()[2]),
     Math.floor(myStock()[3]),
     reason, queue, bk ? bk.id : -1, bk ? bk.queue : -1, bk && bk.complete ? 1 : 0,
-    blockM, blockSp, blockA, blockSk, blockS, blockK, blockCA, blockP, blockR, blockMg, blockSc, blockTC, blockMo, blockFS, blockGa, blockFG, blockDR, blockHu, age, techMask, rbTc.join('.'), Object.values(rbB).join('.'),
+    blockM, blockSp, blockA, blockSk, blockS, blockK, blockCA, blockP, blockR, blockMg, blockSc, blockTC, blockMo, blockFS, blockGa, blockFG, blockDR, blockHu, blockTS, age, techMask, rbTc.join('.'), Object.values(rbB).join('.'),
     tcQueueCodes, bkQueueCodes, buildPage || '', repairArm ? 1 : 0, healArm ? 1 : 0, convertArm ? 1 : 0,
     // Castle P3b: the garrison counts and the bell state are panel
     // state (button faces + disabled states read them).
@@ -14687,6 +14785,20 @@ function renderCommands() {
               ? t('cmd.buildGate', { name: TECH_NAME[47], gate: t('gate.castle') })
               : t('cmd.mediumwarshipsTitle', { name: TECH_NAME[47], cost: costText([[150, 'wood'], [100, 'gold']]), secs: 50 }) + (RESEARCH_BLOCK_TITLES[rbB[47]] ? ' ' + RESEARCH_BLOCK_TITLES[rbB[47]] : ''),
       }),
+      // Water W4 (GAR-09): the Transport Ship — the Dock's
+      // second Dark Age roster entry (beside the Fishing Ship,
+      // so no age gate in the title): 125 wood, 46 s. It
+      // carries 5 land units between shores; the cargo rides
+      // the ship, not a garrison.
+      cmdButton({
+        id: 'train-transport-ship', icon: 'i-transport-ship', label: 'Transport Ship',
+        costIcon: 'i-wood', cost: 125,
+        disabled: underConstruction || blockTS === 2 || blockTS === 3,
+        key: badgeForButton({ context, id: 'train-transport-ship', index: 8 }),
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: KIND_NAME[32], building: BUILD_NAME[23] })
+          : t('cmd.trainTitleTime', { name: KIND_NAME[32], cost: costText([[125, 'wood']]), secs: 46 }) + (TRAIN_BLOCK_TITLES[blockTS] ? ' ' + TRAIN_BLOCK_TITLES[blockTS] : ''),
+      }),
     );
     // Water W2b (ECO-15): the trap-reseed desk — the Mill
     // reseed desk's mirror at the Dock (ECO-14's shape, the
@@ -15067,6 +15179,21 @@ function renderCommands() {
   // panel carries the same Ungarrison button the buildings
   // carry — unbadged, mouse-only, like theirs. The passenger
   // count rides the tooltip; the button greys at zero.
+  // Water W4 (GAR-09): an own Transport Ship's panel carries
+  // the Unload button — unbadged, mouse-only, like the Ram's
+  // Ungarrison. The cargo count rides the tooltip; the button
+  // greys at zero. Unloading sails the ship to the nearest
+  // shore first when it is not beside one (the sim's order).
+  if (context === 'units' && selUnits.length === 1
+      && st.kinds[selUnits[0]] === 32 && st.owners[selUnits[0]] === localOwner) {
+    const cN = typeof sim.transport_cargo_count === 'function'
+      ? sim.transport_cargo_count(selUnits[0]) : 0;
+    cmdGrid.append(cmdButton({
+      id: 'unload-transport', icon: 'i-ungarrison', label: t('cmd.unloadTransport'),
+      disabled: cN === 0, key: null,
+      title: cN > 0 ? t('cmd.unloadTransportTitle', { n: cN }) : t('cmd.unloadTransportNone'),
+    }));
+  }
   if (context === 'units' && selUnits.length === 1
       && st.kinds[selUnits[0]] === 17 && st.owners[selUnits[0]] === localOwner) {
     const gN = sim.unit_garrison_count(selUnits[0]);
@@ -15249,7 +15376,7 @@ function updateSelPanel() {
   // 2026-11-01 trained Monks and saw NO queue/progress line and
   // NO cancel chip — the player could not tell the click had
   // worked, the same defect family a third time.
-  const PROD_KINDS = [2, 3, 4, 5, 6, 7, 8, 12, 15, 16, 17, 20, 23, 24, 25, 26, 27];
+  const PROD_KINDS = [2, 3, 4, 5, 6, 7, 8, 12, 15, 16, 17, 20, 23, 24, 25, 26, 27, 32];
   const context = selUnits.length > 0 ? 'units'
     : selectedBuilding
       ? (selectedBuilding.type === 'tc'
@@ -15348,6 +15475,15 @@ function updateSelPanel() {
         const gN = sim.unit_garrison_count(id);
         if (gN > 0) {
           selInfo.textContent += ' · ' + t('sel.garrisonLine', { n: gN, cap: 6 });
+        }
+      }
+      // Water W4 (GAR-09): a Transport's info line carries its
+      // cargo count (capacity 5) — the cargo list read from the
+      // sim like every host's count.
+      if (kind === 32 && typeof sim.transport_cargo_count === 'function') {
+        const cN = sim.transport_cargo_count(id);
+        if (cN > 0) {
+          selInfo.textContent += ' · ' + t('sel.cargoLine', { n: cN, cap: 5 });
         }
       }
     } else {
@@ -16202,7 +16338,8 @@ function draw() {
     drawWarGalley, // 28: War Galley (Water W3b, CLS-07)
     drawFireShip, // 29: Fire Ship (Water W3b, CLS-07)
     drawDemolitionShip, // 30: Demolition Ship (Water W3b, CLS-07)
-    drawWarHulk]; // 31: War Hulk (Water W3b, CLS-07)
+    drawWarHulk, // 31: War Hulk (Water W3b, CLS-07)
+    drawTransportShip]; // 32: Transport Ship (Water W4, GAR-09)
   for (let i = 0; i < count; i++) {
     const wx = pos[i * 2];
     const wy = pos[i * 2 + 1];

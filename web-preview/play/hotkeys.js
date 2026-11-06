@@ -197,7 +197,7 @@ export const PANEL_BUTTONS = {
   // after them (CLS-07).
   dock: ['train-fishing-ship', 'research-fishinglines', 'research-gillnets',
     'train-galley', 'train-fire-galley', 'train-demolition-raft', 'train-hulk',
-    'research-mediumwarships'],
+    'research-mediumwarships', 'train-transport-ship'],
 };
 
 // The slot letter of every button on every building panel
@@ -402,6 +402,9 @@ export const PANEL_KEYS = {
     // row's second cell — the positional grid continues (X
     // beside the Hulk's Z); the W2/W3a letters are untouched.
     'research-mediumwarships': ['KeyX', 'X'],
+    // Water W4 (GAR-09): the Transport Ship takes the third
+    // row's last cell — the positional grid completes (C).
+    'train-transport-ship': ['KeyC', 'C'],
   },
 };
 export const POSITION_CODES = ['KeyQ', 'KeyW', 'KeyE'];

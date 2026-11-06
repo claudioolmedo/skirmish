@@ -594,14 +594,16 @@ impl WasmSim {
         self.inner.tc_bell_active(tc)
     }
 
-    /// Per-entity garrison flags (GAR-02): 1 while the entity is
-    /// garrisoned inside a building or Town Center (the renderer
-    /// hides those entities — they are out of the field).
+    /// Per-entity containment flags (GAR-02, generalized in
+    /// Water W4): 1 while the entity is garrisoned inside a
+    /// building or Town Center OR aboard a Transport Ship (the
+    /// renderer hides those entities — they are out of the
+    /// field, GAR-09's cargo included).
     pub fn entity_garrisoned(&self) -> Vec<u8> {
         self.inner
             .entities()
             .iter()
-            .map(|e| u8::from(e.garrisoned_in.is_some()))
+            .map(|e| u8::from(e.is_contained()))
             .collect()
     }
 
@@ -724,6 +726,43 @@ impl WasmSim {
     /// `push_train_militia`.
     pub fn push_train_hulk(&mut self, building: u32) -> bool {
         self.push_train_at(building, EntityKind::Hulk)
+    }
+
+    /// Train a Transport Ship at a Dock (Water W4, GAR-09). See
+    /// `push_train_militia`.
+    pub fn push_train_transport_ship(&mut self, building: u32) -> bool {
+        self.push_train_at(building, EntityKind::TransportShip)
+    }
+
+    /// Order a land unit to load onto an own Transport Ship
+    /// (Water W4, GAR-09): it walks to the shoreline beside the
+    /// ship and boards on arrival. Returns whether the order
+    /// *would* be accepted against the current state.
+    pub fn push_load_transport(&mut self, entity: u32, ship: u32) -> bool {
+        let ok = self.inner.can_load_transport(entity, ship);
+        if ok {
+            self.inner
+                .push_command(Command::LoadTransport { entity, ship });
+        }
+        ok
+    }
+
+    /// Order a Transport Ship to unload at a shoreline (Water
+    /// W4, GAR-09): the ship sails to the nearest shore if it is
+    /// not beside one, then discharges its whole cargo there.
+    /// Returns whether anyone is aboard.
+    pub fn push_unload_transport(&mut self, ship: u32) -> bool {
+        let ok = self.inner.transport_cargo_count(ship) > 0;
+        if ok {
+            self.inner.push_command(Command::UnloadTransport { ship });
+        }
+        ok
+    }
+
+    /// The number of units aboard a Transport Ship (Water W4,
+    /// GAR-09) — the transport panel's cargo count.
+    pub fn transport_cargo_count(&self, ship: u32) -> u32 {
+        self.inner.transport_cargo_count(ship)
     }
 
     /// Order a Monk to heal an allied unit (Castle P5a, MNK-10):

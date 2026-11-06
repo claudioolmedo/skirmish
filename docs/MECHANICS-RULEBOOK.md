@@ -3590,7 +3590,35 @@ figure as an error until a source supports it.)
 data as consulted for MECHANICS-STUDY — flagged here rather than silently
 changed. · *Impl:* transport contents are a list on the ship record like
 a building garrison (GAR-01), with the death routing inverted (CMB-14).
-· *Status:* **MISSING**.
+Shipped 2026-11-06 (Water W4): `EntityKind::TransportShip` (tag 32) —
+125 W, 46 s train at the Dock from the Dark Age, HP 70, armor 0/2,
+speed 1.45 tiles/s, LoS 5 (WATER-SPEC §3.1/§6, post-update-169123
+values; the pre-overhaul 100 HP / 4/8 armor figures are superseded).
+The cargo list rides the ship entity itself (`transport_cargo`,
+hashed under marker 0xBF, SAVE_VERSION 20) — deliberately NOT a
+`GarrisonRef` host, so no garrison machinery (ejection, healing,
+arrow fire) can ever apply to it. `Command::LoadTransport` walks a
+land unit to the shore and boards it (capacity 5, own mobile land
+units only); `Command::UnloadTransport` sails the ship to the
+nearest shore water cell when it is not beside land, then
+discharges the cargo onto standable shore cells (radius ≤ 3,
+dynamic occupancy honored — no free cell, the cargo stays aboard).
+Aboard, units are hidden, untargetable, unhealable and inert (the
+contained predicate covers `transported_in` everywhere
+`garrisoned_in` was consulted). The death sweep zeroes the cargo's
+HP in list order before the ship tombstones — combat, Delete and
+Resign all sink the cargo with the ship; a loaded Ram aboard does
+NOT eject (its passengers die too). Client parity: Dock train
+button (hotkey C, the positional grid's last cell), right-click
+load gestures both directions, the panel Unload button, cargo
+count in the selection info, i18n en/pt-BR/es, original vector
+draw + icon. Judgment calls recorded in the W4 handoff: Delete of
+a loaded ship kills the cargo (uniform GAR-09 routing); the King
+boards (a mobile land unit — no DE source singles him out;
+UNVERIFIED edge); boarding order is arrival order. Pinned by
+`sim/src/water_w4_tests.rs` (7 tests) and
+`web-preview/play/waterw4client.test.mjs` (7 tests).
+· *Status:* **MATCHES**.
 
 **GAR-10 — Rams are armored containers.** A battering ram carries up to
 6 foot units inside. Each passenger adds +0.05 tiles/s speed (to a 0.9

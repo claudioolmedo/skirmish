@@ -193,7 +193,15 @@ const MAGIC: &[u8; 4] = b"SKSV";
 /// 0/false in any save whose trap desk never moved, so it
 /// round-trips the hash unchanged; the pending-command codec
 /// gains the Dock desk trio at tags 51–53, append-only.
-const SAVE_VERSION: u32 = 19;
+/// Version 20: Water W4 (GAR-09) — the Transport Ship lands.
+/// The entity record gains the transport block after the
+/// relic fields (the ship's cargo id list, the cargo unit's
+/// back-pointer and load target, the ship's pending-unload
+/// flag — empty/None/None/false in any save with no transport
+/// in play, round-tripping the hash unchanged); the
+/// pending-command codec gains `Command::LoadTransport` /
+/// `Command::UnloadTransport` at tags 54/55, append-only.
+const SAVE_VERSION: u32 = 20;
 
 /// Little-endian byte writer over a growable buffer.
 struct W {
@@ -707,6 +715,17 @@ impl W {
                 self.u32(building);
                 self.u8(u8::from(on));
             }
+            // Water W4: the transport orders (GAR-09) at tags
+            // 54/55, append-only — two ids, resp. one id.
+            Command::LoadTransport { entity, ship } => {
+                self.u8(54);
+                self.u32(entity);
+                self.u32(ship);
+            }
+            Command::UnloadTransport { ship } => {
+                self.u8(55);
+                self.u32(ship);
+            }
         }
     }
 }
@@ -1030,6 +1049,16 @@ impl Sim {
             w.opt_u32(e.relic_deposit_target);
             w.opt_u32(e.relic_carried_by);
             w.opt_u32(e.relic_garrisoned_in);
+            // Water W4 (v20): the transport block (GAR-09) —
+            // the ship's cargo list, the cargo back-pointer and
+            // load target, the pending-unload flag.
+            w.usize(e.transport_cargo.len());
+            for id in &e.transport_cargo {
+                w.u32(*id);
+            }
+            w.opt_u32(e.transported_in);
+            w.opt_u32(e.transport_target);
+            w.bool(e.transport_unload_pending);
         }
         // --- projectiles ---
         w.usize(self.projectiles.len());
@@ -1497,6 +1526,14 @@ impl<'a> R<'a> {
                 building: self.u32()?,
                 on: self.u8()? != 0,
             }),
+            // Water W4: the transport orders (GAR-09), tags 54/55.
+            54 => Some(Command::LoadTransport {
+                entity: self.u32()?,
+                ship: self.u32()?,
+            }),
+            55 => Some(Command::UnloadTransport {
+                ship: self.u32()?,
+            }),
             _ => None,
         }
     }
@@ -1907,6 +1944,14 @@ impl Sim {
             let relic_deposit_target = r.opt_u32()?;
             let relic_carried_by = r.opt_u32()?;
             let relic_garrisoned_in = r.opt_u32()?;
+            let n_t = r.count(4)?;
+            let mut transport_cargo = Vec::with_capacity(n_t);
+            for _ in 0..n_t {
+                transport_cargo.push(r.u32()?);
+            }
+            let transported_in = r.opt_u32()?;
+            let transport_target = r.opt_u32()?;
+            let transport_unload_pending = r.bool()?;
             entities.push(Entity {
                 id,
                 kind,
@@ -1979,6 +2024,10 @@ impl Sim {
                 relic_deposit_target,
                 relic_carried_by,
                 relic_garrisoned_in,
+                transport_cargo,
+                transported_in,
+                transport_target,
+                transport_unload_pending,
                 garrison,
             });
         }

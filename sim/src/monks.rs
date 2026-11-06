@@ -173,7 +173,7 @@ impl Sim {
     /// never healable.
     fn healable_target(&self, owner: u8, ti: usize) -> bool {
         let t = &self.entities[ti];
-        if t.dead || t.garrisoned_in.is_some() {
+        if t.dead || t.is_contained() {
             return false;
         }
         if t.owner != owner
@@ -307,7 +307,7 @@ impl Sim {
     /// offered (GAR-02 — they are out of the field).
     fn eligible_target(&self, monk_owner: u8, ti: usize) -> bool {
         let t = &self.entities[ti];
-        if t.dead || t.garrisoned_in.is_some() || t.owner == monk_owner {
+        if t.dead || t.is_contained() || t.owner == monk_owner {
             return false;
         }
         // Teams T3a (NET-11): an Ally-row owner's units are not
@@ -947,7 +947,7 @@ impl Sim {
                 continue;
             }
             let owner = self.entities[idx].owner;
-            if self.entities[idx].garrisoned_in.is_some() {
+            if self.entities[idx].is_contained() {
                 // GAR-02: a garrisoned monk is out of the field —
                 // it heals nobody, converts nobody, and any task
                 // it held is over (CI progress survives — MNK-07
@@ -1172,7 +1172,7 @@ impl Sim {
         let e = &self.entities[idx];
         if e.kind != EntityKind::Monk
             || !is_player_owner(e.owner)
-            || e.garrisoned_in.is_some()
+            || e.is_contained()
             || e.dead
         {
             return None;
