@@ -137,8 +137,15 @@ html, body {
   inset: var(--beta-h) 0 0 0;
   z-index: 40;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  /* "safe" centering: a card taller than the viewport (Diplomacy
+     with its tribute desk) falls back to start alignment, so its
+     top — and its ✕ — stays inside the scrollable area instead of
+     being clipped above it (bot-loop live proof, 2026-11-05;
+     plain `center` + auto margins on the card did NOT rescue it:
+     with negative free space the margins collapse and the unsafe
+     centering still applies). */
+  align-items: safe center;
+  justify-content: safe center;
   background: rgba(5, 8, 11, 0.62);
   padding: 16px;
   overflow-y: auto;
