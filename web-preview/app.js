@@ -8113,7 +8113,15 @@ async function main() {
     if (n && !cellExploredW(n.x, n.y)) n = null;
     let any = false;
     for (const id of targets) {
-      if (n && st.kinds[id] === 0) {
+      // Gather pairing (the sim's can_gather_pair, ECO-15): a
+      // villager works any node; a Fishing Ship (kind 23) works
+      // fish spots only (node kinds 7/8). Before this branch the
+      // ship fell through to a plain Move — its panel promised
+      // "right-click a fish spot to gather" but the click never
+      // fished (bot-loop proof, 2026-11-05).
+      const gathersHere = n && (st.kinds[id] === 0
+        || (st.kinds[id] === 23 && (n.kind === 7 || n.kind === 8)));
+      if (gathersHere) {
         if (issue({ t: 'gather', e: id, n: n.id, q: queued || undefined })) any = true;
       } else if (sendMove(id)) {
         any = true;
