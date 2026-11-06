@@ -137,9 +137,11 @@ export class WasmSim {
      */
     entity_display_stats(entity: number): Int32Array;
     /**
-     * Per-entity garrison flags (GAR-02): 1 while the entity is
-     * garrisoned inside a building or Town Center (the renderer
-     * hides those entities — they are out of the field).
+     * Per-entity containment flags (GAR-02, generalized in
+     * Water W4): 1 while the entity is garrisoned inside a
+     * building or Town Center OR aboard a Transport Ship (the
+     * renderer hides those entities — they are out of the
+     * field, GAR-09's cargo included).
      */
     entity_garrisoned(): Uint8Array;
     /**
@@ -893,6 +895,13 @@ export class WasmSim {
      */
     push_heal(entity: number, target: number): boolean;
     /**
+     * Order a land unit to load onto an own Transport Ship
+     * (Water W4, GAR-09): it walks to the shoreline beside the
+     * ship and boards on arrival. Returns whether the order
+     * *would* be accepted against the current state.
+     */
+    push_load_transport(entity: number, ship: number): boolean;
+    /**
      * Buy one lot (100) of a commodity at a completed Market
      * (TRD-01..03): `resource_tag` is the `ResourceKind` tag
      * (food 1, wood 2, stone 4 — gold is never a commodity).
@@ -1239,6 +1248,11 @@ export class WasmSim {
      */
     push_train_trade_cart(building: number): boolean;
     /**
+     * Train a Transport Ship at a Dock (Water W4, GAR-09). See
+     * `push_train_militia`.
+     */
+    push_train_transport_ship(building: number): boolean;
+    /**
      * Enqueue a villager at a SPECIFIC Town Center (any seat):
      * `push_train_villager` for an explicit Town Center.
      */
@@ -1279,6 +1293,13 @@ export class WasmSim {
      * inside.
      */
     push_ungarrison_unit(host: number): boolean;
+    /**
+     * Order a Transport Ship to unload at a shoreline (Water
+     * W4, GAR-09): the ship sails to the nearest shore if it is
+     * not beside one, then discharges its whole cargo there.
+     * Returns whether anyone is aboard.
+     */
+    push_unload_transport(ship: number): boolean;
     /**
      * All rally points as a flat array, four values per entry —
      * `[x, y, node, has]` — entry 0 is the Town Center, entries
@@ -1480,6 +1501,11 @@ export class WasmSim {
      */
     train_queue_len(): number;
     /**
+     * The number of units aboard a Transport Ship (Water W4,
+     * GAR-09) — the transport panel's cargo count.
+     */
+    transport_cargo_count(ship: number): number;
+    /**
      * A player's Dock trap-reseed desk, for the Dock panel
      * (Water W2b, ECO-15): `[paid trap reseeds queued,
      * auto trap-reseed on (0/1)]` — the `reseed_for` twin.
@@ -1665,6 +1691,7 @@ export interface InitOutput {
     readonly wasmsim_push_gather: (a: number, b: number, c: number) => void;
     readonly wasmsim_push_gather_queued: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_heal: (a: number, b: number, c: number) => number;
+    readonly wasmsim_push_load_transport: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_market_buy: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_market_sell: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_move: (a: number, b: number, c: number, d: number) => void;
@@ -1716,12 +1743,14 @@ export interface InitOutput {
     readonly wasmsim_push_train_skirmisher: (a: number, b: number) => number;
     readonly wasmsim_push_train_spearman: (a: number, b: number) => number;
     readonly wasmsim_push_train_trade_cart: (a: number, b: number) => number;
+    readonly wasmsim_push_train_transport_ship: (a: number, b: number) => number;
     readonly wasmsim_push_train_villager: (a: number) => number;
     readonly wasmsim_push_train_villager_at: (a: number, b: number) => number;
     readonly wasmsim_push_tribute: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly wasmsim_push_ungarrison_building: (a: number, b: number) => number;
     readonly wasmsim_push_ungarrison_tc: (a: number, b: number) => number;
     readonly wasmsim_push_ungarrison_unit: (a: number, b: number) => number;
+    readonly wasmsim_push_unload_transport: (a: number, b: number) => number;
     readonly wasmsim_rally_points: (a: number) => [number, number];
     readonly wasmsim_relic_countdown_holder: (a: number) => number;
     readonly wasmsim_relic_countdown_ticks_left: (a: number) => number;
@@ -1756,6 +1785,7 @@ export interface InitOutput {
     readonly wasmsim_train_block_reason: (a: number) => number;
     readonly wasmsim_train_block_reason_at: (a: number, b: number) => number;
     readonly wasmsim_train_queue_len: (a: number) => number;
+    readonly wasmsim_transport_cargo_count: (a: number, b: number) => number;
     readonly wasmsim_trap_reseed_for: (a: number, b: number) => [number, number];
     readonly wasmsim_tribute_fee_pct_for: (a: number, b: number) => number;
     readonly wasmsim_unit_garrison_count: (a: number, b: number) => number;

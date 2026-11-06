@@ -254,9 +254,11 @@ export class WasmSim {
         return v1;
     }
     /**
-     * Per-entity garrison flags (GAR-02): 1 while the entity is
-     * garrisoned inside a building or Town Center (the renderer
-     * hides those entities — they are out of the field).
+     * Per-entity containment flags (GAR-02, generalized in
+     * Water W4): 1 while the entity is garrisoned inside a
+     * building or Town Center OR aboard a Transport Ship (the
+     * renderer hides those entities — they are out of the
+     * field, GAR-09's cargo included).
      * @returns {Uint8Array}
      */
     entity_garrisoned() {
@@ -1765,6 +1767,19 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Order a land unit to load onto an own Transport Ship
+     * (Water W4, GAR-09): it walks to the shoreline beside the
+     * ship and boards on arrival. Returns whether the order
+     * *would* be accepted against the current state.
+     * @param {number} entity
+     * @param {number} ship
+     * @returns {boolean}
+     */
+    push_load_transport(entity, ship) {
+        const ret = wasm.wasmsim_push_load_transport(this.__wbg_ptr, entity, ship);
+        return ret !== 0;
+    }
+    /**
      * Buy one lot (100) of a commodity at a completed Market
      * (TRD-01..03): `resource_tag` is the `ResourceKind` tag
      * (food 1, wood 2, stone 4 — gold is never a commodity).
@@ -2383,6 +2398,16 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Train a Transport Ship at a Dock (Water W4, GAR-09). See
+     * `push_train_militia`.
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_train_transport_ship(building) {
+        const ret = wasm.wasmsim_push_train_transport_ship(this.__wbg_ptr, building);
+        return ret !== 0;
+    }
+    /**
      * Enqueue a villager at a SPECIFIC Town Center (any seat):
      * `push_train_villager` for an explicit Town Center.
      * @param {number} tc
@@ -2453,6 +2478,18 @@ export class WasmSim {
      */
     push_ungarrison_unit(host) {
         const ret = wasm.wasmsim_push_ungarrison_unit(this.__wbg_ptr, host);
+        return ret !== 0;
+    }
+    /**
+     * Order a Transport Ship to unload at a shoreline (Water
+     * W4, GAR-09): the ship sails to the nearest shore if it is
+     * not beside one, then discharges its whole cargo there.
+     * Returns whether anyone is aboard.
+     * @param {number} ship
+     * @returns {boolean}
+     */
+    push_unload_transport(ship) {
+        const ret = wasm.wasmsim_push_unload_transport(this.__wbg_ptr, ship);
         return ret !== 0;
     }
     /**
@@ -2859,6 +2896,16 @@ export class WasmSim {
      */
     train_queue_len() {
         const ret = wasm.wasmsim_train_queue_len(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * The number of units aboard a Transport Ship (Water W4,
+     * GAR-09) — the transport panel's cargo count.
+     * @param {number} ship
+     * @returns {number}
+     */
+    transport_cargo_count(ship) {
+        const ret = wasm.wasmsim_transport_cargo_count(this.__wbg_ptr, ship);
         return ret >>> 0;
     }
     /**

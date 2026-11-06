@@ -179,6 +179,7 @@ const TRAIN_AT_FNS = {
   25: 'push_train_fire_galley',
   26: 'push_train_demolition_raft',
   27: 'push_train_hulk',
+  32: 'push_train_transport_ship',
 };
 
 const isInt = (v) => Number.isInteger(v) && v >= 0;
@@ -238,7 +239,7 @@ export function validateCommand(c) {
     // absent — the pre-BLD-20 wire form — or 14 stone wall).
     case 'buildline': return isInt(c.e) && isNum(c.x0) && isNum(c.y0) && isNum(c.x1) && isNum(c.y1)
       && (c.k === undefined || c.k === 9 || c.k === 14);
-    case 'train_at': return isInt(c.b) && (c.k === 2 || c.k === 3 || c.k === 4 || c.k === 9 || c.k === 10 || c.k === 12 || c.k === 14 || c.k === 15 || c.k === 16 || c.k === 17 || c.k === 18 || c.k === 19 || c.k === 20 || c.k === 23 || c.k === 24 || c.k === 25 || c.k === 26 || c.k === 27);
+    case 'train_at': return isInt(c.b) && (c.k === 2 || c.k === 3 || c.k === 4 || c.k === 9 || c.k === 10 || c.k === 12 || c.k === 14 || c.k === 15 || c.k === 16 || c.k === 17 || c.k === 18 || c.k === 19 || c.k === 20 || c.k === 23 || c.k === 24 || c.k === 25 || c.k === 26 || c.k === 27 || c.k === 32);
     case 'train_vil': return c.tc === undefined || isInt(c.tc);
     case 'research_tc': return (c.tech === 0 || c.tech === 1 || c.tech === 6
       || c.tech === 14 || c.tech === 15 || c.tech === 18
@@ -287,6 +288,8 @@ export function validateCommand(c) {
     // and a host (Ram) entity id, like garrison_b's shape.
     case 'garrison_u': return isInt(c.e) && isInt(c.host);
     case 'ungarrison_u': return isInt(c.host);
+    case 'load_t': return isInt(c.e) && isInt(c.ship);
+    case 'unload_t': return isInt(c.ship);
     case 'auto_explore': return isInt(c.e) && typeof c.on === 'boolean';
     case 'attackmove': return isInt(c.e) && isNum(c.x) && isNum(c.y);
     // Castle P4b (CMB-16): attack ground — an entity id and a
@@ -357,6 +360,8 @@ export function applyCommand(sim, cmd, owner, tcOf) {
     case 'town_bell': return sim.push_town_bell(cmd.tc != null ? cmd.tc : tcOf(owner));
     case 'garrison_u': return sim.push_garrison_unit(cmd.e, cmd.host);
     case 'ungarrison_u': return sim.push_ungarrison_unit(cmd.host);
+    case 'load_t': return sim.push_load_transport(cmd.e, cmd.ship);
+    case 'unload_t': return sim.push_unload_transport(cmd.ship);
     case 'auto_explore': return sim.push_auto_explore(cmd.e, cmd.on);
     case 'attackmove': return cmd.q
       ? sim.push_attack_move_queued(cmd.e, cmd.x, cmd.y)

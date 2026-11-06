@@ -50,7 +50,7 @@ test('the Castle tiers are upgrade-only in the client too', () => {
   assert.ok(!netplay.includes('28:'), 'no netplay train row for 28');
   // The production set is unchanged: the tiers are not
   // production kinds anywhere in the panel tables.
-  assert.match(app, /const PROD_KINDS = \[2, 3, 4, 5, 6, 7, 8, 12, 15, 16, 17, 20, 23, 24, 25, 26, 27\];/);
+  assert.match(app, /const PROD_KINDS = \[2, 3, 4, 5, 6, 7, 8, 12, 15, 16, 17, 20, 23, 24, 25, 26, 27, 32\];/);
 });
 
 test('Medium Warships is wired as Dock research, tag 47', () => {
@@ -83,7 +83,7 @@ test('panel order + letters: the research button takes the X cell', () => {
   assert.deepEqual(PANEL_BUTTONS.dock,
     ['train-fishing-ship', 'research-fishinglines', 'research-gillnets',
       'train-galley', 'train-fire-galley', 'train-demolition-raft', 'train-hulk',
-      'research-mediumwarships']);
+      'research-mediumwarships', 'train-transport-ship']);
   assert.deepEqual(PANEL_KEYS.dock['research-mediumwarships'], ['KeyX', 'X']);
   // The W2/W3a letters are untouched.
   assert.deepEqual(PANEL_KEYS.dock['train-galley'], ['KeyA', 'A']);
@@ -96,11 +96,11 @@ test('rendering tables cover the four tiers', () => {
     assert.ok(app.includes(`${tag}: '${icon}',`), `KIND_ICON ${tag}`);
     assert.match(app, new RegExp(`function ${draw}\\(i, wx, wy\\)`));
   }
-  assert.match(app, /'fireGalley', 'demolitionRaft', 'hulk', 'warGalley', 'fireShip', 'demolitionShip', 'warHulk'\];/);
+  assert.match(app, /'fireGalley', 'demolitionRaft', 'hulk', 'warGalley', 'fireShip', 'demolitionShip', 'warHulk', 'transportShip'\];/);
   assert.match(app, /drawWarGalley, \/\/ 28: War Galley/);
   assert.match(app, /drawFireShip, \/\/ 29: Fire Ship/);
   assert.match(app, /drawDemolitionShip, \/\/ 30: Demolition Ship/);
-  assert.match(app, /drawWarHulk\]; \/\/ 31: War Hulk/);
+  assert.match(app, /drawTransportShip\]; \/\/ 32: Transport Ship/);
 });
 
 test('names and the tech exist in all three locales', () => {
