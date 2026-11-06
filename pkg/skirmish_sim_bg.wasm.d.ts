@@ -169,6 +169,7 @@ export const wasmsim_push_trade: (a: number, b: number, c: number) => number;
 export const wasmsim_push_train_archer: (a: number, b: number) => number;
 export const wasmsim_push_train_battering_ram: (a: number, b: number) => number;
 export const wasmsim_push_train_cavalry_archer: (a: number, b: number) => number;
+export const wasmsim_push_train_fishing_ship: (a: number, b: number) => number;
 export const wasmsim_push_train_knight: (a: number, b: number) => number;
 export const wasmsim_push_train_mangonel: (a: number, b: number) => number;
 export const wasmsim_push_train_militia: (a: number, b: number) => number;

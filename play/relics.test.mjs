@@ -21,7 +21,7 @@ const wasmRs = readFileSync(join(here, '..', '..', 'sim', 'src', 'wasm.rs'), 'ut
 
 test('the relic kind rides tag 21 in every client table', () => {
   assert.match(appJs, /const KIND_RELIC = 21;/, 'KIND_RELIC constant');
-  assert.match(appJs, /'monk', 'relic', 'king'\];/, 'KIND_I18N[21] is relic (Package C appended king at 22)');
+  assert.match(appJs, /'monk', 'relic', 'king', 'fishingShip'\];/, 'KIND_I18N[21] is relic (Package C appended king at 22, Water W2 fishingShip at 23)');
   assert.match(appJs, /20: 'Monk', 21: 'Relic',/, 'KIND_NAME[21]');
   assert.match(appJs, /20: 'i-monk', 21: 'i-gold',/, 'KIND_ICON[21] (portrait fallback)');
 });

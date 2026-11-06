@@ -190,6 +190,11 @@ export const PANEL_BUTTONS = {
   // absent on purpose — deferred (anti-ship only, no water).
   university: ['research-ballistics', 'research-murderholes', 'research-treadmill',
     'research-masonry', 'research-fortifiedwall'],
+  // Water W2 client (ECO-15): the Dock's panel — Train Fishing
+  // Ship, then its two fishing researches (Fishing Lines,
+  // Gillnets), the plain positional grid like every production
+  // panel.
+  dock: ['train-fishing-ship', 'research-fishinglines', 'research-gillnets'],
 };
 
 // The slot letter of every button on every building panel
@@ -376,6 +381,13 @@ export const PANEL_KEYS = {
     'research-treadmill': ['KeyE', 'E'],
     'research-masonry': ['KeyA', 'A'],
     'research-fortifiedwall': ['KeyS', 'S'],
+  },
+  // Water W2 client (ECO-15): the Dock — the plain positional
+  // grid: Train Fishing Ship Q, Fishing Lines W, Gillnets E.
+  dock: {
+    'train-fishing-ship': ['KeyQ', 'Q'],
+    'research-fishinglines': ['KeyW', 'W'],
+    'research-gillnets': ['KeyE', 'E'],
   },
 };
 export const POSITION_CODES = ['KeyQ', 'KeyW', 'KeyE'];

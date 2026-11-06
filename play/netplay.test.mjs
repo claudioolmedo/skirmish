@@ -115,6 +115,15 @@ test('validateCommand accepts the full vocabulary and rejects junk', () => {
     { t: 'research_at', b: 3, tech: 40 },
     { t: 'research_at', b: 3, tech: 41 },
     { t: 'research_at', b: 3, tech: 42 },
+    // Water W2 client (ECO-15): train the Fishing Ship (kind 23)
+    // at a Dock and research its pair (Fishing Lines 45,
+    // Gillnets 46) there; the Scorpion's train kind (19) rides
+    // too — TRAIN_AT_FNS always dispatched it, the validator
+    // alone omitted it.
+    { t: 'train_at', b: 3, k: 23 },
+    { t: 'train_at', b: 3, k: 19 },
+    { t: 'research_at', b: 3, tech: 45 },
+    { t: 'research_at', b: 3, tech: 46 },
     { t: 'auto_explore', e: 4, on: true },
     { t: 'auto_explore', e: 4, on: false },
     { t: 'attackmove', e: 4, x: 10, y: -2 },
@@ -338,6 +347,10 @@ test('applyCommand maps semantic commands to the per-seat sim calls', () => {
   applyCommand(sim, { t: 'msell', b: 7, r: 4 }, 0, tcOf);
   applyCommand(sim, { t: 'buildline', e: 5, x0: 1, y0: 2, x1: 9, y1: 2 }, 0, tcOf);
   applyCommand(sim, { t: 'train_at', b: 9, k: 3 }, 0, tcOf);
+  // Water W2 client (ECO-15): the Fishing Ship dispatch.
+  applyCommand(sim, { t: 'train_at', b: 9, k: 23 }, 0, tcOf);
+  applyCommand(sim, { t: 'research_at', b: 9, tech: 45 }, 0, tcOf);
+  applyCommand(sim, { t: 'research_at', b: 9, tech: 46 }, 0, tcOf);
   // Town Center orders resolve the ISSUER's Town Center:
   applyCommand(sim, { t: 'train_vil' }, 2, tcOf);
   applyCommand(sim, { t: 'research_tc', tech: 0 }, 0, tcOf);
@@ -371,6 +384,9 @@ test('applyCommand maps semantic commands to the per-seat sim calls', () => {
     ['push_market_sell', 7, 4],
     ['push_build_wall_line', 5, 1, 2, 9, 2],
     ['push_train_militia', 9],
+    ['push_train_fishing_ship', 9],
+    ['push_research_at', 9, 45],
+    ['push_research_at', 9, 46],
     ['push_train_villager_at', 40],
     ['push_research_tc_at', 0, 0],
     ['push_set_rally_tc_of', 40, 3, 4],
