@@ -4355,7 +4355,14 @@ taunt code and both clients play their LOCAL generated sound, so
 no chat or taunt ever consumes RNG, alters iteration, or is
 required to reproduce a match (pinned by `play/chat.test.mjs`,
 which proves chat content never appears in a signaling frame, and
-`play/netplay.test.mjs`'s rtc-envelope cases). · *Status:*
+`play/netplay.test.mjs`'s rtc-envelope cases). Teams T3b
+(2026-11-05) adds one more non-command message kind under the
+same discipline: the Signal Allies flare (`{type:'flare', x,
+y}`, INF-04) rides the room socket beside the bundle stream —
+the codec bounds its coordinates, the lockstep session never
+consumes it, a flare inside a bundle rejects the bundle whole,
+and its only effect is client-side rendering (pinned by
+`play/teams-t3b.test.mjs`). · *Status:*
 **MATCHES**.
 
 **NET-11 — Diplomacy is match state, not sim physics.** Player stances
@@ -4430,7 +4437,22 @@ tag 50 restores a stance change queued across a save. The
 table's reachable non-default states in shipped matches are
 the unlocked 1v1 shapes (Neutral, one-sided Ally) and the
 same-team locked default; multi-party tables await the
-multi-seat program. Pinned by `sim/src/diplomacy_tests.rs`
+multi-seat program. The client half landed in Teams T3b
+(2026-11-05): the diplomacy panel paints both rows from
+`stance_for` (my row toward the foe and the incoming row —
+the foe's stance toward me, which DE's tab also shows), the
+foe row carries a stance selector in unlocked matches
+issuing `{t:'diplomacy', to, s}` through both dispatch paths
+(the wire form is deliberately not `{t:'stance'}` — that is
+CMB-09's per-unit stance), and the prematch surfaces (pause
+menu, create panel, room screen) carry the host's
+unlocked-teams toggle as bit 16 of the packed teams word
+through the handshake, resync and replay meta; in locked
+matches the selector renders disabled and the panel states
+the lock. A loaded save renders the selector disabled (the
+ABI exposes no lock read — the client never offers a control
+whose acceptance it cannot know). Pinned client-side by
+`play/teams-t3b.test.mjs`. Sim-side pinned by `sim/src/diplomacy_tests.rs`
 (12 tests: construction derivations, locked refusal with
 stream-identical hashes, invalid-order refusals, neutral
 military-only acquisition with explicit tasking preserved,
@@ -4518,8 +4540,32 @@ rendering shipped (terrain, nodes, buildings, entities, viewport rect);
 fog shading shipped with M7 (VIS-10); the attack-alert flash shipped
 2026-10-22 with INF-01 (a flashing X at the alert location);
 flares are a client command + net message (NET-10) and wait for
-team games — there are no allies to signal yet. · *Status:*
-**DIFFERS** (map, fog and alert flashes yes; ally flares no).
+team games — there are no allies to signal yet. Teams T3b
+(2026-11-05, client package on the T3a sim) ships the flare
+surface: a Signal Allies button beside the minimap arms a
+one-shot click (minimap or world); the flare travels as the
+non-command net message `{type:'flare', x, y}` over the room
+socket (NET-10 — never a bundle, never hashed, never in a
+replay); receivers paint a flashing X reusing the INF-01
+alert painter (the adopted 6 s lifetime / 500 ms blink — DE's
+"a few seconds" is not pinned to a number in the fetched
+source, Teams spec register #3) in the sender's player color
+(an adopted presentation choice, not a DE claim) and play a
+cue through the audio layer (the existing 'select' synth
+cue; DE's flare sound is likewise unpinned). Solo/AI matches
+have no human recipient: the button still arms and the sender
+sees their own marker — presentation only, no DE parity
+claimed for self-display. The shipped surface is unit-pinned
+by `play/teams-t3b.test.mjs` (codec, bundle exclusion, painter,
+panel). **The Status does NOT flip in this package**: INF-04's
+content is what another player sees, and its MATCHES flip is
+gated on the bot-loop's live two-client proof (host sets the
+guest seat Ally + unlocked; the guest flares a point; the
+host's minimap shows the flashing X and plays the cue within
+the marker's life) — proof pending at this commit. ·
+*Status:* **DIFFERS** (map, fog and alert flashes yes; ally
+flares shipped and unit-proven, two-client live proof
+pending).
 
 **INF-05 — Selection panel shows identity and health.** A single selected
 unit/building shows its portrait, HP bar, attack/armor stats, and (for

@@ -236,6 +236,16 @@ export function validateCommand(c) {
     case 'tribute': return (c.to === 0 || c.to === 2)
       && isInt(c.r) && c.r >= 1 && c.r <= 4
       && isInt(c.a) && c.a >= 1 && c.a <= 100000;
+    // Teams T3b (NET-11): a diplomacy stance change names the
+    // target's owner tag (0 or 2 — the only seats) and a stance
+    // tag (0 Ally / 1 Neutral / 2 Enemy, the sim's STANCE_*
+    // tags). The sender is the bundle's owner (applyCommand's
+    // contract), exactly like tribute's. The wire form is
+    // {t:'diplomacy'} — NOT {t:'stance'}: that form is CMB-09's
+    // per-unit stance (an entity id and a 0..3 tag) and the two
+    // must never be confusable at the codec.
+    case 'diplomacy': return (c.to === 0 || c.to === 2)
+      && isInt(c.s) && c.s <= 2;
     // ECO-14 (wave-1 leftovers): the Mill reseed desk — the
     // building names the Mill; the sim derives its owner and
     // validates the rest (completed Mill, the wood, the queue).
@@ -370,6 +380,16 @@ export function applyCommand(sim, cmd, owner, tcOf) {
     // owner (applyCommand's contract), the recipient rides in
     // the command; the sim validates both seats.
     case 'tribute': return sim.push_tribute(owner, cmd.to, cmd.r, cmd.a);
+    // Teams T3b (NET-11): a diplomacy stance change — the sender
+    // is the bundle's owner (as tribute's), the target and the
+    // stance tag ride in the command; the sim re-validates at
+    // apply time (locked teams refuse whole). Guarded like the
+    // teams constructor: a stale wasm without the T3a export
+    // simply refuses, and a mixed pair is caught by the
+    // construction-hash check before play begins.
+    case 'diplomacy': return typeof sim.push_set_diplomacy === 'function'
+      ? sim.push_set_diplomacy(owner, cmd.to, cmd.s)
+      : false;
     // ECO-14: the reseed desk — the Mill's owner is derived in
     // the sim from the named building (as research_at), so one
     // form serves both seats.
@@ -430,6 +450,15 @@ const MESSAGE_TYPES = new Set([
   // (receive() returns false — the app's chat link handles it),
   // and nothing here reaches the sim or the hashed state.
   'rtc',
+  // Teams T3b (INF-04, NET-10): a Signal Allies flare. Like the
+  // chat signaling above, a flare is a NON-command envelope: it
+  // travels beside the bundle stream, never enters a bundle,
+  // never reaches the sim or the hashed state, and a replay need
+  // not contain it. The session never consumes it (receive()
+  // returns false) — the app layer paints the marker. The codec
+  // bounds the coordinates below; the sender's seat is known
+  // from the transport (the only other seat in the room).
+  'flare',
 ]);
 
 export function encodeMessage(msg) {
@@ -479,6 +508,16 @@ export function decodeMessage(text) {
   // A password is a short human string; anything else is junk.
   if (msg.type === 'pw' && (typeof msg.pw !== 'string' || msg.pw.length > 128)) {
     return { ok: false, error: 'bad pw' };
+  }
+  // A flare names one world point. World coordinates are
+  // bounded by the map (|x|, |y| < 100 today); the codec allows
+  // generous slack for map growth and rejects anything wilder
+  // as junk — a malformed flare is dropped, never painted.
+  if (msg.type === 'flare') {
+    if (!isNum(msg.x) || !isNum(msg.y)
+      || Math.abs(msg.x) > 1000 || Math.abs(msg.y) > 1000) {
+      return { ok: false, error: 'bad flare' };
+    }
   }
   // WebRTC signaling for the P2P chat channel: exactly three
   // kinds, each with its one payload field, size-bounded (an SDP
@@ -949,6 +988,37 @@ export function packTeams(v) {
 export function unpackTeams(packed) {
   if (!Number.isInteger(packed) || packed < 0) return [...DEFAULT_TEAMS];
   return [packed & 0xff, (packed >> 8) & 0xff];
+}
+
+// Teams T3b (NET-11): the Locked Teams half of the settings.
+// DE's standard posture is locked (the stance table cannot
+// change); an unlocked match lets the diplomacy panel's stance
+// selectors issue real commands. The flag rides the SAME
+// handshake/replay meta as the team pair, as its own boolean
+// field, and enters the sim through bit 16 of the packed
+// constructor word (T3a: set = unlocked; every pre-T3a packed
+// word has the bit clear and reads locked). The validation
+// boundary is strict, like the pair's: only the literal `true`
+// unlocks — junk must never unlock a match by accident.
+export const TEAMS_UNLOCKED_BIT = 1 << 16;
+
+/// The unlocked flag a foreign value amounts to: true only for
+/// the literal boolean true, false for everything else.
+export function normalizeTeamsUnlocked(v) {
+  return v === true;
+}
+
+/// The packed constructor word for a team pair plus the
+/// unlocked flag (packTeams' two bytes, plus bit 16 while
+/// unlocked). Locked packs exactly as packTeams always has.
+export function packTeamsWithLock(v, unlocked) {
+  return (packTeams(v) | (normalizeTeamsUnlocked(unlocked) ? TEAMS_UNLOCKED_BIT : 0)) >>> 0;
+}
+
+/// Whether a packed constructor word carries the unlocked bit.
+export function teamsUnlockedFromPacked(packed) {
+  return Number.isInteger(packed) && packed >= 0
+    && (packed & TEAMS_UNLOCKED_BIT) !== 0;
 }
 
 // ---------------------------------------------------------------------

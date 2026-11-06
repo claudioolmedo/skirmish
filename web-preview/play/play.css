@@ -385,6 +385,11 @@ html, body {
 }
 .diplo-send { display: inline-flex; align-items: center; gap: 6px; }
 .diplo-send:disabled { opacity: 0.45; }
+/* Teams T3b (NET-11): the foe row's stance selector — live only
+   in unlocked matches; disabled (locked) it reads as plain
+   panel furniture, never as an offer the sim would refuse. */
+.diplo-stance-select { font: inherit; }
+.diplo-stance-select:disabled { opacity: 0.45; }
 /* Wave-1 leftovers (INF-06 + INF-11): the technology tree and
    the end card's statistics furniture, in the same parchment
    language. The scoreboard reuses .diplo-card / .diplo-table. */

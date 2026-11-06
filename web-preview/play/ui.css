@@ -515,6 +515,11 @@ button.sel-cell:hover { background: rgba(61, 42, 18, 0.30); }
   border-left: 1px solid rgba(0, 0, 0, 0.5);
 }
 
+/* Teams T3b (INF-04): the Signal Allies button beside the
+   minimap; .active is the armed one-shot state. */
+#flare-btn { margin-left: 8px; white-space: nowrap; }
+#flare-btn.active { outline: 2px solid #ffcf4d; }
+
 #minimap {
   display: block;
   /* the map fills the capped strip's height (to a sane ceiling)

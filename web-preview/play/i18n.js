@@ -376,6 +376,8 @@ const EN = {
   'team.opponentOption': 'Opponent — separate teams',
   'team.allyOption': 'Ally — same team, shared vision',
   'room.teamAlly': 'Team: Ally',
+  'room.teamsUnlocked': 'Unlocked teams',
+  'set.unlockedTeams': 'Unlocked teams (diplomacy)',
   // --- room screen ---------------------------------------------------------
   'room.title': 'Your room',
   'room.config': '1v1 · Arabia · {victory} · Guest: {guest} · Speed: {speed}',
@@ -624,6 +626,14 @@ const EN = {
   'diplo.sendTitle': 'Send {res} — click: 100 · Shift+click: 500',
   'diplo.notEnough': 'Not enough {res} for that tribute.',
   'diplo.sent': 'Sent {amount} {res}.',
+  'diplo.ally': 'Ally',
+  'diplo.neutral': 'Neutral',
+  'diplo.incoming': 'Stance toward you',
+  'diplo.lockedNote': 'Teams are locked in this match — stances cannot change.',
+  'diplo.unlockedNote': 'Teams are unlocked — you can change your stance; a change alters only your own row.',
+  'flare.button': 'Signal allies',
+  'flare.title': 'Signal allies — click the minimap or the world to place a flare',
+  'flare.armed': 'Click the minimap or the world to place your flare.',
   // --- wave-1 leftovers (ECO-14 reseed + the farm chain, INF-11
   // scoreboard/statistics, INF-06 technology tree) ----------------
   'cmd.heavyplowTitle': 'Research {name} — {cost} · {secs} s. Farms hold +125 food; farmers carry +1 food. Hotkey: W.',
@@ -1060,6 +1070,8 @@ const PT_BR = {
   'team.opponentOption': 'Adversário — times separados',
   'team.allyOption': 'Aliado — mesmo time, visão compartilhada',
   'room.teamAlly': 'Time: Aliado',
+  'room.teamsUnlocked': 'Times destravados',
+  'set.unlockedTeams': 'Times destravados (diplomacia)',
   // --- room screen -------------------------------------------------------------
   'room.title': 'Sua sala',
   'room.config': '1v1 · Arábia · {victory} · Convidado: {guest} · Velocidade: {speed}',
@@ -1308,6 +1320,14 @@ const PT_BR = {
   'diplo.sendTitle': 'Enviar {res} — clique: 100 · Shift+clique: 500',
   'diplo.notEnough': '{res} insuficiente para esse tributo.',
   'diplo.sent': 'Enviados {amount} de {res}.',
+  'diplo.ally': 'Aliado',
+  'diplo.neutral': 'Neutro',
+  'diplo.incoming': 'Postura em relação a você',
+  'diplo.lockedNote': 'Os times estão travados nesta partida — você não pode mudar as posturas.',
+  'diplo.unlockedNote': 'Os times estão destravados — você pode mudar a sua postura; a mudança vale só para a sua linha.',
+  'flare.button': 'Sinalizar aliados',
+  'flare.title': 'Sinalizar aliados — clique no minimapa ou no mundo para colocar um sinal',
+  'flare.armed': 'Clique no minimapa ou no mundo para colocar o seu sinal.',
   // --- restos da vaga 1 (ECO-14 replantio + cadeia da fazenda,
   // INF-11 placar/estatísticas, INF-06 árvore tecnológica) -------
   'cmd.heavyplowTitle': 'Pesquisar {name} — {cost} · {secs} s. Fazendas comportam +125 de alimento; fazendeiros carregam +1 de alimento. Tecla: W.',
@@ -1744,6 +1764,8 @@ const ES = {
   'team.opponentOption': 'Oponente — equipos separados',
   'team.allyOption': 'Aliado — mismo equipo, visión compartida',
   'room.teamAlly': 'Equipo: Aliado',
+  'room.teamsUnlocked': 'Equipos desbloqueados',
+  'set.unlockedTeams': 'Equipos desbloqueados (diplomacia)',
   // --- room screen -------------------------------------------------------------
   'room.title': 'Tu sala',
   'room.config': '1v1 · Arabia · {victory} · Invitado: {guest} · Velocidad: {speed}',
@@ -1991,6 +2013,14 @@ const ES = {
   'diplo.tributeNote': 'Haz clic en un recurso para enviar 100 a tu adversario; Mayús+clic envía 500. La tasa se cobra aparte — tu adversario recibe la cantidad completa.',
   'diplo.sendTitle': 'Enviar {res} — clic: 100 · Mayús+clic: 500',
   'diplo.notEnough': '{res} insuficiente para ese tributo.',
+  'diplo.ally': 'Aliado',
+  'diplo.neutral': 'Neutral',
+  'diplo.incoming': 'Postura hacia ti',
+  'diplo.lockedNote': 'Los equipos están bloqueados en esta partida — no puedes cambiar las posturas.',
+  'diplo.unlockedNote': 'Los equipos están desbloqueados — puedes cambiar tu postura; el cambio vale solo para tu fila.',
+  'flare.button': 'Señalar a los aliados',
+  'flare.title': 'Señalar a los aliados — haz clic en el minimapa o en el mundo para colocar una señal',
+  'flare.armed': 'Haz clic en el minimapa o en el mundo para colocar tu señal.',
   'diplo.sent': 'Enviados {amount} de {res}.',
   // --- restos de la oleada 1 (ECO-14 resiembra + cadena de la
   // granja, INF-11 marcador/estadísticas, INF-06 árbol) ---------
