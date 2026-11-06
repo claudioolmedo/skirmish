@@ -39,6 +39,19 @@ test('overlay cards use auto margins so tall cards stay reachable', () => {
     'the card centers via auto margins (top stays scrollable on overflow)');
 });
 
+test('the overlay centers SAFELY so an overflowing card aligns to the top', () => {
+  // The first fix attempt (auto margins alone) failed live: with
+  // negative free space the margins collapse to 0 and the unsafe
+  // `align-items: center` centering still clips the card's top.
+  // `safe center` is the alignment that falls back to start.
+  const m = playCss.match(/\.overlay\s*\{[^}]*\}/);
+  assert.ok(m, '.overlay rule found in play.css');
+  assert.ok(/align-items:\s*safe center/.test(m[0]),
+    'cross-axis centering is safe (top reachable on overflow)');
+  assert.ok(!/align-items:\s*center;/.test(m[0]),
+    'no unsafe plain centering remains on the cross axis');
+});
+
 test('Escape closes the live panels before deselecting', () => {
   const esc = appJs.match(/if \(e\.code === 'Escape'\) \{[\s\S]*?\n    return;\n  \}/);
   assert.ok(esc, 'Escape branch found in app.js');
