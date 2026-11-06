@@ -968,6 +968,12 @@ impl BuildingKind {
                 // the Dock only — the Dock's first roster entry
                 // (its table stood empty through W1).
                 | (BuildingKind::Dock, EntityKind::FishingShip)
+                // Water W3a (CLS-07): the Feudal combat set
+                // trains at the Dock only (WATER-SPEC §3.2).
+                | (BuildingKind::Dock, EntityKind::Galley)
+                | (BuildingKind::Dock, EntityKind::FireGalley)
+                | (BuildingKind::Dock, EntityKind::DemolitionRaft)
+                | (BuildingKind::Dock, EntityKind::Hulk)
         )
     }
 

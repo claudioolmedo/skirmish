@@ -336,7 +336,8 @@ const KIND_KING = 22; // Package C: the Regicide king (VIC-06) — builder's 21 
 // before then.
 const KIND_I18N = ['villager', 'townCenter', 'scout', 'militia', 'archer',
   'sheep', 'boar', 'deer', 'manAtArms', 'spearman', 'skirmisher', 'wolf',
-  'knight', 'lightCavalry', 'cavalryArcher', 'petard', 'tradeCart', 'batteringRam', 'mangonel', 'scorpion', 'monk', 'relic', 'king', 'fishingShip'];
+  'knight', 'lightCavalry', 'cavalryArcher', 'petard', 'tradeCart', 'batteringRam', 'mangonel', 'scorpion', 'monk', 'relic', 'king', 'fishingShip', 'galley',
+  'fireGalley', 'demolitionRaft', 'hulk'];
 let KIND_NAME = {
   0: 'Villager', 1: 'Town Center', 2: 'Scout Cavalry', 3: 'Militia',
   4: 'Archer', 5: 'Sheep', 6: 'Boar', 7: 'Deer', 8: 'Man-at-Arms',
@@ -344,6 +345,7 @@ let KIND_NAME = {
   12: 'Knight', 13: 'Light Cavalry', 14: 'Cavalry Archer', 15: 'Petard',
   16: 'Trade Cart', 17: 'Battering Ram', 18: 'Mangonel', 19: 'Scorpion',
   20: 'Monk', 21: 'Relic', 22: 'King', 23: 'Fishing Ship',
+  24: 'Galley', 25: 'Fire Galley', 26: 'Demolition Raft', 27: 'Hulk',
 };
 // Selection-panel portraits per unit kind (SVG symbol ids in
 // play/index.html).
@@ -353,6 +355,7 @@ const KIND_ICON = {
   12: 'i-villager', 13: 'i-villager', 14: 'i-archer', 15: 'i-petard',
   16: 'i-trade-cart', 17: 'i-ram', 18: 'i-mangonel', 19: 'i-scorpion',
   20: 'i-monk', 21: 'i-gold', 22: 'i-king', 23: 'i-fishing-ship',
+  24: 'i-galley', 25: 'i-fire-galley', 26: 'i-demolition-raft', 27: 'i-hulk',
 };
 
 // Original PNG icon set (2026-10-19, AI generations via Base44 on
@@ -4247,6 +4250,10 @@ function applyLocalOrder(cmd) {
         : cmd.k === 19 ? sim.push_train_scorpion(cmd.b)
         : cmd.k === 20 ? sim.push_train_monk(cmd.b)
         : cmd.k === 23 ? sim.push_train_fishing_ship(cmd.b)
+        : cmd.k === 24 ? sim.push_train_galley(cmd.b)
+        : cmd.k === 25 ? sim.push_train_fire_galley(cmd.b)
+        : cmd.k === 26 ? sim.push_train_demolition_raft(cmd.b)
+        : cmd.k === 27 ? sim.push_train_hulk(cmd.b)
         : sim.push_train_archer(cmd.b);
     // Package D (TRD-05): task a Trade Cart to a foreign Market.
     case 'trade': return sim.push_trade(cmd.e, cmd.b);
@@ -11994,6 +12001,206 @@ function drawFishingShip(i, wx, wy) {
   }
 }
 
+// Water W3a (CLS-07): the Feudal combat ships — original
+// flat-vector hulls in the Fishing Ship's drawing language (a
+// wake ellipse, an owner-color sail or cloth, a brown hull);
+// no DE art. The Galley is the Fishing Ship's bigger war
+// sibling: a taller mast, a single large owner-color sail and
+// a row of oar strokes along the hull.
+function drawGalley(i, wx, wy) {
+  const [sx, sy] = worldToScreen(wx, wy);
+  const u = camS;
+  ctx.strokeStyle = 'rgba(220, 240, 250, 0.45)';
+  ctx.lineWidth = Math.max(1, 0.14 * u);
+  ctx.beginPath();
+  ctx.ellipse(sx, sy - 0.1 * u, 1.8 * u, 0.58 * u, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  if (selection.has(i)) drawSelRing(sx, sy, 2.0);
+  const cloth = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e';
+  ctx.strokeStyle = '#6f5533';
+  ctx.lineWidth = Math.max(1, 0.17 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx, sy - 0.55 * u);
+  ctx.lineTo(sx, sy - 3.6 * u);
+  ctx.stroke();
+  ctx.fillStyle = cloth;
+  ctx.beginPath();
+  ctx.moveTo(sx + 0.12 * u, sy - 3.5 * u);
+  ctx.lineTo(sx + 1.5 * u, sy - 1.2 * u);
+  ctx.lineTo(sx + 0.12 * u, sy - 1.2 * u);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#e8dcc0';
+  ctx.beginPath();
+  ctx.moveTo(sx - 0.12 * u, sy - 3.3 * u);
+  ctx.lineTo(sx - 1.05 * u, sy - 1.2 * u);
+  ctx.lineTo(sx - 0.12 * u, sy - 1.2 * u);
+  ctx.closePath();
+  ctx.fill();
+  poly([
+    [sx - 1.7 * u, sy - 1.0 * u], [sx + 1.7 * u, sy - 1.0 * u],
+    [sx + 1.15 * u, sy - 0.05 * u], [sx - 1.15 * u, sy - 0.05 * u],
+  ], '#7d5830');
+  ctx.strokeStyle = '#5d3d20';
+  ctx.lineWidth = Math.max(1, 0.12 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx - 1.7 * u, sy - 1.0 * u);
+  ctx.lineTo(sx + 1.7 * u, sy - 1.0 * u);
+  ctx.stroke();
+  // Oars: three short strokes a side below the rail.
+  ctx.strokeStyle = 'rgba(230, 220, 195, 0.8)';
+  ctx.lineWidth = Math.max(1, 0.09 * u);
+  for (const f of [-1, 0, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(sx + f * 0.75 * u, sy - 0.35 * u);
+    ctx.lineTo(sx + (f * 0.75 - 0.35) * u, sy + 0.25 * u);
+    ctx.stroke();
+  }
+}
+
+// The Fire Galley: a low hull, no sail — a brazier amidships
+// with two flame tongues, and bronze beak at the bow. The
+// flame is the silhouette: it reads at a glance in a melee.
+function drawFireGalley(i, wx, wy) {
+  const [sx, sy] = worldToScreen(wx, wy);
+  const u = camS;
+  ctx.strokeStyle = 'rgba(220, 240, 250, 0.45)';
+  ctx.lineWidth = Math.max(1, 0.14 * u);
+  ctx.beginPath();
+  ctx.ellipse(sx, sy - 0.1 * u, 1.8 * u, 0.58 * u, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  if (selection.has(i)) drawSelRing(sx, sy, 2.0);
+  const cloth = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e';
+  poly([
+    [sx - 1.7 * u, sy - 0.95 * u], [sx + 1.7 * u, sy - 0.95 * u],
+    [sx + 1.15 * u, sy - 0.05 * u], [sx - 1.15 * u, sy - 0.05 * u],
+  ], '#6e4a26');
+  ctx.strokeStyle = '#4a3016';
+  ctx.lineWidth = Math.max(1, 0.12 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx - 1.7 * u, sy - 0.95 * u);
+  ctx.lineTo(sx + 1.7 * u, sy - 0.95 * u);
+  ctx.stroke();
+  // Owner-color stripe along the rail.
+  ctx.strokeStyle = cloth;
+  ctx.lineWidth = Math.max(1, 0.16 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx - 1.6 * u, sy - 0.82 * u);
+  ctx.lineTo(sx + 1.6 * u, sy - 0.82 * u);
+  ctx.stroke();
+  // The brazier: a dark bowl on a short post.
+  ctx.strokeStyle = '#3a3a3a';
+  ctx.lineWidth = Math.max(1, 0.16 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx, sy - 0.9 * u);
+  ctx.lineTo(sx, sy - 1.5 * u);
+  ctx.stroke();
+  poly([
+    [sx - 0.55 * u, sy - 1.75 * u], [sx + 0.55 * u, sy - 1.75 * u],
+    [sx + 0.35 * u, sy - 1.45 * u], [sx - 0.35 * u, sy - 1.45 * u],
+  ], '#2e2e2e');
+  // Flames: two tongues, orange over yellow.
+  ctx.fillStyle = '#e06a1b';
+  ctx.beginPath();
+  ctx.moveTo(sx - 0.42 * u, sy - 1.75 * u);
+  ctx.quadraticCurveTo(sx - 0.1 * u, sy - 2.9 * u, sx + 0.18 * u, sy - 2.2 * u);
+  ctx.quadraticCurveTo(sx + 0.34 * u, sy - 2.75 * u, sx + 0.44 * u, sy - 1.75 * u);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#f2b63c';
+  ctx.beginPath();
+  ctx.moveTo(sx - 0.2 * u, sy - 1.75 * u);
+  ctx.quadraticCurveTo(sx, sy - 2.45 * u, sx + 0.22 * u, sy - 1.75 * u);
+  ctx.closePath();
+  ctx.fill();
+}
+
+// The Demolition Raft: a flat log platform with barrels —
+// no mast, no sail. Three dark barrels banded in the owner's
+// color make the cargo (and the threat) unmistakable.
+function drawDemolitionRaft(i, wx, wy) {
+  const [sx, sy] = worldToScreen(wx, wy);
+  const u = camS;
+  ctx.strokeStyle = 'rgba(220, 240, 250, 0.45)';
+  ctx.lineWidth = Math.max(1, 0.14 * u);
+  ctx.beginPath();
+  ctx.ellipse(sx, sy - 0.1 * u, 1.75 * u, 0.55 * u, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  if (selection.has(i)) drawSelRing(sx, sy, 1.95);
+  const cloth = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e';
+  // The log platform: three horizontal logs.
+  ctx.fillStyle = '#8a6238';
+  for (const f of [-0.62, -0.28, 0.06]) {
+    ctx.beginPath();
+    ctx.ellipse(sx, sy + f * u, 1.6 * u, 0.17 * u, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.strokeStyle = '#5d3d20';
+  ctx.lineWidth = Math.max(1, 0.1 * u);
+  ctx.beginPath();
+  ctx.ellipse(sx, sy - 0.28 * u, 1.6 * u, 0.51 * u, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  // Barrels: three dark casks with an owner-color band.
+  for (const f of [-0.85, 0, 0.85]) {
+    poly([
+      [sx + (f - 0.3) * u, sy - 0.55 * u], [sx + (f + 0.3) * u, sy - 0.55 * u],
+      [sx + (f + 0.36) * u, sy - 1.25 * u], [sx + (f - 0.36) * u, sy - 1.25 * u],
+    ], '#4c3823');
+    ctx.fillStyle = cloth;
+    ctx.fillRect(sx + (f - 0.37) * u, sy - 0.98 * u, 0.74 * u, 0.14 * u);
+  }
+}
+
+// The Hulk: the heavy melee hull — broad-beamed, high-sided,
+// a fighting platform fore and aft and a short mast with a
+// furled owner-color cloth. Bulk is the silhouette.
+function drawHulk(i, wx, wy) {
+  const [sx, sy] = worldToScreen(wx, wy);
+  const u = camS;
+  ctx.strokeStyle = 'rgba(220, 240, 250, 0.45)';
+  ctx.lineWidth = Math.max(1, 0.14 * u);
+  ctx.beginPath();
+  ctx.ellipse(sx, sy - 0.1 * u, 1.85 * u, 0.6 * u, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  if (selection.has(i)) drawSelRing(sx, sy, 2.05);
+  const cloth = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e';
+  // High hull.
+  poly([
+    [sx - 1.75 * u, sy - 1.25 * u], [sx + 1.75 * u, sy - 1.25 * u],
+    [sx + 1.2 * u, sy - 0.05 * u], [sx - 1.2 * u, sy - 0.05 * u],
+  ], '#75522c');
+  ctx.strokeStyle = '#4f3418';
+  ctx.lineWidth = Math.max(1, 0.13 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx - 1.75 * u, sy - 1.25 * u);
+  ctx.lineTo(sx + 1.75 * u, sy - 1.25 * u);
+  ctx.stroke();
+  // Fighting platforms: two raised decks at the ends.
+  poly([
+    [sx - 1.7 * u, sy - 1.6 * u], [sx - 0.95 * u, sy - 1.6 * u],
+    [sx - 0.95 * u, sy - 1.25 * u], [sx - 1.7 * u, sy - 1.25 * u],
+  ], '#8a6238');
+  poly([
+    [sx + 0.95 * u, sy - 1.6 * u], [sx + 1.7 * u, sy - 1.6 * u],
+    [sx + 1.7 * u, sy - 1.25 * u], [sx + 0.95 * u, sy - 1.25 * u],
+  ], '#8a6238');
+  // Short mast with the furled owner-color cloth.
+  ctx.strokeStyle = '#6f5533';
+  ctx.lineWidth = Math.max(1, 0.16 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx, sy - 1.25 * u);
+  ctx.lineTo(sx, sy - 3.0 * u);
+  ctx.stroke();
+  ctx.fillStyle = cloth;
+  ctx.beginPath();
+  ctx.moveTo(sx - 0.55 * u, sy - 2.95 * u);
+  ctx.lineTo(sx + 0.55 * u, sy - 2.95 * u);
+  ctx.lineTo(sx + 0.4 * u, sy - 2.3 * u);
+  ctx.lineTo(sx - 0.4 * u, sy - 2.3 * u);
+  ctx.closePath();
+  ctx.fill();
+}
+
 function drawTradeCart(i, wx, wy) {
   const [sx, sy] = worldToScreen(wx, wy);
   const u = camS;
@@ -13024,6 +13231,8 @@ function attemptTrain(id) {
     'train-petard': 15, 'train-trade-cart': 16, 'train-ram': 17,
     'train-mangonel': 18, 'train-scorpion': 19,
     'train-monk': 20, 'train-fishing-ship': 23,
+    'train-galley': 24, 'train-fire-galley': 25,
+    'train-demolition-raft': 26, 'train-hulk': 27,
   }[id];
   if (kindTag == null) return false;
   return selectedBuilding && selectedBuilding.type === 'building'
@@ -13048,6 +13257,8 @@ function flashTrainRefusal(id) {
       'train-petard': 15, 'train-trade-cart': 16, 'train-ram': 17,
       'train-mangonel': 18, 'train-scorpion': 19,
       'train-monk': 20, 'train-fishing-ship': 23,
+      'train-galley': 24, 'train-fire-galley': 25,
+      'train-demolition-raft': 26, 'train-hulk': 27,
     }[id];
     const reason = sim.building_train_block(selectedBuilding.id, kindTag);
     flash(['', t('train.noResourcesUnit'),
@@ -13077,7 +13288,9 @@ function runCommandButton(id, times = 1) {
     || id === 'train-knight' || id === 'train-cavalry-archer'
     || id === 'train-petard' || id === 'train-trade-cart' || id === 'train-ram'
     || id === 'train-mangonel' || id === 'train-scorpion' || id === 'train-monk'
-    || id === 'train-fishing-ship') {
+    || id === 'train-fishing-ship' || id === 'train-galley'
+    || id === 'train-fire-galley' || id === 'train-demolition-raft'
+    || id === 'train-hulk') {
     let done = 0;
     while (done < times && attemptTrain(id)) done++;
     if (done === 0) flashTrainRefusal(id);
@@ -13496,6 +13709,10 @@ function renderCommands() {
   const blockTC = bk && context === 'market' ? sim.building_train_block(bk.id, 16) : -1;
   const blockMo = bk && context === 'monastery' ? sim.building_train_block(bk.id, 20) : -1;
   const blockFS = bk && context === 'dock' ? sim.building_train_block(bk.id, 23) : -1;
+  const blockGa = bk && context === 'dock' ? sim.building_train_block(bk.id, 24) : -1;
+  const blockFG = bk && context === 'dock' ? sim.building_train_block(bk.id, 25) : -1;
+  const blockDR = bk && context === 'dock' ? sim.building_train_block(bk.id, 26) : -1;
+  const blockHu = bk && context === 'dock' ? sim.building_train_block(bk.id, 27) : -1;
   // Research blocks: the TC set (Loom 0, Feudal 1, Wheelbarrow 6,
   // Castle 14, Hand Cart 15) and the building techs, keyed by
   // tag — Blacksmith (Fletching 2, Scale Mail 3, Padded 4,
@@ -13523,7 +13740,7 @@ function renderCommands() {
   const sig = [context, Math.floor(wood), Math.floor(myStock()[0]), Math.floor(myStock()[2]),
     Math.floor(myStock()[3]),
     reason, queue, bk ? bk.id : -1, bk ? bk.queue : -1, bk && bk.complete ? 1 : 0,
-    blockM, blockSp, blockA, blockSk, blockS, blockK, blockCA, blockP, blockR, blockMg, blockSc, blockTC, blockMo, blockFS, age, techMask, rbTc.join('.'), Object.values(rbB).join('.'),
+    blockM, blockSp, blockA, blockSk, blockS, blockK, blockCA, blockP, blockR, blockMg, blockSc, blockTC, blockMo, blockFS, blockGa, blockFG, blockDR, blockHu, age, techMask, rbTc.join('.'), Object.values(rbB).join('.'),
     tcQueueCodes, bkQueueCodes, buildPage || '', repairArm ? 1 : 0, healArm ? 1 : 0, convertArm ? 1 : 0,
     // Castle P3b: the garrison counts and the bell state are panel
     // state (button faces + disabled states read them).
@@ -14172,6 +14389,57 @@ function renderCommands() {
               ? t('cmd.buildGate', { name: TECH_NAME[46], gate: t('gate.castle') })
               : t('cmd.gillnetsTitle', { name: TECH_NAME[46], cost: costText([[150, 'food'], [200, 'wood']]), secs: 45 }) + (RESEARCH_BLOCK_TITLES[rbB[46]] ? ' ' + RESEARCH_BLOCK_TITLES[rbB[46]] : ''),
       }),
+      // Water W3a (CLS-07): the Feudal combat ships — the
+      // Dock's second roster row, behind the Feudal gate: the
+      // sim's train block greys them (train_age) and the title
+      // carries the age requirement until then, the Spearman
+      // pattern; the button greys on the hard blocks like the
+      // Fishing Ship's, the funds block stays clickable and
+      // flashes. Costs are two-resource (wood + gold).
+      cmdButton({
+        id: 'train-galley', icon: 'i-galley', label: 'Galley',
+        costIcon: 'i-wood', cost: 90, cost2Icon: 'i-gold', cost2: 30,
+        disabled: underConstruction || blockGa === 2 || blockGa === 3,
+        key: badgeForButton({ context, id: 'train-galley', index: 3 }),
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: KIND_NAME[24], building: BUILD_NAME[23] })
+          : age < 1
+            ? t('cmd.buildGate', { name: KIND_NAME[24], gate: t('gate.feudal') })
+            : t('cmd.trainTitleTime', { name: KIND_NAME[24], cost: costText([[90, 'wood'], [30, 'gold']]), secs: 36 }) + (TRAIN_BLOCK_TITLES[blockGa] ? ' ' + TRAIN_BLOCK_TITLES[blockGa] : ''),
+      }),
+      cmdButton({
+        id: 'train-fire-galley', icon: 'i-fire-galley', label: 'Fire Galley',
+        costIcon: 'i-wood', cost: 75, cost2Icon: 'i-gold', cost2: 45,
+        disabled: underConstruction || blockFG === 2 || blockFG === 3,
+        key: badgeForButton({ context, id: 'train-fire-galley', index: 4 }),
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: KIND_NAME[25], building: BUILD_NAME[23] })
+          : age < 1
+            ? t('cmd.buildGate', { name: KIND_NAME[25], gate: t('gate.feudal') })
+            : t('cmd.trainTitleTime', { name: KIND_NAME[25], cost: costText([[75, 'wood'], [45, 'gold']]), secs: 49 }) + (TRAIN_BLOCK_TITLES[blockFG] ? ' ' + TRAIN_BLOCK_TITLES[blockFG] : ''),
+      }),
+      cmdButton({
+        id: 'train-demolition-raft', icon: 'i-demolition-raft', label: 'Demolition Raft',
+        costIcon: 'i-wood', cost: 70, cost2Icon: 'i-gold', cost2: 80,
+        disabled: underConstruction || blockDR === 2 || blockDR === 3,
+        key: badgeForButton({ context, id: 'train-demolition-raft', index: 5 }),
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: KIND_NAME[26], building: BUILD_NAME[23] })
+          : age < 1
+            ? t('cmd.buildGate', { name: KIND_NAME[26], gate: t('gate.feudal') })
+            : t('cmd.trainTitleTime', { name: KIND_NAME[26], cost: costText([[70, 'wood'], [80, 'gold']]), secs: 45 }) + (TRAIN_BLOCK_TITLES[blockDR] ? ' ' + TRAIN_BLOCK_TITLES[blockDR] : ''),
+      }),
+      cmdButton({
+        id: 'train-hulk', icon: 'i-hulk', label: 'Hulk',
+        costIcon: 'i-wood', cost: 75, cost2Icon: 'i-gold', cost2: 35,
+        disabled: underConstruction || blockHu === 2 || blockHu === 3,
+        key: badgeForButton({ context, id: 'train-hulk', index: 6 }),
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: KIND_NAME[27], building: BUILD_NAME[23] })
+          : age < 1
+            ? t('cmd.buildGate', { name: KIND_NAME[27], gate: t('gate.feudal') })
+            : t('cmd.trainTitleTime', { name: KIND_NAME[27], cost: costText([[75, 'wood'], [35, 'gold']]), secs: 42 }) + (TRAIN_BLOCK_TITLES[blockHu] ? ' ' + TRAIN_BLOCK_TITLES[blockHu] : ''),
+      }),
     );
     // Water W2b (ECO-15): the trap-reseed desk — the Mill
     // reseed desk's mirror at the Dock (ECO-14's shape, the
@@ -14734,7 +15002,7 @@ function updateSelPanel() {
   // 2026-11-01 trained Monks and saw NO queue/progress line and
   // NO cancel chip — the player could not tell the click had
   // worked, the same defect family a third time.
-  const PROD_KINDS = [2, 3, 4, 5, 6, 7, 8, 12, 15, 16, 17, 20, 23];
+  const PROD_KINDS = [2, 3, 4, 5, 6, 7, 8, 12, 15, 16, 17, 20, 23, 24, 25, 26, 27];
   const context = selUnits.length > 0 ? 'units'
     : selectedBuilding
       ? (selectedBuilding.type === 'tc'
@@ -15679,7 +15947,11 @@ function draw() {
     drawMonk, // 20: Monk (Castle P5a)
     drawRelic, // 21: Relic (Castle P5d)
     drawKing, // 22: King (Package C, VIC-06)
-    drawFishingShip]; // 23: Fishing Ship (Water W2, ECO-15)
+    drawFishingShip, // 23: Fishing Ship (Water W2, ECO-15)
+    drawGalley, // 24: Galley (Water W3a, CLS-07)
+    drawFireGalley, // 25: Fire Galley (Water W3a, CLS-07)
+    drawDemolitionRaft, // 26: Demolition Raft (Water W3a, CLS-07)
+    drawHulk]; // 27: Hulk (Water W3a, CLS-07)
   for (let i = 0; i < count; i++) {
     const wx = pos[i * 2];
     const wy = pos[i * 2 + 1];

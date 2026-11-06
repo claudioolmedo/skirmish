@@ -61,12 +61,13 @@ test('the Dock panel exists: context, train block, research rows', () => {
   assert.match(app, /id: 'research-fishinglines', icon: 'i-fishinglines', label: 'Fishing Lines',\s*costIcon: 'i-food', cost: 50, cost2Icon: 'i-wood', cost2: 100,/);
   assert.match(app, /id: 'research-gillnets', icon: 'i-gillnets', label: 'Gillnets',\s*costIcon: 'i-food', cost: 150, cost2Icon: 'i-wood', cost2: 200,/);
   assert.deepEqual(PANEL_BUTTONS.dock,
-    ['train-fishing-ship', 'research-fishinglines', 'research-gillnets']);
+    ['train-fishing-ship', 'research-fishinglines', 'research-gillnets',
+      'train-galley', 'train-fire-galley', 'train-demolition-raft', 'train-hulk']);
 });
 
 test('the Dock is a full production + shelter host client-side', () => {
   // Selection panel production line and queue-name tag.
-  assert.match(app, /const PROD_KINDS = \[2, 3, 4, 5, 6, 7, 8, 12, 15, 16, 17, 20, 23\];/);
+  assert.match(app, /const PROD_KINDS = \[2, 3, 4, 5, 6, 7, 8, 12, 15, 16, 17, 20, 23, 24, 25, 26, 27\];/);
   assert.match(app, /20: 20, 23: 23 \};/);
   // Shelter: cap 5 on the garrison line, arrows read, and the
   // ungarrison block rides the Dock panel.
@@ -83,9 +84,9 @@ test('rendering tables cover the ship and both fish nodes', () => {
   assert.match(app, /function drawShoreFish\(sx, sy, frac\)/);
   assert.match(app, /function drawDeepFish\(sx, sy, frac\)/);
   assert.match(app, /function drawFishingShip\(i, wx, wy\)/);
-  assert.match(app, /drawFishingShip\]; \/\/ 23: Fishing Ship/);
-  assert.match(app, /23: 'Fishing Ship',\s*\};/);
-  assert.match(app, /23: 'i-fishing-ship',\s*\};/);
+  assert.match(app, /drawFishingShip, \/\/ 23: Fishing Ship/);
+  assert.match(app, /23: 'Fishing Ship',/);
+  assert.match(app, /23: 'i-fishing-ship',/);
   assert.equal(NODE_COLORS.length, 10);
 });
 

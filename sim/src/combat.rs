@@ -197,6 +197,13 @@ struct Blast {
     /// Fell covered tree nodes (MAP-04 — the Onager line's
     /// documented effect; not the Petard's).
     fell_trees: bool,
+    /// Enemies only (Water W3a, CLS-07): the Demolition line's
+    /// documented NO-friendly-fire profile — entities and
+    /// buildings of the blast owner's own seat or an allied seat
+    /// are excluded before any roll or damage, the exact inverse
+    /// of CMB-12's hurts-everyone flag the Petard and the
+    /// Mangonel pass as `false`.
+    enemies_only: bool,
 }
 
 /// The pre-elevation damage sum of CMB-01: Σ over participating
@@ -1477,11 +1484,19 @@ impl Sim {
                 } else {
                     std::borrow::Cow::Borrowed(spec.attacks)
                 };
-                self.apply_hit(attacker_id, owner, (ax, ay), &attacks, ti, false, atk_elev);
-                // CMB-17 (Castle P3a): a Petard's landed strike
-                // detonates it at the target.
-                if self.entities[idx].kind == EntityKind::Petard {
-                    self.petard_detonate(idx, (tx, ty), spec.attacks, Some(ti), None);
+                // CLS-07 (Water W3a): a Demolition Raft's landed
+                // strike detonates it INSTEAD of dealing the
+                // strike — the blast is the whole attack (see
+                // `demolition_detonate`).
+                if self.entities[idx].kind == EntityKind::DemolitionRaft {
+                    self.demolition_detonate(idx);
+                } else {
+                    self.apply_hit(attacker_id, owner, (ax, ay), &attacks, ti, false, atk_elev);
+                    // CMB-17 (Castle P3a): a Petard's landed strike
+                    // detonates it at the target.
+                    if self.entities[idx].kind == EntityKind::Petard {
+                        self.petard_detonate(idx, (tx, ty), spec.attacks, Some(ti), None);
+                    }
                 }
             }
         }
@@ -1998,11 +2013,20 @@ impl Sim {
                     self.entities[idx].garrison.len(),
                     spec.attacks,
                 );
-                self.damage_building(bid, &attacks, atk_elev, owner);
-                // CMB-17 (Castle P3a): a Petard's landed strike
-                // detonates it at the footprint's edge point.
-                if self.entities[idx].kind == EntityKind::Petard {
-                    self.petard_detonate(idx, (qx, qy), spec.attacks, None, Some(bid));
+                // CLS-07 (Water W3a): a Demolition Raft's landed
+                // building strike detonates it instead of dealing
+                // the strike, exactly as against a unit (the
+                // blast, centered on the raft, reaches the
+                // footprint's edge well inside its radius).
+                if self.entities[idx].kind == EntityKind::DemolitionRaft {
+                    self.demolition_detonate(idx);
+                } else {
+                    self.damage_building(bid, &attacks, atk_elev, owner);
+                    // CMB-17 (Castle P3a): a Petard's landed strike
+                    // detonates it at the footprint's edge point.
+                    if self.entities[idx].kind == EntityKind::Petard {
+                        self.petard_detonate(idx, (qx, qy), spec.attacks, None, Some(bid));
+                    }
                 }
             }
         }
@@ -2065,11 +2089,69 @@ impl Sim {
                 struck_building: primary_building,
                 secondaries: 0,
                 fell_trees: false,
+                enemies_only: false,
             },
         );
         // Consumed by its own detonation.
         let e = &mut self.entities[idx];
         e.hp = I16F16::ZERO;
+        e.clear_combat();
+    }
+
+    /// CLS-07 (Water W3a): the Demolition Raft's detonation —
+    /// the Petard's sibling with the opposite blast profile.
+    /// Called from both strike resolutions the tick a raft's
+    /// contact strike LANDS (in place of the strike's own
+    /// damage — the blast IS the attack, so the primary takes
+    /// tapered blast damage, never strike-plus-blast) and from
+    /// the death sweep when enemy fire kills the raft first
+    /// (SPEC §3.5: a demolition ship killed before reaching its
+    /// target "still explodes for full damage"). The blast is
+    /// centered on the raft, radius 2.5 tiles, TAPERED (the
+    /// Raft's radial decrease; the Castle-Age Demolition Ship's
+    /// untapered 3.0 profile is W3b's second profile on this
+    /// same helper), no accuracy rolls, no tree felling, and
+    /// **enemies only** — no friendly fire, where the Petard
+    /// and the Mangonel hurt everyone (CMB-12's pair, pinned by
+    /// the W3a tests both ways). Finally the raft is consumed:
+    /// its HP is set to 0 and the death sweep removes it this
+    /// same tick; its hit attribution is cleared first, so the
+    /// sweep does not read its own detonation as an enemy kill
+    /// and detonate it a second time.
+    fn demolition_detonate(&mut self, idx: usize) {
+        let (px, py) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
+        let spec = self.unit_stats(idx);
+        let attacks: Vec<(u8, i32)> = spec.attacks.to_vec();
+        let attacker_id = self.entities[idx].id;
+        let owner = self.entities[idx].owner;
+        let atk_elev = self.entity_height(idx);
+        self.apply_blast(
+            &attacks,
+            Blast {
+                attacker_id,
+                owner,
+                threat: (px, py),
+                point: (px, py),
+                radius: crate::units::DEMOLITION_RAFT_BLAST_RADIUS,
+                atk_elev,
+                accuracy: None,
+                taper: true,
+                primary_unit: None,
+                primary_building: None,
+                skip_unit: Some(idx),
+                struck_unit: None,
+                struck_building: None,
+                secondaries: 0,
+                fell_trees: false,
+                enemies_only: true,
+            },
+        );
+        // Consumed by its own detonation (see the doc above on
+        // the cleared attribution).
+        let e = &mut self.entities[idx];
+        e.hp = I16F16::ZERO;
+        e.last_hit_by = None;
+        e.last_hit_owner = None;
         e.clear_combat();
     }
 
@@ -2102,6 +2184,7 @@ impl Sim {
                 struck_building: None,
                 secondaries: spec.blast_secondaries,
                 fell_trees: true,
+                enemies_only: false,
             },
         );
     }
@@ -2135,6 +2218,14 @@ impl Sim {
             .filter(|&vi| {
                 Some(vi) != b.skip_unit
                     && Some(vi) != b.struck_unit
+                    // Water W3a (CLS-07): an enemies-only blast
+                    // never lists the owner's own or an allied
+                    // seat's units — excluded before the accuracy
+                    // roll, like the relic below, so they consume
+                    // no stream draw either.
+                    && !(b.enemies_only
+                        && (self.entities[vi].owner == b.owner
+                            || self.allied(b.owner, self.entities[vi].owner)))
                     // MNK-09 (Castle P5d): relics are never blast
                     // victims — indestructible, and excluded
                     // before the accuracy roll so they never
@@ -2194,7 +2285,14 @@ impl Sim {
             .buildings
             .iter()
             .filter(|bd| {
-                Some(bd.id) != b.struck_building && {
+                Some(bd.id) != b.struck_building
+                    // Water W3a (CLS-07): an enemies-only blast
+                    // spares the owner's own and allied buildings
+                    // too (a Demolition Raft beside its own Dock
+                    // leaves the Dock untouched).
+                    && !(b.enemies_only
+                        && (bd.owner == b.owner || self.allied(b.owner, bd.owner)))
+                    && {
                     // Package J landing: per-axis halves (gate spans),
                     // not the square footprint half.
                     let (hx, hy) = bd.half_extents();
@@ -3284,6 +3382,34 @@ impl Sim {
             {
                 let tc_id = self.entities[idx].id;
                 self.eject_host(crate::entity::GarrisonRef::TownCenter(tc_id));
+            }
+            // CLS-07 (Water W3a): a Demolition Raft killed by
+            // ENEMY fire detonates where it died, before the
+            // corpse is marked (SPEC §3.5 — "a Demolition Ship
+            // that is killed before reaching its target still
+            // explodes for full damage"). The attribution test
+            // is the guard against double detonation: a raft
+            // consumed by its own attack-path detonation arrives
+            // here with its attribution cleared by
+            // `demolition_detonate` itself, and a Delete arrives
+            // with it cleared by the Delete command — neither
+            // re-detonates. (DE's "or deleted" clause is NOT
+            // reproduced: a Delete's cleared attribution is
+            // indistinguishable here from a self-detonation's,
+            // and the anti-double-detonation guard governs —
+            // recorded in the W3a handoff.)
+            if !self.entities[idx].dead
+                && self.entities[idx].hp < I16F16::from_num(1)
+                && self.entities[idx].kind == EntityKind::DemolitionRaft
+                && match self.entities[idx].last_hit_owner {
+                    Some(lo) => {
+                        lo != self.entities[idx].owner
+                            && !self.allied(lo, self.entities[idx].owner)
+                    }
+                    None => false,
+                }
+            {
+                self.demolition_detonate(idx);
             }
             // GAR-10 (Castle P4a): a dying Battering Ram ejects
             // its passengers ALIVE at the ring around its final

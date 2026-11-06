@@ -125,6 +125,8 @@ mod water_w1_tests;
 mod water_w2a_tests;
 #[cfg(test)]
 mod water_w2b_tests;
+#[cfg(test)]
+mod water_w3a_tests;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
@@ -3810,6 +3812,20 @@ impl Sim {
             s.attacks = units::CAVALRY_ARCHER_FLETCHING_ATTACKS;
             s.range_max += I16F16::from_bits(262_144); // +4.0 (1 tile)
         }
+        // Water W3a (CLS-07): the Galley line takes Fletching
+        // with the archer line — the wiki's Galley article lists
+        // Fletching among its attack AND range technologies
+        // (+1 attack, +1 range per rung; only the Feudal rung
+        // exists in this roster). Ballistics needs no patch row
+        // here: the release already leads moving targets for
+        // every ranged attacker whose owner holds it (PRJ-05's
+        // generic layer in `combat`), and the Galley's article
+        // names Ballistics as its accuracy technology — the W3a
+        // tests pin the lead applying to a Galley shot.
+        if kind == EntityKind::Galley && p.techs & TechId::Fletching.bit() != 0 {
+            s.attacks = units::GALLEY_FLETCHING_ATTACKS;
+            s.range_max += I16F16::from_bits(262_144); // +4.0 (1 tile)
+        }
         // Scale Mail Armor (study §8): infantry +1/+1 armor — the
         // Spearman is infantry and takes the patch with the line.
         if matches!(
@@ -3854,6 +3870,13 @@ impl Sim {
                         units::SCOUT_FORGING_ATTACKS
                     };
                 }
+                // Water W3a (CLS-07): the Hulk line takes
+                // Forging — the Forging article names it
+                // explicitly ("Infantry, Cavalry and Hulk-line
+                // +1 attack"); the later rungs (Iron Casting,
+                // Blast Furnace) are not in this roster yet and
+                // layer here when they land.
+                EntityKind::Hulk => s.attacks = units::HULK_FORGING_ATTACKS,
                 _ => {}
             }
         }

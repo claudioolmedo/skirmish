@@ -175,6 +175,10 @@ const TRAIN_AT_FNS = {
   19: 'push_train_scorpion',
   17: 'push_train_battering_ram', 20: 'push_train_monk',
   23: 'push_train_fishing_ship',
+  24: 'push_train_galley',
+  25: 'push_train_fire_galley',
+  26: 'push_train_demolition_raft',
+  27: 'push_train_hulk',
 };
 
 const isInt = (v) => Number.isInteger(v) && v >= 0;
@@ -234,7 +238,7 @@ export function validateCommand(c) {
     // absent — the pre-BLD-20 wire form — or 14 stone wall).
     case 'buildline': return isInt(c.e) && isNum(c.x0) && isNum(c.y0) && isNum(c.x1) && isNum(c.y1)
       && (c.k === undefined || c.k === 9 || c.k === 14);
-    case 'train_at': return isInt(c.b) && (c.k === 2 || c.k === 3 || c.k === 4 || c.k === 9 || c.k === 10 || c.k === 12 || c.k === 14 || c.k === 15 || c.k === 16 || c.k === 17 || c.k === 18 || c.k === 19 || c.k === 20 || c.k === 23);
+    case 'train_at': return isInt(c.b) && (c.k === 2 || c.k === 3 || c.k === 4 || c.k === 9 || c.k === 10 || c.k === 12 || c.k === 14 || c.k === 15 || c.k === 16 || c.k === 17 || c.k === 18 || c.k === 19 || c.k === 20 || c.k === 23 || c.k === 24 || c.k === 25 || c.k === 26 || c.k === 27);
     case 'train_vil': return c.tc === undefined || isInt(c.tc);
     case 'research_tc': return (c.tech === 0 || c.tech === 1 || c.tech === 6
       || c.tech === 14 || c.tech === 15 || c.tech === 18

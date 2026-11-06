@@ -702,6 +702,30 @@ impl WasmSim {
         self.push_train_at(building, EntityKind::FishingShip)
     }
 
+    /// Train a Galley at a Dock (Water W3a, CLS-07). See
+    /// `push_train_militia`.
+    pub fn push_train_galley(&mut self, building: u32) -> bool {
+        self.push_train_at(building, EntityKind::Galley)
+    }
+
+    /// Train a Fire Galley at a Dock (Water W3a, CLS-07). See
+    /// `push_train_militia`.
+    pub fn push_train_fire_galley(&mut self, building: u32) -> bool {
+        self.push_train_at(building, EntityKind::FireGalley)
+    }
+
+    /// Train a Demolition Raft at a Dock (Water W3a, CLS-07).
+    /// See `push_train_militia`.
+    pub fn push_train_demolition_raft(&mut self, building: u32) -> bool {
+        self.push_train_at(building, EntityKind::DemolitionRaft)
+    }
+
+    /// Train a Hulk at a Dock (Water W3a, CLS-07). See
+    /// `push_train_militia`.
+    pub fn push_train_hulk(&mut self, building: u32) -> bool {
+        self.push_train_at(building, EntityKind::Hulk)
+    }
+
     /// Order a Monk to heal an allied unit (Castle P5a, MNK-10):
     /// the monk walks into heal range and restores 150 HP/min
     /// until the target is whole. Returns whether the order

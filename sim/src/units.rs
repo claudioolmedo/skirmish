@@ -169,6 +169,10 @@ pub fn spec(kind: EntityKind) -> &'static UnitSpec {
         EntityKind::Relic => &RELIC,
         EntityKind::King => &KING,
         EntityKind::FishingShip => &FISHING_SHIP,
+        EntityKind::Galley => &GALLEY,
+        EntityKind::FireGalley => &FIRE_GALLEY,
+        EntityKind::DemolitionRaft => &DEMOLITION_RAFT,
+        EntityKind::Hulk => &HULK,
     }
 }
 
@@ -228,6 +232,27 @@ pub(crate) static SPEARMAN_FORGING_ATTACKS: &[(u8, i32)] = &[
     (cls::SHOCK_INFANTRY, 1),
     (cls::STANDARD_BUILDINGS, 1),
 ];
+
+/// The Galley's attack table with Fletching researched (Water
+/// W3a, CLS-07): the tech's +1 pierce (the wiki's Galley article
+/// lists Fletching among its attack technologies); the bonus
+/// pairs are untouched, exactly the reference's arithmetic. The
+/// +1 range is patched separately — see `Sim::stats_for`.
+pub(crate) static GALLEY_FLETCHING_ATTACKS: &[(u8, i32)] = &[
+    (cls::PIERCE, 7),
+    (cls::LONG_RANGE_WARSHIP, 4),
+    (cls::STANDARD_BUILDINGS, 6),
+    (cls::RAM, 3),
+];
+
+/// The Hulk's attack table with Forging researched (Water W3a,
+/// CLS-07): the tech's +1 melee (the wiki's Forging article
+/// names the Hulk line explicitly — "Infantry, Cavalry and
+/// Hulk-line +1 attack" in `tech.rs`'s module docs; the Hulk
+/// article's own technology table agrees); the +1 vs Fire Ships
+/// pair is untouched.
+pub(crate) static HULK_FORGING_ATTACKS: &[(u8, i32)] =
+    &[(cls::MELEE, 5), (cls::FIRE_SHIP, 1)];
 
 /// Villager (study §3.1): HP 25, attack 3 melee, armor 0/0, RoF 2.0 s,
 /// attack delay ≈0.64 s (community table), speed 0.8, LoS 4.
@@ -830,6 +855,213 @@ static FISHING_SHIP: UnitSpec = UnitSpec {
     wood_cost: 75,
     gold_cost: 0,
     train_ticks: 2400, // 40 s
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
+};
+
+/// The Demolition Raft's blast radius (Water W3a, CLS-07): 2.5
+/// tiles (wiki, Update 169123 article's Demolition Raft line via
+/// WATER-SPEC §3.2) — the blast tapers radially (the Raft's
+/// profile; the Castle-Age Demolition Ship's 3.0 at 100% across
+/// is W3b's second profile on the same helper).
+pub const DEMOLITION_RAFT_BLAST_RADIUS: I16F16 = I16F16::from_bits(655_360); // 10.0 = 2.5 tiles
+
+/// Galley (Water W3a, CLS-07; wiki, Ship list fresh crawl
+/// 2026-11-05 via WATER-SPEC §3.2 — post-update-169123 values):
+/// HP 110, armor 0/3, attack 6 pierce with +4 vs Long-Range
+/// Warships (wiki, Update 169123 article's Galley line, fetched
+/// 2026-11-06), +6 vs Standard Buildings and +3 vs Rams
+/// (ADOPTED for the Feudal row from the War Galley's pinned
+/// comparison row — wiki, Turtle Ship comparison table — via
+/// update 169123's "Galley line: unchanged attack bonuses
+/// against buildings and rams"), range 5, RoF 3.0 s, speed 1.36
+/// tiles/s, LoS 7. Cost 90 W / 30 G, train 36 s at the Dock,
+/// Feudal Age. Classes: SHIP + LONG_RANGE_WARSHIP (the Galley
+/// line carries the class it also hunts — DE models both sides
+/// of the one surviving bonus case). Accuracy 80, projectile
+/// speed and scatter adopt the Archer row's recorded design
+/// constants (PRJ-02/PRJ-04) — ADOPTED/UNVERIFIED for this row:
+/// no fetched source pins the Galley's own figures. Attack
+/// delay adopts the Archer's 21 ticks on the same basis.
+/// Radius adopts the Fishing Ship's 1.6 — an implementation
+/// constant (WATER-SPEC §8.9), never DE data.
+static GALLEY: UnitSpec = UnitSpec {
+    max_hp: 110,
+    attacks: &[
+        (cls::PIERCE, 6),
+        (cls::LONG_RANGE_WARSHIP, 4),
+        (cls::STANDARD_BUILDINGS, 6),
+        (cls::RAM, 3),
+    ],
+    armor_melee: 0,
+    armor_pierce: 3,
+    armor_building: 0,
+    classes: cls::mask(&[cls::SHIP, cls::LONG_RANGE_WARSHIP]),
+    range_max: I16F16::from_bits(1_310_720), // 20 (5 tiles)
+    range_min: I16F16::ZERO,
+    reload_ticks: 180, // 3.0 s
+    attack_delay_ticks: 21, // adopted (see above)
+    accuracy: 80, // adopted (see above)
+    projectile_speed: I16F16::from_bits(32_768), // 0.5 — design constant (see Archer)
+    scatter: I16F16::from_bits(131_072),          // 2.0 — design constant (see Archer)
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
+    speed: I16F16::from_bits(5_942), // 1.36 tiles/s (absolute scale, see header)
+    los: I16F16::from_bits(1_835_008), // 28 (7 tiles)
+    radius: I16F16::from_bits(104_858), // 1.6 — adopted (see above)
+    carcass_food: 0,
+    carcass_decay_bits: 0,
+    food_cost: 0,
+    wood_cost: 90,
+    gold_cost: 30,
+    train_ticks: 2160, // 36 s
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
+};
+
+/// Fire Galley (Water W3a, CLS-07; wiki, Ship list fresh crawl
+/// 2026-11-05 via WATER-SPEC §3.2 + the Fire Galley article's
+/// update-169123 changelog, fetched 2026-11-06): HP 110, armor
+/// 1/4, attack **2 melee** (the overhaul "changed base attack to
+/// 2 melee and pierce attack removed") with +1 vs Long-Range
+/// Warships (wiki, Update 169123 article's Fire Galley line) and
+/// NO bonus vs buildings (the article's update-185872 line:
+/// "Fire Galley have an attack bonus of 0 vs. buildings"),
+/// range 2.5, RoF 0.25 s, speed 1.36 tiles/s (the SPEC's fresh
+/// Ship-list value governs; the Update 169123 article's 1.43
+/// conflicts and is recorded here, not averaged), LoS 5. Cost
+/// 75 W / 45 G, train 49 s at the Dock, Feudal Age. Classes:
+/// SHIP + FIRE_SHIP. **Spray-as-data (Passo 0 pin):** the
+/// documented weapon is ordinary fast melee strikes — 2 melee
+/// every 0.25 s inside range 2.5 — so the row is pure data on
+/// the standing release: range 2.5 rides the ranged band with
+/// the generic projectile constants and accuracy 100 (a spray
+/// at this range does not scatter-roll in any fetched source);
+/// no continuous-damage model is documented, so none is built.
+/// Attack delay 15 ticks (one RoF cycle) is ADOPTED/UNVERIFIED.
+/// Radius adopts the Fishing Ship's 1.6 (implementation
+/// constant, WATER-SPEC §8.9).
+static FIRE_GALLEY: UnitSpec = UnitSpec {
+    max_hp: 110,
+    attacks: &[(cls::MELEE, 2), (cls::LONG_RANGE_WARSHIP, 1)],
+    armor_melee: 1,
+    armor_pierce: 4,
+    armor_building: 0,
+    classes: cls::mask(&[cls::SHIP, cls::FIRE_SHIP]),
+    range_max: I16F16::from_bits(655_360), // 10 (2.5 tiles)
+    range_min: I16F16::ZERO,
+    reload_ticks: 15, // 0.25 s
+    attack_delay_ticks: 15, // adopted (see above)
+    accuracy: 100,
+    projectile_speed: I16F16::from_bits(32_768), // 0.5 — design constant (see Archer)
+    scatter: I16F16::ZERO,
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
+    speed: I16F16::from_bits(5_942), // 1.36 tiles/s (see above)
+    los: I16F16::from_bits(1_310_720), // 20 (5 tiles)
+    radius: I16F16::from_bits(104_858), // 1.6 — adopted (see above)
+    carcass_food: 0,
+    carcass_decay_bits: 0,
+    food_cost: 0,
+    wood_cost: 75,
+    gold_cost: 45,
+    train_ticks: 2940, // 49 s
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
+};
+
+/// Demolition Raft (Water W3a, CLS-07; wiki, Update 169123
+/// article's Demolition Raft line via WATER-SPEC §3.2 — the
+/// fresh Ship list's own row was internally inconsistent, SPEC
+/// §8.10): HP 40, armor 0/0, attack 65 melee delivered as its
+/// **blast** (radius 2.5 tiles, radial decrease, NO friendly
+/// fire — the wiki's Demolition tactics; see
+/// `combat::Sim::demolition_detonate`), contact range, speed
+/// 1.42 tiles/s, LoS 6. Cost 70 W / 80 G, train 45 s at the
+/// Dock, Feudal Age. Class: SHIP. The row's `attacks` table IS
+/// the blast table; the strike machinery never applies it
+/// singly — a landed strike (or the raft's death by enemy fire)
+/// detonates instead, exactly the Petard's split with the
+/// blast profile inverted (tapered, enemies-only). Reload and
+/// attack delay adopt the Petard's recorded constants (the
+/// strike is single by construction). Radius adopts the
+/// Fishing Ship's 1.6 (implementation constant, §8.9).
+static DEMOLITION_RAFT: UnitSpec = UnitSpec {
+    max_hp: 40,
+    attacks: &[(cls::MELEE, 65)],
+    armor_melee: 0,
+    armor_pierce: 0,
+    armor_building: 0,
+    classes: cls::mask(&[cls::SHIP]),
+    range_max: I16F16::ZERO,
+    range_min: I16F16::ZERO,
+    reload_ticks: 120, // adopted (see above)
+    attack_delay_ticks: 30, // adopted foot-melee value (see above)
+    accuracy: 100,
+    projectile_speed: I16F16::ZERO,
+    scatter: I16F16::ZERO,
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
+    speed: I16F16::from_bits(6_204), // 1.42 tiles/s (absolute scale, see header)
+    los: I16F16::from_bits(1_572_864), // 24 (6 tiles)
+    radius: I16F16::from_bits(104_858), // 1.6 — adopted (see above)
+    carcass_food: 0,
+    carcass_decay_bits: 0,
+    food_cost: 0,
+    wood_cost: 70,
+    gold_cost: 80,
+    train_ticks: 2700, // 45 s
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
+};
+
+/// Hulk (Water W3a, CLS-07; wiki, Ship list fresh crawl
+/// 2026-11-05 via WATER-SPEC §3.2, corroborated by the Hulk
+/// article's update-185872 changelog — HP 90 → 85, melee armor
+/// 4 → 3 — fetched 2026-11-06): HP 85, armor 3/1, attack 4 melee
+/// with +1 vs Fire Ships (wiki, "Armor class: Fire ship" —
+/// the anti-fire-ship row is +1 and the class exists for the
+/// Hulk line), range 1 (the melee reach constant governs, as
+/// for every melee row), RoF 1.75 s, speed 1.42 tiles/s, LoS 5.
+/// Cost 75 W / 35 G, train 42 s at the Dock, Feudal Age. Class:
+/// SHIP. It takes the Forging line's patches (its article's
+/// technology table) and no archer patch. Attack delay adopts
+/// the foot-melee rows' 30 ticks (no fetched source pins the
+/// Hulk's own frame value) — ADOPTED. Radius adopts the
+/// Fishing Ship's 1.6 (implementation constant, §8.9).
+static HULK: UnitSpec = UnitSpec {
+    max_hp: 85,
+    attacks: &[(cls::MELEE, 4), (cls::FIRE_SHIP, 1)],
+    armor_melee: 3,
+    armor_pierce: 1,
+    armor_building: 0,
+    classes: cls::mask(&[cls::SHIP]),
+    range_max: I16F16::ZERO,
+    range_min: I16F16::ZERO,
+    reload_ticks: 105, // 1.75 s
+    attack_delay_ticks: 30, // adopted (see above)
+    accuracy: 100,
+    projectile_speed: I16F16::ZERO,
+    scatter: I16F16::ZERO,
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
+    speed: I16F16::from_bits(6_204), // 1.42 tiles/s (absolute scale, see header)
+    los: I16F16::from_bits(1_310_720), // 20 (5 tiles)
+    radius: I16F16::from_bits(104_858), // 1.6 — adopted (see above)
+    carcass_food: 0,
+    carcass_decay_bits: 0,
+    food_cost: 0,
+    wood_cost: 75,
+    gold_cost: 35,
+    train_ticks: 2520, // 42 s
     regicide_unit: false,
     immune_conversion: false,
     regenerates: 0,

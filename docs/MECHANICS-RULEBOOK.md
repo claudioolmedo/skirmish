@@ -2666,16 +2666,47 @@ sources, and nothing reads `regenerates` or `immune_conversion` yet
 Fire Ship, Turtle Ship, …) interact through their own bonus rows; ship
 armor values and the Fire Ship's short-range spray follow the same
 CMB-01 math on water (MOV-11). Demolition Ships are blast units whose
-attack is their own destruction.
+attack is their own destruction. *Amended (Water W3, 2026-11-06) to
+the current DE ecology:* the Update 169123 naval overhaul abolished
+almost all inter-ship bonus rows — ship combat is now the base attack
+(pierce for the Galley line, melee for the Fire, Demolition and Hulk
+lines) plus a single surviving bonus family, the **Long-Ranged
+Warship** class (genie class 60: +4 to Galleys, +1 to Fire Galleys),
+and one armor class, **Fire Ship** (genie class 41, carried by the
+Fire Galley line; the anti-fire bonus is +1 — e.g. the Hulk's). The
+Fire Galley's spray is an ordinary fast melee strike (2 melee, 0.25 s
+reload, range 2.5), not a per-tick damage model. Demolition blasts
+take the inverse friendly-fire profile of CMB-12: they hurt enemies
+only. The dossier is `skirmish-study/water/WATER-SPEC.md` §3.
 *Source:* MECHANICS-STUDY §1.3 (ship classes), §3 (naval lines via GAP
-6.10). · *Impl:* nothing structural — classes + domain data. Water
+6.10); Update 169123 (official preview + wiki) for the amended
+ecology. · *Impl:* nothing structural — classes + domain data. Water
 W2a (2026-11-05) lands the first member: the Fishing Ship carries
 the SHIP class (the §0.5 membership pin in
 `sim/src/entity.rs` — post-169123 the Fire Galley exception no
 longer exists, so the class applies uniformly), and the Dock's
 shelter arrows and the Watch Tower's anti-ship row now have a
-target. The combat lines themselves are W3. · *Status:*
-**MISSING** (first member only; the ecology lands in W3).
+target. Water W3a (2026-11-06) lands the Feudal combat set at the
+Dock: **Galley** (kind 24; 6 pierce, +4 vs Long-Ranged Warships —
+the Galley line carries that class itself — +6 vs buildings / +3
+vs rams ADOPTED from the War Galley's pinned comparison row),
+**Fire Galley** (25; 2 melee spray at RoF 0.25 / range 2.5, +1 vs
+Long-Ranged Warships, classes SHIP + FIRE_SHIP), **Demolition
+Raft** (26; 65 melee blast, radius 2.5 tapered, enemies-only —
+detonates on a landed strike or, attribution allowing, when an
+enemy kills it; the deleted-raft case is deliberately not
+reproduced, see the W3a handoff) and **Hulk** (27; 4 melee, +1 vs
+the FIRE_SHIP class). Two new armor classes ride along:
+LONG_RANGE_WARSHIP 22 and FIRE_SHIP 23 in `classes.rs`. The
+Feudal Blacksmith/Ballistics patch rows land with them: Fletching
+swaps the Galley's attack table (+1 pierce, +1 range) and Forging
+the Hulk's (+1 melee), and Ballistics reaches the Galley line
+through the generic PRJ-05 lead. The Castle Age set (Medium
+Warships → War Galley / Fire Ship / Demolition Ship / War Hulk,
+the Demolition Ship's untapered 3.0 blast) is W3b, which flips
+this status. · *Status:*
+**MISSING** (narrowed by W3a: the Feudal ecology is in; the
+Medium Warships / Castle set is W3b).
 
 **CLS-08 — The Monk class has no attack.** Monks belong to their own
 class (which other monks' Atonement and various bonuses key off); their

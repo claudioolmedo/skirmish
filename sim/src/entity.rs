@@ -159,6 +159,30 @@ pub enum EntityKind {
     /// SHIP and every anti-ship row (the Dock's shelter arrows,
     /// the Watch Tower's +7) applies to it uniformly.
     FishingShip,
+    /// The Galley (Water W3a, CLS-07): the Feudal Age all-purpose
+    /// warship trained at the Dock — the pierce half of the
+    /// post-169123 naval ecology, and the generic roster's first
+    /// carrier of the LONG_RANGE_WARSHIP armor class (it is both
+    /// the class's target and, at +4, its hardest generic hitter).
+    Galley,
+    /// The Fire Galley (Water W3a, CLS-07): the Feudal Age
+    /// close-range fire ship trained at the Dock — 2 melee sprayed
+    /// at RoF 0.25 s inside range 2.5 (spray-as-data, Passo 0 pin:
+    /// no source documents a continuous per-tick damage model
+    /// distinct from ordinary fast strikes). It carries the
+    /// FIRE_SHIP armor class the Hulk line's +1 row keys on.
+    FireGalley,
+    /// The Demolition Raft (Water W3a, CLS-07): the Feudal Age
+    /// suicide ship trained at the Dock — its attack is its own
+    /// destruction: a tapered, enemies-only blast of radius 2.5
+    /// tiles, on contact or when killed (CMB-17's sibling; the
+    /// Mangonel's hurts-everyone flag is the opposite pole).
+    DemolitionRaft,
+    /// The Hulk (Water W3a, CLS-07): the Feudal Age boarding ship
+    /// new in update 169123, trained at the Dock — a short-range
+    /// melee ship that counters the Fire line (its +1 vs the
+    /// FIRE_SHIP class) and takes the Forging line's patches.
+    Hulk,
 }
 
 impl EntityKind {
@@ -179,6 +203,11 @@ impl EntityKind {
     /// 23 = fishing ship (Water W2a, ECO-15 — appended after the
     /// King, so no tag moved; verified first free on the W2a base
     /// `7e0d294`, where 0–22 were taken).
+    /// 24 = galley, 25 = fire galley, 26 = demolition raft,
+    /// 27 = hulk (Water W3a, CLS-07 — appended after the Fishing
+    /// Ship in the WATER-EXECUTION-PLAN §2 allocation order;
+    /// verified first free on the W3a base `00f5864`, where
+    /// 0–23 were taken).
     pub fn tag(self) -> u8 {
         match self {
             EntityKind::Villager => 0,
@@ -205,6 +234,10 @@ impl EntityKind {
             EntityKind::Relic => 21,
             EntityKind::King => 22,
             EntityKind::FishingShip => 23,
+            EntityKind::Galley => 24,
+            EntityKind::FireGalley => 25,
+            EntityKind::DemolitionRaft => 26,
+            EntityKind::Hulk => 27,
         }
     }
 
@@ -235,6 +268,10 @@ impl EntityKind {
             21 => Some(EntityKind::Relic),
             22 => Some(EntityKind::King),
             23 => Some(EntityKind::FishingShip),
+            24 => Some(EntityKind::Galley),
+            25 => Some(EntityKind::FireGalley),
+            26 => Some(EntityKind::DemolitionRaft),
+            27 => Some(EntityKind::Hulk),
             _ => None,
         }
     }
@@ -250,6 +287,13 @@ impl EntityKind {
             EntityKind::Spearman | EntityKind::Skirmisher | EntityKind::TradeCart => {
                 crate::tech::Age::Feudal
             }
+            // Water W3a (CLS-07): the whole Feudal combat set
+            // trains at the Dock from the Feudal Age (WATER-SPEC
+            // §3.2 — the Fishing Ship alone is Dark Age).
+            EntityKind::Galley
+            | EntityKind::FireGalley
+            | EntityKind::DemolitionRaft
+            | EntityKind::Hulk => crate::tech::Age::Feudal,
             EntityKind::Knight
             | EntityKind::CavalryArcher
             | EntityKind::Petard
@@ -271,7 +315,11 @@ impl EntityKind {
     /// match).
     pub fn domain(self) -> crate::grid::Domain {
         match self {
-            EntityKind::FishingShip => crate::grid::Domain::Water,
+            EntityKind::FishingShip
+            | EntityKind::Galley
+            | EntityKind::FireGalley
+            | EntityKind::DemolitionRaft
+            | EntityKind::Hulk => crate::grid::Domain::Water,
             _ => crate::grid::Domain::Land,
         }
     }
@@ -310,6 +358,10 @@ impl EntityKind {
                 | EntityKind::Monk
                 | EntityKind::King
                 | EntityKind::FishingShip
+                | EntityKind::Galley
+                | EntityKind::FireGalley
+                | EntityKind::DemolitionRaft
+                | EntityKind::Hulk
         )
     }
 
@@ -335,6 +387,10 @@ impl EntityKind {
                 | EntityKind::Scorpion
                 | EntityKind::Monk
                 | EntityKind::FishingShip
+                | EntityKind::Galley
+                | EntityKind::FireGalley
+                | EntityKind::DemolitionRaft
+                | EntityKind::Hulk
         )
     }
 
@@ -389,6 +445,10 @@ impl EntityKind {
                 | EntityKind::Petard
                 | EntityKind::Mangonel
                 | EntityKind::Scorpion
+                | EntityKind::Galley
+                | EntityKind::FireGalley
+                | EntityKind::DemolitionRaft
+                | EntityKind::Hulk
         )
     }
 

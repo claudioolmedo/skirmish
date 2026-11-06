@@ -79,6 +79,21 @@ pub const SIEGE: u8 = 20;
 /// membership in the same slice that gives the class its first
 /// consumer, and the Mangonel's +12 stays keyed on SIEGE.
 pub const RAM: u8 = 21;
+/// Long-range warships (Water W3a, CLS-07; DE update 169123's
+/// single surviving ship bonus case): DE's genie class 60 in the
+/// reference, renumbered to our next free id 22 here — carried by
+/// the Galley line (and, in later slices, the Cannon Galleon
+/// equivalents); the Galley line attacks it for +4 and the Fire
+/// line for +1 (wiki, Update 169123 article + the naval-rework
+/// preview's per-line rows, fetched 2026-11-05/06).
+pub const LONG_RANGE_WARSHIP: u8 = 22;
+/// Fire ships (Water W3a, CLS-07; DE update 169123): DE's genie
+/// class 41 in the reference, renumbered to our next free id 23
+/// here — carried by the Fire Galley line; the Hulk line attacks
+/// it for +1 (wiki, "Armor class: Fire ship": the class "was
+/// introduced to make the Hulk line stronger against the Fire
+/// Galley line", anti-fire-ship row +1, fetched 2026-11-06).
+pub const FIRE_SHIP: u8 = 23;
 
 /// Membership bit for one class id.
 pub const fn bit(class: u8) -> u64 {
