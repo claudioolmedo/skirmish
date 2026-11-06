@@ -158,6 +158,13 @@ const BUILD_FNS = [
   'push_build_university', 'push_build_siege_workshop',
   'push_build_palisade_gate', 'push_build_stone_gate', 'push_build_monastery',
 ];
+// Appended after the literal, exactly as app.js's PUSH_BUILD
+// does: tag 24 is the Fish Trap (Water W2b) — the one kind
+// past the literal this table dispatches. Tags 22 (Wonder)
+// and 23 (Dock) keep their pre-W2b state: local dispatch
+// only, not wire-legal (see the validator), so no entries
+// are added for them here.
+BUILD_FNS[24] = 'push_build_fish_trap';
 const BUILD_FNS_QUEUED = BUILD_FNS.map((n) => n + '_queued');
 const TRAIN_AT_FNS = {
   2: 'push_train_scout', 3: 'push_train_militia', 4: 'push_train_archer',
@@ -212,7 +219,13 @@ export function validateCommand(c) {
     // index past the table is junk. (BLD-20 raised it to 14 with
     // the Stone Wall; 13 — the Town Center — was already
     // dispatchable but not validatable, an old inconsistency.)
-    case 'build': return isInt(c.e) && isInt(c.k) && c.k <= 18 && isNum(c.x) && isNum(c.y);
+    // In practice the wire vocabulary is 0..18 plus, since
+    // Water W2b, the Fish Trap (24): 19/20 stay dispatchable
+    // but not wire-legal (the pinned quirk — netplay.test.mjs
+    // names 19 as junk), 21 is the unconstructible Monument,
+    // and 22/23 (Wonder, Dock) remain local-dispatch only, as
+    // they were before W2b.
+    case 'build': return isInt(c.e) && isInt(c.k) && (c.k <= 18 || c.k === 24) && isNum(c.x) && isNum(c.y);
     // TRD-01..03: Market trades — a building id and a commodity
     // tag (food 1, wood 2, stone 4; gold is never a commodity).
     case 'mbuy': case 'msell':
@@ -252,6 +265,11 @@ export function validateCommand(c) {
     case 'queue_reseed': return isInt(c.b);
     case 'dequeue_reseed': return isInt(c.b);
     case 'set_auto_reseed': return isInt(c.b) && typeof c.on === 'boolean';
+    // Water W2b (ECO-15): the Dock trap-reseed desk — the
+    // ECO-14 trio's mirror; the building names the Dock.
+    case 'queue_trap_reseed': return isInt(c.b);
+    case 'dequeue_trap_reseed': return isInt(c.b);
+    case 'set_auto_trap_reseed': return isInt(c.b) && typeof c.on === 'boolean';
     case 'rally_tc': return isNum(c.x) && isNum(c.y) && (c.tc === undefined || isInt(c.tc));
     case 'rally_b': return isInt(c.b) && isNum(c.x) && isNum(c.y);
     case 'force_dep': return isInt(c.e);
@@ -396,6 +414,16 @@ export function applyCommand(sim, cmd, owner, tcOf) {
     case 'queue_reseed': return sim.push_queue_reseed(cmd.b);
     case 'dequeue_reseed': return sim.push_dequeue_reseed(cmd.b);
     case 'set_auto_reseed': return sim.push_set_auto_reseed(cmd.b, cmd.on);
+    // Water W2b: the trap-reseed desk — the Dock's owner is
+    // derived in the sim from the named building, like the
+    // reseed desk above. Guarded like diplomacy: a stale wasm
+    // without the exports simply refuses.
+    case 'queue_trap_reseed': return typeof sim.push_queue_trap_reseed === 'function'
+      ? sim.push_queue_trap_reseed(cmd.b) : false;
+    case 'dequeue_trap_reseed': return typeof sim.push_dequeue_trap_reseed === 'function'
+      ? sim.push_dequeue_trap_reseed(cmd.b) : false;
+    case 'set_auto_trap_reseed': return typeof sim.push_set_auto_trap_reseed === 'function'
+      ? sim.push_set_auto_trap_reseed(cmd.b, cmd.on) : false;
     // VIC-11: resignation — the resigning seat is the bundle's
     // owner, so both clients sweep the same player at the same
     // tick and the ruins agree bit-for-bit.

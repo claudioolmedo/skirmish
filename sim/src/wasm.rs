@@ -1437,6 +1437,16 @@ impl WasmSim {
         self.push_build(entity, BuildingKind::Dock, x, y)
     }
 
+    /// Order a Fishing Ship to build a Fish Trap (100 wood, 1×1
+    /// on one water cell; Feudal Age — Water W2b, ECO-15): the
+    /// point names the trap's cell, and the sim accepts only a
+    /// ship ordering onto water-side, unobstructed ground it
+    /// can reach — the game's first non-villager build order;
+    /// see `push_build_house`.
+    pub fn push_build_fish_trap(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build(entity, BuildingKind::FishTrap, x, y)
+    }
+
     /// Buy one lot (100) of a commodity at a completed Market
     /// (TRD-01..03): `resource_tag` is the `ResourceKind` tag
     /// (food 1, wood 2, stone 4 — gold is never a commodity).
@@ -1533,6 +1543,45 @@ impl WasmSim {
         if self.inner.is_completed_mill(building) {
             self.inner
                 .push_command(Command::SetAutoReseed { building, on });
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Buy one Fish Trap reseed ahead at the named Dock (Water
+    /// W2b, ECO-15): 100 wood, paid now, into the Dock owner's
+    /// paid trap-reseed queue. Returns false (and queues
+    /// nothing) when the sim would reject it: not a completed
+    /// Dock, or the owner short of the wood.
+    pub fn push_queue_trap_reseed(&mut self, building: u32) -> bool {
+        if !self.inner.can_queue_trap_reseed(building) {
+            return false;
+        }
+        self.inner.push_command(Command::QueueTrapReseed { building });
+        true
+    }
+
+    /// Remove one paid trap reseed from the queue of the named
+    /// Dock's owner, refunding its 100 wood (Water W2b). False
+    /// when the queue is empty or the building is not a
+    /// completed Dock.
+    pub fn push_dequeue_trap_reseed(&mut self, building: u32) -> bool {
+        if !self.inner.can_dequeue_trap_reseed(building) {
+            return false;
+        }
+        self.inner
+            .push_command(Command::DequeueTrapReseed { building });
+        true
+    }
+
+    /// Set the auto trap-reseed toggle of the named Dock's
+    /// owner (Water W2b). False when the building is not a
+    /// completed Dock.
+    pub fn push_set_auto_trap_reseed(&mut self, building: u32, on: bool) -> bool {
+        if self.inner.is_completed_dock(building) {
+            self.inner
+                .push_command(Command::SetAutoTrapReseed { building, on });
             true
         } else {
             false
@@ -1830,6 +1879,12 @@ impl WasmSim {
     /// `push_build_house_queued`.
     pub fn push_build_dock_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
         self.push_build_queued(entity, BuildingKind::Dock, x, y)
+    }
+
+    /// Queue a Fish Trap build (Feudal Age — Water W2b,
+    /// ECO-15) — see `push_build_house_queued`.
+    pub fn push_build_fish_trap_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build_queued(entity, BuildingKind::FishTrap, x, y)
     }
 
     /// Queue a Market build — see `push_build_house_queued`.
@@ -2467,6 +2522,16 @@ impl WasmSim {
         vec![
             self.inner.reseed_queue_of(owner as u8),
             u32::from(self.inner.auto_reseed_of(owner as u8)),
+        ]
+    }
+
+    /// A player's Dock trap-reseed desk, for the Dock panel
+    /// (Water W2b, ECO-15): `[paid trap reseeds queued,
+    /// auto trap-reseed on (0/1)]` — the `reseed_for` twin.
+    pub fn trap_reseed_for(&self, owner: u32) -> Vec<u32> {
+        vec![
+            self.inner.trap_reseed_queue_of(owner as u8),
+            u32::from(self.inner.auto_trap_reseed_of(owner as u8)),
         ]
     }
 

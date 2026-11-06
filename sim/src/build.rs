@@ -213,6 +213,26 @@ pub const WONDER_BUILD_TICKS: u64 = 210_000;
 pub const DOCK_WOOD_COST: I16F16 = I16F16::from_bits(9_830_400); // 150
 /// Dock build time: 35 s at 60 Hz (Water W1, BLD-14; same source).
 pub const DOCK_BUILD_TICKS: u64 = 2100;
+/// Fish Trap construction cost: 100 wood (Water W2b, ECO-15;
+/// AoE wiki, Fish Trap article via WATER-SPEC §4, fetched
+/// 2026-11-05).
+pub const FISH_TRAP_WOOD_COST: I16F16 = I16F16::from_bits(6_553_600); // 100
+/// Fish Trap build time: 40 s at 60 Hz (Water W2b, ECO-15; same
+/// source). Gillnets' documented build-speed interaction (the
+/// trap article's note that the +10% work rate cuts the build
+/// 40 s → 32 s) is NOT modelled: construction in this sim runs
+/// on the standing multi-builder thirds rate for every kind,
+/// and no builder-speed patch exists for villagers either —
+/// recorded as an open fidelity question in the W2b handoff.
+pub const FISH_TRAP_BUILD_TICKS: u64 = 2400;
+/// Fish Trap hit points: 480 — ADOPTED, UNVERIFIED. No fetched
+/// source pins the trap's HP or armor; the row adopts the
+/// Farm's (480 HP, 0/0 armor) — the trap is the Farm's water
+/// analog in every documented respect (ECO-15's own framing),
+/// and the value is recorded here as an implementation
+/// constant in the Castle P4 named-constant tradition, never
+/// dressed as DE data.
+pub const FISH_TRAP_HP: i32 = 480;
 /// The Dock's production garrison capacity (Water W1, BLD-14):
 /// 10 ships, entered only via the rally point on creation — the
 /// GAR-08 pattern every production building carries (AoE2 manual,
@@ -304,6 +324,11 @@ pub enum Placement {
     Normal,
     /// Must straddle a shoreline (the Dock predicate).
     Shoreline,
+    /// On the water itself (Water W2b): the footprint cell must
+    /// be water-side — deep water or shallows — and
+    /// unobstructed (the Fish Trap predicate,
+    /// `Grid::fish_trap_placement_ok`).
+    Water,
 }
 
 /// A buildable building kind.
@@ -474,6 +499,23 @@ pub enum BuildingKind {
     /// support 0 (WATER-SPEC §2: the comparative table's 10 is
     /// its garrison column, not population).
     Dock,
+    /// Water W2b (ECO-15): the Fish Trap — the floating
+    /// farm-analog. Feudal Age; 100 wood, 40 s build, 1×1 on a
+    /// single water cell; on completion it stamps a 715-food
+    /// node (`NodeKind::FishTrap`) that exactly one Fishing
+    /// Ship of its owner works at 0.35/s (the Farm's
+    /// building→node stamp, ECO-14 pattern). Its builder is the
+    /// Fishing Ship — the game's first non-villager builder
+    /// (WATER-SPEC §4: the foundation is laid "only by a
+    /// Fishing Ship"; a villager may help in DE if it can reach
+    /// the shore beside the trap — that assist path is a
+    /// recorded follow-up, not this slice: the construction
+    /// machine here admits the ship alone). It never blocks
+    /// its cell (ships sail over the ground it stands on, like
+    /// a farmer stands on his Farm), holds no garrison, fires
+    /// nothing and accepts no drop-off. HP/armor are ADOPTED
+    /// at the Farm's row (see `FISH_TRAP_HP`).
+    FishTrap,
 }
 
 impl BuildingKind {
@@ -491,8 +533,10 @@ impl BuildingKind {
     /// renumbered at this landing: the builder's 16 was already
     /// the University here), 22 = wonder (VIC-02), 23 = dock
     /// (Water W1, BLD-14 — the plan's allocation, verified free
-    /// on the W1 base). Tags are an ABI contract — append only,
-    /// never renumber.
+    /// on the W1 base), 24 = fish trap (Water W2b, ECO-15 — the
+    /// plan's allocation, verified free on the W2b base
+    /// `e794788`, where 0–23 were taken). Tags are an ABI
+    /// contract — append only, never renumber.
     pub fn tag(self) -> u8 {
         match self {
             BuildingKind::House => 0,
@@ -519,6 +563,7 @@ impl BuildingKind {
             BuildingKind::Monument => 21,
             BuildingKind::Wonder => 22,
             BuildingKind::Dock => 23,
+            BuildingKind::FishTrap => 24,
         }
     }
 
@@ -549,6 +594,7 @@ impl BuildingKind {
             21 => Some(BuildingKind::Monument),
             22 => Some(BuildingKind::Wonder),
             23 => Some(BuildingKind::Dock),
+            24 => Some(BuildingKind::FishTrap),
             _ => None,
         }
     }
@@ -575,10 +621,13 @@ impl BuildingKind {
     /// water and no shallows in the footprint — buildings are
     /// not constructed on shallows, the one Dock excepted);
     /// `Shoreline` (the Dock alone) must straddle a shoreline
-    /// under the grid's Dock predicate.
+    /// under the grid's Dock predicate; `Water` (Water W2b —
+    /// the Fish Trap alone) floats on a water-side cell under
+    /// the grid's trap predicate.
     pub fn placement(self) -> Placement {
         match self {
             BuildingKind::Dock => Placement::Shoreline,
+            BuildingKind::FishTrap => Placement::Water,
             _ => Placement::Normal,
         }
     }
@@ -634,6 +683,8 @@ impl BuildingKind {
             BuildingKind::Wonder => WONDER_WOOD_COST,
             // Water W1 (BLD-14): the Dock's 150 wood.
             BuildingKind::Dock => DOCK_WOOD_COST,
+            // Water W2b (ECO-15): the Fish Trap's 100 wood.
+            BuildingKind::FishTrap => FISH_TRAP_WOOD_COST,
         }
     }
 
@@ -711,6 +762,8 @@ impl BuildingKind {
             BuildingKind::Wonder => WONDER_BUILD_TICKS,
             // Water W1 (BLD-14): 35 s (WATER-SPEC §2).
             BuildingKind::Dock => DOCK_BUILD_TICKS,
+            // Water W2b (ECO-15): 40 s (WATER-SPEC §4).
+            BuildingKind::FishTrap => FISH_TRAP_BUILD_TICKS,
         }
     }
 
@@ -737,6 +790,11 @@ impl BuildingKind {
             // touch it — `Sim::refresh_gate_blocking` owns the
             // gate cells outright.
             BuildingKind::PalisadeGate | BuildingKind::StoneGate => false,
+            // Water W2b: a Fish Trap never blocks its cell —
+            // the working ship must stand on the trap cell to
+            // gather (the Farm's exemption, on water), and a
+            // completed trap must not displace its own worker.
+            BuildingKind::FishTrap => false,
             _ => true,
         }
     }
@@ -764,6 +822,8 @@ impl BuildingKind {
             | BuildingKind::StoneWall
             | BuildingKind::WatchTower
             | BuildingKind::Outpost
+            // Water W2b: the Fish Trap floats on ONE water cell.
+            | BuildingKind::FishTrap
             // Package J: a gate's ACROSS edge is 1 cell; its span
             // geometry (4 cells along the line) lives in
             // `Building::footprint_cells` / `half_extents`, which
@@ -923,7 +983,12 @@ impl BuildingKind {
             | BuildingKind::StoneWall
             // Package J: the Stone Gate is Feudal-born, like its
             // wall (walls dossier §5: HP keyed Feudal/Castle).
-            | BuildingKind::StoneGate => Age::Feudal,
+            | BuildingKind::StoneGate
+            // Water W2b (ECO-15): the Fish Trap is Feudal-born
+            // (the SPEC's pin — "the Age requirement moves the
+            // Fishing Ship panel flow": Dark Age shows the ship
+            // no build button).
+            | BuildingKind::FishTrap => Age::Feudal,
             BuildingKind::TownCenter
             | BuildingKind::Castle
             | BuildingKind::University
@@ -1026,6 +1091,10 @@ impl BuildingKind {
             | BuildingKind::Blacksmith
             | BuildingKind::Market
             | BuildingKind::Farm => crate::BUILDING_SIGHT_TILES,
+            // Water W2b: the Fish Trap's own sight is likewise
+            // ADOPTED at the generic building value — no source
+            // in hand pins it; it joins the farm row's class.
+            BuildingKind::FishTrap => crate::BUILDING_SIGHT_TILES,
         }
     }
 
@@ -1037,12 +1106,16 @@ impl BuildingKind {
     /// Gates and Fish Traps do not exist as building kinds yet;
     /// the exclusion is named here so the rule lands whole when
     /// they do. The 20-tile cap (VIS-04) applies at stamp time.
+    /// (Water W2b: the Fish Trap now exists and takes its named
+    /// exclusion below; the gates' own arm is a pre-existing
+    /// wording/code gap this package does not touch.)
     pub fn sight_tiles_with_techs(self, age: Age, techs: u64) -> u32 {
         let base = self.sight_tiles_at(age);
         match self {
             BuildingKind::PalisadeWall
             | BuildingKind::StoneWall
-            | BuildingKind::Farm => base,
+            | BuildingKind::Farm
+            | BuildingKind::FishTrap => base,
             _ => base + crate::tech::building_los_bonus(techs),
         }
     }
@@ -1379,6 +1452,9 @@ impl BuildingKind {
             // the comparative table lists no age scaling for the
             // Dock's HP; `max_hp_at` falls through at every Age).
             BuildingKind::Dock => 1800,
+            // Water W2b: ADOPTED at the Farm's 480 (see
+            // `FISH_TRAP_HP` — UNVERIFIED in the dossier); flat.
+            BuildingKind::FishTrap => FISH_TRAP_HP,
         }
     }
 
@@ -1518,7 +1594,10 @@ impl BuildingKind {
     pub fn armor_pierce(self) -> i32 {
         match self {
             BuildingKind::House => 7,
-            BuildingKind::Farm => 0,
+            // Water W2b: the Fish Trap joins the Farm at 0 —
+            // the adopted row (see `FISH_TRAP_HP`, UNVERIFIED);
+            // every unlisted kind otherwise reads the generic 7.
+            BuildingKind::Farm | BuildingKind::FishTrap => 0,
             BuildingKind::ArcheryRange | BuildingKind::Stable | BuildingKind::Market => 8,
             // BLD-13: palisade pierce armor 5 (wiki infobox; 2 in
             // The Age of Kings, 5 since The Conquerors patch 1.0b).

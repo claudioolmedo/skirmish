@@ -103,6 +103,17 @@ pub enum NodeKind {
     /// exists in DE but the generic roster fields one deep kind,
     /// at the article's "all the others" value).
     DeepFish,
+    /// A completed Fish Trap (Water W2b, ECO-15): created by
+    /// construction (a Fishing Ship raises the Fish Trap
+    /// building on a water cell), never part of the starting
+    /// layout — the Farm's building→node stamp on water. Holds
+    /// 715 food (wiki, Fish Trap, fetched 2026-11-05 via
+    /// WATER-SPEC §4), worked by exactly one Fishing Ship of
+    /// the building's owner at 0.35/s. It is NOT a fish spot:
+    /// `is_fish` stays false for it, so the fish-family
+    /// retarget never chains a ship onto a trap it was not
+    /// ordered to, and villagers never work it.
+    FishTrap,
 }
 
 impl NodeKind {
@@ -118,6 +129,7 @@ impl NodeKind {
             NodeKind::CarcassHerd => ResourceKind::Food,
             NodeKind::ShoreFish => ResourceKind::Food,
             NodeKind::DeepFish => ResourceKind::Food,
+            NodeKind::FishTrap => ResourceKind::Food,
         }
     }
 
@@ -140,6 +152,11 @@ impl NodeKind {
             // Fish amounts pinned at W2 Passo 0 (see the kind docs).
             NodeKind::ShoreFish => 200,
             NodeKind::DeepFish => 250,
+            // Fish Trap (Water W2b): 715 food (wiki, Fish Trap —
+            // WATER-SPEC §4). No Mill technology touches traps,
+            // so the stamped total is this row verbatim (the
+            // Farm's tech-stamped total is the contrast).
+            NodeKind::FishTrap => 715,
         })
     }
 
@@ -163,6 +180,13 @@ impl NodeKind {
             // row only serves gatherer-blind readers.
             NodeKind::ShoreFish => 470,
             NodeKind::DeepFish => 459,
+            // Fish Trap (Water W2b, ECO-15): a Fishing Ship
+            // takes 0.35/s from a trap (wiki, Fishing Ship,
+            // Collection rate — WATER-SPEC §4): 0.35 × 65536 /
+            // 60 = 382.3, so 383 bits (≈0.3506/s). The nominal
+            // row is the ship's — the only gatherer a trap ever
+            // has (the order gate refuses everyone else).
+            NodeKind::FishTrap => 383,
         })
     }
 
@@ -197,6 +221,15 @@ impl NodeKind {
     /// kinds at every call site.
     pub fn is_fish(self) -> bool {
         matches!(self, NodeKind::ShoreFish | NodeKind::DeepFish)
+    }
+
+    /// Whether this node kind is a Fish Trap's stamped node
+    /// (Water W2b, ECO-15): the one-worker rule, the gather
+    /// gate's owner check and the Dock reseed desk's depletion
+    /// path key on this test. A trap is deliberately NOT
+    /// `is_fish` (see the kind's doc).
+    pub fn is_trap(self) -> bool {
+        matches!(self, NodeKind::FishTrap)
     }
 
     /// How much a villager can carry away from this node before it
@@ -239,7 +272,9 @@ impl NodeKind {
     /// 0 tree, 1 berry, 2 gold, 3 stone, 4 farm, 5 hunt carcass,
     /// 6 herdable carcass, 7 shore fish, 8 deep fish (Water W2a —
     /// appended after the carcass pair; verified first free on
-    /// the W2a base, where 0–6 were taken).
+    /// the W2a base, where 0–6 were taken), 9 fish trap (Water
+    /// W2b — appended after the fish pair; verified first free
+    /// on the W2b base `e794788`, where 0–8 were taken).
     pub fn tag(self) -> u8 {
         match self {
             NodeKind::Tree => 0,
@@ -251,6 +286,7 @@ impl NodeKind {
             NodeKind::CarcassHerd => 6,
             NodeKind::ShoreFish => 7,
             NodeKind::DeepFish => 8,
+            NodeKind::FishTrap => 9,
         }
     }
 }

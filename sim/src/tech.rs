@@ -906,13 +906,16 @@ pub fn patched_gather_rate(kind: NodeKind, techs: u64) -> I16F16 {
 /// multiplicative stacking): shore 262 → 288 → 316 bits, deep
 /// 459 → 504 → 554 bits. A villager's shore-fish rate takes no
 /// fishing patch — the pair's wiki text scopes both techs to
-/// Fishing Ships.
+/// Fishing Ships. Water W2b extends the same ship branch to the
+/// Fish Trap node: the pair's text reads "Fishing Ships gather
+/// +10% faster" without scoping by source, and the trap's only
+/// gatherer is a Fishing Ship — trap 383 → 421 → 463 bits.
 pub fn patched_gather_rate_for(
     kind: NodeKind,
     gatherer: crate::entity::EntityKind,
     techs: u64,
 ) -> I16F16 {
-    if !kind.is_fish() {
+    if !kind.is_fish() && !kind.is_trap() {
         return patched_gather_rate(kind, techs);
     }
     let mut bits = kind.gather_rate_for(gatherer).to_bits() as i64;

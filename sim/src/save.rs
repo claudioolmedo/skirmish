@@ -184,7 +184,16 @@ const MAGIC: &[u8; 4] = b"SKSV";
 /// (3) The pending-command codec gains `Command::SetDiplomacy`
 /// at tag 50, append-only, so a save taken between frames with
 /// a stance change queued restores it.
-const SAVE_VERSION: u32 = 18;
+/// Version 19: Water W2b (ECO-15) — the Fish Trap lands. The
+/// node record's kind tag gains 9 (`NodeKind::FishTrap`, via
+/// the existing tag byte — no layout change to the record);
+/// the player record gains the Dock trap-reseed pair (paid
+/// trap queue count, then the auto trap-reseed byte) written
+/// right after the ECO-14 farm-reseed pair for every player —
+/// 0/false in any save whose trap desk never moved, so it
+/// round-trips the hash unchanged; the pending-command codec
+/// gains the Dock desk trio at tags 51–53, append-only.
+const SAVE_VERSION: u32 = 19;
 
 /// Little-endian byte writer over a growable buffer.
 struct W {
@@ -681,6 +690,23 @@ impl W {
                 self.u8(target);
                 self.u8(stance);
             }
+            // Water W2b: the Dock trap-reseed desk (ECO-15) at
+            // tags 51–53, append-only — the ECO-14 trio's mirror
+            // (tags 44–46): a building id, resp. an id + the
+            // toggle byte.
+            Command::QueueTrapReseed { building } => {
+                self.u8(51);
+                self.u32(building);
+            }
+            Command::DequeueTrapReseed { building } => {
+                self.u8(52);
+                self.u32(building);
+            }
+            Command::SetAutoTrapReseed { building, on } => {
+                self.u8(53);
+                self.u32(building);
+                self.u8(u8::from(on));
+            }
         }
     }
 }
@@ -792,6 +818,9 @@ impl Sim {
             }
             w.u32(p.reseed_queue);
             w.bool(p.auto_reseed);
+            // Format v19: the Dock trap-reseed pair (Water W2b).
+            w.u32(p.trap_reseed_queue);
+            w.bool(p.auto_trap_reseed);
             // Format v11: the mode-elimination flag (Package C).
             w.bool(p.mode_out);
             // Format v15: the resignation flag (VIC-11).
@@ -1457,6 +1486,17 @@ impl<'a> R<'a> {
                 target: self.u8()?,
                 stance: self.u8()?,
             }),
+            // Water W2b: the Dock trap-reseed desk (tags 51–53).
+            51 => Some(Command::QueueTrapReseed {
+                building: self.u32()?,
+            }),
+            52 => Some(Command::DequeueTrapReseed {
+                building: self.u32()?,
+            }),
+            53 => Some(Command::SetAutoTrapReseed {
+                building: self.u32()?,
+                on: self.u8()? != 0,
+            }),
             _ => None,
         }
     }
@@ -1486,6 +1526,8 @@ fn node_kind_from_tag(tag: u8) -> Option<NodeKind> {
         // Water W2a (ECO-15): the fish kinds (tags 7/8).
         7 => Some(NodeKind::ShoreFish),
         8 => Some(NodeKind::DeepFish),
+        // Water W2b (ECO-15): the Fish Trap node (tag 9).
+        9 => Some(NodeKind::FishTrap),
         _ => None,
     }
 }
@@ -1633,6 +1675,8 @@ impl Sim {
             }
             p.reseed_queue = r.u32()?;
             p.auto_reseed = r.bool()?;
+            p.trap_reseed_queue = r.u32()?;
+            p.auto_trap_reseed = r.bool()?;
             p.mode_out = r.bool()?;
             p.resigned = r.bool()?;
         }

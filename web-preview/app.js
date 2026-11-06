@@ -312,12 +312,14 @@ const COLORS = [
 // Node kind tags (must match the sim's NodeKind::tag): 0 tree, 1 berry,
 // 2 gold, 3 stone, 4 farm, 5 hunt carcass (boar/deer), 6 herd carcass
 // (sheep), 7 shore fish, 8 deep fish (Water W2, ECO-15 —
-// 200 / 250 food per spot, the sim's econ.rs rows). NODE_MAX is each kind's nominal full amount in the sim (for
+// 200 / 250 food per spot, the sim's econ.rs rows), 9 fish trap
+// (Water W2b, ECO-15 — 715 food, the completed trap's node).
+// NODE_MAX is each kind's nominal full amount in the sim (for
 // the remaining-amount bar / farm crop tint) — a carcass starts at what
 // the animal was carrying, so its bar starts below full; CARRY_COLORS
 // is the load dot shown above a hauling villager.
-const NODE_MAX = [100, 125, 800, 350, 175, 340, 100, 200, 250];
-const CARRY_COLORS = ['#d9a05b', '#ff5da2', '#ffd700', '#c3c8cd', '#ff5da2', '#ff5da2', '#ff5da2', '#ff5da2', '#ff5da2'];
+const NODE_MAX = [100, 125, 800, 350, 175, 340, 100, 200, 250, 715];
+const CARRY_COLORS = ['#d9a05b', '#ff5da2', '#ffd700', '#c3c8cd', '#ff5da2', '#ff5da2', '#ff5da2', '#ff5da2', '#ff5da2', '#ff5da2'];
 // Entity kind tags (must match the sim's EntityKind::tag).
 const KIND_TC = 1;
 const KIND_SHEEP = 5;
@@ -399,25 +401,29 @@ function pngIcon(png, cls) {
 // 23 dock (Water W1, BLD-14 — 150 wood, 3×3, Dark Age; its
 // footprint must straddle a shoreline — the ghost mirror's
 // shoreline case in mirrorValid; food-only drop-off).
+// 24 fish trap (Water W2b, ECO-15 — 100 wood, 1×1, Feudal Age;
+// built BY a Fishing Ship on one water cell — the ghost
+// mirror's water case in mirrorValid; completes into a
+// 715-food node, worked by one own Fishing Ship).
 // Costs and footprints mirror the sim (MECHANICS-STUDY §5; the
 // palisade row is the current DE wiki row — 3 wood per segment).
-const BUILD_COST = [25, 60, 175, 100, 100, 100, 175, 175, 150, 3, 35, 25, 175, 275, 0, 0, 200, 200, 20, 0, 175, 0, 1000, 150];
+const BUILD_COST = [25, 60, 175, 100, 100, 100, 175, 175, 150, 3, 35, 25, 175, 275, 0, 0, 200, 200, 20, 0, 175, 0, 1000, 150, 100];
 // Stone paid at placement, by kind tag (BLD-18's two defensive
 // structures, the Town Center, the Stone Wall and the Castle
 // cost stone; every other entry 0).
-const BUILD_COST_STONE = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 125, 5, 0, 100, 5, 650, 0, 0, 0, 30, 0, 0, 1000, 0];
+const BUILD_COST_STONE = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 125, 5, 0, 100, 5, 650, 0, 0, 0, 30, 0, 0, 1000, 0, 0];
 // Gold paid at placement, by kind tag (VIC-02: the Wonder is
 // the first gold-cost kind; every other entry 0).
-const BUILD_COST_GOLD = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1000, 0];
+const BUILD_COST_GOLD = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1000, 0, 0];
 const BUILD_I18N = ['house', 'farm', 'barracks', 'lumber', 'mill',
   'mining', 'range', 'stable', 'blacksmith', 'palisade', 'watchtower',
-  'outpost', 'market', 'towncenter', 'stonewall', 'castle', 'university', 'siegeworkshop', 'palisadegate', 'stonegate', 'monastery', 'monument', 'wonder', 'dock'];
+  'outpost', 'market', 'towncenter', 'stonewall', 'castle', 'university', 'siegeworkshop', 'palisadegate', 'stonegate', 'monastery', 'monument', 'wonder', 'dock', 'fishtrap'];
 let BUILD_NAME = ['House', 'Farm', 'Barracks', 'Lumber Camp', 'Mill',
   'Mining Camp', 'Archery Range', 'Stable', 'Blacksmith', 'Palisade Wall',
-  'Watch Tower', 'Outpost', 'Market', 'Town Center', 'Stone Wall', 'Castle', 'University', 'Siege Workshop', 'Palisade Gate', 'Stone Gate', 'Monastery', 'Monument', 'Wonder', 'Dock'];
+  'Watch Tower', 'Outpost', 'Market', 'Town Center', 'Stone Wall', 'Castle', 'University', 'Siege Workshop', 'Palisade Gate', 'Stone Gate', 'Monastery', 'Monument', 'Wonder', 'Dock', 'Fish Trap'];
 // Farm footprint is 3 (DE-documented; Claudio's decision
 // 2026-10-22, superseding the earlier 2x2 specification).
-const BUILD_SIZE = [2, 3, 3, 2, 2, 2, 3, 3, 3, 1, 1, 1, 4, 4, 1, 4, 4, 4, 1, 1, 3, 4, 5, 3];
+const BUILD_SIZE = [2, 3, 3, 2, 2, 2, 3, 3, 3, 1, 1, 1, 4, 4, 1, 4, 4, 4, 1, 1, 3, 4, 5, 3, 1];
 // The wall kinds (BLD-13 palisade, BLD-20 stone): 1×1 segments
 // placed by dragged lines, not single footprints.
 function isWallKind(kind) { return kind === 9 || kind === 14; }
@@ -430,14 +436,14 @@ const GATE_OF_WALL = { 9: 18, 14: 19 };
 const WALL_OF_GATE = { 18: 9, 19: 14 };
 const BUILD_ICON = ['i-house', 'i-farm', 'i-tc', 'i-lumber', 'i-mill',
   'i-mining', 'i-range', 'i-stable', 'i-blacksmith', 'i-palisade',
-  'i-watchtower', 'i-outpost', 'i-market', 'i-tc', 'i-stonewall', 'i-castle', 'i-university', 'i-siegeworkshop', 'i-palisade', 'i-stonewall', 'i-monastery', 'i-monument', 'i-wonder', 'i-dock'];
+  'i-watchtower', 'i-outpost', 'i-market', 'i-tc', 'i-stonewall', 'i-castle', 'i-university', 'i-siegeworkshop', 'i-palisade', 'i-stonewall', 'i-monastery', 'i-monument', 'i-wonder', 'i-dock', 'i-fish-trap'];
 // The PNG set above, per building kind tag (same order as
 // BUILD_ICON): command buttons and building portraits.
 const BUILD_PNG = ['house.png', 'farm.png', 'barracks.png', 'lumber-camp.png',
   'mill.png', 'mining-camp.png', 'archery-range.png', 'stable.png',
   'blacksmith.png', 'palisade-wall.png', 'watchtower.png', 'outpost.png',
   'market.png', 'town-center.png', 'stone-wall.png', 'castle.png', 'university.png',
-  'siege-workshop.png', 'palisade-wall.png', 'stone-wall.png', 'monastery.png', 'monument.png', 'wonder.png', 'dock.png'];
+  'siege-workshop.png', 'palisade-wall.png', 'stone-wall.png', 'monastery.png', 'monument.png', 'wonder.png', 'dock.png', 'fish-trap.png'];
 // Building max HP by kind tag (the sim's building table, study
 // §5) — for the enemy-building info panel (M5). The palisade
 // entry is its Dark-Age value (150; 250 from Feudal, BLD-13 —
@@ -466,6 +472,9 @@ PUSH_BUILD_QUEUED[22] = 'push_build_wonder_queued';
 // Water W1 (BLD-14): tag 23 is the Dock.
 PUSH_BUILD[23] = 'push_build_dock';
 PUSH_BUILD_QUEUED[23] = 'push_build_dock_queued';
+// Water W2b (ECO-15): tag 24 is the Fish Trap.
+PUSH_BUILD[24] = 'push_build_fish_trap';
+PUSH_BUILD_QUEUED[24] = 'push_build_fish_trap_queued';
 // Own-building minimap colors by kind tag (M6); kinds without an
 // entry keep the minimap's parchment default, the enemy's
 // buildings are always ENEMY_COLOR.
@@ -2868,11 +2877,57 @@ function mirrorDockValid(cx, cy) {
   return true;
 }
 
+// Client mirror of the sim's Fish Trap placement (Water W2b,
+// ECO-15): one water-side cell (deep water or shallows — the
+// TERRAIN layer's water readings), unobstructed — no live node
+// on the cell, no standing building over it, no OTHER living
+// unit standing on it (the ordering ship itself may), the
+// Feudal Age, and the price. Resuming our own incomplete trap
+// at the cell is valid, as in the square mirror. The sim
+// re-validates every order itself (including the water-domain
+// reach this mirror cannot see).
+function mirrorTrapValid(cx, cy) {
+  const kind = 24;
+  if (cx < 0 || cy < 0 || cx >= GW || cy >= GH) return false;
+  const buildings = buildingList();
+  for (const b of buildings) {
+    if (!b.complete && b.owner === localOwner && b.kind === kind && b.cellX === cx && b.cellY === cy) {
+      return true;
+    }
+  }
+  if (myAge() < 1) return false; // the Fish Trap is Feudal-born
+  const t = TERRAIN[cy * GW + cx];
+  if (t < 1) return false; // water-side only (deep water or shallows)
+  if (OBST[cy * GW + cx]) return false;
+  for (const b of buildings) {
+    const bs = b.size || BUILD_SIZE[b.kind] || 2;
+    if (cx >= b.cellX && cx < b.cellX + bs && cy >= b.cellY && cy < b.cellY + bs) return false;
+  }
+  for (const n of nodeList()) {
+    if (n.amount <= 0) continue;
+    const nc = worldToCell(n.x, n.y);
+    if (nc[0] === cx && nc[1] === cy) return false;
+  }
+  const st = entityState();
+  const sel = selectedUnits();
+  for (let id = 0; id < st.count; id++) {
+    if (sel.includes(id)) continue;
+    if (st.hp[id * 2] < 1) continue; // dead (the sim's hp < 1 rule)
+    if (st.garrisoned[id]) continue;
+    const uc = worldToCell(st.pos[id * 2], st.pos[id * 2 + 1]);
+    if (uc[0] === cx && uc[1] === cy) return false;
+  }
+  if (myStock()[1] < BUILD_COST[kind]) return false;
+  return true;
+}
+
 function mirrorValid(kind, cx, cy) {
   // Package J: a gate's mirror is its span rule, not the square.
   if (isGateKind(kind)) return mirrorGateValid(kind, cx, cy);
   // Water W1 (BLD-14): the Dock's mirror is its shoreline rule.
   if (kind === 23) return mirrorDockValid(cx, cy);
+  // Water W2b (ECO-15): the Fish Trap's mirror is its water rule.
+  if (kind === 24) return mirrorTrapValid(cx, cy);
   const size = BUILD_SIZE[kind];
   if (cx < 0 || cy < 0 || cx + size > GW || cy + size > GH) return false;
   const buildings = buildingList();
@@ -4265,6 +4320,16 @@ function applyLocalOrder(cmd) {
     case 'queue_reseed': return sim.push_queue_reseed(cmd.b);
     case 'dequeue_reseed': return sim.push_dequeue_reseed(cmd.b);
     case 'set_auto_reseed': return sim.push_set_auto_reseed(cmd.b, cmd.on);
+    // Water W2b (ECO-15): the Dock trap-reseed desk — the sim
+    // derives the owner from the named Dock. Guarded like the
+    // diplomacy case: a stale wasm without the exports refuses
+    // cleanly.
+    case 'queue_trap_reseed': return typeof sim.push_queue_trap_reseed === 'function'
+      ? sim.push_queue_trap_reseed(cmd.b) : false;
+    case 'dequeue_trap_reseed': return typeof sim.push_dequeue_trap_reseed === 'function'
+      ? sim.push_dequeue_trap_reseed(cmd.b) : false;
+    case 'set_auto_trap_reseed': return typeof sim.push_set_auto_trap_reseed === 'function'
+      ? sim.push_set_auto_trap_reseed(cmd.b, cmd.on) : false;
     // VIC-11: resignation — locally the resigning seat is this
     // client's (as tribute's sender); online the same command
     // rides the bundle and netplay's applier names the sender
@@ -7696,10 +7761,16 @@ async function main() {
   // browser default suppressed by the canvas-level handler.
   cmdGrid.addEventListener('contextmenu', (ev) => {
     const btn = ev.target.closest('button');
-    if (!btn || btn.id !== 'reseed-queue' || btn.disabled) return;
+    if (!btn || btn.disabled) return;
+    if (btn.id !== 'reseed-queue' && btn.id !== 'trap-reseed-queue') return;
     ev.preventDefault();
     if (selectedBuilding && selectedBuilding.type === 'building') {
-      if (issue({ t: 'dequeue_reseed', b: selectedBuilding.id })) {
+      // Water W2b: the Dock's trap-reseed queue refunds on
+      // right-click exactly like the Mill's (ECO-14's gesture).
+      const ok = btn.id === 'trap-reseed-queue'
+        ? issue({ t: 'dequeue_trap_reseed', b: selectedBuilding.id })
+        : issue({ t: 'dequeue_reseed', b: selectedBuilding.id });
+      if (ok) {
         playAudioCue('orderBuilding');
       }
     }
@@ -8281,7 +8352,11 @@ async function main() {
     if (bT && bT.owner === localOwner && !bT.complete) {
       let any = false;
       for (const id of targets) {
-        if (st.kinds[id] !== 0) continue;
+        // Water W2b: an own Fish Trap foundation takes selected
+        // FISHING SHIPS as its builders (the trap's builder is
+        // the ship, never a villager); every other foundation
+        // keeps the villager-only rule.
+        if (st.kinds[id] !== 0 && !(bT.kind === 24 && st.kinds[id] === 23)) continue;
         // Command coordinates: `push_build` re-derives the cell
         // from the world point, so the click point is the order.
         if (issue({ t: 'build', k: bT.kind, e: id, x: wx, y: wy, q: queued || undefined })) any = true;
@@ -8360,9 +8435,11 @@ async function main() {
       // fish spots only (node kinds 7/8). Before this branch the
       // ship fell through to a plain Move — its panel promised
       // "right-click a fish spot to gather" but the click never
-      // fished (bot-loop proof, 2026-11-05).
+      // fished (bot-loop proof, 2026-11-05). Water W2b: the
+      // ship also works Fish Trap nodes (kind 9) — its own
+      // owner's only; the sim's gate refuses a foreign trap.
       const gathersHere = n && (st.kinds[id] === 0
-        || (st.kinds[id] === 23 && (n.kind === 7 || n.kind === 8)));
+        || (st.kinds[id] === 23 && (n.kind === 7 || n.kind === 8 || n.kind === 9)));
       if (gathersHere) {
         if (issue({ t: 'gather', e: id, n: n.id, q: queued || undefined })) any = true;
       } else if (sendMove(id)) {
@@ -8610,13 +8687,17 @@ async function main() {
     // The builder is the selected VILLAGER nearest the placement
     // point: with a group selected, the closest pair of hands does
     // the work (the sim's Build command names a single builder, and
-    // only villagers build).
+    // only villagers build). Water W2b (ECO-15): the Fish Trap is
+    // the one exception — its builder is the nearest selected
+    // FISHING SHIP (entity kind 23), the game's first non-villager
+    // builder.
+    const wantKind = placement.kind === 24 ? 23 : 0;
     const st = entityState();
     const pos = st.pos;
     let builder = null;
     let bestD2 = Infinity;
     for (const id of selectedUnits()) {
-      if (st.kinds[id] !== 0) continue;
+      if (st.kinds[id] !== wantKind) continue;
       const d2 = (pos[id * 2] - wx) ** 2 + (pos[id * 2 + 1] - wy) ** 2;
       if (d2 < bestD2) {
         bestD2 = d2;
@@ -8624,8 +8705,9 @@ async function main() {
       }
     }
     if (builder == null) {
+      const wasTrap = placement.kind === 24;
       placement = null;
-      flash(t('flash.buildSelectVil'));
+      flash(t(wasTrap ? 'flash.buildSelectShip' : 'flash.buildSelectVil'));
       return;
     }
     const [cx, cy] = worldToCell(wx, wy);
@@ -9700,7 +9782,56 @@ function drawDeepFish(sx, sy, frac) {
   fish(0.05, -0.05, 0.58, '#6ba3c2');
 }
 
-const NODE_DRAW = [drawTree, drawBerry, drawGold, drawStone, drawFarm, drawCarcass, drawCarcass, drawShoreFish, drawDeepFish];
+// A completed Fish Trap (Water W2b, ECO-15): a floating wooden
+// frame with a net slung under it and two cork floats — the flat
+// vector node style of the fish spots (original placeholder art,
+// presentation only). The frame sags as the stock runs down
+// (frac is the node's remaining fraction, as for every node).
+function drawFishTrap(sx, sy, frac) {
+  const u = camS;
+  const sag = (1 - frac) * 0.35;
+  ctx.strokeStyle = 'rgba(220, 240, 250, 0.4)';
+  ctx.lineWidth = Math.max(1, 0.12 * u);
+  ctx.beginPath();
+  ctx.ellipse(sx, sy - 0.4 * u, 1.25 * u, 0.45 * u, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  // The frame: four posts and the slung net between them.
+  ctx.strokeStyle = '#8a6844';
+  ctx.lineWidth = Math.max(1, 0.22 * u);
+  for (const [dx, dy] of [[-1.05, -0.5], [1.05, -0.5], [-1.05, 0.42], [1.05, 0.42]]) {
+    ctx.beginPath();
+    ctx.moveTo(sx + dx * u, sy + (dy - 0.55) * u);
+    ctx.lineTo(sx + dx * u, sy + (dy + 0.25) * u);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = 'rgba(233, 226, 205, 0.85)';
+  ctx.lineWidth = Math.max(1, 0.09 * u);
+  for (let i = 0; i <= 3; i++) {
+    const t = i / 3;
+    const x = sx + (-1.05 + 2.1 * t) * u;
+    ctx.beginPath();
+    ctx.moveTo(x, sy - 0.95 * u);
+    ctx.quadraticCurveTo(x, sy + (0.35 + sag) * u, x, sy + 0.62 * u);
+    ctx.stroke();
+  }
+  for (let i = 0; i <= 2; i++) {
+    const t = i / 2;
+    const y = sy + (-0.8 + 1.25 * t + sag * (1 - Math.abs(t - 0.5) * 2)) * u;
+    ctx.beginPath();
+    ctx.moveTo(sx - 1.05 * u, y);
+    ctx.lineTo(sx + 1.05 * u, y);
+    ctx.stroke();
+  }
+  // Cork floats on the top corners.
+  ctx.fillStyle = '#d9a05b';
+  for (const dx of [-1.05, 1.05]) {
+    ctx.beginPath();
+    ctx.ellipse(sx + dx * u, sy - 1.0 * u, 0.28 * u, 0.16 * u, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+const NODE_DRAW = [drawTree, drawBerry, drawGold, drawStone, drawFarm, drawCarcass, drawCarcass, drawShoreFish, drawDeepFish, drawFishTrap];
 
 // --- Building sprites -----------------------------------------------------
 const TC_HALF = 8; // world units: TC footprint half-extent (4x4 cells x 4 wu, BLD-16)
@@ -10028,7 +10159,7 @@ function updateRubble(buildings, st) {
   const live = new Set();
   for (const b of buildings) {
     live.add(b.id);
-    if (b.kind === 1 || !b.complete) continue; // farms leave no rubble
+    if (b.kind === 1 || b.kind === 24 || !b.complete) continue; // farms and fish traps leave no rubble
     if (b.owner !== foeOwner() || fogAtWorld(b.x, b.y) === 2) {
       rubbleSeen.set(b.id, { x: b.x, y: b.y, size: b.size, owner: b.owner });
     }
@@ -10288,8 +10419,29 @@ function drawMonument(b) {
   }
 }
 
+// A Fish Trap foundation (Water W2b): four posts rising out of
+// the water and a progress bar — the completed trap is drawn by
+// the node renderer instead (drawFishTrap), like the Farm.
+function drawFishTrapFoundation(b) {
+  const [sx, sy] = worldToScreen(b.x, b.y);
+  const u = camS;
+  ctx.strokeStyle = '#8a6844';
+  ctx.lineWidth = Math.max(1, 0.22 * u);
+  for (const [dx, dy] of [[-1.05, -0.5], [1.05, -0.5], [-1.05, 0.42], [1.05, 0.42]]) {
+    ctx.beginPath();
+    ctx.moveTo(sx + dx * u, sy + (dy - 0.55 * b.progress) * u);
+    ctx.lineTo(sx + dx * u, sy + (dy + 0.25) * u);
+    ctx.stroke();
+  }
+  progressBar(sx, sy - 2.2 * u, b.progress);
+}
+
 function drawBuilding(b, all) {
-  if (b.kind === 1) {
+  if (b.kind === 24) {
+    // Water W2b: a Fish Trap under construction (a completed
+    // one is skipped by the render loop and drawn as a node).
+    drawFishTrapFoundation(b);
+  } else if (b.kind === 1) {
     // Farm under construction: bare tilled plot + progress bar.
     // (A completed farm is drawn by the node renderer instead.)
     // Shadow/bar offsets scale with the 3x3 field (Claudio
@@ -13035,6 +13187,33 @@ function runCommandButton(id, times = 1) {
         playAudioCue('orderBuilding');
       }
     }
+  } else if (id === 'trap-reseed-queue') {
+    // Water W2b: buy one trap reseed ahead at the selected
+    // Dock (100 wood, paid now; right-click refunds — see the
+    // grid's contextmenu listener).
+    if (selectedBuilding && selectedBuilding.type === 'building') {
+      if (issue({ t: 'queue_trap_reseed', b: selectedBuilding.id })) {
+        playAudioCue('orderBuilding');
+      } else {
+        flash(t('block.noResources'));
+      }
+    }
+  } else if (id === 'trap-reseed-auto') {
+    // Water W2b: flip the selected Dock owner's auto
+    // trap-reseed toggle.
+    if (selectedBuilding && selectedBuilding.type === 'building') {
+      const [, auto] = sim.trap_reseed_for(localOwner);
+      if (issue({ t: 'set_auto_trap_reseed', b: selectedBuilding.id, on: auto !== 1 })) {
+        playAudioCue('orderBuilding');
+      }
+    }
+  } else if (id === 'build-fish-trap') {
+    // Water W2b: arm (or disarm) Fish Trap placement from the
+    // Fishing Ship's panel — the build-* branch below cannot
+    // parse this id (its kind rides the button, not a number).
+    repairArm = false;
+    placement = placement && placement.kind === 24 ? null : { kind: 24 };
+    playAudioCue(placement ? 'orderBuilding' : 'click');
   } else if (id === 'ungarrison') {
     // GAR-03: voluntary ungarrison of the selected building or TC.
     // Castle P4a: a selected Ram ungarrisons the same way (its
@@ -13291,6 +13470,11 @@ function renderCommands() {
   // per-entity tags (-1 when the selection is mixed).
   const selMil = context === 'units'
     ? selUnits.filter((id) => [2, 3, 4, 8, 9, 10].includes(st.kinds[id])) : [];
+  // Water W2b (ECO-15): the Fish Trap's builder selection — our
+  // own Fishing Ships in the units selection carry the Build
+  // Fish Trap button (the ship panel's one build order).
+  const selShips = context === 'units'
+    ? selUnits.filter((id) => st.kinds[id] === 23 && st.owners[id] === localOwner) : [];
   const milStanceTags = selMil.length ? sim.entity_stance() : null;
   const milStance = selMil.length
     ? (selMil.every((id) => milStanceTags[id] === milStanceTags[selMil[0]])
@@ -13349,6 +13533,12 @@ function renderCommands() {
     // ECO-14: the Mill's reseed state is panel state (the queue
     // count in the button's title, the toggle's active face).
     context === 'mill' ? sim.reseed_for(localOwner).join('.') : '',
+    // Water W2b: the Dock's trap-reseed state and the selected
+    // ships are panel state the same way (the desk's titles and
+    // the Build Fish Trap button's presence).
+    context === 'dock' && typeof sim.trap_reseed_for === 'function'
+      ? sim.trap_reseed_for(localOwner).join('.') : '',
+    selShips.length ? selShips.join('.') : -1,
     // Castle P4a: a selected Ram's passenger count is panel state
     // too (its Ungarrison button's disabled face reads it).
     selUnits.length === 1 && st.kinds[selUnits[0]] === 17
@@ -13983,6 +14173,27 @@ function renderCommands() {
               : t('cmd.gillnetsTitle', { name: TECH_NAME[46], cost: costText([[150, 'food'], [200, 'wood']]), secs: 45 }) + (RESEARCH_BLOCK_TITLES[rbB[46]] ? ' ' + RESEARCH_BLOCK_TITLES[rbB[46]] : ''),
       }),
     );
+    // Water W2b (ECO-15): the trap-reseed desk — the Mill
+    // reseed desk's mirror at the Dock (ECO-14's shape, the
+    // trap's price): the paid queue (click buys one,
+    // right-click refunds one) and the auto-reseed toggle.
+    // Unbadged, mouse-only, like the Mill desk: the grid's
+    // letters belong to the train/research row.
+    if (bk.complete && typeof sim.trap_reseed_for === 'function') {
+      const [tq, tAuto] = sim.trap_reseed_for(localOwner);
+      cmdGrid.append(cmdButton({
+        id: 'trap-reseed-queue', icon: 'i-reseed', label: t('dock.trapReseedQueue'),
+        key: null,
+        // The queue count lives in the title, not on the
+        // face — the panel law (no indicators on faces).
+        title: t('dock.trapReseedTitle', { n: tq }),
+      }));
+      cmdGrid.append(cmdButton({
+        id: 'trap-reseed-auto', icon: 'i-croprotation', label: t('dock.trapReseedAuto'),
+        key: null, active: tAuto === 1,
+        title: t('dock.trapReseedAutoTitle', { state: t(tAuto === 1 ? 'reseed.on' : 'reseed.off') }),
+      }));
+    }
   } else if (context === 'blacksmith') {
     // M6: the Blacksmith's Feudal researches — the three armor /
     // arrow lines, plus Forging and Scale Barding Armor from
@@ -14254,6 +14465,29 @@ function renderCommands() {
       id: 'ungarrison', icon: 'i-ungarrison', label: t('cmd.ungarrison'),
       disabled: gCount === 0, key: null,
       title: gCount > 0 ? t('cmd.ungarrisonTitle', { n: gCount }) : t('cmd.ungarrisonNone'),
+    }));
+  }
+  if (context === 'units' && selShips.length) {
+    // Water W2b (ECO-15): the Fishing Ship's one build order —
+    // Build Fish Trap, on its own panel (the SPEC's pin: the
+    // Age requirement moves this flow — Dark Age shows the
+    // button greyed with its gate, Feudal arms it). Unbadged
+    // and mouse-only, like the Ram's Ungarrison: the ship has
+    // no lettered grid in the reference panel. Clicking arms
+    // placement of kind 24; the ghost mirror (mirrorTrapValid)
+    // and attemptPlace's ship branch run the order.
+    const trapGate = age < 1;
+    const lacksWood = wood < BUILD_COST[24];
+    cmdGrid.append(cmdButton({
+      id: 'build-fish-trap', icon: BUILD_ICON[24], label: BUILD_NAME[24],
+      costIcon: 'i-wood', cost: BUILD_COST[24],
+      disabled: trapGate || lacksWood,
+      active: !!placement && placement.kind === 24,
+      key: null,
+      title: trapGate
+        ? t('cmd.buildGate', { name: BUILD_NAME[24], gate: t('gate.feudal') })
+        : t(lacksWood ? 'cmd.buildNeeds' : 'cmd.buildOk',
+          { name: BUILD_NAME[24], cost: costText([[BUILD_COST[24], 'wood']]) }),
     }));
   }
   if (context === 'units' && selMil.length) {
@@ -15386,6 +15620,7 @@ function draw() {
   }
   for (const b of renderBuildings) {
     if (b.kind === 1 && b.complete) continue; // drawn as a farm node
+    if (b.kind === 24 && b.complete) continue; // drawn as a fish trap node (Water W2b)
     draws.push({ key: b.x + b.y + CS, occ: { role: 'occluder', ...buildingOccGeo(b) }, fn: () => drawBuilding(b, renderBuildings) });
   }
   // Tree depletion tracking (falling trees + stumps) — the same

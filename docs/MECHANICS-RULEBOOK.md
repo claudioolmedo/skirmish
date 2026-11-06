@@ -1279,9 +1279,23 @@ are a named implementation constant (no DE Arabia fish layout
 exists in the sources). Fishing Lines (50 F / 100 W, Feudal) and
 Gillnets (150 F / 200 W, Castle) each give ships +10% gather
 rate and +5 carry, stacking multiplicatively. The Fish Trap
-clause is W2b's extension (building-on-water + the Dock reseed
-desk); it is the one part of this entry not yet in the tree.
-Pinned by `sim/src/water_w2a_tests.rs`. · *Status:* **MATCHES**.
+clause landed as W2b's extension (2026-11-05): the Fish Trap
+(BuildingKind tag 24) is built by a Fishing Ship — the first
+non-villager builder — for 100 wood / 40 s on a single
+water-side cell (Feudal Age), completes into a 715-food node
+(NodeKind tag 9) its builder starts working at 0.35/s (the
+fishing pair patching the trap's rate too: 383 → 421 → 463
+bits), takes exactly one own ship as its worker (the Farm's
+one-worker rule on water), and replants through the Dock's
+trap-reseed desk — the ECO-14 desk's mirror at 100 wood (paid
+queue at a completed Dock, then the auto toggle's on-the-spot
+charge; a depleted trap with neither retires). The ship-only
+build path is the plan's pin: DE's villager assist beside a
+reachable shore is a recorded follow-up, not this slice. The
+trap's HP/armor (480, 0/0) are ADOPTED at the Farm's row —
+UNVERIFIED in the dossier's sources, recorded as such in
+`build::FISH_TRAP_HP`. Pinned by `sim/src/water_w2a_tests.rs`
+and `sim/src/water_w2b_tests.rs`. · *Status:* **MATCHES**.
 
 **ECO-16 — Relics trickle gold.** A relic garrisoned in a Monastery
 generates 0.5 gold per second (30/min) for its owner, continuously, until

@@ -100,7 +100,7 @@ export function diamondPath(ctx, g) {
 // 4 farm, 5 hunt carcass, 6 herd carcass — M3; 7 shore fish,
 // 8 deep fish — Water W2, ECO-15). Our own minimap
 // palette — flat and readable at 2 px.
-export const NODE_COLORS = ['#2e7d32', '#e0497e', '#ffd23e', '#a8adb5', '#86c860', '#b5542c', '#c97b4a', '#8fd8ef', '#2f8fb8'];
+export const NODE_COLORS = ['#2e7d32', '#e0497e', '#ffd23e', '#a8adb5', '#86c860', '#b5542c', '#c97b4a', '#8fd8ef', '#2f8fb8', '#5ec8a8'];
 export const GROUND_COLOR = '#44512f'; // muted moss — the unexplored-later base
 export const OBSTACLE_COLOR = '#232a20'; // wall cells read as dark blocks
 // M7 fog/terrain palette (VIS-10): unexplored is the black shroud;

@@ -123,6 +123,8 @@ mod diplomacy_tests;
 mod water_w1_tests;
 #[cfg(test)]
 mod water_w2a_tests;
+#[cfg(test)]
+mod water_w2b_tests;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
@@ -827,6 +829,22 @@ pub enum Command {
     /// so the diplomacy variant carries its own name and the
     /// append-only codec tag 50.)
     SetDiplomacy { player: u8, target: u8, stance: u8 },
+    /// Buy one Fish Trap reseed ahead at the Dock (Water W2b,
+    /// ECO-15's desk): 100 wood, paid now, added to the Dock
+    /// owner's paid trap-reseed queue. The named building must
+    /// be a completed Dock; the queue itself is per player, so
+    /// any standing Dock manages it — the ECO-14 desk's exact
+    /// mirror, at the trap's price (the rebuilt trap costs
+    /// what a new trap costs: 100 wood, WATER-SPEC §4).
+    /// An unaffordable or Dock-less order is ignored whole.
+    QueueTrapReseed { building: u32 },
+    /// Remove one paid trap reseed from the Dock owner's queue,
+    /// refunding its 100 wood. An empty queue ignores the order.
+    DequeueTrapReseed { building: u32 },
+    /// Set the Dock owner's auto trap-reseed toggle (Water
+    /// W2b): with it on, a depleted Fish Trap replants itself
+    /// on depletion, charging the 100 wood at that moment.
+    SetAutoTrapReseed { building: u32, on: bool },
 }
 
 /// ECO-14: one farm reseed costs 60 wood (MECHANICS-STUDY §6.3:
@@ -834,6 +852,12 @@ pub enum Command {
 /// advance)"), whether bought ahead into the queue or charged
 /// by the auto-reseed toggle at depletion.
 pub const RESEED_WOOD_COST: i32 = 60;
+
+/// Water W2b (ECO-15): one Fish Trap reseed costs 100 wood —
+/// the trap's own construction price, charged the same two
+/// ways as the farm reseed (paid ahead into the Dock queue, or
+/// on the spot by the auto-reseed toggle at depletion).
+pub const TRAP_RESEED_WOOD_COST: i32 = 100;
 
 /// Why Town Center training cannot currently proceed (M2.5). The
 /// numeric tags are the WASM ABI contract: 0 ok, 1 no food,
@@ -1329,6 +1353,18 @@ struct PlayerState {
     /// pre-payment, charging the 60 wood at that moment (and
     /// only when the wood is there; MECHANICS-STUDY §6.3).
     auto_reseed: bool,
+    /// Water W2b (ECO-15): the Dock's paid trap-reseed queue —
+    /// how many trap reseeds this player has bought ahead
+    /// (100 wood each, paid at queue time). Any standing
+    /// completed Dock manages the one queue; a depleted Fish
+    /// Trap consumes one to replant itself. The ECO-14 pair's
+    /// exact mirror, at the Dock.
+    trap_reseed_queue: u32,
+    /// Water W2b (ECO-15): the Dock's auto trap-reseed toggle —
+    /// when on, a depleted Fish Trap replants itself on
+    /// depletion without pre-payment, charging the 100 wood at
+    /// that moment (and only when the wood is there).
+    auto_trap_reseed: bool,
     /// Package C: the mode-elimination flag (VIC-06 / VIC-07).
     /// Set once, by the death sweep, when this player's King dies
     /// (VIC-06) or — in a Sudden Death match — their last Town
@@ -3062,6 +3098,86 @@ impl Sim {
         }
     }
 
+    /// Water W2b (ECO-15): whether naming `building` (a
+    /// completed Dock) can buy one more paid trap reseed for
+    /// the Dock's owner: the owner holds the 100 wood. The
+    /// ECO-14 desk's mirror; the pinned sources state no queue
+    /// cap, so none is invented here either.
+    pub fn can_queue_trap_reseed(&self, building: u32) -> bool {
+        let Some(owner) = self.completed_dock_owner(building) else {
+            return false;
+        };
+        self.stockpile_of(owner).amount(ResourceKind::Wood)
+            >= I16F16::from_num(TRAP_RESEED_WOOD_COST)
+    }
+
+    /// Water W2b (ECO-15): whether naming `building` (a
+    /// completed Dock) can remove one paid trap reseed from
+    /// the owner's queue (the queue is nonempty).
+    pub fn can_dequeue_trap_reseed(&self, building: u32) -> bool {
+        let Some(owner) = self.completed_dock_owner(building) else {
+            return false;
+        };
+        self.trap_reseed_queue_of(owner) > 0
+    }
+
+    /// Water W2b (ECO-15): whether the named building is a
+    /// completed Dock (the SetAutoTrapReseed gate — the toggle
+    /// itself always applies once named on a real Dock).
+    pub fn is_completed_dock(&self, building: u32) -> bool {
+        self.completed_dock_owner(building).is_some()
+    }
+
+    /// The owner of the named building when it is a completed
+    /// Dock, else `None` — the trap-reseed commands' shared
+    /// gate (the `completed_mill_owner` twin).
+    fn completed_dock_owner(&self, building: u32) -> Option<u8> {
+        let b = self.buildings.iter().find(|b| b.id == building)?;
+        if b.kind == BuildingKind::Dock && b.complete {
+            Some(b.owner)
+        } else {
+            None
+        }
+    }
+
+    fn issue_queue_trap_reseed(&mut self, building: u32) {
+        if !self.can_queue_trap_reseed(building) {
+            return;
+        }
+        let owner = self.completed_dock_owner(building).expect("checked above");
+        let paid = self.stockpile_mut(owner).spend(
+            ResourceKind::Wood,
+            I16F16::from_num(TRAP_RESEED_WOOD_COST),
+        );
+        debug_assert!(paid);
+        if paid {
+            if let Some(slot) = player_slot(owner) {
+                self.players[slot].trap_reseed_queue += 1;
+            }
+        }
+    }
+
+    fn issue_dequeue_trap_reseed(&mut self, building: u32) {
+        if !self.can_dequeue_trap_reseed(building) {
+            return;
+        }
+        let owner = self.completed_dock_owner(building).expect("checked above");
+        if let Some(slot) = player_slot(owner) {
+            self.players[slot].trap_reseed_queue -= 1;
+        }
+        self.stockpile_mut(owner)
+            .add(ResourceKind::Wood, I16F16::from_num(TRAP_RESEED_WOOD_COST));
+    }
+
+    fn issue_set_auto_trap_reseed(&mut self, building: u32, on: bool) {
+        let Some(owner) = self.completed_dock_owner(building) else {
+            return;
+        };
+        if let Some(slot) = player_slot(owner) {
+            self.players[slot].auto_trap_reseed = on;
+        }
+    }
+
     /// Credit a destruction to the player who inflicted it
     /// (VIC-04, Military): `value` is the destroyed thing's
     /// resource cost. Only cross-player kills count — a Gaia
@@ -3367,6 +3483,24 @@ impl Sim {
     pub fn auto_reseed_of(&self, owner: u8) -> bool {
         match player_slot(owner) {
             Some(slot) => self.players[slot].auto_reseed,
+            None => false,
+        }
+    }
+
+    /// Water W2b (ECO-15): how many Fish Trap reseeds a player
+    /// has paid ahead at the Dock (0 for Gaia / unknown tags).
+    pub fn trap_reseed_queue_of(&self, owner: u8) -> u32 {
+        match player_slot(owner) {
+            Some(slot) => self.players[slot].trap_reseed_queue,
+            None => 0,
+        }
+    }
+
+    /// Water W2b (ECO-15): a player's Dock auto trap-reseed
+    /// toggle.
+    pub fn auto_trap_reseed_of(&self, owner: u8) -> bool {
+        match player_slot(owner) {
+            Some(slot) => self.players[slot].auto_trap_reseed,
             None => false,
         }
     }
@@ -6510,7 +6644,18 @@ impl Sim {
                     && self.node_index(node).is_some()
             }
             QueuedOrder::Attack { target } => self.can_attack(entity, target),
-            QueuedOrder::Build { .. } => self.entities[idx].kind == EntityKind::Villager,
+            // Water W2b: the queued Build gate takes the same
+            // builder↔kind pairing as `validate_build` — a
+            // Fishing Ship may queue a Fish Trap (execution
+            // re-validates the pairing whole, like every queued
+            // order).
+            QueuedOrder::Build { kind, .. } => {
+                match self.entities[idx].kind {
+                    EntityKind::Villager => kind != BuildingKind::FishTrap,
+                    EntityKind::FishingShip => kind == BuildingKind::FishTrap,
+                    _ => false,
+                }
+            }
             QueuedOrder::Repair { building } => self.can_repair(entity, building),
             QueuedOrder::RepairTc { tc } => self.can_repair_tc(entity, tc),
             QueuedOrder::AttackMove { .. } => self.can_attack_move(entity),
@@ -6867,6 +7012,15 @@ impl Sim {
                     target,
                     stance,
                 } => self.issue_set_diplomacy(player, target, stance),
+                Command::QueueTrapReseed { building } => {
+                    self.issue_queue_trap_reseed(building)
+                }
+                Command::DequeueTrapReseed { building } => {
+                    self.issue_dequeue_trap_reseed(building)
+                }
+                Command::SetAutoTrapReseed { building, on } => {
+                    self.issue_set_auto_trap_reseed(building, on)
+                }
             }
         }
 
@@ -8517,6 +8671,28 @@ impl Sim {
     /// deposit); otherwise it heads straight for the node. A
     /// non-queued `Gather` also clears the villager's order queue
     /// (M4, SEL-12: replace semantics).
+    /// Whether node `node_id` is a Fish Trap already being
+    /// worked by a Fishing Ship other than `self_id` (Water
+    /// W2b, ECO-15's one-worker rule — the Farm rule: a farm
+    /// takes one farmer, a trap takes one ship). Non-trap nodes
+    /// are never "busy" by this test.
+    fn trap_worker_busy(&self, node_id: u32, self_id: u32) -> bool {
+        let ni = match self.node_index(node_id) {
+            Some(ni) => ni,
+            None => return false,
+        };
+        if !self.nodes[ni].kind.is_trap() {
+            return false;
+        }
+        self.entities.iter().any(|e| {
+            e.id != self_id
+                && !e.dead
+                && e.kind == EntityKind::FishingShip
+                && e.task == Task::Gathering
+                && e.task_node == Some(node_id)
+        })
+    }
+
     fn issue_gather(&mut self, entity: u32, node: u32) {
         let idx = match self.entity_index(entity) {
             Some(i) => i,
@@ -8529,14 +8705,36 @@ impl Sim {
         // villagers work every land node plus SHORE fish (never
         // deep fish — no bank reaches it); a Fishing Ship works
         // fish only, of either kind. Every other kind gathers
-        // nothing.
+        // nothing. Water W2b extends the ship's row to its own
+        // Fish Traps: a ship works a trap node only when the
+        // trap building behind it (found through `node_id`)
+        // belongs to the ship's owner — DE gives a Fishing
+        // Ship no work on another player's trap, and the
+        // villager row refuses traps outright (a trap node is
+        // not `is_fish`, so without this arm the ship's row
+        // would refuse it too).
         let gatherer = self.entities[idx].kind;
         match self.node_index(node) {
             Some(ni) if !self.nodes[ni].is_depleted() => {
                 let nk = self.nodes[ni].kind;
                 let allowed = match gatherer {
-                    EntityKind::Villager => !nk.is_fish() || nk == NodeKind::ShoreFish,
-                    EntityKind::FishingShip => nk.is_fish(),
+                    // A trap node is not `is_fish`, so the
+                    // villager row must refuse it explicitly —
+                    // a trap's only worker is its owner's ship.
+                    EntityKind::Villager => {
+                        !nk.is_trap() && (!nk.is_fish() || nk == NodeKind::ShoreFish)
+                    }
+                    EntityKind::FishingShip => {
+                        nk.is_fish()
+                            || (nk.is_trap()
+                                && self
+                                    .buildings
+                                    .iter()
+                                    .any(|b| {
+                                        b.node_id == Some(node)
+                                            && b.owner == self.entities[idx].owner
+                                    }))
+                    }
                     _ => false,
                 };
                 if !allowed {
@@ -9489,7 +9687,22 @@ impl Sim {
             Some(i) => i,
             None => return BuildVerdict::Reject,
         };
-        if self.entities[idx].kind != EntityKind::Villager || self.entities[idx].dead {
+        if self.entities[idx].dead {
+            return BuildVerdict::Reject;
+        }
+        // The builder↔kind pairing. Every kind but one is
+        // villager-built; the exception is Water W2b's Fish
+        // Trap, the first non-villager-built building: a
+        // Fishing Ship builds ONLY Fish Traps, and a Fish Trap
+        // is built ONLY by a Fishing Ship (WATER-SPEC §4 — see
+        // the plan §3.3.5 note on the villager-assist path this
+        // slice does not implement).
+        let builder_admits = match self.entities[idx].kind {
+            EntityKind::Villager => kind != BuildingKind::FishTrap,
+            EntityKind::FishingShip => kind == BuildingKind::FishTrap,
+            _ => false,
+        };
+        if !builder_admits {
             return BuildVerdict::Reject;
         }
         // Package I: the Monument is unconstructible (wiki,
@@ -9546,6 +9759,13 @@ impl Sim {
         // (see `validate_build_gate`).
         if kind.is_gate() {
             return self.validate_build_gate(idx, kind, ax, ay);
+        }
+        // Water W2b: the Fish Trap's placement is its own
+        // branch too — a single water cell, a water-domain
+        // reach check, and a builder who stands ON the site
+        // rather than beside it (see `validate_build_fish_trap`).
+        if kind == BuildingKind::FishTrap {
+            return self.validate_build_fish_trap(idx, ax, ay);
         }
         // The whole footprint must be inside the grid.
         if ax + size > GRID_DIM || ay + size > GRID_DIM {
@@ -9762,6 +9982,100 @@ impl Sim {
         BuildVerdict::Place(ax, ay)
     }
 
+    /// Placement validation for a Fish Trap (Water W2b,
+    /// ECO-15): the generic tail's checks in the trap's own
+    /// geometry — the age gate already ran above (the kind is
+    /// Feudal-born), and what remains is the grid predicate
+    /// (one water-side, unobstructed cell), no live node and no
+    /// standing building on the cell, no living unit standing
+    /// on it but the ordering ship itself, the price, and a
+    /// water-domain reach check to the site.
+    fn validate_build_fish_trap(&self, idx: usize, ax: u32, ay: u32) -> BuildVerdict {
+        if ax >= GRID_DIM || ay >= GRID_DIM {
+            return BuildVerdict::Reject;
+        }
+        if !self.grid.fish_trap_placement_ok(ax, ay) {
+            return BuildVerdict::Reject;
+        }
+        // A footprint may not swallow a live node (the generic
+        // tail's rule) — a trap never shares its cell with a
+        // fish spot or a carcass.
+        for n in &self.nodes {
+            if !n.is_depleted() && self.grid.world_to_cell(n.pos_x, n.pos_y) == (ax, ay) {
+                return BuildVerdict::Reject;
+            }
+        }
+        // No standing building's footprint covers the cell
+        // (a Dock's water cells included — the registry reads
+        // every kind, farms and traps too).
+        for b in &self.buildings {
+            if b.footprint_cells().contains(&(ax, ay)) {
+                return BuildVerdict::Reject;
+            }
+        }
+        // A living unit standing on the cell blocks placement
+        // (the generic tail's rule) — except the ordering ship
+        // itself, which is supposed to be there.
+        let entity = self.entities[idx].id;
+        for e in &self.entities {
+            if e.id != entity
+                && !e.dead
+                && self.grid.world_to_cell(e.pos_x, e.pos_y) == (ax, ay)
+            {
+                return BuildVerdict::Reject;
+            }
+        }
+        // A living Town Center's reserved 4×4 refuses the cell
+        // too (BLD-16, the generic tail's rule) — a shoreline
+        // TC's reserve can reach a shallows cell, and the trap
+        // reads the reserve exactly like every other kind.
+        for e in &self.entities {
+            if e.kind == EntityKind::TownCenter && !e.dead {
+                let (tx, ty) = self.grid.world_to_cell(e.pos_x, e.pos_y);
+                let (tx, ty) = (tx as i32, ty as i32);
+                if (tx - 1..=tx + 2).contains(&(ax as i32))
+                    && (ty - 1..=ty + 2).contains(&(ay as i32))
+                {
+                    return BuildVerdict::Reject;
+                }
+            }
+        }
+        // The price, paid by the builder's owner (the generic
+        // tail's rule; the trap's stone/gold rows read 0).
+        let builder_owner = self.entities[idx].owner;
+        if self.stockpile_of(builder_owner).amount(ResourceKind::Wood)
+            < BuildingKind::FishTrap.wood_cost()
+        {
+            return BuildVerdict::Reject;
+        }
+        // Reachable on the builder's own domain: the ship must
+        // be able to sail to the site and stand on it.
+        if self.fish_trap_stand_point(idx, ax, ay).is_none() {
+            return BuildVerdict::Reject;
+        }
+        BuildVerdict::Place(ax, ay)
+    }
+
+    /// The Fish Trap builder's standing spot (Water W2b): the
+    /// trap cell's own center, when the builder can path to it
+    /// on the WATER domain. A ship builds standing ON its site
+    /// — the trap never blocks its cell (`blocks_footprint` is
+    /// false for the kind), exactly as the completed trap is
+    /// worked from on top of it; the 1×1 build range (5.8)
+    /// forgives the steering arrival slack around the center.
+    fn fish_trap_stand_point(
+        &self,
+        idx: usize,
+        ax: u32,
+        ay: u32,
+    ) -> Option<(I16F16, I16F16)> {
+        let from = (self.entities[idx].pos_x, self.entities[idx].pos_y);
+        let center = self.grid.cell_center(ax, ay);
+        self.grid
+            .find_path_through_for(Domain::Water, from, center, &[])
+            .map(|_| center)
+    }
+
     /// Put villager `idx` on construction duty for building `bid`:
     /// travel phase, with a move order to the best standing spot.
     fn assign_builder(&mut self, idx: usize, bid: u32) {
@@ -9831,6 +10145,11 @@ impl Sim {
     fn approach_point_building(&self, idx: usize, bid: u32) -> Option<(I16F16, I16F16)> {
         let bi = self.building_index(bid)?;
         let b = &self.buildings[bi];
+        // Water W2b: a Fish Trap's builder stands ON the site
+        // (the land ring search would refuse every water cell).
+        if b.kind == BuildingKind::FishTrap {
+            return self.fish_trap_stand_point(idx, b.cell_x, b.cell_y);
+        }
         if b.kind.is_gate() {
             let cells = b.ring_cells();
             return self.approach_point_cells(
@@ -10379,9 +10698,25 @@ impl Sim {
                         false
                     }
                 };
-                if d <= GATHER_RANGE || at_tree_stand || beside_shore_fish {
+                // Water W2b (ECO-15): a Fish Trap takes ONE
+                // worker — the Farm's one-worker rule on water.
+                // A second ship ordered to a worked trap sails
+                // to it and waits beside it; it starts the tick
+                // the trap frees up (the worker filled up, left,
+                // or the trap depleted).
+                let trap_busy = self.trap_worker_busy(node_id, self.entities[idx].id);
+                if (d <= GATHER_RANGE || at_tree_stand || beside_shore_fish) && !trap_busy {
                     let e = &mut self.entities[idx];
                     e.task = Task::Gathering;
+                    e.order = None;
+                    e.vel_x = I16F16::ZERO;
+                    e.vel_y = I16F16::ZERO;
+                } else if d <= GATHER_RANGE && trap_busy {
+                    // Holding beside the worked trap: no order,
+                    // no motion — the arrival test above re-runs
+                    // every tick and admits this ship the moment
+                    // the trap is free.
+                    let e = &mut self.entities[idx];
                     e.order = None;
                     e.vel_x = I16F16::ZERO;
                     e.vel_y = I16F16::ZERO;
@@ -10421,6 +10756,19 @@ impl Sim {
                         return;
                     }
                 };
+                // Water W2b backstop (ECO-15's one-worker rule):
+                // two ships can be carried into Gathering on the
+                // same trap only through paths that never pass
+                // the ToNode arrival gate (a completion hand-off
+                // race); the later one steps back to the travel
+                // phase and waits beside the trap like any
+                // second worker.
+                if self.nodes[ni].kind.is_trap()
+                    && self.trap_worker_busy(node_id, self.entities[idx].id)
+                {
+                    self.entities[idx].task = Task::ToNode;
+                    return;
+                }
                 // The gather rate is the node's base rate patched
                 // by the gatherer's owner's economy technologies
                 // (TEC-06 percentage patches, applied at lookup):
@@ -10850,6 +11198,37 @@ impl Sim {
         if !retire.is_empty() {
             self.buildings.retain(|b| !retire.contains(&b.id));
         }
+        // Retire depleted Fish Traps (Water W2b, ECO-15): the
+        // farm pass's twin on water — the trap's ground returns
+        // to open water unless the Dock trap-reseed desk
+        // replants it. Same visiting discipline (building
+        // order), so a short paid trap queue feeds the earliest
+        // traps first.
+        let depleted_traps: Vec<u32> = self
+            .buildings
+            .iter()
+            .filter(|b| {
+                b.complete
+                    && b.kind == BuildingKind::FishTrap
+                    && match b.node_id {
+                        Some(nid) => self
+                            .node_index(nid)
+                            .map(|ni| self.nodes[ni].is_depleted())
+                            .unwrap_or(true),
+                        None => false,
+                    }
+            })
+            .map(|b| b.id)
+            .collect();
+        let mut retire_traps: Vec<u32> = Vec::new();
+        for bid in depleted_traps {
+            if !self.try_replant_trap(bid) {
+                retire_traps.push(bid);
+            }
+        }
+        if !retire_traps.is_empty() {
+            self.buildings.retain(|b| !retire_traps.contains(&b.id));
+        }
     }
 
     /// ECO-14: try to replant one depleted farm in place,
@@ -10916,6 +11295,78 @@ impl Sim {
                 .map(|(i, _)| i)
                 .next();
             if let Some(idx) = farmer {
+                self.assign_builder(idx, bid);
+            }
+        }
+        true
+    }
+
+    /// Water W2b (ECO-15): try to replant one depleted Fish
+    /// Trap in place, returning whether the trap survives as a
+    /// fresh foundation — `try_replant_farm`'s exact mirror at
+    /// the Dock desk's price. Payment order: one paid trap
+    /// reseed from the Dock queue first; else, with the auto
+    /// trap-reseed toggle on, the 100 wood charged on the spot
+    /// (and the trap retires when the wood is not there). Like
+    /// its farm twin, the depletion path itself names no
+    /// standing-building gate — the desk's COMMANDS gate on a
+    /// completed Dock; what was bought stays bought. The
+    /// replanted trap returns to a foundation exactly as a
+    /// fresh placement; its dead node stays inert until the
+    /// completion path stamps a fresh 715 over the building.
+    /// The Fishing Ship that worked the dead trap becomes its
+    /// builder (the lowest-indexed living own ship still
+    /// assigned to the old node — the one-worker rule's
+    /// worker); any other ship on the dead node follows the
+    /// ordinary depletion paths in its own work step.
+    fn try_replant_trap(&mut self, bid: u32) -> bool {
+        let Some(bi) = self.building_index(bid) else {
+            return false;
+        };
+        let (owner, old_node) = (self.buildings[bi].owner, self.buildings[bi].node_id);
+        let Some(slot) = player_slot(owner) else {
+            return false;
+        };
+        if self.players[slot].trap_reseed_queue > 0 {
+            self.players[slot].trap_reseed_queue -= 1;
+        } else if self.players[slot].auto_trap_reseed {
+            let charged = self.stockpile_mut(owner).spend(
+                ResourceKind::Wood,
+                I16F16::from_num(TRAP_RESEED_WOOD_COST),
+            );
+            if !charged {
+                return false;
+            }
+        } else {
+            return false;
+        }
+        let max_hp = self.building_max_hp(BuildingKind::FishTrap, owner);
+        {
+            let b = &mut self.buildings[bi];
+            b.complete = false;
+            b.progress_thirds = 0;
+            b.hp = build::construction_hp_ceiling(
+                max_hp,
+                0,
+                BuildingKind::FishTrap.build_thirds(),
+            );
+            b.build_rate_remainder = 0;
+        }
+        if let Some(old_node) = old_node {
+            let worker = self
+                .entities
+                .iter()
+                .enumerate()
+                .filter(|(_, e)| {
+                    !e.dead
+                        && e.owner == owner
+                        && e.kind == EntityKind::FishingShip
+                        && e.task_node == Some(old_node)
+                        && e.garrisoned_in.is_none()
+                })
+                .map(|(i, _)| i)
+                .next();
+            if let Some(idx) = worker {
                 self.assign_builder(idx, bid);
             }
         }
@@ -11182,13 +11633,19 @@ impl Sim {
         // overlaps (validate_build); this covers everything that
         // moved in afterwards. Deterministic: entities in id
         // order, the ring search in fixed order.
-        if self.buildings[bi].kind != BuildingKind::Farm {
+        if self.buildings[bi].kind != BuildingKind::Farm
+            && self.buildings[bi].kind != BuildingKind::FishTrap
+        {
             // Package J: the footprint read is the building's own
             // (a gate's span, not its anchor cell). A gate that
             // completes OPEN (its owner's unit at the span) leaves
             // its standers be — the span is passable ground while
             // open; a gate that completes closed cures its span
-            // like any blocking footprint.
+            // like any blocking footprint. Water W2b: the Fish
+            // Trap is exempt beside the Farm — its builder stands
+            // ON the cell by design and starts working the trap
+            // the moment it completes; displacing it would strand
+            // the worker it just handed the node to.
             let gate_open = self.buildings[bi].kind.is_gate()
                 && self.gate_is_open(&self.buildings[bi]);
             if !gate_open {
@@ -11236,6 +11693,30 @@ impl Sim {
                     }
                 }
             }
+        }
+        if self.buildings[bi].kind == BuildingKind::FishTrap {
+            // Water W2b (ECO-15): the Farm's stamp on water —
+            // the completed trap becomes a 715-food node at the
+            // building's center, and the ship(s) that raised it
+            // start working it (the one-worker rule admits the
+            // first; a second builder waits beside it like any
+            // second worker). No technology stamps a trap's
+            // total (no Mill tech touches traps, WATER-SPEC
+            // §4), so `placed`'s kind row — 715 — stands as is.
+            let (px, py) = (self.buildings[bi].pos_x, self.buildings[bi].pos_y);
+            let nid = self.nodes.len() as u32;
+            self.nodes.push(ResourceNode::placed(nid, NodeKind::FishTrap, px, py));
+            if let Some(bi) = self.building_index(bid) {
+                self.buildings[bi].node_id = Some(nid);
+            }
+            for idx in 0..self.entities.len() {
+                if self.entities[idx].task == Task::Building
+                    && self.entities[idx].task_building == Some(bid)
+                {
+                    self.begin_gather(idx, nid);
+                }
+            }
+            return;
         }
         if self.buildings[bi].kind != BuildingKind::Farm {
             // House: active builders are done; travellers notice the
@@ -11751,6 +12232,20 @@ impl Sim {
                 }
                 h.write_u32(p.reseed_queue);
                 h.write_u8(u8::from(p.auto_reseed));
+            }
+            // Water W2b (ECO-15): the Dock trap-reseed pair gets
+            // its OWN conditional block rather than extending
+            // 0xB9 — the mode_out precedent: a stream whose trap
+            // desk never leaves its default stays byte-identical
+            // to the pre-W2b stream, golden included. Marker
+            // 0xC6, grepped free in `hash_parts` at build time
+            // (taken: 0xAE, 0xB0–0xBE, 0xC1 relic, 0xC2 MOV-06,
+            // 0xC3 wonder, 0xC4 teams, 0xC5 diplomacy, 0xD1
+            // resignation, 0xF1 queue provenance).
+            if p.trap_reseed_queue > 0 || p.auto_trap_reseed {
+                h.write_u8(0xC6);
+                h.write_u32(p.trap_reseed_queue);
+                h.write_u8(u8::from(p.auto_trap_reseed));
             }
             // Package C: the mode-elimination flag (VIC-06 /
             // VIC-07), written only while set — the same

@@ -309,6 +309,25 @@ impl Grid {
         true
     }
 
+    /// The Fish Trap placement predicate (Water W2b, ECO-15 —
+    /// plan §3.3.5's pin): the trap's single cell must be
+    /// water-side (deep water or shallows — DE allows traps
+    /// anywhere on water a Fishing Ship can reach; there is no
+    /// shallows-adjacency requirement) and unobstructed — no
+    /// building on the cell (the dynamic layer) and no node
+    /// block. The live-node and price/reach checks are
+    /// `Sim::validate_build`'s standing tail, as for every kind;
+    /// this is the one terrain implementation the sim and the
+    /// client's ghost mirror both read.
+    pub fn fish_trap_placement_ok(&self, ax: u32, ay: u32) -> bool {
+        if ax >= GRID_DIM || ay >= GRID_DIM {
+            return false;
+        }
+        self.is_water_side(ax, ay)
+            && !self.is_dynamic(ax, ay)
+            && !self.is_node_blocked(ax, ay)
+    }
+
     /// The terrain tag of a cell (out of bounds reads as water —
     /// the wall at the world's edge).
     pub fn terrain_at(&self, x: u32, y: u32) -> u8 {
