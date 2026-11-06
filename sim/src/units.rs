@@ -178,6 +178,7 @@ pub fn spec(kind: EntityKind) -> &'static UnitSpec {
         EntityKind::DemolitionShip => &DEMOLITION_SHIP,
         EntityKind::WarHulk => &WAR_HULK,
         EntityKind::TransportShip => &TRANSPORT_SHIP,
+        EntityKind::TradeCog => &TRADE_COG,
     }
 }
 
@@ -1340,6 +1341,57 @@ static TRANSPORT_SHIP: UnitSpec = UnitSpec {
     wood_cost: 125,
     gold_cost: 0,
     train_ticks: 2760, // 46 s
+    regicide_unit: false,
+    immune_conversion: false,
+    regenerates: 0,
+};
+
+/// Trade Cog (Water W5, TRD-05/07/08; wiki, Ship list fresh
+/// crawl 2026-11-05 via WATER-SPEC §3.2 — post-update-169123
+/// values, corroborated at W5 Passo 0 against the live Ship
+/// list and the Trade Cog article, fetched 2026-11-06): HP 80,
+/// armor 0/6, no attack, speed 1.65 tiles/s (the Trade Cog
+/// article's changelog: update 141935 raised the base speed to
+/// 1.65 and cut Caravan to +20% in the same patch — the cart's
+/// own history, one domain over), LoS 6. Cost 100 W / 50 G,
+/// train 36 s at the Dock, Feudal Age. Class: SHIP (the Ship
+/// article's overview: all ships except the Fishing Ship carry
+/// the Ships class — and the Fishing Ship carries it too in
+/// this roster, per the W2a §0.5 decision). Radius adopts the
+/// Fishing Ship's 1.6 — an implementation constant
+/// (WATER-SPEC §8.9), never DE data. NOT shipped: the update-
+/// 169123 preview's gold/wood cargo-ratio configuration on the
+/// Cog's UI (ageofempires.com naval preview, 2026-01-28) — no
+/// fetched source pins its ratios or its TRD-06 interaction,
+/// so the Cog credits gold by the shipped formula exactly
+/// like the Cart; the ratio options are recorded as an open
+/// item in the W5 handoff, not invented here.
+static TRADE_COG: UnitSpec = UnitSpec {
+    max_hp: 80,
+    attacks: NO_ATTACKS,
+    armor_melee: 0,
+    armor_pierce: 6,
+    armor_building: 0,
+    classes: cls::mask(&[cls::SHIP]),
+    range_max: I16F16::ZERO,
+    range_min: I16F16::ZERO,
+    reload_ticks: 0,
+    attack_delay_ticks: 0,
+    accuracy: 100,
+    projectile_speed: I16F16::ZERO,
+    scatter: I16F16::ZERO,
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
+    speed: I16F16::from_bits(7_209), // 1.65 tiles/s (absolute scale, see header)
+    los: I16F16::from_bits(1_572_864), // 24 (6 tiles)
+    radius: I16F16::from_bits(104_858), // 1.6 — adopted (see above)
+    carcass_food: 0,
+    carcass_decay_bits: 0,
+    food_cost: 0,
+    wood_cost: 100,
+    gold_cost: 50,
+    train_ticks: 2160, // 36 s
     regicide_unit: false,
     immune_conversion: false,
     regenerates: 0,

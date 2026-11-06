@@ -122,7 +122,10 @@ fn transport_row_tags_and_dock_roster() {
     // LoS 5, no attack, SHIP class, Water domain, capacity 5.
     assert_eq!(EntityKind::TransportShip.tag(), 32);
     assert_eq!(EntityKind::from_tag(32), Some(EntityKind::TransportShip));
-    assert_eq!(EntityKind::from_tag(33), None);
+    // On the merged tree Water W5's Trade Cog fills tag 33;
+    // 34 is the next free tag.
+    assert_eq!(EntityKind::from_tag(33), Some(EntityKind::TradeCog));
+    assert_eq!(EntityKind::from_tag(34), None);
     let spec = crate::units::spec(EntityKind::TransportShip);
     assert_eq!(spec.max_hp, 70);
     assert_eq!(spec.armor_melee, 0);

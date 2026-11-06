@@ -2732,7 +2732,7 @@ Ballistics lead on the Fire line still rides the generic
 PRJ-05 release — its post-overhaul applicability remains
 UNVERIFIED, as W3a left it. The Imperial tiers (§3.4 of the
 SPEC) are a later slice, outside this rule's documented
-generic-roster scope as landed. · *Status:* **MATCHES**.
+generic-roster scope as landed. **Water W5 extension (2026-11-06): the class's technology half lands** — Careening (University, Castle, 100 F / 200 G: ships +1 pierce armor) and Clinker Construction (University, Castle, 150 F / 100 W: ships +10% speed) as TEC-06 lookup patches keyed on the SHIP class mask in `stats_for`, so every hull — the Trade Cog included — inherits both from its table row alone. Costs pin to the official update-169123 preview (fetched 2026-11-06; Careening's "changed from 250f 150g → 100f 200g" is explicit there); the two RESEARCH TIMES are UNVERIFIED in every fetched source and ship as a named 40 s placeholder in `tech.rs`, never presented as DE data. Carvel Hull (the Imperial third ship tech) stays out — a W5 non-goal in the execution plan §1.1. · *Status:* **MATCHES**.
 
 **CLS-08 — The Monk class has no attack.** Monks belong to their own
 class (which other monks' Atonement and various bonuses key off); their
@@ -3392,7 +3392,7 @@ preference, update 34699); a loaded cart whose owner has no Market
 standing waits at the foreign depot. The Trade Cog is the same machine
 on the Dock depot kind and lands with BLD-14 (the Dock/water domain is
 not in the game yet). Pinned by `sim/src/trade_tests.rs` (loop credit,
-one-way silence, stop/move re-task, home re-resolution). · *Status:*
+one-way silence, stop/move re-task, home re-resolution). **Water W5 extension (2026-11-06): the Cog half is live** — the shipped machine generalized by depot kind rather than forked: `trade_depot_kind` pairs Cart↔Market and Cog↔Dock, and `can_trade` / `trade_home_of` / `trade_step` / the economy-tick loop / the spawn home stamp all read the pair, so the Cog runs the identical two-leg loop on the water domain (its `trade_approach` searches the Dock's ring on the Water domain — the Fish Trap stand point's discipline — where the land `approach_point` would beach it). The Cog's row (WATER-SPEC §3.2, post-update-169123): 100 W / 50 G, 36 s, Feudal at the Dock, HP 80, armor 0/6, no attack, speed 1.65, LoS 6, SHIP class; route gold is this rule's TRD-06 formula over the Dock depot centers. Pinned by `sim/src/water_w5_tests.rs` (the row, Dock training + home stamp, the loop crediting ≈9.94 only on arrival home over a staged 41-tile sea route, twice, and Stop ending the route). · *Status:*
 **MATCHES**.
 
 **TRD-06 — Trade gold scales ~quadratically with distance.** Gold per
@@ -3427,7 +3427,7 @@ Market; one's own Market is refused — gold comes from *another*
 player's Market, wiki "Trade Cart"). With no Dock in the game the
 depot set is Markets. Pinned by `trade_tests` (enemy depot valid in a
 1v1 staging, own depot refused, depot owner's stockpile untouched
-across a full round trip). · *Status:* **MATCHES**.
+across a full round trip) **Water W5 extension (2026-11-06):** the depot set is now Markets *and* Docks, paired by unit kind — a Cog tasks to ANY other player's completed Dock (the 1v1 enemy's included), its own Dock is refused, and the cross-kind pairings are refused both ways (a Cog offered a Market, a Cart offered a Dock). A foreign Dock falling mid-route ends the Cog's route exactly as a fallen Market ends the Cart's. Pinned by `water_w5_tests` (tasking validity + the fallen-Dock route end).. · *Status:* **MATCHES**.
 
 **TRD-08 — Caravan speeds trade units.** The Caravan technology (Castle,
 Market) raises Trade Cart and Trade Cog speed by 20% (an ordinary MOV-01
@@ -3443,7 +3443,7 @@ is a **Castle Age** research (only the Burgundians hold it an Age
 early, as a civilization bonus), so the parenthetical above now reads
 Castle; and the +20% is the current value — update 141935 cut it from
 +50% while raising the trade units' base speed 1 → 1.25, which the
-Trade Cart's table row also adopts. · *Status:* **MATCHES**.
+Trade Cart's table row also adopts. **Water W5 (2026-11-06): the Cog joins the patch, as this note always provided** — the `stats_for` Caravan patch keys on both trade kinds; `water_w5_tests::clinker_and_caravan_speed_the_ships` pins the Cog's layered row (7209 → 8650 bits under Caravan) beside the Cart's unchanged 6553. · *Status:* **MATCHES**.
 
 ---
 

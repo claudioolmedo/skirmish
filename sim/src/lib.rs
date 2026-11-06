@@ -132,6 +132,7 @@ mod water_w3a_tests;
 mod water_w3b_tests;
 #[cfg(test)]
 mod water_w4_tests;
+mod water_w5_tests;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
@@ -3953,11 +3954,31 @@ impl Sim {
         // Caravan (Package D, TRD-08): trade units +20% speed —
         // an ordinary MOV-01 percentage patch on the trade kinds
         // (TEC-06), in the same integer-scalar shape: speed × 6/5
-        // over the base row. Keyed on the kind, not a class: the
-        // Trade Cart is the only trade kind until the Dock lands
-        // (BLD-14), when the Trade Cog joins this same patch.
-        if kind == EntityKind::TradeCart && p.techs & TechId::Caravan.bit() != 0 {
+        // over the base row. Keyed on the kind, not a class.
+        // Water W5: the Trade Cog joins the patch, exactly as
+        // TRD-08's text always read ("Trade Cart and Trade Cog").
+        if (kind == EntityKind::TradeCart || kind == EntityKind::TradeCog)
+            && p.techs & TechId::Caravan.bit() != 0
+        {
             s.speed = I16F16::from_bits(((s.speed.to_bits() as i64 * 6) / 5) as i32);
+        }
+        // Water W5 (the University ship pair, TEC-06 patches
+        // keyed on the SHIP armor class — every ship row carries
+        // it, so a future hull inherits both by its table row
+        // alone, the cavalry discipline):
+        // Careening (University, Castle): ships +1 pierce armor
+        // (wiki, Ship tech table + War Galley Further statistics;
+        // SPEC §5).
+        let ship_class = s.classes & crate::classes::bit(crate::classes::SHIP) != 0;
+        if ship_class && p.techs & TechId::Careening.bit() != 0 {
+            s.armor_pierce += 1;
+        }
+        // Clinker Construction (University, Castle): ships +10%
+        // speed — the Husbandry integer scalar over the layered
+        // row, so a Cog's Caravan layer is scaled too (the
+        // sequential-layering rule the Hand Cart precedent set).
+        if ship_class && p.techs & TechId::ClinkerConstruction.bit() != 0 {
+            s.speed = I16F16::from_bits(((s.speed.to_bits() as i64 * 11) / 10) as i32);
         }
         // The Monastery patches (Castle P5a, MNK-01): keyed on
         // the MONK class mask, TEC-06's discipline — the Monk is
@@ -6691,8 +6712,10 @@ impl Sim {
     }
 
     /// Would a `Trade` command be accepted right now? (Package D,
-    /// TRD-05/07.) The entity must be a living, player-owned Trade
-    /// Cart and the building a *complete* Market owned by another
+    /// TRD-05/07.) The entity must be a living, player-owned trade
+    /// unit (a Trade Cart, or — Water W5 — a Trade Cog) and the
+    /// building a *complete* depot of the unit's own kind (Market
+    /// for a Cart, Dock for a Cog) owned by another
     /// player — ally, neutral, enemy, even a resigned player's:
     /// trade tasking never consults the diplomacy table for
     /// validity, only for the combat exposure that follows, and
@@ -6708,11 +6731,33 @@ impl Sim {
             return false;
         };
         let e = &self.entities[idx];
-        if e.kind != EntityKind::TradeCart || e.dead || e.owner == entity::OWNER_GAIA {
+        // Water W5 (TRD-05/07): the Cog joins the Cart on the
+        // SAME machine — the unit kind selects its depot kind
+        // (Cart ↔ Market, Cog ↔ Dock); a Cart tasked to a Dock
+        // or a Cog to a Market is refused, exactly as a villager
+        // is. Every other clause is the Package D rule, shared.
+        let Some(depot) = Self::trade_depot_kind(e.kind) else {
+            return false;
+        };
+        if e.dead || e.owner == entity::OWNER_GAIA {
             return false;
         }
         let b = &self.buildings[bi];
-        b.kind == BuildingKind::Market && b.complete && b.owner != e.owner
+        b.kind == depot && b.complete && b.owner != e.owner
+    }
+
+    /// The depot building kind a trade unit runs to (Package D,
+    /// TRD-05; Water W5 extends the pairing to the sea): a Trade
+    /// Cart trades Market↔Market, a Trade Cog Dock↔Dock — the
+    /// WATER-EXECUTION-PLAN §6 decision that the Cog rides the
+    /// shipped Trade machine on the Dock depot kind. `None` for
+    /// every non-trade kind.
+    fn trade_depot_kind(kind: EntityKind) -> Option<BuildingKind> {
+        match kind {
+            EntityKind::TradeCart => Some(BuildingKind::Market),
+            EntityKind::TradeCog => Some(BuildingKind::Dock),
+            _ => None,
+        }
     }
 
     /// Would a `Queue` command be accepted right now? (M4, SEL-12.)
@@ -8178,11 +8223,15 @@ impl Sim {
     /// completed Market standing.
     fn trade_home_of(&self, idx: usize) -> Option<u32> {
         let e = &self.entities[idx];
+        // Water W5: the home depot reads on the unit's depot
+        // kind (Market for a Cart, Dock for a Cog) — one machine,
+        // two depot kinds, no other change to the rule.
+        let depot = Self::trade_depot_kind(e.kind)?;
         let standing = |bid: u32| {
             self.building_index(bid)
                 .map(|bi| {
                     let b = &self.buildings[bi];
-                    b.kind == BuildingKind::Market && b.complete && b.owner == e.owner
+                    b.kind == depot && b.complete && b.owner == e.owner
                 })
                 .unwrap_or(false)
         };
@@ -8197,7 +8246,7 @@ impl Sim {
         };
         let mut best: Option<(u32, I16F16)> = None;
         for b in &self.buildings {
-            if b.kind != BuildingKind::Market || !b.complete || b.owner != e.owner {
+            if b.kind != depot || !b.complete || b.owner != e.owner {
                 continue;
             }
             let d = steer::vec_len(b.pos_x - tx, b.pos_y - ty);
@@ -8237,6 +8286,32 @@ impl Sim {
             let b = &self.buildings[bi];
             (b.cell_x, b.cell_y, b.kind.footprint_size())
         };
+        // Water W5: a Cog approaches its Dock on the WATER
+        // domain — the land ring search (`approach_point` reads
+        // `is_blocked` / `find_path`, the land readings) would
+        // refuse every water cell around the Dock and accept
+        // only bank cells the ship can never stand on. The
+        // water search is the same ring in the same fixed
+        // order, read on the ship's domain (the Fish Trap stand
+        // point's discipline): the first ring cell the water
+        // domain leaves open — a Dock footprint blocks its own
+        // cells for water, so the apron is the water-side ring.
+        if self.entities[idx].kind.domain() == Domain::Water {
+            let from = (self.entities[idx].pos_x, self.entities[idx].pos_y);
+            for (cx, cy) in build::ring_cells(ax, ay, size) {
+                if cx >= GRID_DIM || cy >= GRID_DIM {
+                    continue;
+                }
+                if self.grid.is_blocked_for(Domain::Water, cx, cy) {
+                    continue;
+                }
+                let center = self.grid.cell_center(cx, cy);
+                if self.grid.find_path_for(Domain::Water, from, center).is_some() {
+                    return self.set_move_order(idx, center.0, center.1);
+                }
+            }
+            return false;
+        }
         match self.approach_point(idx, ax, ay, size) {
             Some((px, py)) => {
                 self.set_move_order(idx, px, py);
@@ -8274,13 +8349,15 @@ impl Sim {
             Some(t) => t,
             None => return,
         };
-        // The foreign depot must still stand, complete, a Market:
-        // if it fell mid-route the route is over — the cart stands
-        // down where it is (the reference's stranded cart).
+        // The foreign depot must still stand, complete, of the
+        // unit's depot kind (a Market for a Cart, a Dock for a
+        // Cog — Water W5): if it fell mid-route the route is
+        // over — the unit stands down where it is (the
+        // reference's stranded cart).
+        let depot = Self::trade_depot_kind(self.entities[idx].kind);
         let tbi = match self.building_index(target) {
             Some(bi)
-                if self.buildings[bi].kind == BuildingKind::Market
-                    && self.buildings[bi].complete =>
+                if Some(self.buildings[bi].kind) == depot && self.buildings[bi].complete =>
             {
                 bi
             }
@@ -10606,11 +10683,14 @@ impl Sim {
                 self.work_tick(idx);
             }
         }
-        // Trade routes (Package D, TRD-05): every living Trade
-        // Cart with a tasking runs its two-waypoint loop, in id
-        // order like the work machine above.
+        // Trade routes (Package D, TRD-05): every living trade
+        // unit with a tasking runs its two-waypoint loop, in id
+        // order like the work machine above — Trade Carts on
+        // land, and (Water W5) Trade Cogs on the water domain,
+        // on the same step.
         for idx in 0..self.entities.len() {
-            if self.entities[idx].kind == EntityKind::TradeCart
+            if (self.entities[idx].kind == EntityKind::TradeCart
+                || self.entities[idx].kind == EntityKind::TradeCog)
                 && !self.entities[idx].dead
                 && self.entities[idx].trade_target.is_some()
             {
@@ -10715,8 +10795,10 @@ impl Sim {
         // Package D (TRD-05): a Trade Cart's home depot is the
         // Market that trained it, stamped at spawn — the depot it
         // returns its gold to for its whole life (re-resolved by
-        // `trade_home_of` only if that Market falls).
-        if kind == EntityKind::TradeCart {
+        // `trade_home_of` only if that Market falls). Water W5:
+        // a Trade Cog's home depot is the Dock that trained it,
+        // the same stamp on the second depot kind.
+        if kind == EntityKind::TradeCart || kind == EntityKind::TradeCog {
             self.entities[idx].trade_home = Some(building);
         }
         // Rally (M4, SEL-13): the new unit walks to the building's

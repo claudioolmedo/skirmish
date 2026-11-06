@@ -765,6 +765,17 @@ impl WasmSim {
         self.inner.transport_cargo_count(ship)
     }
 
+    /// Train a Trade Cog at a Dock (Water W5, TRD-05). The
+    /// Cog's trade tasking needs no dedicated export: it rides
+    /// the generic `push_trade` by entity/building id, exactly
+    /// like the Trade Cart's — one command, two depot kinds.
+    /// The University ship pair (Careening 48, Clinker
+    /// Construction 49) likewise rides `push_research_at`.
+    /// See `push_train_militia`.
+    pub fn push_train_trade_cog(&mut self, building: u32) -> bool {
+        self.push_train_at(building, EntityKind::TradeCog)
+    }
+
     /// Order a Monk to heal an allied unit (Castle P5a, MNK-10):
     /// the monk walks into heal range and restores 150 HP/min
     /// until the target is whole. Returns whether the order

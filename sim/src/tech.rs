@@ -388,11 +388,33 @@ pub enum TechId {
     /// ships the dossier's form and flags the divergence in
     /// its handoff. Tag 47.
     MediumWarships,
+    /// University, Castle: ships +1 pierce armor (Water W5;
+    /// moved from the Dock to the University in DE update
+    /// 169123 — wiki, Ship tech table + the official update-
+    /// 169123 preview, ageofempires.com, fetched 2026-11-06).
+    /// Cost pinned at W5 Passo 0 from the same official
+    /// preview: **100 food / 200 gold** ("Careening cost
+    /// changed from 250f 150g → 100f 200g"). Research time is
+    /// UNVERIFIED — no fetched source pins it; the 40 s below
+    /// is a named implementation placeholder in the
+    /// Man-at-Arms sense, recorded as such in the W5 handoff,
+    /// never DE data. Tag 48.
+    Careening,
+    /// University, Castle: ships +10% speed (Water W5; new in
+    /// DE update 169123 — wiki, Clinker Construction article +
+    /// the official update-169123 preview, fetched 2026-11-06;
+    /// Carvel Hull, Imperial, is its further upgrade and is
+    /// NOT in this slice). Cost pinned at W5 Passo 0 from the
+    /// official preview: **150 food / 100 wood** ("150f 100w
+    /// (III): Ships move +10% faster"). Research time
+    /// UNVERIFIED, same placeholder discipline as Careening.
+    /// Tag 49.
+    ClinkerConstruction,
 }
 
 impl TechId {
     /// All technologies, in tag order.
-    pub const ALL: [TechId; 48] = [
+    pub const ALL: [TechId; 50] = [
         TechId::Loom,
         TechId::FeudalAge,
         TechId::Fletching,
@@ -441,6 +463,8 @@ impl TechId {
         TechId::FishingLines,
         TechId::Gillnets,
         TechId::MediumWarships,
+        TechId::Careening,
+        TechId::ClinkerConstruction,
     ];
 
     /// Stable tag: 0 loom, 1 feudal age, 2 fletching, 3 scale mail,
@@ -496,6 +520,11 @@ impl TechId {
     /// WATER-EXECUTION-PLAN §2 allocation; verified first free
     /// on the W3b base `1070746`, where ALL held 47 entries,
     /// tags 0–46.)
+    /// 48 careening, 49 clinker construction (Water W5 — the
+    /// University ship pair, appended after Medium Warships in
+    /// the WATER-EXECUTION-PLAN §2 allocation; verified first
+    /// free on the W5 base `c9d1353`, where ALL held 48
+    /// entries, tags 0–47.)
     pub fn tag(self) -> u8 {
         match self {
             TechId::Loom => 0,
@@ -546,6 +575,8 @@ impl TechId {
             TechId::FishingLines => 45,
             TechId::Gillnets => 46,
             TechId::MediumWarships => 47,
+            TechId::Careening => 48,
+            TechId::ClinkerConstruction => 49,
         }
     }
 
@@ -596,7 +627,12 @@ impl TechId {
             | TechId::MurderHoles
             | TechId::TreadmillCrane
             | TechId::Masonry
-            | TechId::FortifiedWall => TechHost::Building(BuildingKind::University),
+            | TechId::FortifiedWall
+            // Water W5: the University ship pair (update 169123
+            // moved Careening to the University; Clinker
+            // Construction was born there).
+            | TechId::Careening
+            | TechId::ClinkerConstruction => TechHost::Building(BuildingKind::University),
             // Package M: Conscription is researched at the Castle
             // itself (wiki, Conscription).
             TechId::Conscription => TechHost::Building(BuildingKind::Castle),
@@ -665,8 +701,12 @@ impl TechId {
             // Water W2a: Gillnets is Castle Age research (its
             // precursor Fishing Lines falls to the Feudal default).
             // Water W3b: Medium Warships is Castle Age research.
+            // Water W5: the University ship pair is Castle Age
+            // research (wiki, Careening / Clinker Construction).
             | TechId::Gillnets
-            | TechId::MediumWarships => Age::Castle,
+            | TechId::MediumWarships
+            | TechId::Careening
+            | TechId::ClinkerConstruction => Age::Castle,
             _ => Age::Feudal,
         }
     }
@@ -764,6 +804,8 @@ impl TechId {
             TechId::FishingLines => 1200, // 20 s (wiki, Technology table — WATER-SPEC §5)
             TechId::Gillnets => 2700, // 45 s (pinned at W2 Passo 0 — see the tag docs)
             TechId::MediumWarships => 3000, // 50 s (pinned at W3b Passo 0 — see the tag docs)
+            TechId::Careening => 2400, // 40 s — UNVERIFIED placeholder (see the tag docs)
+            TechId::ClinkerConstruction => 2400, // 40 s — UNVERIFIED placeholder (see the tag docs)
         }
     }
 
@@ -819,6 +861,8 @@ impl TechId {
             TechId::FishingLines => (50, 100, 0, 0), // wiki, Technology table — WATER-SPEC §5
             TechId::Gillnets => (150, 200, 0, 0), // pinned at W2 Passo 0 — see the tag docs
             TechId::MediumWarships => (0, 150, 100, 0), // pinned at W3b Passo 0 — see the tag docs
+            TechId::Careening => (100, 0, 200, 0), // official update-169123 preview — see the tag docs
+            TechId::ClinkerConstruction => (150, 100, 0, 0), // official update-169123 preview — see the tag docs
         }
     }
 }
@@ -1150,7 +1194,9 @@ mod tests {
         assert_eq!(TechId::from_tag(46), Some(TechId::Gillnets));
         // Water W3b: Medium Warships appends at 47.
         assert_eq!(TechId::from_tag(47), Some(TechId::MediumWarships));
-        assert_eq!(TechId::from_tag(48), None);
+        assert_eq!(TechId::from_tag(48), Some(TechId::Careening));
+        assert_eq!(TechId::from_tag(49), Some(TechId::ClinkerConstruction));
+        assert_eq!(TechId::from_tag(50), None);
     }
 
     #[test]
@@ -1300,7 +1346,7 @@ mod tests {
         // TEC-07 wood chain (43/44) last, so ALL now holds 45.
         // (Water W2a appends the Dock fishing pair at 45/46 —
         // ALL now holds 47; the count lives in the W2a test.)
-        assert_eq!(TechId::ALL.len(), 48);
+        assert_eq!(TechId::ALL.len(), 50);
         // ECO-14: the farm gather lookup meets the farm's own
         // 0.4 food/s work-rate cap — the base farm rate sits
         // below it today, so the clamped value is the base rate,
@@ -1391,8 +1437,10 @@ mod tests {
         assert_eq!(TechId::from_tag(46), Some(TechId::Gillnets));
         // Water W3b appends Medium Warships at 47.
         assert_eq!(TechId::from_tag(47), Some(TechId::MediumWarships));
-        assert_eq!(TechId::from_tag(48), None);
-        assert_eq!(TechId::ALL.len(), 48);
+        assert_eq!(TechId::from_tag(48), Some(TechId::Careening));
+        assert_eq!(TechId::from_tag(49), Some(TechId::ClinkerConstruction));
+        assert_eq!(TechId::from_tag(50), None);
+        assert_eq!(TechId::ALL.len(), 50);
     }
 
     #[test]

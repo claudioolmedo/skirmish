@@ -978,6 +978,10 @@ impl BuildingKind {
                 // the Dock only — a Dark Age roster entry beside
                 // the Fishing Ship (WATER-SPEC §3.1).
                 | (BuildingKind::Dock, EntityKind::TransportShip)
+                // Water W5 (TRD-05): the Trade Cog trains at
+                // the Dock only — the Dock depot kind's trade
+                // unit, as the Trade Cart is the Market's.
+                | (BuildingKind::Dock, EntityKind::TradeCog)
         )
     }
 

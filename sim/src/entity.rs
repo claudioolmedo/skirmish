@@ -208,6 +208,18 @@ pub enum EntityKind {
     /// inert while aboard, and — the inverse of GAR-03/GAR-10 —
     /// everything aboard DIES with the ship when it sinks.
     TransportShip,
+    /// The Trade Cog (Water W5, TRD-05/07/08): the Feudal Age
+    /// civilian ship trained at the Dock — the Trade Cart's
+    /// sea-going counterpart, running the SAME two-leg trade
+    /// machine on the Dock depot kind (the WATER-EXECUTION-PLAN
+    /// §6 program decision: the Cog reuses the shipped Trade
+    /// machine, it does not fork it). No attack: a civilian
+    /// hull. Its tag is 33, the plan §2 reserved allocation —
+    /// tag 32 is Water W4's Transport Ship; the W5 tree was
+    /// built off the same base with a deliberate gap at 32, so
+    /// landing the two branches together kept both allocations
+    /// exactly as the plan assigned them.
+    TradeCog,
 }
 
 impl EntityKind {
@@ -242,6 +254,11 @@ impl EntityKind {
     /// the Castle tiers in the plan §2 allocation order;
     /// verified first free on the W4 base `c9d1353`, where
     /// 0–31 were taken).
+    /// 33 = trade cog (Water W5, TRD-05 — appended after
+    /// the Transport Ship in the plan §2 allocation order;
+    /// the W5 tree off this same base `c9d1353` carried a
+    /// deliberate one-tag gap at 32, filled by W4's landing
+    /// when the two branches merged).
     pub fn tag(self) -> u8 {
         match self {
             EntityKind::Villager => 0,
@@ -277,6 +294,7 @@ impl EntityKind {
             EntityKind::DemolitionShip => 30,
             EntityKind::WarHulk => 31,
             EntityKind::TransportShip => 32,
+            EntityKind::TradeCog => 33,
         }
     }
 
@@ -316,6 +334,7 @@ impl EntityKind {
             30 => Some(EntityKind::DemolitionShip),
             31 => Some(EntityKind::WarHulk),
             32 => Some(EntityKind::TransportShip),
+            33 => Some(EntityKind::TradeCog),
             _ => None,
         }
     }
@@ -331,6 +350,10 @@ impl EntityKind {
             EntityKind::Spearman | EntityKind::Skirmisher | EntityKind::TradeCart => {
                 crate::tech::Age::Feudal
             }
+            // Water W5 (TRD-05): the Trade Cog is a Feudal unit
+            // (WATER-SPEC §3.2 — it trains at the Dock once the
+            // Feudal Age is reached, wiki, Trade Cog article).
+            EntityKind::TradeCog => crate::tech::Age::Feudal,
             // Water W3a (CLS-07): the whole Feudal combat set
             // trains at the Dock from the Feudal Age (WATER-SPEC
             // §3.2 — the Fishing Ship alone is Dark Age).
@@ -376,7 +399,8 @@ impl EntityKind {
             | EntityKind::FireShip
             | EntityKind::DemolitionShip
             | EntityKind::WarHulk
-            | EntityKind::TransportShip => crate::grid::Domain::Water,
+            | EntityKind::TransportShip
+            | EntityKind::TradeCog => crate::grid::Domain::Water,
             _ => crate::grid::Domain::Land,
         }
     }
@@ -424,6 +448,7 @@ impl EntityKind {
                 | EntityKind::DemolitionShip
                 | EntityKind::WarHulk
                 | EntityKind::TransportShip
+                | EntityKind::TradeCog
         )
     }
 
@@ -454,6 +479,7 @@ impl EntityKind {
                 | EntityKind::DemolitionRaft
                 | EntityKind::Hulk
                 | EntityKind::TransportShip
+                | EntityKind::TradeCog
         )
     }
 

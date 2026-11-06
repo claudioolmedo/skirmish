@@ -45,8 +45,9 @@ test('both dispatch paths route Fishing Ship trains to the export', () => {
 
 test('the tech tree mirrors the Dock researches (tags 45/46)', () => {
   // TECH_TREE.length grew to 48 with Water W3b's Medium
-  // Warships (tag 47, pinned in waterw3bclient.test.mjs).
-  assert.equal(TECH_TREE.length, 48);
+  // Warships (tag 47, pinned in waterw3bclient.test.mjs), and
+  // to 50 with Water W5's University ship pair (tags 48/49).
+  assert.equal(TECH_TREE.length, 50);
   assert.deepEqual(TECH_TREE[45], {
     tag: 45, host: 23, age: 1, cost: [50, 100, 0, 0], secs: 20, requires: null,
   });
@@ -65,7 +66,7 @@ test('the Dock panel exists: context, train block, research rows', () => {
   assert.deepEqual(PANEL_BUTTONS.dock,
     ['train-fishing-ship', 'research-fishinglines', 'research-gillnets',
       'train-galley', 'train-fire-galley', 'train-demolition-raft', 'train-hulk',
-      'research-mediumwarships', 'train-transport-ship']);
+      'research-mediumwarships', 'train-transport-ship', 'train-trade-cog']); // + Transport (W4), + the Cog (W5)
 });
 
 test('the Dock is a full production + shelter host client-side', () => {

@@ -79,6 +79,8 @@ export const TECH_TREE = [
   { tag: 45, host: 23, age: 1, cost: [50, 100, 0, 0], secs: 20, requires: null }, // Fishing Lines
   { tag: 46, host: 23, age: 2, cost: [150, 200, 0, 0], secs: 45, requires: 45 }, // Gillnets
   { tag: 47, host: 23, age: 2, cost: [0, 150, 100, 0], secs: 50, requires: null }, // Medium Warships (Water W3b)
+  { tag: 48, host: 16, age: 2, cost: [100, 0, 200, 0], secs: 40, requires: null }, // Careening (Water W5; cost per the official update-169123 preview, research time UNVERIFIED — the sim's named placeholder)
+  { tag: 49, host: 16, age: 2, cost: [150, 100, 0, 0], secs: 40, requires: null }, // Clinker Construction (Water W5; same sourcing note)
 ];
 
 /** The age-advancement tags and the age each one reaches. */

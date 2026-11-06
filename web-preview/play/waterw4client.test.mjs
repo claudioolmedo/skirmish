@@ -62,7 +62,10 @@ test('the Dock panel gains the Transport train button (Dark Age, no gate)', () =
   assert.deepEqual(PANEL_BUTTONS.dock,
     ['train-fishing-ship', 'research-fishinglines', 'research-gillnets',
       'train-galley', 'train-fire-galley', 'train-demolition-raft', 'train-hulk',
-      'research-mediumwarships', 'train-transport-ship']);
+      'research-mediumwarships', 'train-transport-ship', 'train-trade-cog']);
+  // (The Trade Cog appends after the Transport Ship on the
+  // merged tree — Water W5 merge; it takes KeyV, see the W5
+  // client suite. The Transport Ship's own cell is unchanged.)
   assert.deepEqual(PANEL_KEYS.dock['train-transport-ship'], ['KeyC', 'C']);
   assert.deepEqual(PANEL_KEYS.dock['research-mediumwarships'], ['KeyX', 'X']);
 });
@@ -81,9 +84,9 @@ test('the human load/unload paths ride the smart order and the panel', () => {
 test('rendering tables cover the Transport Ship', () => {
   assert.ok(app.includes(`32: 'Transport Ship',`), 'KIND_NAME 32');
   assert.ok(app.includes(`32: 'i-transport-ship',`), 'KIND_ICON 32');
-  assert.match(app, /'demolitionShip', 'warHulk', 'transportShip'\];/);
+  assert.match(app, /'transportShip', 'tradeCog'\];/); // merged tail: the Cog (33) follows the Transport Ship
   assert.match(app, /function drawTransportShip\(i, wx, wy\)/);
-  assert.match(app, /drawTransportShip\]; \/\/ 32: Transport Ship/);
+  assert.match(app, /drawTransportShip, \/\/ 32: Transport Ship/); // no longer the tail: the Cog's draw follows (W5 merge)
   assert.match(app, /const PROD_KINDS = \[2, 3, 4, 5, 6, 7, 8, 12, 15, 16, 17, 20, 23, 24, 25, 26, 27, 32\];/);
 });
 

@@ -189,7 +189,11 @@ export const PANEL_BUTTONS = {
   // Treadmill Crane, Masonry, Fortified Wall). Heated Shot is
   // absent on purpose — deferred (anti-ship only, no water).
   university: ['research-ballistics', 'research-murderholes', 'research-treadmill',
-    'research-masonry', 'research-fortifiedwall'],
+    'research-masonry', 'research-fortifiedwall',
+    // Water W5: the University ship pair appends after the five
+    // (Careening, Clinker Construction) — the positional grid
+    // continues; the five letters above are untouched.
+    'research-careening', 'research-clinkerconstruction'],
   // Water W2 client (ECO-15): the Dock's panel — Train Fishing
   // Ship, then its two fishing researches (Fishing Lines,
   // Gillnets), the plain positional grid like every production
@@ -197,7 +201,11 @@ export const PANEL_BUTTONS = {
   // after them (CLS-07).
   dock: ['train-fishing-ship', 'research-fishinglines', 'research-gillnets',
     'train-galley', 'train-fire-galley', 'train-demolition-raft', 'train-hulk',
-    'research-mediumwarships', 'train-transport-ship'],
+    'research-mediumwarships', 'train-transport-ship',
+    // Water W5 (TRD-05): the Trade Cog appends after the
+    // Transport Ship — the merged Dock order (W4's Transport
+    // took the slot after Medium Warships first).
+    'train-trade-cog'],
 };
 
 // The slot letter of every button on every building panel
@@ -384,6 +392,10 @@ export const PANEL_KEYS = {
     'research-treadmill': ['KeyE', 'E'],
     'research-masonry': ['KeyA', 'A'],
     'research-fortifiedwall': ['KeyS', 'S'],
+    // Water W5: the ship pair takes the second row's remaining
+    // cells — the positional grid continues (D, then Z).
+    'research-careening': ['KeyD', 'D'],
+    'research-clinkerconstruction': ['KeyZ', 'Z'],
   },
   // Water W2 client (ECO-15): the Dock — the plain positional
   // grid: Train Fishing Ship Q, Fishing Lines W, Gillnets E.
@@ -405,6 +417,10 @@ export const PANEL_KEYS = {
     // Water W4 (GAR-09): the Transport Ship takes the third
     // row's last cell — the positional grid completes (C).
     'train-transport-ship': ['KeyC', 'C'],
+    // Water W5 (TRD-05): the Trade Cog takes the fourth row's
+    // first cell (V) — the cell W5's own tree gave it at the
+    // merge, since W4's Transport Ship holds KeyC.
+    'train-trade-cog': ['KeyV', 'V'],
   },
 };
 export const POSITION_CODES = ['KeyQ', 'KeyW', 'KeyE'];
