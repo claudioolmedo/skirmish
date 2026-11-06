@@ -337,7 +337,7 @@ const KIND_KING = 22; // Package C: the Regicide king (VIC-06) — builder's 21 
 const KIND_I18N = ['villager', 'townCenter', 'scout', 'militia', 'archer',
   'sheep', 'boar', 'deer', 'manAtArms', 'spearman', 'skirmisher', 'wolf',
   'knight', 'lightCavalry', 'cavalryArcher', 'petard', 'tradeCart', 'batteringRam', 'mangonel', 'scorpion', 'monk', 'relic', 'king', 'fishingShip', 'galley',
-  'fireGalley', 'demolitionRaft', 'hulk'];
+  'fireGalley', 'demolitionRaft', 'hulk', 'warGalley', 'fireShip', 'demolitionShip', 'warHulk'];
 let KIND_NAME = {
   0: 'Villager', 1: 'Town Center', 2: 'Scout Cavalry', 3: 'Militia',
   4: 'Archer', 5: 'Sheep', 6: 'Boar', 7: 'Deer', 8: 'Man-at-Arms',
@@ -346,6 +346,7 @@ let KIND_NAME = {
   16: 'Trade Cart', 17: 'Battering Ram', 18: 'Mangonel', 19: 'Scorpion',
   20: 'Monk', 21: 'Relic', 22: 'King', 23: 'Fishing Ship',
   24: 'Galley', 25: 'Fire Galley', 26: 'Demolition Raft', 27: 'Hulk',
+  28: 'War Galley', 29: 'Fire Ship', 30: 'Demolition Ship', 31: 'War Hulk',
 };
 // Selection-panel portraits per unit kind (SVG symbol ids in
 // play/index.html).
@@ -356,6 +357,7 @@ const KIND_ICON = {
   16: 'i-trade-cart', 17: 'i-ram', 18: 'i-mangonel', 19: 'i-scorpion',
   20: 'i-monk', 21: 'i-gold', 22: 'i-king', 23: 'i-fishing-ship',
   24: 'i-galley', 25: 'i-fire-galley', 26: 'i-demolition-raft', 27: 'i-hulk',
+  28: 'i-war-galley', 29: 'i-fire-ship', 30: 'i-demolition-ship', 31: 'i-war-hulk',
 };
 
 // Original PNG icon set (2026-10-19, AI generations via Base44 on
@@ -505,7 +507,7 @@ let TECH_NAME = {
   30: 'Heavy Plow', 31: 'Crop Rotation',
   32: 'Sanctity', 33: 'Fervor', 34: 'Herbal Medicine',
   35: 'Atonement', 36: 'Devotion',
-  45: 'Fishing Lines', 46: 'Gillnets',
+  45: 'Fishing Lines', 46: 'Gillnets', 47: 'Medium Warships',
 };
 // Research-block explanations, indexed by the sim's ResearchBlock
 // tag (0 ok — unused, 1 funds, 2 queue full, 3 already done,
@@ -562,6 +564,7 @@ function refreshNames() {
     41: t('tech.theocracy'), 42: t('tech.faith'),
     43: t('tech.bowsaw'), 44: t('tech.twomansaw'),
     45: t('tech.fishinglines'), 46: t('tech.gillnets'),
+    47: t('tech.mediumwarships'),
   };
   RESEARCH_BLOCK_TITLES = [
     '', t('block.noResources'), t('block.queueFullTrain'),
@@ -12201,6 +12204,227 @@ function drawHulk(i, wx, wy) {
   ctx.fill();
 }
 
+// Water W3b (CLS-07): the Castle Age tiers — the same
+// flat-vector language, one step heavier per hull: the War
+// Galley gains a bolt-shooter frame on the bow and a striped
+// sail; the Fire Ship a taller flame and an iron-banded hull;
+// the Demolition Ship a bigger raft with five barrels; the
+// War Hulk higher platforms and a second furled cloth. No DE
+// art, presentation only.
+function drawWarGalley(i, wx, wy) {
+  const [sx, sy] = worldToScreen(wx, wy);
+  const u = camS;
+  ctx.strokeStyle = 'rgba(220, 240, 250, 0.45)';
+  ctx.lineWidth = Math.max(1, 0.14 * u);
+  ctx.beginPath();
+  ctx.ellipse(sx, sy - 0.1 * u, 1.9 * u, 0.6 * u, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  if (selection.has(i)) drawSelRing(sx, sy, 2.1);
+  const cloth = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e';
+  ctx.strokeStyle = '#6f5533';
+  ctx.lineWidth = Math.max(1, 0.18 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx, sy - 0.55 * u);
+  ctx.lineTo(sx, sy - 3.9 * u);
+  ctx.stroke();
+  ctx.fillStyle = cloth;
+  ctx.beginPath();
+  ctx.moveTo(sx + 0.12 * u, sy - 3.8 * u);
+  ctx.lineTo(sx + 1.65 * u, sy - 1.25 * u);
+  ctx.lineTo(sx + 0.12 * u, sy - 1.25 * u);
+  ctx.closePath();
+  ctx.fill();
+  // The sail's pale stripe: this tier's quick tell.
+  ctx.strokeStyle = '#e8dcc0';
+  ctx.lineWidth = Math.max(1, 0.22 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx + 0.2 * u, sy - 2.6 * u);
+  ctx.lineTo(sx + 1.05 * u, sy - 2.6 * u);
+  ctx.stroke();
+  ctx.fillStyle = '#e8dcc0';
+  ctx.beginPath();
+  ctx.moveTo(sx - 0.12 * u, sy - 3.6 * u);
+  ctx.lineTo(sx - 1.15 * u, sy - 1.25 * u);
+  ctx.lineTo(sx - 0.12 * u, sy - 1.25 * u);
+  ctx.closePath();
+  ctx.fill();
+  poly([
+    [sx - 1.8 * u, sy - 1.05 * u], [sx + 1.8 * u, sy - 1.05 * u],
+    [sx + 1.25 * u, sy - 0.05 * u], [sx - 1.25 * u, sy - 0.05 * u],
+  ], '#75522c');
+  ctx.strokeStyle = '#4f3418';
+  ctx.lineWidth = Math.max(1, 0.13 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx - 1.8 * u, sy - 1.05 * u);
+  ctx.lineTo(sx + 1.8 * u, sy - 1.05 * u);
+  ctx.stroke();
+  // The bolt-shooter: a dark frame angled on the bow.
+  ctx.strokeStyle = '#2e2e2e';
+  ctx.lineWidth = Math.max(1, 0.2 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx + 1.15 * u, sy - 1.05 * u);
+  ctx.lineTo(sx + 1.95 * u, sy - 1.7 * u);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(230, 220, 195, 0.8)';
+  ctx.lineWidth = Math.max(1, 0.09 * u);
+  for (const f of [-1, 0, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(sx + f * 0.8 * u, sy - 0.35 * u);
+    ctx.lineTo(sx + (f * 0.8 - 0.35) * u, sy + 0.25 * u);
+    ctx.stroke();
+  }
+}
+
+// The Fire Ship: the Fire Galley's brazier grown — a taller
+// flame over an iron-banded hull, the rail stripe doubled.
+function drawFireShip(i, wx, wy) {
+  const [sx, sy] = worldToScreen(wx, wy);
+  const u = camS;
+  ctx.strokeStyle = 'rgba(220, 240, 250, 0.45)';
+  ctx.lineWidth = Math.max(1, 0.14 * u);
+  ctx.beginPath();
+  ctx.ellipse(sx, sy - 0.1 * u, 1.9 * u, 0.6 * u, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  if (selection.has(i)) drawSelRing(sx, sy, 2.1);
+  const cloth = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e';
+  poly([
+    [sx - 1.8 * u, sy - 1.0 * u], [sx + 1.8 * u, sy - 1.0 * u],
+    [sx + 1.25 * u, sy - 0.05 * u], [sx - 1.25 * u, sy - 0.05 * u],
+  ], '#63431f');
+  ctx.strokeStyle = '#3f2a10';
+  ctx.lineWidth = Math.max(1, 0.13 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx - 1.8 * u, sy - 1.0 * u);
+  ctx.lineTo(sx + 1.8 * u, sy - 1.0 * u);
+  ctx.stroke();
+  // Iron bands across the hull.
+  ctx.strokeStyle = '#3a3a3a';
+  ctx.lineWidth = Math.max(1, 0.12 * u);
+  for (const f of [-0.9, 0, 0.9]) {
+    ctx.beginPath();
+    ctx.moveTo(sx + f * u, sy - 1.0 * u);
+    ctx.lineTo(sx + f * 0.85 * u, sy - 0.1 * u);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = cloth;
+  ctx.lineWidth = Math.max(1, 0.16 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx - 1.7 * u, sy - 0.86 * u);
+  ctx.lineTo(sx + 1.7 * u, sy - 0.86 * u);
+  ctx.stroke();
+  ctx.strokeStyle = '#3a3a3a';
+  ctx.lineWidth = Math.max(1, 0.17 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx, sy - 0.95 * u);
+  ctx.lineTo(sx, sy - 1.6 * u);
+  ctx.stroke();
+  poly([
+    [sx - 0.62 * u, sy - 1.9 * u], [sx + 0.62 * u, sy - 1.9 * u],
+    [sx + 0.4 * u, sy - 1.55 * u], [sx - 0.4 * u, sy - 1.55 * u],
+  ], '#2e2e2e');
+  // The taller flame: three tongues this tier.
+  ctx.fillStyle = '#e06a1b';
+  ctx.beginPath();
+  ctx.moveTo(sx - 0.5 * u, sy - 1.9 * u);
+  ctx.quadraticCurveTo(sx - 0.14 * u, sy - 3.4 * u, sx + 0.16 * u, sy - 2.5 * u);
+  ctx.quadraticCurveTo(sx + 0.3 * u, sy - 3.15 * u, sx + 0.52 * u, sy - 1.9 * u);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#f2b63c';
+  ctx.beginPath();
+  ctx.moveTo(sx - 0.24 * u, sy - 1.9 * u);
+  ctx.quadraticCurveTo(sx, sy - 2.8 * u, sx + 0.26 * u, sy - 1.9 * u);
+  ctx.closePath();
+  ctx.fill();
+}
+
+// The Demolition Ship: the raft grown — a longer log platform
+// and five barrels, the cargo reading bigger at a glance.
+function drawDemolitionShip(i, wx, wy) {
+  const [sx, sy] = worldToScreen(wx, wy);
+  const u = camS;
+  ctx.strokeStyle = 'rgba(220, 240, 250, 0.45)';
+  ctx.lineWidth = Math.max(1, 0.14 * u);
+  ctx.beginPath();
+  ctx.ellipse(sx, sy - 0.1 * u, 1.9 * u, 0.6 * u, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  if (selection.has(i)) drawSelRing(sx, sy, 2.1);
+  const cloth = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e';
+  ctx.fillStyle = '#7d5830';
+  for (const f of [-0.66, -0.3, 0.06]) {
+    ctx.beginPath();
+    ctx.ellipse(sx, sy + f * u, 1.8 * u, 0.18 * u, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.strokeStyle = '#4f3418';
+  ctx.lineWidth = Math.max(1, 0.11 * u);
+  ctx.beginPath();
+  ctx.ellipse(sx, sy - 0.3 * u, 1.8 * u, 0.55 * u, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  for (const f of [-1.15, -0.58, 0, 0.58, 1.15]) {
+    poly([
+      [sx + (f - 0.26) * u, sy - 0.6 * u], [sx + (f + 0.26) * u, sy - 0.6 * u],
+      [sx + (f + 0.32) * u, sy - 1.35 * u], [sx + (f - 0.32) * u, sy - 1.35 * u],
+    ], '#41301c');
+    ctx.fillStyle = cloth;
+    ctx.fillRect(sx + (f - 0.33) * u, sy - 1.05 * u, 0.66 * u, 0.15 * u);
+  }
+}
+
+// The War Hulk: the Hulk's bulk one step further — higher
+// platforms, a taller mast and two furled cloths.
+function drawWarHulk(i, wx, wy) {
+  const [sx, sy] = worldToScreen(wx, wy);
+  const u = camS;
+  ctx.strokeStyle = 'rgba(220, 240, 250, 0.45)';
+  ctx.lineWidth = Math.max(1, 0.14 * u);
+  ctx.beginPath();
+  ctx.ellipse(sx, sy - 0.1 * u, 1.95 * u, 0.62 * u, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  if (selection.has(i)) drawSelRing(sx, sy, 2.15);
+  const cloth = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e';
+  poly([
+    [sx - 1.85 * u, sy - 1.35 * u], [sx + 1.85 * u, sy - 1.35 * u],
+    [sx + 1.3 * u, sy - 0.05 * u], [sx - 1.3 * u, sy - 0.05 * u],
+  ], '#6b4a24');
+  ctx.strokeStyle = '#453012';
+  ctx.lineWidth = Math.max(1, 0.14 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx - 1.85 * u, sy - 1.35 * u);
+  ctx.lineTo(sx + 1.85 * u, sy - 1.35 * u);
+  ctx.stroke();
+  poly([
+    [sx - 1.8 * u, sy - 1.85 * u], [sx - 0.95 * u, sy - 1.85 * u],
+    [sx - 0.95 * u, sy - 1.35 * u], [sx - 1.8 * u, sy - 1.35 * u],
+  ], '#7d5830');
+  poly([
+    [sx + 0.95 * u, sy - 1.85 * u], [sx + 1.8 * u, sy - 1.85 * u],
+    [sx + 1.8 * u, sy - 1.35 * u], [sx + 0.95 * u, sy - 1.35 * u],
+  ], '#7d5830');
+  ctx.strokeStyle = '#6f5533';
+  ctx.lineWidth = Math.max(1, 0.17 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx, sy - 1.35 * u);
+  ctx.lineTo(sx, sy - 3.4 * u);
+  ctx.stroke();
+  ctx.fillStyle = cloth;
+  ctx.beginPath();
+  ctx.moveTo(sx - 0.6 * u, sy - 3.35 * u);
+  ctx.lineTo(sx + 0.6 * u, sy - 3.35 * u);
+  ctx.lineTo(sx + 0.44 * u, sy - 2.65 * u);
+  ctx.lineTo(sx - 0.44 * u, sy - 2.65 * u);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#e8dcc0';
+  ctx.beginPath();
+  ctx.moveTo(sx - 0.42 * u, sy - 2.5 * u);
+  ctx.lineTo(sx + 0.42 * u, sy - 2.5 * u);
+  ctx.lineTo(sx + 0.32 * u, sy - 1.95 * u);
+  ctx.lineTo(sx - 0.32 * u, sy - 1.95 * u);
+  ctx.closePath();
+  ctx.fill();
+}
+
 function drawTradeCart(i, wx, wy) {
   const [sx, sy] = worldToScreen(wx, wy);
   const u = camS;
@@ -13564,6 +13788,7 @@ function runCommandButton(id, times = 1) {
       'research-theocracy': 41, 'research-faith': 42,
       'research-bowsaw': 43, 'research-twomansaw': 44,
       'research-fishinglines': 45, 'research-gillnets': 46,
+      'research-mediumwarships': 47,
     }[id];
     if (tag != null && selectedBuilding && selectedBuilding.type === 'building') {
       if (!issue({ t: 'research_at', b: selectedBuilding.id, tech: tag })) {
@@ -13730,7 +13955,7 @@ function renderCommands() {
     university: [20, 21, 22, 23, 24], castle: [29],
     lumbercamp: [10, 43, 44], miningcamp: [11, 12], mill: [13], market: [19, 25, 26],
     university: [20, 21, 22, 23, 24], monastery: [32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42],
-    dock: [45, 46],
+    dock: [45, 46, 47],
   };
   const rbB = bk && RB_TAGS[context]
     ? Object.fromEntries(RB_TAGS[context].map((t) => [t, sim.research_block_at(bk.id, t)]))
@@ -14353,6 +14578,7 @@ function renderCommands() {
     const underConstruction = !bk.complete;
     const flDone = techMaskHas(techMask, 45);
     const gnDone = techMaskHas(techMask, 46);
+    const mwDone = techMaskHas(techMask, 47);
     cmdGrid.append(
       cmdButton({
         id: 'train-fishing-ship', icon: 'i-fishing-ship', label: 'Fishing Ship',
@@ -14439,6 +14665,27 @@ function renderCommands() {
           : age < 1
             ? t('cmd.buildGate', { name: KIND_NAME[27], gate: t('gate.feudal') })
             : t('cmd.trainTitleTime', { name: KIND_NAME[27], cost: costText([[75, 'wood'], [35, 'gold']]), secs: 42 }) + (TRAIN_BLOCK_TITLES[blockHu] ? ' ' + TRAIN_BLOCK_TITLES[blockHu] : ''),
+      }),
+      // Water W3b (CLS-07): Medium Warships — the Castle Age
+      // line upgrade. Standing Galleys / Fire Galleys / Hulks /
+      // Demolition Rafts convert in the sim on completion and
+      // later production spawns at the Castle tier, so the four
+      // train buttons above keep their Feudal faces (the
+      // Man-at-Arms pattern: the queue entry keeps the base
+      // kind). The button follows the fishing pair's research
+      // law: hard blocks grey, funds stays clickable.
+      cmdButton({
+        id: 'research-mediumwarships', icon: 'i-mediumwarships', label: 'Medium Warships',
+        costIcon: 'i-wood', cost: 150, cost2Icon: 'i-gold', cost2: 100,
+        disabled: underConstruction || mwDone || rbB[47] === 2 || rbB[47] === 3 || rbB[47] === 4,
+        key: badgeForButton({ context, id: 'research-mediumwarships', index: 7 }),
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: TECH_NAME[47], building: BUILD_NAME[23] })
+          : mwDone
+            ? t('cmd.researchDone', { name: TECH_NAME[47] })
+            : age < 2
+              ? t('cmd.buildGate', { name: TECH_NAME[47], gate: t('gate.castle') })
+              : t('cmd.mediumwarshipsTitle', { name: TECH_NAME[47], cost: costText([[150, 'wood'], [100, 'gold']]), secs: 50 }) + (RESEARCH_BLOCK_TITLES[rbB[47]] ? ' ' + RESEARCH_BLOCK_TITLES[rbB[47]] : ''),
       }),
     );
     // Water W2b (ECO-15): the trap-reseed desk — the Mill
@@ -15951,7 +16198,11 @@ function draw() {
     drawGalley, // 24: Galley (Water W3a, CLS-07)
     drawFireGalley, // 25: Fire Galley (Water W3a, CLS-07)
     drawDemolitionRaft, // 26: Demolition Raft (Water W3a, CLS-07)
-    drawHulk]; // 27: Hulk (Water W3a, CLS-07)
+    drawHulk, // 27: Hulk (Water W3a, CLS-07)
+    drawWarGalley, // 28: War Galley (Water W3b, CLS-07)
+    drawFireShip, // 29: Fire Ship (Water W3b, CLS-07)
+    drawDemolitionShip, // 30: Demolition Ship (Water W3b, CLS-07)
+    drawWarHulk]; // 31: War Hulk (Water W3b, CLS-07)
   for (let i = 0; i < count; i++) {
     const wx = pos[i * 2];
     const wy = pos[i * 2 + 1];

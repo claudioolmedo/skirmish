@@ -78,6 +78,7 @@ export const TECH_TREE = [
   // --- Dock (Water W2, ECO-15) ---------------------------------------
   { tag: 45, host: 23, age: 1, cost: [50, 100, 0, 0], secs: 20, requires: null }, // Fishing Lines
   { tag: 46, host: 23, age: 2, cost: [150, 200, 0, 0], secs: 45, requires: 45 }, // Gillnets
+  { tag: 47, host: 23, age: 2, cost: [0, 150, 100, 0], secs: 50, requires: null }, // Medium Warships (Water W3b)
 ];
 
 /** The age-advancement tags and the age each one reaches. */

@@ -44,8 +44,9 @@ test('ECO-14: the farm chain is on the Mill panel and the research map', () => {
   assert.ok(app.includes("campBtn('research-croprotation', 31, 'i-croprotation', 'Crop Rotation',"));
   assert.ok(app.includes('mill: [13, 30, 31]'), 'RB_TAGS mill carries the chain');
   // Netplay lets the two new tags through research_at (the
-  // ceiling was 44; Water W2's Dock pair raised it to 46).
-  assert.ok(netplay.includes('(c.tech >= 29 && c.tech <= 46)'));
+  // ceiling was 44; Water W2's Dock pair raised it to 46, and
+  // Water W3b's Medium Warships raised it to 47).
+  assert.ok(netplay.includes('(c.tech >= 29 && c.tech <= 47)'));
   // Icons exist for both buttons and the reseed desk.
   for (const icon of ['i-heavyplow', 'i-croprotation', 'i-reseed']) {
     assert.ok(html.includes(`<symbol id="${icon}"`), `${icon} symbol`);

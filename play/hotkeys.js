@@ -196,7 +196,8 @@ export const PANEL_BUTTONS = {
   // panel. Water W3a appends the four Feudal combat ships
   // after them (CLS-07).
   dock: ['train-fishing-ship', 'research-fishinglines', 'research-gillnets',
-    'train-galley', 'train-fire-galley', 'train-demolition-raft', 'train-hulk'],
+    'train-galley', 'train-fire-galley', 'train-demolition-raft', 'train-hulk',
+    'research-mediumwarships'],
 };
 
 // The slot letter of every button on every building panel
@@ -397,6 +398,10 @@ export const PANEL_KEYS = {
     'train-fire-galley': ['KeyS', 'S'],
     'train-demolition-raft': ['KeyD', 'D'],
     'train-hulk': ['KeyZ', 'Z'],
+    // Water W3b (CLS-07): Medium Warships takes the third
+    // row's second cell — the positional grid continues (X
+    // beside the Hulk's Z); the W2/W3a letters are untouched.
+    'research-mediumwarships': ['KeyX', 'X'],
   },
 };
 export const POSITION_CODES = ['KeyQ', 'KeyW', 'KeyE'];

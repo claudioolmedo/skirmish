@@ -66,7 +66,8 @@ test('the Dock panel gains the four train buttons behind the Feudal gate', () =>
   // take the positional grid's next cells A/S/D/Z.
   assert.deepEqual(PANEL_BUTTONS.dock,
     ['train-fishing-ship', 'research-fishinglines', 'research-gillnets',
-      'train-galley', 'train-fire-galley', 'train-demolition-raft', 'train-hulk']);
+      'train-galley', 'train-fire-galley', 'train-demolition-raft', 'train-hulk',
+      'research-mediumwarships']);
   assert.deepEqual(PANEL_KEYS.dock['train-galley'], ['KeyA', 'A']);
   assert.deepEqual(PANEL_KEYS.dock['train-fire-galley'], ['KeyS', 'S']);
   assert.deepEqual(PANEL_KEYS.dock['train-demolition-raft'], ['KeyD', 'D']);
@@ -78,7 +79,7 @@ test('rendering tables cover the four ships', () => {
     assert.ok(app.includes(`${tag}: '${name}',`), `KIND_NAME ${tag}`);
     assert.ok(app.includes(`${tag}: '${icon}',`), `KIND_ICON ${tag}`);
   }
-  assert.match(app, /'fishingShip', 'galley',\s*'fireGalley', 'demolitionRaft', 'hulk'\];/);
+  assert.match(app, /'fishingShip', 'galley',\s*'fireGalley', 'demolitionRaft', 'hulk', 'warGalley', 'fireShip', 'demolitionShip', 'warHulk'\];/);
   assert.match(app, /function drawGalley\(i, wx, wy\)/);
   assert.match(app, /function drawFireGalley\(i, wx, wy\)/);
   assert.match(app, /function drawDemolitionRaft\(i, wx, wy\)/);
@@ -86,7 +87,7 @@ test('rendering tables cover the four ships', () => {
   assert.match(app, /drawGalley, \/\/ 24: Galley/);
   assert.match(app, /drawFireGalley, \/\/ 25: Fire Galley/);
   assert.match(app, /drawDemolitionRaft, \/\/ 26: Demolition Raft/);
-  assert.match(app, /drawHulk\]; \/\/ 27: Hulk/);
+  assert.match(app, /drawHulk, \/\/ 27: Hulk/);
   // The production-building set names the Dock's roster kinds.
   assert.match(app, /const PROD_KINDS = \[2, 3, 4, 5, 6, 7, 8, 12, 15, 16, 17, 20, 23, 24, 25, 26, 27\];/);
 });
