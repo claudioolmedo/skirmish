@@ -1043,6 +1043,34 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Order a Fishing Ship to build a Fish Trap (100 wood, 1×1
+     * on one water cell; Feudal Age — Water W2b, ECO-15): the
+     * point names the trap's cell, and the sim accepts only a
+     * ship ordering onto water-side, unobstructed ground it
+     * can reach — the game's first non-villager build order;
+     * see `push_build_house`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_fish_trap(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_fish_trap(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Queue a Fish Trap build (Feudal Age — Water W2b,
+     * ECO-15) — see `push_build_house_queued`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_fish_trap_queued(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_fish_trap_queued(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
      * Order a villager to build a House with its 2×2-cell footprint
      * anchored at the cell containing the world point `(x, y)`. The
      * 25-wood cost is deducted at placement (next tick). Returns
@@ -1610,6 +1638,18 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Remove one paid trap reseed from the queue of the named
+     * Dock's owner, refunding its 100 wood (Water W2b). False
+     * when the queue is empty or the building is not a
+     * completed Dock.
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_dequeue_trap_reseed(building) {
+        const ret = wasm.wasmsim_push_dequeue_trap_reseed(this.__wbg_ptr, building);
+        return ret !== 0;
+    }
+    /**
      * Force drop-off (M6, ECO-07): order a loaded villager to haul
      * its carry to the nearest valid drop-off now, then return to
      * its previous work on its own. Returns whether the order
@@ -1836,6 +1876,19 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Buy one Fish Trap reseed ahead at the named Dock (Water
+     * W2b, ECO-15): 100 wood, paid now, into the Dock owner's
+     * paid trap-reseed queue. Returns false (and queues
+     * nothing) when the sim would reject it: not a completed
+     * Dock, or the owner short of the wood.
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_queue_trap_reseed(building) {
+        const ret = wasm.wasmsim_push_queue_trap_reseed(this.__wbg_ptr, building);
+        return ret !== 0;
+    }
+    /**
      * Order a villager to repair one of its own player's placed
      * buildings (BLD-07): travel to the building's ring and
      * restore its HP at the documented flat rate (750 HP/min for
@@ -2001,6 +2054,18 @@ export class WasmSim {
      */
     push_set_auto_reseed(building, on) {
         const ret = wasm.wasmsim_push_set_auto_reseed(this.__wbg_ptr, building, on);
+        return ret !== 0;
+    }
+    /**
+     * Set the auto trap-reseed toggle of the named Dock's
+     * owner (Water W2b). False when the building is not a
+     * completed Dock.
+     * @param {number} building
+     * @param {boolean} on
+     * @returns {boolean}
+     */
+    push_set_auto_trap_reseed(building, on) {
+        const ret = wasm.wasmsim_push_set_auto_trap_reseed(this.__wbg_ptr, building, on);
         return ret !== 0;
     }
     /**
@@ -2755,6 +2820,19 @@ export class WasmSim {
     train_queue_len() {
         const ret = wasm.wasmsim_train_queue_len(this.__wbg_ptr);
         return ret >>> 0;
+    }
+    /**
+     * A player's Dock trap-reseed desk, for the Dock panel
+     * (Water W2b, ECO-15): `[paid trap reseeds queued,
+     * auto trap-reseed on (0/1)]` — the `reseed_for` twin.
+     * @param {number} owner
+     * @returns {Uint32Array}
+     */
+    trap_reseed_for(owner) {
+        const ret = wasm.wasmsim_trap_reseed_for(this.__wbg_ptr, owner);
+        var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
     }
     /**
      * A player's current tribute fee, in percent (TRD-04):

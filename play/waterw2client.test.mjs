@@ -78,15 +78,15 @@ test('the Dock is a full production + shelter host client-side', () => {
 });
 
 test('rendering tables cover the ship and both fish nodes', () => {
-  assert.match(app, /const NODE_MAX = \[100, 125, 800, 350, 175, 340, 100, 200, 250\];/);
-  assert.match(app, /drawCarcass, drawCarcass, drawShoreFish, drawDeepFish\];/);
+  assert.match(app, /const NODE_MAX = \[100, 125, 800, 350, 175, 340, 100, 200, 250, 715\];/);
+  assert.match(app, /drawCarcass, drawCarcass, drawShoreFish, drawDeepFish, drawFishTrap\];/);
   assert.match(app, /function drawShoreFish\(sx, sy, frac\)/);
   assert.match(app, /function drawDeepFish\(sx, sy, frac\)/);
   assert.match(app, /function drawFishingShip\(i, wx, wy\)/);
   assert.match(app, /drawFishingShip\]; \/\/ 23: Fishing Ship/);
   assert.match(app, /23: 'Fishing Ship',\s*\};/);
   assert.match(app, /23: 'i-fishing-ship',\s*\};/);
-  assert.equal(NODE_COLORS.length, 9);
+  assert.equal(NODE_COLORS.length, 10);
 });
 
 test('a right-click on a fish spot orders the Fishing Ship to gather, not move', () => {
@@ -96,7 +96,7 @@ test('a right-click on a fish spot orders the Fishing Ship to gather, not move',
   // branch tested kind 0 alone, so a ship's right-click on a
   // fish spot degraded to a Move and the ship never fished
   // (bot-loop live proof, 2026-11-05).
-  assert.match(app, /const gathersHere = n && \(st\.kinds\[id\] === 0\s*\|\| \(st\.kinds\[id\] === 23 && \(n\.kind === 7 \|\| n\.kind === 8\)\)\);/);
+  assert.match(app, /const gathersHere = n && \(st\.kinds\[id\] === 0\s*\|\| \(st\.kinds\[id\] === 23 && \(n\.kind === 7 \|\| n\.kind === 8 \|\| n\.kind === 9\)\)\);/);
   assert.match(app, /if \(gathersHere\) \{\s*if \(issue\(\{ t: 'gather', e: id, n: n\.id, q: queued \|\| undefined \}\)\) any = true;/);
 });
 

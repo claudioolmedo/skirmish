@@ -544,6 +544,20 @@ export class WasmSim {
      */
     push_build_farm_queued(entity: number, x: number, y: number): boolean;
     /**
+     * Order a Fishing Ship to build a Fish Trap (100 wood, 1×1
+     * on one water cell; Feudal Age — Water W2b, ECO-15): the
+     * point names the trap's cell, and the sim accepts only a
+     * ship ordering onto water-side, unobstructed ground it
+     * can reach — the game's first non-villager build order;
+     * see `push_build_house`.
+     */
+    push_build_fish_trap(entity: number, x: number, y: number): boolean;
+    /**
+     * Queue a Fish Trap build (Feudal Age — Water W2b,
+     * ECO-15) — see `push_build_house_queued`.
+     */
+    push_build_fish_trap_queued(entity: number, x: number, y: number): boolean;
+    /**
      * Order a villager to build a House with its 2×2-cell footprint
      * anchored at the cell containing the world point `(x, y)`. The
      * 25-wood cost is deducted at placement (next tick). Returns
@@ -810,6 +824,13 @@ export class WasmSim {
      */
     push_dequeue_reseed(building: number): boolean;
     /**
+     * Remove one paid trap reseed from the queue of the named
+     * Dock's owner, refunding its 100 wood (Water W2b). False
+     * when the queue is empty or the building is not a
+     * completed Dock.
+     */
+    push_dequeue_trap_reseed(building: number): boolean;
+    /**
      * Force drop-off (M6, ECO-07): order a loaded villager to haul
      * its carry to the nearest valid drop-off now, then return to
      * its previous work on its own. Returns whether the order
@@ -932,6 +953,14 @@ export class WasmSim {
      */
     push_queue_reseed(building: number): boolean;
     /**
+     * Buy one Fish Trap reseed ahead at the named Dock (Water
+     * W2b, ECO-15): 100 wood, paid now, into the Dock owner's
+     * paid trap-reseed queue. Returns false (and queues
+     * nothing) when the sim would reject it: not a completed
+     * Dock, or the owner short of the wood.
+     */
+    push_queue_trap_reseed(building: number): boolean;
+    /**
      * Order a villager to repair one of its own player's placed
      * buildings (BLD-07): travel to the building's ring and
      * restore its HP at the documented flat rate (750 HP/min for
@@ -1028,6 +1057,12 @@ export class WasmSim {
      * (ECO-14). False when the building is not a completed Mill.
      */
     push_set_auto_reseed(building: number, on: boolean): boolean;
+    /**
+     * Set the auto trap-reseed toggle of the named Dock's
+     * owner (Water W2b). False when the building is not a
+     * completed Dock.
+     */
+    push_set_auto_trap_reseed(building: number, on: boolean): boolean;
     /**
      * Set a diplomacy stance (Teams T3a, NET-11): the sender
      * seat (`player`, an owner byte — in lockstep this is the
@@ -1425,6 +1460,12 @@ export class WasmSim {
      */
     train_queue_len(): number;
     /**
+     * A player's Dock trap-reseed desk, for the Dock panel
+     * (Water W2b, ECO-15): `[paid trap reseeds queued,
+     * auto trap-reseed on (0/1)]` — the `reseed_for` twin.
+     */
+    trap_reseed_for(owner: number): Uint32Array;
+    /**
      * A player's current tribute fee, in percent (TRD-04):
      * 30 by default, 20 with Coinage, 0 with Banking. Behind the
      * diplomacy screen's fee line.
@@ -1548,6 +1589,8 @@ export interface InitOutput {
     readonly wasmsim_push_build_dock_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_farm: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_farm_queued: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_fish_trap: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_fish_trap_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_house: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_house_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_lumber_camp: (a: number, b: number, c: number, d: number) => number;
@@ -1592,6 +1635,7 @@ export interface InitOutput {
     readonly wasmsim_push_delete_building: (a: number, b: number) => number;
     readonly wasmsim_push_deposit_relic: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_dequeue_reseed: (a: number, b: number) => number;
+    readonly wasmsim_push_dequeue_trap_reseed: (a: number, b: number) => number;
     readonly wasmsim_push_force_deposit: (a: number, b: number) => number;
     readonly wasmsim_push_formation_move: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly wasmsim_push_formation_move_queued: (a: number, b: number, c: number, d: number, e: number) => number;
@@ -1610,6 +1654,7 @@ export interface InitOutput {
     readonly wasmsim_push_patrol_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_pickup_relic: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_queue_reseed: (a: number, b: number) => number;
+    readonly wasmsim_push_queue_trap_reseed: (a: number, b: number) => number;
     readonly wasmsim_push_repair: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_repair_queued: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_repair_tc: (a: number, b: number, c: number) => number;
@@ -1624,6 +1669,7 @@ export interface InitOutput {
     readonly wasmsim_push_research_wheelbarrow: (a: number) => number;
     readonly wasmsim_push_resign: (a: number, b: number) => number;
     readonly wasmsim_push_set_auto_reseed: (a: number, b: number, c: number) => number;
+    readonly wasmsim_push_set_auto_trap_reseed: (a: number, b: number, c: number) => number;
     readonly wasmsim_push_set_diplomacy: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_set_rally_building: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_set_rally_tc: (a: number, b: number, c: number) => number;
@@ -1686,6 +1732,7 @@ export interface InitOutput {
     readonly wasmsim_train_block_reason: (a: number) => number;
     readonly wasmsim_train_block_reason_at: (a: number, b: number) => number;
     readonly wasmsim_train_queue_len: (a: number) => number;
+    readonly wasmsim_trap_reseed_for: (a: number, b: number) => [number, number];
     readonly wasmsim_tribute_fee_pct_for: (a: number, b: number) => number;
     readonly wasmsim_unit_garrison_count: (a: number, b: number) => number;
     readonly wasmsim_villager_count: (a: number) => number;

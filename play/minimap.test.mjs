@@ -138,7 +138,7 @@ test('renderMinimap: obstacles, live nodes only, entities, viewport', () => {
   assert.equal(ctx.calls.fill, 9, `fill calls ${ctx.calls.fill}`);
   // M3: two carcass node kinds (hunt + herd) extend the palette 5 -> 7.
   // Water W2 (ECO-15): the two fish node kinds extend it 7 -> 9.
-  assert.equal(NODE_COLORS.length, 9);
+  assert.equal(NODE_COLORS.length, 10);
 });
 
 // --- M7: fog/terrain base -------------------------------------------
