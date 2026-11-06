@@ -144,6 +144,12 @@ html, body {
   overflow-y: auto;
 }
 .overlay-card {
+  /* Auto margins, not the container's centering: a card taller than
+     the viewport (Diplomacy with its tribute desk, on a short window)
+     must align to the top and scroll — flex centering alone clips
+     the card's top (and its ✕) above the reachable scroll area
+     (bot-loop two-client proof, 2026-11-05). */
+  margin: auto;
   /* parchment slab (our generated texture) with dark umber text */
   background: #d9c49a url("ui-art/tex-parchment.webp") center / cover no-repeat;
   border: 1px solid #8a6a1f;
