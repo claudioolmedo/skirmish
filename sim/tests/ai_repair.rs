@@ -7,9 +7,12 @@
 //! The scene is driven entirely through public commands: the
 //! human side raises a House and a Barracks from its starting
 //! stockpile (200 wood exactly: 25 + 175), trains four Militia
-//! (150 food / 60 gold of its 200 / 100), and marches them across
-//! the map at the AI's Barracks the moment it stands. Everything
-//! the AI does in response is its own script — no state is poked.
+//! (240 food / 80 gold at the 2026-11-05 price of 60F/20G — the
+//! starting 200 food no longer covers the squad, so the third
+//! villager works the berries to earn the rest, exactly as a
+//! human player must), and marches them across the map at the
+//! AI's Barracks the moment it stands. Everything the AI does
+//! in response is its own script — no state is poked.
 //! (The wood-floor gate and the exact drip the AI pays are pinned
 //! by the in-crate tests in `sim/src/ai.rs`, where the stockpile
 //! can be staged precisely; the repair mechanics themselves are
@@ -17,7 +20,8 @@
 
 use fixed::types::I16F16;
 use skirmish_sim::{
-    BuildingKind, Command, Entity, EntityKind, MatchMode, Sim, Task, OWNER_OPPONENT, OWNER_PLAYER,
+    BuildingKind, Command, Entity, EntityKind, MatchMode, NodeKind, Sim, Task, OWNER_OPPONENT,
+    OWNER_PLAYER,
 };
 
 fn ent(sim: &Sim, id: u32) -> &Entity {
@@ -132,6 +136,30 @@ fn ai_repairs_its_barracks_under_attack() {
         x: bx,
         y: by,
     });
+    // The third villager earns food at the nearest berry bush:
+    // at 60 food per Militia (Claudio's 2026-11-05 price), four
+    // Militia cost 240 food against a 200-food start, so the
+    // squad can only be fielded with a gatherer working — the
+    // same economy a human player faces.
+    if human_villagers.len() > 2 {
+        let tc = ent(&sim, human_tc);
+        let (tcx, tcy) = (f(tc.pos_x), f(tc.pos_y));
+        let berry = sim
+            .nodes()
+            .iter()
+            .filter(|n| n.kind == NodeKind::BerryBush)
+            .min_by(|a, b| {
+                let da = (f(a.pos_x) - tcx).powi(2) + (f(a.pos_y) - tcy).powi(2);
+                let db = (f(b.pos_x) - tcx).powi(2) + (f(b.pos_y) - tcy).powi(2);
+                da.partial_cmp(&db).unwrap()
+            })
+            .expect("the human start has a berry bush")
+            .id;
+        sim.push_command(Command::Gather {
+            entity: human_villagers[2],
+            node: berry,
+        });
+    }
     sim.tick();
     let human_barracks = sim
         .buildings()
