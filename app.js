@@ -15402,6 +15402,61 @@ function renderCommands() {
     el.style.gridRowStart = String(row);
     el.style.gridColumnStart = String(col);
   }
+  // Panel-grid overflow fix (bot-loop, 2026-11-06): the building
+  // Delete rides cell C by design (panelCellFor), but panels that
+  // grew a lettered C button — the Dock's Transport Ship (W4),
+  // the Monastery's Block Printing, the University's Carvel
+  // Hull (W6) — stack the Delete exactly on top of that button:
+  // two definite-position items in one cell, the later-appended
+  // Delete painting over and swallowing the clicks (proven live
+  // on the Dock: the Transport Ship read "covered" at every
+  // browser zoom and could not be trained by mouse). Panels
+  // with more than nine buttons spill the rest into implicit
+  // rows below the capped bottom strip, where they are equally
+  // unreachable. Fix, presentation only: outside the build
+  // pages, grow the grid's explicit rows to fit every button
+  // (all rows share the strip height), and when the Delete's
+  // cell is contested — a definite-position collision, or any
+  // button flowing past cell C — move the Delete to the
+  // bottom-right free cell of the grown grid. Small panels
+  // (nine buttons or fewer, cell C free) keep the pinned layout
+  // exactly as panels.test.mjs documents it.
+  if (context !== 'build') {
+    const kids = [...cmdGrid.children];
+    const placed = kids.filter((el) => el.style.gridRowStart);
+    let maxRow = 3;
+    for (const el of placed) {
+      maxRow = Math.max(maxRow, Number(el.style.gridRowStart));
+    }
+    let rows = Math.max(3, maxRow, Math.ceil(kids.length / 3));
+    const del = kids.find((el) => el.id === 'delete-building');
+    if (del) {
+      const cells = placed.map((el) => el.style.gridRowStart + ',' + el.style.gridColumnStart);
+      const contested = new Set(cells).size !== cells.length || kids.length > 9;
+      if (contested) {
+        // Every other button's definite cell stays taken (a
+        // lettered button sharing cell C keeps it); the Delete
+        // takes the bottom-right free cell of the grown grid.
+        const taken = new Set();
+        for (const el of placed) {
+          if (el === del) continue;
+          taken.add(el.style.gridRowStart + ',' + el.style.gridColumnStart);
+        }
+        let spot = null;
+        for (let n = rows * 3 - 1; n >= 0 && !spot; n--) {
+          const key = (Math.floor(n / 3) + 1) + ',' + (n % 3 + 1);
+          if (!taken.has(key)) spot = [Math.floor(n / 3) + 1, n % 3 + 1];
+        }
+        if (!spot) { rows += 1; spot = [rows, 3]; }
+        del.style.gridRowStart = String(spot[0]);
+        del.style.gridColumnStart = String(spot[1]);
+      }
+    }
+    cmdGrid.style.gridTemplateRows = rows > 3
+      ? 'repeat(' + rows + ', minmax(0, 1fr))' : '';
+  } else {
+    cmdGrid.style.gridTemplateRows = '';
+  }
   // 'foe' and no-selection contexts (and a units selection without
   // a scout) render nothing: DE's command panel carries
   // no explanatory text — with no command buttons to show, the
