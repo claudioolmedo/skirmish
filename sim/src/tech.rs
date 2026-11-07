@@ -410,21 +410,21 @@ pub enum TechId {
     /// UNVERIFIED, same placeholder discipline as Careening.
     /// Tag 49.
     ClinkerConstruction,
-    /// University, Imperial: ships +1 pierce armor AND +15%
-    /// speed (Water W6; the further upgrade of Careening —
-    /// wiki, Careening article: "Dry Dock is the further
-    /// upgrade of this technology"). Cost/time pinned at W6
-    /// Passo 0 from the wiki Technology table (fetched
-    /// 2026-11-06): **200 food / 400 gold, 60 s** — VERIFIED.
-    /// EFFECT DIVERGENCE (recorded, dossier governs): the
-    /// current wiki Dry Dock article (fetched 2026-11-06)
+    /// University, Imperial: ships +1 pierce armor ONLY
+    /// (Water W6, corrected by W6fix to the current-DE form;
+    /// the further upgrade of Careening — wiki, Careening
+    /// article: "Dry Dock is the further upgrade of this
+    /// technology"). Cost/time pinned at W6 Passo 0 from the
+    /// wiki Technology table (fetched 2026-11-06): **200 food
+    /// / 400 gold, 60 s** — VERIFIED. EFFECT (current DE):
+    /// the current wiki Dry Dock article (fetched 2026-11-06)
     /// reads "Ships +1 pierce armor" only, and its changelog
     /// records that update 169123 removed the old +15% speed
-    /// increase; WATER-SPEC §5 (wiki Ship tech table crawl of
-    /// 2026-11-05) pins BOTH effects, and the W6 tasking ships
-    /// the dossier's form — armor and speed both apply here,
-    /// flagged in the W6 handoff as Claudio's call if he wants
-    /// the live-wiki form. Tag 50.
+    /// increase. The W6 build originally shipped the
+    /// WATER-SPEC §5 dossier form (armor AND speed, per the
+    /// 2026-11-05 crawl); this W6fix package corrects it —
+    /// the dossier form is superseded by verified current DE
+    /// and only the armor leg applies. Tag 50.
     DryDock,
     /// University, Imperial: ships +10% speed (Water W6; the
     /// further upgrade of Clinker Construction — wiki, Carvel

@@ -1,6 +1,7 @@
 //! Water W6 tests: the Imperial University ship trio —
-//! Dry Dock (50: ships +1 pierce armor AND +15% speed, the
-//! dossier's form — see the divergence note in `tech.rs`),
+//! Dry Dock (50: ships +1 pierce armor ONLY, the current-DE
+//! form — update 169123 removed the speed increase; the W6
+//! dossier form is corrected by W6fix, see `tech.rs`),
 //! Carvel Hull (51: ships +10% speed, stacking with Clinker
 //! Construction) and Shipwright (52: ship wood cost −20% and
 //! Dock creation +54% faster, unit heads only) — as TEC-06
@@ -133,7 +134,8 @@ fn trio_table_rows_match_the_wiki() {
 
 // ------------------------------------------------------------------
 // Dry Dock: the research flow (host / age / prerequisite gates,
-// exact charges) and the SHIP-class patch (armor + speed).
+// exact charges) and the SHIP-class patch (armor only —
+// current DE; update 169123 removed the speed leg, W6fix).
 
 #[test]
 fn dry_dock_researches_and_patches_ships() {
@@ -178,10 +180,12 @@ fn dry_dock_researches_and_patches_ships() {
     assert_eq!(food0 - stock(&sim, ResourceKind::Food), 200.0);
     assert_eq!(gold0 - stock(&sim, ResourceKind::Gold), 400.0);
     // After: a second +1 pierce (Careening and Dry Dock stack)
-    // and +15% speed over the base row (×115/100, truncating).
+    // and NO speed change — Dry Dock is armor-only in current
+    // DE (update 169123 removed the +15% speed leg; W6fix
+    // corrects the dossier form the W6 build shipped).
     let g = sim.stats_for(OWNER_PLAYER, EntityKind::Galley);
     assert_eq!(g.armor_pierce, 5);
-    assert_eq!(g.speed.to_bits(), ((galley_speed as i64 * 115) / 100) as i32);
+    assert_eq!(g.speed.to_bits(), galley_speed);
     assert_eq!(
         sim.stats_for(OWNER_PLAYER, EntityKind::FishingShip).armor_pierce,
         3 // 1 base + Careening + Dry Dock
@@ -199,7 +203,8 @@ fn dry_dock_researches_and_patches_ships() {
 
 // ------------------------------------------------------------------
 // Carvel Hull: the chain gate, and the multiplicative speed
-// stacking Clinker → Dry Dock → Carvel at lookup (TEC-08).
+// stacking Clinker → Carvel at lookup (TEC-08); Dry Dock no
+// longer contributes speed (armor only, W6fix).
 
 #[test]
 fn carvel_hull_stacks_multiplicatively() {
@@ -233,16 +238,17 @@ fn carvel_hull_stacks_multiplicatively() {
     let two = (((cog as i64 * 11) / 10) * 11) / 10;
     assert_eq!(speed(&sim), two as i32);
     // + Caravan (the Cog's kind patch layers first) and Dry
-    // Dock (×115/100 between the two hull scalars, tag order):
-    // 7209 → 8650 → 9515 → 10942 → 12036.
+    // Dock held alongside: Dry Dock contributes NO speed in
+    // current DE (armor only — update 169123 removed the
+    // ×115/100 leg; W6fix), so the chain is Caravan → Clinker
+    // → Carvel only: 7209 → 8650 → 9515 → 10466.
     sim.players[0].techs |= TechId::Caravan.bit() | TechId::DryDock.bit();
     let layered = {
         let mut b = (cog as i64 * 6) / 5;
         b = (b * 11) / 10;
-        b = (b * 115) / 100;
         (b * 11) / 10
     };
-    assert_eq!(layered, 12_036);
+    assert_eq!(layered, 10_466);
     assert_eq!(speed(&sim), layered as i32);
     // Carvel alone on a plain hull: exactly ×11/10, no more.
     sim.players[0].techs = TechId::CarvelHull.bit();

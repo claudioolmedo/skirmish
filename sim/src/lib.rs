@@ -3984,16 +3984,16 @@ impl Sim {
         }
         // Water W6 (the Imperial University ship trio, same
         // SHIP-class key, layered after the W5 pair in tag
-        // order): Dry Dock — ships +1 pierce armor AND +15%
-        // speed (WATER-SPEC §5's form; the live wiki's
-        // post-169123 Dry Dock article reads armor only — the
-        // divergence is recorded in `tech.rs`'s tag docs and
-        // the W6 handoff, dossier governs). The speed half is
-        // the ×115/100 scalar (Fervor's shape) over the layered
-        // row, so it stacks multiplicatively with Clinker's.
+        // order): Dry Dock — ships +1 pierce armor ONLY
+        // (current-DE form; the live wiki's post-169123 Dry
+        // Dock article reads armor only, its changelog
+        // recording that update 169123 removed the old +15%
+        // speed increase). The W6 build originally shipped
+        // the WATER-SPEC §5 dossier form (armor + speed);
+        // this W6fix package corrects it to the verified
+        // current-DE form — armor only, no speed leg.
         if ship_class && p.techs & TechId::DryDock.bit() != 0 {
             s.armor_pierce += 1;
-            s.speed = I16F16::from_bits(((s.speed.to_bits() as i64 * 115) / 100) as i32);
         }
         // Carvel Hull — ships +10% speed, Clinker's scalar
         // applied a second time over the layered row (the two
