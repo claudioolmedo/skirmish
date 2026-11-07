@@ -15820,8 +15820,15 @@ function updateSelPanel() {
         })
         : '';
   } else {
+    // No selection: the medallion stays EMPTY (bot-loop defect,
+    // live proofs #179/#180). This branch used to substitute a
+    // villager.png placeholder and rely on the 'empty' class to
+    // dim it, but .sel-portrait.empty only sets `color` — which
+    // dims SVG symbols, not a PNG <img> — so a full-strength
+    // portrait lingered beside "No selection", even across a
+    // Restart. No icon at all is the honest empty state.
     selPortrait.classList.add('empty');
-    selPortrait.innerHTML = pngIcon('villager.png', 'ui-icon');
+    selPortrait.innerHTML = '';
     selName.textContent = t('sel.none');
     selInfo.textContent = t('sel.noneInfo');
   }
