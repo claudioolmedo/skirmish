@@ -58,3 +58,6 @@ buttons and selection portraits (`BUILD_PNG` / `KIND_PNG` /
 `pngIcon` in `app.js`); the symbols remain for resources, animals,
 and anything unmapped. Set size ≈ 427 KB.
 | `icons/castle.png` | Build Castle command + Castle portrait (Castle P3a, 2026-10-29) — original programmatic pictogram drawn in code for this package (stone keep on dark walnut, gold frame), matching this set's language; not an AI generation. |
+| `icons/wonder.png` | Build Wonder command + Wonder portrait (icon fix, 2026-11-07) — original programmatic pictogram drawn in code (`tools/art/gen-building-icons.py`: stepped stone tiers, gold capstone, dark walnut, gold frame), matching this set's language; not an AI generation. The file was missing since VIC-02 named it in `BUILD_PNG`, so the build button rendered a broken image. |
+| `icons/dock.png` | Build Dock command + Dock portrait (icon fix, 2026-11-07) — original programmatic pictogram drawn in code (same generator: pier hut and loading crane over water), matching this set's language; not an AI generation. Missing since Water W1 named it in `BUILD_PNG`. |
+| `icons/fish-trap.png` | Fish Trap portrait (icon fix, 2026-11-07) — original programmatic pictogram drawn in code (same generator: woven net with a caught fish between two posts), matching this set's language; not an AI generation. Missing since Water W2b named it in `BUILD_PNG`. |
