@@ -180,9 +180,10 @@ fn castle_ship_rows_are_the_spec_rows() {
         assert!(!BuildingKind::Dock.trains(kind));
     }
     // The tech row (W3b Passo 0 pin; the ALL count extends
-    // with Water W5's University ship pair at 48/49).
+    // with Water W5's University ship pair at 48/49 and
+    // Water W6's Imperial University ship trio at 50/51/52).
     assert_eq!(TechId::MediumWarships.tag(), 47);
-    assert_eq!(TechId::ALL.len(), 50);
+    assert_eq!(TechId::ALL.len(), 53);
     assert_eq!(TechId::MediumWarships.age_required(), Age::Castle);
     assert_eq!(TechId::MediumWarships.ticks(), 3000); // 50 s
     assert_eq!(TechId::MediumWarships.cost(), (0, 150, 100, 0));

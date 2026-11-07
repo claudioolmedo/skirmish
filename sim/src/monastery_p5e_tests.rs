@@ -135,7 +135,7 @@ fn herbal_medicine_row_and_gates() {
     // Sanctity 32 / Fervor 33 — no existing tag moved.
     assert_eq!(TechId::HerbalMedicine.tag(), 34);
     assert_eq!(TechId::from_tag(34), Some(TechId::HerbalMedicine));
-    assert_eq!(TechId::ALL.len(), 50, "P5b's Atonement/Devotion append at 35/36, P5c's Redemption/Heresy at 37/38, P5f's Imperial row at 39–42, the TEC-07 wood chain at 43/44, Water W2a's Dock fishing pair at 45/46, Water W3b's Medium Warships at 47, Water W5's University ship pair (Careening / Clinker Construction) at 48/49");
+    assert_eq!(TechId::ALL.len(), 53, "P5b's Atonement/Devotion append at 35/36, P5c's Redemption/Heresy at 37/38, P5f's Imperial row at 39–42, the TEC-07 wood chain at 43/44, Water W2a's Dock fishing pair at 45/46, Water W3b's Medium Warships at 47, Water W5's University ship pair (Careening / Clinker Construction) at 48/49, Water W6's Imperial University ship trio (Dry Dock / Carvel Hull / Shipwright) at 50/51/52");
     assert_eq!(
         TechId::HerbalMedicine.host(),
         TechHost::Building(BuildingKind::Monastery)

@@ -81,6 +81,9 @@ export const TECH_TREE = [
   { tag: 47, host: 23, age: 2, cost: [0, 150, 100, 0], secs: 50, requires: null }, // Medium Warships (Water W3b)
   { tag: 48, host: 16, age: 2, cost: [100, 0, 200, 0], secs: 40, requires: null }, // Careening (Water W5; cost per the official update-169123 preview, research time UNVERIFIED — the sim's named placeholder)
   { tag: 49, host: 16, age: 2, cost: [150, 100, 0, 0], secs: 40, requires: null }, // Clinker Construction (Water W5; same sourcing note)
+  { tag: 50, host: 16, age: 3, cost: [200, 0, 400, 0], secs: 60, requires: 48 }, // Dry Dock (Water W6; cost/time VERIFIED at W6 Passo 0, wiki Technology table)
+  { tag: 51, host: 16, age: 3, cost: [350, 200, 0, 0], secs: 60, requires: 49 }, // Carvel Hull (Water W6; same sourcing)
+  { tag: 52, host: 16, age: 3, cost: [1000, 0, 300, 0], secs: 60, requires: null }, // Shipwright (Water W6; same sourcing)
 ];
 
 /** The age-advancement tags and the age each one reaches. */

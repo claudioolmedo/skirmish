@@ -193,7 +193,10 @@ export const PANEL_BUTTONS = {
     // Water W5: the University ship pair appends after the five
     // (Careening, Clinker Construction) — the positional grid
     // continues; the five letters above are untouched.
-    'research-careening', 'research-clinkerconstruction'],
+    'research-careening', 'research-clinkerconstruction',
+    // Water W6: the Imperial ship trio appends after the pair
+    // (Dry Dock, Carvel Hull, Shipwright) — the grid continues.
+    'research-drydock', 'research-carvelhull', 'research-shipwright'],
   // Water W2 client (ECO-15): the Dock's panel — Train Fishing
   // Ship, then its two fishing researches (Fishing Lines,
   // Gillnets), the plain positional grid like every production
@@ -396,6 +399,11 @@ export const PANEL_KEYS = {
     // cells — the positional grid continues (D, then Z).
     'research-careening': ['KeyD', 'D'],
     'research-clinkerconstruction': ['KeyZ', 'Z'],
+    // Water W6: the Imperial trio takes the third row's
+    // remaining cells and the fourth row's first (X, C, V).
+    'research-drydock': ['KeyX', 'X'],
+    'research-carvelhull': ['KeyC', 'C'],
+    'research-shipwright': ['KeyV', 'V'],
   },
   // Water W2 client (ECO-15): the Dock — the plain positional
   // grid: Train Fishing Ship Q, Fishing Lines W, Gillnets E.

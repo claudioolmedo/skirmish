@@ -410,11 +410,49 @@ pub enum TechId {
     /// UNVERIFIED, same placeholder discipline as Careening.
     /// Tag 49.
     ClinkerConstruction,
+    /// University, Imperial: ships +1 pierce armor AND +15%
+    /// speed (Water W6; the further upgrade of Careening —
+    /// wiki, Careening article: "Dry Dock is the further
+    /// upgrade of this technology"). Cost/time pinned at W6
+    /// Passo 0 from the wiki Technology table (fetched
+    /// 2026-11-06): **200 food / 400 gold, 60 s** — VERIFIED.
+    /// EFFECT DIVERGENCE (recorded, dossier governs): the
+    /// current wiki Dry Dock article (fetched 2026-11-06)
+    /// reads "Ships +1 pierce armor" only, and its changelog
+    /// records that update 169123 removed the old +15% speed
+    /// increase; WATER-SPEC §5 (wiki Ship tech table crawl of
+    /// 2026-11-05) pins BOTH effects, and the W6 tasking ships
+    /// the dossier's form — armor and speed both apply here,
+    /// flagged in the W6 handoff as Claudio's call if he wants
+    /// the live-wiki form. Tag 50.
+    DryDock,
+    /// University, Imperial: ships +10% speed (Water W6; the
+    /// further upgrade of Clinker Construction — wiki, Carvel
+    /// Hull article, fetched 2026-11-06: "researched at the
+    /// University in the Imperial Age after Clinker
+    /// Construction has been researched… increases the
+    /// movement speed of all ships by 10%"). Cost/time pinned
+    /// at W6 Passo 0 from the wiki Technology table:
+    /// **350 food / 200 wood, 60 s** — VERIFIED. Tag 51.
+    CarvelHull,
+    /// University, Imperial: ship wood cost −20% and ship
+    /// creation +54% faster (Water W6 — wiki, Shipwright
+    /// article, fetched 2026-11-06: "decreases the amount of
+    /// wood required to build ships by 20%. It also reduces
+    /// the training time of ships by 35%, which results in an
+    /// increase in ship creation speed of 54%… Shipwright does
+    /// not make Docks work faster, hence technologies are not
+    /// researched faster" — so the speed half scales UNIT
+    /// heads at the Dock only, never research heads). Cost/
+    /// time pinned at W6 Passo 0 from the wiki Technology
+    /// table: **1 000 food / 300 gold, 60 s** — VERIFIED.
+    /// Tag 52.
+    Shipwright,
 }
 
 impl TechId {
     /// All technologies, in tag order.
-    pub const ALL: [TechId; 50] = [
+    pub const ALL: [TechId; 53] = [
         TechId::Loom,
         TechId::FeudalAge,
         TechId::Fletching,
@@ -465,6 +503,9 @@ impl TechId {
         TechId::MediumWarships,
         TechId::Careening,
         TechId::ClinkerConstruction,
+        TechId::DryDock,
+        TechId::CarvelHull,
+        TechId::Shipwright,
     ];
 
     /// Stable tag: 0 loom, 1 feudal age, 2 fletching, 3 scale mail,
@@ -525,6 +566,11 @@ impl TechId {
     /// the WATER-EXECUTION-PLAN §2 allocation; verified first
     /// free on the W5 base `c9d1353`, where ALL held 48
     /// entries, tags 0–47.)
+    /// 50 dry dock, 51 carvel hull, 52 shipwright (Water W6 —
+    /// the Imperial University ship trio, appended at the tail
+    /// after W5's pair in the tasking's order; verified first
+    /// free on the W6 base `78ef23b`, where ALL held 50
+    /// entries, tags 0–49.)
     pub fn tag(self) -> u8 {
         match self {
             TechId::Loom => 0,
@@ -577,6 +623,9 @@ impl TechId {
             TechId::MediumWarships => 47,
             TechId::Careening => 48,
             TechId::ClinkerConstruction => 49,
+            TechId::DryDock => 50,
+            TechId::CarvelHull => 51,
+            TechId::Shipwright => 52,
         }
     }
 
@@ -632,7 +681,14 @@ impl TechId {
             // moved Careening to the University; Clinker
             // Construction was born there).
             | TechId::Careening
-            | TechId::ClinkerConstruction => TechHost::Building(BuildingKind::University),
+            | TechId::ClinkerConstruction
+            // Water W6: the Imperial University ship trio joins
+            // the same host arm (update 169123 moved Dry Dock
+            // and Shipwright to the University; Carvel Hull was
+            // born there — wiki, the three articles).
+            | TechId::DryDock
+            | TechId::CarvelHull
+            | TechId::Shipwright => TechHost::Building(BuildingKind::University),
             // Package M: Conscription is researched at the Castle
             // itself (wiki, Conscription).
             TechId::Conscription => TechHost::Building(BuildingKind::Castle),
@@ -674,7 +730,12 @@ impl TechId {
             | TechId::BlockPrinting
             | TechId::Illumination
             | TechId::Theocracy
-            | TechId::Faith => Age::Imperial,
+            | TechId::Faith
+            // Water W6: the University ship trio is Imperial
+            // Age research (wiki, the three articles).
+            | TechId::DryDock
+            | TechId::CarvelHull
+            | TechId::Shipwright => Age::Imperial,
             TechId::HandCart
             | TechId::LightCavalry
             | TechId::Husbandry
@@ -746,6 +807,14 @@ impl TechId {
             // Lines → Gillnets"; WATER-SPEC §5 names Fishing
             // Lines Gillnets' precursor).
             TechId::Gillnets => Some(TechId::FishingLines),
+            // Water W6: the Imperial ship chains — Dry Dock is
+            // the further upgrade of Careening, Carvel Hull of
+            // Clinker Construction (wiki technology nav:
+            // "Careening → Dry Dock", "Clinker Construction →
+            // Carvel Hull"; the Carvel Hull article states the
+            // prerequisite in prose). Shipwright stands alone.
+            TechId::DryDock => Some(TechId::Careening),
+            TechId::CarvelHull => Some(TechId::ClinkerConstruction),
             _ => None,
         }
     }
@@ -806,6 +875,9 @@ impl TechId {
             TechId::MediumWarships => 3000, // 50 s (pinned at W3b Passo 0 — see the tag docs)
             TechId::Careening => 2400, // 40 s — UNVERIFIED placeholder (see the tag docs)
             TechId::ClinkerConstruction => 2400, // 40 s — UNVERIFIED placeholder (see the tag docs)
+            TechId::DryDock => 3600, // 60 s (wiki, Technology table — W6 Passo 0, VERIFIED)
+            TechId::CarvelHull => 3600, // 60 s (wiki, Technology table — W6 Passo 0, VERIFIED)
+            TechId::Shipwright => 3600, // 60 s (wiki, Technology table — W6 Passo 0, VERIFIED)
         }
     }
 
@@ -863,8 +935,55 @@ impl TechId {
             TechId::MediumWarships => (0, 150, 100, 0), // pinned at W3b Passo 0 — see the tag docs
             TechId::Careening => (100, 0, 200, 0), // official update-169123 preview — see the tag docs
             TechId::ClinkerConstruction => (150, 100, 0, 0), // official update-169123 preview — see the tag docs
+            TechId::DryDock => (200, 0, 400, 0), // wiki, Technology table — W6 Passo 0, VERIFIED
+            TechId::CarvelHull => (350, 200, 0, 0), // wiki, Technology table — W6 Passo 0, VERIFIED
+            TechId::Shipwright => (1000, 0, 300, 0), // wiki, Technology table — W6 Passo 0, VERIFIED
         }
     }
+}
+
+/// Whether the unit kind is a ship for Shipwright's patches
+/// (Water W6): the kind's spec row carries the SHIP armor
+/// class — the same class key the W5 pair's `stats_for`
+/// patches read, so every hull (present and future) is in
+/// scope by its table row alone, and no land kind ever is.
+fn is_ship_kind(kind: crate::entity::EntityKind) -> bool {
+    crate::units::spec(kind).classes & crate::classes::bit(crate::classes::SHIP) != 0
+}
+
+/// The wood a unit kind's training actually charges a player
+/// holding the researched set `techs` (Water W6, Shipwright):
+/// ships cost −20% wood (wiki, Shipwright), read at lookup
+/// from the owner's mask exactly like every TEC-06 patch —
+/// the base table in `units` never changes. Every ship row's
+/// wood cost is a multiple of 5, so ×80/100 is exact on the
+/// whole roster (75 → 60, 90 → 72, 125 → 100); the multiply
+/// truncates in the standing integer-scalar shape regardless.
+/// Non-ships and non-holders read the base cost unchanged.
+pub fn train_wood_cost(kind: crate::entity::EntityKind, techs: u64) -> i32 {
+    let base = crate::units::spec(kind).wood_cost;
+    if techs & TechId::Shipwright.bit() != 0 && is_ship_kind(kind) {
+        ((base as i64 * 80) / 100) as i32
+    } else {
+        base
+    }
+}
+
+/// Whether unit heads at a Dock accrue progress at
+/// Shipwright's rate for a player holding `techs` (Water W6):
+/// ships are created +54% faster (wiki, Shipwright) — a
+/// production-rate patch on the Dock's UNIT heads only, in
+/// `conscription_scales`' shape. Research heads never scale
+/// (the Shipwright article is explicit: it "does not make
+/// Docks work faster, hence technologies are not researched
+/// faster"), and neither do non-ship unit heads (the Dock
+/// trains none today; the kind test keeps the rule honest if
+/// that ever changes). Read at progress time from the owner's
+/// mask — no stored per-building rate (TEC-06 discipline).
+pub fn shipwright_scales(kind: BuildingKind, entry: ProdEntry, techs: u64) -> bool {
+    techs & TechId::Shipwright.bit() != 0
+        && kind == BuildingKind::Dock
+        && matches!(entry, ProdEntry::Unit(k) if is_ship_kind(k))
 }
 
 /// The tribute fee, in percent of the amount sent, for a player
@@ -1196,7 +1315,10 @@ mod tests {
         assert_eq!(TechId::from_tag(47), Some(TechId::MediumWarships));
         assert_eq!(TechId::from_tag(48), Some(TechId::Careening));
         assert_eq!(TechId::from_tag(49), Some(TechId::ClinkerConstruction));
-        assert_eq!(TechId::from_tag(50), None);
+        assert_eq!(TechId::from_tag(50), Some(TechId::DryDock));
+        assert_eq!(TechId::from_tag(51), Some(TechId::CarvelHull));
+        assert_eq!(TechId::from_tag(52), Some(TechId::Shipwright));
+        assert_eq!(TechId::from_tag(53), None);
     }
 
     #[test]
@@ -1346,7 +1468,7 @@ mod tests {
         // TEC-07 wood chain (43/44) last, so ALL now holds 45.
         // (Water W2a appends the Dock fishing pair at 45/46 —
         // ALL now holds 47; the count lives in the W2a test.)
-        assert_eq!(TechId::ALL.len(), 50);
+        assert_eq!(TechId::ALL.len(), 53);
         // ECO-14: the farm gather lookup meets the farm's own
         // 0.4 food/s work-rate cap — the base farm rate sits
         // below it today, so the clamped value is the base rate,
@@ -1439,8 +1561,11 @@ mod tests {
         assert_eq!(TechId::from_tag(47), Some(TechId::MediumWarships));
         assert_eq!(TechId::from_tag(48), Some(TechId::Careening));
         assert_eq!(TechId::from_tag(49), Some(TechId::ClinkerConstruction));
-        assert_eq!(TechId::from_tag(50), None);
-        assert_eq!(TechId::ALL.len(), 50);
+        assert_eq!(TechId::from_tag(50), Some(TechId::DryDock));
+        assert_eq!(TechId::from_tag(51), Some(TechId::CarvelHull));
+        assert_eq!(TechId::from_tag(52), Some(TechId::Shipwright));
+        assert_eq!(TechId::from_tag(53), None);
+        assert_eq!(TechId::ALL.len(), 53);
     }
 
     #[test]

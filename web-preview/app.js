@@ -515,6 +515,7 @@ let TECH_NAME = {
   35: 'Atonement', 36: 'Devotion',
   45: 'Fishing Lines', 46: 'Gillnets', 47: 'Medium Warships',
   48: 'Careening', 49: 'Clinker Construction',
+  50: 'Dry Dock', 51: 'Carvel Hull', 52: 'Shipwright',
 };
 // Research-block explanations, indexed by the sim's ResearchBlock
 // tag (0 ok — unused, 1 funds, 2 queue full, 3 already done,
@@ -1561,7 +1562,7 @@ function updateEventFeed() {
   const lines = diffFeedEvents(prev, snap, {
     buildingName: (k) => BUILD_NAME[k],
     unitName: (k) => KIND_NAME[k],
-    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15, lightcavalry: 16, husbandry: 17, caravan: 19, coinage: 25, banking: 26, townwatch: 27, townpatrol: 28, conscription: 29, heavyplow: 30, croprotation: 31, sanctity: 32, fervor: 33, herbalmedicine: 34, atonement: 35, devotion: 36, redemption: 37, heresy: 38, blockprinting: 39, illumination: 40, theocracy: 41, faith: 42, bowsaw: 43, twomansaw: 44, fishinglines: 45, gillnets: 46, mediumwarships: 47, careening: 48, clinkerconstruction: 49 }[key]],
+    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15, lightcavalry: 16, husbandry: 17, caravan: 19, coinage: 25, banking: 26, townwatch: 27, townpatrol: 28, conscription: 29, heavyplow: 30, croprotation: 31, sanctity: 32, fervor: 33, herbalmedicine: 34, atonement: 35, devotion: 36, redemption: 37, heresy: 38, blockprinting: 39, illumination: 40, theocracy: 41, faith: 42, bowsaw: 43, twomansaw: 44, fishinglines: 45, gillnets: 46, mediumwarships: 47, careening: 48, clinkerconstruction: 49, drydock: 50, carvelhull: 51, shipwright: 52 }[key]],
   }, feedFmt());
   feedPrev = snap;
   for (const text of lines) pushFeedLine(text);
@@ -13973,6 +13974,7 @@ function runCommandButton(id, times = 1) {
       'research-fishinglines': 45, 'research-gillnets': 46,
       'research-mediumwarships': 47,
       'research-careening': 48, 'research-clinkerconstruction': 49,
+      'research-drydock': 50, 'research-carvelhull': 51, 'research-shipwright': 52,
     }[id];
     if (tag != null && selectedBuilding && selectedBuilding.type === 'building') {
       if (!issue({ t: 'research_at', b: selectedBuilding.id, tech: tag })) {
@@ -14138,9 +14140,9 @@ function renderCommands() {
   const RB_TAGS = {
     blacksmith: [2, 3, 4, 7, 8], barracks: [5], stable: [9, 16, 17],
     lumbercamp: [10, 43, 44], miningcamp: [11, 12], mill: [13, 30, 31], market: [19, 25, 26],
-    university: [20, 21, 22, 23, 24, 48, 49], castle: [29],
+    university: [20, 21, 22, 23, 24, 48, 49, 50, 51, 52], castle: [29],
     lumbercamp: [10, 43, 44], miningcamp: [11, 12], mill: [13], market: [19, 25, 26],
-    university: [20, 21, 22, 23, 24, 48, 49], monastery: [32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42],
+    university: [20, 21, 22, 23, 24, 48, 49, 50, 51, 52], monastery: [32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42],
     dock: [45, 46, 47],
   };
   const rbB = bk && RB_TAGS[context]
@@ -15108,6 +15110,18 @@ function renderCommands() {
         [[100, 'food'], [200, 'gold']], 40, 5),
       techBtn('research-clinkerconstruction', 49, 'i-clinkerconstruction', 'cmd.clinkerTitle',
         [[150, 'food'], [100, 'wood']], 40, 6),
+      // Water W6: the Imperial University ship trio — Dry
+      // Dock (ships +1 pierce armor, +15% speed), Carvel Hull
+      // (ships +10% speed) and Shipwright (ships −20% wood,
+      // created +54% faster at the Dock), Imperial Age
+      // researches on the same lock law; costs/times VERIFIED
+      // at W6 Passo 0 (wiki Technology table).
+      techBtn('research-drydock', 50, 'i-drydock', 'cmd.drydockTitle',
+        [[200, 'food'], [400, 'gold']], 60, 7),
+      techBtn('research-carvelhull', 51, 'i-carvelhull', 'cmd.carvelhullTitle',
+        [[350, 'food'], [200, 'wood']], 60, 8),
+      techBtn('research-shipwright', 52, 'i-shipwright', 'cmd.shipwrightTitle',
+        [[1000, 'food'], [300, 'gold']], 60, 9),
     );
   } else if (context === 'lumbercamp' || context === 'mill' || context === 'miningcamp') {
     // The economy researches (2026-10-22): Double-Bit Axe at the

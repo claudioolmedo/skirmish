@@ -133,6 +133,8 @@ mod water_w3b_tests;
 #[cfg(test)]
 mod water_w4_tests;
 mod water_w5_tests;
+#[cfg(test)]
+mod water_w6_tests;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
@@ -3980,6 +3982,26 @@ impl Sim {
         if ship_class && p.techs & TechId::ClinkerConstruction.bit() != 0 {
             s.speed = I16F16::from_bits(((s.speed.to_bits() as i64 * 11) / 10) as i32);
         }
+        // Water W6 (the Imperial University ship trio, same
+        // SHIP-class key, layered after the W5 pair in tag
+        // order): Dry Dock — ships +1 pierce armor AND +15%
+        // speed (WATER-SPEC §5's form; the live wiki's
+        // post-169123 Dry Dock article reads armor only — the
+        // divergence is recorded in `tech.rs`'s tag docs and
+        // the W6 handoff, dossier governs). The speed half is
+        // the ×115/100 scalar (Fervor's shape) over the layered
+        // row, so it stacks multiplicatively with Clinker's.
+        if ship_class && p.techs & TechId::DryDock.bit() != 0 {
+            s.armor_pierce += 1;
+            s.speed = I16F16::from_bits(((s.speed.to_bits() as i64 * 115) / 100) as i32);
+        }
+        // Carvel Hull — ships +10% speed, Clinker's scalar
+        // applied a second time over the layered row (the two
+        // hull techs stack multiplicatively: ×11/10 ×11/10,
+        // each step truncating, the TEC-08 pattern).
+        if ship_class && p.techs & TechId::CarvelHull.bit() != 0 {
+            s.speed = I16F16::from_bits(((s.speed.to_bits() as i64 * 11) / 10) as i32);
+        }
         // The Monastery patches (Castle P5a, MNK-01): keyed on
         // the MONK class mask, TEC-06's discipline — the Monk is
         // the class's only member today, and a future monk-class
@@ -5352,7 +5374,12 @@ impl Sim {
         let spec = units::spec(kind);
         let stockpile = self.stockpile_of(owner);
         stockpile.amount(ResourceKind::Food) >= I16F16::from_num(spec.food_cost)
-            && stockpile.amount(ResourceKind::Wood) >= I16F16::from_num(spec.wood_cost)
+            // Water W6 (Shipwright): the wood leg reads the
+            // patched cost — a holder's ships charge −20% wood
+            // (the helper returns the base cost for every other
+            // kind/mask, so land training is untouched).
+            && stockpile.amount(ResourceKind::Wood)
+                >= I16F16::from_num(tech::train_wood_cost(kind, self.tech_mask_of(owner)))
             && stockpile.amount(ResourceKind::Gold) >= I16F16::from_num(spec.gold_cost)
     }
 
@@ -5365,9 +5392,12 @@ impl Sim {
             self.stockpile_mut(owner)
                 .spend(ResourceKind::Food, I16F16::from_num(spec.food_cost));
         }
-        if spec.wood_cost > 0 {
+        // Water W6 (Shipwright): the wood spend is the patched
+        // cost, the exact amount `can_afford` just checked.
+        let wood_cost = tech::train_wood_cost(kind, self.tech_mask_of(owner));
+        if wood_cost > 0 {
             self.stockpile_mut(owner)
-                .spend(ResourceKind::Wood, I16F16::from_num(spec.wood_cost));
+                .spend(ResourceKind::Wood, I16F16::from_num(wood_cost));
         }
         if spec.gold_cost > 0 {
             self.stockpile_mut(owner)
@@ -6034,7 +6064,11 @@ impl Sim {
                 let spec = units::spec(kind);
                 for (res, amount) in [
                     (ResourceKind::Food, spec.food_cost),
-                    (ResourceKind::Wood, spec.wood_cost),
+                    // Water W6 (Shipwright): the refund is the
+                    // patched wood cost, the enqueue spend's
+                    // inverse under the owner's current mask
+                    // (TEC-06 lookup discipline, as everywhere).
+                    (ResourceKind::Wood, tech::train_wood_cost(kind, self.tech_mask_of(owner))),
                     (ResourceKind::Gold, spec.gold_cost),
                 ] {
                     if amount > 0 {
@@ -10649,6 +10683,25 @@ impl Sim {
                 let acc = 4 + b.queue_rate_remainder;
                 b.train_progress += (acc / 3) as u64;
                 b.queue_rate_remainder = acc % 3;
+            } else if tech::shipwright_scales(
+                self.buildings[bi].kind,
+                head,
+                self.tech_mask_of(owner),
+            ) {
+                // Shipwright (Water W6, TEC-09's sibling): at a
+                // Dock whose owner holds the tech, a SHIP unit
+                // head accrues ×154/100 — carried exactly by the
+                // building's queue-rate remainder (hundredths of
+                // a tick), so 50 ticks accrue exactly 77. The
+                // Dock is never a Conscription building, so the
+                // shared remainder field is Shipwright's alone
+                // here; research heads and the TC never enter
+                // this branch (the article: Shipwright "does
+                // not make Docks work faster" for research).
+                let b = &mut self.buildings[bi];
+                let acc = 154 + b.queue_rate_remainder;
+                b.train_progress += (acc / 100) as u64;
+                b.queue_rate_remainder = acc % 100;
             } else {
                 self.buildings[bi].train_progress += 1;
             }
