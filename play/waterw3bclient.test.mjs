@@ -73,7 +73,7 @@ test('Medium Warships is wired as Dock research, tag 47', () => {
   // The tech-tree mirror row (INF-06): Dock host, Castle Age,
   // no prerequisite (the upgrade keys off the age, not off
   // Gillnets).
-  assert.equal(TECH_TREE.length, 48);
+  assert.equal(TECH_TREE.length, 50); // 48 at W3b; +Careening/Clinker (W5)
   assert.deepEqual(TECH_TREE[47], {
     tag: 47, host: 23, age: 2, cost: [0, 150, 100, 0], secs: 50, requires: null,
   });
@@ -83,7 +83,7 @@ test('panel order + letters: the research button takes the X cell', () => {
   assert.deepEqual(PANEL_BUTTONS.dock,
     ['train-fishing-ship', 'research-fishinglines', 'research-gillnets',
       'train-galley', 'train-fire-galley', 'train-demolition-raft', 'train-hulk',
-      'research-mediumwarships', 'train-transport-ship']);
+      'research-mediumwarships', 'train-transport-ship', 'train-trade-cog']); // + Transport (W4), + the Cog (W5)
   assert.deepEqual(PANEL_KEYS.dock['research-mediumwarships'], ['KeyX', 'X']);
   // The W2/W3a letters are untouched.
   assert.deepEqual(PANEL_KEYS.dock['train-galley'], ['KeyA', 'A']);
@@ -96,11 +96,13 @@ test('rendering tables cover the four tiers', () => {
     assert.ok(app.includes(`${tag}: '${icon}',`), `KIND_ICON ${tag}`);
     assert.match(app, new RegExp(`function ${draw}\\(i, wx, wy\\)`));
   }
-  assert.match(app, /'fireGalley', 'demolitionRaft', 'hulk', 'warGalley', 'fireShip', 'demolitionShip', 'warHulk', 'transportShip'\];/);
+  assert.match(app, /'fireGalley', 'demolitionRaft', 'hulk', 'warGalley', 'fireShip', 'demolitionShip', 'warHulk',/);
   assert.match(app, /drawWarGalley, \/\/ 28: War Galley/);
   assert.match(app, /drawFireShip, \/\/ 29: Fire Ship/);
   assert.match(app, /drawDemolitionShip, \/\/ 30: Demolition Ship/);
-  assert.match(app, /drawTransportShip\]; \/\/ 32: Transport Ship/);
+  assert.match(app, /drawWarHulk, \/\/ 31: War Hulk/);
+  assert.match(app, /drawTransportShip, \/\/ 32: Transport Ship/);
+  assert.match(app, /drawTradeCog\]; \/\/ 33: Trade Cog/); // the table ends at the Cog since the W5 merge
 });
 
 test('names and the tech exist in all three locales', () => {

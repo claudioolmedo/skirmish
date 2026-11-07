@@ -2398,6 +2398,21 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * Train a Trade Cog at a Dock (Water W5, TRD-05). The
+     * Cog's trade tasking needs no dedicated export: it rides
+     * the generic `push_trade` by entity/building id, exactly
+     * like the Trade Cart's — one command, two depot kinds.
+     * The University ship pair (Careening 48, Clinker
+     * Construction 49) likewise rides `push_research_at`.
+     * See `push_train_militia`.
+     * @param {number} building
+     * @returns {boolean}
+     */
+    push_train_trade_cog(building) {
+        const ret = wasm.wasmsim_push_train_trade_cog(this.__wbg_ptr, building);
+        return ret !== 0;
+    }
+    /**
      * Train a Transport Ship at a Dock (Water W4, GAR-09). See
      * `push_train_militia`.
      * @param {number} building

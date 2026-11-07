@@ -337,7 +337,11 @@ const KIND_KING = 22; // Package C: the Regicide king (VIC-06) — builder's 21 
 const KIND_I18N = ['villager', 'townCenter', 'scout', 'militia', 'archer',
   'sheep', 'boar', 'deer', 'manAtArms', 'spearman', 'skirmisher', 'wolf',
   'knight', 'lightCavalry', 'cavalryArcher', 'petard', 'tradeCart', 'batteringRam', 'mangonel', 'scorpion', 'monk', 'relic', 'king', 'fishingShip', 'galley',
-  'fireGalley', 'demolitionRaft', 'hulk', 'warGalley', 'fireShip', 'demolitionShip', 'warHulk', 'transportShip'];
+  'fireGalley', 'demolitionRaft', 'hulk', 'warGalley', 'fireShip', 'demolitionShip', 'warHulk',
+  // 32: Transport Ship (Water W4, GAR-09). 33: Trade Cog
+  // (Water W5, TRD-05). The W5 tree carried slot 32 as a
+  // reserved name while W4 was in flight; both are real here.
+  'transportShip', 'tradeCog'];
 let KIND_NAME = {
   0: 'Villager', 1: 'Town Center', 2: 'Scout Cavalry', 3: 'Militia',
   4: 'Archer', 5: 'Sheep', 6: 'Boar', 7: 'Deer', 8: 'Man-at-Arms',
@@ -347,7 +351,7 @@ let KIND_NAME = {
   20: 'Monk', 21: 'Relic', 22: 'King', 23: 'Fishing Ship',
   24: 'Galley', 25: 'Fire Galley', 26: 'Demolition Raft', 27: 'Hulk',
   28: 'War Galley', 29: 'Fire Ship', 30: 'Demolition Ship', 31: 'War Hulk',
-  32: 'Transport Ship',
+  32: 'Transport Ship', 33: 'Trade Cog',
 };
 // Selection-panel portraits per unit kind (SVG symbol ids in
 // play/index.html).
@@ -359,7 +363,7 @@ const KIND_ICON = {
   20: 'i-monk', 21: 'i-gold', 22: 'i-king', 23: 'i-fishing-ship',
   24: 'i-galley', 25: 'i-fire-galley', 26: 'i-demolition-raft', 27: 'i-hulk',
   28: 'i-war-galley', 29: 'i-fire-ship', 30: 'i-demolition-ship', 31: 'i-war-hulk',
-  32: 'i-transport-ship',
+  32: 'i-transport-ship', 33: 'i-trade-cog',
 };
 
 // Original PNG icon set (2026-10-19, AI generations via Base44 on
@@ -510,6 +514,7 @@ let TECH_NAME = {
   32: 'Sanctity', 33: 'Fervor', 34: 'Herbal Medicine',
   35: 'Atonement', 36: 'Devotion',
   45: 'Fishing Lines', 46: 'Gillnets', 47: 'Medium Warships',
+  48: 'Careening', 49: 'Clinker Construction',
 };
 // Research-block explanations, indexed by the sim's ResearchBlock
 // tag (0 ok — unused, 1 funds, 2 queue full, 3 already done,
@@ -1556,7 +1561,7 @@ function updateEventFeed() {
   const lines = diffFeedEvents(prev, snap, {
     buildingName: (k) => BUILD_NAME[k],
     unitName: (k) => KIND_NAME[k],
-    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15, lightcavalry: 16, husbandry: 17, caravan: 19, coinage: 25, banking: 26, townwatch: 27, townpatrol: 28, conscription: 29, heavyplow: 30, croprotation: 31, sanctity: 32, fervor: 33, herbalmedicine: 34, atonement: 35, devotion: 36, redemption: 37, heresy: 38, blockprinting: 39, illumination: 40, theocracy: 41, faith: 42, bowsaw: 43, twomansaw: 44, fishinglines: 45, gillnets: 46 }[key]],
+    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15, lightcavalry: 16, husbandry: 17, caravan: 19, coinage: 25, banking: 26, townwatch: 27, townpatrol: 28, conscription: 29, heavyplow: 30, croprotation: 31, sanctity: 32, fervor: 33, herbalmedicine: 34, atonement: 35, devotion: 36, redemption: 37, heresy: 38, blockprinting: 39, illumination: 40, theocracy: 41, faith: 42, bowsaw: 43, twomansaw: 44, fishinglines: 45, gillnets: 46, mediumwarships: 47, careening: 48, clinkerconstruction: 49 }[key]],
   }, feedFmt());
   feedPrev = snap;
   for (const text of lines) pushFeedLine(text);
@@ -4260,8 +4265,11 @@ function applyLocalOrder(cmd) {
         : cmd.k === 26 ? sim.push_train_demolition_raft(cmd.b)
         : cmd.k === 27 ? sim.push_train_hulk(cmd.b)
         : cmd.k === 32 ? sim.push_train_transport_ship(cmd.b)
+        : cmd.k === 33 ? sim.push_train_trade_cog(cmd.b)
         : sim.push_train_archer(cmd.b);
     // Package D (TRD-05): task a Trade Cart to a foreign Market.
+    // Water W5: the same command tasks a Trade Cog to a foreign
+    // Dock — one verb, two depot kinds, the sim decides.
     case 'trade': return sim.push_trade(cmd.e, cmd.b);
     // Castle P5a (MNK-10): task a Monk to heal an allied unit.
     case 'heal': return sim.push_heal(cmd.e, cmd.tg);
@@ -8327,6 +8335,21 @@ async function main() {
       let any = false;
       for (const id of targets) {
         if (st.kinds[id] !== 16) continue;
+        if (issue({ t: 'trade', e: id, b: bT.id })) any = true;
+      }
+      if (any) { orderAck('order'); return; }
+    }
+    // Trade tasking on water (Water W5, TRD-05/07): a Trade Cog
+    // clicked onto a foreign Dock — the Cart block's exact mirror
+    // on the second depot kind (building kind 23). The Cog has
+    // no attack either, so the click is its whole purpose; the
+    // sim refuses the cross-kind pairings, so a Cart in the
+    // selection simply issues nothing here.
+    if (bT && bT.kind === 23 && bT.complete && bT.owner !== localOwner
+        && cellExploredW(bT.x, bT.y)) {
+      let any = false;
+      for (const id of targets) {
+        if (st.kinds[id] !== 33) continue;
         if (issue({ t: 'trade', e: id, b: bT.id })) any = true;
       }
       if (any) { orderAck('order'); return; }
@@ -12512,6 +12535,67 @@ function drawTransportShip(i, wx, wy) {
   ctx.fill();
 }
 
+// Water W5 (TRD-05): the Trade Cog — an original flat-vector
+// merchantman in the fleet's idiom: a broad, high-sided hull
+// with a single mast and a big square sail in the owner's
+// cloth, visibly laden on the homeward leg — the trade state
+// (tradeStateOf, the sim's own summary) fills the deck with
+// cargo crates once the Cog has loaded at the foreign Dock,
+// the sea mirror of the Cart's loaded packs.
+function drawTradeCog(i, wx, wy) {
+  const [sx, sy] = worldToScreen(wx, wy);
+  const u = camS;
+  ctx.strokeStyle = 'rgba(220, 240, 250, 0.45)';
+  ctx.lineWidth = Math.max(1, 0.14 * u);
+  ctx.beginPath();
+  ctx.ellipse(sx, sy - 0.1 * u, 1.8 * u, 0.58 * u, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  if (selection.has(i)) drawSelRing(sx, sy, 2.0);
+  const loaded = tradeStateOf(i) === 2;
+  const cloth = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e';
+  // Broad hull, fuller than the war lines.
+  poly([
+    [sx - 1.7 * u, sy - 1.3 * u], [sx + 1.7 * u, sy - 1.3 * u],
+    [sx + 1.15 * u, sy - 0.05 * u], [sx - 1.15 * u, sy - 0.05 * u],
+  ], '#7d5a30');
+  ctx.strokeStyle = '#54391a';
+  ctx.lineWidth = Math.max(1, 0.13 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx - 1.7 * u, sy - 1.3 * u);
+  ctx.lineTo(sx + 1.7 * u, sy - 1.3 * u);
+  ctx.stroke();
+  // Sterncastle block.
+  poly([
+    [sx + 0.95 * u, sy - 1.62 * u], [sx + 1.66 * u, sy - 1.62 * u],
+    [sx + 1.66 * u, sy - 1.3 * u], [sx + 0.95 * u, sy - 1.3 * u],
+  ], '#8f683a');
+  // The cargo: crates on deck, only on the loaded leg home.
+  if (loaded) {
+    poly([
+      [sx - 1.05 * u, sy - 1.78 * u], [sx - 0.35 * u, sy - 1.78 * u],
+      [sx - 0.35 * u, sy - 1.3 * u], [sx - 1.05 * u, sy - 1.3 * u],
+    ], '#c9a45c');
+    poly([
+      [sx - 0.28 * u, sy - 1.66 * u], [sx + 0.3 * u, sy - 1.66 * u],
+      [sx + 0.3 * u, sy - 1.3 * u], [sx - 0.28 * u, sy - 1.3 * u],
+    ], '#b28c46');
+  }
+  // Mast + the square sail (owner color), the cog's one canvas.
+  ctx.strokeStyle = '#6f5533';
+  ctx.lineWidth = Math.max(1, 0.16 * u);
+  ctx.beginPath();
+  ctx.moveTo(sx, sy - 1.3 * u);
+  ctx.lineTo(sx, sy - 3.6 * u);
+  ctx.stroke();
+  ctx.fillStyle = cloth;
+  ctx.beginPath();
+  ctx.moveTo(sx - 1.05 * u, sy - 3.5 * u);
+  ctx.lineTo(sx + 1.05 * u, sy - 3.5 * u);
+  ctx.lineTo(sx + 0.88 * u, sy - 2.2 * u);
+  ctx.lineTo(sx - 0.88 * u, sy - 2.2 * u);
+  ctx.closePath();
+  ctx.fill();
+}
 
 function drawTradeCart(i, wx, wy) {
   const [sx, sy] = worldToScreen(wx, wy);
@@ -13546,6 +13630,7 @@ function attemptTrain(id) {
     'train-galley': 24, 'train-fire-galley': 25,
     'train-demolition-raft': 26, 'train-hulk': 27,
     'train-transport-ship': 32,
+    'train-trade-cog': 33,
   }[id];
   if (kindTag == null) return false;
   return selectedBuilding && selectedBuilding.type === 'building'
@@ -13573,6 +13658,7 @@ function flashTrainRefusal(id) {
       'train-galley': 24, 'train-fire-galley': 25,
       'train-demolition-raft': 26, 'train-hulk': 27,
       'train-transport-ship': 32,
+      'train-trade-cog': 33,
     }[id];
     const reason = sim.building_train_block(selectedBuilding.id, kindTag);
     flash(['', t('train.noResourcesUnit'),
@@ -13604,7 +13690,7 @@ function runCommandButton(id, times = 1) {
     || id === 'train-mangonel' || id === 'train-scorpion' || id === 'train-monk'
     || id === 'train-fishing-ship' || id === 'train-galley'
     || id === 'train-fire-galley' || id === 'train-demolition-raft'
-    || id === 'train-hulk' || id === 'train-transport-ship') {
+    || id === 'train-hulk' || id === 'train-transport-ship' || id === 'train-trade-cog') {
     let done = 0;
     while (done < times && attemptTrain(id)) done++;
     if (done === 0) flashTrainRefusal(id);
@@ -13886,6 +13972,7 @@ function runCommandButton(id, times = 1) {
       'research-bowsaw': 43, 'research-twomansaw': 44,
       'research-fishinglines': 45, 'research-gillnets': 46,
       'research-mediumwarships': 47,
+      'research-careening': 48, 'research-clinkerconstruction': 49,
     }[id];
     if (tag != null && selectedBuilding && selectedBuilding.type === 'building') {
       if (!issue({ t: 'research_at', b: selectedBuilding.id, tech: tag })) {
@@ -14036,6 +14123,7 @@ function renderCommands() {
   const blockDR = bk && context === 'dock' ? sim.building_train_block(bk.id, 26) : -1;
   const blockHu = bk && context === 'dock' ? sim.building_train_block(bk.id, 27) : -1;
   const blockTS = bk && context === 'dock' ? sim.building_train_block(bk.id, 32) : -1;
+  const blockTCog = bk && context === 'dock' ? sim.building_train_block(bk.id, 33) : -1;
   // Research blocks: the TC set (Loom 0, Feudal 1, Wheelbarrow 6,
   // Castle 14, Hand Cart 15) and the building techs, keyed by
   // tag — Blacksmith (Fletching 2, Scale Mail 3, Padded 4,
@@ -14050,9 +14138,9 @@ function renderCommands() {
   const RB_TAGS = {
     blacksmith: [2, 3, 4, 7, 8], barracks: [5], stable: [9, 16, 17],
     lumbercamp: [10, 43, 44], miningcamp: [11, 12], mill: [13, 30, 31], market: [19, 25, 26],
-    university: [20, 21, 22, 23, 24], castle: [29],
+    university: [20, 21, 22, 23, 24, 48, 49], castle: [29],
     lumbercamp: [10, 43, 44], miningcamp: [11, 12], mill: [13], market: [19, 25, 26],
-    university: [20, 21, 22, 23, 24], monastery: [32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42],
+    university: [20, 21, 22, 23, 24, 48, 49], monastery: [32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42],
     dock: [45, 46, 47],
   };
   const rbB = bk && RB_TAGS[context]
@@ -14063,7 +14151,7 @@ function renderCommands() {
   const sig = [context, Math.floor(wood), Math.floor(myStock()[0]), Math.floor(myStock()[2]),
     Math.floor(myStock()[3]),
     reason, queue, bk ? bk.id : -1, bk ? bk.queue : -1, bk && bk.complete ? 1 : 0,
-    blockM, blockSp, blockA, blockSk, blockS, blockK, blockCA, blockP, blockR, blockMg, blockSc, blockTC, blockMo, blockFS, blockGa, blockFG, blockDR, blockHu, blockTS, age, techMask, rbTc.join('.'), Object.values(rbB).join('.'),
+    blockM, blockSp, blockA, blockSk, blockS, blockK, blockCA, blockP, blockR, blockMg, blockSc, blockTC, blockMo, blockFS, blockGa, blockFG, blockDR, blockHu, blockTS, blockTCog, age, techMask, rbTc.join('.'), Object.values(rbB).join('.'),
     tcQueueCodes, bkQueueCodes, buildPage || '', repairArm ? 1 : 0, healArm ? 1 : 0, convertArm ? 1 : 0,
     // Castle P3b: the garrison counts and the bell state are panel
     // state (button faces + disabled states read them).
@@ -14799,6 +14887,25 @@ function renderCommands() {
           ? t('cmd.underConstruction', { name: KIND_NAME[32], building: BUILD_NAME[23] })
           : t('cmd.trainTitleTime', { name: KIND_NAME[32], cost: costText([[125, 'wood']]), secs: 46 }) + (TRAIN_BLOCK_TITLES[blockTS] ? ' ' + TRAIN_BLOCK_TITLES[blockTS] : ''),
       }),
+      // Water W5 (TRD-05): the Trade Cog — the Dock's second
+      // production line, the Market's Cart mirrored onto the
+      // Dock depot kind. Feudal, 100 wood / 50 gold, 36 s; the
+      // train-block law is the ships' own (hard blocks grey,
+      // funds stays clickable). Cell: index 9 (KeyV), the
+      // fourth row's first cell — Water W4's Transport Ship
+      // holds index 8 (KeyC) on the merged tree, the move the
+      // W5 handoff's merge notes prescribed.
+      cmdButton({
+        id: 'train-trade-cog', icon: 'i-trade-cog', label: 'Trade Cog',
+        costIcon: 'i-wood', cost: 100, cost2Icon: 'i-gold', cost2: 50,
+        disabled: underConstruction || blockTCog === 2 || blockTCog === 3,
+        key: badgeForButton({ context, id: 'train-trade-cog', index: 9 }),
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: KIND_NAME[33], building: BUILD_NAME[23] })
+          : age < 1
+            ? t('cmd.buildGate', { name: KIND_NAME[33], gate: t('gate.feudal') })
+            : t('cmd.trainTitleTime', { name: KIND_NAME[33], cost: costText([[100, 'wood'], [50, 'gold']]), secs: 36 }) + (TRAIN_BLOCK_TITLES[blockTCog] ? ' ' + TRAIN_BLOCK_TITLES[blockTCog] : ''),
+      }),
     );
     // Water W2b (ECO-15): the trap-reseed desk — the Mill
     // reseed desk's mirror at the Dock (ECO-14's shape, the
@@ -14962,7 +15069,11 @@ function renderCommands() {
     // game has no water domain), never a fake button.
     const underConstruction = !bk.complete;
     const techBtn = (id, tag, icon, titleKey, costParts, secs, index) => {
-      const done = (techMask & (1 << tag)) !== 0;
+      // BigInt mask read (the techMaskHas helper): the ship
+      // pair's tags (48/49, Water W5) cross the 32-bit shift
+      // boundary where `(1 << tag)` wraps — the camp panels'
+      // lesson, applied here before it can bite.
+      const done = techMaskHas(techMask, tag);
       const rb = rbB[tag];
       return cmdButton({
         id, icon, label: TECH_NAME[tag],
@@ -14987,6 +15098,16 @@ function renderCommands() {
         [[150, 'food'], [175, 'wood']], 50, 3),
       techBtn('research-fortifiedwall', 24, 'i-fortifiedwall', 'cmd.fortifiedwallTitle',
         [[200, 'food'], [100, 'wood']], 50, 4),
+      // Water W5 (CLS-07's tech half): the University ship pair
+      // — Careening (ships +1 pierce armor) and Clinker
+      // Construction (ships +10% speed), Castle Age researches
+      // on the same lock law. (The panel comment above predates
+      // the water domain; Heated Shot stays deferred on its own
+      // terms, not these buttons'.)
+      techBtn('research-careening', 48, 'i-careening', 'cmd.careeningTitle',
+        [[100, 'food'], [200, 'gold']], 40, 5),
+      techBtn('research-clinkerconstruction', 49, 'i-clinkerconstruction', 'cmd.clinkerTitle',
+        [[150, 'food'], [100, 'wood']], 40, 6),
     );
   } else if (context === 'lumbercamp' || context === 'mill' || context === 'miningcamp') {
     // The economy researches (2026-10-22): Double-Bit Axe at the
@@ -16339,7 +16460,8 @@ function draw() {
     drawFireShip, // 29: Fire Ship (Water W3b, CLS-07)
     drawDemolitionShip, // 30: Demolition Ship (Water W3b, CLS-07)
     drawWarHulk, // 31: War Hulk (Water W3b, CLS-07)
-    drawTransportShip]; // 32: Transport Ship (Water W4, GAR-09)
+    drawTransportShip, // 32: Transport Ship (Water W4, GAR-09)
+    drawTradeCog]; // 33: Trade Cog (Water W5, TRD-05)
   for (let i = 0; i < count; i++) {
     const wx = pos[i * 2];
     const wy = pos[i * 2 + 1];

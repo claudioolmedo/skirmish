@@ -191,6 +191,7 @@ export const wasmsim_push_train_scout: (a: number, b: number) => number;
 export const wasmsim_push_train_skirmisher: (a: number, b: number) => number;
 export const wasmsim_push_train_spearman: (a: number, b: number) => number;
 export const wasmsim_push_train_trade_cart: (a: number, b: number) => number;
+export const wasmsim_push_train_trade_cog: (a: number, b: number) => number;
 export const wasmsim_push_train_transport_ship: (a: number, b: number) => number;
 export const wasmsim_push_train_villager: (a: number) => number;
 export const wasmsim_push_train_villager_at: (a: number, b: number) => number;

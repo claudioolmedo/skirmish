@@ -180,6 +180,8 @@ const TRAIN_AT_FNS = {
   26: 'push_train_demolition_raft',
   27: 'push_train_hulk',
   32: 'push_train_transport_ship',
+  // Water W5 (TRD-05): the Trade Cog.
+  33: 'push_train_trade_cog',
 };
 
 const isInt = (v) => Number.isInteger(v) && v >= 0;
@@ -239,13 +241,13 @@ export function validateCommand(c) {
     // absent — the pre-BLD-20 wire form — or 14 stone wall).
     case 'buildline': return isInt(c.e) && isNum(c.x0) && isNum(c.y0) && isNum(c.x1) && isNum(c.y1)
       && (c.k === undefined || c.k === 9 || c.k === 14);
-    case 'train_at': return isInt(c.b) && (c.k === 2 || c.k === 3 || c.k === 4 || c.k === 9 || c.k === 10 || c.k === 12 || c.k === 14 || c.k === 15 || c.k === 16 || c.k === 17 || c.k === 18 || c.k === 19 || c.k === 20 || c.k === 23 || c.k === 24 || c.k === 25 || c.k === 26 || c.k === 27 || c.k === 32);
+    case 'train_at': return isInt(c.b) && (c.k === 2 || c.k === 3 || c.k === 4 || c.k === 9 || c.k === 10 || c.k === 12 || c.k === 14 || c.k === 15 || c.k === 16 || c.k === 17 || c.k === 18 || c.k === 19 || c.k === 20 || c.k === 23 || c.k === 24 || c.k === 25 || c.k === 26 || c.k === 27 || c.k === 32 || c.k === 33);
     case 'train_vil': return c.tc === undefined || isInt(c.tc);
     case 'research_tc': return (c.tech === 0 || c.tech === 1 || c.tech === 6
       || c.tech === 14 || c.tech === 15 || c.tech === 18
       || c.tech === 27 || c.tech === 28) && (c.tc === undefined || isInt(c.tc));
     case 'research_at': return isInt(c.b) && isInt(c.tech) && (c.tech <= 13 || c.tech === 16 || c.tech === 17 || c.tech === 19
-      || (c.tech >= 20 && c.tech <= 26) || (c.tech >= 29 && c.tech <= 47));
+      || (c.tech >= 20 && c.tech <= 26) || (c.tech >= 29 && c.tech <= 49));
     // Package K (TRD-04): a tribute names the recipient's owner
     // tag (0 or 2 — the only seats), a ResourceKind tag (food 1,
     // wood 2, gold 3, stone 4) and a positive amount. The amount
