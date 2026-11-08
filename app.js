@@ -11030,7 +11030,9 @@ function drawVillager(i, wx, wy) {
     ctx.strokeStyle = 'rgba(0,0,0,0.35)';
     ctx.stroke();
   }
-  // Unit id label: debug-grade detail — MEDIUM/HIGH only.
+  // Unit id label: debug-grade detail — idLabels is false at every
+  // quality level (quality.js), so players never see internal ids;
+  // this draw stays only as a manual debug override.
   if (Q.idLabels) {
     ctx.fillStyle = '#101010';
     ctx.font = `${Math.max(7, Math.round(u))}px monospace`;
