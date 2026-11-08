@@ -49,13 +49,18 @@ export const LEVEL_SETTINGS = Object.freeze({
   medium: Object.freeze({
     tier: 16, tierDir: 'tier16', dprCap: 1.5,
     shadows: true, groundStrokes: true, pathLines: true,
-    projTrail: true, idLabels: true,
+    // idLabels stays false at EVERY level: the unit entity id is
+    // debug-grade detail, and at medium/high it leaked into the
+    // player view as small unlabelled numbers under villagers'
+    // feet (bot-loop defect, live-confirmed 2026-11-08). DE shows
+    // no such numbers; players never see internal ids.
+    projTrail: true, idLabels: false,
     corpses: true,
   }),
   high: Object.freeze({
     tier: 32, tierDir: 'tier32', dprCap: 2,
     shadows: true, groundStrokes: true, pathLines: true,
-    projTrail: true, idLabels: true,
+    projTrail: true, idLabels: false,
     corpses: true,
   }),
 });

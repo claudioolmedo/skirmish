@@ -120,6 +120,18 @@ test('settings: levels map to tiers, DPR caps and cosmetic flags', () => {
   assert.equal(settingsFor('ultra'), low);
 });
 
+test('settings: unit id labels are debug detail — off at EVERY level', () => {
+  // Bot-loop defect (confirmed live, runs #203/#204): at medium/high
+  // the client drew each villager's internal entity id as a small
+  // unlabelled number under its feet — debug-grade detail leaking
+  // into the player view (DE shows no such numbers). The A/B live
+  // proof: Medium showed them, Low hid them, Medium brought them
+  // back. No quality level may enable them for players.
+  for (const level of LEVELS) {
+    assert.equal(settingsFor(level).idLabels, false, level);
+  }
+});
+
 // --- Governor state machine ----------------------------------------------
 // Feed `seconds` of frames at a steady `fps`, starting the fake
 // clock at t; returns the new clock and the last sample() result.
