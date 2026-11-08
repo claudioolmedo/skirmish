@@ -38,9 +38,9 @@ test('the naval section exists at help.i13-i15 in every locale, Esc last at i16'
       `${loc} help.i13 must open with the Naval & Transport heading`);
   }
   // Esc stays the last item, renumbered i13 -> i16, text unchanged.
-  assert.equal(STRINGS.en['help.i16'], '<strong>Esc</strong> pauses.');
-  assert.equal(STRINGS['pt-BR']['help.i16'], '<strong>Esc</strong> pausa.');
-  assert.equal(STRINGS.es['help.i16'], '<strong>Esc</strong> pausa.');
+  assert.equal(STRINGS.en['help.i16'], '<strong>Esc</strong> cancels, closes panels and deselects.');
+  assert.equal(STRINGS['pt-BR']['help.i16'], '<strong>Esc</strong> cancela, fecha painéis e desseleciona.');
+  assert.equal(STRINGS.es['help.i16'], '<strong>Esc</strong> cancela, cierra paneles y deselecciona.');
 });
 
 test('help.i13 covers the Dock, Fishing Ships and fish traps with localized names', () => {
