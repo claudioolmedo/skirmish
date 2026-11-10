@@ -3222,6 +3222,22 @@ addEventListener('keydown', (e) => {
   // element's own listener handles Enter/Escape (and stops
   // propagation); this guard covers every other key.
   if (chatInputOpen()) return;
+  // Form controls own their arrow keys: a focused <input
+  // type="range"> (the pause menu's volume slider) steps natively
+  // with the arrows, a <select> changes its choice, a text field
+  // moves its caret. The blanket preventDefault below killed all
+  // of that (bot-loop defect, live-confirmed in proofs #240/#241:
+  // the volume slider's arrows did nothing even with explicit
+  // focus — only dragging changed the value). Arrow keys aimed at
+  // a form control therefore return here, untouched; game keys
+  // resume the moment focus leaves the control. Guarded by
+  // capability, like handleGameKey (the headless harness loads
+  // this file without a full DOM).
+  if (e.code.startsWith('Arrow')
+    && e.target && typeof e.target.closest === 'function'
+    && e.target.closest('input, textarea, select, [contenteditable="true"]')) {
+    return;
+  }
   if (e.code.startsWith('Arrow')) e.preventDefault();
   // Enter opens the chat input — online matches only, and
   // never while typing in another field (lobby name, password,
