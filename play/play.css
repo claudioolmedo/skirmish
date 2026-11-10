@@ -635,8 +635,12 @@ html, body {
 }
 .pb-label { color: #5d4630; font-size: 13px; font-weight: 600; }
 /* [hidden] must win over the flex layouts above (attribute vs class
-   specificity), or hidden rows/bars stay visible. */
-.playback-bar[hidden], .net-wait[hidden], .pw-row[hidden] {
+   specificity), or hidden rows/bars stay visible. #btn-resign joins
+   the list (bot-loop #246): site.css `.btn { display: inline-block }`
+   otherwise beats the UA [hidden] rule, so the Resign button stayed
+   visible — and clickable, though the sim ignores it — in Sandbox
+   matches, where setPaused hides it by design (VIC-11). */
+.playback-bar[hidden], .net-wait[hidden], .pw-row[hidden], #btn-resign[hidden] {
   display: none !important;
 }
 

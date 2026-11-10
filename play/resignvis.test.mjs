@@ -24,6 +24,8 @@ import { dirname, join } from 'node:path';
 const here = dirname(fileURLToPath(import.meta.url));
 const indexHtml = readFileSync(join(here, 'index.html'), 'utf8');
 const appJs = readFileSync(join(here, '..', 'app.js'), 'utf8');
+const playCss = readFileSync(join(here, 'play.css'), 'utf8');
+const siteCss = readFileSync(join(here, '..', 'site.css'), 'utf8');
 
 test('the Resign button exists once and outside #net-status', () => {
   const occurrences = indexHtml.split('id="btn-resign"').length - 1;
@@ -53,4 +55,21 @@ test('online visibility is still owned by updateNetStatus and teardownNet', () =
     'updateNetStatus shows Resign only while playing / peer-left');
   assert.ok(appJs.includes('if (netUi.resignBtn) netUi.resignBtn.hidden = true;'),
     'teardownNet hides the button');
+});
+
+test('the hidden flag actually hides the button (CSS guard)', () => {
+  // Why this pin exists (bot-loop runs #245/#246, 2026-11-10): in a
+  // Sandbox match the pause menu showed a live-looking "Resign match"
+  // button; clicking it did nothing (the sim ignores resign in
+  // Sandbox). setPaused had set hidden=true correctly — but site.css
+  // `.btn { display: inline-block }` is an author rule and beats the
+  // UA stylesheet's [hidden] rule, so the button rendered anyway.
+  // play.css already guards [hidden] with !important for other
+  // components (.playback-bar/.net-wait/.pw-row, #lock-cursor,
+  // #capture-overlay); #btn-resign must be guarded the same way.
+  assert.ok(/\.btn\s*\{[^}]*display:\s*inline-block/.test(siteCss),
+    'precondition: site.css .btn sets display (the override being guarded against)');
+  assert.ok(/#btn-resign\[hidden\]\s*\{[^}]*display:\s*none\s*!important/.test(playCss)
+    || /[^{}]*#btn-resign\[hidden\][^{}]*\{[^}]*display:\s*none\s*!important/.test(playCss),
+    'play.css must force display:none !important for #btn-resign[hidden]');
 });
