@@ -8876,6 +8876,19 @@ async function main() {
     mouseClientPt = pointerLocked
       ? { x: virtualCursor.x, y: virtualCursor.y }
       : { x: e.clientX, y: e.clientY };
+    // Bot-loop fix (2026-11-11): mouseWorld must ALSO track at the
+    // window level, not only on canvas mousemove. The placement
+    // ghost (incl. the wall line's segment/cost label) renders from
+    // mouseWorld, but the top/bottom bars float over the canvas and
+    // swallow mousemove for their bands — a wall drag ending over a
+    // bar froze the ghost at the bar's edge while the release
+    // (window mouseup, eventWorld of the release event itself)
+    // committed the full endpoint: live-directed readings showed
+    // the preview at "3 segments · 9 wood" in the last instant and
+    // 5 foundations / 15 wood placed on release. 'mousemove' is
+    // never stopped by the pointer-lock router, so this handler
+    // sees every move the release can see.
+    mouseWorld = eventWorld(e);
   });
   document.addEventListener('mouseleave', () => {
     mouseClientPt = null;
@@ -8912,6 +8925,11 @@ async function main() {
     const d = lDrag;
     lDrag = null;
     const [wx, wy] = eventWorld(ev);
+    // The release point IS the cursor's world point: keep the
+    // ghost's source in sync with it, so what the last rendered
+    // preview showed and what this release commits can never be
+    // two different endpoints (see the window-mousemove note).
+    mouseWorld = [wx, wy];
     // Teams T3b (INF-04): with a flare armed, a plain click on
     // the world places the flare instead of selecting.
     if (flareArm) {
