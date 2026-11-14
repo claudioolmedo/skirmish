@@ -512,7 +512,9 @@ let TECH_NAME = {
   27: 'Town Watch', 28: 'Town Patrol', 29: 'Conscription',
   30: 'Heavy Plow', 31: 'Crop Rotation',
   32: 'Sanctity', 33: 'Fervor', 34: 'Herbal Medicine',
-  35: 'Atonement', 36: 'Devotion',
+  35: 'Atonement', 36: 'Devotion', 37: 'Redemption', 38: 'Heresy',
+  39: 'Block Printing', 40: 'Illumination', 41: 'Theocracy',
+  42: 'Faith', 43: 'Bow Saw', 44: 'Two-Man Saw',
   45: 'Fishing Lines', 46: 'Gillnets', 47: 'Medium Warships',
   48: 'Careening', 49: 'Clinker Construction',
   50: 'Dry Dock', 51: 'Carvel Hull', 52: 'Shipwright',
@@ -573,6 +575,9 @@ function refreshNames() {
     43: t('tech.bowsaw'), 44: t('tech.twomansaw'),
     45: t('tech.fishinglines'), 46: t('tech.gillnets'),
     47: t('tech.mediumwarships'),
+    48: t('tech.careening'), 49: t('tech.clinkerconstruction'),
+    50: t('tech.drydock'), 51: t('tech.carvelhull'),
+    52: t('tech.shipwright'),
   };
   RESEARCH_BLOCK_TITLES = [
     '', t('block.noResources'), t('block.queueFullTrain'),
