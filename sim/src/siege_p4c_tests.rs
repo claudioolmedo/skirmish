@@ -132,7 +132,7 @@ fn p4c_scorpion_row() {
     assert_eq!(s.reload_ticks, 216); // 3.6 s
     assert_eq!(s.attack_delay_ticks, 13); // 0.21 s
     assert_eq!(s.accuracy, 100);
-    assert_eq!(s.projectile_speed.to_bits(), 30_583); // 7 tiles/s — the generic arrow speed (PRJ-02, 2026-11-16)
+    assert_eq!(s.projectile_speed.to_bits(), 26_214); // 6 tiles/s — the bolt's own documented speed (PRJ-02, 2026-11-16)
     // PRJ-09's pass-through data: no blast at all, the flag instead.
     assert_eq!(s.blast_radius, I16F16::ZERO);
     assert!(s.pass_through);

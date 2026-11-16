@@ -79,11 +79,13 @@ pub struct UnitSpec {
     /// forum's projectile-speed discussion — the speed of archers',
     /// arrow towers' and Spanish cannon galleons' projectiles);
     /// individual weapons carry their own documented figures where
-    /// they differ (Mangonel stone 3.5 tiles/s, Janissary bullet
-    /// 7.5). In row bits, 7 tiles/s = floor(7 × 4 × 65536 / 60)
-    /// = 30_583. Rows whose docs record adopting the generic
-    /// constant carry 30_583; the Town Center's building weapon
-    /// carries its own documented 8 tiles/s (build.rs).
+    /// they differ (Mangonel stone 3.5 tiles/s, Scorpion bolt 6,
+    /// the fire ships' flame 3, Janissary bullet 7.5). In row
+    /// bits, a speed of v tiles/s = floor(v × 4 × 65536 / 60):
+    /// 7 → 30_583, 6 → 26_214, 3 → 13_107. Rows whose docs record
+    /// adopting the generic constant carry 30_583; the Town
+    /// Center's building weapon carries its own documented
+    /// 8 tiles/s (build.rs).
     pub projectile_speed: I16F16,
     /// Attack dispersion for missed shots (PRJ-04): on a miss the
     /// projectile lands uniformly in the square centred on the
@@ -773,8 +775,8 @@ static LIGHT_CAVALRY: UnitSpec = UnitSpec {
 /// calls the unit "hindered somewhat by their high attack delay"
 /// without pinning a number in its text, so 30 ticks (0.5 s —
 /// above the foot Archer's 21) stands in, marked UNVERIFIED.
-/// Projectile speed and scatter reuse the Archer rows' recorded
-/// design constants (PRJ-02/PRJ-04).
+/// Projectile speed and scatter reuse the Archer rows' values
+/// (PRJ-02/PRJ-04).
 static CAVALRY_ARCHER: UnitSpec = UnitSpec {
     max_hp: 50,
     attacks: &[(cls::PIERCE, 6), (cls::SPEARMAN, 2)],
@@ -1032,9 +1034,18 @@ static GALLEY: UnitSpec = UnitSpec {
 /// documented weapon is ordinary fast melee strikes — 2 melee
 /// every 0.25 s inside range 2.5 — so the row is pure data on
 /// the standing release: range 2.5 rides the ranged band with
-/// the generic projectile constants and accuracy 100 (a spray
-/// at this range does not scatter-roll in any fetched source);
-/// no continuous-damage model is documented, so none is built.
+/// accuracy 100 (a spray at this range does not scatter-roll
+/// in any fetched source); no continuous-damage model is
+/// documented, so none is built. The flame is its OWN
+/// projectile, not an arrow: its documented speed is
+/// 3 tiles/s (Fire Ship stat blocks copied from the .dat in
+/// official-forum discussion — every other field of those
+/// blocks cross-checks against independent sources, RoF 0.25
+/// and range 2.49 included; the wiki's Siphons charge, the
+/// line's other documented projectile, is likewise 3). In
+/// the reference the flame projectile TRACKS its target, so
+/// Ballistics never leads it (see `combat::resolve_strike`'s
+/// recorded exemption).
 /// Attack delay 15 ticks (one RoF cycle) is ADOPTED/UNVERIFIED.
 /// Radius adopts the Fishing Ship's 1.6 (implementation
 /// constant, WATER-SPEC §8.9).
@@ -1050,7 +1061,7 @@ static FIRE_GALLEY: UnitSpec = UnitSpec {
     reload_ticks: 15, // 0.25 s
     attack_delay_ticks: 15, // adopted (see above)
     accuracy: 100,
-    projectile_speed: I16F16::from_bits(30_583), // 7 tiles/s (see Archer)
+    projectile_speed: I16F16::from_bits(13_107), // 3 tiles/s — the flame's own projectile (see doc)
     scatter: I16F16::ZERO,
     blast_radius: I16F16::ZERO,
     pass_through: false,
@@ -1237,7 +1248,8 @@ static WAR_GALLEY: UnitSpec = UnitSpec {
 /// up one rung, the Galley line's own step (4 → 5) — ADOPTED
 /// on line continuity, no fetched source pins it. Classes:
 /// SHIP + FIRE_SHIP. Attack delay and radius adopt the Fire
-/// Galley's recorded constants.
+/// Galley's recorded constants; the projectile speed is the
+/// flame's own documented 3 tiles/s, as on the Fire Galley.
 static FIRE_SHIP: UnitSpec = UnitSpec {
     max_hp: 120,
     attacks: &[(cls::MELEE, 3), (cls::LONG_RANGE_WARSHIP, 2)],
@@ -1250,7 +1262,7 @@ static FIRE_SHIP: UnitSpec = UnitSpec {
     reload_ticks: 15, // 0.25 s
     attack_delay_ticks: 15, // adopted (the Fire Galley's)
     accuracy: 100,
-    projectile_speed: I16F16::from_bits(30_583), // 7 tiles/s (see Archer)
+    projectile_speed: I16F16::from_bits(13_107), // 3 tiles/s — the flame's own projectile (see Fire Galley)
     scatter: I16F16::ZERO,
     blast_radius: I16F16::ZERO,
     pass_through: false,
@@ -1640,10 +1652,11 @@ static MANGONEL: UnitSpec = UnitSpec {
 /// accuracy technology is Ballistics, which since update
 /// 125283 lets its bolts track moving targets — the generic
 /// release already leads under Ballistics), so its misses
-/// are dodges, never scatter; the bolt flies at the generic
-/// arrow speed like every unpinned projectile (PRJ-02:
-/// 7 tiles/s, documented for arrows — no fetched source pins
-/// the bolt's own figure). Attack delay 13 ticks from the
+/// are dodges, never scatter; the bolt's speed is its own
+/// documented figure, 6 tiles/s (PRJ-02: NamuWiki, Cannon
+/// Galleon — "6 for Scorpion projectiles", against 7 for
+/// normal arrows; official forum, "The state of Scorpions" —
+/// "their projectile speed is only 6"). Attack delay 13 ticks from the
 /// article's 0.21 s figure (its comparison section: the
 /// Scorpion HAS a significant attack delay, the Mangonel
 /// none). The weapon is pass-through-flagged (PRJ-09): the
@@ -1672,7 +1685,7 @@ static SCORPION: UnitSpec = UnitSpec {
     reload_ticks: 216,                       // 3.6 s
     attack_delay_ticks: 13,                  // 0.21 s (see above)
     accuracy: 100,
-    projectile_speed: I16F16::from_bits(30_583), // 7 tiles/s (see Archer)
+    projectile_speed: I16F16::from_bits(26_214), // 6 tiles/s (PRJ-02, see doc)
     scatter: I16F16::from_bits(21_626),          // dispersion 0.33 (see Archer)
     blast_radius: I16F16::ZERO,
     pass_through: true,

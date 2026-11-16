@@ -2409,23 +2409,37 @@ Spanish cannon galleons' projectiles (AoE wiki projectile data, via the
 Age of Empires forum's projectile-speed discussion; the Krepost
 article likewise lists "Projectile Speed: 7"). Individual weapons
 carry their own documented figures where they differ: Mangonel stone
-3.5 tiles/s, Janissary bullet 7.5, and Town Center arrows 8 tiles/s
-since update 153015 (raised from 7). Elevation difference does not
+3.5 tiles/s, Scorpion bolt 6 (NamuWiki, Cannon Galleon — "6 for
+Scorpion projectiles"; official forum, "The state of Scorpions"), the
+fire ships' flame 3 (Fire Ship stat blocks copied from the .dat in
+official-forum discussion, cross-checked field-by-field; the wiki's
+Siphons charge is likewise 3), Janissary bullet 7.5, and Town Center
+arrows 8 tiles/s since update 153015 (raised from 7; the same update
+raised the TC projectile SIZE to 0.15 — recorded here, not modelled:
+the sim has no projectile-size field). Elevation difference does not
 change flight time in the documented model.
 *Source:* MECHANICS-STUDY §10.4 (#12); AoE wiki (Update 153015
-changelog; Krepost article); Age of Empires forum, "Gunpowder
-Projectile Speed". · *Impl:* shipped (M3) — ceiling division at spawn;
+changelog; Krepost article; Siphons article); Age of Empires forum,
+"Gunpowder Projectile Speed" and "The state of Scorpions"; NamuWiki,
+Cannon Galleon. · *Impl:* shipped (M3) — ceiling division at spawn;
 the value lives in the weapon row. *Closed 2026-11-16 (PRJ-02/PRJ-04
-package):* the adopted 7.5 tiles/s generic constant is replaced by the
-documented values — 30_583 bits (floor(7 × 4 × 65536 / 60)) on every
-arrow row and arrow building weapon, 34_952 bits (8 tiles/s) on the
-Town Center weapon; rows that record adopting the Archer's / generic
-constants (Skirmisher, Cavalry Archer, Galley line, fire ships,
-Scorpion) follow the generic, as their row docs state; the Mangonel's
-documented 3.5 was already exact. The Dock keeps the generic 7:
-update 153015 names Town Center arrows specifically. Pinned by
-`projectile_tests` (row constants; an exact 35-tick flight at 4 tiles
-on both the unit and building release paths). · *Status:* **MATCHES**.
+package, with the sk-09 correction of the same day):* the adopted
+7.5 tiles/s generic constant is replaced by the documented values —
+30_583 bits (floor(7 × 4 × 65536 / 60)) on every arrow row and arrow
+building weapon, 34_952 bits (8 tiles/s) on the Town Center weapon,
+26_214 bits (6 tiles/s) on the Scorpion, 13_107 bits (3 tiles/s) on
+the fire line; rows that record adopting the Archer's / generic
+constants (Skirmisher, Cavalry Archer, Galley line) follow the
+generic, as their row docs state; the Mangonel's documented 3.5 was
+already exact. The Dock keeps the generic 7: update 153015 names
+Town Center arrows specifically. The flame is never led by
+Ballistics (PRJ-05 interaction): in the reference the flame
+projectile tracks its target, so the tech neither applies nor is
+needed — `resolve_strike` exempts the fire line from the led aim.
+Pinned by `projectile_tests` (row constants; exact flights — 35 ticks
+at 4 tiles on the unit and building release paths, 71 ticks for a
+Scorpion at 7 tiles, 51 ticks for the flame at 2.5 tiles; the flame's
+no-lead pin under Ballistics). · *Status:* **MATCHES**.
 
 **PRJ-03 — Accuracy is one roll per shot, at release.** A ranged attack
 rolls once against the attacker's accuracy (Archer 80/85/90% by tier,

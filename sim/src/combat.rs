@@ -1437,7 +1437,19 @@ impl Sim {
                 // current velocity over the flight time; without
                 // it, the aim is where the target stands at
                 // release — decided once, here, either way.
-                let aim = if self.has_tech(owner, crate::tech::TechId::Ballistics) {
+                // The fire line is the recorded exception
+                // (PRJ-02, 2026-11-16): in the reference the
+                // flame projectile TRACKS its target, so
+                // Ballistics neither applies to it nor is
+                // needed — a fire ship's aim is never led and
+                // stays on the release-position model (its
+                // spray model, scatter ZERO) with or without
+                // the tech.
+                let aim = if self.has_tech(owner, crate::tech::TechId::Ballistics)
+                    && !matches!(
+                        self.entities[idx].kind,
+                        EntityKind::FireGalley | EntityKind::FireShip
+                    ) {
                     Self::ballistics_aim(
                         ax,
                         ay,

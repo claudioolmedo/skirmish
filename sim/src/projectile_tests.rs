@@ -22,10 +22,29 @@
 use crate::build::{
     Building, BuildingKind, CASTLE_WEAPON, DOCK_WEAPON, TOWN_CENTER_WEAPON, WATCH_TOWER_WEAPON,
 };
+use crate::econ::NodeKind;
 use crate::entity::{Entity, EntityKind, OWNER_OPPONENT, OWNER_PLAYER};
+use crate::tech::TechId;
 use crate::units::spec;
-use crate::{Command, Sim};
+use crate::{player_slot, Command, Sim};
 use fixed::types::I16F16;
+
+fn grant(sim: &mut Sim, owner: u8, tech: TechId) {
+    let slot = player_slot(owner).expect("owner slot");
+    sim.players[slot].techs |= tech.bit();
+}
+
+/// A point on the seed-42 pond: the first deep-fish node's
+/// position (deep water by construction — the water tests'
+/// staging pattern).
+fn pond_point(sim: &Sim) -> (I16F16, I16F16) {
+    let n = sim
+        .nodes()
+        .iter()
+        .find(|n| n.kind == NodeKind::DeepFish)
+        .expect("seed 42 stocks deep fish");
+    (n.pos_x, n.pos_y)
+}
 
 fn wu(n: i32) -> I16F16 {
     I16F16::from_num(n)
@@ -103,9 +122,6 @@ fn prj02_projectile_speeds_are_the_documented_values() {
         EntityKind::CavalryArcher,
         EntityKind::Galley,
         EntityKind::WarGalley,
-        EntityKind::FireGalley,
-        EntityKind::FireShip,
-        EntityKind::Scorpion,
     ] {
         assert_eq!(
             spec(kind).projectile_speed.to_bits(),
@@ -113,6 +129,16 @@ fn prj02_projectile_speeds_are_the_documented_values() {
             "{kind:?} should fly at the documented 7 tiles/s"
         );
     }
+    // The Scorpion's bolt has its OWN documented figure:
+    // 6 tiles/s (NamuWiki, Cannon Galleon; official forum, "The
+    // state of Scorpions") — floor(6 × 4 × 65536 / 60) = 26_214.
+    assert_eq!(spec(EntityKind::Scorpion).projectile_speed.to_bits(), 26_214);
+    // The fire ships' flame is its own projectile too:
+    // 3 tiles/s (Fire Ship stat blocks copied from the .dat in
+    // official-forum discussion; the wiki's Siphons charge is
+    // likewise 3) — floor(3 × 4 × 65536 / 60) = 13_107.
+    assert_eq!(spec(EntityKind::FireGalley).projectile_speed.to_bits(), 13_107);
+    assert_eq!(spec(EntityKind::FireShip).projectile_speed.to_bits(), 13_107);
     // The Mangonel's own documented figure (3.5 tiles/s) was
     // already exact and does not move.
     assert_eq!(spec(EntityKind::Mangonel).projectile_speed.to_bits(), 15_291);
@@ -148,6 +174,105 @@ fn prj02_archer_flight_at_four_tiles_is_35_ticks() {
 
 // ----------------------------------------------------------------
 // PRJ-04 — the dispersion model.
+
+#[test]
+fn prj02_scorpion_flight_at_seven_tiles_is_71_ticks() {
+    let mut sim = Sim::new(7);
+    // Two Scorpions exactly 7 tiles (28 wu) apart — both in
+    // range at spawn, so neither moves. Flight at the bolt's
+    // documented 6 tiles/s: ceil(1_835_008 / 26_214) = 71 ticks
+    // (the exact fraction gives 70.0003 — the truncated house
+    // bits push it one tick over; the probe pins the measured
+    // value, per the sk-09 spec).
+    let a = spawn(&mut sim, EntityKind::Scorpion, OWNER_PLAYER, wu(40), wu(40));
+    let b = spawn(&mut sim, EntityKind::Scorpion, OWNER_OPPONENT, wu(68), wu(40));
+    for id in [a, b] {
+        let ei = sim.entity_index(id).unwrap();
+        sim.entities[ei].hp = I16F16::from_num(30_000);
+    }
+    sim.push_command(Command::Attack { entity: a, target: b });
+    sim.push_command(Command::Attack { entity: b, target: a });
+    for _ in 0..600 {
+        sim.tick();
+        if let Some(p) = sim.projectiles().first() {
+            assert_eq!(p.impact_tick - p.spawn_tick, 71);
+            return;
+        }
+    }
+    panic!("no projectile was released");
+}
+
+#[test]
+fn prj02_fire_flight_at_two_and_a_half_tiles_is_51_ticks() {
+    let mut sim = Sim::new(42);
+    let (px, py) = pond_point(&sim);
+    // A Fire Galley at the pond point and a Galley exactly
+    // 2.5 tiles (10 wu) east — the flame's maximum range, so
+    // the Fire Galley stands and sprays. Flight at the flame's
+    // documented 3 tiles/s: ceil(655_360 / 13_107) = 51 ticks
+    // (at the adopted 7 tiles/s it was 22).
+    let f = spawn(&mut sim, EntityKind::FireGalley, OWNER_PLAYER, px, py);
+    let g = spawn(&mut sim, EntityKind::Galley, OWNER_OPPONENT, px + wu(10), py);
+    sim.push_command(Command::Attack { entity: f, target: g });
+    for _ in 0..600 {
+        sim.tick();
+        if let Some(p) = sim.projectiles().first() {
+            assert_eq!(p.intended, Some(g));
+            assert_eq!(p.impact_tick - p.spawn_tick, 51);
+            // The spray model: accuracy 100, scatter ZERO — the
+            // flame lands exactly on the target's position.
+            let gi = sim.entity_index(g).unwrap();
+            assert_eq!(p.impact_x, sim.entities[gi].pos_x);
+            assert_eq!(p.impact_y, sim.entities[gi].pos_y);
+            return;
+        }
+    }
+    panic!("no projectile was released");
+}
+
+#[test]
+fn prj02_fire_is_never_led_by_ballistics() {
+    // PRJ-05 interaction (sk-09 spec item 3): in the reference
+    // the flame projectile TRACKS its target, so Ballistics
+    // does not lead it. With the tech granted, a Fire Galley's
+    // shot at a crossing Galley must still aim at the target's
+    // release-time position — a led aim would sit ~4.6 wu east
+    // (51 ticks of flight × the Galley's speed).
+    let mut sim = Sim::new(42);
+    grant(&mut sim, OWNER_PLAYER, TechId::Ballistics);
+    let (px, py) = pond_point(&sim);
+    let f = spawn(&mut sim, EntityKind::FireGalley, OWNER_PLAYER, px, py);
+    let g = spawn(
+        &mut sim,
+        EntityKind::Galley,
+        OWNER_OPPONENT,
+        px - wu(14),
+        py - wu(8),
+    );
+    sim.push_command(Command::Move { entity: g, x: px + wu(38), y: py - wu(8) });
+    sim.push_command(Command::Attack { entity: f, target: g });
+    for _ in 0..2400 {
+        sim.tick();
+        if let Some(p) = sim.projectiles().first() {
+            let gi = sim.entity_index(g).expect("target alive");
+            let (tx, ty) = (sim.entities[gi].pos_x, sim.entities[gi].pos_y);
+            assert!(
+                (p.impact_x - tx).abs() < wu(1),
+                "flame impact {} should sit on the target's release position {} (no Ballistics lead)",
+                p.impact_x,
+                tx
+            );
+            assert!(
+                (p.impact_y - ty).abs() < wu(1),
+                "flame impact stays on the target's lane ({} vs {})",
+                p.impact_y,
+                ty
+            );
+            return;
+        }
+    }
+    panic!("the fire galley never released");
+}
 
 #[test]
 fn prj04_dispersion_constants_are_the_documented_values() {
