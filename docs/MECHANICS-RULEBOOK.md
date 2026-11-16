@@ -2975,7 +2975,8 @@ whole.
 modify §12's rules directly: Redemption (475G, 50 s) unlocks siege/
 building conversion; Atonement (325G, 40 s) monk-vs-monk conversion;
 Heresy (1000G, 60 s) converted units die (MNK-11); Sanctity (+15 monk
-HP); Fervor (monks +15% speed); Block Printing (+3 conversion range);
+HP); Fervor (monks +15% speed); Block Printing (+3 conversion range,
++3 monk Line of Sight);
 Theocracy (group conversion rest rule, MNK-06); Devotion/Faith
 (resistance-time modifiers, MNK-05); Illumination (faith recharge 62 s →
 33 s, MNK-02); Herbal Medicine (garrison healing ×6, GAR-04).
@@ -3010,6 +3011,19 @@ the wiki Technology table + Faith article (update 99311 values for
 Faith). TEC-10 is now COMPLETE (11 of 11: the seven Castle-row entries
 plus the four Imperial-row entries), pinned by
 `sim/src/monastery_p5f_tests.rs`.
+*Progress (Block Printing LoS leg, 2026-11-15):* Block Printing's
+second documented effect lands — the wiki's Block Printing article,
+from the game data, grants Monks +3 conversion range AND +3 Line of
+Sight (the in-game tooltip names only the range, which is why P5f
+shipped the range leg alone). The LoS leg is a MONK-class patch in
+`stats_for_masked` beside Sanctity/Fervor (monk 11 → 14 tiles; no
+Missionary kind exists here), and MNK-09's carrying reduction now
+composes over the layered row instead of reading an absolute 9, so a
+Block Printing carrier reads 12 — DE's Monks with Relic are
+themselves affected by Block Printing (wiki, Block Printing,
+changelog). Claudio authorized resolving this decision (D1) by the
+documented DE behaviour on 2026-11-15. The rule stays MATCHES — its
+text above now names both legs.
 · *Status:* **MATCHES**.
 
 **TEC-11 — Unique technologies are an extension point.** Each empire has
@@ -3207,8 +3221,10 @@ two pointers on its own record, mirrored by the monk's `carrying_relic`
 and the Monastery's `relics` list — the uncapped store the note above
 prescribes (the Monastery's "garrison 10" is its production shelter,
 not a relic cap). `PickupRelic`/`DepositRelic` (direct orders only, no
-queued forms) ride the monk phase: carrying reads LoS 9 at the
-`unit_stats` lookup, conversion orders are refused while carrying (the
+queued forms) ride the monk phase: carrying reduces the monk's LoS
+by 2 at the `unit_stats` lookup (base 11 → 9; over the layered row,
+so a Block Printing carrier reads 12 — the TEC-10 LoS leg,
+2026-11-15), conversion orders are refused while carrying (the
 eligibility reads stay pure; `can_convert`/`can_convert_building`
 carry the gate), and healing is NOT excluded — the sources name no
 heal ban, so a carrying monk still heals. The death sweep drops a

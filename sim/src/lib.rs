@@ -4019,6 +4019,15 @@ impl Sim {
         if monk_class && p.techs & TechId::Fervor.bit() != 0 {
             s.speed = I16F16::from_bits(((s.speed.to_bits() as i64 * 115) / 100) as i32);
         }
+        // Block Printing: monks +3 Line of Sight (wiki, Block
+        // Printing — the article, from the game data, grants
+        // range AND LoS; the in-game tooltip names only the
+        // range, whose leg is read in `monks::conversion_range`).
+        // The flat add layers over the base row like Sanctity's;
+        // the carrying reduction in `unit_stats` composes on top.
+        if monk_class && p.techs & TechId::BlockPrinting.bit() != 0 {
+            s.los += crate::monks::BLOCK_PRINTING_LOS_BONUS;
+        }
         s
     }
 
@@ -4031,12 +4040,15 @@ impl Sim {
         // patch snapshot, never its new owner's set.
         let mut s = self.stats_for_masked(e.owner, e.kind, e.frozen_patches);
         // MNK-09 (Castle P5d): a Monk carrying a relic reads
-        // LoS 9 instead of his base 11 — applied here, at the
-        // one effective-row lookup every reader shares
-        // (visibility, the heal auto-task), never written into
-        // the table row.
+        // LoS 2 tiles below his layered row (base 11 → 9) —
+        // applied here, at the one effective-row lookup every
+        // reader shares (visibility, the heal auto-task), never
+        // written into the table row. A reduction, not an
+        // absolute, so Block Printing's +3 (layered in
+        // `stats_for_masked`) composes: a carrier under it
+        // reads 12, as DE's Monks with Relic do.
         if e.kind == EntityKind::Monk && e.carrying_relic.is_some() {
-            s.los = crate::monks::CARRY_LOS;
+            s.los -= crate::monks::CARRY_LOS_PENALTY;
         }
         s
     }

@@ -36,10 +36,21 @@ pub const CONVERT_RANGE: I16F16 = I16F16::from_bits(2_359_296); // 36.0
 /// MNK-03 / TEC-10 (Castle P5f): Block Printing's bonus, +3
 /// tiles = 12 world units on the conversion range (12 tiles
 /// total). Read at the one range check in `conversion_step`
-/// through `conversion_range`; the monk's line of sight (11
-/// tiles, the unit table row) is a separate constant and is
-/// NOT touched — no extra behavior is invented here.
+/// through `conversion_range`.
 pub const BLOCK_PRINTING_RANGE_BONUS: I16F16 = I16F16::from_bits(786_432); // 12.0
+
+/// TEC-10 (Block Printing's second leg): the same tech also
+/// grants +3 tiles of Line of Sight to monks — the wiki's
+/// Block Printing article, from the game data, reads "it
+/// increases both the conversion range and Line of Sight of
+/// Monks and Missionaries by +3" (the in-game tooltip names
+/// only the range, which is why the P5f slice shipped the
+/// range leg alone). +3 tiles = 12 world units, layered onto
+/// the monk row at the `stats_for_masked` Monastery patches
+/// beside Sanctity and Fervor. No Missionary kind exists in
+/// this sim, so the MONK class patch covers every monk-class
+/// kind there is.
+pub const BLOCK_PRINTING_LOS_BONUS: I16F16 = I16F16::from_bits(786_432); // 12.0
 
 /// MNK-03: one conversion interval (CI) ≈ 1.25 s = 75 ticks at
 /// 60 Hz. The ≈ is in the documented model itself; 75 is an
@@ -104,11 +115,16 @@ pub const HEAL_RANGE: I16F16 = I16F16::from_bits(1_048_576); // 16.0
 /// minute, with no rounding drift (the GAR-04 shelter pattern).
 pub const HEAL_HP_PER_MIN: i64 = 150;
 
-/// MNK-09 (Castle P5d): the carrying monk's line of sight —
-/// 9 tiles = 36 world units (his base 11 minus the documented
-/// 2). Applied at the one LoS lookup (`Sim::unit_stats`), never
-/// written into the table row.
-pub const CARRY_LOS: I16F16 = I16F16::from_bits(2_359_296); // 36.0
+/// MNK-09 (Castle P5d): carrying a relic REDUCES the monk's
+/// line of sight by 2 tiles = 8 world units (the rulebook's
+/// documented form: his base 11 reads 9 while carrying).
+/// Applied as a reduction over the layered row at the one LoS
+/// lookup (`Sim::unit_stats`), never written into the table
+/// row — so it composes with the row's own patches: a Block
+/// Printing carrier reads 14 − 2 = 12 tiles, matching DE,
+/// whose Monks with Relic are themselves affected by Block
+/// Printing (wiki, Block Printing, changelog).
+pub const CARRY_LOS_PENALTY: I16F16 = I16F16::from_bits(524_288); // 8.0
 
 /// MNK-09 (Castle P5d): the pickup touch distance — a monk
 /// ordered onto a ground relic takes it once his center stands

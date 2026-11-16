@@ -444,3 +444,50 @@ fn block_printing_extends_conversion_start_range_by_three_tiles() {
     );
     assert_eq!(ent(&sim, 9001).ci_ticks, 0);
 }
+
+// ------------------------------------------------------------------
+// TEC-10 — Block Printing's second leg: +3 monk Line of Sight
+// (wiki, Block Printing: the tech increases BOTH the conversion
+// range and the Line of Sight of Monks by +3; the in-game
+// tooltip names only the range).
+
+#[test]
+fn block_printing_grants_three_tiles_of_monk_line_of_sight() {
+    // The owner row: base monk LoS 11 tiles (44 world units),
+    // 14 tiles (56) with Block Printing layered in
+    // `stats_for_masked` beside Sanctity and Fervor.
+    let mut sim = Sim::new(7);
+    assert_eq!(
+        sim.stats_for(OWNER_PLAYER, EntityKind::Monk).los,
+        I16F16::from_num(44),
+        "base monk LoS 11 tiles"
+    );
+    sim.players[0].techs |= TechId::BlockPrinting.bit();
+    assert_eq!(
+        sim.stats_for(OWNER_PLAYER, EntityKind::Monk).los,
+        I16F16::from_num(56),
+        "Block Printing monk LoS 14 tiles"
+    );
+    // The patch keys on the owner's set: the opponent's row is
+    // untouched by our research.
+    assert_eq!(
+        sim.stats_for(OWNER_OPPONENT, EntityKind::Monk).los,
+        I16F16::from_num(44),
+        "the opponent's monks gain nothing"
+    );
+
+    // The per-entity read composes with MNK-09's carrying
+    // reduction (−2 tiles at `unit_stats`): a Block Printing
+    // monk carrying a relic reads 14 − 2 = 12 tiles (48) —
+    // DE's Monks with Relic are themselves affected by Block
+    // Printing (wiki, Block Printing, changelog).
+    spawn(&mut sim, 9001, EntityKind::Monk, OWNER_PLAYER, (60, 60));
+    let idx = sim.entity_index(9001).unwrap();
+    assert_eq!(sim.unit_stats(idx).los, I16F16::from_num(56));
+    sim.entities[idx].carrying_relic = Some(1);
+    assert_eq!(
+        sim.unit_stats(idx).los,
+        I16F16::from_num(48),
+        "carrying under Block Printing: LoS 12 tiles"
+    );
+}
