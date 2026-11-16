@@ -2403,15 +2403,29 @@ intended target id); iteration in spawn order after entity-id order
 (MECHANICS-STUDY §10.3). · *Status:* **MATCHES**.
 
 **PRJ-02 — Flight time comes from distance ÷ projectile speed at spawn.**
-Each weapon has a projectile-speed stat (documented for individuals only:
-Mangonel stone 3.5 tiles/s, Janissary bullet 7.5 — the generic arrow speed
-is UNVERIFIED; it is adopted as a per-weapon data constant). Elevation
-difference does not change flight time in the documented model.
-*Source:* MECHANICS-STUDY §10.4 (#12). · *Impl:* shipped (M3) — ceiling
-division at spawn; the value lives in the weapon row. The generic arrow
-speed is an adopted constant (UNVERIFIED, as this rule records).
-· *Status:* **DIFFERS** (mechanism shipped; the arrow-speed constant is
-adopted, not documented).
+Each weapon has a projectile-speed stat. The generic arrow speed is
+DOCUMENTED at 7 tiles/s — the speed of archers', arrow towers' and
+Spanish cannon galleons' projectiles (AoE wiki projectile data, via the
+Age of Empires forum's projectile-speed discussion; the Krepost
+article likewise lists "Projectile Speed: 7"). Individual weapons
+carry their own documented figures where they differ: Mangonel stone
+3.5 tiles/s, Janissary bullet 7.5, and Town Center arrows 8 tiles/s
+since update 153015 (raised from 7). Elevation difference does not
+change flight time in the documented model.
+*Source:* MECHANICS-STUDY §10.4 (#12); AoE wiki (Update 153015
+changelog; Krepost article); Age of Empires forum, "Gunpowder
+Projectile Speed". · *Impl:* shipped (M3) — ceiling division at spawn;
+the value lives in the weapon row. *Closed 2026-11-16 (PRJ-02/PRJ-04
+package):* the adopted 7.5 tiles/s generic constant is replaced by the
+documented values — 30_583 bits (floor(7 × 4 × 65536 / 60)) on every
+arrow row and arrow building weapon, 34_952 bits (8 tiles/s) on the
+Town Center weapon; rows that record adopting the Archer's / generic
+constants (Skirmisher, Cavalry Archer, Galley line, fire ships,
+Scorpion) follow the generic, as their row docs state; the Mangonel's
+documented 3.5 was already exact. The Dock keeps the generic 7:
+update 153015 names Town Center arrows specifically. Pinned by
+`projectile_tests` (row constants; an exact 35-tick flight at 4 tiles
+on both the unit and building release paths). · *Status:* **MATCHES**.
 
 **PRJ-03 — Accuracy is one roll per shot, at release.** A ranged attack
 rolls once against the attacker's accuracy (Archer 80/85/90% by tier,

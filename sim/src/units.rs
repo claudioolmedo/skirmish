@@ -74,10 +74,16 @@ pub struct UnitSpec {
     /// range at the landing tick — CMB-06). Only the Archer uses it.
     pub accuracy: u32,
     /// Projectile travel speed, world units per tick (ranged only).
-    /// UNVERIFIED as a generic-arrow value: the docs pin individual
-    /// weapons (Mangonel stone 3.5 tiles/s, Janissary bullet 7.5), no
-    /// generic arrow speed — 0.5 units/tick is a recorded design
-    /// constant (PRJ-02).
+    /// PRJ-02: the generic arrow speed is DOCUMENTED at 7 tiles/s
+    /// (the AoE wiki's projectile data, via the Age of Empires
+    /// forum's projectile-speed discussion — the speed of archers',
+    /// arrow towers' and Spanish cannon galleons' projectiles);
+    /// individual weapons carry their own documented figures where
+    /// they differ (Mangonel stone 3.5 tiles/s, Janissary bullet
+    /// 7.5). In row bits, 7 tiles/s = floor(7 × 4 × 65536 / 60)
+    /// = 30_583. Rows whose docs record adopting the generic
+    /// constant carry 30_583; the Town Center's building weapon
+    /// carries its own documented 8 tiles/s (build.rs).
     pub projectile_speed: I16F16,
     /// Scatter radius for missed shots, world units. UNVERIFIED
     /// numerically in the docs (PRJ-04) — recorded design constant.
@@ -494,7 +500,7 @@ static ARCHER: UnitSpec = UnitSpec {
     reload_ticks: 120,
     attack_delay_ticks: 21,
     accuracy: 80,
-    projectile_speed: I16F16::from_bits(32_768), // 0.5 — design constant (see field doc)
+    projectile_speed: I16F16::from_bits(30_583), // 7 tiles/s (PRJ-02, see field doc)
     scatter: I16F16::from_bits(131_072),          // 2.0 — design constant (see field doc)
     blast_radius: I16F16::ZERO,
     pass_through: false,
@@ -631,7 +637,7 @@ static SPEARMAN: UnitSpec = UnitSpec {
 /// civilization-specific unit that does not exist here) and
 /// "0 vs Cavalry Archers" (a class with no member kinds); neither
 /// row is carried. Projectile speed and scatter reuse the Archer
-/// rows' recorded design constants (PRJ-02/PRJ-04).
+/// rows' values (PRJ-02/PRJ-04).
 static SKIRMISHER: UnitSpec = UnitSpec {
     max_hp: 30,
     attacks: &[(cls::PIERCE, 2), (cls::ARCHERY, 3), (cls::SPEARMAN, 3)],
@@ -644,7 +650,7 @@ static SKIRMISHER: UnitSpec = UnitSpec {
     reload_ticks: 180,                      // 3.0 s
     attack_delay_ticks: 31,
     accuracy: 90,
-    projectile_speed: I16F16::from_bits(32_768), // 0.5 — design constant (see Archer)
+    projectile_speed: I16F16::from_bits(30_583), // 7 tiles/s (see Archer)
     scatter: I16F16::from_bits(131_072),          // 2.0 — design constant (see Archer)
     blast_radius: I16F16::ZERO,
     pass_through: false,
@@ -773,7 +779,7 @@ static CAVALRY_ARCHER: UnitSpec = UnitSpec {
     reload_ticks: 120, // 2.0 s
     attack_delay_ticks: 30, // UNVERIFIED design constant (see above)
     accuracy: 50,
-    projectile_speed: I16F16::from_bits(32_768), // 0.5 — design constant (see Archer)
+    projectile_speed: I16F16::from_bits(30_583), // 7 tiles/s (see Archer)
     scatter: I16F16::from_bits(131_072),          // 2.0 — design constant (see Archer)
     blast_radius: I16F16::ZERO,
     pass_through: false,
@@ -959,9 +965,10 @@ pub const DEMOLITION_SHIP_BLAST_RADIUS: I16F16 = I16F16::from_bits(786_432); // 
 /// Feudal Age. Classes: SHIP + LONG_RANGE_WARSHIP (the Galley
 /// line carries the class it also hunts — DE models both sides
 /// of the one surviving bonus case). Accuracy 80, projectile
-/// speed and scatter adopt the Archer row's recorded design
-/// constants (PRJ-02/PRJ-04) — ADOPTED/UNVERIFIED for this row:
-/// no fetched source pins the Galley's own figures. Attack
+/// speed and scatter adopt the Archer row's values (PRJ-02/
+/// PRJ-04) — ADOPTED for this row: no fetched source pins the
+/// Galley's own figures, so it follows the documented generic
+/// arrow values the Archer carries. Attack
 /// delay adopts the Archer's 21 ticks on the same basis.
 /// Radius adopts the Fishing Ship's 1.6 — an implementation
 /// constant (WATER-SPEC §8.9), never DE data.
@@ -982,7 +989,7 @@ static GALLEY: UnitSpec = UnitSpec {
     reload_ticks: 180, // 3.0 s
     attack_delay_ticks: 21, // adopted (see above)
     accuracy: 80, // adopted (see above)
-    projectile_speed: I16F16::from_bits(32_768), // 0.5 — design constant (see Archer)
+    projectile_speed: I16F16::from_bits(30_583), // 7 tiles/s (see Archer)
     scatter: I16F16::from_bits(131_072),          // 2.0 — design constant (see Archer)
     blast_radius: I16F16::ZERO,
     pass_through: false,
@@ -1035,7 +1042,7 @@ static FIRE_GALLEY: UnitSpec = UnitSpec {
     reload_ticks: 15, // 0.25 s
     attack_delay_ticks: 15, // adopted (see above)
     accuracy: 100,
-    projectile_speed: I16F16::from_bits(32_768), // 0.5 — design constant (see Archer)
+    projectile_speed: I16F16::from_bits(30_583), // 7 tiles/s (see Archer)
     scatter: I16F16::ZERO,
     blast_radius: I16F16::ZERO,
     pass_through: false,
@@ -1166,8 +1173,8 @@ static HULK: UnitSpec = UnitSpec {
 /// sim the queue entry stays Galley and the spawn converts,
 /// the CLS-03 pattern, so the row's cost is the tier's data
 /// record). Classes: SHIP + LONG_RANGE_WARSHIP. Accuracy,
-/// projectile constants, attack delay and radius adopt the
-/// Galley's recorded constants on the same basis as W3a's.
+/// projectile values, attack delay and radius adopt the
+/// Galley's on the same basis as W3a's.
 static WAR_GALLEY: UnitSpec = UnitSpec {
     max_hp: 125,
     attacks: &[
@@ -1185,7 +1192,7 @@ static WAR_GALLEY: UnitSpec = UnitSpec {
     reload_ticks: 180, // 3.0 s
     attack_delay_ticks: 21, // adopted (the Galley's)
     accuracy: 80, // adopted (the Galley's)
-    projectile_speed: I16F16::from_bits(32_768), // 0.5 — design constant (see Archer)
+    projectile_speed: I16F16::from_bits(30_583), // 7 tiles/s (see Archer)
     scatter: I16F16::from_bits(131_072),          // 2.0 — design constant (see Archer)
     blast_radius: I16F16::ZERO,
     pass_through: false,
@@ -1235,7 +1242,7 @@ static FIRE_SHIP: UnitSpec = UnitSpec {
     reload_ticks: 15, // 0.25 s
     attack_delay_ticks: 15, // adopted (the Fire Galley's)
     accuracy: 100,
-    projectile_speed: I16F16::from_bits(32_768), // 0.5 — design constant (see Archer)
+    projectile_speed: I16F16::from_bits(30_583), // 7 tiles/s (see Archer)
     scatter: I16F16::ZERO,
     blast_radius: I16F16::ZERO,
     pass_through: false,
@@ -1626,8 +1633,9 @@ static MANGONEL: UnitSpec = UnitSpec {
 /// 125283 lets its bolts track moving targets — the generic
 /// release already leads under Ballistics), so its misses
 /// are dodges, never scatter; the bolt flies at the generic
-/// 0.5 units/tick design constant like every unpinned
-/// projectile (PRJ-02). Attack delay 13 ticks from the
+/// arrow speed like every unpinned projectile (PRJ-02:
+/// 7 tiles/s, documented for arrows — no fetched source pins
+/// the bolt's own figure). Attack delay 13 ticks from the
 /// article's 0.21 s figure (its comparison section: the
 /// Scorpion HAS a significant attack delay, the Mangonel
 /// none). The weapon is pass-through-flagged (PRJ-09): the
@@ -1656,7 +1664,7 @@ static SCORPION: UnitSpec = UnitSpec {
     reload_ticks: 216,                       // 3.6 s
     attack_delay_ticks: 13,                  // 0.21 s (see above)
     accuracy: 100,
-    projectile_speed: I16F16::from_bits(32_768), // 0.5 — design constant (see Archer)
+    projectile_speed: I16F16::from_bits(30_583), // 7 tiles/s (see Archer)
     scatter: I16F16::from_bits(131_072),         // 2.0 — design constant (see Archer)
     blast_radius: I16F16::ZERO,
     pass_through: true,

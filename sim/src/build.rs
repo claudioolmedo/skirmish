@@ -1757,12 +1757,12 @@ pub fn repair_rate_hp_per_min(repairers: u32) -> i64 {
 /// and does not govern a 1×1 tower), one shot every 2.0 s.
 ///
 /// The flight profile reuses the Archer's arrow constants: the
-/// projectile speed 0.5 wu/tick and the scattered-landing spread
-/// 2.0 are PRJ-02/PRJ-04 design constants (the reference publishes
-/// no numbers for either), and the attack delay takes the
+/// projectile speed is the documented generic arrow speed,
+/// 7 tiles/s (PRJ-02), and the scattered-landing spread is
+/// PRJ-04's dispersion factor, and the attack delay takes the
 /// Archer's documented 21 ticks as the arrow-weapon precedent —
-/// ADOPTED for buildings, UNVERIFIED (no fetched source pins a
-/// tower frame delay). Accuracy 100: the study's §2.2 profiles
+/// the delay is ADOPTED for buildings, UNVERIFIED (no fetched
+/// source pins a tower frame delay). Accuracy 100: the study's §2.2 profiles
 /// foot archers at 80/90, but a defensive building's arrows are
 /// the always-on-target case in every account of tower rushes —
 /// a moving target still dodges by travel time (PRJ-06), which
@@ -1789,7 +1789,9 @@ pub struct BuildingWeapon {
     /// Percent chance the shot flies true; a miss still flies and
     /// lands scattered (PRJ-05).
     pub accuracy: u32,
-    /// Arrow speed (PRJ-02 design constant, shared with archers).
+    /// Arrow speed (PRJ-02: the documented generic 7 tiles/s,
+    /// shared with archers; the Town Center's own row carries
+    /// its documented 8 tiles/s instead).
     pub projectile_speed: I16F16,
     /// Scattered-landing spread on a miss (PRJ-04 design constant).
     pub scatter: I16F16,
@@ -1813,7 +1815,7 @@ pub const WATCH_TOWER_WEAPON: BuildingWeapon = BuildingWeapon {
     reload_ticks: 120,                       // 2.0 s
     attack_delay_ticks: 21,
     accuracy: 100,
-    projectile_speed: I16F16::from_bits(32_768), // 0.5
+    projectile_speed: I16F16::from_bits(30_583), // 7 tiles/s (PRJ-02)
     scatter: I16F16::from_bits(131_072),         // 2.0
     volley: 1,
 };
@@ -1825,9 +1827,9 @@ pub const WATCH_TOWER_WEAPON: BuildingWeapon = BuildingWeapon {
 /// Murder Holes, the University tech that removes the minimum,
 /// is P3b), one volley every 2.0 s, accuracy 100%, and a base
 /// volley of **5 projectiles**. The flight profile reuses the
-/// tower's adopted constants (the Archer's 21-tick delay, the
-/// PRJ-02/PRJ-04 speed/scatter) — the same UNVERIFIED-for-
-/// buildings adoption BLD-18 records for the tower.
+/// tower's constants (the Archer's 21-tick delay — adopted for
+/// buildings, UNVERIFIED — and the documented PRJ-02 speed /
+/// PRJ-04 dispersion).
 pub const CASTLE_WEAPON: BuildingWeapon = BuildingWeapon {
     attacks: &[(crate::classes::PIERCE, 11), (crate::classes::SPEARMAN, 2)],
     range_max: I16F16::from_bits(2_097_152), // 32.0 = 8 tiles
@@ -1835,7 +1837,7 @@ pub const CASTLE_WEAPON: BuildingWeapon = BuildingWeapon {
     reload_ticks: 120,                       // 2.0 s
     attack_delay_ticks: 21,
     accuracy: 100,
-    projectile_speed: I16F16::from_bits(32_768), // 0.5
+    projectile_speed: I16F16::from_bits(30_583), // 7 tiles/s (PRJ-02)
     scatter: I16F16::from_bits(131_072),         // 2.0
     volley: 5,
 };
@@ -1843,10 +1845,12 @@ pub const CASTLE_WEAPON: BuildingWeapon = BuildingWeapon {
 /// The Town Center's weapon (Castle P3b, GAR-06): 5 pierce,
 /// range 6 tiles, RoF 2.0 s — it fires ONLY while the Town Center
 /// holds a garrison, with the GAR-05 arrow count (minimum one
-/// arrow while garrisoned). The flight profile reuses the armed
-/// buildings' adopted constants (the Archer's 21-tick delay, the
-/// PRJ-02/PRJ-04 speed/scatter), the same UNVERIFIED-for-buildings
-/// adoption BLD-18 records. Range is measured from the TC
+/// arrow while garrisoned). Its arrow speed is the Town
+/// Center's own documented figure — update 153015 raised Town
+/// Center arrows from 7 to 8 tiles/s (PRJ-02) — while the
+/// attack delay and dispersion reuse the armed buildings'
+/// constants (the Archer's 21-tick delay is the same
+/// UNVERIFIED-for-buildings adoption BLD-18 records). Range is measured from the TC
 /// footprint's edge like every building weapon (PRJ-08's building
 /// form); no minimum range is documented for the TC, so none is
 /// applied. The `volley` field is the ungarrisoned placeholder 1 —
@@ -1858,7 +1862,7 @@ pub const TOWN_CENTER_WEAPON: BuildingWeapon = BuildingWeapon {
     reload_ticks: 120,                       // 2.0 s
     attack_delay_ticks: 21,
     accuracy: 100,
-    projectile_speed: I16F16::from_bits(32_768), // 0.5
+    projectile_speed: I16F16::from_bits(34_952), // 8 tiles/s (PRJ-02: update 153015)
     scatter: I16F16::from_bits(131_072),         // 2.0
     volley: 1,
 };
@@ -1867,11 +1871,15 @@ pub const TOWN_CENTER_WEAPON: BuildingWeapon = BuildingWeapon {
 /// the Dock fires like a garrisoned Town Center while Fishing
 /// Ships shelter inside (DE update 169123 + the 177723 arrow
 /// re-tune, WATER-SPEC §2). The profile reuses the Town Center
-/// weapon's adopted constants (5 pierce, RoF 2.0 s, the shared
-/// flight profile); the RANGE is the TC's 6 tiles by the same
-/// analogy — the sources consulted pin the arrow counts and the
-/// anti-ship bonus, not the Dock's range, so the range is an
-/// adopted constant, recorded here. The age-keyed pieces layer
+/// weapon's constants (5 pierce, RoF 2.0 s) with ONE recorded
+/// exception: the arrow speed is the generic documented
+/// 7 tiles/s (PRJ-02), not the TC's own 8 — update 153015
+/// names Town Center arrows specifically, and no fetched
+/// source extends the 8 to the Dock. The RANGE is the TC's
+/// 6 tiles by the same analogy — the sources consulted pin
+/// the arrow counts and the anti-ship bonus, not the Dock's
+/// range, so the range is an adopted constant, recorded
+/// here. The age-keyed pieces layer
 /// on elsewhere: the attack table's anti-ship bonus (+0/2/3/4
 /// vs Ships by Age) is picked per owner age in
 /// `Sim::building_weapon` from the `DOCK_ATTACKS_*` tables, and
@@ -1886,7 +1894,7 @@ pub const DOCK_WEAPON: BuildingWeapon = BuildingWeapon {
     reload_ticks: 120,                       // 2.0 s
     attack_delay_ticks: 21,
     accuracy: 100,
-    projectile_speed: I16F16::from_bits(32_768), // 0.5
+    projectile_speed: I16F16::from_bits(30_583), // 7 tiles/s (PRJ-02)
     scatter: I16F16::from_bits(131_072),         // 2.0
     volley: 1,
 };
