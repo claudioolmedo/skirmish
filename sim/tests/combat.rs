@@ -754,6 +754,27 @@ fn militia_production_and_population_interplay() {
     }
     // A house (the last 25 wood) frees room; a fresh order trains.
     let (hx, hy) = cell_point(&sim, 18, 27);
+    // The House site is unexplored too (BLD-01's 2026-11-15
+    // amendment): walk its builder there first and let its own
+    // sight settle the fog, exactly as the Barracks staging at
+    // the top of this test, before the order goes in.
+    let (wx, wy) = cell_point(&sim, 19, 28);
+    sim.push_command(Command::Move {
+        entity: 2,
+        x: wx,
+        y: wy,
+    });
+    let there_house = run_until(&mut sim, 90_000, |s| {
+        let e = ent(s, 2);
+        (e.pos_x - wx).abs() <= I16F16::from_num(8) && (e.pos_y - wy).abs() <= I16F16::from_num(8)
+    });
+    assert!(there_house, "builder never reached the House site");
+    for _ in 0..900 {
+        if sim.can_build(2, BuildingKind::House, hx, hy) {
+            break;
+        }
+        sim.tick();
+    }
     sim.push_command(Command::Build {
         entity: 2,
         kind: BuildingKind::House,

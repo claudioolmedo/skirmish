@@ -97,6 +97,69 @@ fn open_run_near_tc(sim: &Sim, owner: u8, entity: u32, len: u32) -> (u32, u32) {
     panic!("no open wall run of {len} near the Town Center");
 }
 
+/// Ride the Scout to the center of cell `(cx, cy)` and let the
+/// fog settle. Arrival is "within 2 cells" OR "as close as
+/// pathing gets" (the position unchanged for 90 ticks — a tree
+/// or a shore in the way): the stamped disc is what matters,
+/// not the exact stand point.
+fn scout_ride(sim: &mut Sim, scout: u32, cx: u32, cy: u32) {
+    let (x, y) = cell_point(sim, cx, cy);
+    sim.push_command(Command::Move { entity: scout, x, y });
+    let mut last = None;
+    let mut still = 0u32;
+    for _ in 0..200_000 {
+        let e = ent(sim, scout);
+        if (e.pos_x - x).abs() <= I16F16::from_num(8)
+            && (e.pos_y - y).abs() <= I16F16::from_num(8)
+        {
+            break;
+        }
+        if last == Some((e.pos_x, e.pos_y)) {
+            still += 1;
+            if still >= 90 {
+                break;
+            }
+        } else {
+            still = 0;
+            last = Some((e.pos_x, e.pos_y));
+        }
+        sim.tick();
+    }
+    for _ in 0..30 {
+        sim.tick();
+    }
+}
+
+/// Explore the square of half-edge `half` around the player's
+/// Town Center: the Scout rides serpentine rows 6 cells apart
+/// (its sight disc is 4 tiles, so adjacent rows' discs overlap
+/// and no cell of the square stays black). BLD-01's 2026-11-15
+/// amendment refuses unexplored ground, and the long drags in
+/// this suite (a 20-run, a (20, 3) shape) do not fit inside the
+/// starting disc — a player scouts the ground first; so does
+/// the staging. Nothing else about the scenario changes.
+fn explore_around_tc(sim: &mut Sim, half: i32) {
+    let scout = find_id(sim, OWNER_PLAYER, EntityKind::ScoutCavalry);
+    let tc = ent(sim, find_id(sim, OWNER_PLAYER, EntityKind::TownCenter));
+    let (tcx, tcy) = sim.grid().world_to_cell(tc.pos_x, tc.pos_y);
+    let dim = sim.grid().width() as i32;
+    let x_lo = (tcx as i32 - half).max(0) as u32;
+    let x_hi = (tcx as i32 + half).min(dim - 1) as u32;
+    let mut left_to_right = true;
+    let mut ry = (tcy as i32 - half).max(0);
+    while ry <= (tcy as i32 + half).min(dim - 1) {
+        let (from, to) = if left_to_right {
+            (x_lo, x_hi)
+        } else {
+            (x_hi, x_lo)
+        };
+        scout_ride(sim, scout, from, ry as u32);
+        scout_ride(sim, scout, to, ry as u32);
+        left_to_right = !left_to_right;
+        ry += 6;
+    }
+}
+
 fn build_line(sim: &mut Sim, entity: u32, a: (u32, u32), b: (u32, u32)) {
     let (x0, y0) = cell_point(sim, a.0, a.1);
     let (x1, y1) = cell_point(sim, b.0, b.1);
@@ -307,6 +370,10 @@ fn line_truncates_where_the_wood_runs_out() {
         sim.stockpile().amount(ResourceKind::Wood),
         I16F16::from_num(50)
     );
+    // A 20-run does not fit inside the starting explored disc
+    // (BLD-01's 2026-11-15 amendment): the Scout opens the
+    // ground around the Town Center first, as a player must.
+    explore_around_tc(&mut sim, 26);
     let (ax, ay) = open_run_near_tc(&sim, OWNER_PLAYER, vil, 20);
     build_line(&mut sim, vil, (ax, ay), (ax + 19, ay));
     sim.tick();
@@ -891,6 +958,14 @@ fn ghost_cells_equal_founded_cells_for_all_drag_shapes() {
     for &(sx, sy) in &shapes {
         let mut sim = Sim::new(31);
         let vil = villagers_of(&sim, OWNER_PLAYER)[0];
+        // The long drag's 21 cells do not fit inside the
+        // starting explored disc (BLD-01's 2026-11-15
+        // amendment): the Scout opens the ground around the
+        // Town Center first, as a player must. The shorter
+        // shapes stage inside the disc, as before.
+        if sx.abs().max(sy.abs()) > 12 {
+            explore_around_tc(&mut sim, 26);
+        }
         let (ax, ay) = open_anchor_for_shape(&sim, vil, (sx, sy));
         let b = ((ax as i32 + sx) as u32, (ay as i32 + sy) as u32);
         let mut want = wall_line_cells(ax, ay, b.0, b.1);

@@ -75,6 +75,39 @@ fn run_until(sim: &mut Sim, cap: u64, mut done: impl FnMut(&Sim) -> bool) -> boo
     done(sim)
 }
 
+/// Ride the Scout through the given cells (settling the fog at
+/// each) and back home — the construction suite's staging for
+/// BLD-01's 2026-11-15 amendment: a staged site the `build`
+/// helper never visits (a can_build *check* target, not a build)
+/// starts outside the explored disc and reads as refused.
+fn explore_cells(sim: &mut Sim, cells: &[(u32, u32)]) {
+    let scout = sim
+        .entities()
+        .iter()
+        .find(|e| e.owner == OWNER_PLAYER && e.kind == EntityKind::ScoutCavalry)
+        .unwrap()
+        .id;
+    let tc = sim.town_center();
+    let home = (tc.pos_x, tc.pos_y);
+    let mut ride = |sim: &mut Sim, x: I16F16, y: I16F16| {
+        sim.push_command(Command::Move { entity: scout, x, y });
+        let there = run_until(sim, 90_000, |s| {
+            let e = s.entities().iter().find(|e| e.id == scout).unwrap();
+            (e.pos_x - x).abs() <= I16F16::from_num(8)
+                && (e.pos_y - y).abs() <= I16F16::from_num(8)
+        });
+        assert!(there, "scout never reached a staging cell");
+        for _ in 0..30 {
+            sim.tick();
+        }
+    };
+    for &(cx, cy) in cells {
+        let (x, y) = anchor_point(sim, cx, cy);
+        ride(sim, x, y);
+    }
+    ride(sim, home.0, home.1);
+}
+
 fn first_node(sim: &Sim, kind: NodeKind) -> u32 {
     sim.nodes().iter().find(|n| n.kind == kind).unwrap().id
 }
@@ -565,6 +598,10 @@ fn a_builder_finishing_a_camp_deposits_its_carry_there() {
 #[test]
 fn farm_placement_requires_a_completed_mill() {
     let mut sim = Sim::new(97);
+    // Explore the Farm plot first (anchor + the 3x3's far
+    // corner): with the fog satisfied, every can_build verdict
+    // below is the Mill gate alone, which is what this test pins.
+    explore_cells(&mut sim, &[(28, 20), (30, 20)]);
     let (fx, fy) = anchor_point(&sim, 28, 20);
     assert!(
         !sim.can_build(1, BuildingKind::Farm, fx, fy),
@@ -930,6 +967,16 @@ fn wheelbarrow_gates_costs_and_patches_carry_and_speed() {
         entity: 1,
         node: tree,
     });
+    // The observed cycle must start from an empty basket: the
+    // villager can still be carrying a partial load from the
+    // all-chop phase (the staged openings shifted the phase
+    // alignment — probe-verified: it entered this window
+    // mid-Return with 3.58987 and deposited without chopping,
+    // tripping the deposit check on the stale load). Let that
+    // load land first; the haul observed below is then a full
+    // Wheelbarrow cycle, which is what this test pins.
+    let emptied = run_until(&mut sim, 60_000, |s| villager(s, 1).carry == I16F16::ZERO);
+    assert!(emptied, "the wood villager never emptied its basket");
     let mut max_carry = I16F16::ZERO;
     let mut deposited = false;
     for _ in 0..60_000 {

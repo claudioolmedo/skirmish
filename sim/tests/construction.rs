@@ -250,7 +250,12 @@ fn training_is_refused_at_cap_and_trains_after_a_house() {
 #[test]
 fn farm_completes_is_gatherable_depletes_and_frees_the_ground() {
     let mut sim = Sim::new(41);
-    explore_cells(&mut sim, &[(20, 20), (28, 20)]);
+    // The Farm plot's far corner (30, 20) gets its own ride: the
+    // Scout's disc is only 4 tiles and a ride ends within 2 cells
+    // of its target, so riding the anchor (28, 20) alone leaves
+    // the 3x3 footprint's far corner black (probe-verified) and
+    // the placement is refused whole.
+    explore_cells(&mut sim, &[(20, 20), (28, 20), (30, 20)]);
     let start_wood = sim.stockpile().amount(ResourceKind::Wood);
     let start_food = sim.stockpile().amount(ResourceKind::Food);
     // M6: Farms are gated behind a standing Mill (OPENING-SPEC
