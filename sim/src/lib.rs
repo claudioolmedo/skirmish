@@ -106,6 +106,8 @@ mod conscription_tests;
 #[cfg(test)]
 mod bowsaw_tests;
 #[cfg(test)]
+mod tec08_tests;
+#[cfg(test)]
 mod victory_relic_tests;
 #[cfg(test)]
 mod victory_wonder_tests;
@@ -4027,6 +4029,52 @@ impl Sim {
         // the carrying reduction in `unit_stats` composes on top.
         if monk_class && p.techs & TechId::BlockPrinting.bit() != 0 {
             s.los += crate::monks::BLOCK_PRINTING_LOS_BONUS;
+        }
+        // Siege Engineers (TEC-08): the game's first *attack*
+        // percentage — siege weapons +20% attack vs buildings,
+        // the Petard (a suicide unit) +40%, applied per building
+        // class and rounded, exactly the reference's damage
+        // Step 1 (see the tables in `units.rs`). The affected
+        // rows swap to their precomputed scaled tables, the
+        // Forging pattern, so the percentage has already acted
+        // on the attack value when CMB-01 subtracts armor per
+        // class — the ordering TEC-08 fixes. GAR-10's passenger
+        // bonus derives at strike time over this layered table,
+        // so a garrisoned ram reads 180 + 10 per passenger.
+        // The Demolition line takes no swap: its rows carry no
+        // building-class bonus pair (their whole damage is the
+        // melee base through the blast — Water W3's model), so
+        // the +40% has no bonus pair to scale and is not faked
+        // onto the base pair.
+        if p.techs & TechId::SiegeEngineers.bit() != 0 {
+            match kind {
+                EntityKind::BatteringRam => {
+                    s.attacks = units::BATTERING_RAM_SIEGE_ENGINEERS_ATTACKS;
+                    // Rams +1 LoS (wiki, Siege Engineers; the
+                    // Siege Tower shares the leg in the reference
+                    // and takes it here when it exists).
+                    s.los += I16F16::from_bits(262_144); // +4.0 (1 tile)
+                }
+                EntityKind::Mangonel => {
+                    s.attacks = units::MANGONEL_SIEGE_ENGINEERS_ATTACKS
+                }
+                EntityKind::Scorpion => {
+                    s.attacks = units::SCORPION_SIEGE_ENGINEERS_ATTACKS
+                }
+                EntityKind::Petard => {
+                    s.attacks = units::PETARD_SIEGE_ENGINEERS_ATTACKS
+                }
+                _ => {}
+            }
+            // Ranged siege +1 range (wiki, Siege Engineers:
+            // "increases the range of all such ranged units by
+            // 1") — keyed on the SIEGE class with a ranged row,
+            // so the ram (melee) is excluded by its own table.
+            if s.classes & crate::classes::bit(crate::classes::SIEGE) != 0
+                && s.range_max > I16F16::ZERO
+            {
+                s.range_max += I16F16::from_bits(262_144); // +4.0 (1 tile)
+            }
         }
         s
     }

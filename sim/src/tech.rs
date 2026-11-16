@@ -448,11 +448,22 @@ pub enum TechId {
     /// table: **1 000 food / 300 gold, 60 s** — VERIFIED.
     /// Tag 52.
     Shipwright,
+    /// University, Imperial: siege weapons +20% attack vs
+    /// buildings (suicide units +40%), ranged siege +1 range,
+    /// rams +1 LoS (TEC-08 — the rulebook's first *attack*
+    /// percentage, and the ordering's first consumer). Cost/time
+    /// pinned from the wiki Technology table + the Siege
+    /// Engineers article (fetched 2026-11-16): **500 food /
+    /// 600 wood, 45 s** — VERIFIED. The scaling arithmetic and
+    /// its per-class rounding live on the attack tables in
+    /// `units.rs`; the layering lives in `stats_for_masked`.
+    /// Tag 53 — appended after W6's 50–52.
+    SiegeEngineers,
 }
 
 impl TechId {
     /// All technologies, in tag order.
-    pub const ALL: [TechId; 53] = [
+    pub const ALL: [TechId; 54] = [
         TechId::Loom,
         TechId::FeudalAge,
         TechId::Fletching,
@@ -506,6 +517,7 @@ impl TechId {
         TechId::DryDock,
         TechId::CarvelHull,
         TechId::Shipwright,
+        TechId::SiegeEngineers,
     ];
 
     /// Stable tag: 0 loom, 1 feudal age, 2 fletching, 3 scale mail,
@@ -571,6 +583,9 @@ impl TechId {
     /// after W5's pair in the tasking's order; verified first
     /// free on the W6 base `78ef23b`, where ALL held 50
     /// entries, tags 0–49.)
+    /// 53 siege engineers (TEC-08 — appended at the tail after
+    /// W6's trio; verified first free on the TEC-08 base
+    /// `a9edef6`, where ALL held 53 entries, tags 0–52.)
     pub fn tag(self) -> u8 {
         match self {
             TechId::Loom => 0,
@@ -626,6 +641,7 @@ impl TechId {
             TechId::DryDock => 50,
             TechId::CarvelHull => 51,
             TechId::Shipwright => 52,
+            TechId::SiegeEngineers => 53,
         }
     }
 
@@ -688,7 +704,10 @@ impl TechId {
             // born there — wiki, the three articles).
             | TechId::DryDock
             | TechId::CarvelHull
-            | TechId::Shipwright => TechHost::Building(BuildingKind::University),
+            | TechId::Shipwright
+            // TEC-08: Siege Engineers is University research
+            // (wiki, Siege Engineers article).
+            | TechId::SiegeEngineers => TechHost::Building(BuildingKind::University),
             // Package M: Conscription is researched at the Castle
             // itself (wiki, Conscription).
             TechId::Conscription => TechHost::Building(BuildingKind::Castle),
@@ -735,7 +754,10 @@ impl TechId {
             // Age research (wiki, the three articles).
             | TechId::DryDock
             | TechId::CarvelHull
-            | TechId::Shipwright => Age::Imperial,
+            | TechId::Shipwright
+            // TEC-08: Siege Engineers is Imperial Age research
+            // (wiki, Siege Engineers article).
+            | TechId::SiegeEngineers => Age::Imperial,
             TechId::HandCart
             | TechId::LightCavalry
             | TechId::Husbandry
@@ -878,6 +900,7 @@ impl TechId {
             TechId::DryDock => 3600, // 60 s (wiki, Technology table — W6 Passo 0, VERIFIED)
             TechId::CarvelHull => 3600, // 60 s (wiki, Technology table — W6 Passo 0, VERIFIED)
             TechId::Shipwright => 3600, // 60 s (wiki, Technology table — W6 Passo 0, VERIFIED)
+            TechId::SiegeEngineers => 2700, // 45 s (wiki, Technology table — TEC-08, VERIFIED)
         }
     }
 
@@ -938,6 +961,7 @@ impl TechId {
             TechId::DryDock => (200, 0, 400, 0), // wiki, Technology table — W6 Passo 0, VERIFIED
             TechId::CarvelHull => (350, 200, 0, 0), // wiki, Technology table — W6 Passo 0, VERIFIED
             TechId::Shipwright => (1000, 0, 300, 0), // wiki, Technology table — W6 Passo 0, VERIFIED
+            TechId::SiegeEngineers => (500, 600, 0, 0), // wiki, Technology table — TEC-08, VERIFIED
         }
     }
 }
@@ -1318,7 +1342,9 @@ mod tests {
         assert_eq!(TechId::from_tag(50), Some(TechId::DryDock));
         assert_eq!(TechId::from_tag(51), Some(TechId::CarvelHull));
         assert_eq!(TechId::from_tag(52), Some(TechId::Shipwright));
-        assert_eq!(TechId::from_tag(53), None);
+        // TEC-08: Siege Engineers appends at 53.
+        assert_eq!(TechId::from_tag(53), Some(TechId::SiegeEngineers));
+        assert_eq!(TechId::from_tag(54), None);
     }
 
     #[test]
@@ -1468,7 +1494,9 @@ mod tests {
         // TEC-07 wood chain (43/44) last, so ALL now holds 45.
         // (Water W2a appends the Dock fishing pair at 45/46 —
         // ALL now holds 47; the count lives in the W2a test.)
-        assert_eq!(TechId::ALL.len(), 53);
+        // (TEC-08 appends Siege Engineers at 53 — ALL now
+        // holds 54.)
+        assert_eq!(TechId::ALL.len(), 54);
         // ECO-14: the farm gather lookup meets the farm's own
         // 0.4 food/s work-rate cap — the base farm rate sits
         // below it today, so the clamped value is the base rate,
@@ -1564,8 +1592,9 @@ mod tests {
         assert_eq!(TechId::from_tag(50), Some(TechId::DryDock));
         assert_eq!(TechId::from_tag(51), Some(TechId::CarvelHull));
         assert_eq!(TechId::from_tag(52), Some(TechId::Shipwright));
-        assert_eq!(TechId::from_tag(53), None);
-        assert_eq!(TechId::ALL.len(), 53);
+        assert_eq!(TechId::from_tag(53), Some(TechId::SiegeEngineers));
+        assert_eq!(TechId::from_tag(54), None);
+        assert_eq!(TechId::ALL.len(), 54);
     }
 
     #[test]

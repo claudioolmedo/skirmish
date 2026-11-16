@@ -84,6 +84,7 @@ export const TECH_TREE = [
   { tag: 50, host: 16, age: 3, cost: [200, 0, 400, 0], secs: 60, requires: 48 }, // Dry Dock (Water W6; cost/time VERIFIED at W6 Passo 0, wiki Technology table)
   { tag: 51, host: 16, age: 3, cost: [350, 200, 0, 0], secs: 60, requires: 49 }, // Carvel Hull (Water W6; same sourcing)
   { tag: 52, host: 16, age: 3, cost: [1000, 0, 300, 0], secs: 60, requires: null }, // Shipwright (Water W6; same sourcing)
+  { tag: 53, host: 16, age: 3, cost: [500, 600, 0, 0], secs: 45, requires: null }, // Siege Engineers (TEC-08; cost/time VERIFIED, wiki Technology table + article, fetched 2026-11-16)
 ];
 
 /** The age-advancement tags and the age each one reaches. */

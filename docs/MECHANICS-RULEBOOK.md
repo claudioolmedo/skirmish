@@ -2940,9 +2940,27 @@ the layered lookup applies flat adds into the stat row before CMB-01
 ever sees it — true for every shipped technology (M6). Percentage
 patches exist since Wheelbarrow (speed, 2026-10-21/22) and the
 gather-rate set (Double-Bit Axe, Gold Mining, Stone Mining,
-2026-10-22), but none of them is an *attack* percentage, so the
-ordering's attack half remains unexercised.
-· *Status:* **DIFFERS**.
+2026-10-22). The attack half's first consumer landed 2026-11-16:
+Siege Engineers (University, Imperial; TechId 53; 500 F / 600 W,
+45 s — wiki, Technology table + Siege Engineers article, fetched
+2026-11-16) scales the building-class attack pairs ×6/5 (the
+Petard, a suicide unit, ×7/5), per class, rounded to the nearest
+integer and stored — the reference's damage Step 1 (wiki, "Armor
+class": attack multipliers are applied and stored before the
+per-class subtraction; the article's worked examples run 7 → 8
+and 2 → 2, and the Scorpion article's 3 → 3.6 → 4) — as
+precomputed table swaps in the layered lookup (the Forging
+pattern), so CMB-01 only ever sees the scaled value: Ram
+150 → 180, Mangonel 35 → 42, Scorpion 3 → 4, Petard 500/900/100
+→ 700/1260/140. The tech's other legs ride the same lookup:
+ranged siege +1 range, rams +1 LoS. GAR-10's passenger bonus
+derives over the layered table (a full ram reads 180 + 10 per
+passenger). One honest residue: the Demolition line's rows carry
+no building-class bonus pair (their damage is the melee base
+through the blast — Water W3's model), so the +40% demolition
+leg has no bonus pair to scale and is not faked onto the base
+pair.
+· *Status:* **MATCHES**.
 
 **TEC-09 — Production-speed techs scale work rates.** Technologies like
 Conscription (+33% work rate at military production buildings, Siege
@@ -5463,6 +5481,20 @@ tree); the mechanical Status count over the rule bodies
 on the landing tree (bot-loop, 2026-11-05) is 204 / 15 / 4
 (NET-11 composing over the T2/W2a convoy's 203 / 15 / 5).
 
+updated 2026-11-16 for TEC-08 (bot-loop builder): Siege
+Engineers lands (University, Imperial; TechId 53; 500 F /
+600 W, 45 s) — the game's first attack percentage — as
+per-class, pre-rounded table swaps in the layered lookup, so
+the percentage acts on the attack value before CMB-01's
+per-class armor subtraction, with the +1 ranged-siege range
+and +1 ram LoS legs on the same lookup (see the rule's Impl
+note; the Demolition line's missing bonus pair is recorded
+there as the one residue). TEC-08 moves DIFFERS → MATCHES.
+The book's Appendix table stands at 223 rules, 197 / 15 / 11
+(the TEC-08 flip applied to its section row); the mechanical
+Status count over the rule bodies (bot-loop recount,
+2026-11-16) is 207 / 14 / 2.
+
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
 | 1 | Simulation & time (SIM) | 12 | 12 | 0 | 0 |
@@ -5475,7 +5507,7 @@ on the landing tree (bot-loop, 2026-11-05) is 204 / 15 / 4
 | 8 | Combat & damage (CMB) | 17 | 17 | 0 | 0 |
 | 9 | Projectiles & ballistics (PRJ) | 10 | 8 | 2 | 0 |
 | 10 | Unit classes & counters (CLS) | 8 | 6 | 0 | 2 |
-| 11 | Technologies & age advancement (TEC) | 11 | 9 | 1 | 1 |
+| 11 | Technologies & age advancement (TEC) | 11 | 10 | 0 | 1 |
 | 12 | Monks, conversion & relics (MNK) | 13 | 13 | 0 | 0 |
 | 13 | Trade, market & tribute (TRD) | 8 | 8 | 0 | 0 |
 | 14 | Garrison, transport & repair (GAR) | 10 | 9 | 0 | 1 |
@@ -5483,7 +5515,7 @@ on the landing tree (bot-loop, 2026-11-05) is 204 / 15 / 4
 | 16 | Victory, scoring & game modes (VIC) | 12 | 9 | 0 | 3 |
 | 17 | Multiplayer determinism (NET) | 11 | 10 | 1 | 0 |
 | 18 | Information rules (INF) | 13 | 12 | 1 | 0 |
-| | **Total** | **223** | **196** | **16** | **11** |
+| | **Total** | **223** | **197** | **15** | **11** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer

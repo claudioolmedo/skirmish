@@ -280,6 +280,52 @@ pub(crate) static WAR_GALLEY_FLETCHING_ATTACKS: &[(u8, i32)] = &[
 pub(crate) static WAR_HULK_FORGING_ATTACKS: &[(u8, i32)] =
     &[(cls::MELEE, 5), (cls::FIRE_SHIP, 1)];
 
+/// Siege Engineers attack tables (TEC-08): the University
+/// technology's percentage applied to the *building-class pairs
+/// only*, per class, rounded to the nearest integer and stored —
+/// the reference's own damage-calculation Step 1 (wiki, "Armor
+/// class": "Attack multipliers are applied and stored. Attacks
+/// are stored as integers only. So an attack value which is not
+/// an integer is rounded off... Siege Engineers, where x = 1.2"),
+/// so CMB-01's per-class armor subtraction always sees the
+/// scaled value (the pre-armor ordering TEC-08 fixes). The
+/// rounding is round-to-nearest, per the wiki's worked examples
+/// (Siege Engineers article, note 1: 7 → 8 and 2 → 2; Scorpion
+/// article, update 141935: "+3 is increased to +3.6, hence
+/// rounded to +4"). Siege units scale ×6/5; the Petard, a
+/// suicide unit, scales ×7/5 (wiki, Siege Engineers: "increases
+/// the bonus attack of siege units against buildings by 20%,
+/// and that of suicide units by 40%"; update 99311 extended it
+/// to all building classes). Base pairs and non-building bonus
+/// pairs are untouched — the multiplier names building classes
+/// only. The +1 range (ranged siege) and +1 ram LoS legs are
+/// patched separately — see `Sim::stats_for_masked`.
+pub(crate) static BATTERING_RAM_SIEGE_ENGINEERS_ATTACKS: &[(u8, i32)] = &[
+    (cls::MELEE, 2),
+    (cls::STANDARD_BUILDINGS, 180), // 150 × 6/5
+    (cls::SIEGE, 40),
+];
+pub(crate) static MANGONEL_SIEGE_ENGINEERS_ATTACKS: &[(u8, i32)] = &[
+    (cls::MELEE, 40),
+    (cls::STANDARD_BUILDINGS, 42), // 35 × 6/5
+    (cls::SIEGE, 12),
+];
+pub(crate) static SCORPION_SIEGE_ENGINEERS_ATTACKS: &[(u8, i32)] = &[
+    (cls::PIERCE, 11),
+    (cls::MELEE, 0),
+    (cls::ELEPHANT, 7),
+    (cls::STANDARD_BUILDINGS, 4), // 3 × 6/5 = 3.6 → 4 (see above)
+    (cls::RAM, 1),
+    (cls::INFANTRY, 1),
+];
+pub(crate) static PETARD_SIEGE_ENGINEERS_ATTACKS: &[(u8, i32)] = &[
+    (cls::MELEE, 25),
+    (cls::WALLS_AND_GATES, 1260), // 900 × 7/5
+    (cls::STANDARD_BUILDINGS, 700), // 500 × 7/5
+    (cls::CASTLE, 140),           // 100 × 7/5
+    (cls::SIEGE, 60),
+];
+
 /// Villager (study §3.1): HP 25, attack 3 melee, armor 0/0, RoF 2.0 s,
 /// attack delay ≈0.64 s (community table), speed 0.8, LoS 4.
 /// Cost 50 F / 1500 ticks is the Town Center training contract (econ).

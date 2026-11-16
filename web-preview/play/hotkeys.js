@@ -196,7 +196,10 @@ export const PANEL_BUTTONS = {
     'research-careening', 'research-clinkerconstruction',
     // Water W6: the Imperial ship trio appends after the pair
     // (Dry Dock, Carvel Hull, Shipwright) — the grid continues.
-    'research-drydock', 'research-carvelhull', 'research-shipwright'],
+    'research-drydock', 'research-carvelhull', 'research-shipwright',
+    // TEC-08: Siege Engineers appends after the trio — the
+    // positional grid continues.
+    'research-siegeengineers'],
   // Water W2 client (ECO-15): the Dock's panel — Train Fishing
   // Ship, then its two fishing researches (Fishing Lines,
   // Gillnets), the plain positional grid like every production
@@ -404,6 +407,9 @@ export const PANEL_KEYS = {
     'research-drydock': ['KeyX', 'X'],
     'research-carvelhull': ['KeyC', 'C'],
     'research-shipwright': ['KeyV', 'V'],
+    // TEC-08: Siege Engineers takes the fourth row's second
+    // cell (N) — the positional grid continues.
+    'research-siegeengineers': ['KeyN', 'N'],
   },
   // Water W2 client (ECO-15): the Dock — the plain positional
   // grid: Train Fishing Ship Q, Fishing Lines W, Gillnets E.

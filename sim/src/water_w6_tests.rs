@@ -103,7 +103,7 @@ const DOCK: u32 = 910;
 
 #[test]
 fn trio_table_rows_match_the_wiki() {
-    assert_eq!(TechId::ALL.len(), 53);
+    assert_eq!(TechId::ALL.len(), 54); // + Siege Engineers 53 (TEC-08)
     for (tech, tag, cost) in [
         (TechId::DryDock, 50, (200, 0, 400, 0)),
         (TechId::CarvelHull, 51, (350, 200, 0, 0)),
@@ -120,7 +120,12 @@ fn trio_table_rows_match_the_wiki() {
         );
         assert_eq!(tech.age_required(), Age::Imperial, "{tech:?} age");
     }
-    assert_eq!(TechId::from_tag(53), None, "52 is the tail");
+    assert_eq!(
+        TechId::from_tag(53),
+        Some(TechId::SiegeEngineers),
+        "TEC-08 appends Siege Engineers at 53"
+    );
+    assert_eq!(TechId::from_tag(54), None, "53 is the tail");
     // The chains (TEC-07): Dry Dock is Careening's further
     // upgrade, Carvel Hull is Clinker Construction's; Shipwright
     // stands alone.
