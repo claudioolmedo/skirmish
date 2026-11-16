@@ -997,9 +997,33 @@ it attacks and is rendered in its facing; melee engagement turns the unit
 toward its target. (Reference sprites store 5 directions and mirror 3 —
 a rendering fact that lives in SPRITE-PIPELINE.md, not a sim rule.)
 *Source:* OPENAGE-RESEARCH §2.4. · *Impl:* facing is *derived* from
-velocity/target each tick for rendering; if a rule ever needs it (none
-does today), store it as a hashed byte. · *Status:* **DIFFERS** (facing is
-implicit in the renderer's animation state, not modeled).
+velocity/target for rendering — presentation only: the WASM ABI
+exposes no unit state to the client and no rule consumes facing (if
+one ever does, store it as a hashed byte then). The derivation is
+now ONE model, `web-preview/play/facing.js`: a per-unit 8-way facing
+(dir 0 = +X, increasing toward +Y) taken from the movement vector
+while the unit moves, from the work target while it works (the
+gatherer faces its node), from the shot while it shoots, and —
+the clause that was missing — turned toward the melee target while
+it fights (`foeTargetFor` in app.js, the nearest-foe twin of the
+attack-pose inference, applied in the shared unit-action path and
+the villager sheet path, and to the wolf's lunge and the standing
+boar's bite); an idle unit keeps its last facing, and its corpse
+inherits
+it (`corpseDir8`). Every facing consumer reads the model: the
+directional sheets (8 rows), the villager sheets (the facing
+mapped onto the loaded tier's rows by `sheetRowForDir8` — sheet
+rows are storage, SPRITE-PIPELINE §12, not the facing model), the
+side-view fallback's flip (`faceForDir8`), and the animals. Kinds
+drawn as static vector figures (cavalry, siege, monk, king, ships,
+trade units) have no facing-dependent rendering at all — that is
+art state, not a facing model. Sim untouched; the golden hash does
+not move. · *Status:* **MATCHES** (shipped 2026-11-16, MOV-09
+package: `play/facing.js` + the melee turn in `unitActionFor`,
+`updateVilAnim`, `dirWolfAct` and `dirAnimalAct`; pinned by
+`web-preview/play/facing.test.mjs` — the quantization sectors and
+boundaries, the 8-vector round-trip, the flip table, the tier row
+mapping with its back-conversion, and the app.js wiring).
 
 **MOV-10 — Work and attack trigger on range, not exact arrival.** A unit
 begins its task when it comes within the task's range of the target, even

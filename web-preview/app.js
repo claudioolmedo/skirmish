@@ -104,6 +104,9 @@ import { pennantsForSelection, pennantShape } from './play/pennants.js';
 import { occlusionFor, intersectionRect } from './play/occlusion.js';
 import { wallLineCells, wallPiece } from './play/walls.js';
 import {
+  dir8FromVector, turnedDir8, faceForDir8, sheetRowForDir8,
+} from './play/facing.js';
+import {
   t, getLocale, setLocale, costText, genderOf,
 } from './play/i18n.js';
 
@@ -2148,7 +2151,7 @@ function drawDirUnit(unit, act, sx, sy) {
   const C = spec.cell;
   const rows = Math.max(1, Math.round((im.naturalHeight || im.height) / C));
   const frames = Math.max(1, Math.round((im.naturalWidth || im.width) / C));
-  const d = ((Math.floor((act.dir * rows) / 8) % rows) + rows) % rows;
+  const d = sheetRowForDir8(act.dir, rows);
   const f = ((dirSheetFrame(act, frames) % frames) + frames) % frames;
   const k = (camS * 1.35) / 46;
   ctx.drawImage(im, f * C, d * C, C, C,
@@ -2238,8 +2241,9 @@ const prevPos = new Map();
 function updateVilAnim(i, wx, wy, now) {
   let a = vilAnim.get(i);
   if (!a) {
-    // Default facing: +Y (screen down-left) — row dirs/4 at any tier.
-    a = { dir: VIL_ORIGINAL.dirs / 4, phase: 0, still: 0 };
+    // Default facing (MOV-09 model, play/facing.js): dir8 2 =
+    // +Y (screen down-left) — sheet row dirs/4 at any tier.
+    a = { dir: VIL_ORIGINAL.dirs / 4, dir8: 2, phase: 0, still: 0 };
     vilAnim.set(i, a);
   }
   const p = prevPos.get(i);
@@ -2254,10 +2258,11 @@ function updateVilAnim(i, wx, wy, now) {
       a.still = 0;
       a.phase += dist / 1.5; // ~1.5 world units travelled per walk cycle
       if (dist > 0.02) {
-        // Quantize the facing to the loaded tier's direction rows.
-        const dirs = VIL_ORIGINAL.dirs;
-        const d = Math.round(Math.atan2(dy, dx) / ((Math.PI * 2) / dirs));
-        a.dir = ((d % dirs) + dirs) % dirs;
+        // MOV-09: the facing model is 8-way at every quality
+        // tier; the loaded sheet's row for the facing is derived
+        // at the end of this update (sheet rows are storage —
+        // SPRITE-PIPELINE §12 — not the facing model).
+        a.dir8 = turnedDir8(a.dir8 ?? 2, dx, dy);
       }
     } else if (++a.still > 3) {
       a.phase = 0;
@@ -2280,9 +2285,14 @@ function updateVilAnim(i, wx, wy, now) {
   // read as "standing by the tree".
   const gTarget = state === 'gather' ? atNodeTarget.get(i) : null;
   if (gTarget) {
-    const dirs = VIL_ORIGINAL.dirs;
-    const d = Math.round(Math.atan2(gTarget.y - wy, gTarget.x - wx) / ((Math.PI * 2) / dirs));
-    a.dir = ((d % dirs) + dirs) % dirs;
+    a.dir8 = turnedDir8(a.dir8 ?? 2, gTarget.x - wx, gTarget.y - wy);
+  }
+  // MOV-09: melee engagement turns the unit toward its target —
+  // a villager fighting a boar or an enemy strikes in the facing
+  // it turned to, like the footmen (unitActionFor's turn).
+  if (state === 'attack') {
+    const tgt = foeTargetFor(i, wx, wy);
+    if (tgt) a.dir8 = turnedDir8(a.dir8 ?? 2, tgt.x - wx, tgt.y - wy);
   }
   let frame;
   if (state === 'walk' || state === 'carry') {
@@ -2350,6 +2360,10 @@ function updateVilAnim(i, wx, wy, now) {
       if (!playSfx(key, gain)) playAudioCueScaled('work', gain);
     }
   }
+  // The sheet row is storage: the modeled 8-way facing mapped
+  // onto the loaded tier's rows — the same mapping drawDirUnit
+  // applies to the 8-row sheets (sheetRowForDir8).
+  a.dir = sheetRowForDir8(a.dir8 ?? 2, VIL_ORIGINAL.dirs);
   return { state, dir: a.dir, frame, carryRes: carryResOf(i) };
 }
 
@@ -10441,7 +10455,11 @@ function loadCorpseArt() {
 function corpseDir8(i, unit) {
   if (unit === 'villager') {
     const a = vilAnim.get(i);
-    return a ? (((Math.round((a.dir * 8) / VIL_ORIGINAL.dirs) % 8) + 8) % 8) : 2;
+    if (!a) return 2;
+    // The modeled 8-way facing; the tier-row conversion is the
+    // legacy fallback for an entry that predates the model.
+    return a.dir8 !== undefined ? a.dir8
+      : (((Math.round((a.dir * 8) / VIL_ORIGINAL.dirs) % 8) + 8) % 8);
   }
   const p = UNIT_POSE_STATE[i];
   return p ? p.dir : 2;
@@ -12879,8 +12897,9 @@ function animalPoseFor(i, wx, wy) {
     if (sdx > 0.0001) st.face = 1;
     else if (sdx < -0.0001) st.face = -1;
     if (Math.hypot(dx, dy) > 0.004) {
-      const d = Math.round(Math.atan2(dy, dx) / (Math.PI / 4));
-      st.dir = ((d % 8) + 8) % 8;
+      // MOV-09: the movement facing from the one facing model
+      // (play/facing.js), shared by every draw path.
+      st.dir = dir8FromVector(dx, dy);
     }
   }
   st.x = wx;
@@ -12894,10 +12913,23 @@ function animalPoseFor(i, wx, wy) {
 // The directional-sheet action for an animal this draw: walk
 // while it moves, the graze cycle on the same slow phase the
 // side-view poses use, idle otherwise — with the world facing.
-function dirAnimalAct(i, wx, wy) {
+function dirAnimalAct(i, wx, wy, engage = false) {
   const pose = animalPoseFor(i, wx, wy);
   const tick = sim.tick_count();
   if (pose.moving) return { action: 'walk', dir: pose.dir };
+  // MOV-09: melee engagement turns the unit toward its target.
+  // Only the boar engages among the grazers (it has no attack
+  // cycle — the turned facing is the whole read of the bite);
+  // its caller passes engage. Sheep and deer never engage.
+  if (engage && foeNearUnit(i, wx, wy)) {
+    const tgt = foeTargetFor(i, wx, wy);
+    if (tgt) {
+      const d = turnedDir8(pose.dir, tgt.x - wx, tgt.y - wy);
+      const pst = ANIMAL_POSE_STATE[i];
+      if (pst) pst.dir = d;
+      return { action: 'idle', dir: d };
+    }
+  }
   if ((Math.floor(tick / 240) + i) % 5 === 0) return { action: 'graze', dir: pose.dir };
   return { action: 'idle', dir: pose.dir };
 }
@@ -12983,7 +13015,7 @@ function drawBoar(i, wx, wy) {
   const u = camS;
   shadow(sx, sy, 1.25 * u);
   if (selection.has(i)) drawSelRing(sx, sy, 1.55);
-  if (drawDirUnit('boar', dirAnimalAct(i, wx, wy), sx, sy)) return;
+  if (drawDirUnit('boar', dirAnimalAct(i, wx, wy, true), sx, sy)) return;
   const boarPose = animalPoseImage('boar', i, wx, wy);
   if (drawAnimalPose(boarPose.im, sx, sy, 2.1, boarPose.flip)) return;
   legs(sx, sy, u, [-0.7, -0.25, 0.5, 0.9], '#3a2a20');
@@ -13051,7 +13083,18 @@ function drawDeer(i, wx, wy) {
 function dirWolfAct(i, wx, wy) {
   const pose = animalPoseFor(i, wx, wy);
   if (pose.moving) return { action: 'walk', dir: pose.dir };
-  if (foeNearUnit(i, wx, wy)) return { action: 'attack', dir: pose.dir };
+  if (foeNearUnit(i, wx, wy)) {
+    // MOV-09: the lunge turns the wolf toward its prey, and the
+    // turn persists in the pose state like the footmen's.
+    const tgt = foeTargetFor(i, wx, wy);
+    if (tgt) {
+      const d = turnedDir8(pose.dir, tgt.x - wx, tgt.y - wy);
+      const pst = ANIMAL_POSE_STATE[i];
+      if (pst) pst.dir = d;
+      return { action: 'attack', dir: d };
+    }
+    return { action: 'attack', dir: pose.dir };
+  }
   return { action: 'idle', dir: pose.dir };
 }
 
@@ -13132,10 +13175,9 @@ function unitPoseFor(i, wx, wy) {
     else if (sdx < -0.0001) st.face = -1;
     if (Math.hypot(dx, dy) > 0.004) {
       // Facing for the directional sheets: the world movement
-      // angle quantized to the 8 rows (atan2 convention shared
-      // with the villager sheets, updateVilAnim).
-      const d = Math.round(Math.atan2(dy, dx) / (Math.PI / 4));
-      st.dir = ((d % 8) + 8) % 8;
+      // angle through the one facing model (play/facing.js,
+      // MOV-09) — the same quantization the villager sheets use.
+      st.dir = dir8FromVector(dx, dy);
     }
   }
   st.x = wx;
@@ -13193,11 +13235,10 @@ function updateUnitAnimState(buildings, st) {
     }
     if (best >= 0) {
       const sdx = (proj[p + 2] - proj[p]) - (proj[p + 3] - proj[p + 1]);
-      const wdir = Math.round(Math.atan2(proj[p + 3] - proj[p + 1],
-        proj[p + 2] - proj[p]) / (Math.PI / 4));
       archerShoot.set(best, {
         tick: proj[p + 4], face: sdx > 0 ? 1 : -1,
-        dir: ((wdir % 8) + 8) % 8,
+        // The shot's facing, through the one facing model.
+        dir: dir8FromVector(proj[p + 2] - proj[p], proj[p + 3] - proj[p + 1]),
       });
     }
   }
@@ -13221,6 +13262,31 @@ function foeNearUnit(i, wx, wy) {
     if (dx * dx + dy * dy <= 2.3 * 2.3) return true;
   }
   return false;
+}
+
+// The nearest entity foeNearUnit would flag, as a position —
+// the melee target a unit turns to face when it engages
+// (MOV-09: melee engagement turns the unit toward its target).
+// Same scan, same radius and exclusions; null when there is
+// no foe in reach.
+function foeTargetFor(i, wx, wy) {
+  if (!frameSt) return null;
+  const st = frameSt;
+  const pos = st.pos;
+  let best = null;
+  let bestD2 = 2.3 * 2.3;
+  for (let j = 0; j < st.count; j++) {
+    if (j === i || st.hp[j * 2] < 1) continue;
+    if (st.owners[j] === st.owners[i] || st.kinds[j] === KIND_TC) continue;
+    const dx = pos[j * 2] - wx;
+    const dy = pos[j * 2 + 1] - wy;
+    const d2 = dx * dx + dy * dy;
+    if (d2 <= bestD2) {
+      bestD2 = d2;
+      best = { x: pos[j * 2], y: pos[j * 2 + 1] };
+    }
+  }
+  return best;
 }
 
 // A UNIT_ART image is drawable when loaded; the enemy variant is a
@@ -13311,6 +13377,27 @@ function unitActionFor(unit, i, wx, wy) {
     } else if (foeNearUnit(i, wx, wy)) {
       action = 'attack';
       n = Math.floor(tick / 7) % 3 + 1;
+    }
+  }
+  // MOV-09: melee engagement turns the unit toward its target.
+  // The attack pose is rendered in the turned facing (the stale
+  // last-movement facing no longer strikes sideways), the turn
+  // is written back into the pose state so an idle unit keeps
+  // it (and its corpse inherits it), and the side-view flip
+  // follows the facing. Ranged units already face their shot
+  // (archerShoot above); work states face their node/site on
+  // their own paths (updateVilAnim).
+  if (action === 'attack') {
+    const tgt = foeTargetFor(i, wx, wy);
+    if (tgt) {
+      dir = turnedDir8(dir, tgt.x - wx, tgt.y - wy);
+      const f = faceForDir8(dir);
+      if (f !== 0) face = f;
+      const pst = UNIT_POSE_STATE[i];
+      if (pst) {
+        pst.dir = dir;
+        if (f !== 0) pst.face = f;
+      }
     }
   }
   // Generated combat audio: this runs on the draw path, so only
