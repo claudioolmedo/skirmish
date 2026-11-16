@@ -2442,15 +2442,32 @@ must not). · *Status:* **MATCHES**.
 
 **PRJ-04 — Misses scatter around the aim point.** A failed accuracy roll
 (or a target that moved away, PRJ-06) puts the impact at a scattered
-point within the weapon's dispersion radius of the aim point. Dispersion
-radii are per-weapon data and are UNVERIFIED in public sources (a
-prototype program exists to measure the reference — MECHANICS-STUDY
-§10.4 #11); adopt tuned constants and record them as design values.
-*Source:* MECHANICS-STUDY §2.3, §10.4. · *Impl:* shipped (M3) — scatter
-direction and distance from two further RNG draws in the same fixed
-order (PRJ-03); fixed-point integer vector math — never float sin/cos
-in the sim. The dispersion radius is an adopted constant (UNVERIFIED,
-as this rule records). · *Status:* **DIFFERS**.
+point around the aim point. The scatter geometry is DOCUMENTED (the
+AoE2 info sheet's accuracy model): a miss lands uniformly in the
+SQUARE centred on the aim point whose side is the weapon's dispersion
+("accuracy error width") × the shot's range — e.g. dispersion 0.1 at
+10 tiles lands up to 0.5 tiles away per axis. Dispersion is per-weapon
+data: 0.33 for any archer type, 0.75 for gunpowder units and camel
+archers, 0.5 for the Arambai, 0.2 for Trebuchets, 0.1 for cannon
+galleons / turtle ships. (The wiki's Accuracy article names the
+per-unit "dispersion attribute"; its Hand Cannoneer changelog shows
+that attribute carrying per-unit values — 0.75 → 0.5 in update 50292.)
+*Source:* MECHANICS-STUDY §2.3, §10.4; AoE2 info sheet (aoe2sheet),
+accuracy error width; AoE wiki, Accuracy. · *Impl:* shipped (M3) —
+scatter from two further RNG draws in the same fixed order (PRJ-03);
+fixed-point integer math — never float sin/cos in the sim. *Closed
+2026-11-16 (PRJ-02/PRJ-04 package):* the adopted fixed 0.5-tile radius
+is replaced by the documented model — half-side = dispersion ×
+distance / 2 per axis, uniform per axis (the square the sheet
+describes), computed at all three release paths from the shot's
+distance to the aim point via `Sim::scattered_impact`; archer-type
+rows and the arrow building weapons carry dispersion 0.33 (21_626
+bits); zero-dispersion rows (the fire ships' spray) are unchanged in
+behaviour, and the draw count per miss is unchanged (two), so SIM-04's
+discipline is untouched. Pinned by `projectile_tests` (the half-side
+law including the sheet's own worked example; behavioural bounds at
+4 tiles on the unit and building release paths). · *Status:*
+**MATCHES**.
 
 **PRJ-05 — Ballistics leads the target; without it, aim is at the
 release-time position.** Aiming is decided once, at release: with the

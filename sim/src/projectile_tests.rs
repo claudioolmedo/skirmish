@@ -146,6 +146,174 @@ fn prj02_archer_flight_at_four_tiles_is_35_ticks() {
     panic!("no projectile was released");
 }
 
+// ----------------------------------------------------------------
+// PRJ-04 — the dispersion model.
+
+#[test]
+fn prj04_dispersion_constants_are_the_documented_values() {
+    // 0.33 (any archer type) in bits: floor(0.33 × 65536) = 21_626.
+    for kind in [
+        EntityKind::Archer,
+        EntityKind::Skirmisher,
+        EntityKind::CavalryArcher,
+        EntityKind::Galley,
+        EntityKind::WarGalley,
+        EntityKind::Scorpion,
+    ] {
+        assert_eq!(
+            spec(kind).scatter.to_bits(),
+            21_626,
+            "{kind:?} should carry the documented archer dispersion 0.33"
+        );
+    }
+    // The fire ships' spray never offsets — ZERO under both the
+    // old fixed-radius model and the dispersion model.
+    assert_eq!(spec(EntityKind::FireGalley).scatter.to_bits(), 0);
+    assert_eq!(spec(EntityKind::FireShip).scatter.to_bits(), 0);
+    // Arrow building weapons carry the archer-type 0.33 (inert
+    // today: their accuracy is 100, so the roll never scatters).
+    assert_eq!(WATCH_TOWER_WEAPON.scatter.to_bits(), 21_626);
+    assert_eq!(CASTLE_WEAPON.scatter.to_bits(), 21_626);
+    assert_eq!(TOWN_CENTER_WEAPON.scatter.to_bits(), 21_626);
+    assert_eq!(DOCK_WEAPON.scatter.to_bits(), 21_626);
+}
+
+#[test]
+fn prj04_half_side_is_dispersion_times_distance_over_two() {
+    let mut sim = Sim::new(11);
+    let aim = (wu(100), wu(100));
+    // The info sheet's own worked example: dispersion 0.1 at
+    // 10 tiles (40 wu) lands up to 0.5 tiles (2 wu) away per
+    // axis: half-side = 6_554 × 2_621_440 / 131_072 = 131_080
+    // bits ≈ 2 wu.
+    let disp = I16F16::from_bits(6_554);
+    let mut max_seen = 0;
+    for _ in 0..500 {
+        let (ix, iy) = sim.scattered_impact(disp, wu(40), aim);
+        let dx = (ix - aim.0).to_bits().abs();
+        let dy = (iy - aim.1).to_bits().abs();
+        assert!(dx <= 131_080 && dy <= 131_080, "offset ({dx}, {dy}) outside the sheet's square");
+        max_seen = max_seen.max(dx).max(dy);
+    }
+    assert!(max_seen > 100_000, "the draws should fill the square, max was {max_seen}");
+    // The Archer's 0.33 at 4 tiles (16 wu): half-side =
+    // 21_626 × 8 = 173_008 bits — WIDER than the old adopted
+    // fixed half-side of 131_072 (0.5 tiles).
+    let disp = I16F16::from_bits(21_626);
+    let mut beyond_old = false;
+    for _ in 0..500 {
+        let (ix, iy) = sim.scattered_impact(disp, wu(16), aim);
+        let dx = (ix - aim.0).to_bits().abs();
+        let dy = (iy - aim.1).to_bits().abs();
+        assert!(dx <= 173_008 && dy <= 173_008, "offset ({dx}, {dy}) outside the 0.33 square");
+        beyond_old |= dx > 131_072 || dy > 131_072;
+    }
+    assert!(beyond_old, "at 4 tiles the documented square exceeds the old fixed radius");
+    // At 2 tiles (8 wu) the same dispersion gives half-side
+    // 86_504 bits — TIGHTER than the old fixed radius: the
+    // square scales with the shot's distance.
+    for _ in 0..500 {
+        let (ix, iy) = sim.scattered_impact(disp, wu(8), aim);
+        let dx = (ix - aim.0).to_bits().abs();
+        let dy = (iy - aim.1).to_bits().abs();
+        assert!(dx <= 86_504 && dy <= 86_504, "offset ({dx}, {dy}) outside the scaled square");
+    }
+    // Zero dispersion lands exactly on the aim.
+    let (ix, iy) = sim.scattered_impact(I16F16::ZERO, wu(16), aim);
+    assert_eq!((ix, iy), aim);
+}
+
+/// Shared behavioural pin for the two release paths that can
+/// scatter today (unit → unit and unit → building): two shooters
+/// (or one, against a building) at exactly 4 tiles, HP boosted
+/// so the exchange runs long; every missed shot must land in
+/// the 0.33 × distance square (half-side 173_008 bits), hits
+/// land exactly on the aim, and at least one miss must land
+/// beyond the old fixed 0.5-tile half-side.
+fn assert_scatter_behaviour(unit_target: bool) {
+    let mut sim = Sim::new(7);
+    let house = if unit_target {
+        None
+    } else {
+        let h = placed(&mut sim, BuildingKind::House, OWNER_OPPONENT, (40, 40));
+        let bi = sim.buildings.iter().position(|b| b.id == h).unwrap();
+        sim.buildings[bi].hp = I16F16::from_num(30_000);
+        Some(h)
+    };
+    let (ax, ay, aim) = match house {
+        Some(h) => {
+            let (bx, by) = building_pos(&sim, h);
+            (bx - wu(16), by, (bx, by))
+        }
+        None => (wu(40), wu(40), (wu(56), wu(40))),
+    };
+    let a = spawn(&mut sim, EntityKind::Archer, OWNER_PLAYER, ax, ay);
+    let b = if unit_target {
+        let id = spawn(&mut sim, EntityKind::Archer, OWNER_OPPONENT, aim.0, aim.1);
+        let ei = sim.entity_index(id).unwrap();
+        sim.entities[ei].hp = I16F16::from_num(30_000);
+        Some(id)
+    } else {
+        None
+    };
+    let ei = sim.entity_index(a).unwrap();
+    sim.entities[ei].hp = I16F16::from_num(30_000);
+    match (b, house) {
+        (Some(t), _) => {
+            sim.push_command(Command::Attack { entity: a, target: t });
+            sim.push_command(Command::Attack { entity: t, target: a });
+        }
+        (_, Some(h)) => sim.push_command(Command::AttackBuilding { entity: a, building: h }),
+        _ => unreachable!(),
+    }
+    let mut seen = 0usize;
+    let mut misses = 0usize;
+    let mut beyond_old = false;
+    let mut inspected: std::collections::HashSet<(u64, u32, i32, i32)> =
+        std::collections::HashSet::new();
+    for _ in 0..6000 {
+        sim.tick();
+        // Inspect every in-flight projectile exactly once
+        // (keyed by spawn tick, attacker and impact point).
+        for p in sim.projectiles() {
+            let key = (p.spawn_tick, p.attacker, p.impact_x.to_bits(), p.impact_y.to_bits());
+            if !inspected.insert(key) {
+                continue;
+            }
+            seen += 1;
+            // For the unit target the opponent's shots aim at
+            // the OTHER archer; skip those here (their aim is
+            // the first archer's position, not `aim`).
+            if unit_target && p.owner == OWNER_OPPONENT {
+                continue;
+            }
+            let dx = (p.impact_x - aim.0).to_bits().abs();
+            let dy = (p.impact_y - aim.1).to_bits().abs();
+            assert!(
+                dx <= 173_008 && dy <= 173_008,
+                "impact offset ({dx}, {dy}) outside the dispersion square"
+            );
+            if dx != 0 || dy != 0 {
+                misses += 1;
+                beyond_old |= dx > 131_072 || dy > 131_072;
+            }
+        }
+    }
+    assert!(seen >= 20, "expected a long exchange, saw {seen} shots");
+    assert!(misses >= 3, "expected several misses, saw {misses}");
+    assert!(beyond_old, "no miss landed beyond the old fixed half-side");
+}
+
+#[test]
+fn prj04_misses_scatter_in_the_dispersion_square_unit_path() {
+    assert_scatter_behaviour(true);
+}
+
+#[test]
+fn prj04_misses_scatter_in_the_dispersion_square_building_path() {
+    assert_scatter_behaviour(false);
+}
+
 #[test]
 fn prj02_archer_flight_to_a_building_center_uses_the_same_speed() {
     let mut sim = Sim::new(7);

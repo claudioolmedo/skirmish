@@ -1387,6 +1387,34 @@ impl Sim {
         e.attack_engaged = true;
     }
 
+    /// PRJ-04 miss scatter: on a failed accuracy roll the shot
+    /// lands uniformly in the square centred on the aim point
+    /// whose side is the weapon's dispersion × the shot's
+    /// distance (the AoE2 info sheet's accuracy-error-width
+    /// model: a miss can land anywhere in a square of side
+    /// error-width × range around the aim, so the half-side is
+    /// dispersion × distance / 2, drawn independently per axis).
+    /// Two RNG draws, x then y, in PRJ-03's fixed order;
+    /// fixed-point integer math only. A zero dispersion (or a
+    /// zero-distance shot) consumes the same two draws and lands
+    /// exactly on the aim — the draw discipline never changes,
+    /// only the span does.
+    pub(crate) fn scattered_impact(
+        &mut self,
+        dispersion: I16F16,
+        dist: I16F16,
+        aim: (I16F16, I16F16),
+    ) -> (I16F16, I16F16) {
+        let half = ((dispersion.to_bits() as i64 * dist.to_bits() as i64) / 131_072) as i32;
+        let span = (2 * half + 1) as u32;
+        let dx = self.rng.below(span) as i32 - half;
+        let dy = self.rng.below(span) as i32 - half;
+        (
+            aim.0 + I16F16::from_bits(dx),
+            aim.1 + I16F16::from_bits(dy),
+        )
+    }
+
     fn resolve_strike(&mut self, idx: usize, ti: usize) {
         // M6: release-time snapshot of the attacker's *effective*
         // attacks — a Fletching completing mid-flight does not
@@ -1433,13 +1461,14 @@ impl Sim {
                 if spec.blast_radius <= I16F16::ZERO {
                     let roll = self.rng.below(100);
                     if roll >= spec.accuracy {
-                        // Miss: scatter within the weapon's radius — two
-                        // further draws, same fixed order (PRJ-04).
-                        let sb = spec.scatter.to_bits();
-                        let span = (2 * sb + 1) as u32;
-                        let dx = self.rng.below(span) as i32 - sb;
-                        let dy = self.rng.below(span) as i32 - sb;
-                        impact = (aim.0 + I16F16::from_bits(dx), aim.1 + I16F16::from_bits(dy));
+                        // Miss: scatter inside the dispersion
+                        // square around the aim point — two
+                        // further draws, same fixed order
+                        // (PRJ-04). The shot's distance is
+                        // measured to the aim point, the
+                        // projectile's actual flight distance.
+                        let dist = steer::vec_len(aim.0 - ax, aim.1 - ay);
+                        impact = self.scattered_impact(spec.scatter, dist, aim);
                     }
                 }
                 // Flight time = distance ÷ speed at spawn (PRJ-02),
@@ -1982,11 +2011,12 @@ impl Sim {
                 if spec.blast_radius <= I16F16::ZERO {
                     let roll = self.rng.below(100);
                     if roll >= spec.accuracy {
-                        let sb = spec.scatter.to_bits();
-                        let span = (2 * sb + 1) as u32;
-                        let dx = self.rng.below(span) as i32 - sb;
-                        let dy = self.rng.below(span) as i32 - sb;
-                        impact = (bx + I16F16::from_bits(dx), by + I16F16::from_bits(dy));
+                        // Miss: scatter inside the dispersion
+                        // square around the building's center
+                        // (PRJ-04); the shot's distance is the
+                        // center distance the flight time uses.
+                        let dist = steer::vec_len(bx - ax, by - ay);
+                        impact = self.scattered_impact(spec.scatter, dist, (bx, by));
                     }
                 }
                 let dist_bits = steer::vec_len(bx - ax, by - ay).to_bits() as i64;
@@ -2687,11 +2717,12 @@ impl Sim {
         if w.accuracy < 100 {
             let roll = self.rng.below(100);
             if roll >= w.accuracy {
-                let sb = w.scatter.to_bits();
-                let span = (2 * sb + 1) as u32;
-                let dx = self.rng.below(span) as i32 - sb;
-                let dy = self.rng.below(span) as i32 - sb;
-                impact = (aim.0 + I16F16::from_bits(dx), aim.1 + I16F16::from_bits(dy));
+                // Miss: scatter inside the dispersion square
+                // (PRJ-04); the distance is measured to the aim
+                // point — the same distance the flight time
+                // below is computed from.
+                let dist = steer::vec_len(aim.0 - bx, aim.1 - by);
+                impact = self.scattered_impact(w.scatter, dist, aim);
             }
         }
         let dist_bits = steer::vec_len(aim.0 - bx, aim.1 - by).to_bits() as i64;

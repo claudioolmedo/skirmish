@@ -85,8 +85,16 @@ pub struct UnitSpec {
     /// constant carry 30_583; the Town Center's building weapon
     /// carries its own documented 8 tiles/s (build.rs).
     pub projectile_speed: I16F16,
-    /// Scatter radius for missed shots, world units. UNVERIFIED
-    /// numerically in the docs (PRJ-04) — recorded design constant.
+    /// Attack dispersion for missed shots (PRJ-04): on a miss the
+    /// projectile lands uniformly in the square centred on the
+    /// aim point whose side is this factor × the shot's distance
+    /// (the AoE2 info sheet's "accuracy error width" model).
+    /// DOCUMENTED per class: 0.33 for any archer type, 0.75 for
+    /// gunpowder units and camel archers, 0.5 for the Arambai,
+    /// 0.2 for Trebuchets, 0.1 for cannon galleons. 0.33 in bits
+    /// = floor(0.33 × 65536) = 21_626. ZERO means the shot never
+    /// offsets (the fire ships' spray model; blast weapons never
+    /// reach the scatter path at all).
     pub scatter: I16F16,
     /// Blast radius in world units (PRJ-07, Castle P4b): ZERO =
     /// not a blast weapon. A blast weapon's projectile resolves
@@ -501,7 +509,7 @@ static ARCHER: UnitSpec = UnitSpec {
     attack_delay_ticks: 21,
     accuracy: 80,
     projectile_speed: I16F16::from_bits(30_583), // 7 tiles/s (PRJ-02, see field doc)
-    scatter: I16F16::from_bits(131_072),          // 2.0 — design constant (see field doc)
+    scatter: I16F16::from_bits(21_626),          // dispersion 0.33 (see field doc)
     blast_radius: I16F16::ZERO,
     pass_through: false,
     blast_secondaries: 0,
@@ -651,7 +659,7 @@ static SKIRMISHER: UnitSpec = UnitSpec {
     attack_delay_ticks: 31,
     accuracy: 90,
     projectile_speed: I16F16::from_bits(30_583), // 7 tiles/s (see Archer)
-    scatter: I16F16::from_bits(131_072),          // 2.0 — design constant (see Archer)
+    scatter: I16F16::from_bits(21_626),          // dispersion 0.33 (see Archer)
     blast_radius: I16F16::ZERO,
     pass_through: false,
     blast_secondaries: 0,
@@ -780,7 +788,7 @@ static CAVALRY_ARCHER: UnitSpec = UnitSpec {
     attack_delay_ticks: 30, // UNVERIFIED design constant (see above)
     accuracy: 50,
     projectile_speed: I16F16::from_bits(30_583), // 7 tiles/s (see Archer)
-    scatter: I16F16::from_bits(131_072),          // 2.0 — design constant (see Archer)
+    scatter: I16F16::from_bits(21_626),          // dispersion 0.33 (see Archer)
     blast_radius: I16F16::ZERO,
     pass_through: false,
     blast_secondaries: 0,
@@ -990,7 +998,7 @@ static GALLEY: UnitSpec = UnitSpec {
     attack_delay_ticks: 21, // adopted (see above)
     accuracy: 80, // adopted (see above)
     projectile_speed: I16F16::from_bits(30_583), // 7 tiles/s (see Archer)
-    scatter: I16F16::from_bits(131_072),          // 2.0 — design constant (see Archer)
+    scatter: I16F16::from_bits(21_626),          // dispersion 0.33 (see Archer)
     blast_radius: I16F16::ZERO,
     pass_through: false,
     blast_secondaries: 0,
@@ -1193,7 +1201,7 @@ static WAR_GALLEY: UnitSpec = UnitSpec {
     attack_delay_ticks: 21, // adopted (the Galley's)
     accuracy: 80, // adopted (the Galley's)
     projectile_speed: I16F16::from_bits(30_583), // 7 tiles/s (see Archer)
-    scatter: I16F16::from_bits(131_072),          // 2.0 — design constant (see Archer)
+    scatter: I16F16::from_bits(21_626),          // dispersion 0.33 (see Archer)
     blast_radius: I16F16::ZERO,
     pass_through: false,
     blast_secondaries: 0,
@@ -1665,7 +1673,7 @@ static SCORPION: UnitSpec = UnitSpec {
     attack_delay_ticks: 13,                  // 0.21 s (see above)
     accuracy: 100,
     projectile_speed: I16F16::from_bits(30_583), // 7 tiles/s (see Archer)
-    scatter: I16F16::from_bits(131_072),         // 2.0 — design constant (see Archer)
+    scatter: I16F16::from_bits(21_626),          // dispersion 0.33 (see Archer)
     blast_radius: I16F16::ZERO,
     pass_through: true,
     blast_secondaries: 0,

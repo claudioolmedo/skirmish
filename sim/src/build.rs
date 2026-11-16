@@ -1793,7 +1793,9 @@ pub struct BuildingWeapon {
     /// shared with archers; the Town Center's own row carries
     /// its documented 8 tiles/s instead).
     pub projectile_speed: I16F16,
-    /// Scattered-landing spread on a miss (PRJ-04 design constant).
+    /// Attack dispersion on a miss (PRJ-04: the miss square's
+    /// side is this factor × the shot's distance; 0.33, the
+    /// documented archer-type value, for arrow weapons).
     pub scatter: I16F16,
     /// Projectiles loosed per shot (Castle P3a): 1 for the Watch
     /// Tower; the Castle's BASE volley is 5 (dossier §2). The
@@ -1816,7 +1818,7 @@ pub const WATCH_TOWER_WEAPON: BuildingWeapon = BuildingWeapon {
     attack_delay_ticks: 21,
     accuracy: 100,
     projectile_speed: I16F16::from_bits(30_583), // 7 tiles/s (PRJ-02)
-    scatter: I16F16::from_bits(131_072),         // 2.0
+    scatter: I16F16::from_bits(21_626),         // dispersion 0.33
     volley: 1,
 };
 
@@ -1838,7 +1840,7 @@ pub const CASTLE_WEAPON: BuildingWeapon = BuildingWeapon {
     attack_delay_ticks: 21,
     accuracy: 100,
     projectile_speed: I16F16::from_bits(30_583), // 7 tiles/s (PRJ-02)
-    scatter: I16F16::from_bits(131_072),         // 2.0
+    scatter: I16F16::from_bits(21_626),         // dispersion 0.33
     volley: 5,
 };
 
@@ -1863,7 +1865,7 @@ pub const TOWN_CENTER_WEAPON: BuildingWeapon = BuildingWeapon {
     attack_delay_ticks: 21,
     accuracy: 100,
     projectile_speed: I16F16::from_bits(34_952), // 8 tiles/s (PRJ-02: update 153015)
-    scatter: I16F16::from_bits(131_072),         // 2.0
+    scatter: I16F16::from_bits(21_626),         // dispersion 0.33
     volley: 1,
 };
 
@@ -1895,7 +1897,7 @@ pub const DOCK_WEAPON: BuildingWeapon = BuildingWeapon {
     attack_delay_ticks: 21,
     accuracy: 100,
     projectile_speed: I16F16::from_bits(30_583), // 7 tiles/s (PRJ-02)
-    scatter: I16F16::from_bits(131_072),         // 2.0
+    scatter: I16F16::from_bits(21_626),         // dispersion 0.33
     volley: 1,
 };
 
