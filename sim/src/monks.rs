@@ -497,14 +497,19 @@ impl Sim {
     /// to the building bases (CI 15 / CI 25) — the +10/+16 deltas
     /// are the row difference, with the target owner's Devotion
     /// shift (MNK-05's +1/+1, read at start like the unit row)
-    /// added on top. Sticky progress (MNK-07): switching unit →
-    /// building does NOT reset the counter — only the
-    /// building → unit switch does (see `apply_convert`).
+    /// and Faith shift (MNK-05's +4/+4 — Faith is a player-wide
+    /// modifier whose subject is "All" on the wiki's
+    /// conversion-resistance table, so the building row takes it
+    /// exactly like the unit row) added on top. Sticky progress
+    /// (MNK-07): switching unit → building does NOT reset the
+    /// counter — only the building → unit switch does (see
+    /// `apply_convert`).
     pub(crate) fn apply_convert_building(&mut self, idx: usize, building: u32) {
         let bi = self.building_index(building).unwrap();
         let target_owner = self.buildings[bi].owner;
         let devotion = self.has_tech(target_owner, TechId::Devotion);
-        let shift = if devotion { 1 } else { 0 };
+        let faith = self.faith_researched(target_owner);
+        let shift = (if devotion { 1 } else { 0 }) + (if faith { 4 } else { 0 });
         let e = &mut self.entities[idx];
         e.task = Task::Idle;
         e.task_node = None;

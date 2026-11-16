@@ -3126,10 +3126,14 @@ type has a resistance *level* n: the per-CI chance is 38/max(1, n) %.
 Scouts are level 2 (→19%/CI) and start attempts +3 CIs later / guarantee
 +1 CI later; buildings are level 3; ships start +2 / guarantee +2.
 Technologies and bonuses shift the same counters: Devotion +1/+1, Faith
-+4/+4 (all own units), Teutons team bonus +3/+1. (The wiki displays these
-as min/max *time* modifiers; the counters here are the same facts in CI
-units, 1 CI ≈ 1.25 s.)
-*Source:* wiki, Conversion (resistance levels and modifier list). ·
++4/+4 (all own units and buildings — Faith is a player-wide modifier:
+the wiki's conversion-resistance table lists its subject as "All" under
+a Unit/Building column, and building stat tables list Faith as a
+conversion-resistance source), Teutons team bonus +3/+1. (The wiki
+displays these as min/max *time* modifiers; the counters here are the
+same facts in CI units, 1 CI ≈ 1.25 s.)
+*Source:* wiki, Conversion (resistance levels and modifier list); wiki,
+Faith; wiki, Ability (conversion-resistance table). ·
 *Impl:* resistance rows keyed by target class in the monk table; shifts
 are integer CI adds applied when a conversion starts. Empire-specific
 rows (Teutons) are extension content (§C). Shipped for unit targets in
@@ -3140,7 +3144,13 @@ Castle P5b (2026-11-02): Scout-line level 2 (19%/CI, +3/+1), Devotion
 against the target's owner (Castle P5f, 2026-11-03: TechId 42,
 550F/750G, 60 s, requires Devotion), pinned there by
 `faith_shifts_the_victims_window_by_four_ci` in
-`sim/src/monastery_p5f_tests.rs`. Pinned by `scout_resistance_window_is_ci_8_to_10` and
+`sim/src/monastery_p5f_tests.rs`. The building arm took only Devotion
+until the Faith-buildings fix (2026-11-15, decision D2 resolved by the
+documented DE behaviour above): `apply_convert_building` now adds
+Faith's +4/+4 on top of the +10/+16 row deltas exactly like the unit
+row (building window CI 19–29 under Faith; Devotion and Faith stack),
+pinned by `faith_shifts_the_building_window_by_four_ci` in
+`sim/src/monastery_p5c_tests.rs`. Pinned by `scout_resistance_window_is_ci_8_to_10` and
 `devotion_shifts_the_victims_window_by_one_ci`. ·
 *Status:* **MATCHES**.
 

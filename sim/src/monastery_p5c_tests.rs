@@ -188,6 +188,58 @@ fn building_conversion_lands_only_in_ci_15_to_25() {
 }
 
 #[test]
+fn faith_shifts_the_building_window_by_four_ci() {
+    // MNK-05's Faith row on the BUILDING arm: Faith is a
+    // player-wide modifier (the wiki's conversion-resistance
+    // table lists its subject as "All" under a Unit/Building
+    // column, and building stat tables list Faith as a
+    // conversion-resistance source), so a building whose owner
+    // holds Faith converts on CI 19–29, not 15–25 — the same
+    // +4/+4 the unit row takes (P5f's unit pin is
+    // `faith_shifts_the_victims_window_by_four_ci`).
+    for seed in 1..=12u64 {
+        let (mut sim, monk, rax) = monk_and_barracks(seed, true);
+        // The TARGET's owner holds Faith: +4/+4.
+        sim.players[1].techs |= TechId::Faith.bit();
+        sim.push_command(Command::ConvertBuilding {
+            entity: monk,
+            building: rax,
+        });
+        sim.tick();
+        let m = ent(&sim, monk);
+        // Row deltas (+10/+16) plus Faith's +4/+4.
+        assert_eq!(m.conversion_start_shift, 14, "seed {seed}");
+        assert_eq!(m.conversion_guarantee_shift, 20, "seed {seed}");
+        let mut converted_at = None;
+        for n in 2..=2300u64 {
+            sim.tick();
+            if building_owner(&sim, rax) == Some(OWNER_PLAYER) {
+                converted_at = Some(n);
+                break;
+            }
+        }
+        let at = converted_at
+            .unwrap_or_else(|| panic!("seed {seed}: barracks never converted"));
+        assert!(
+            (1425..=2175).contains(&at),
+            "seed {seed}: building converted at tick {at}, outside CIs 19–29 (1425–2175)"
+        );
+    }
+    // Devotion and Faith stack on the building row, as on the
+    // unit row: +1/+1 and +4/+4 over the +10/+16 row deltas.
+    let (mut sim, monk, rax) = monk_and_barracks(7, true);
+    sim.players[1].techs |= TechId::Devotion.bit() | TechId::Faith.bit();
+    sim.push_command(Command::ConvertBuilding {
+        entity: monk,
+        building: rax,
+    });
+    sim.tick();
+    let m = ent(&sim, monk);
+    assert_eq!(m.conversion_start_shift, 15);
+    assert_eq!(m.conversion_guarantee_shift, 21);
+}
+
+#[test]
 fn building_conversion_makes_no_progress_from_range() {
     // The monk starts 9 cells west of the Barracks and must WALK
     // adjacent: while it is still travelling (and for the whole
