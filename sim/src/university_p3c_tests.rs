@@ -360,6 +360,20 @@ fn construction_delta(treadmill: bool) -> u64 {
     }
     let (cx, cy) = sim.grid().cell_center(21, 21);
     let v = spawn(&mut sim, EntityKind::Villager, OWNER_PLAYER, cx, cy);
+    // Let the fog settle over the staged site: it starts
+    // unexplored, and BLD-01's 2026-11-15 amendment refuses
+    // unexplored ground — the standing builder's own sight
+    // explores the footprint within a few visibility recomputes.
+    for _ in 0..600 {
+        if (0..2).all(|oy| (0..2).all(|ox| sim.cell_explored_by(OWNER_PLAYER, 22 + ox, 20 + oy))) {
+            break;
+        }
+        sim.tick();
+    }
+    assert!(
+        (0..2).all(|oy| (0..2).all(|ox| sim.cell_explored_by(OWNER_PLAYER, 22 + ox, 20 + oy))),
+        "the staged site never became explored"
+    );
     let (tx, ty) = sim.grid().cell_center(22, 20);
     sim.push_command(Command::Build {
         entity: v,

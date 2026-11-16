@@ -60,6 +60,27 @@ fn run_until(sim: &mut Sim, cap: u64, mut done: impl FnMut(&Sim) -> bool) -> boo
 /// spot) with villager 1 and return its building id.
 fn build_barracks(sim: &mut Sim) -> u32 {
     let (x, y) = cell_point(sim, 27, 20);
+    // BLD-01's 2026-11-15 amendment refuses unexplored ground,
+    // and the staged site starts far outside the explored disc:
+    // walk the builder there first and let its own sight settle
+    // the fog, exactly as a player must, before the order.
+    let (mx, my) = cell_point(sim, 28, 21);
+    sim.push_command(Command::Move {
+        entity: 1,
+        x: mx,
+        y: my,
+    });
+    let there = run_until(sim, 90_000, |s| {
+        let e = ent(s, 1);
+        (e.pos_x - mx).abs() <= I16F16::from_num(8) && (e.pos_y - my).abs() <= I16F16::from_num(8)
+    });
+    assert!(there, "builder never reached the Barracks site");
+    for _ in 0..900 {
+        if sim.can_build(1, BuildingKind::Barracks, x, y) {
+            break;
+        }
+        sim.tick();
+    }
     sim.push_command(Command::Build {
         entity: 1,
         kind: BuildingKind::Barracks,

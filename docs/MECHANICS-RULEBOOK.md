@@ -1327,12 +1327,22 @@ only if the whole footprint is inside the map, on allowed terrain,
 unobstructed (no building overlap, no live node, no static wall), and at
 least one adjacent ring cell is reachable by a builder. A rejected order
 changes nothing and charges nothing.
+*Amendment 2026-11-15 (Claudio's authorization — the documented DE
+rule):* every footprint cell must also be **explored by the placing
+player** — buildings cannot be placed on unexplored terrain, while
+explored-but-currently-fogged cells stay legal. The check is per-cell,
+so a dragged wall line founds its explored segments and skips the
+unexplored ones (the occupied-tile skip's behaviour), charging only
+for the segments that stand.
 *Source:* GAP 4.1; Skirmish II M2.5 spec (the reference validates the same
 way observably). · *Impl:* shipped — `validate_build` in `build.rs`,
 called from `push_build` (the ABI returns its verdict) and re-checked in
 `apply_command`; ordering onto an incomplete same-kind building resumes
 it instead of double-charging. Since M6 the same function also
-evaluates the availability gates (BLD-15). · *Status:* **MATCHES**.
+evaluates the availability gates (BLD-15). The 2026-11-15 amendment is
+enforced in `validate_build`'s footprint loop (and in the gate span
+and Fish Trap branches) via `cell_explored_by`; pinned by
+`sim/tests/unexplored_placement.rs`. · *Status:* **MATCHES**.
 
 **BLD-02 — Cost is paid at placement; foundation cancel refunds fully.**
 Laying a foundation deducts the full cost immediately. Cancelling a

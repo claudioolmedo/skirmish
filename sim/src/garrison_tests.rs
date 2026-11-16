@@ -1104,14 +1104,17 @@ fn gar07_bell_mixed_tasks_all_come_out_and_resume() {
         entity: v_food,
         node: food_node,
     });
-    // Build: a House foundation a few cells from the TC.
+    // Build: a House foundation a few cells from the TC, on
+    // explored ground (BLD-01's 2026-11-15 amendment refuses
+    // unexplored cells; the old +6/+6 site is outside the
+    // starting visibility disc on this seed).
     sim.stockpile_mut(OWNER_PLAYER)
         .add(ResourceKind::Wood, I16F16::from_num(500));
     let (tcx, tcy) = {
         let e = ent(&sim, tc);
         sim.grid().world_to_cell(e.pos_x, e.pos_y)
     };
-    let (hx, hy) = sim.grid().cell_center(tcx + 6, tcy + 6);
+    let (hx, hy) = sim.grid().cell_center(tcx + 4, tcy + 4);
     sim.push_command(Command::Build {
         entity: v_build,
         kind: BuildingKind::House,

@@ -31,6 +31,32 @@ fn anchor_point(sim: &Sim, cx: u32, cy: u32) -> (I16F16, I16F16) {
 
 fn build(sim: &mut Sim, entity: u32, kind: BuildingKind, cx: u32, cy: u32) {
     let (x, y) = anchor_point(sim, cx, cy);
+    // BLD-01's 2026-11-15 amendment refuses unexplored ground,
+    // and this suite's staged sites (the berry Mill, the
+    // woodline camp) start far outside the explored disc: walk
+    // the builder to the footprint's centre first and let its
+    // own sight settle the fog, exactly as a player must,
+    // before the build order goes in.
+    let size = kind.footprint_size();
+    let (mx, my) = anchor_point(sim, cx + size / 2, cy + size / 2);
+    sim.push_command(Command::Move {
+        entity,
+        x: mx,
+        y: my,
+    });
+    let arrived = run_until(sim, 90_000, |s| {
+        let e = villager(s, entity);
+        e.order.is_none()
+            && (e.pos_x - mx).abs() <= I16F16::from_num(12)
+            && (e.pos_y - my).abs() <= I16F16::from_num(12)
+    });
+    assert!(arrived, "builder {entity} never reached the {kind:?} site");
+    for _ in 0..900 {
+        if sim.can_build(entity, kind, x, y) {
+            break;
+        }
+        sim.tick();
+    }
     sim.push_command(Command::Build {
         entity,
         kind,

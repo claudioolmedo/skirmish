@@ -8843,6 +8843,12 @@ impl Sim {
             if cx >= GRID_DIM || cy >= GRID_DIM {
                 return false;
             }
+            // Unexplored ground refuses placement (BLD-01,
+            // 2026-11-15): every span cell must be explored by
+            // the placing player, as on the generic path.
+            if !self.cell_explored_by(owner, cx, cy) {
+                return false;
+            }
             // A living Town Center's reserved 4×4 (BLD-16): the
             // cells tx−1..=tx+2 × ty−1..=ty+2 around its cell,
             // written without subtraction so nothing underflows.
@@ -10055,6 +10061,20 @@ impl Sim {
             }
         }
         for &(cx, cy) in &cells {
+            // Unexplored ground refuses placement (BLD-01,
+            // 2026-11-15, Claudio's authorization — the DE rule):
+            // a foundation may only stand on ground the placing
+            // player has explored at some point; explored-but-
+            // fogged cells stay legal (VIS-06's remembered
+            // knowledge is enough to build on). Per-cell, so a
+            // dragged wall line founds its explored segments and
+            // skips the black ones, exactly like the occupied-
+            // tile skip — and a refused cell is never charged,
+            // because `place_building` only runs on a Place
+            // verdict for the surviving segments.
+            if !self.cell_explored_by(builder_owner, cx, cy) {
+                return BuildVerdict::Reject;
+            }
             // Walls and already-blocking buildings. Water W1
             // (BLD-14): the terrain reading is per placement
             // class — a Normal footprint admits no deep water
@@ -10222,6 +10242,12 @@ impl Sim {
     /// water-domain reach check to the site.
     fn validate_build_fish_trap(&self, idx: usize, ax: u32, ay: u32) -> BuildVerdict {
         if ax >= GRID_DIM || ay >= GRID_DIM {
+            return BuildVerdict::Reject;
+        }
+        // Unexplored ground refuses placement (BLD-01,
+        // 2026-11-15): the trap's cell must be explored by the
+        // placing player, as on the generic path.
+        if !self.cell_explored_by(self.entities[idx].owner, ax, ay) {
             return BuildVerdict::Reject;
         }
         if !self.grid.fish_trap_placement_ok(ax, ay) {

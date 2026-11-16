@@ -9,7 +9,8 @@
 
 use fixed::types::I16F16;
 use skirmish_sim::{
-    BuildingKind, Command, NodeKind, ResourceKind, Sim, Task, TrainBlock,
+    BuildingKind, Command, EntityKind, NodeKind, ResourceKind, Sim, Task, TrainBlock,
+    OWNER_PLAYER,
 };
 
 fn villager(sim: &Sim, id: u32) -> &skirmish_sim::Entity {
@@ -82,6 +83,43 @@ fn build(sim: &mut Sim, entity: u32, kind: BuildingKind, cx: u32, cy: u32) {
         x,
         y,
     });
+}
+
+/// Ride the Scout through the given cells (settling the fog at
+/// each) and back home: BLD-01's 2026-11-15 amendment refuses
+/// unexplored ground, and several staged sites in this suite
+/// start far outside the explored disc. The scripted builds
+/// that follow run exactly as written — only the fog moved.
+fn explore_cells(sim: &mut Sim, cells: &[(u32, u32)]) {
+    let scout = sim
+        .entities()
+        .iter()
+        .find(|e| e.owner == OWNER_PLAYER && e.kind == EntityKind::ScoutCavalry)
+        .unwrap()
+        .id;
+    let tc = sim.town_center();
+    let home = (tc.pos_x, tc.pos_y);
+    let mut ride = |sim: &mut Sim, x: I16F16, y: I16F16| {
+        sim.push_command(Command::Move {
+            entity: scout,
+            x,
+            y,
+        });
+        let there = run_until(sim, 90_000, |s| {
+            let e = s.entities().iter().find(|e| e.id == scout).unwrap();
+            (e.pos_x - x).abs() <= I16F16::from_num(8)
+                && (e.pos_y - y).abs() <= I16F16::from_num(8)
+        });
+        assert!(there, "scout never reached a staging cell");
+        for _ in 0..30 {
+            sim.tick();
+        }
+    };
+    for &(cx, cy) in cells {
+        let (x, y) = anchor_point(sim, cx, cy);
+        ride(sim, x, y);
+    }
+    ride(sim, home.0, home.1);
 }
 
 fn run_until(sim: &mut Sim, cap: u64, mut done: impl FnMut(&Sim) -> bool) -> bool {
@@ -194,6 +232,7 @@ fn training_is_refused_at_cap_and_trains_after_a_house() {
 
     // Build a house: capacity rises to 10, and a fresh order then
     // trains normally to completion.
+    explore_cells(&mut sim, &[(18, 27)]);
     build(&mut sim, 1, BuildingKind::House, 18, 27);
     let housed_no_more = run_until(&mut sim, 20_000, |s| {
         s.buildings().iter().any(|b| b.complete)
@@ -211,6 +250,7 @@ fn training_is_refused_at_cap_and_trains_after_a_house() {
 #[test]
 fn farm_completes_is_gatherable_depletes_and_frees_the_ground() {
     let mut sim = Sim::new(41);
+    explore_cells(&mut sim, &[(20, 20), (28, 20)]);
     let start_wood = sim.stockpile().amount(ResourceKind::Wood);
     let start_food = sim.stockpile().amount(ResourceKind::Food);
     // M6: Farms are gated behind a standing Mill (OPENING-SPEC
@@ -380,6 +420,7 @@ fn invalid_placements_are_rejected_whole() {
 #[test]
 fn unaffordable_placement_is_rejected() {
     let mut sim = Sim::new(47);
+    explore_cells(&mut sim, &[(16, 20), (27, 20), (33, 27)]);
     // M6 adaptation: the scenario spends the 200 starting wood
     // through the Farm gate's own buildings — a Mill (100) and a
     // Farm (60) leave 40, and a second Farm (60) cannot be paid
@@ -418,6 +459,7 @@ fn unaffordable_placement_is_rejected() {
 #[test]
 fn a_second_builder_resumes_an_unfinished_building() {
     let mut sim = Sim::new(53);
+    explore_cells(&mut sim, &[(18, 27)]);
     let start_wood = sim.stockpile().amount(ResourceKind::Wood);
     build(&mut sim, 1, BuildingKind::House, 18, 27);
     sim.tick();
@@ -440,6 +482,11 @@ fn a_second_builder_resumes_an_unfinished_building() {
 fn build_script_replays_bit_identically() {
     fn run(seed: u64, extra_build: bool) -> Vec<u64> {
         let mut sim = Sim::new(seed);
+        // The script's plots start unexplored (BLD-01's
+        // 2026-11-15 amendment): the Scout rides out first —
+        // identically in every run, so the replay property is
+        // untouched; the hashes below are the script's alone.
+        explore_cells(&mut sim, &[(18, 27), (24, 30), (27, 33)]);
         let mut hashes = Vec::new();
         for tick in 0..9000u64 {
             match tick {
@@ -509,6 +556,7 @@ fn build_script_replays_bit_identically() {
     // Sanity: the script really exercised the systems (house done, mill
     // raised, training completed).
     let mut probe = Sim::new(42);
+    explore_cells(&mut probe, &[(18, 27)]);
     let (hx, hy) = anchor_point(&probe, 18, 27);
     probe.push_command(Command::Build {
         entity: 1,
@@ -569,6 +617,7 @@ fn tick_building(sim: &mut Sim, builders: &[u32]) -> (u64, u64) {
 #[test]
 fn solo_house_takes_exactly_1500_ticks_of_work() {
     let mut sim = Sim::new(59);
+    explore_cells(&mut sim, &[(18, 27)]);
     build(&mut sim, 1, BuildingKind::House, 18, 27);
     sim.tick(); // placement applied here
     let started = run_until(&mut sim, 20_000, |s| villager(s, 1).task == Task::Building);

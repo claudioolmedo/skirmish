@@ -191,9 +191,29 @@ fn human_villager(sim: &Sim) -> u32 {
 /// itself accepts a Wonder (the 5×5 footprint needs clear
 /// ground — the scan asks `can_build`, so the fixture can
 /// never drift from the placement rules it exercises).
-fn buildable_wonder_cell(sim: &Sim) -> (u32, u32) {
+/// The scan window is explored first (BLD-01's 2026-11-15
+/// amendment refuses unexplored ground, and the 5×5 does not
+/// fit inside the starting visibility disc): the Scout is
+/// staged over the window in a grid, one fog recompute a stop.
+fn buildable_wonder_cell(sim: &mut Sim) -> (u32, u32) {
     let villager = human_villager(sim);
     let (tcx, tcy) = tc_cell(sim, OWNER_PLAYER);
+    if let Some(scout) = sim
+        .entities()
+        .iter()
+        .find(|e| e.owner == OWNER_PLAYER && e.kind == EntityKind::ScoutCavalry)
+        .map(|e| e.id)
+    {
+        for dy in [3u32, 9, 15, 21] {
+            for dx in [3u32, 9, 15, 21] {
+                let (x, y) = sim.grid().cell_center(tcx + dx, tcy + dy);
+                let e = sim.entities.iter_mut().find(|e| e.id == scout).unwrap();
+                e.pos_x = x;
+                e.pos_y = y;
+                settle(sim, 20);
+            }
+        }
+    }
     for dy in 0..24u32 {
         for dx in 0..24u32 {
             let (x, y) = sim.grid().cell_center(tcx + dx, tcy + dy);
@@ -216,7 +236,7 @@ fn placement_charges_all_three_resources_and_delete_refunds_them() {
         amount(&sim, OWNER_PLAYER, ResourceKind::Gold),
         amount(&sim, OWNER_PLAYER, ResourceKind::Food),
     );
-    let (cx, cy) = buildable_wonder_cell(&sim);
+    let (cx, cy) = buildable_wonder_cell(&mut sim);
     let (x, y) = sim.grid().cell_center(cx, cy);
     sim.push_command(Command::Build {
         entity: human_villager(&sim),
@@ -265,7 +285,7 @@ fn placement_refuses_when_any_leg_is_short_or_the_age_is_short() {
     let villager = human_villager(&sim);
     // A cell the sim accepts while every leg is funded — the
     // refusals below are then about the one condition changed.
-    let (cx, cy) = buildable_wonder_cell(&sim);
+    let (cx, cy) = buildable_wonder_cell(&mut sim);
     let (x, y) = sim.grid().cell_center(cx, cy);
     assert!(sim.can_build(villager, BuildingKind::Wonder, x, y));
     // Drain the gold below 1000: the Wonder refuses, and the
@@ -298,7 +318,7 @@ fn placement_refuses_when_any_leg_is_short_or_the_age_is_short() {
     young.players[0].age = Age::Imperial;
     top_up(&mut young, OWNER_PLAYER);
     let villager = human_villager(&young);
-    let (cx, cy) = buildable_wonder_cell(&young);
+    let (cx, cy) = buildable_wonder_cell(&mut young);
     let (x, y) = young.grid().cell_center(cx, cy);
     young.players[0].age = Age::Castle;
     assert!(!young.can_build(villager, BuildingKind::Wonder, x, y));

@@ -45,6 +45,27 @@ fn dock_builds_to_completion_on_a_pond_shore() {
     let mut sim = Sim::new(42);
     let (ax, ay) = dock_anchor(&sim).expect("seed 42: a legal Dock site on the pond shore");
     let villager = a_villager(&sim);
+    // Stage the builder on the site and let the fog settle:
+    // the pond starts unexplored, and BLD-01's 2026-11-15
+    // amendment refuses unexplored ground — the standing
+    // builder's own sight explores the footprint within a
+    // few visibility recomputes.
+    {
+        let (sx, sy) = sim.grid().cell_center(ax + 1, ay + 1);
+        let e = sim.entities.iter_mut().find(|e| e.id == villager).unwrap();
+        e.pos_x = sx;
+        e.pos_y = sy;
+    }
+    for _ in 0..600 {
+        if (0..3).all(|oy| (0..3).all(|ox| sim.cell_explored_by(OWNER_PLAYER, ax + ox, ay + oy))) {
+            break;
+        }
+        sim.tick();
+    }
+    assert!(
+        (0..3).all(|oy| (0..3).all(|ox| sim.cell_explored_by(OWNER_PLAYER, ax + ox, ay + oy))),
+        "the Dock site never became explored"
+    );
     let (px, py) = sim.grid().cell_center(ax, ay);
     assert!(
         sim.can_build(villager, BuildingKind::Dock, px, py),
@@ -157,34 +178,63 @@ fn normal_buildings_are_refused_on_shallows() {
     // anchor — the pair isolates terrain as the deciding rule.
     let mut checked = false;
     for seed in 1..=40u64 {
-        let sim = Sim::new(seed);
-        let grid = sim.grid();
+        let mut sim = Sim::new(seed);
+        // No named grid borrow: the staging below mutates the
+        // sim, so every grid read goes through a transient
+        // `sim.grid()` call.
         let villager = a_villager(&sim);
         for ay in 0..=117u32 {
             for ax in 0..=117u32 {
                 let cells: Vec<(u32, u32)> = (0..3)
                     .flat_map(|dy| (0..3).map(move |dx| (ax + dx, ay + dy)))
                     .collect();
-                let has_shallows = cells.iter().any(|&(x, y)| grid.is_shallows(x, y));
-                let has_deep = cells.iter().any(|&(x, y)| grid.is_water(x, y));
+                let has_shallows = cells.iter().any(|&(x, y)| sim.grid().is_shallows(x, y));
+                let has_deep = cells.iter().any(|&(x, y)| sim.grid().is_water(x, y));
                 if !has_shallows || has_deep {
                     continue;
                 }
                 let clean = cells.iter().all(|&(x, y)| {
-                    !grid.is_node_blocked(x, y)
-                        && !grid.is_dynamic(x, y)
+                    !sim.grid().is_node_blocked(x, y)
+                        && !sim.grid().is_dynamic(x, y)
                         && sim
                             .nodes()
                             .iter()
-                            .all(|n| n.is_depleted() || grid.world_to_cell(n.pos_x, n.pos_y) != (x, y))
+                            .all(|n| {
+                                n.is_depleted()
+                                    || sim.grid().world_to_cell(n.pos_x, n.pos_y) != (x, y)
+                            })
                         && sim.entities().iter().all(|e| {
-                            e.dead || grid.world_to_cell(e.pos_x, e.pos_y) != (x, y)
+                            e.dead || sim.grid().world_to_cell(e.pos_x, e.pos_y) != (x, y)
                         })
                 });
-                if !clean || !grid.dock_placement_ok(ax, ay, 3) {
+                if !clean || !sim.grid().dock_placement_ok(ax, ay, 3) {
                     continue;
                 }
-                let (px, py) = grid.cell_center(ax, ay);
+                // Stage the builder on the site and let the fog
+                // settle, so terrain alone decides the pair below
+                // (BLD-01's 2026-11-15 amendment refuses
+                // unexplored ground before terrain is consulted).
+                {
+                    let (sx, sy) = sim.grid().cell_center(ax + 1, ay + 1);
+                    let e = sim.entities.iter_mut().find(|e| e.id == villager).unwrap();
+                    e.pos_x = sx;
+                    e.pos_y = sy;
+                }
+                for _ in 0..600 {
+                    if (0..3).all(|oy| {
+                        (0..3).all(|ox| sim.cell_explored_by(OWNER_PLAYER, ax + ox, ay + oy))
+                    }) {
+                        break;
+                    }
+                    sim.tick();
+                }
+                assert!(
+                    (0..3).all(|oy| {
+                        (0..3).all(|ox| sim.cell_explored_by(OWNER_PLAYER, ax + ox, ay + oy))
+                    }),
+                    "seed {seed}: the shallows site never became explored"
+                );
+                let (px, py) = sim.grid().cell_center(ax, ay);
                 assert!(
                     !sim.can_build(villager, BuildingKind::Barracks, px, py),
                     "seed {seed}: a Barracks was placeable in the shallows at {ax},{ay}"

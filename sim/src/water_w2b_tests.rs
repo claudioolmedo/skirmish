@@ -182,6 +182,20 @@ fn trap_stage() -> (Sim, u32, u32, (u32, u32)) {
 /// Build the trap with the staged ship and run until it
 /// completes; returns the stamped node's id.
 fn build_the_trap(sim: &mut Sim, ship: u32, cell: (u32, u32)) -> u32 {
+    // Let the fog settle over the staged cell first: it starts
+    // unexplored, and BLD-01's 2026-11-15 amendment refuses
+    // unexplored ground — the standing ship's own sight explores
+    // its cell within a few visibility recomputes.
+    for _ in 0..600 {
+        if sim.cell_explored_by(OWNER_PLAYER, cell.0, cell.1) {
+            break;
+        }
+        sim.tick();
+    }
+    assert!(
+        sim.cell_explored_by(OWNER_PLAYER, cell.0, cell.1),
+        "the trap cell never became explored"
+    );
     let (x, y) = sim.grid().cell_center(cell.0, cell.1);
     let wood_before = wood(sim);
     sim.push_command(Command::Build {

@@ -669,6 +669,27 @@ fn barracks_placement_rules_3x3() {
 fn militia_production_and_population_interplay() {
     let mut sim = Sim::new(41);
     let (x, y) = cell_point(&sim, 27, 20);
+    // BLD-01's 2026-11-15 amendment refuses unexplored ground,
+    // and the staged site starts far outside the explored disc:
+    // walk the builder there first and let its own sight settle
+    // the fog, exactly as a player must, before the order.
+    let (mx, my) = cell_point(&sim, 28, 21);
+    sim.push_command(Command::Move {
+        entity: 1,
+        x: mx,
+        y: my,
+    });
+    let there = run_until(&mut sim, 90_000, |s| {
+        let e = ent(s, 1);
+        (e.pos_x - mx).abs() <= I16F16::from_num(8) && (e.pos_y - my).abs() <= I16F16::from_num(8)
+    });
+    assert!(there, "builder never reached the Barracks site");
+    for _ in 0..900 {
+        if sim.can_build(1, BuildingKind::Barracks, x, y) {
+            break;
+        }
+        sim.tick();
+    }
     sim.push_command(Command::Build {
         entity: 1,
         kind: BuildingKind::Barracks,
@@ -908,6 +929,24 @@ fn opp_house(sim: &mut Sim) -> u32 {
         .find(|e| e.owner == OWNER_OPPONENT && e.kind == EntityKind::Villager)
         .unwrap()
         .id;
+    // BLD-01's 2026-11-15 amendment refuses unexplored ground,
+    // and the midpoint starts unexplored for the opponent too:
+    // walk the builder there first and let its own sight settle
+    // the fog, exactly as a player must, before the anchor scan.
+    let (mx, my) = cell_point(sim, mid.0, mid.1);
+    sim.push_command(Command::Move {
+        entity: builder,
+        x: mx,
+        y: my,
+    });
+    let there = run_until(sim, 90_000, |s| {
+        let e = ent(s, builder);
+        (e.pos_x - mx).abs() <= I16F16::from_num(8) && (e.pos_y - my).abs() <= I16F16::from_num(8)
+    });
+    assert!(there, "opponent builder never reached the midpoint");
+    for _ in 0..30 {
+        sim.tick();
+    }
     let (hx, hy) = anchor_near(sim, builder, BuildingKind::House, mid);
     let (x, y) = cell_point(sim, hx, hy);
     sim.push_command(Command::Build {
