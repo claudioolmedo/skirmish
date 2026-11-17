@@ -5702,13 +5702,30 @@ the DIFFERS side pending its live proofs, the standing
 treatment; the appendix table's printed totals remain stale
 against the bodies, as recorded at the NET-11 entry above.
 
+2026-11-17 (Water batch + MOV-05, convoy landing):
+MOV-05 moves DIFFERS → MATCHES — the §5 row below moves
+8/3/1 → 9/2/1 and the table's total row 198/14/11 →
+199/13/11, on the table's own arithmetic only. The Water
+batch flips no Status: BLD-14 stays MATCHES (the Dock's
+fish-shoal exception is recorded in its Impl) and CLS-07
+stays MATCHES (its recorded divergence — the Demolition
+line folded into Medium Warships — is CLOSED by the split
+into the line's own Dock technology). The Demolition Ship
+TechId renumbered at integration: 57 (drafted 53 on the
+water base; Siege Engineers holds 53 and the BLD-18 tower
+trio holds 54–56); the netplay research ceiling rises to
+57. The mechanical Status count over the rule bodies on
+this tree is 213 / 8 / 2 raw — 212 / 9 / 2 with SEL-10
+held on the DIFFERS side pending its live proofs, the
+standing treatment.
+
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
 | 1 | Simulation & time (SIM) | 12 | 12 | 0 | 0 |
 | 2 | Map, terrain & elevation (MAP) | 13 | 9 | 4 | 0 |
 | 3 | Visibility & exploration (VIS) | 10 | 9 | 1 | 0 |
 | 4 | Selection & orders (SEL) | 17 | 16 | 1 | 0 |
-| 5 | Movement, pathfinding & collision (MOV) | 12 | 8 | 3 | 1 |
+| 5 | Movement, pathfinding & collision (MOV) | 12 | 9 | 2 | 1 |
 | 6 | Economy & drop-off (ECO) | 17 | 16 | 0 | 1 |
 | 7 | Buildings & placement (BLD) | 20 | 18 | 1 | 1 |
 | 8 | Combat & damage (CMB) | 17 | 17 | 0 | 0 |
@@ -5722,7 +5739,7 @@ against the bodies, as recorded at the NET-11 entry above.
 | 16 | Victory, scoring & game modes (VIC) | 12 | 9 | 0 | 3 |
 | 17 | Multiplayer determinism (NET) | 11 | 10 | 1 | 0 |
 | 18 | Information rules (INF) | 13 | 12 | 1 | 0 |
-| | **Total** | **223** | **198** | **14** | **11** |
+| | **Total** | **223** | **199** | **13** | **11** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer
