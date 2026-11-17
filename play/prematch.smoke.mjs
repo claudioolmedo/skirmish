@@ -431,14 +431,18 @@ const roomSocket = () =>
   console.log('PASS (7) front-door lobby: no ✕ to a black page; ✕ returns over a live match');
 }
 
-// (8) Regression (bot-loop, 2026-11-04): end screen → Back to menu
-//     black-screened the page. The local endMenuBtn path cleared
-//     .in-match and then opened the pause menu over the fresh
-//     match it had just reset — so the menu floated over a black
-//     page, and closing it (✕/Resume only hide the menu) left a
-//     black screen with no game and no menu, reload the only
-//     recovery. Back to menu must open the pause menu over the
-//     VISIBLE fresh match, and closing it must land in that match.
+// (8) End screen → Back to menu lands on the Lobby Browser
+//     (client batch, 2026-11-16 — Claudio's standing DE-fidelity
+//     rule: the button lands in the same place from every mode,
+//     as it already did from AI-room and online matches). This
+//     replaces the 2026-11-04 regression pin: the old solo path
+//     (bf599f8) reset a fresh match and opened the pause menu
+//     over it — and an earlier variant that cleared .in-match
+//     under that menu black-screened the page, reload the only
+//     recovery. The lobby path cannot strand the player that
+//     way: the lobby IS the surface (the pre-match state, on the
+//     plain background), and Play solo starts the next visible
+//     match from it.
 {
   const tab = makeTab('https://skirmish.online/play/');
   await boot(tab);
@@ -446,12 +450,13 @@ const roomSocket = () =>
   await sleep(1500);
   assert.equal(inMatch(tab), true, 'solo match started');
   tab.el('end-menu-btn').click();
-  assert.equal(inMatch(tab), true, 'back to menu keeps the fresh match on screen under the pause menu');
-  assert.equal(tab.el('pause-menu').style.display, 'flex', 'pause menu open over the fresh match');
-  tab.el('menu-close').click();
-  assert.equal(tab.el('pause-menu').style.display, 'none', 'closing the menu hides it');
-  assert.equal(inMatch(tab), true, 'closing the back-to-menu pause lands IN the fresh match, not on a black page');
-  console.log('PASS (8) end screen → Back to menu → close: fresh match visible throughout, no black screen');
+  assert.equal(tab.el('end-overlay').style.display, 'none', 'end card dismissed');
+  assert.equal(tab.el('online-overlay').style.display, 'flex', 'Back to menu opens the Lobby Browser');
+  assert.equal(inMatch(tab), false, 'the lobby is up: no game on screen (pre-match state, not a black page)');
+  tab.el('btn-solo').click();
+  await sleep(1500);
+  assert.equal(inMatch(tab), true, 'Play solo from the lobby starts a fresh visible match');
+  console.log('PASS (8) end screen → Back to menu → Lobby Browser → Play solo: never stranded');
 }
 
 console.log('PREMATCH SMOKE: all cases passed');

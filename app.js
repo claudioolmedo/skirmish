@@ -192,6 +192,7 @@ const resGold = document.getElementById('res-gold');
 const resStone = document.getElementById('res-stone');
 const resPop = document.getElementById('res-pop');
 const resAge = document.getElementById('res-age'); // M6: the player's age
+const gameClock = document.getElementById('game-clock'); // INF-08: the match clock (restored 2026-11-16)
 const relicCountdownChip = document.getElementById('relic-countdown-chip'); // VIC-03: the relic countdown readout
 const relicCountdownVal = document.getElementById('relic-countdown');
 const kothCountdownChip = document.getElementById('koth-countdown-chip'); // Package I: the Monument countdown readout
@@ -462,8 +463,11 @@ const BUILD_PNG = ['house.png', 'farm.png', 'barracks.png', 'lumber-camp.png',
 // the Watch Tower's 850 is its pre-Castle value (BLD-18). The
 // gates follow the same convention: 240 is the Palisade Gate's
 // Dark column (400 from Feudal), 1650 the Stone Gate's Feudal
-// column (2700 from Castle).
-const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200, 150, 850, 500, 1800, 2400, 1080, 4800, 2100, 1800, 240, 1650, 2100, 4800, 4800, 1800];
+// column (2700 from Castle). The last entry completes the table
+// (client batch, 2026-11-16): the Fish Trap (kind 24) was
+// missing, so its panel HP read NaN — the sim's FISH_TRAP_HP
+// (480, the Farm row it adopts) is the value.
+const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200, 150, 850, 500, 1800, 2400, 1080, 4800, 2100, 1800, 240, 1650, 2100, 4800, 4800, 1800, 480];
 // the Watch Tower's 850 is its pre-Castle value (BLD-18).
 // WASM build commands by kind tag (M6 completes the set; BLD-13
 // adds the palisade's single-segment form — dragged lines go
@@ -2554,7 +2558,18 @@ updateQualityUi();
 // --- Isometric camera -------------------------------------------------
 // Fixed angle, 2:1 dimetric. Pure functions of explicit parameters so
 // the projection math can be unit-tested headlessly in Node.
-const INITIAL_S = 5; // screen px per iso unit at load
+// Screen px per iso unit at load. Raised 5 → 8 (client batch,
+// 2026-11-16 — Claudio's standing DE-fidelity rule, resolving
+// the black-pause-screen decision): at 5 the start view spanned
+// ~48 cells along the diagonal of a 1920 canvas, so the small
+// explored diamond around the Town Center read as an island in
+// black — and under the Pause overlay the screen read as simply
+// black. At 8 the span is ~30 cells, DE's default-view scale:
+// the starting base (TC, villagers, the nearest resources)
+// fills the frame. Only the STARTING zoom changes — S_MIN /
+// S_MAX and every zoom control are untouched, and resetSim /
+// adoptSim / the replay entry all read this one constant.
+const INITIAL_S = 8;
 const S_MIN = 1.2;
 const S_MAX = 24;
 let camS = INITIAL_S;
@@ -7335,8 +7350,9 @@ async function main() {
     playing = true;
   });
   // Match end (M5): Restart runs the menu's checked mode again from
-  // the same seed; Back to menu resets a fresh match and opens the
-  // pause menu over it (there is no start screen anymore).
+  // the same seed; Back to menu leaves to the Lobby Browser (the
+  // solo path joined the AI-room path on 2026-11-16 — see the
+  // endMenuBtn handler below).
   endRestartBtn.addEventListener('click', () => {
     enterGameCapture(); // every path here begins a fresh match
     if (net) {
@@ -7370,17 +7386,22 @@ async function main() {
       openLobby(null);
       return;
     }
-    // The pause menu over a fresh match IS this client's menu
-    // (see the handler's header note) — so the game view stays ON
-    // screen under it. Clearing .in-match here (bot-loop live
-    // proof, 2026-11-04) opened the pause menu over a black page,
-    // and closing it then left a black screen with no game and no
-    // menu: reload was the only recovery. Resume/✕ from here must
-    // land in the visible fresh match, like the lobby return path.
-    setInMatch(true); // fresh match stays visible under the menu
-    resetSim(builtMode || matchMode);
-    playing = true;
-    setPaused(true);
+    // Solo (client batch, 2026-11-16 — Claudio's standing
+    // DE-fidelity rule): Back to menu means the Lobby Browser
+    // here too, exactly as from an AI-room match above — the
+    // button now lands in the same place from every mode. The
+    // old solo path (bf599f8, 2026-10-17) reset a fresh match and
+    // opened the pause menu over it; that design is retired.
+    // openLobby takes the game off screen itself (setInMatch
+    // (false) — the pre-match state, the lobby on the plain
+    // background, not a black page: the 2026-11-04 black-screen
+    // defect came from clearing .in-match while keeping the
+    // pause menu as the only surface; here the lobby IS the
+    // surface, and its Play solo button starts the next match).
+    // matchEnded still stands, so the lobby offers no
+    // return-to-match for the finished game.
+    endOverlay.style.display = 'none';
+    openLobby(null);
   });
 
   // End-of-match feedback: stars paint on click, Send posts to
@@ -9579,8 +9600,10 @@ function drawTree(sx, sy, frac = 1, wx = 0, wy = 0) {
   // so the shake Claudio asked for never reached the screen (three
   // live sessions saw a perfectly still tree). At 0.30 units /
   // 0.08 rad the trunk shifts ~1.5 px and the treetop swings
-  // ~2.2 px at default zoom: a clear hit shudder, still well short
-  // of cartoonish. treefeedback.test.mjs pins this floor.
+  // ~2.2 px at that zoom: a clear hit shudder, still well short
+  // of cartoonish. (INITIAL_S is 8 since 2026-11-16, so both read
+  // proportionally larger now.) treefeedback.test.mjs pins this
+  // floor.
   let ox = 0;
   let wob = 0;
   const hitAt = treeWobble.get(key);
@@ -13465,6 +13488,23 @@ function updateTopBar() {
   const pop = myPop();
   const cap = myPopCap();
   resPop.textContent = `${pop} / ${cap}`;
+  // INF-08: the match clock — elapsed GAME time (ticks ÷ 60, the
+  // sim ticks at 60 Hz), mm:ss, h:mm:ss past an hour, so speed
+  // settings stretch it exactly as they stretch the game.
+  // Restored 2026-11-16 (client batch, Claudio's standing
+  // DE-fidelity rule), reversing the 2026-10-17 removal
+  // (1432660). updateTopBar runs on every frame in every state
+  // (the frame loop draws through Pause, the end screen and
+  // playback), and the element is a permanent top-bar child —
+  // so the clock cannot disappear after Resume, and while
+  // paused it shows the frozen game time, as DE's does.
+  if (gameClock) {
+    const secs = Math.floor(sim.tick_count() / 60);
+    const hh = Math.floor(secs / 3600);
+    const mm = String(Math.floor((secs % 3600) / 60)).padStart(2, '0');
+    const ss = String(secs % 60).padStart(2, '0');
+    gameClock.textContent = hh > 0 ? `${hh}:${mm}:${ss}` : `${mm}:${ss}`;
+  }
   // VIC-03: the relic countdown readout — the Package C
   // conditions ship no in-match clock, so this chip is the
   // minimal readout in their style: it appears only while an
@@ -15890,6 +15930,35 @@ function updateSelPanel() {
     selName.textContent = t('sel.none');
     selInfo.textContent = t('sel.noneInfo');
   }
+  // Building HP number (client batch, 2026-11-16 — Claudio's
+  // standing DE-fidelity rule): a selected unit's line leads
+  // with "HP cur / max" (sel.hp), and the foe-building line has
+  // always carried the number — but an OWN building's line
+  // showed none (the only HP read was the world-space bar over
+  // a damaged building). Own TC / production / plain buildings
+  // now lead with the same sel.hp text: the TC from the entity
+  // HP pair (the foe-TC read), a placed building from its HP
+  // fraction over the kind's max (the foe-building read).
+  if ((context === 'tc' || context === 'production' || context === 'building')
+      && selectedBuilding) {
+    let hpTxt = null;
+    if (selectedBuilding.type === 'tc') {
+      const id = selectedBuilding.id;
+      hpTxt = t('sel.hp', {
+        cur: Math.max(0, Math.ceil(st.hp[id * 2])),
+        max: st.hp[id * 2 + 1],
+      });
+    } else if (bk && BUILD_MAXHP[bk.kind] != null) {
+      hpTxt = t('sel.hp', {
+        cur: Math.round(bk.hpFrac * BUILD_MAXHP[bk.kind]),
+        max: BUILD_MAXHP[bk.kind],
+      });
+    }
+    if (hpTxt) {
+      selInfo.textContent = selInfo.textContent
+        ? `${hpTxt} · ${selInfo.textContent}` : hpTxt;
+    }
+  }
   // Castle P3b: a garrison host's info line carries its garrison
   // count — and, for the armed shelters, the live arrows per
   // volley (the sim's own stored counts, never recomputed here).
@@ -15984,11 +16053,12 @@ function drawRallyFlag(from, rx, ry, nodeId) {
 // source rect, dest rect, transform). After the pass, a unit
 // whose alpha-tight rect is materially covered by items drawn
 // in front of it (buildings, the Town Center, trees) gets its
-// silhouette — its own sprite alpha, flattened to its owner's
-// colour — painted over the occluders, clipped to the
-// occluders' own alpha, so exactly the hidden part shows
-// through, as in DE. The decision (geometry + the fog fairness
-// gate) is occlusion.js's; nothing here touches the sim.
+// outline — its own sprite alpha, flattened to its owner's
+// colour and reduced to its border — painted over the
+// occluders, clipped to the occluders' own alpha, so exactly
+// the hidden part's outline shows through, as in DE. The
+// decision (geometry + the fog fairness gate) is occlusion.js's;
+// nothing here touches the sim.
 //
 // Bot-loop fix2 (2026-11-02): three building kinds have no art
 // at all (BUILDING_ART_KEY has no 16 University / 17 Siege
@@ -16160,8 +16230,11 @@ function unionRectOf(a, b) {
 
 // The unit's sprite region flattened to a flat colour (its own
 // alpha, the colour filled in) — cached per image + region +
-// colour. This is DE's "player-colored outline": the shape is
-// the unit's silhouette, the colour is the owner's.
+// colour. This flattened silhouette is the raw material for
+// DE's "player-colored outline": paintOccludedSilhouette keeps
+// only its border (see OCC_OUTLINE_PX there), so what shows
+// through the occluder is the unit's outline in its owner's
+// colour, never the filled shape.
 const occTintCache = new WeakMap();
 function tintedSpriteOf(call, color) {
   let per = occTintCache.get(call.im);
@@ -16200,6 +16273,24 @@ function outlineColorFor(owner) {
 
 const occMaskCv = document.createElement('canvas');
 const occSilCv = document.createElement('canvas');
+const occErodeCv = document.createElement('canvas');
+
+// Outline-only (client batch, 2026-11-16 — Claudio's standing
+// DE-fidelity rule): DE shows an occluded unit's OUTLINE in the
+// owner's colour, not the filled silhouette this pass used to
+// paint. The outline is what remains of the clipped silhouette
+// after its eroded interior is cut away; the erosion keeps only
+// pixels whose 8 neighbours at this distance (device px) are
+// also inside the silhouette, so the surviving band is about
+// this thick. A shape thinner than the erosion keeps its full
+// silhouette — at that size the outline IS the shape.
+const OCC_OUTLINE_PX = 2;
+const OCC_ERODE_OFFSETS = [
+  [OCC_OUTLINE_PX, 0], [-OCC_OUTLINE_PX, 0],
+  [0, OCC_OUTLINE_PX], [0, -OCC_OUTLINE_PX],
+  [OCC_OUTLINE_PX, OCC_OUTLINE_PX], [OCC_OUTLINE_PX, -OCC_OUTLINE_PX],
+  [-OCC_OUTLINE_PX, OCC_OUTLINE_PX], [-OCC_OUTLINE_PX, -OCC_OUTLINE_PX],
+];
 
 // Synthesized occluder geometry for a placed building: the
 // screen-space silhouette of the generic building box (the
@@ -16233,13 +16324,15 @@ function buildingOccGeo(b) {
   };
 }
 
-// Paint one unit's silhouette over its occluders: the unit's own
+// Paint one unit's OUTLINE over its occluders: the unit's own
 // tinted alpha, clipped to the union of the covering occluders'
 // alpha (their recorded images replayed into a mask the size of
-// the unit's rect). LOW quality keeps the aid but clips to the
-// occluders' rects instead of their pixel alpha — cheaper, and
-// per the governor's doctrine information is never shed, only
-// cosmetic fidelity is.
+// the unit's rect), then reduced to its border — the filled
+// silhouette minus its eroded interior — so only the outline
+// shows through, as in DE. LOW quality keeps the aid but clips
+// to the occluders' rects instead of their pixel alpha —
+// cheaper, and per the governor's doctrine information is never
+// shed, only cosmetic fidelity is.
 function paintOccludedSilhouette(unitEntry, cover, color) {
   const r = unitEntry.rect;
   const bx = Math.floor(r.x);
@@ -16299,6 +16392,23 @@ function paintOccludedSilhouette(unitEntry, cover, color) {
   sg.globalCompositeOperation = 'destination-in';
   sg.drawImage(occMaskCv, 0, 0);
   sg.globalCompositeOperation = 'source-over';
+  // Outline-only: cut the eroded interior out of the clipped
+  // silhouette, leaving its border band. The erosion replays
+  // the silhouette into a scratch canvas and keeps, via
+  // destination-in at each neighbour offset, only the pixels
+  // that are inside from every side.
+  occErodeCv.width = bw;
+  occErodeCv.height = bh;
+  const eg = occErodeCv.getContext('2d');
+  eg.drawImage(occSilCv, 0, 0);
+  eg.globalCompositeOperation = 'destination-in';
+  for (const [dx, dy] of OCC_ERODE_OFFSETS) {
+    eg.drawImage(occSilCv, dx, dy);
+  }
+  eg.globalCompositeOperation = 'source-over';
+  sg.globalCompositeOperation = 'destination-out';
+  sg.drawImage(occErodeCv, 0, 0);
+  sg.globalCompositeOperation = 'source-over';
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.drawImage(occSilCv, bx, by);
@@ -16307,7 +16417,7 @@ function paintOccludedSilhouette(unitEntry, cover, color) {
 
 // The occlusion pass itself: group the recorded items into
 // units and occluders (with their alpha-tight rects), ask
-// occlusion.js who is hidden, and paint those silhouettes.
+// occlusion.js who is hidden, and paint those units' outlines.
 function drawOccludedOutlines(items) {
   const units = [];
   const occluders = [];
