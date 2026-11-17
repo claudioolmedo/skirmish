@@ -93,7 +93,11 @@ fn own_villager(sim: &Sim) -> u32 {
 fn gar01_eligibility_and_capacities_match_the_resolved_column() {
     // Capacities: towers 5, Castle 20, production 10, others none.
     assert_eq!(BuildingKind::WatchTower.garrison_capacity(), Some(5));
-    assert_eq!(BuildingKind::Outpost.garrison_capacity(), Some(5));
+    // BLD-18 completion (2026-11-16): the Outpost garrisons
+    // NOTHING in DE (capacity 0) — the whole tower line holds 5.
+    assert_eq!(BuildingKind::Outpost.garrison_capacity(), None);
+    assert_eq!(BuildingKind::GuardTower.garrison_capacity(), Some(5));
+    assert_eq!(BuildingKind::Keep.garrison_capacity(), Some(5));
     assert_eq!(BuildingKind::Castle.garrison_capacity(), Some(20));
     assert_eq!(BuildingKind::Barracks.garrison_capacity(), Some(10));
     assert_eq!(BuildingKind::ArcheryRange.garrison_capacity(), Some(10));

@@ -516,6 +516,27 @@ pub enum BuildingKind {
     /// nothing and accepts no drop-off. HP/armor are ADOPTED
     /// at the Farm's row (see `FISH_TRAP_HP`).
     FishTrap,
+    /// BLD-18 completion (2026-11-16): the Guard Tower — the
+    /// Watch Tower's Castle Age upgrade form. It is never placed
+    /// directly: the University's Guard Tower research converts
+    /// every standing Watch Tower of the owner in place (the
+    /// CLS-03 sweep shape), and a tower placed afterwards is
+    /// born at the owner's researched tier (see
+    /// `Sim::place_building`). Same placement rows as the Watch
+    /// Tower (35 W / 125 S, 80 s, 1×1 — the wiki Building
+    /// comparative table carries the base tower's cost on the
+    /// whole line); its own stat row: 1500 HP, armor 2/8, weapon
+    /// 7 pierce (+7 vs Ship, +2 vs Spearman), LoS 10, garrison 5.
+    GuardTower,
+    /// BLD-18 completion (2026-11-16): the Keep — the tower
+    /// line's Imperial form, reached by the University's Keep
+    /// research (which requires Guard Tower) converting every
+    /// standing Guard Tower of the owner, exactly as Guard
+    /// Tower converts the Watch. Stat row: 2250 HP, armor 3/9,
+    /// weapon 8 pierce (+10 vs Ship, +2 vs Spearman), LoS 10,
+    /// garrison 5; placement rows are the line's (35 W / 125 S,
+    /// 80 s, 1×1).
+    Keep,
 }
 
 impl BuildingKind {
@@ -535,7 +556,11 @@ impl BuildingKind {
     /// (Water W1, BLD-14 — the plan's allocation, verified free
     /// on the W1 base), 24 = fish trap (Water W2b, ECO-15 — the
     /// plan's allocation, verified free on the W2b base
-    /// `e794788`, where 0–23 were taken). Tags are an ABI
+    /// `e794788`, where 0–23 were taken), 25 = guard tower,
+    /// 26 = keep (BLD-18 completion, 2026-11-16 — the Watch
+    /// Tower line's upgrade forms, appended after the fish
+    /// trap, verified free on the BLD-18 base `a9edef6`, where
+    /// 0–24 were taken). Tags are an ABI
     /// contract — append only, never renumber.
     pub fn tag(self) -> u8 {
         match self {
@@ -564,6 +589,8 @@ impl BuildingKind {
             BuildingKind::Wonder => 22,
             BuildingKind::Dock => 23,
             BuildingKind::FishTrap => 24,
+            BuildingKind::GuardTower => 25,
+            BuildingKind::Keep => 26,
         }
     }
 
@@ -595,6 +622,8 @@ impl BuildingKind {
             22 => Some(BuildingKind::Wonder),
             23 => Some(BuildingKind::Dock),
             24 => Some(BuildingKind::FishTrap),
+            25 => Some(BuildingKind::GuardTower),
+            26 => Some(BuildingKind::Keep),
             _ => None,
         }
     }
@@ -613,6 +642,19 @@ impl BuildingKind {
     /// from unit proximity, never stored (see the variants).
     pub fn is_gate(self) -> bool {
         matches!(self, BuildingKind::PalisadeGate | BuildingKind::StoneGate)
+    }
+
+    /// Whether this kind is a tower of the Watch Tower line
+    /// (BLD-18 completion, 2026-11-16): the Watch Tower and its
+    /// two upgrade forms. The line shares its placement rows,
+    /// garrison column, Fletching/Arrowslits/Murder Holes
+    /// layering and garrison-arrow discipline; the kinds differ
+    /// in HP, armor and weapon rows only.
+    pub fn is_tower(self) -> bool {
+        matches!(
+            self,
+            BuildingKind::WatchTower | BuildingKind::GuardTower | BuildingKind::Keep
+        )
     }
 
     /// The placement-terrain classification of this kind (Water
@@ -658,6 +700,10 @@ impl BuildingKind {
             BuildingKind::Blacksmith => BLACKSMITH_WOOD_COST,
             BuildingKind::PalisadeWall => PALISADE_WALL_WOOD_COST,
             BuildingKind::WatchTower => WATCH_TOWER_WOOD_COST,
+            // BLD-18 completion: the upgrade forms carry the
+            // line's placement rows (the comparative table's
+            // single cost row for the tower line).
+            BuildingKind::GuardTower | BuildingKind::Keep => WATCH_TOWER_WOOD_COST,
             BuildingKind::Outpost => OUTPOST_WOOD_COST,
             BuildingKind::Market => MARKET_WOOD_COST,
             BuildingKind::TownCenter => TOWN_CENTER_WOOD_COST,
@@ -697,6 +743,8 @@ impl BuildingKind {
     pub fn stone_cost(self) -> I16F16 {
         match self {
             BuildingKind::WatchTower => WATCH_TOWER_STONE_COST,
+            // BLD-18 completion: the line's stone row, as above.
+            BuildingKind::GuardTower | BuildingKind::Keep => WATCH_TOWER_STONE_COST,
             BuildingKind::Outpost => OUTPOST_STONE_COST,
             BuildingKind::TownCenter => TOWN_CENTER_STONE_COST,
             // BLD-20: 5 stone per segment (dossier §2).
@@ -744,6 +792,8 @@ impl BuildingKind {
             BuildingKind::Blacksmith => BLACKSMITH_BUILD_TICKS,
             BuildingKind::PalisadeWall => PALISADE_WALL_BUILD_TICKS,
             BuildingKind::WatchTower => WATCH_TOWER_BUILD_TICKS,
+            // BLD-18 completion: the line's 80 s build row.
+            BuildingKind::GuardTower | BuildingKind::Keep => WATCH_TOWER_BUILD_TICKS,
             BuildingKind::Outpost => OUTPOST_BUILD_TICKS,
             BuildingKind::Market => MARKET_BUILD_TICKS,
             BuildingKind::TownCenter => TOWN_CENTER_BUILD_TICKS,
@@ -821,6 +871,9 @@ impl BuildingKind {
             BuildingKind::PalisadeWall
             | BuildingKind::StoneWall
             | BuildingKind::WatchTower
+            // BLD-18 completion: the tower line is 1×1 throughout.
+            | BuildingKind::GuardTower
+            | BuildingKind::Keep
             | BuildingKind::Outpost
             // Water W2b: the Fish Trap floats on ONE water cell.
             | BuildingKind::FishTrap
@@ -1007,11 +1060,17 @@ impl BuildingKind {
             | BuildingKind::Castle
             | BuildingKind::University
             | BuildingKind::SiegeWorkshop
+            // BLD-18 completion: the Guard Tower is the line's
+            // Castle Age form (reached by research, never placed
+            // before its Age).
+            | BuildingKind::GuardTower
             | BuildingKind::Monastery => Age::Castle,
             // VIC-02 (BLD-15): the Wonder is Imperial-born, with
             // no prerequisite building (`requires_building` reads
             // None for it, like the Castle's row).
-            BuildingKind::Wonder => Age::Imperial,
+            // BLD-18 completion: the Keep is the line's Imperial
+            // form, on the same terms.
+            BuildingKind::Wonder | BuildingKind::Keep => Age::Imperial,
             _ => Age::Dark,
         }
     }
@@ -1025,18 +1084,17 @@ impl BuildingKind {
     /// article itself, whose +4 "triples" the House's sight
     /// (2 → 6). The two BLD-18 structures keep their adopted rows:
     ///
-    /// - Watch Tower 10: ADOPTED — UNVERIFIED. The fetched tower
-    ///   sources pin range 8 but no sight figure; 10 follows the
-    ///   defensive-building pattern of sight = range + 2 (the
-    ///   Castle's documented 8 range pairs with double-digit sight
-    ///   in every secondary account).
-    /// - Outpost 6 in the Dark Age, 8 from Feudal: the Outpost
-    ///   article states its line of sight "increases with each
-    ///   Age" without numbers in the fetched text; the step values
-    ///   are ADOPTED — UNVERIFIED, chosen so the Dark-Age outpost
-    ///   already out-sees every ordinary building (its whole
-    ///   purpose) and the Feudal step matches the Town Center's
-    ///   documented 8.
+    /// - Watch Tower 10: CONFIRMED 2026-11-16 (BLD-18
+    ///   completion) — the wiki Building comparative table's
+    ///   tower rows pin LoS 10 for the whole line (Watch, Guard,
+    ///   Keep alike), discharging the earlier ADOPTED flag.
+    /// - Outpost 6 / 8 / 10 / 12 by Age (Dark/Feudal/Castle/
+    ///   Imperial): the same comparative table's Outpost row,
+    ///   corroborated by the Tower article ("grows from 6 to 12
+    ///   tiles as one advances through the Ages", +2 per Age) —
+    ///   the earlier adopted row held Castle/Imperial at the
+    ///   Feudal 8; the documented steps land with BLD-18's
+    ///   completion (sk-08 research, fetched 2026-11-16).
     ///
     /// The ordinary production/economy kinds keep the adopted
     /// constant 4 — now as explicit per-kind rows, still flagged
@@ -1079,13 +1137,18 @@ impl BuildingKind {
             // the Building comparative table's 6 is stale
             // (WATER-SPEC §8.4; plan Passo 0.4 takes 8).
             BuildingKind::Dock => 8,
-            BuildingKind::WatchTower => 10,
+            // BLD-18: the tower line's documented LoS is 10 at
+            // every tier (comparative table, confirmed
+            // 2026-11-16 — see the doc comment).
+            BuildingKind::WatchTower | BuildingKind::GuardTower | BuildingKind::Keep => 10,
             BuildingKind::Outpost => match age {
                 Age::Dark => 6,
-                // Castle holds the Feudal step (ADOPTED — the
-                // article's per-Age numbers stay UNVERIFIED; the
-                // Castle rung exists since Castle Age P1).
-                Age::Feudal | Age::Castle | Age::Imperial => 8,
+                Age::Feudal => 8,
+                // BLD-18 completion (2026-11-16): the documented
+                // Castle/Imperial steps (comparative table;
+                // Tower article: +2 per Age from 6 to 12).
+                Age::Castle => 10,
+                Age::Imperial => 12,
             },
             // VIS-03: the Town Watch article's +4 "triples" the
             // House — its base sight is 2.
@@ -1141,6 +1204,11 @@ impl BuildingKind {
     pub fn weapon(self) -> Option<BuildingWeapon> {
         match self {
             BuildingKind::WatchTower => Some(WATCH_TOWER_WEAPON),
+            // BLD-18 completion (2026-11-16): the upgrade forms
+            // carry their own profiles (7 / 8 pierce — see the
+            // constants below).
+            BuildingKind::GuardTower => Some(GUARD_TOWER_WEAPON),
+            BuildingKind::Keep => Some(KEEP_WEAPON),
             // Castle P3a: the designed second user ships — the
             // Castle fires its base volley of 5 (GAR-05's extra
             // garrison arrows layer on in P3c, not here).
@@ -1163,10 +1231,18 @@ impl BuildingKind {
     /// `crate::TC_GARRISON_CAPACITY`); towers 5; the Castle 20;
     /// production buildings 10 (production garrison only — entry
     /// solely as the rally/newly-trained case, GAR-08). `None` =
-    /// not garrisonable at all.
+    /// not garrisonable at all. BLD-18 completion (2026-11-16):
+    /// the Outpost's capacity is **0 — it never garrisons** (the
+    /// wiki Outpost article, Trivia: "Outposts cannot garrison
+    /// units"; the sk-08 research) — it leaves this column, the
+    /// defensive-garrison set and the Town Bell's shelter scan
+    /// together, and GAR-01's note is amended in the same
+    /// landing. The whole Watch Tower line holds 5.
     pub fn garrison_capacity(self) -> Option<u32> {
         match self {
-            BuildingKind::WatchTower | BuildingKind::Outpost => Some(5),
+            BuildingKind::WatchTower | BuildingKind::GuardTower | BuildingKind::Keep => {
+                Some(5)
+            }
             BuildingKind::Castle => Some(20),
             BuildingKind::Barracks
             | BuildingKind::ArcheryRange
@@ -1195,9 +1271,15 @@ impl BuildingKind {
     /// re-enter. Production buildings are the other type: eject
     /// freely, never re-enter (GAR-08).
     pub fn is_defensive_garrison(self) -> bool {
+        // BLD-18 completion (2026-11-16): the Outpost leaves the
+        // set (capacity 0 — see `garrison_capacity`); the tower
+        // line and the Castle remain.
         matches!(
             self,
-            BuildingKind::WatchTower | BuildingKind::Outpost | BuildingKind::Castle
+            BuildingKind::WatchTower
+                | BuildingKind::GuardTower
+                | BuildingKind::Keep
+                | BuildingKind::Castle
         )
     }
 
@@ -1220,7 +1302,9 @@ impl BuildingKind {
     /// separately (`garrison_capacity` + the spawn path).
     pub fn admits_defensive(self, kind: crate::entity::EntityKind) -> bool {
         match self {
-            BuildingKind::WatchTower | BuildingKind::Outpost => kind.is_foot_garrisonable(),
+            BuildingKind::WatchTower | BuildingKind::GuardTower | BuildingKind::Keep => {
+                kind.is_foot_garrisonable()
+            }
             BuildingKind::Castle => {
                 kind.is_foot_garrisonable() || kind.is_mounted_garrisonable()
             }
@@ -1246,7 +1330,10 @@ impl BuildingKind {
     /// base column in the garrison tick's `host_heal_rate`.
     pub fn garrison_heal_hp_per_min(self) -> i64 {
         match self {
-            BuildingKind::WatchTower | BuildingKind::Outpost => 6,
+            // BLD-18 completion: the tower line heals its
+            // garrison at the tower rate; the Outpost (no
+            // garrison since this landing) falls to the 0 row.
+            BuildingKind::WatchTower | BuildingKind::GuardTower | BuildingKind::Keep => 6,
             BuildingKind::Castle => 12,
             _ => 0,
         }
@@ -1421,6 +1508,13 @@ impl BuildingKind {
             // value to 850; the Castle step to 1020 lands with the
             // Castle Age column, when the `Age` enum reaches it).
             BuildingKind::WatchTower => 850,
+            // BLD-18 completion (2026-11-16): the upgrade forms'
+            // flat rows (wiki Building comparative table) — the
+            // kind IS the tier, so no Age step exists here; the
+            // Watch Tower's own Castle step in `max_hp_at` never
+            // applies to them.
+            BuildingKind::GuardTower => 1500,
+            BuildingKind::Keep => 2250,
             // BLD-18: the Outpost's flat 500 (Outpost article).
             BuildingKind::Outpost => 500,
             // Feudal column of the wiki's Market table (Castle and
@@ -1539,6 +1633,12 @@ impl BuildingKind {
             | BuildingKind::Stable
             | BuildingKind::WatchTower
             | BuildingKind::Market => 1,
+            // BLD-18 completion (2026-11-16): the Guard Tower's
+            // melee armor 2 (comparative table).
+            BuildingKind::GuardTower => 2,
+            // BLD-18 completion (2026-11-16): the Keep's melee
+            // armor 3 (comparative table).
+            BuildingKind::Keep => 3,
             // BLD-13: palisade melee armor 2 (wiki infobox; flat
             // across ages).
             BuildingKind::PalisadeWall => 2,
@@ -1612,7 +1712,19 @@ impl BuildingKind {
             // the adopted row (see `FISH_TRAP_HP`, UNVERIFIED);
             // every unlisted kind otherwise reads the generic 7.
             BuildingKind::Farm | BuildingKind::FishTrap => 0,
+            // BLD-18 completion (2026-11-16): the Outpost's
+            // pierce armor is **0** — its documented row is 0/0
+            // (comparative table); until this landing it read
+            // the generic fall-through 7 by accident. An explicit
+            // row, never the fall-through.
+            BuildingKind::Outpost => 0,
             BuildingKind::ArcheryRange | BuildingKind::Stable | BuildingKind::Market => 8,
+            // BLD-18 completion (2026-11-16): the Guard Tower's
+            // pierce armor 8 (comparative table).
+            BuildingKind::GuardTower => 8,
+            // BLD-18 completion (2026-11-16): the Keep's pierce
+            // armor 9 (comparative table).
+            BuildingKind::Keep => 9,
             // BLD-13: palisade pierce armor 5 (wiki infobox; 2 in
             // The Age of Kings, 5 since The Conquerors patch 1.0b).
             BuildingKind::PalisadeWall => 5,
@@ -1938,6 +2050,118 @@ pub const WATCH_TOWER_FLETCHING_ATTACKS: &[(u8, i32)] = &[
     (crate::classes::SHIP, 7),
     (crate::classes::SPEARMAN, 2),
 ];
+
+/// The Guard Tower's base profile (BLD-18 completion,
+/// 2026-11-16; wiki Building comparative + attacking-buildings
+/// tables via the sk-08 research): 7 pierce attack (+7 vs
+/// Ships — the current-DE value of updates 169123/177723; the
+/// comparative table's +9 is stale — +2 vs Spearmen), the
+/// tower band 1–8, RoF 2.0 s, and the line's shared flight
+/// profile (the Archer's adopted constants, as the Watch
+/// Tower's row records).
+pub const GUARD_TOWER_WEAPON: BuildingWeapon = BuildingWeapon {
+    attacks: &[(crate::classes::PIERCE, 7), (crate::classes::SHIP, 7), (crate::classes::SPEARMAN, 2)],
+    range_max: I16F16::from_bits(2_097_152), // 32.0 = 8 tiles
+    range_min: I16F16::from_bits(262_144),   // 4.0 = 1 tile
+    reload_ticks: 120,                       // 2.0 s
+    attack_delay_ticks: 21,
+    accuracy: 100,
+    projectile_speed: I16F16::from_bits(32_768), // 0.5
+    scatter: I16F16::from_bits(131_072),         // 2.0
+    volley: 1,
+};
+
+/// The Keep's base profile (BLD-18 completion, 2026-11-16;
+/// same sources): 8 pierce attack (+10 vs Ships, +2 vs
+/// Spearmen), the tower band and flight profile unchanged.
+pub const KEEP_WEAPON: BuildingWeapon = BuildingWeapon {
+    attacks: &[(crate::classes::PIERCE, 8), (crate::classes::SHIP, 10), (crate::classes::SPEARMAN, 2)],
+    range_max: I16F16::from_bits(2_097_152), // 32.0 = 8 tiles
+    range_min: I16F16::from_bits(262_144),   // 4.0 = 1 tile
+    reload_ticks: 120,                       // 2.0 s
+    attack_delay_ticks: 21,
+    accuracy: 100,
+    projectile_speed: I16F16::from_bits(32_768), // 0.5
+    scatter: I16F16::from_bits(131_072),         // 2.0
+    volley: 1,
+};
+
+/// The tower line's attack tables under Fletching and
+/// Arrowslits (BLD-18 completion, 2026-11-16). Fletching adds
+/// +1 pierce to the whole line (TEC-06's tower line, applied
+/// to all three tiers since this landing — before it, only
+/// the Watch Tower kind could carry the patch). Arrowslits
+/// (University, Imperial) adds +1 / +2 / +3 pierce by tier —
+/// Watch / Guard / Keep (wiki, Arrowslits; the Donjon's +3
+/// special case has no kind here). The two patches compose
+/// additively on the pierce component; the anti-ship and
+/// anti-spearman pairs never move. Only the pierce component
+/// differs between the four rows of each tier, so the tables
+/// are written out in full, in the DOCK_ATTACKS_* manner.
+pub const WATCH_TOWER_ARROWSLITS_ATTACKS: &[(u8, i32)] = &[
+    (crate::classes::PIERCE, 6),
+    (crate::classes::SHIP, 7),
+    (crate::classes::SPEARMAN, 2),
+];
+pub const WATCH_TOWER_FLETCHING_ARROWSLITS_ATTACKS: &[(u8, i32)] = &[
+    (crate::classes::PIERCE, 7),
+    (crate::classes::SHIP, 7),
+    (crate::classes::SPEARMAN, 2),
+];
+pub const GUARD_TOWER_FLETCHING_ATTACKS: &[(u8, i32)] = &[
+    (crate::classes::PIERCE, 8),
+    (crate::classes::SHIP, 7),
+    (crate::classes::SPEARMAN, 2),
+];
+pub const GUARD_TOWER_ARROWSLITS_ATTACKS: &[(u8, i32)] = &[
+    (crate::classes::PIERCE, 9),
+    (crate::classes::SHIP, 7),
+    (crate::classes::SPEARMAN, 2),
+];
+pub const GUARD_TOWER_FLETCHING_ARROWSLITS_ATTACKS: &[(u8, i32)] = &[
+    (crate::classes::PIERCE, 10),
+    (crate::classes::SHIP, 7),
+    (crate::classes::SPEARMAN, 2),
+];
+pub const KEEP_FLETCHING_ATTACKS: &[(u8, i32)] = &[
+    (crate::classes::PIERCE, 9),
+    (crate::classes::SHIP, 10),
+    (crate::classes::SPEARMAN, 2),
+];
+pub const KEEP_ARROWSLITS_ATTACKS: &[(u8, i32)] = &[
+    (crate::classes::PIERCE, 11),
+    (crate::classes::SHIP, 10),
+    (crate::classes::SPEARMAN, 2),
+];
+pub const KEEP_FLETCHING_ARROWSLITS_ATTACKS: &[(u8, i32)] = &[
+    (crate::classes::PIERCE, 12),
+    (crate::classes::SHIP, 10),
+    (crate::classes::SPEARMAN, 2),
+];
+
+/// The attack table of a tower-line kind under the owner's
+/// Fletching / Arrowslits research state (BLD-18 completion):
+/// the one selector `Sim::building_weapon` reads, so the
+/// layering lives beside the tables it picks from. Non-tower
+/// kinds read their weapon profile's own table (the caller
+/// only invokes this for the line).
+pub fn tower_attacks(kind: BuildingKind, fletching: bool, arrowslits: bool) -> &'static [(u8, i32)] {
+    match (kind, fletching, arrowslits) {
+        (BuildingKind::WatchTower, false, false) => WATCH_TOWER_WEAPON.attacks,
+        (BuildingKind::WatchTower, true, false) => WATCH_TOWER_FLETCHING_ATTACKS,
+        (BuildingKind::WatchTower, false, true) => WATCH_TOWER_ARROWSLITS_ATTACKS,
+        (BuildingKind::WatchTower, true, true) => WATCH_TOWER_FLETCHING_ARROWSLITS_ATTACKS,
+        (BuildingKind::GuardTower, false, false) => GUARD_TOWER_WEAPON.attacks,
+        (BuildingKind::GuardTower, true, false) => GUARD_TOWER_FLETCHING_ATTACKS,
+        (BuildingKind::GuardTower, false, true) => GUARD_TOWER_ARROWSLITS_ATTACKS,
+        (BuildingKind::GuardTower, true, true) => GUARD_TOWER_FLETCHING_ARROWSLITS_ATTACKS,
+        (BuildingKind::Keep, false, false) => KEEP_WEAPON.attacks,
+        (BuildingKind::Keep, true, false) => KEEP_FLETCHING_ATTACKS,
+        (BuildingKind::Keep, false, true) => KEEP_ARROWSLITS_ATTACKS,
+        (BuildingKind::Keep, true, true) => KEEP_FLETCHING_ARROWSLITS_ATTACKS,
+        _ => WATCH_TOWER_WEAPON.attacks,
+    }
+}
 
 /// `Projectile::attacker` value for a shot loosed by a building:
 /// no entity bears this id (entity ids are sequential from 1 and

@@ -1699,6 +1699,22 @@ impl WasmSim {
         self.push_build(entity, BuildingKind::Outpost, x, y)
     }
 
+    /// BLD-18 completion (2026-11-16): the Guard Tower kind's
+    /// direct form. Towers are normally ordered as Watch Towers
+    /// and born at the owner's researched tier (the placement
+    /// conversion in `Sim::place_building`); the direct form
+    /// exists so the kind set's ABI stays complete, on the
+    /// Watch Tower's terms.
+    pub fn push_build_guard_tower(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build(entity, BuildingKind::GuardTower, x, y)
+    }
+
+    /// BLD-18 completion (2026-11-16): the Keep kind's direct
+    /// form, on the Guard Tower's terms.
+    pub fn push_build_keep(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build(entity, BuildingKind::Keep, x, y)
+    }
+
     fn push_build(&mut self, entity: u32, kind: BuildingKind, x: f64, y: f64) -> bool {
         let (fx, fy) = (I16F16::from_num(x), I16F16::from_num(y));
         let ok = self.inner.can_build(entity, kind, fx, fy);
@@ -1976,6 +1992,18 @@ impl WasmSim {
     /// `push_build_house_queued`.
     pub fn push_build_outpost_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
         self.push_build_queued(entity, BuildingKind::Outpost, x, y)
+    }
+
+    /// Queue a Guard Tower build (BLD-18 completion) — see
+    /// `push_build_guard_tower`.
+    pub fn push_build_guard_tower_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build_queued(entity, BuildingKind::GuardTower, x, y)
+    }
+
+    /// Queue a Keep build (BLD-18 completion) — see
+    /// `push_build_keep`.
+    pub fn push_build_keep_queued(&mut self, entity: u32, x: f64, y: f64) -> bool {
+        self.push_build_queued(entity, BuildingKind::Keep, x, y)
     }
 
     fn push_build_queued(&mut self, entity: u32, kind: BuildingKind, x: f64, y: f64) -> bool {

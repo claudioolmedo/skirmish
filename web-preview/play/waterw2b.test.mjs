@@ -46,10 +46,10 @@ test('the build tables carry kind 24 at the SPEC row', () => {
   assert.equal(table('BUILD_COST_STONE')[24], '0');
   assert.equal(table('BUILD_COST_GOLD')[24], '0');
   assert.equal(table('BUILD_SIZE')[24], '1');
-  assert.equal(table('BUILD_COST').length, 25);
-  assert.match(app, /'i-fish-trap'\];?\s*$/m);
-  assert.match(app, /'dock', 'fishtrap'\]/);
-  assert.match(app, /'Dock', 'Fish Trap'\]/);
+  assert.equal(table('BUILD_COST').length, 27); // 25 here at W2b; +Guard Tower / Keep (BLD-18 completion, 2026-11-16)
+  assert.match(app, /'i-watchtower'\];?\s*$/m);
+  assert.match(app, /'fishtrap', 'guardtower', 'keep'\]/);
+  assert.match(app, /'Fish Trap', 'Guard Tower', 'Keep'\]/);
   // The local dispatch tables reach the new export.
   assert.match(app, /PUSH_BUILD\[24\] = 'push_build_fish_trap';/);
   assert.match(app, /PUSH_BUILD_QUEUED\[24\] = 'push_build_fish_trap_queued';/);

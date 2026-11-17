@@ -236,14 +236,15 @@ test('train badge costs match the sim table', () => {
 test('Castle P3b: the garrison buttons ride the host panels, unbadged', () => {
   // The renderer's garrison block (app.js) appends the Town Bell
   // + Ungarrison on the TC context and Ungarrison on the Castle,
-  // tower, Outpost and production contexts — with NO grid letter
+  // tower and production contexts — with NO grid letter
   // (key: null): the pinned DE panels above leave those cells to
   // their own occupants, so the buttons answer to the mouse only,
-  // like the building Delete.
+  // like the building Delete. (BLD-18 completion, 2026-11-16:
+  // the Outpost leaves the list — its garrison capacity is 0.)
   const app = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
   assert.match(app, /id: 'town-bell', icon: 'i-bell'/);
   assert.match(app, /id: 'ungarrison', icon: 'i-ungarrison'/);
-  assert.match(app, /GAR_PANEL = \['tc', 'castle', 'tower', 'outpost', 'barracks', 'range', 'stable', 'siegeworkshop', 'monastery', 'dock'\]/);
+  assert.match(app, /GAR_PANEL = \['tc', 'castle', 'tower', 'barracks', 'range', 'stable', 'siegeworkshop', 'monastery', 'dock'\]/);
   assert.match(app, /case 'garrison_b': return sim\.push_garrison_building/);
   assert.match(app, /case 'town_bell': return sim\.push_town_bell/);
   // The smart order (SEL-11's garrison context): a right-click on

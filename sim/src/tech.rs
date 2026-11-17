@@ -166,6 +166,18 @@
 //!   Faith — 550 food / 750 gold, 60 s, requires Devotion
 //!   (TEC-07): own units as conversion targets get +4/+4 CI
 //!   shift (the MNK-05 stamps in `monks::apply_convert`).
+//! - The tower line completes (BLD-18 completion, 2026-11-16;
+//!   all University; wiki Technology table + the Guard Tower /
+//!   Keep / Arrowslits articles via the sk-08 research):
+//!   Guard Tower — Castle Age, 100 food / 250 wood, 30 s: every
+//!   standing Watch Tower of the owner becomes a Guard Tower
+//!   (the CLS-03 sweep in `apply_research`), and towers placed
+//!   afterwards are born at the tier. Keep — Imperial Age,
+//!   500 food / 350 wood, 75 s, requires Guard Tower: Guard
+//!   Towers become Keeps the same way. Arrowslits — Imperial
+//!   Age, 250 food / 250 wood, 25 s: the tower line gains
+//!   +1 / +2 / +3 attack by tier (layered in
+//!   `Sim::building_weapon` via `build::tower_attacks`).
 //! - Herbal Medicine (Castle P5e): Monastery, Castle Age,
 //!   200 gold, 35 s (wiki, Herbal Medicine; Castle Age dossier
 //!   §5.6). Effect: garrisoned units heal ×6 as fast (GAR-04) —
@@ -459,11 +471,30 @@ pub enum TechId {
     /// `units.rs`; the layering lives in `stats_for_masked`.
     /// Tag 53 — appended after W6's 50–52.
     SiegeEngineers,
+    /// University, Castle: the Watch Tower line upgrades —
+    /// every standing Watch Tower of the owner becomes a Guard
+    /// Tower, and later towers are born at the tier (BLD-18
+    /// completion, 2026-11-16; wiki, Guard Tower — cost/time
+    /// from the wiki Technology table: **100 food / 250 wood,
+    /// 30 s**). Tag 54 — drafted 53 on the BLD-18 base
+    /// `a9edef6`, renumbered +1 at integration (2026-11-17):
+    /// TEC-08's Siege Engineers holds 53.
+    GuardTower,
+    /// University, Imperial: Guard Towers become Keeps (BLD-18
+    /// completion; wiki, Keep — **500 food / 350 wood, 75 s**;
+    /// chains from Guard Tower, TEC-07). Tag 55 (drafted 54,
+    /// renumbered +1 at integration with BLD-18's trio).
+    Keep,
+    /// University, Imperial: the tower line gains +1 / +2 / +3
+    /// attack by tier (BLD-18 completion; wiki, Arrowslits —
+    /// **250 food / 250 wood, 25 s**). Tag 56 (drafted 55,
+    /// renumbered +1 at integration with BLD-18's trio).
+    Arrowslits,
 }
 
 impl TechId {
     /// All technologies, in tag order.
-    pub const ALL: [TechId; 54] = [
+    pub const ALL: [TechId; 57] = [
         TechId::Loom,
         TechId::FeudalAge,
         TechId::Fletching,
@@ -518,6 +549,9 @@ impl TechId {
         TechId::CarvelHull,
         TechId::Shipwright,
         TechId::SiegeEngineers,
+        TechId::GuardTower,
+        TechId::Keep,
+        TechId::Arrowslits,
     ];
 
     /// Stable tag: 0 loom, 1 feudal age, 2 fletching, 3 scale mail,
@@ -586,6 +620,11 @@ impl TechId {
     /// 53 siege engineers (TEC-08 — appended at the tail after
     /// W6's trio; verified first free on the TEC-08 base
     /// `a9edef6`, where ALL held 53 entries, tags 0–52.)
+    /// 54 guard tower, 55 keep, 56 arrowslits (BLD-18
+    /// completion, 2026-11-16 — the University tower trio,
+    /// appended at the tail; drafted 53/54/55 on the BLD-18 base
+    /// `a9edef6`, renumbered +1 at integration 2026-11-17 —
+    /// Siege Engineers holds 53.)
     pub fn tag(self) -> u8 {
         match self {
             TechId::Loom => 0,
@@ -642,6 +681,9 @@ impl TechId {
             TechId::CarvelHull => 51,
             TechId::Shipwright => 52,
             TechId::SiegeEngineers => 53,
+            TechId::GuardTower => 54,
+            TechId::Keep => 55,
+            TechId::Arrowslits => 56,
         }
     }
 
@@ -708,6 +750,12 @@ impl TechId {
             // TEC-08: Siege Engineers is University research
             // (wiki, Siege Engineers article).
             | TechId::SiegeEngineers => TechHost::Building(BuildingKind::University),
+            // BLD-18 completion (2026-11-16): the tower trio is
+            // University research (wiki, Guard Tower / Keep /
+            // Arrowslits).
+            | TechId::GuardTower
+            | TechId::Keep
+            | TechId::Arrowslits => TechHost::Building(BuildingKind::University),
             // Package M: Conscription is researched at the Castle
             // itself (wiki, Conscription).
             TechId::Conscription => TechHost::Building(BuildingKind::Castle),
@@ -758,6 +806,11 @@ impl TechId {
             // TEC-08: Siege Engineers is Imperial Age research
             // (wiki, Siege Engineers article).
             | TechId::SiegeEngineers => Age::Imperial,
+            // BLD-18 completion (2026-11-16): Keep and
+            // Arrowslits are Imperial Age research (wiki, the
+            // two articles).
+            | TechId::Keep
+            | TechId::Arrowslits => Age::Imperial,
             TechId::HandCart
             | TechId::LightCavalry
             | TechId::Husbandry
@@ -786,10 +839,13 @@ impl TechId {
             // Water W3b: Medium Warships is Castle Age research.
             // Water W5: the University ship pair is Castle Age
             // research (wiki, Careening / Clinker Construction).
+            // BLD-18 completion (2026-11-16): Guard Tower is
+            // Castle Age research (wiki, Guard Tower).
             | TechId::Gillnets
             | TechId::MediumWarships
             | TechId::Careening
-            | TechId::ClinkerConstruction => Age::Castle,
+            | TechId::ClinkerConstruction
+            | TechId::GuardTower => Age::Castle,
             _ => Age::Feudal,
         }
     }
@@ -837,6 +893,10 @@ impl TechId {
             // prerequisite in prose). Shipwright stands alone.
             TechId::DryDock => Some(TechId::Careening),
             TechId::CarvelHull => Some(TechId::ClinkerConstruction),
+            // BLD-18 completion (2026-11-16): Keep is the
+            // further upgrade of Guard Tower (wiki, Keep:
+            // "requires Guard Tower to be researched").
+            TechId::Keep => Some(TechId::GuardTower),
             _ => None,
         }
     }
@@ -901,6 +961,9 @@ impl TechId {
             TechId::CarvelHull => 3600, // 60 s (wiki, Technology table — W6 Passo 0, VERIFIED)
             TechId::Shipwright => 3600, // 60 s (wiki, Technology table — W6 Passo 0, VERIFIED)
             TechId::SiegeEngineers => 2700, // 45 s (wiki, Technology table — TEC-08, VERIFIED)
+            TechId::GuardTower => 1800, // 30 s (wiki, Technology table — BLD-18 completion, 2026-11-16)
+            TechId::Keep => 4500, // 75 s (wiki, Technology table — BLD-18 completion, 2026-11-16)
+            TechId::Arrowslits => 1500, // 25 s (wiki, Technology table — BLD-18 completion, 2026-11-16)
         }
     }
 
@@ -962,6 +1025,9 @@ impl TechId {
             TechId::CarvelHull => (350, 200, 0, 0), // wiki, Technology table — W6 Passo 0, VERIFIED
             TechId::Shipwright => (1000, 0, 300, 0), // wiki, Technology table — W6 Passo 0, VERIFIED
             TechId::SiegeEngineers => (500, 600, 0, 0), // wiki, Technology table — TEC-08, VERIFIED
+            TechId::GuardTower => (100, 250, 0, 0), // wiki, Technology table — BLD-18 completion, 2026-11-16
+            TechId::Keep => (500, 350, 0, 0), // wiki, Technology table — BLD-18 completion, 2026-11-16
+            TechId::Arrowslits => (250, 250, 0, 0), // wiki, Technology table — BLD-18 completion, 2026-11-16
         }
     }
 }
@@ -1344,7 +1410,13 @@ mod tests {
         assert_eq!(TechId::from_tag(52), Some(TechId::Shipwright));
         // TEC-08: Siege Engineers appends at 53.
         assert_eq!(TechId::from_tag(53), Some(TechId::SiegeEngineers));
-        assert_eq!(TechId::from_tag(54), None);
+        // BLD-18 completion (2026-11-16): the tower trio
+        // appends at 54/55/56 (drafted 53/54/55, renumbered +1
+        // at integration — Siege Engineers holds 53).
+        assert_eq!(TechId::from_tag(54), Some(TechId::GuardTower));
+        assert_eq!(TechId::from_tag(55), Some(TechId::Keep));
+        assert_eq!(TechId::from_tag(56), Some(TechId::Arrowslits));
+        assert_eq!(TechId::from_tag(57), None);
     }
 
     #[test]
@@ -1494,9 +1566,10 @@ mod tests {
         // TEC-07 wood chain (43/44) last, so ALL now holds 45.
         // (Water W2a appends the Dock fishing pair at 45/46 —
         // ALL now holds 47; the count lives in the W2a test.)
-        // (TEC-08 appends Siege Engineers at 53 — ALL now
-        // holds 54.)
-        assert_eq!(TechId::ALL.len(), 54);
+        // (TEC-08 appends Siege Engineers at 53 — ALL then
+        // held 54; BLD-18 completion appends the tower trio at
+        // 54/55/56 — ALL now holds 57.)
+        assert_eq!(TechId::ALL.len(), 57);
         // ECO-14: the farm gather lookup meets the farm's own
         // 0.4 food/s work-rate cap — the base farm rate sits
         // below it today, so the clamped value is the base rate,
@@ -1593,8 +1666,13 @@ mod tests {
         assert_eq!(TechId::from_tag(51), Some(TechId::CarvelHull));
         assert_eq!(TechId::from_tag(52), Some(TechId::Shipwright));
         assert_eq!(TechId::from_tag(53), Some(TechId::SiegeEngineers));
-        assert_eq!(TechId::from_tag(54), None);
-        assert_eq!(TechId::ALL.len(), 54);
+        // BLD-18 completion (2026-11-16): the tower trio
+        // appends at 54/55/56 (renumbered +1 at integration).
+        assert_eq!(TechId::from_tag(54), Some(TechId::GuardTower));
+        assert_eq!(TechId::from_tag(55), Some(TechId::Keep));
+        assert_eq!(TechId::from_tag(56), Some(TechId::Arrowslits));
+        assert_eq!(TechId::from_tag(57), None);
+        assert_eq!(TechId::ALL.len(), 57);
     }
 
     #[test]

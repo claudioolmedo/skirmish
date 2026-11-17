@@ -48,8 +48,10 @@ test('ECO-14: the farm chain is on the Mill panel and the research map', () => {
   // Water W3b's Medium Warships raised it to 47, Water
   // W5's University ship pair raised it to 49, Water
   // W6's Imperial University ship trio raised it to 52, and
-  // TEC-08's Siege Engineers raised it to 53).
-  assert.ok(netplay.includes('(c.tech >= 29 && c.tech <= 53)'));
+  // TEC-08's Siege Engineers raised it to 53; the BLD-18
+  // completion's tower trio (renumbered 54/55/56 at
+  // integration) raised it to 56).
+  assert.ok(netplay.includes('(c.tech >= 29 && c.tech <= 56)'));
   // Icons exist for both buttons and the reseed desk.
   for (const icon of ['i-heavyplow', 'i-croprotation', 'i-reseed']) {
     assert.ok(html.includes(`<symbol id="${icon}"`), `${icon} symbol`);

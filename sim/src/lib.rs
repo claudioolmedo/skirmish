@@ -92,6 +92,8 @@ mod university_p3c_tests;
 #[cfg(test)]
 mod garrison_tests;
 #[cfg(test)]
+mod bld18_tests;
+#[cfg(test)]
 mod imperial_tests;
 #[cfg(test)]
 mod housed_tests;
@@ -4128,9 +4130,19 @@ impl Sim {
                 crate::tech::Age::Imperial => crate::build::DOCK_ATTACKS_IMPERIAL,
             };
         }
-        if kind == BuildingKind::WatchTower && self.has_tech(owner, TechId::Fletching) {
-            w.attacks = crate::build::WATCH_TOWER_FLETCHING_ATTACKS;
-            w.range_max += I16F16::from_num(4); // +1 tile (TEC-06)
+        if kind.is_tower() {
+            // TEC-06's tower line, generalized to the whole
+            // Watch Tower line (BLD-18 completion, 2026-11-16 —
+            // before it, only the Watch Tower kind could carry
+            // the patches): Fletching adds +1 attack and +1
+            // range; Arrowslits adds +1/+2/+3 attack by tier.
+            // The selector beside the tables picks the row.
+            let fletching = self.has_tech(owner, TechId::Fletching);
+            let arrowslits = self.has_tech(owner, TechId::Arrowslits);
+            w.attacks = crate::build::tower_attacks(kind, fletching, arrowslits);
+            if fletching {
+                w.range_max += I16F16::from_num(4); // +1 tile (TEC-06)
+            }
         }
         // Murder Holes (Castle P3c, PRJ-08/BLD-18): the
         // University tech removes the minimum range of defensive
@@ -5829,6 +5841,56 @@ impl Sim {
                     if e.owner == owner && e.kind == EntityKind::ScoutCavalry && !e.dead {
                         e.kind = EntityKind::LightCavalry;
                     }
+                }
+            }
+            TechId::GuardTower => {
+                // BLD-18 completion (2026-11-16): the tower
+                // line's upgrade — every standing Watch Tower of
+                // the owner becomes a Guard Tower in place (the
+                // CLS-03 sweep shape on buildings: position,
+                // garrison, progress and current HP are kept
+                // exactly; the new tier's maximum simply reads
+                // off the new kind — no heal, per BLD-11/TEC-04).
+                // Foundations convert too: the line's build row
+                // is one 80 s row at every tier, so a foundation's
+                // progress carries unchanged. Converted towers
+                // recompute their garrison arrows — the Guard
+                // weapon's own DPS (7 pierce against the Watch's
+                // 5) is the GAR-05 divisor.
+                self.players[slot].techs |= tech.bit();
+                let converted: Vec<u32> = self
+                    .buildings
+                    .iter()
+                    .filter(|b| b.owner == owner && b.kind == BuildingKind::WatchTower)
+                    .map(|b| b.id)
+                    .collect();
+                for bid in converted {
+                    if let Some(bi) = self.building_index(bid) {
+                        self.buildings[bi].kind = BuildingKind::GuardTower;
+                    }
+                    self.recompute_garrison_arrows(
+                        GarrisonRef::Building(bid),
+                    );
+                }
+            }
+            TechId::Keep => {
+                // BLD-18 completion (2026-11-16): the second
+                // rung — Guard Towers become Keeps, on the Guard
+                // Tower sweep's exact terms.
+                self.players[slot].techs |= tech.bit();
+                let converted: Vec<u32> = self
+                    .buildings
+                    .iter()
+                    .filter(|b| b.owner == owner && b.kind == BuildingKind::GuardTower)
+                    .map(|b| b.id)
+                    .collect();
+                for bid in converted {
+                    if let Some(bi) = self.building_index(bid) {
+                        self.buildings[bi].kind = BuildingKind::Keep;
+                    }
+                    self.recompute_garrison_arrows(
+                        GarrisonRef::Building(bid),
+                    );
                 }
             }
             TechId::MediumWarships => {
@@ -9358,6 +9420,26 @@ impl Sim {
         cell_y: u32,
     ) -> Option<u32> {
         let builder_owner = self.entities[idx].owner;
+        // BLD-18 completion (2026-11-16): a tower placed by an
+        // owner holding the line's upgrades is BORN at the
+        // researched tier — the command still names the Watch
+        // Tower (the build menu's one tower button), and the
+        // tier resolves here, at the one placement choke point
+        // every path (player, queued, AI) shares, so all
+        // clients agree. The line's placement rows are identical
+        // at every tier, so validation and the spends below are
+        // tier-blind.
+        let kind = if kind == BuildingKind::WatchTower {
+            if self.has_tech(builder_owner, TechId::Keep) {
+                BuildingKind::Keep
+            } else if self.has_tech(builder_owner, TechId::GuardTower) {
+                BuildingKind::GuardTower
+            } else {
+                kind
+            }
+        } else {
+            kind
+        };
         // Stone-cost kinds (BLD-18's tower and outpost; the Town
         // Center's 100 stone, Castle Age P1): the stone is
         // re-checked BEFORE either spend lands, so a failure can

@@ -439,7 +439,11 @@ impl Sim {
                                 extra.max(1).min(10)
                             }
                         }
-                        Some(BuildingKind::WatchTower) => 1 + extra.min(4),
+                        // BLD-18 completion (2026-11-16): the
+                        // whole tower line caps at +4 over its
+                        // base 1 (the divisor above already read
+                        // the tier's own weapon row).
+                        Some(k) if k.is_tower() => 1 + extra.min(4),
                         Some(BuildingKind::Castle) => 5 + extra.min(16),
                         _ => 0,
                     }

@@ -199,7 +199,13 @@ export const PANEL_BUTTONS = {
     'research-drydock', 'research-carvelhull', 'research-shipwright',
     // TEC-08: Siege Engineers appends after the trio — the
     // positional grid continues.
-    'research-siegeengineers'],
+    'research-siegeengineers',
+    // BLD-18 completion (2026-11-16): the tower trio appends —
+    // Guard Tower takes the grid's last cell (M); Keep and
+    // Arrowslits render after it unlettered (click-only, like
+    // the Monastery's Imperial researches), so they are not
+    // listed here: this table holds the lettered buttons only.
+    'research-guardtower'],
   // Water W2 client (ECO-15): the Dock's panel — Train Fishing
   // Ship, then its two fishing researches (Fishing Lines,
   // Gillnets), the plain positional grid like every production
@@ -410,6 +416,12 @@ export const PANEL_KEYS = {
     // TEC-08: Siege Engineers takes the fourth row's second
     // cell (N) — the positional grid continues.
     'research-siegeengineers': ['KeyN', 'N'],
+    // BLD-18 completion (2026-11-16): Guard Tower takes the
+    // fourth row's last cell (M); Keep and Arrowslits ride
+    // unlettered past the 4×3 grid, click-only like the
+    // Monastery's Imperial researches (the renderer grows the
+    // grid rows for them, per the 2026-11-06 overflow fix).
+    'research-guardtower': ['KeyM', 'M'],
   },
   // Water W2 client (ECO-15): the Dock — the plain positional
   // grid: Train Fishing Ship Q, Fishing Lines W, Gillnets E.

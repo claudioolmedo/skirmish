@@ -384,8 +384,12 @@ included — EXCEPT walls, gates, Farms and Fish Traps (gates and
 Fish Traps do not exist as kinds yet; the exclusion is recorded
 in the table for when they land). The 20-tile cap (VIS-04) is
 enforced at stamp time for every source. · *Status:* **MATCHES**
-(the ordinary kinds' base 4 and the BLD-18 rows remain adopted
-values, flagged as such in the table — the CLS-03 precedent).
+(the ordinary kinds' base 4 remains an adopted value, flagged
+as such in the table — the CLS-03 precedent). *Note
+2026-11-16 (BLD-18 completion):* the BLD-18 rows are
+documented now, no longer adopted — the tower line reads 10
+at every tier and the Outpost 6/8/10/12 by Age (wiki
+comparative table, fetched for sk-08).
 
 **VIS-04 — LoS is capped at 20 tiles.** No unit or building sees farther
 than 20 tiles, whatever its stats or technologies say.
@@ -1961,14 +1965,13 @@ hits, so the attribution marker never enters its stream, and
 no tower stands in it); per-kind sight in
 `recompute_visibility`; client panel/art/i18n in the same
 landing; towers register as occluders through the shared
-building draw path (INF-12). · *Status:* **DIFFERS** — base
-fire, band, costs, HP/armor, repair/delete and the panel match
-the documented values; the remainders are: garrison arrows
-(capacity 5 — the GAR family's package; a garrisoned tower
-fires more arrows in the reference), Murder Holes (removes the
-minimum range), the Guard Tower upgrade (100 F / 250 W → 1500
-HP, 7 attack), the Castle-Age HP step, and the two
-UNVERIFIED sight figures. *Narrowed 2026-10-29 (Castle P3a):*
+building draw path (INF-12). · *Status:* **MATCHES** (flipped
+by the completion landing of 2026-11-16, final note below; at
+first landing: DIFFERS — base fire, band, costs, HP/armor,
+repair/delete and the panel matched; the remainders were the
+garrison arrows, Murder Holes, the Guard Tower upgrade, the
+Castle-Age HP step, and the two UNVERIFIED sight figures —
+each closed by the narrowings and the completion below). *Narrowed 2026-10-29 (Castle P3a):*
 the Castle — this rule's designed second user — now fires on
 the same machinery: 11 pierce (+2 vs Spearmen on the main
 projectile), range 8 (min 1), RoF 2.0 s, accuracy 100%, and a
@@ -1996,6 +1999,44 @@ Remaining for this rule: the Guard Tower upgrade (100 F / 250 W
 no armor row for the upgraded tower, and this package does not
 invent one) and the two UNVERIFIED sight figures. Status
 unchanged.
+*Completed 2026-11-16 (sk-08 resolution, approved by
+Claudio):* the tower line is whole, and the status flips to
+**MATCHES**. **Guard Tower / Keep** are their own kinds (tags
+25/26): the University researches **Guard Tower** (Castle Age,
+100 F / 250 W, 30 s; TechId 53) and **Keep** (Imperial, 500 F /
+350 W, 75 s; TechId 54, requires Guard Tower); on completion
+every standing tower of the owner converts in place (position,
+current HP, garrison and progress kept exactly — the maximum
+rises, no heal), and a tower placed afterwards is born at the
+owner's tier. Rows (wiki "Building" comparative table, fetched
+for sk-08): Guard 1500 HP, armor 2/8, attack 7 (+7 vs Ship —
+the current-DE value; the comparative table's +9 is stale —
++2 vs Spearman); Keep 2250 HP, armor 3/9, attack 8 (+10 vs
+Ship, +2 vs Spearman); the build row (35 W / 125 S, 80 s,
+1×1), the 1–8 band, RoF 2.0 s and garrison 5 are unchanged at
+every tier. **Outpost corrections**: sight is now the
+documented 6/8/10/12 by Age (was the adopted 6/8, Dark/Feudal
+only), pierce armor an explicit 0 (was the generic 7), and
+garrison capacity **0** — the Outpost shelters nobody and
+leaves the Town Bell's shelter scan (GAR-01 narrows
+accordingly, same date). **Arrowslits** (University, Imperial,
+250 F / 250 W, 25 s; TechId 55) layers +1/+2/+3 pierce by tier
+over the Fletching-patched tables, additively. **Garrison
+arrows** past the base volley fly the secondary table — the
+tower's own layered table + **+5 vs Stone Defense** (new armor
+class 24: the tower line, the Castle, stone walls and gates,
+and the Town Center) — while the tower's own arrow keeps the
+main table. The two formerly UNVERIFIED sight figures are
+documented now (the tower line reads 10 at every tier; the
+Outpost row above). Golden hash unchanged: every new row sits
+behind research bits no existing scenario sets. Client:
+University buttons (hotkeys N/M; Arrowslits rides unlettered
+past the 4×3 grid, click-only like the Monastery's Imperial
+researches), tech-tree mirror, names EN/PT/ES, the netplay
+research ceiling raised to 55, original icons; the two kinds
+draw the line's Watch Tower art until a per-tier art front
+gives them their own. Heated Shot stays
+deferred under TEC-06 — it was never this rule's remainder.
 
 ---
 
@@ -3577,6 +3618,14 @@ columns on `BuildingKind` and the Town Center record
 (`sim/src/garrison.rs`); the garrisoned list lives on the host
 record (hashed) and the garrisoned flag on the entity removes it
 from the field and from pathing. · *Status:* **MATCHES**.
+*Narrowed 2026-11-16 (BLD-18 completion):* the "towers 5" above
+is the Watch Tower line (Watch / Guard / Keep, 5 each); the
+**Outpost garrisons nothing (capacity 0)** — the DE column the
+P3b landing read as a shelter is explicit in the wiki's Outpost
+row ("Outposts cannot garrison units"). The Outpost leaves the
+capacity, defensive-garrison, admission and heal columns, and
+with them the Town Bell's shelter scan. The DE column is now
+implemented exactly; status stays **MATCHES**.
 
 **GAR-02 — Garrisoned units are untouchable.** While inside, a unit
 cannot be damaged, converted, or healed by monks (it heals by GAR-04
@@ -5564,6 +5613,20 @@ The book's Appendix table stands at 223 rules, 197 / 15 / 11
 Status count over the rule bodies (bot-loop recount,
 2026-11-16) is 207 / 14 / 2.
 
+2026-11-17 (BLD-18 completion, convoy landing with
+MOV-09): BLD-18 moves DIFFERS → MATCHES — the §7 row below
+moves 17/2/1 → 18/1/1 and the table's total row 197/15/11 →
+198/14/11, on the table's own arithmetic only. The tower
+trio's TechIds renumbered at integration: Guard Tower 54,
+Keep 55, Arrowslits 56 (Siege Engineers holds 53); the
+University panel appends after Siege Engineers (Guard Tower
+index 11, hotkey M; Keep 12 and Arrowslits 13 unlettered).
+The mechanical Status count over the rule bodies on this
+tree is 212 / 9 / 2 raw — 211 / 10 / 2 with SEL-10 held on
+the DIFFERS side pending its live proofs, the standing
+treatment; the appendix table's printed totals remain stale
+against the bodies, as recorded at the NET-11 entry above.
+
 | § | System | Rules | MATCHES | DIFFERS | MISSING |
 |---|--------|------:|--------:|--------:|--------:|
 | 1 | Simulation & time (SIM) | 12 | 12 | 0 | 0 |
@@ -5572,7 +5635,7 @@ Status count over the rule bodies (bot-loop recount,
 | 4 | Selection & orders (SEL) | 17 | 16 | 1 | 0 |
 | 5 | Movement, pathfinding & collision (MOV) | 12 | 8 | 3 | 1 |
 | 6 | Economy & drop-off (ECO) | 17 | 16 | 0 | 1 |
-| 7 | Buildings & placement (BLD) | 20 | 17 | 2 | 1 |
+| 7 | Buildings & placement (BLD) | 20 | 18 | 1 | 1 |
 | 8 | Combat & damage (CMB) | 17 | 17 | 0 | 0 |
 | 9 | Projectiles & ballistics (PRJ) | 10 | 8 | 2 | 0 |
 | 10 | Unit classes & counters (CLS) | 8 | 6 | 0 | 2 |
@@ -5584,7 +5647,7 @@ Status count over the rule bodies (bot-loop recount,
 | 16 | Victory, scoring & game modes (VIC) | 12 | 9 | 0 | 3 |
 | 17 | Multiplayer determinism (NET) | 11 | 10 | 1 | 0 |
 | 18 | Information rules (INF) | 13 | 12 | 1 | 0 |
-| | **Total** | **223** | **197** | **15** | **11** |
+| | **Total** | **223** | **198** | **14** | **11** |
 
 Reading: the foundation systems (§1, §4–§7) are largely in place; the
 combat stack (§8–§10) landed with M3, the age/technology layer

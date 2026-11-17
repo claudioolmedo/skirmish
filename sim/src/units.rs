@@ -385,7 +385,16 @@ static TOWN_CENTER: UnitSpec = UnitSpec {
     armor_melee: 3,
     armor_pierce: 5,
     armor_building: 0,
-    classes: cls::mask(&[cls::ALL_BUILDINGS, cls::STANDARD_BUILDINGS]),
+    // BLD-18 completion (2026-11-16): the Town Center carries
+    // the Stone Defense class like the placed stone defensive
+    // structures (wiki, "Armor class: Stone defense") — the
+    // placed-building half of the membership lives in
+    // `combat::building_spec`.
+    classes: cls::mask(&[
+        cls::ALL_BUILDINGS,
+        cls::STANDARD_BUILDINGS,
+        cls::STONE_DEFENSE,
+    ]),
     range_max: I16F16::ZERO,
     range_min: I16F16::ZERO,
     reload_ticks: 0,

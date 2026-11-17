@@ -94,6 +94,16 @@ pub const LONG_RANGE_WARSHIP: u8 = 22;
 /// introduced to make the Hulk line stronger against the Fire
 /// Galley line", anti-fire-ship row +1, fetched 2026-11-06).
 pub const FIRE_SHIP: u8 = 23;
+/// Stone defense (BLD-18 completion, 2026-11-16): DE's genie
+/// class 13 in the wiki's building-class numbering ("Armor
+/// class: Stone defense" — "includes Harbors"), renumbered to
+/// our next free id 24 here. Carried by the stone defensive
+/// structures: the Town Center, the Watch Tower line, the
+/// Castle, the Stone Wall and the Stone Gate. Its first
+/// consumer in this roster is the tower line's garrison-arrow
+/// table (+5 vs Stone Defense, the wiki Building table's
+/// secondary-projectile row).
+pub const STONE_DEFENSE: u8 = 24;
 
 /// Membership bit for one class id.
 pub const fn bit(class: u8) -> u64 {

@@ -415,14 +415,48 @@ pub(crate) fn building_spec(kind: BuildingKind, owner_age: crate::tech::Age) -> 
     // Castle P3a: the Castle additionally belongs to the Castle
     // class — the membership its own anti-Castle bonus rows (the
     // Petard's +100) key on.
-    let classes = if kind.is_wall() {
+    // BLD-18 completion (2026-11-16): the stone defensive
+    // structures additionally belong to the Stone Defense
+    // class (wiki, "Armor class: Stone defense") — the tower
+    // line, the Castle, the Stone Wall and the Stone Gate.
+    // The class's armor reads 0 like every non-building class
+    // (see `damage_sum`), so the membership only ever ADDS
+    // the documented bonus pairs (the tower garrison arrows'
+    // +5) against these kinds; no existing attack row carries
+    // the pair, so no standing damage number moves.
+    let stone_defense = kind.is_tower()
+        || kind == BuildingKind::Castle
+        || kind == BuildingKind::StoneWall
+        || kind == BuildingKind::StoneGate;
+    let classes = if kind == BuildingKind::StoneWall {
+        // The Stone Wall carries Walls and Gates AND Stone
+        // Defense; its palisade sibling (wood) carries only
+        // the wall class, per the same class article.
+        cls::mask(&[
+            cls::ALL_BUILDINGS,
+            cls::STANDARD_BUILDINGS,
+            cls::WALLS_AND_GATES,
+            cls::STONE_DEFENSE,
+        ])
+    } else if kind.is_wall() {
         cls::mask(&[
             cls::ALL_BUILDINGS,
             cls::STANDARD_BUILDINGS,
             cls::WALLS_AND_GATES,
         ])
     } else if kind == BuildingKind::Castle {
-        cls::mask(&[cls::ALL_BUILDINGS, cls::STANDARD_BUILDINGS, cls::CASTLE])
+        cls::mask(&[
+            cls::ALL_BUILDINGS,
+            cls::STANDARD_BUILDINGS,
+            cls::CASTLE,
+            cls::STONE_DEFENSE,
+        ])
+    } else if stone_defense {
+        cls::mask(&[
+            cls::ALL_BUILDINGS,
+            cls::STANDARD_BUILDINGS,
+            cls::STONE_DEFENSE,
+        ])
     } else {
         cls::mask(&[cls::ALL_BUILDINGS, cls::STANDARD_BUILDINGS])
     };
@@ -2658,6 +2692,7 @@ impl Sim {
         let tick = self.tick;
         let b = &self.buildings[bi];
         let (bid, owner, bx, by, size) = (b.id, b.owner, b.pos_x, b.pos_y, b.kind.footprint_size());
+        let bkind = b.kind;
         let half = I16F16::from_num(size as i32 * 2);
         // Aim + band from the target as it stands NOW.
         let resolved = if let Some(tid) = b.weapon_target {
@@ -2747,7 +2782,27 @@ impl Sim {
         // per-projectile RNG, so SIM-04's draw discipline is
         // untouched; a future sub-100 building weapon would draw
         // per projectile here, in volley order.
-        for _ in 0..volley.max(1) {
+        // BLD-18 completion (2026-11-16): the tower line's
+        // GARRISON arrows — every projectile past the tower's
+        // own (the profile's base volley) — fly with the
+        // SECONDARY attack table: the weapon's layered table
+        // plus +5 vs Stone Defense (wiki, Building,
+        // attacking-buildings table: the secondary projectile
+        // row of the tower line). The Castle's volley and the
+        // Dock's arrows keep the one table (their secondary
+        // rows are outside this rule's documented scope here).
+        let secondary: Option<Vec<(u8, i32)>> = if bkind.is_tower() {
+            let mut t = w.attacks.to_vec();
+            t.push((cls::STONE_DEFENSE, 5));
+            Some(t)
+        } else {
+            None
+        };
+        for i in 0..volley.max(1) {
+            let attacks = match &secondary {
+                Some(sec) if i >= w.volley => sec.clone(),
+                _ => w.attacks.to_vec(),
+            };
             self.projectiles.push(Projectile {
                 spawn_x: bx,
                 spawn_y: by,
@@ -2761,7 +2816,7 @@ impl Sim {
                 attacker_building: Some(bid),
                 owner,
                 attacker_elev: self.height_at_world(bx, by),
-                attacks: w.attacks.to_vec(),
+                attacks,
             });
         }
     }
