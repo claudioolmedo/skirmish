@@ -992,38 +992,51 @@ standard opening: a 40+-cell group move routes the Scout and
 villagers through their column slots while their targets stay
 formation slots)).
 
-**MOV-09 — Facing is one of 8 directions.** A unit has a facing (8-way);
-it attacks and is rendered in its facing; melee engagement turns the unit
-toward its target. (Reference sprites store 5 directions and mirror 3 —
-a rendering fact that lives in SPRITE-PIPELINE.md, not a sim rule.)
-*Source:* OPENAGE-RESEARCH §2.4. · *Impl:* facing is *derived* from
+**MOV-09 — Facing is one of 16 directions.** A unit has a facing
+(16-way, 22.5° sectors); it attacks and is rendered in its facing —
+the nearest of the 16 angles to its continuous heading; melee
+engagement turns the unit toward its target. (The classic engine
+stored 5 of 8 directions and mirrored 3 — the 1999 original's
+economy, not DE's model; storage facts live in SPRITE-PIPELINE.md,
+not a sim rule.)
+*Source:* the AoE2 DE modding documentation (DE unit graphics
+carry 16 directions — the graphic's declared angle count, Genie
+Editor "Angle Count"; official-forum modding guidebook) and
+SPRITE-PIPELINE §10.5 (DE itself uses 16 facings; the classic 8 is
+OPENAGE-RESEARCH §2.4). · *Impl:* facing is *derived* from
 velocity/target for rendering — presentation only: the WASM ABI
 exposes no unit state to the client and no rule consumes facing (if
-one ever does, store it as a hashed byte then). The derivation is
-now ONE model, `web-preview/play/facing.js`: a per-unit 8-way facing
-(dir 0 = +X, increasing toward +Y) taken from the movement vector
-while the unit moves, from the work target while it works (the
-gatherer faces its node), from the shot while it shoots, and —
-the clause that was missing — turned toward the melee target while
-it fights (`foeTargetFor` in app.js, the nearest-foe twin of the
+one ever does, store it as a hashed byte then). The sim's formation
+OCTANTS table (`sim/src/formation.rs`) stays 8 — that is formation
+slot *layout geometry*, a separate matter from sprite facing. The
+derivation is ONE model, `web-preview/play/facing.js`: a per-unit
+16-way facing (dir 0 = +X, increasing toward +Y, 22.5° sectors)
+taken from the movement vector while the unit moves, from the work
+target while it works (the gatherer faces its node), from the shot
+while it shoots, and turned toward the melee target while it
+fights (`foeTargetFor` in app.js, the nearest-foe twin of the
 attack-pose inference, applied in the shared unit-action path and
 the villager sheet path, and to the wolf's lunge and the standing
 boar's bite); an idle unit keeps its last facing, and its corpse
-inherits
-it (`corpseDir8`). Every facing consumer reads the model: the
-directional sheets (8 rows), the villager sheets (the facing
-mapped onto the loaded tier's rows by `sheetRowForDir8` — sheet
-rows are storage, SPRITE-PIPELINE §12, not the facing model), the
-side-view fallback's flip (`faceForDir8`), and the animals. Kinds
-drawn as static vector figures (cavalry, siege, monk, king, ships,
-trade units) have no facing-dependent rendering at all — that is
-art state, not a facing model. Sim untouched; the golden hash does
+inherits it (`corpseDir16`). Every facing consumer reads the
+model: the directional sheets (re-rendered at 16 rows from the
+same pipeline models), the villager sheets (the facing mapped
+onto the loaded tier's rows by `sheetRowForDir16` — exact at the
+16-row tier, paired at 8, doubled at 32; sheet rows are storage,
+SPRITE-PIPELINE §10.5, not the facing model), the side-view
+fallback's flip (`faceForDir16`), and the animals. Kinds drawn as
+static vector figures (cavalry, siege, monk, king, ships, trade
+units) have no facing-dependent rendering at all — that is art
+state, not a facing model. Sim untouched; the golden hash does
 not move. · *Status:* **MATCHES** (shipped 2026-11-16, MOV-09
-package: `play/facing.js` + the melee turn in `unitActionFor`,
-`updateVilAnim`, `dirWolfAct` and `dirAnimalAct`; pinned by
-`web-preview/play/facing.test.mjs` — the quantization sectors and
-boundaries, the 8-vector round-trip, the flip table, the tier row
-mapping with its back-conversion, and the app.js wiring).
+package as adjusted by the sk-06 adjudication: `play/facing.js`
+dir16 model + the melee turn in `unitActionFor`, `updateVilAnim`,
+`dirWolfAct` and `dirAnimalAct` + the 16-row sheet re-render;
+pinned by `web-preview/play/facing.test.mjs` — the 16 sector
+centres and 11.25° boundaries, the 16-vector round-trip, the flip
+table, the row mapping (16→16 identity, 16→8 pairs, 16→32
+doubling) with its back-conversion, and the app.js wiring — and
+by the sheet geometry in `web-preview/play/directional.test.mjs`).
 
 **MOV-10 — Work and attack trigger on range, not exact arrival.** A unit
 begins its task when it comes within the task's range of the target, even

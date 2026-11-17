@@ -1,8 +1,12 @@
 // Directional sprite milestone (2026-10-19) — structural
 // assertions: the directional sheets + player-color masks exist
-// with the pipeline's geometry (rows = 8 directions, columns =
+// with the pipeline's geometry (rows = directions, columns =
 // frames, cell 128 — scout 160), the villager root panel carries
 // Repair on E, and the fire/rubble hooks are wired in app.js.
+// MOV-09 dir16 adjustment (2026-11-16): the unit/animal sheets
+// and the die sheets carry 16 rows (DE's direction count); the
+// villager's tier sheets keep the quality tiers' own row counts
+// (LOW root = 8 — the tier system is storage, not the model).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
@@ -38,28 +42,33 @@ const SHEETS = {
   wolf: { idle: 4, walk: 8, attack: 4 },
 };
 const MASKED = ['villager', 'archer', 'militia', 'maa', 'scout', 'spearman', 'skirmisher'];
+// Direction rows per unit: 16 for the directional sheets (the
+// MOV-09 model), 8 for the villager's LOW-tier root sheets.
+const ROWS = { villager: 8 };
+const rowsOf = (unit) => ROWS[unit] || 16;
 
 for (const [unit, states] of Object.entries(SHEETS)) {
   for (const [state, frames] of Object.entries(states)) {
-    test(`${unit}-${state} sheet: ${frames} frames x 8 directions`, () => {
+    const rows = rowsOf(unit);
+    test(`${unit}-${state} sheet: ${frames} frames x ${rows} directions`, () => {
       const path = join(sheetsDir, `${unit}-${state}.png`);
       assert.ok(existsSync(path), `${unit}-${state}.png exists`);
-      assert.deepEqual(pngSize(path), [frames * 128, 8 * 128]);
+      assert.deepEqual(pngSize(path), [frames * 128, rows * 128]);
     });
     if (MASKED.includes(unit)) {
       test(`${unit}-${state} player-color mask exists, same geometry`, () => {
         const path = join(sheetsDir, `${unit}-${state}-pcmask.png`);
         assert.ok(existsSync(path), `${unit}-${state}-pcmask.png exists`);
-        assert.deepEqual(pngSize(path), [frames * 128, 8 * 128]);
+        assert.deepEqual(pngSize(path), [frames * 128, rows * 128]);
       });
     }
   }
 }
 
 test('scout sheets: 160px cells (idle 4, gallop 12, attack 4) + masks', () => {
-  assert.deepEqual(pngSize(join(sheetsDir, 'scout-idle.png')), [4 * 160, 8 * 160]);
-  assert.deepEqual(pngSize(join(sheetsDir, 'scout-gallop.png')), [12 * 160, 8 * 160]);
-  assert.deepEqual(pngSize(join(sheetsDir, 'scout-attack.png')), [4 * 160, 8 * 160]);
+  assert.deepEqual(pngSize(join(sheetsDir, 'scout-idle.png')), [4 * 160, 16 * 160]);
+  assert.deepEqual(pngSize(join(sheetsDir, 'scout-gallop.png')), [12 * 160, 16 * 160]);
+  assert.deepEqual(pngSize(join(sheetsDir, 'scout-attack.png')), [4 * 160, 16 * 160]);
   assert.ok(existsSync(join(sheetsDir, 'scout-idle-pcmask.png')));
   assert.ok(existsSync(join(sheetsDir, 'scout-gallop-pcmask.png')));
   assert.ok(existsSync(join(sheetsDir, 'scout-attack-pcmask.png')));
@@ -68,16 +77,20 @@ test('scout sheets: 160px cells (idle 4, gallop 12, attack 4) + masks', () => {
 // Die sheets (animation pass 2026-10-22): 6 fall frames on the
 // bigger death cells (foot units 232x208, scout 304x232 — the
 // STATE_CANVAS values in tools/sprite-pipeline/models/*.py),
-// each with its player-color mask twin.
+// each with its player-color mask twin. 16 direction rows since
+// the MOV-09 dir16 adjustment — the corpse draw reads the
+// modeled facing as the row directly (the die sheets live
+// outside the villager tier system, so the villager's die sheet
+// carries 16 rows like the others).
 const DIE_SHEETS = {
   villager: [232, 208], archer: [232, 208], militia: [232, 208],
   maa: [232, 208], spearman: [232, 208], skirmisher: [232, 208],
   scout: [304, 232],
 };
 for (const [unit, [cw, ch]] of Object.entries(DIE_SHEETS)) {
-  test(`${unit}-die sheet: 6 frames x 8 directions on the death cell`, () => {
-    assert.deepEqual(pngSize(join(sheetsDir, `${unit}-die.png`)), [6 * cw, 8 * ch]);
-    assert.deepEqual(pngSize(join(sheetsDir, `${unit}-die-pcmask.png`)), [6 * cw, 8 * ch]);
+  test(`${unit}-die sheet: 6 frames x 16 directions on the death cell`, () => {
+    assert.deepEqual(pngSize(join(sheetsDir, `${unit}-die.png`)), [6 * cw, 16 * ch]);
+    assert.deepEqual(pngSize(join(sheetsDir, `${unit}-die-pcmask.png`)), [6 * cw, 16 * ch]);
   });
 }
 

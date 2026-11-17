@@ -104,7 +104,7 @@ import { pennantsForSelection, pennantShape } from './play/pennants.js';
 import { occlusionFor, intersectionRect } from './play/occlusion.js';
 import { wallLineCells, wallPiece } from './play/walls.js';
 import {
-  dir8FromVector, turnedDir8, faceForDir8, sheetRowForDir8,
+  dir16FromVector, turnedDir16, faceForDir16, sheetRowForDir16,
 } from './play/facing.js';
 import {
   t, getLocale, setLocale, costText, genderOf,
@@ -2018,7 +2018,7 @@ function whenUnitArtSettled() {
 
 // --- Directional sprite sheets (ours — sprite pipeline, §10) --------
 // The directional milestone: sheets rendered from the procedural
-// models in tools/sprite-pipeline/models/ — rows = 8 facing
+// models in tools/sprite-pipeline/models/ — rows = 16 facing
 // directions (row 0 faces +X world, increasing toward +Y, the same
 // quantization updateVilAnim uses), columns = frames, cell/anchor
 // per unit below, drawn at the pipeline's 1.35 readability scale.
@@ -2151,7 +2151,7 @@ function drawDirUnit(unit, act, sx, sy) {
   const C = spec.cell;
   const rows = Math.max(1, Math.round((im.naturalHeight || im.height) / C));
   const frames = Math.max(1, Math.round((im.naturalWidth || im.width) / C));
-  const d = sheetRowForDir8(act.dir, rows);
+  const d = sheetRowForDir16(act.dir, rows);
   const f = ((dirSheetFrame(act, frames) % frames) + frames) % frames;
   const k = (camS * 1.35) / 46;
   ctx.drawImage(im, f * C, d * C, C, C,
@@ -2241,9 +2241,9 @@ const prevPos = new Map();
 function updateVilAnim(i, wx, wy, now) {
   let a = vilAnim.get(i);
   if (!a) {
-    // Default facing (MOV-09 model, play/facing.js): dir8 2 =
+    // Default facing (MOV-09 model, play/facing.js): dir16 4 =
     // +Y (screen down-left) — sheet row dirs/4 at any tier.
-    a = { dir: VIL_ORIGINAL.dirs / 4, dir8: 2, phase: 0, still: 0 };
+    a = { dir: VIL_ORIGINAL.dirs / 4, dir16: 4, phase: 0, still: 0 };
     vilAnim.set(i, a);
   }
   const p = prevPos.get(i);
@@ -2258,11 +2258,11 @@ function updateVilAnim(i, wx, wy, now) {
       a.still = 0;
       a.phase += dist / 1.5; // ~1.5 world units travelled per walk cycle
       if (dist > 0.02) {
-        // MOV-09: the facing model is 8-way at every quality
+        // MOV-09: the facing model is 16-way at every quality
         // tier; the loaded sheet's row for the facing is derived
         // at the end of this update (sheet rows are storage —
-        // SPRITE-PIPELINE §12 — not the facing model).
-        a.dir8 = turnedDir8(a.dir8 ?? 2, dx, dy);
+        // SPRITE-PIPELINE §10.5 — not the facing model).
+        a.dir16 = turnedDir16(a.dir16 ?? 4, dx, dy);
       }
     } else if (++a.still > 3) {
       a.phase = 0;
@@ -2285,14 +2285,14 @@ function updateVilAnim(i, wx, wy, now) {
   // read as "standing by the tree".
   const gTarget = state === 'gather' ? atNodeTarget.get(i) : null;
   if (gTarget) {
-    a.dir8 = turnedDir8(a.dir8 ?? 2, gTarget.x - wx, gTarget.y - wy);
+    a.dir16 = turnedDir16(a.dir16 ?? 4, gTarget.x - wx, gTarget.y - wy);
   }
   // MOV-09: melee engagement turns the unit toward its target —
   // a villager fighting a boar or an enemy strikes in the facing
   // it turned to, like the footmen (unitActionFor's turn).
   if (state === 'attack') {
     const tgt = foeTargetFor(i, wx, wy);
-    if (tgt) a.dir8 = turnedDir8(a.dir8 ?? 2, tgt.x - wx, tgt.y - wy);
+    if (tgt) a.dir16 = turnedDir16(a.dir16 ?? 4, tgt.x - wx, tgt.y - wy);
   }
   let frame;
   if (state === 'walk' || state === 'carry') {
@@ -2360,10 +2360,12 @@ function updateVilAnim(i, wx, wy, now) {
       if (!playSfx(key, gain)) playAudioCueScaled('work', gain);
     }
   }
-  // The sheet row is storage: the modeled 8-way facing mapped
+  // The sheet row is storage: the modeled 16-way facing mapped
   // onto the loaded tier's rows — the same mapping drawDirUnit
-  // applies to the 8-row sheets (sheetRowForDir8).
-  a.dir = sheetRowForDir8(a.dir8 ?? 2, VIL_ORIGINAL.dirs);
+  // applies to the 16-row sheets (sheetRowForDir16). The tier16
+  // sheets take the facing exactly; tier8 pairs it, tier32
+  // doubles it.
+  a.dir = sheetRowForDir16(a.dir16 ?? 4, VIL_ORIGINAL.dirs);
   return { state, dir: a.dir, frame, carryRes: carryResOf(i) };
 }
 
@@ -10450,19 +10452,20 @@ function loadCorpseArt() {
   }
 }
 
-// The facing row (of 8) a corpse keeps: the last facing the
-// unit's own animation state recorded while it lived.
-function corpseDir8(i, unit) {
+// The facing row (of 16) a corpse keeps: the last facing the
+// unit's own animation state recorded while it lived. The die
+// sheets carry 16 rows, so the modeled facing IS the row.
+function corpseDir16(i, unit) {
   if (unit === 'villager') {
     const a = vilAnim.get(i);
-    if (!a) return 2;
-    // The modeled 8-way facing; the tier-row conversion is the
+    if (!a) return 4;
+    // The modeled 16-way facing; the tier-row conversion is the
     // legacy fallback for an entry that predates the model.
-    return a.dir8 !== undefined ? a.dir8
-      : (((Math.round((a.dir * 8) / VIL_ORIGINAL.dirs) % 8) + 8) % 8);
+    return a.dir16 !== undefined ? a.dir16
+      : (((Math.round((a.dir * 16) / VIL_ORIGINAL.dirs) % 16) + 16) % 16);
   }
   const p = UNIT_POSE_STATE[i];
-  return p ? p.dir : 2;
+  return p ? p.dir : 4;
 }
 
 // Per-draw bookkeeping, mirroring updateRubble: a remembered
@@ -10481,7 +10484,7 @@ function updateCorpses(st) {
     const x = st.pos[i * 2], y = st.pos[i * 2 + 1];
     if (st.hp[i * 2] >= 1) {
       if (owner !== foeOwner() || fogAtWorld(x, y) === 2) {
-        corpseSeen.set(i, { unit, owner, x, y, dir: corpseDir8(i, unit) });
+        corpseSeen.set(i, { unit, owner, x, y, dir: corpseDir16(i, unit) });
       }
     } else if (corpseSeen.has(i)) {
       const seen = corpseSeen.get(i);
@@ -12887,7 +12890,7 @@ function drawArcher(i, wx, wy) {
 const ANIMAL_POSE_STATE = {};
 function animalPoseFor(i, wx, wy) {
   const st = ANIMAL_POSE_STATE[i] ||
-    (ANIMAL_POSE_STATE[i] = { x: wx, y: wy, face: -1, dir: 2, stamp: -1, pose: null });
+    (ANIMAL_POSE_STATE[i] = { x: wx, y: wy, face: -1, dir: 4, stamp: -1, pose: null });
   if (st.stamp === poseStamp && st.pose) return st.pose;
   const dx = wx - st.x;
   const dy = wy - st.y;
@@ -12899,7 +12902,7 @@ function animalPoseFor(i, wx, wy) {
     if (Math.hypot(dx, dy) > 0.004) {
       // MOV-09: the movement facing from the one facing model
       // (play/facing.js), shared by every draw path.
-      st.dir = dir8FromVector(dx, dy);
+      st.dir = dir16FromVector(dx, dy);
     }
   }
   st.x = wx;
@@ -12924,7 +12927,7 @@ function dirAnimalAct(i, wx, wy, engage = false) {
   if (engage && foeNearUnit(i, wx, wy)) {
     const tgt = foeTargetFor(i, wx, wy);
     if (tgt) {
-      const d = turnedDir8(pose.dir, tgt.x - wx, tgt.y - wy);
+      const d = turnedDir16(pose.dir, tgt.x - wx, tgt.y - wy);
       const pst = ANIMAL_POSE_STATE[i];
       if (pst) pst.dir = d;
       return { action: 'idle', dir: d };
@@ -13088,7 +13091,7 @@ function dirWolfAct(i, wx, wy) {
     // turn persists in the pose state like the footmen's.
     const tgt = foeTargetFor(i, wx, wy);
     if (tgt) {
-      const d = turnedDir8(pose.dir, tgt.x - wx, tgt.y - wy);
+      const d = turnedDir16(pose.dir, tgt.x - wx, tgt.y - wy);
       const pst = ANIMAL_POSE_STATE[i];
       if (pst) pst.dir = d;
       return { action: 'attack', dir: d };
@@ -13164,7 +13167,7 @@ let frameSt = null; // the entityState() snapshot of the running draw
 
 function unitPoseFor(i, wx, wy) {
   const st = UNIT_POSE_STATE[i] ||
-    (UNIT_POSE_STATE[i] = { x: wx, y: wy, face: -1, dir: 2, stamp: -1, pose: null });
+    (UNIT_POSE_STATE[i] = { x: wx, y: wy, face: -1, dir: 4, stamp: -1, pose: null });
   if (st.stamp === poseStamp && st.pose) return st.pose;
   const dx = wx - st.x;
   const dy = wy - st.y;
@@ -13177,7 +13180,7 @@ function unitPoseFor(i, wx, wy) {
       // Facing for the directional sheets: the world movement
       // angle through the one facing model (play/facing.js,
       // MOV-09) — the same quantization the villager sheets use.
-      st.dir = dir8FromVector(dx, dy);
+      st.dir = dir16FromVector(dx, dy);
     }
   }
   st.x = wx;
@@ -13238,7 +13241,7 @@ function updateUnitAnimState(buildings, st) {
       archerShoot.set(best, {
         tick: proj[p + 4], face: sdx > 0 ? 1 : -1,
         // The shot's facing, through the one facing model.
-        dir: dir8FromVector(proj[p + 2] - proj[p], proj[p + 3] - proj[p + 1]),
+        dir: dir16FromVector(proj[p + 2] - proj[p], proj[p + 3] - proj[p + 1]),
       });
     }
   }
@@ -13390,8 +13393,8 @@ function unitActionFor(unit, i, wx, wy) {
   if (action === 'attack') {
     const tgt = foeTargetFor(i, wx, wy);
     if (tgt) {
-      dir = turnedDir8(dir, tgt.x - wx, tgt.y - wy);
-      const f = faceForDir8(dir);
+      dir = turnedDir16(dir, tgt.x - wx, tgt.y - wy);
+      const f = faceForDir16(dir);
       if (f !== 0) face = f;
       const pst = UNIT_POSE_STATE[i];
       if (pst) {

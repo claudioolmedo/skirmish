@@ -3,11 +3,14 @@
 Skirmish sprite pipeline — directional unit/animal sheets.
 
 Renders the models in tools/sprite-pipeline/models/<unit>.py into
-sprite sheets for the directional-sprite milestone: rows = 8 facing
+sprite sheets for the directional-sprite milestone: rows = facing
 directions (dir 0 faces +X world, increasing toward +Y — the client
 quantizes the facing angle the same way), columns = animation
 frames, cell/anchor per the pipeline contract (128x128, feet-center
-at (64, 110), 46 px per world unit, 2x supersampled).
+at (64, 110), 46 px per world unit, 2x supersampled). The renderer
+takes any direction count (render.render_cell's `directions`); the
+shipped unit sheets use 16 rows since the MOV-09 dir16 adjustment
+(2026-11-16) — pass --directions 8 to reproduce the classic sheets.
 
 For every sheet with player-color materials it also renders a
 `<unit>-<state>-pcmask.png` twin: player-color pixels grayscale at
@@ -19,6 +22,7 @@ PNGs instead of a hardware palette.
 
     python3 tools/sprite-pipeline/units.py [unit ...]
         [--out DIR] [--contact DIR] [--player-color RRGGBB]
+        [--directions N] [--states a,b,...]
 
 With no unit names, renders every registered model. Contact sheets
 (one row per state, one column per direction, mid-cycle frame) go to
@@ -59,16 +63,16 @@ def canvas_for(mod, state):
     return per_state.get(state, getattr(mod, 'CANVAS', DEFAULT_CANVAS))
 
 
-def render_sheet(mod, state, mask=False):
+def render_sheet(mod, state, mask=False, directions=DIRECTIONS):
     frames = mod.STATES[state]
     cw, ch, ax, ay = canvas_for(mod, state)
-    sheet = Image.new('RGBA', (frames * cw, DIRECTIONS * ch))
+    sheet = Image.new('RGBA', (frames * cw, directions * ch))
     worst_margin = 99
-    for d in range(DIRECTIONS):
+    for d in range(directions):
         for f in range(frames):
             tris = mod.tris_for(state, f)
             cell = render.render_cell(
-                tris, d, cw=cw, ch=ch, ax=ax, ay=ay,
+                tris, d, cw=cw, ch=ch, ax=ax, ay=ay, directions=directions,
                 mask_mats=mod.PC_MATS if mask else None)
             img = Image.fromarray(cell, 'RGBA')
             sheet.paste(img, (f * cw, d * ch))
@@ -82,8 +86,8 @@ def render_sheet(mod, state, mask=False):
     return sheet, worst_margin
 
 
-def contact_sheet(mod, name):
-    """Rows = states, columns = the 8 directions, mid-cycle frame.
+def contact_sheet(mod, name, directions=DIRECTIONS):
+    """Rows = states, columns = the directions, mid-cycle frame.
     Each row uses its own state's canvas (see canvas_for), so the
     'die' row shows the fallen body at full size."""
     rows = []
@@ -92,9 +96,10 @@ def contact_sheet(mod, name):
         cw, ch, ax, ay = canvas_for(mod, state)
         f = mod.STATES[state] // 2
         tris = mod.tris_for(state, f)
-        row = Image.new('RGBA', (DIRECTIONS * cw, ch), (24, 24, 28, 255))
-        for d in range(DIRECTIONS):
-            cell = render.render_cell(tris, d, cw=cw, ch=ch, ax=ax, ay=ay)
+        row = Image.new('RGBA', (directions * cw, ch), (24, 24, 28, 255))
+        for d in range(directions):
+            cell = render.render_cell(tris, d, cw=cw, ch=ch, ax=ax, ay=ay,
+                                       directions=directions)
             img = Image.fromarray(cell, 'RGBA')
             row.paste(img, (d * cw, 0), img)
         rows.append(row)
@@ -116,6 +121,12 @@ def main():
     ap.add_argument('--contact', default=None,
                     help='also write <unit>-contact.png sheets here')
     ap.add_argument('--player-color', default='#2e6fd8')
+    ap.add_argument('--directions', type=int, default=DIRECTIONS,
+                    help='facing rows per sheet (default: the render '
+                         'module LOW tier, 8; shipped unit sheets: 16)')
+    ap.add_argument('--states', default=None,
+                    help='comma-separated subset of states to render '
+                         '(default: all of the model STATES)')
     args = ap.parse_args()
     render.MATERIALS['tunic'] = hex2rgb(args.player_color)
     render.MATERIALS.setdefault('cloth', hex2rgb(args.player_color))
@@ -124,22 +135,27 @@ def main():
     out = args.out or os.path.join(root, 'web-preview', 'assets-original')
     os.makedirs(out, exist_ok=True)
     names = args.units or list(REGISTRY)
+    only_states = (set(args.states.split(',')) if args.states else None)
     for name in names:
         mod = load_unit(name)
         for state in mod.STATES:
-            sheet, margin = render_sheet(mod, state)
+            if only_states is not None and state not in only_states:
+                continue
+            sheet, margin = render_sheet(mod, state,
+                                         directions=args.directions)
             path = os.path.join(out, f'{name}-{state}.png')
             sheet.save(path)
             note = '' if margin >= 3 else f'  MARGIN {margin}px (<3!)'
             print(f'{path}: {sheet.width}x{sheet.height}{note}')
             if mod.PC_MATS:
-                mask, _ = render_sheet(mod, state, mask=True)
+                mask, _ = render_sheet(mod, state, mask=True,
+                                       directions=args.directions)
                 mpath = os.path.join(out, f'{name}-{state}-pcmask.png')
                 mask.save(mpath)
                 print(f'{mpath}: player-color mask')
         if args.contact:
             os.makedirs(args.contact, exist_ok=True)
-            cs = contact_sheet(mod, name)
+            cs = contact_sheet(mod, name, directions=args.directions)
             cpath = os.path.join(args.contact, f'{name}-contact.png')
             cs.save(cpath)
             print(f'{cpath}: contact sheet {cs.width}x{cs.height}')

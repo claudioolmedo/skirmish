@@ -1,7 +1,9 @@
 // Node tests for the MOV-09 facing model (play/facing.js) plus
 // the app.js wiring that makes it THE model: every draw path
 // quantizes through it, and melee engagement turns the unit
-// toward its target. Run: node --test play/facing.test.mjs
+// toward its target. The model is DE's 16 directions (22.5°
+// sectors — sk-research sk-06 adjudication, 2026-11-16).
+// Run: node --test play/facing.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -9,98 +11,114 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 import {
-  DIR8_VECTORS, dir8FromVector, turnedDir8, faceForDir8,
-  sheetRowForDir8,
+  DIR16_VECTORS, dir16FromVector, turnedDir16, faceForDir16,
+  sheetRowForDir16,
 } from './facing.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const appJs = readFileSync(join(here, '..', 'app.js'), 'utf8');
+const facingJs = readFileSync(join(here, 'facing.js'), 'utf8');
 
-test('the 8 sector centres quantize to their own dir', () => {
-  for (let d = 0; d < 8; d++) {
-    const a = (d * Math.PI) / 4;
-    assert.equal(dir8FromVector(Math.cos(a), Math.sin(a)), d, `dir ${d}`);
+test('the 16 sector centres quantize to their own dir', () => {
+  for (let d = 0; d < 16; d++) {
+    const a = (d * Math.PI) / 8;
+    assert.equal(dir16FromVector(Math.cos(a), Math.sin(a)), d, `dir ${d}`);
     // Scale must not matter — only the angle does.
-    assert.equal(dir8FromVector(7 * Math.cos(a), 7 * Math.sin(a)), d);
+    assert.equal(dir16FromVector(7 * Math.cos(a), 7 * Math.sin(a)), d);
   }
 });
 
 test('axis and diagonal world vectors land on the documented dirs', () => {
-  assert.equal(dir8FromVector(1, 0), 0); // +X
-  assert.equal(dir8FromVector(1, 1), 1); // +X+Y, down-screen front
-  assert.equal(dir8FromVector(0, 1), 2); // +Y
-  assert.equal(dir8FromVector(-1, 1), 3);
-  assert.equal(dir8FromVector(-1, 0), 4); // −X
-  assert.equal(dir8FromVector(-1, -1), 5); // −X−Y, up-screen back
-  assert.equal(dir8FromVector(0, -1), 6); // −Y
-  assert.equal(dir8FromVector(1, -1), 7);
+  assert.equal(dir16FromVector(1, 0), 0); // +X
+  assert.equal(dir16FromVector(1, 1), 2); // +X+Y, down-screen front
+  assert.equal(dir16FromVector(0, 1), 4); // +Y
+  assert.equal(dir16FromVector(-1, 1), 6);
+  assert.equal(dir16FromVector(-1, 0), 8); // −X
+  assert.equal(dir16FromVector(-1, -1), 10); // −X−Y, up-screen back
+  assert.equal(dir16FromVector(0, -1), 12); // −Y
+  assert.equal(dir16FromVector(1, -1), 14);
 });
 
-test('sector boundaries sit at the odd 22.5° steps', () => {
-  const at = (deg) => dir8FromVector(
+test('sector boundaries sit at the odd 11.25° steps', () => {
+  const at = (deg) => dir16FromVector(
     Math.cos((deg * Math.PI) / 180), Math.sin((deg * Math.PI) / 180));
-  assert.equal(at(22.4), 0);
-  assert.equal(at(22.6), 1);
-  assert.equal(at(67.4), 1);
-  assert.equal(at(67.6), 2);
-  assert.equal(at(-22.4), 0);
-  assert.equal(at(-22.6), 7);
-  assert.equal(at(180), 4);
-  assert.equal(at(-180), 4);
+  assert.equal(at(11.24), 0);
+  assert.equal(at(11.26), 1);
+  assert.equal(at(33.74), 1);
+  assert.equal(at(33.76), 2);
+  assert.equal(at(-11.24), 0);
+  assert.equal(at(-11.26), 15);
+  assert.equal(at(180), 8);
+  assert.equal(at(-180), 8);
 });
 
-test('a zero vector has no facing; turnedDir8 keeps the current one', () => {
-  assert.equal(dir8FromVector(0, 0), -1);
-  assert.equal(turnedDir8(3, 0, 0), 3);
-  assert.equal(turnedDir8(3, 0, -5), 6); // straight −Y from anywhere
-  assert.equal(turnedDir8(0, -2, 0), 4);
+test('a zero vector has no facing; turnedDir16 keeps the current one', () => {
+  assert.equal(dir16FromVector(0, 0), -1);
+  assert.equal(turnedDir16(6, 0, 0), 6);
+  assert.equal(turnedDir16(6, 0, -5), 12); // straight −Y from anywhere
+  assert.equal(turnedDir16(0, -2, 0), 8);
 });
 
-test('DIR8_VECTORS are the 8 unit vectors and round-trip', () => {
-  assert.equal(DIR8_VECTORS.length, 8);
-  for (let d = 0; d < 8; d++) {
-    const [dx, dy] = DIR8_VECTORS[d];
+test('DIR16_VECTORS are the 16 unit vectors and round-trip', () => {
+  assert.equal(DIR16_VECTORS.length, 16);
+  for (let d = 0; d < 16; d++) {
+    const [dx, dy] = DIR16_VECTORS[d];
     assert.ok(Math.abs(Math.hypot(dx, dy) - 1) < 1e-9, `dir ${d} unit`);
-    assert.equal(dir8FromVector(dx, dy), d, `dir ${d} round-trips`);
+    assert.equal(dir16FromVector(dx, dy), d, `dir ${d} round-trips`);
   }
-  assert.deepEqual(DIR8_VECTORS[0], [1, 0]);
-  assert.equal(DIR8_VECTORS[4][0], -1);
-  assert.ok(Math.abs(DIR8_VECTORS[4][1]) < 1e-9);
-  assert.ok(Math.abs(DIR8_VECTORS[2][0]) < 1e-9);
-  assert.equal(DIR8_VECTORS[2][1], 1);
+  assert.deepEqual(DIR16_VECTORS[0], [1, 0]);
+  assert.equal(DIR16_VECTORS[8][0], -1);
+  assert.ok(Math.abs(DIR16_VECTORS[8][1]) < 1e-9);
+  assert.ok(Math.abs(DIR16_VECTORS[4][0]) < 1e-9);
+  assert.equal(DIR16_VECTORS[4][1], 1);
 });
 
-test('faceForDir8: the side-view flip table for all 8 facings', () => {
+test('faceForDir16: the side-view flip table for all 16 facings', () => {
   // Screen-x follows sign(dx − dy): right for +X-ish facings,
-  // left for −X-ish, straight up/down screen at rows 5 and 1.
+  // left for −X-ish, straight up/down screen at rows 2 and 10.
   assert.deepEqual(
-    [0, 1, 2, 3, 4, 5, 6, 7].map((d) => faceForDir8(d)),
+    Array.from({ length: 16 }, (_, d) => faceForDir16(d)),
+    [1, 1, 0, -1, -1, -1, -1, -1, -1, -1, 0, 1, 1, 1, 1, 1]);
+  // The classic 8 facings (the even dirs) keep the old table.
+  assert.deepEqual(
+    [0, 2, 4, 6, 8, 10, 12, 14].map((d) => faceForDir16(d)),
     [1, 0, -1, -1, -1, 0, 1, 1]);
 });
 
-test('sheetRowForDir8: identity at 8 rows, scaled at the tiers', () => {
-  for (let d = 0; d < 8; d++) {
-    assert.equal(sheetRowForDir8(d, 8), d);
-    assert.equal(sheetRowForDir8(d, 16), d * 2);
-    assert.equal(sheetRowForDir8(d, 32), d * 4);
-    assert.equal(sheetRowForDir8(d, 1), 0);
-    // The corpse-style back-conversion recovers the facing at
-    // every tier: the stored row never loses the 8-way model.
-    for (const rows of [8, 16, 32]) {
-      const row = sheetRowForDir8(d, rows);
-      assert.equal(Math.round((row * 8) / rows), d, `dir ${d} @ ${rows}`);
+test('sheetRowForDir16: identity at 16 rows, pairs at 8, doubled at 32', () => {
+  for (let d = 0; d < 16; d++) {
+    assert.equal(sheetRowForDir16(d, 16), d);
+    assert.equal(sheetRowForDir16(d, 8), Math.floor(d / 2));
+    assert.equal(sheetRowForDir16(d, 32), d * 2);
+    assert.equal(sheetRowForDir16(d, 1), 0);
+    // The corpse-style back-conversion recovers the facing
+    // exactly at the tiers that store it (16 and 32 rows); at
+    // 8 rows it recovers the pair's even member — the stored
+    // row never pretends to hold more than it does.
+    for (const rows of [16, 32]) {
+      const row = sheetRowForDir16(d, rows);
+      assert.equal(Math.round((row * 16) / rows), d, `dir ${d} @ ${rows}`);
     }
+    const row8 = sheetRowForDir16(d, 8);
+    assert.equal(Math.round((row8 * 16) / 8), d - (d % 2), `dir ${d} @ 8`);
   }
 });
 
 test('app.js wires the facing model (import + shared quantization)', () => {
   assert.match(appJs, /from '\.\/play\/facing\.js'/);
-  assert.match(appJs, /dir8FromVector/);
-  assert.match(appJs, /sheetRowForDir8\(act\.dir, rows\)/);
-  // No private atan2 quantization survives in the pose paths:
-  // the old inline forms are gone from app.js.
+  assert.match(appJs, /dir16FromVector/);
+  assert.match(appJs, /sheetRowForDir16\(act\.dir, rows\)/);
+  // No dir8 remnant survives anywhere in the client model or
+  // its wiring, and no private atan2 quantization survives in
+  // the pose paths: the old inline forms are gone from app.js.
+  assert.ok(!appJs.includes('Dir8'));
+  assert.ok(!facingJs.includes('Dir8'));
   assert.ok(!appJs.includes('Math.atan2(dy, dx) / (Math.PI / 4)'));
   assert.ok(!appJs.includes('Math.atan2(dy, dx) / ((Math.PI * 2) / dirs)'));
+  // The dangling SPRITE-PIPELINE §12 citation (there is no §12)
+  // is gone from both files; §10.5 is the real reference.
+  assert.ok(!appJs.includes('SPRITE-PIPELINE §12'));
+  assert.ok(!facingJs.includes('SPRITE-PIPELINE §12'));
 });
 
 test('app.js: melee engagement turns toward the target (MOV-09)', () => {

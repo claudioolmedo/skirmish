@@ -1,11 +1,15 @@
 // Unit facing (MOV-09) — the client's ONE facing model.
 //
-// Rulebook MOV-09: "A unit has a facing (8-way); it attacks and
+// Rulebook MOV-09: "A unit has a facing (16-way); it attacks and
 // is rendered in its facing; melee engagement turns the unit
-// toward its target." Source: OPENAGE-RESEARCH §2.4 (the classic
-// engine's units carry one of 8 facings; the 5-stored + 3-mirrored
-// sprite split is a storage fact — SPRITE-PIPELINE §12 — not the
-// facing model, and neither are our 16/32-row quality tiers).
+// toward its target." DE renders each unit graphic at 16 angles
+// (22.5° sectors — the graphic's declared angle count, per the
+// DE modding documentation; SPRITE-PIPELINE §10.5): the unit's
+// heading is continuous and the renderer presents the nearest
+// of the 16 angles. The classic engine's 8 facings (5 stored +
+// 3 mirrored) are the 1999 original, not DE. The sim's formation
+// OCTANTS table stays 8 — that is formation slot layout
+// geometry, a separate matter from sprite facing.
 //
 // Facing is presentation only: the WASM ABI exposes no unit
 // state, no sim rule consumes facing, and nothing here is sim
@@ -19,57 +23,57 @@
 // now every draw path quantizes through here.
 //
 // Convention (shared with the sprite pipeline, §10.1): dir 0
-// faces +X world, increasing toward +Y, one sector per 45°.
-// Row 1 (+X+Y) is the down-screen FRONT view, row 5 (−X−Y) the
+// faces +X world, increasing toward +Y, one sector per 22.5°.
+// Row 2 (+X+Y) is the down-screen FRONT view, row 10 (−X−Y) the
 // up-screen BACK view.
 
-// The 8 facing unit vectors, index = dir. (cos/sin of dir × 45°;
-// components are 0, ±1 or ±√½.)
-export const DIR8_VECTORS = Array.from({ length: 8 }, (_, d) => [
-  Math.cos((d * Math.PI) / 4),
-  Math.sin((d * Math.PI) / 4),
+// The 16 facing unit vectors, index = dir. (cos/sin of
+// dir × 22.5°.)
+export const DIR16_VECTORS = Array.from({ length: 16 }, (_, d) => [
+  Math.cos((d * Math.PI) / 8),
+  Math.sin((d * Math.PI) / 8),
 ]);
 
 // The facing for a world vector (dx, dy): the sector whose
-// centre the vector's angle rounds to — exactly the renderer's
-// long-standing atan2 quantization, now in one place. A zero
+// centre the vector's angle rounds to — the renderer's atan2
+// quantization, now in one place at DE's 16 sectors. A zero
 // vector has no facing: returns −1, and callers keep the unit's
-// current facing (turnedDir8 does that for them).
-export function dir8FromVector(dx, dy) {
+// current facing (turnedDir16 does that for them).
+export function dir16FromVector(dx, dy) {
   if (dx === 0 && dy === 0) return -1;
-  const d = Math.round(Math.atan2(dy, dx) / (Math.PI / 4));
-  return ((d % 8) + 8) % 8;
+  const d = Math.round(Math.atan2(dy, dx) / (Math.PI / 8));
+  return ((d % 16) + 16) % 16;
 }
 
 // The facing after turning toward (dx, dy) from where the unit
 // stands: the new facing, or `current` when the vector is zero
 // (already on top of the target — no turn is meaningful).
-export function turnedDir8(current, dx, dy) {
-  const d = dir8FromVector(dx, dy);
+export function turnedDir16(current, dx, dy) {
+  const d = dir16FromVector(dx, dy);
   return d >= 0 ? d : current;
 }
 
 // The side-view flip sign for a facing: +1 when the facing
 // points right on screen, −1 left, 0 when it points straight
-// up/down screen (rows 1 and 5 — the caller keeps its current
+// up/down screen (rows 2 and 10 — the caller keeps its current
 // flip there, as the pose code always has). Screen-x in the
 // fixed iso projection follows the sign of (dx − dy) of the
 // facing vector — the same projection the pose code derives
 // movement flips from.
-export function faceForDir8(dir) {
-  const v = DIR8_VECTORS[((dir % 8) + 8) % 8];
+export function faceForDir16(dir) {
+  const v = DIR16_VECTORS[((dir % 16) + 16) % 16];
   const s = v[0] - v[1];
   return s > 0.001 ? 1 : s < -0.001 ? -1 : 0;
 }
 
-// The row of an 8-way facing in a sprite sheet with `rows`
+// The row of a 16-way facing in a sprite sheet with `rows`
 // direction rows: the facing mapped onto the stored rows
-// (identity at the standard 8; the villager quality tiers'
-// 16/32 rows are storage resolution, so a facing lands on the
-// row the pipeline rendered for it — floor(dir × rows / 8),
-// the mapping drawDirUnit has always applied).
-export function sheetRowForDir8(dir, rows) {
+// (identity at 16; the villager quality tiers store 8/16/32
+// rows, so a facing lands on the row the pipeline rendered for
+// it — floor(dir × rows / 16), the mapping drawDirUnit has
+// always applied: pairs at 8 rows, exact at 16, doubled at 32).
+export function sheetRowForDir16(dir, rows) {
   const r = Math.max(1, rows | 0);
-  const d = ((dir % 8) + 8) % 8;
-  return ((Math.floor((d * r) / 8) % r) + r) % r;
+  const d = ((dir % 16) + 16) % 16;
+  return ((Math.floor((d * r) / 16) % r) + r) % r;
 }

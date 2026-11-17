@@ -337,10 +337,24 @@ Shipped in this milestone:
   antler boxes read as a crown in pure side views; the scout's
   neck root can show daylight in two side views (cosmetic).
 
+**MOV-09 dir16 adjustment (2026-11-16).** The §10.5 re-render
+away happened: the unit/animal directional sheets (archer,
+militia, man-at-arms, spearman, skirmisher, scout, sheep, boar,
+deer, wolf — every state, masks included) and all seven die
+sheets were re-rendered from the same models at **16 direction
+rows** (`units.py --directions 16`; the renderer always took the
+count as a parameter), matching DE's 16 facings and the client's
+dir16 facing model (rulebook MOV-09). Front is now row 2, back
+row 10. The villager's quality-tier sheets are unchanged (LOW 8 /
+MEDIUM 16 / HIGH 32 rows — the tier system is storage); its die
+sheet carries 16 rows like the others because the corpse draw
+lives outside the tier system and reads the modeled facing as
+the row directly. Contact sheets re-verified per unit at 16.
+
 ## 11. QA checklist (per render)
 
 1. Contact-sheet eyeball: silhouette reads at game zoom; facing is
-   unambiguous in all 8 directions; walk cycle has a clear stride.
+   unambiguous in all rendered directions; walk cycle has a clear stride.
 2. Automated: anchor-margin check on every cell; identical-pose
    frames must be pixel-identical (walk frames 0 and 4).
 3. In-game: fallback chain intact (original -> placeholder -> vector),
