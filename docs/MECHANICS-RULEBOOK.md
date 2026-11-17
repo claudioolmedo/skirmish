@@ -828,17 +828,39 @@ pattern as CMB-15's garrison clause.)
 **MOV-05 — Collision radius is unit data.** Units occupy a small circle
 for steering purposes; the documented typical radius is ≈0.2 tiles
 (Karambit Warrior 0.15 is the famous exception). Per-unit numbers are
-otherwise UNVERIFIED in public sources — 0.2 is the adopted default.
-*Source:* MECHANICS-STUDY §4.2. · *Impl:* the structure shipped
-(re-audited 2026-10-21/22): the snapshot carries a per-kind `radius`
-(1.0 wu standard, boar 1.2, Town Center 3.6) and the separation
-distance in `steer.rs` is r₁ + r₂. What still differs is the VALUE:
-the adopted standard radius is 1.0 wu = 0.25 tiles against the
-documented ≈0.2-tile typical, and per-unit numbers remain UNVERIFIED
-in public sources — closing the last 0.05 tiles is a feel/balance
-call, not a documented convergence, so it waits for evidence or
-Claudio's word. · *Status:* **DIFFERS** (structure matches; the
-standard radius value is 0.25 tiles vs the documented ≈0.2).
+documented by class in the Jineapple Infosheet legend and the
+update-81058 patch notes (see the Impl note).
+*Source:* MECHANICS-STUDY §4.2; the central DE data package
+(2026-11-16) and the Jineapple Infosheet legend's collision lines
+(extracted 2026-11-16 with Claudio's approval). · *Impl:* the
+structure shipped (re-audited 2026-10-21/22): the snapshot carries a
+per-kind `radius` and the separation distance in `steer.rs` is
+r₁ + r₂. The VALUES converged 2026-11-16 (MOV-05 package): foot
+units 0.8 wu = 0.20 tiles (Villager, Militia, Man-at-Arms, Archer,
+Spearman, Skirmisher — package + legend foot line; the Monk rides
+the same line, which names the Missionary; the King and the Petard
+— this table's INFANTRY row — take it too), cavalry and the Trade
+Cart 1.0 wu = 0.25 tiles (unchanged, now documented), rams 1.8 wu =
+0.45 and the other siege rows 2.0 wu = 0.5 (legend lines), war
+ships and the Transport Ship 2.0 wu = 0.5 (package; update 81058's
+from-values pin the ship default at 0.5, carving out only the
+Fishing Ship, 1.6 wu = 0.4, and the Trade Cog, 1.2 wu = 0.3).
+Carried openly as adopted, outside the DE sources' scope: the Gaia
+animals (Sheep/Deer/Wolf 1.0, Boar 1.2), the Relic (0.5) and the
+Town Center building row (3.6). Recorded for kinds that do not
+exist yet: Karambit Warrior 0.15, War Elephant 0.25, Bombard
+Cannon / Trebuchet 0.5 (legend siege line), Cannon Galleon 0.5.
+Pinned in `sim/src/mov05_tests.rs` (table assertions for every kind
+plus pair-settle probes per family — a pair rests at exactly the
+sum of its radii: villagers 131 072 → 104 858 bits, rams
+157 286 → 235 930, galleys 209 716 → 262 144, knights unchanged
+at 131 072). The golden hash does NOT move: the golden scenario
+issues no commands, so separation never engages and no reach or
+hit test is measured — the stream stays `f89f443f9bd8a7fc`, and
+the pair-settle probes carry the before/after attribution
+instead. · *Status:* **MATCHES** (values converged on the
+documented table; the adopted residue above is named, not
+hidden).
 
 **MOV-06 — Groups travel at their slowest member's speed.** Units sharing
 a move order form a temporary group: the group advances no faster than

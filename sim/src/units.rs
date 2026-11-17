@@ -364,7 +364,7 @@ static VILLAGER: UnitSpec = UnitSpec {
     blast_secondaries: 0,
     speed: I16F16::from_bits(3_495), // 0.8 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(1_048_576), // 16 (4 tiles)
-    radius: I16F16::from_bits(65_536), // 1.0
+    radius: I16F16::from_bits(52_429), // 0.8 (0.2 tiles — MOV-05 foot size)
     carcass_food: 0,
     carcass_decay_bits: 0,
     food_cost: 50,
@@ -490,7 +490,7 @@ static MILITIA: UnitSpec = UnitSpec {
     blast_secondaries: 0,
     speed: I16F16::from_bits(3_932), // 0.90 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(1_048_576), // 16 (4 tiles)
-    radius: I16F16::from_bits(65_536),
+    radius: I16F16::from_bits(52_429), // 0.8 (0.2 tiles — MOV-05 foot size)
     carcass_food: 0,
     carcass_decay_bits: 0,
     food_cost: 60,
@@ -526,7 +526,7 @@ static ARCHER: UnitSpec = UnitSpec {
     blast_secondaries: 0,
     speed: I16F16::from_bits(4_194),            // 0.96 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(1_572_864),            // 24 (6 tiles)
-    radius: I16F16::from_bits(65_536),
+    radius: I16F16::from_bits(52_429), // 0.8 (0.2 tiles — MOV-05 foot size)
     carcass_food: 0,
     carcass_decay_bits: 0,
     food_cost: 0,
@@ -574,7 +574,7 @@ static MAN_AT_ARMS: UnitSpec = UnitSpec {
     blast_secondaries: 0,
     speed: I16F16::from_bits(4_194), // 0.96 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(1_048_576), // 16 (4 tiles)
-    radius: I16F16::from_bits(65_536),
+    radius: I16F16::from_bits(52_429), // 0.8 (0.2 tiles — MOV-05 foot size)
     carcass_food: 0,
     carcass_decay_bits: 0,
     food_cost: 60,
@@ -631,7 +631,7 @@ static SPEARMAN: UnitSpec = UnitSpec {
     blast_secondaries: 0,
     speed: I16F16::from_bits(4_369), // 1.0 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(1_048_576), // 16 (4 tiles)
-    radius: I16F16::from_bits(65_536),
+    radius: I16F16::from_bits(52_429), // 0.8 (0.2 tiles — MOV-05 foot size)
     carcass_food: 0,
     carcass_decay_bits: 0,
     food_cost: 35,
@@ -676,7 +676,7 @@ static SKIRMISHER: UnitSpec = UnitSpec {
     blast_secondaries: 0,
     speed: I16F16::from_bits(4_194),             // 0.96 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(1_572_864),           // 24 (6 tiles)
-    radius: I16F16::from_bits(65_536),
+    radius: I16F16::from_bits(52_429), // 0.8 (0.2 tiles — MOV-05 foot size)
     carcass_food: 0,
     carcass_decay_bits: 0,
     food_cost: 25,
@@ -836,7 +836,9 @@ pub const PETARD_BLAST_RADIUS: I16F16 = I16F16::from_bits(131_072); // 2.0 = 0.5
 /// `combat::Sim::petard_detonate`. The attack delay and reload
 /// adopt the foot-melee rows' 30 ticks / 2.0 s as recorded
 /// design constants (the strike is single by construction, so
-/// the reload never governs a second shot).
+/// the reload never governs a second shot). Radius 0.8
+/// (0.2 tiles): the Infosheet legend's foot line (MOV-05) —
+/// this row's own class is INFANTRY.
 static PETARD: UnitSpec = UnitSpec {
     max_hp: 50,
     attacks: &[
@@ -862,7 +864,7 @@ static PETARD: UnitSpec = UnitSpec {
     blast_secondaries: 0,
     speed: I16F16::from_bits(3_495), // 0.8 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(1_048_576), // 16 (4 tiles)
-    radius: I16F16::from_bits(65_536),
+    radius: I16F16::from_bits(52_429), // 0.8 (0.2 tiles — MOV-05 foot line)
     carcass_food: 0,
     carcass_decay_bits: 0,
     food_cost: 65,
@@ -903,7 +905,7 @@ static KING: UnitSpec = UnitSpec {
     blast_secondaries: 0,
     speed: I16F16::from_bits(5_767), // 1.32 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(1_572_864), // 24 (6 tiles)
-    radius: I16F16::from_bits(65_536), // 1.0 (villager-like; unpinned)
+    radius: I16F16::from_bits(52_429), // 0.8 (0.2 tiles — MOV-05 foot line)
     carcass_food: 0,
     carcass_decay_bits: 0,
     food_cost: 0,
@@ -989,8 +991,9 @@ pub const DEMOLITION_SHIP_BLAST_RADIUS: I16F16 = I16F16::from_bits(786_432); // 
 /// Galley's own figures, so it follows the documented generic
 /// arrow values the Archer carries. Attack
 /// delay adopts the Archer's 21 ticks on the same basis.
-/// Radius adopts the Fishing Ship's 1.6 — an implementation
-/// constant (WATER-SPEC §8.9), never DE data.
+/// Radius 2.0 (0.5 tiles): DE's war-ship collision size
+/// (MOV-05 — central package; update 81058's from-values pin
+/// the ship default at 0.5).
 static GALLEY: UnitSpec = UnitSpec {
     max_hp: 110,
     attacks: &[
@@ -1015,7 +1018,7 @@ static GALLEY: UnitSpec = UnitSpec {
     blast_secondaries: 0,
     speed: I16F16::from_bits(5_942), // 1.36 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(1_835_008), // 28 (7 tiles)
-    radius: I16F16::from_bits(104_858), // 1.6 — adopted (see above)
+    radius: I16F16::from_bits(131_072), // 2.0 (0.5 tiles — MOV-05 war-ship size)
     carcass_food: 0,
     carcass_decay_bits: 0,
     food_cost: 0,
@@ -1056,8 +1059,8 @@ static GALLEY: UnitSpec = UnitSpec {
 /// Ballistics never leads it (see `combat::resolve_strike`'s
 /// recorded exemption).
 /// Attack delay 15 ticks (one RoF cycle) is ADOPTED/UNVERIFIED.
-/// Radius adopts the Fishing Ship's 1.6 (implementation
-/// constant, WATER-SPEC §8.9).
+/// Radius 2.0 (0.5 tiles): DE's war-ship collision size
+/// (MOV-05 — see the Galley's note).
 static FIRE_GALLEY: UnitSpec = UnitSpec {
     max_hp: 110,
     attacks: &[(cls::MELEE, 2), (cls::LONG_RANGE_WARSHIP, 1)],
@@ -1077,7 +1080,7 @@ static FIRE_GALLEY: UnitSpec = UnitSpec {
     blast_secondaries: 0,
     speed: I16F16::from_bits(5_942), // 1.36 tiles/s (see above)
     los: I16F16::from_bits(1_310_720), // 20 (5 tiles)
-    radius: I16F16::from_bits(104_858), // 1.6 — adopted (see above)
+    radius: I16F16::from_bits(131_072), // 2.0 (0.5 tiles — MOV-05 war-ship size)
     carcass_food: 0,
     carcass_decay_bits: 0,
     food_cost: 0,
@@ -1103,8 +1106,8 @@ static FIRE_GALLEY: UnitSpec = UnitSpec {
 /// detonates instead, exactly the Petard's split with the
 /// blast profile inverted (tapered, enemies-only). Reload and
 /// attack delay adopt the Petard's recorded constants (the
-/// strike is single by construction). Radius adopts the
-/// Fishing Ship's 1.6 (implementation constant, §8.9).
+/// strike is single by construction). Radius 2.0 (0.5 tiles):
+/// DE's demolition-ship collision size (MOV-05).
 static DEMOLITION_RAFT: UnitSpec = UnitSpec {
     max_hp: 40,
     attacks: &[(cls::MELEE, 65)],
@@ -1124,7 +1127,7 @@ static DEMOLITION_RAFT: UnitSpec = UnitSpec {
     blast_secondaries: 0,
     speed: I16F16::from_bits(6_204), // 1.42 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(1_572_864), // 24 (6 tiles)
-    radius: I16F16::from_bits(104_858), // 1.6 — adopted (see above)
+    radius: I16F16::from_bits(131_072), // 2.0 (0.5 tiles — MOV-05 demolition size)
     carcass_food: 0,
     carcass_decay_bits: 0,
     food_cost: 0,
@@ -1148,8 +1151,8 @@ static DEMOLITION_RAFT: UnitSpec = UnitSpec {
 /// SHIP. It takes the Forging line's patches (its article's
 /// technology table) and no archer patch. Attack delay adopts
 /// the foot-melee rows' 30 ticks (no fetched source pins the
-/// Hulk's own frame value) — ADOPTED. Radius adopts the
-/// Fishing Ship's 1.6 (implementation constant, §8.9).
+/// Hulk's own frame value) — ADOPTED. Radius 2.0 (0.5 tiles):
+/// DE's war-ship collision size (MOV-05).
 static HULK: UnitSpec = UnitSpec {
     max_hp: 85,
     attacks: &[(cls::MELEE, 4), (cls::FIRE_SHIP, 1)],
@@ -1169,7 +1172,7 @@ static HULK: UnitSpec = UnitSpec {
     blast_secondaries: 0,
     speed: I16F16::from_bits(6_204), // 1.42 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(1_310_720), // 20 (5 tiles)
-    radius: I16F16::from_bits(104_858), // 1.6 — adopted (see above)
+    radius: I16F16::from_bits(131_072), // 2.0 (0.5 tiles — MOV-05 war-ship size)
     carcass_food: 0,
     carcass_decay_bits: 0,
     food_cost: 0,
@@ -1201,8 +1204,9 @@ static HULK: UnitSpec = UnitSpec {
 /// sim the queue entry stays Galley and the spawn converts,
 /// the CLS-03 pattern, so the row's cost is the tier's data
 /// record). Classes: SHIP + LONG_RANGE_WARSHIP. Accuracy,
-/// projectile values, attack delay and radius adopt the
-/// Galley's on the same basis as W3a's.
+/// projectile values and attack delay adopt the
+/// Galley's on the same basis as W3a's. Radius 2.0
+/// (0.5 tiles): DE's war-ship collision size (MOV-05).
 static WAR_GALLEY: UnitSpec = UnitSpec {
     max_hp: 125,
     attacks: &[
@@ -1227,7 +1231,7 @@ static WAR_GALLEY: UnitSpec = UnitSpec {
     blast_secondaries: 0,
     speed: I16F16::from_bits(5_942), // 1.36 tiles/s (adopted — see above)
     los: I16F16::from_bits(2_097_152), // 32 (8 tiles)
-    radius: I16F16::from_bits(104_858), // 1.6 — adopted (the Galley's)
+    radius: I16F16::from_bits(131_072), // 2.0 (0.5 tiles — MOV-05 war-ship size)
     carcass_food: 0,
     carcass_decay_bits: 0,
     food_cost: 0,
@@ -1256,9 +1260,10 @@ static WAR_GALLEY: UnitSpec = UnitSpec {
 /// The +2 vs Long-Range Warships steps the Fire Galley's +1
 /// up one rung, the Galley line's own step (4 → 5) — ADOPTED
 /// on line continuity, no fetched source pins it. Classes:
-/// SHIP + FIRE_SHIP. Attack delay and radius adopt the Fire
-/// Galley's recorded constants; the projectile speed is the
+/// SHIP + FIRE_SHIP. Attack delay adopts the Fire
+/// Galley's recorded constant; the projectile speed is the
 /// flame's own documented 3 tiles/s, as on the Fire Galley.
+/// Radius 2.0 (0.5 tiles): DE's war-ship collision size (MOV-05).
 static FIRE_SHIP: UnitSpec = UnitSpec {
     max_hp: 120,
     attacks: &[(cls::MELEE, 3), (cls::LONG_RANGE_WARSHIP, 2)],
@@ -1278,7 +1283,7 @@ static FIRE_SHIP: UnitSpec = UnitSpec {
     blast_secondaries: 0,
     speed: I16F16::from_bits(6_423), // 1.47 tiles/s
     los: I16F16::from_bits(1_310_720), // 20 (5 tiles)
-    radius: I16F16::from_bits(104_858), // 1.6 — adopted (the Fire Galley's)
+    radius: I16F16::from_bits(131_072), // 2.0 (0.5 tiles — MOV-05 war-ship size)
     carcass_food: 0,
     carcass_decay_bits: 0,
     food_cost: 0,
@@ -1305,8 +1310,8 @@ static FIRE_SHIP: UnitSpec = UnitSpec {
 /// order; the discrepancy is flagged in the W3b handoff for
 /// the loop. The row's `attacks` table IS the blast table,
 /// exactly the Raft's split; reload and attack delay adopt
-/// the Raft's (the Petard's) recorded constants; radius adopts
-/// the Fishing Ship's 1.6 (implementation constant, §8.9).
+/// the Raft's (the Petard's) recorded constants. Radius 2.0
+/// (0.5 tiles): DE's demolition-ship collision size (MOV-05).
 static DEMOLITION_SHIP: UnitSpec = UnitSpec {
     max_hp: 50,
     attacks: &[(cls::MELEE, 80)],
@@ -1326,7 +1331,7 @@ static DEMOLITION_SHIP: UnitSpec = UnitSpec {
     blast_secondaries: 0,
     speed: I16F16::from_bits(6_641), // 1.52 tiles/s
     los: I16F16::from_bits(1_572_864), // 24 (6 tiles)
-    radius: I16F16::from_bits(104_858), // 1.6 — adopted (see above)
+    radius: I16F16::from_bits(131_072), // 2.0 (0.5 tiles — MOV-05 demolition size)
     carcass_food: 0,
     carcass_decay_bits: 0,
     food_cost: 0,
@@ -1354,7 +1359,8 @@ static DEMOLITION_SHIP: UnitSpec = UnitSpec {
 /// and speed 1.42 carry the Hulk's — ADOPTED on line
 /// continuity, flagged. The +1 vs the FIRE_SHIP class carries
 /// unchanged (the class's purpose is the line's, both tiers).
-/// Class: SHIP. Attack delay and radius adopt the Hulk's.
+/// Class: SHIP. Attack delay adopts the Hulk's. Radius 2.0
+/// (0.5 tiles): DE's war-ship collision size (MOV-05).
 static WAR_HULK: UnitSpec = UnitSpec {
     max_hp: 110,
     attacks: &[(cls::MELEE, 4), (cls::FIRE_SHIP, 1)],
@@ -1374,7 +1380,7 @@ static WAR_HULK: UnitSpec = UnitSpec {
     blast_secondaries: 0,
     speed: I16F16::from_bits(6_204), // 1.42 tiles/s (adopted — see above)
     los: I16F16::from_bits(1_310_720), // 20 (5 tiles)
-    radius: I16F16::from_bits(104_858), // 1.6 — adopted (the Hulk's)
+    radius: I16F16::from_bits(131_072), // 2.0 (0.5 tiles — MOV-05 war-ship size)
     carcass_food: 0,
     carcass_decay_bits: 0,
     food_cost: 0,
@@ -1395,8 +1401,10 @@ static WAR_HULK: UnitSpec = UnitSpec {
 /// Transport Ship changelog's "garrison capacity of 5"; the
 /// GAP "5 → 20" progression is Chronicles-mode content, NOT
 /// standard DE — SPEC §8.6). Class: SHIP, like every ship but
-/// with no weapon. Radius adopts the Fishing Ship's 1.6 — an
-/// implementation constant (WATER-SPEC §8.9), never DE data.
+/// with no weapon. Radius 2.0 (0.5 tiles): the ship default
+/// update 81058's from-values pin at 0.5 — that update carved
+/// out only the Fishing Ship and the Trade Cog, so the
+/// Transport Ship keeps the default (MOV-05).
 static TRANSPORT_SHIP: UnitSpec = UnitSpec {
     max_hp: 70,
     attacks: NO_ATTACKS,
@@ -1416,7 +1424,7 @@ static TRANSPORT_SHIP: UnitSpec = UnitSpec {
     blast_secondaries: 0,
     speed: I16F16::from_bits(6_335), // 1.45 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(1_310_720), // 20 (5 tiles)
-    radius: I16F16::from_bits(104_858), // 1.6 — adopted (see above)
+    radius: I16F16::from_bits(131_072), // 2.0 (0.5 tiles — MOV-05 ship default)
     carcass_food: 0,
     carcass_decay_bits: 0,
     food_cost: 0,
@@ -1439,9 +1447,9 @@ static TRANSPORT_SHIP: UnitSpec = UnitSpec {
 /// train 36 s at the Dock, Feudal Age. Class: SHIP (the Ship
 /// article's overview: all ships except the Fishing Ship carry
 /// the Ships class — and the Fishing Ship carries it too in
-/// this roster, per the W2a §0.5 decision). Radius adopts the
-/// Fishing Ship's 1.6 — an implementation constant
-/// (WATER-SPEC §8.9), never DE data. NOT shipped: the update-
+/// this roster, per the W2a §0.5 decision). Radius 1.2
+/// (0.3 tiles): update 81058 cut the Trade Cog's collision
+/// size from 0.5 to 0.3 (MOV-05). NOT shipped: the update-
 /// 169123 preview's gold/wood cargo-ratio configuration on the
 /// Cog's UI (ageofempires.com naval preview, 2026-01-28) — no
 /// fetched source pins its ratios or its TRD-06 interaction,
@@ -1467,7 +1475,7 @@ static TRADE_COG: UnitSpec = UnitSpec {
     blast_secondaries: 0,
     speed: I16F16::from_bits(7_209), // 1.65 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(1_572_864), // 24 (6 tiles)
-    radius: I16F16::from_bits(104_858), // 1.6 — adopted (see above)
+    radius: I16F16::from_bits(78_643), // 1.2 (0.3 tiles — MOV-05, update 81058)
     carcass_food: 0,
     carcass_decay_bits: 0,
     food_cost: 0,
@@ -1542,10 +1550,9 @@ static TRADE_CART: UnitSpec = UnitSpec {
 /// so the Scorpion's +1 vs Rams row has its documented target
 /// (the P4 plan's Passo 0.3). The attack delay adopts the
 /// foot-melee rows' 30 ticks as a recorded design constant
-/// (the dossier pins no separate ram frame value). The radius
-/// adopts the largest shipped row's 1.2 (the Boar's bulk) as an
-/// implementation constant — the dossier gives no ram radius —
-/// never presented as DE data.
+/// (the dossier pins no separate ram frame value). Radius 1.8
+/// (0.45 tiles): the Jineapple Infosheet legend's rams line
+/// (MOV-05, extracted 2026-11-16).
 static BATTERING_RAM: UnitSpec = UnitSpec {
     max_hp: 175,
     attacks: &[
@@ -1569,7 +1576,7 @@ static BATTERING_RAM: UnitSpec = UnitSpec {
     blast_secondaries: 0,
     speed: I16F16::from_bits(2_621), // 0.6 tiles/s, empty (see above)
     los: I16F16::from_bits(1_310_720), // 20 (5 tiles)
-    radius: I16F16::from_bits(78_643), // 1.2 — adopted (see above)
+    radius: I16F16::from_bits(117_965), // 1.8 (0.45 tiles — MOV-05 rams line)
     carcass_food: 0,
     carcass_decay_bits: 0,
     food_cost: 0,
@@ -1599,9 +1606,9 @@ static BATTERING_RAM: UnitSpec = UnitSpec {
 /// with the engagement), speed 0.6 tiles/s, LoS 9. Cost 160 W /
 /// 135 G, train 46 s, Siege Workshop only (`BuildingKind::trains`
 /// + `EntityKind::train_age`). Its classes carry SIEGE, like the
-/// Ram's. The collision radius adopts the Ram's 1.2 — an
-/// implementation constant (§3.2.4 of the P4 plan), never
-/// presented as DE data. The weapon is blast-flagged (CMB-12):
+/// Ram's. Collision radius 2.0 (0.5 tiles): the Infosheet
+/// legend's "other siege units" line (MOV-05, extracted
+/// 2026-11-16). The weapon is blast-flagged (CMB-12):
 /// its stones hurt friend and foe alike, fell trees inside the
 /// radius (MAP-04), and it is the game's first Attack Ground
 /// weapon (CMB-16).
@@ -1628,7 +1635,7 @@ static MANGONEL: UnitSpec = UnitSpec {
     blast_secondaries: 5,
     speed: I16F16::from_bits(2_621), // 0.6 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(2_359_296), // 36 (9 tiles)
-    radius: I16F16::from_bits(78_643), // 1.2 — adopted (see above)
+    radius: I16F16::from_bits(131_072), // 2.0 (0.5 tiles — MOV-05 siege line)
     carcass_food: 0,
     carcass_decay_bits: 0,
     food_cost: 0,
@@ -1672,9 +1679,9 @@ static MANGONEL: UnitSpec = UnitSpec {
 /// bolt damages every ENEMY along its line — the targeted
 /// unit full, the rest half, friendly units nothing — out
 /// to 3 tiles past its maximum range. Its classes carry
-/// SIEGE, like its workshop kin. The collision radius adopts
-/// the Ram/Mangonel 1.2 — an implementation constant (§3.2.4
-/// of the P4 plan), never presented as DE data.
+/// SIEGE, like its workshop kin. Collision radius 2.0
+/// (0.5 tiles): the Infosheet legend's "other siege units"
+/// line (MOV-05, extracted 2026-11-16).
 static SCORPION: UnitSpec = UnitSpec {
     max_hp: 40,
     attacks: &[
@@ -1701,7 +1708,7 @@ static SCORPION: UnitSpec = UnitSpec {
     blast_secondaries: 0,
     speed: I16F16::from_bits(2_840), // 0.65 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(2_359_296), // 36 (9 tiles)
-    radius: I16F16::from_bits(78_643), // 1.2 — adopted (see above)
+    radius: I16F16::from_bits(131_072), // 2.0 (0.5 tiles — MOV-05 siege line)
     carcass_food: 0,
     carcass_decay_bits: 0,
     food_cost: 0,
@@ -1726,9 +1733,10 @@ static SCORPION: UnitSpec = UnitSpec {
 /// class was memberless and the Scout's +6 / Light Cavalry's
 /// +10 anti-monk attack rows keyed on nothing. Cost 100 gold,
 /// train 51 s, Monastery only (`BuildingKind::trains` +
-/// `EntityKind::train_age`). The radius adopts the foot rows'
-/// 1.0 as an implementation constant — the dossier gives no
-/// monk radius — never presented as DE data. Reload/delay/
+/// `EntityKind::train_age`). Radius 0.8 (0.2 tiles): the
+/// Infosheet legend's foot line names the Missionary beside
+/// "other foot units" (MOV-05, extracted 2026-11-16).
+/// Reload/delay/
 /// range are the inert zeros of the other attack-less rows
 /// (Sheep, Trade Cart): with no attack table they are never
 /// read.
@@ -1751,7 +1759,7 @@ static MONK: UnitSpec = UnitSpec {
     blast_secondaries: 0,
     speed: I16F16::from_bits(3_058), // 0.7 tiles/s (absolute scale, see header)
     los: I16F16::from_bits(2_883_584), // 44 (11 tiles)
-    radius: I16F16::from_bits(65_536), // 1.0 — adopted (see above)
+    radius: I16F16::from_bits(52_429), // 0.8 (0.2 tiles — MOV-05 foot line)
     carcass_food: 0,
     carcass_decay_bits: 0,
     food_cost: 0,

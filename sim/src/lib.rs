@@ -141,6 +141,8 @@ mod water_w4_tests;
 mod water_w5_tests;
 #[cfg(test)]
 mod water_w6_tests;
+#[cfg(test)]
+mod mov05_tests;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;

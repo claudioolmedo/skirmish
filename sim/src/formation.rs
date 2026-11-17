@@ -80,9 +80,10 @@ impl FormationKind {
 }
 
 /// Slot spacing between neighbouring units, in world units
-/// (2.0 = half a tile): units carry a 1.0-world-unit collision
-/// radius (MOV-05's table), so adjacent slots sit exactly one
-/// diameter apart — the shape holds without separation having
+/// (2.0 = half a tile): at the widest MOV-05 table radius a
+/// formation carries (cavalry, 1.0 world unit) adjacent slots
+/// sit exactly one diameter apart, and foot slots (0.8 radius)
+/// hold with slack — the shape holds without separation having
 /// to shove members off their slots (MOV-04 tolerates the
 /// residual crowding). Offsets are computed in HALF-spacing
 /// steps (1.0 world unit) so a rank can center exactly on the

@@ -358,8 +358,36 @@ fn stand_ground_holds_post_while_boar_passes() {
     }
     sim.tick(); // the stances land before the lure
     let post = post_group(&mut sim, &militias);
-    let settled: Vec<(f64, f64)> = militias.iter().map(|&m| pos(&sim, m)).collect();
     let boar = boar_near(&sim, post);
+    // MOV-05 re-choreography (test-only; the sim's mechanisms all
+    // fired per their rules — lure lock, chase, strike-at-reach,
+    // Stand Ground acquisition at exactly MELEE_REACH): with the
+    // documented per-unit radii the chase corridor's closest
+    // approach to the post measures 4.011 wu (probe) — the fleeing
+    // villager shoves the posted group ~1.8 wu away from the
+    // boar's approach and the boar kills it just outside the 3.0
+    // reach. So the group re-posts 3 wu forward, onto the corridor
+    // the lure will actually take: the boar transits the group
+    // mid-chase, which is the pass this scenario exists to stage.
+    {
+        let c = (
+            militias.iter().map(|&m| pos(&sim, m).0).sum::<f64>() / militias.len() as f64,
+            militias.iter().map(|&m| pos(&sim, m).1).sum::<f64>() / militias.len() as f64,
+        );
+        let bp = pos(&sim, boar);
+        let d = ((bp.0 - c.0).powi(2) + (bp.1 - c.1).powi(2)).sqrt().max(1.0);
+        let off = ((bp.0 - c.0) / d * 3.0, (bp.1 - c.1) / d * 3.0);
+        let fwd = free_point(&sim, c, &[off, (0.0, 0.0)]);
+        for &m in &militias {
+            sim.push_command(Command::Move { entity: m, x: fx(fwd.0), y: fx(fwd.1) });
+        }
+        let group: Vec<u32> = militias.to_vec();
+        let arrived = run_until(&mut sim, 20_000, |s| {
+            group.iter().all(|&m| dist(pos(s, m), fwd) <= 1.5)
+        });
+        assert!(arrived, "the group never reached its forward post");
+    }
+    let settled: Vec<(f64, f64)> = militias.iter().map(|&m| pos(&sim, m)).collect();
     lure_boar_past(&mut sim, vil, boar, post);
     // Watch the whole chase from the flee order on: whenever the
     // boar is outside a militia's melee range that militia must
@@ -926,6 +954,8 @@ fn orders_and_stances_replay_bit_identically() {
     };
     assert_eq!(run(), run(), "the orders package broke replay determinism");
 }
+
+
 
 
 

@@ -139,7 +139,7 @@ fn p4c_scorpion_row() {
     assert_eq!(s.blast_secondaries, 0);
     assert_eq!(s.speed.to_bits(), 2_840); // 0.65 tiles/s
     assert_eq!(s.los.to_bits(), 2_359_296); // 9 tiles
-    assert_eq!(s.radius.to_bits(), 78_643); // 1.2 — adopted constant
+    assert_eq!(s.radius.to_bits(), 131_072); // 2.0 — MOV-05 siege line (was 1.2 adopted)
     assert_eq!(s.food_cost, 0);
     assert_eq!(s.wood_cost, 75);
     assert_eq!(s.gold_cost, 75);
