@@ -201,7 +201,15 @@ const MAGIC: &[u8; 4] = b"SKSV";
 /// in play, round-tripping the hash unchanged); the
 /// pending-command codec gains `Command::LoadTransport` /
 /// `Command::UnloadTransport` at tags 54/55, append-only.
-const SAVE_VERSION: u32 = 20;
+/// Version 21: MOV-03 — the move-order record gains two
+/// flagged blocks after the MOV-06 group stamp: the formation
+/// stamp (presence byte, then the id while stamped) and the
+/// bump state (presence byte, then the streak counter and the
+/// wait flag while a streak stands or the unit waits). Both
+/// are hashed state (markers 0xC7/0xC8) exactly while their
+/// presence bytes are set, so a save that dropped them could
+/// never pass the load-time hash check.
+const SAVE_VERSION: u32 = 21;
 
 /// Little-endian byte writer over a growable buffer.
 struct W {
@@ -382,6 +390,21 @@ impl W {
                     self.u8(1);
                     self.u32(o.group_id);
                     self.fx(o.group_cap);
+                } else {
+                    self.u8(0);
+                }
+                // MOV-03 (v21): the formation stamp, flagged.
+                if o.formation_id != 0 {
+                    self.u8(1);
+                    self.u32(o.formation_id);
+                } else {
+                    self.u8(0);
+                }
+                // MOV-03 (v21): the bump state, flagged.
+                if o.blocked_ticks != 0 || o.bump_wait {
+                    self.u8(1);
+                    self.u32(o.blocked_ticks);
+                    self.u8(u8::from(o.bump_wait));
                 } else {
                     self.u8(0);
                 }
@@ -1296,6 +1319,18 @@ impl<'a> R<'a> {
                     1 => (self.u32()?, self.fx()?),
                     _ => return None,
                 };
+                // MOV-03 (v21): the formation stamp, flagged.
+                let formation_id = match self.u8()? {
+                    0 => 0,
+                    1 => self.u32()?,
+                    _ => return None,
+                };
+                // MOV-03 (v21): the bump state, flagged.
+                let (blocked_ticks, bump_wait) = match self.u8()? {
+                    0 => (0, false),
+                    1 => (self.u32()?, self.u8()? != 0),
+                    _ => return None,
+                };
                 Some(Some(MoveOrder {
                     target_x,
                     target_y,
@@ -1304,6 +1339,9 @@ impl<'a> R<'a> {
                     arrive,
                     group_id,
                     group_cap,
+                    formation_id,
+                    blocked_ticks,
+                    bump_wait,
                 }))
             }
             _ => None,

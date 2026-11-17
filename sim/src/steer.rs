@@ -33,6 +33,24 @@ pub const TREE_ARRIVE: I16F16 = I16F16::from_bits(32_768); // 0.5
 /// radii (MOV-05); two 1.0-radius units still separate at 2.0.
 pub const SEPARATION_RADIUS: I16F16 = I16F16::from_bits(131_072); // 2.0
 
+/// MOV-03 bump window: an ordered unit that makes near-zero
+/// progress for this many consecutive ticks while a mobile
+/// neighbour stands inside the pair's separation distance is
+/// "bumped" — the movement phase repaths its order around the
+/// blockers' current cells (the reference's bump-stop-repath;
+/// Klingers, Meeting C++ 2025: "Units bump into others, stop
+/// and repath around"). DE publishes NO number for this window
+/// — the DE team's own pathfinding thread concedes the choice
+/// is an open tuning question — so 30 ticks (0.5 s at 60 tps)
+/// is a feel value, recorded as such, never as a DE fact.
+pub const BUMP_WINDOW_TICKS: u32 = 30;
+/// MOV-03 repath retry interval while waiting: when a bump
+/// repath finds no route around the blockers (a 1-wide gap),
+/// the unit waits and the repath is retried every this many
+/// ticks. Same status as `BUMP_WINDOW_TICKS`: no DE number
+/// exists; 60 ticks (1 s) by feel.
+pub const BUMP_REPATH_INTERVAL: u32 = 60;
+
 /// One steering-snapshot entry: position + collision radius. The sim
 /// builds the snapshot from the id-ordered entity list each tick.
 pub type SnapshotEntry = (I16F16, I16F16, I16F16);

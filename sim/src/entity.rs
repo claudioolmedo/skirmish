@@ -1449,4 +1449,35 @@ pub struct MoveOrder {
     /// new order replaces the stamp with the new order's own
     /// (usually none), which is how the cap ends.
     pub group_cap: I16F16,
+    /// MOV-03/MOV-07 formation stamp: the formation group this
+    /// order belongs to, stamped by `Sim::finalize_formations`
+    /// on EVERY member of a formation group (unlike the MOV-06
+    /// speed stamp above, which lands only on members the cap
+    /// clamps). `0` = no formation. Two units whose live orders
+    /// carry the same nonzero formation id are members of one
+    /// formation and do not collide with each other at all
+    /// (MOV-03's documented formation rule: collision applies
+    /// between formations, groups and opponents, never inside
+    /// one formation). Plain data — part of the hashed state,
+    /// written only while stamped (marker 0xC7), and saved
+    /// (format v21).
+    pub formation_id: u32,
+    /// MOV-03 bump state: consecutive ticks on which this order
+    /// made near-zero progress while a mobile neighbour stood
+    /// inside the pair's separation distance — the "bump" of
+    /// the reference's bump-stop-repath. Reset to zero by any
+    /// tick with real progress, and by a successful repath.
+    /// At `steer::BUMP_WINDOW_TICKS` the movement phase repaths
+    /// the order around the blockers' current cells. Plain
+    /// data — part of the hashed state, written only while
+    /// nonzero or waiting (marker 0xC8), and saved (v21).
+    pub blocked_ticks: u32,
+    /// MOV-03 bump state: the last repath found no route around
+    /// the blockers, so the unit waits (steering zeroed) and
+    /// the repath is retried every
+    /// `steer::BUMP_REPATH_INTERVAL` ticks — the reference's
+    /// answer for a 1-wide gap with no alternate path. Cleared
+    /// by a successful repath or by any progress. Plain data —
+    /// hashed and saved with `blocked_ticks` (marker 0xC8).
+    pub bump_wait: bool,
 }

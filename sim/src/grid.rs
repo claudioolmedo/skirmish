@@ -639,7 +639,47 @@ impl Grid {
         if self.is_blocked_for(domain, goal.0, goal.1) && !goal_exempt {
             return None;
         }
-        let cells = self.astar_cells(domain, start, goal, passable)?;
+        let cells = self.astar_cells(domain, start, goal, passable, &[])?;
+        let mut waypoints: Vec<(I16F16, I16F16)> = cells
+            .iter()
+            .skip(1)
+            .map(|&(cx, cy)| self.cell_center(cx, cy))
+            .collect();
+        // Finish exactly on the commanded point, not the cell center.
+        waypoints.push(to);
+        Some(waypoints)
+    }
+
+    /// A* from one world point to another, additionally treating
+    /// the cells of `avoid` as blocked for this search only
+    /// (MOV-03: the bump repath routes around the current cells
+    /// of the units blocking the traveller — a standing unit is
+    /// an obstacle, never a thing to displace). Every other rule
+    /// is `find_path_through_for`'s; a goal cell inside `avoid`
+    /// is unreachable by definition and returns `None`, and
+    /// `avoid` cells also count as hard corners for the diagonal
+    /// corner rule, so a route never slips diagonally between
+    /// two blockers. The querier's own start cell is never
+    /// blocked by `avoid` (a blocker may share it — the
+    /// coincident case is a separate mechanism, not MOV-03).
+    pub fn find_path_avoiding_for(
+        &self,
+        domain: Domain,
+        from: (I16F16, I16F16),
+        to: (I16F16, I16F16),
+        passable: &[(u32, u32)],
+        avoid: &[(u32, u32)],
+    ) -> Option<Vec<(I16F16, I16F16)>> {
+        let start = self.world_to_cell(from.0, from.1);
+        let goal = self.world_to_cell(to.0, to.1);
+        if avoid.contains(&goal) {
+            return None;
+        }
+        let goal_exempt = domain == Domain::Land && passable.contains(&goal);
+        if self.is_blocked_for(domain, goal.0, goal.1) && !goal_exempt {
+            return None;
+        }
+        let cells = self.astar_cells(domain, start, goal, passable, avoid)?;
         let mut waypoints: Vec<(I16F16, I16F16)> = cells
             .iter()
             .skip(1)
@@ -665,6 +705,7 @@ impl Grid {
         start: (u32, u32),
         goal: (u32, u32),
         passable: &[(u32, u32)],
+        avoid: &[(u32, u32)],
     ) -> Option<Vec<(u32, u32)>> {
         if start == goal {
             return Some(vec![start]);
@@ -769,6 +810,12 @@ impl Grid {
                 if self.is_blocked_for(domain, nx, ny) && !gate_free {
                     continue;
                 }
+                // MOV-03: a dynamic obstacle cell (a blocking
+                // unit's current cell) bars the step for this
+                // search only.
+                if avoid.contains(&(nx, ny)) {
+                    continue;
+                }
                 // MAP-07: a cliff border is impassable — the step
                 // may not cross one, diagonally included (the
                 // corner rule inside `move_crosses_cliff`). Land
@@ -799,11 +846,14 @@ impl Grid {
                     // the node layer does not exist there).
                     let hard = |x: u32, y: u32| match domain {
                         Domain::Land => {
-                            (self.is_water(x, y) || self.is_dynamic(x, y))
-                                && !passable.contains(&(x, y))
+                            ((self.is_water(x, y) || self.is_dynamic(x, y))
+                                && !passable.contains(&(x, y)))
+                                || avoid.contains(&(x, y))
                         }
                         Domain::Water => {
-                            self.terrain_at(x, y) == TERRAIN_LAND || self.is_dynamic(x, y)
+                            self.terrain_at(x, y) == TERRAIN_LAND
+                                || self.is_dynamic(x, y)
+                                || avoid.contains(&(x, y))
                         }
                     };
                     if hard((cx as i32 + dx) as u32, cy) || hard(cx, (cy as i32 + dy) as u32) {
@@ -916,6 +966,58 @@ mod tests {
         g.set_terrain(60, 40, TERRAIN_WATER);
         let to = g.cell_center(60, 40); // inside the pond
         assert!(g.find_path(g.cell_center(0, 0), to).is_none());
+    }
+
+    #[test]
+    fn astar_avoid_routes_around_a_dynamic_obstacle() {
+        // MOV-03: the bump repath's search — a blocker's cell in
+        // the middle of the straight run forces a detour, and no
+        // waypoint (except the final target point) lands on it.
+        let g = Grid::new();
+        let from = g.cell_center(30, 40);
+        let to = g.cell_center(90, 40);
+        let _straight = g.find_path(from, to).expect("open field paths");
+        let avoid = [(60, 40)];
+        let path = g
+            .find_path_avoiding_for(Domain::Land, from, to, &[], &avoid)
+            .expect("a detour around one cell must exist");
+        assert!(
+            path[..path.len() - 1]
+                .iter()
+                .any(|&(wx, wy)| g.world_to_cell(wx, wy).1 != 40),
+            "no detour was taken — every waypoint stayed on the blocked row"
+        );
+        for &(wx, wy) in &path[..path.len() - 1] {
+            assert_ne!(g.world_to_cell(wx, wy), (60, 40), "waypoint on the avoided cell");
+        }
+        assert_eq!(*path.last().unwrap(), to);
+    }
+
+    #[test]
+    fn astar_avoid_rejects_an_occupied_goal() {
+        // MOV-03: the target point itself occupied — no route,
+        // the caller waits (or completes on the arrival
+        // tolerance) instead of pathing onto the blocker.
+        let g = Grid::new();
+        let from = g.cell_center(30, 40);
+        let to = g.cell_center(60, 40);
+        assert!(g
+            .find_path_avoiding_for(Domain::Land, from, to, &[], &[(60, 40)])
+            .is_none());
+    }
+
+    #[test]
+    fn astar_avoid_sealed_gap_returns_none() {
+        // MOV-03: a full column of avoided cells seals the map
+        // like a wall — the 1-wide-gap case generalised: no
+        // alternate path exists, so the search says so.
+        let g = Grid::new();
+        let avoid: Vec<(u32, u32)> = (0..GRID_DIM).map(|y| (60, y)).collect();
+        let from = g.cell_center(30, 40);
+        let to = g.cell_center(90, 40);
+        assert!(g
+            .find_path_avoiding_for(Domain::Land, from, to, &[], &avoid)
+            .is_none());
     }
 
     #[test]

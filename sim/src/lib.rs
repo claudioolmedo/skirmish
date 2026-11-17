@@ -143,6 +143,8 @@ mod water_w5_tests;
 mod water_w6_tests;
 #[cfg(test)]
 mod mov05_tests;
+#[cfg(test)]
+mod mov03_tests;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
@@ -7394,11 +7396,15 @@ impl Sim {
             .collect();
         // Entity index -> index into the snapshot.
         let mut snap_idx = vec![usize::MAX; self.entities.len()];
+        // Snapshot index -> entity index (MOV-03: the bump pass
+        // walks blockers in snapshot order).
+        let mut snap_entities: Vec<usize> = Vec::with_capacity(snapshot.len());
         {
             let mut k = 0;
             for (i, e) in self.entities.iter().enumerate() {
                 if e.kind.is_mobile() && !e.dead && !e.is_contained() {
                     snap_idx[i] = k;
+                    snap_entities.push(i);
                     k += 1;
                 }
             }
@@ -7416,6 +7422,12 @@ impl Sim {
                 _ => self.current_speed(i),
             };
             plans.push(match &e.order {
+                // MOV-03: a unit in the no-path bump wait holds
+                // its ground — steering is zeroed until a retry
+                // repath (bump pass, below) finds a route.
+                Some(o) if snap_idx[i] != usize::MAX && o.bump_wait => {
+                    (I16F16::ZERO, I16F16::ZERO, o.wp_index, false)
+                }
                 Some(o) if snap_idx[i] != usize::MAX => steer::steer(
                     &snapshot,
                     snap_idx[i],
@@ -7438,6 +7450,12 @@ impl Sim {
                 _ => (I16F16::ZERO, I16F16::ZERO, 0, false),
             });
         }
+        // MOV-03: the bump pass compares each ordered unit's
+        // integrated displacement against the velocity steering
+        // asked for — capture the asks before the zip consumes
+        // the plans.
+        let plan_vel: Vec<(I16F16, I16F16)> =
+            plans.iter().map(|&(vx, vy, _, _)| (vx, vy)).collect();
         let grid = &self.grid;
         for (e, (vx, vy, idx, arrived)) in self.entities.iter_mut().zip(plans) {
             if arrived {
@@ -7504,6 +7522,14 @@ impl Sim {
                 e.pos_y = fy;
             }
         }
+
+        // 2.25 MOV-03 bump pass: an ordered unit that made
+        //     near-zero progress against a standing neighbour
+        //     counts a bump tick; a full window repaths its
+        //     order around the blockers' cells, and a failed
+        //     repath parks it in the retrying wait. Nobody is
+        //     displaced by this pass — the traveller pays.
+        self.bump_pass(&snapshot, &snap_idx, &snap_entities, &plan_vel);
 
         // 2.5 Grid integrity (M6): separation can push a unit into
         //    a blocked cell (a wall cell, a building footprint) —
@@ -9271,6 +9297,9 @@ impl Sim {
                 arrive: steer::TREE_ARRIVE,
                 group_id: 0,
                 group_cap: I16F16::ZERO,
+                formation_id: 0,
+                blocked_ticks: 0,
+                bump_wait: false,
             });
             return true;
         }
@@ -9313,6 +9342,9 @@ impl Sim {
                     arrive: steer::TREE_ARRIVE,
                     group_id: 0,
                     group_cap: I16F16::ZERO,
+                    formation_id: 0,
+                    blocked_ticks: 0,
+                    bump_wait: false,
                 });
                 return true;
             }
@@ -10740,6 +10772,179 @@ impl Sim {
     /// perf fix; the building set is the only thing that changes
     /// reachability, and completion/destruction re-tasks everyone
     /// affected through other paths).
+    /// MOV-03 bump pass (movement phase, after integration):
+    /// the reference's bump-stop-repath, as a bookkeeping pass
+    /// over this tick's steering. For every ordered, snapshot
+    /// (mobile/living) unit, compare the displacement it
+    /// actually integrated against the velocity steering asked
+    /// for: under a quarter of the ask, with a mobile neighbour
+    /// inside the pair's separation distance, is a bumped tick
+    /// (the unit's own attack target is excluded — contact with
+    /// the victim is the fight, not a bump). A full bump window
+    /// (`steer::BUMP_WINDOW_TICKS`) repaths the order around the
+    /// blockers' CURRENT cells via the dynamic-obstacle A*; a
+    /// successful repath replaces only the waypoint trail (the
+    /// target, arrival radius and stamps stand). If no route
+    /// exists the unit enters the bump wait — steering zeroed,
+    /// repath retried every `steer::BUMP_REPATH_INTERVAL`
+    /// ticks — except when the target point itself is what is
+    /// occupied and the unit already stands as close as contact
+    /// allows (within the widest blocker's separation distance
+    /// plus the order's arrival radius): then the order
+    /// completes, the way a group converging on one point in
+    /// the reference spreads around it and is done. Real
+    /// progress resets the streak. Nobody else's position is
+    /// ever touched here — under MOV-03 the traveller pays,
+    /// never the bystander.
+    fn bump_pass(
+        &mut self,
+        snapshot: &[steer::SnapshotEntry],
+        snap_idx: &[usize],
+        snap_entities: &[usize],
+        plan_vel: &[(I16F16, I16F16)],
+    ) {
+        for i in 0..self.entities.len() {
+            let si = snap_idx[i];
+            if si == usize::MAX {
+                continue;
+            }
+            // Facts first (immutable borrows), mutation after.
+            let (waiting, counter, target, arrive, my_pos, pre_pos, my_r, domain, owner, atk_idx) = {
+                let e = &self.entities[i];
+                let Some(o) = &e.order else { continue };
+                let pre = snapshot[si];
+                (
+                    o.bump_wait,
+                    o.blocked_ticks,
+                    (o.target_x, o.target_y),
+                    o.arrive,
+                    (e.pos_x, e.pos_y),
+                    (pre.0, pre.1),
+                    units::spec(e.kind).radius,
+                    e.kind.domain(),
+                    e.owner,
+                    e.attack_target.and_then(|t| self.entity_index(t)),
+                )
+            };
+            // Blockers: snapshot neighbours (id order) inside
+            // the pair's separation distance at their
+            // post-integration positions.
+            let mut blockers: Vec<usize> = Vec::new();
+            let mut max_sep = I16F16::ZERO;
+            for &j in snap_entities {
+                if j == i || Some(j) == atk_idx {
+                    continue;
+                }
+                let n = &self.entities[j];
+                let sep = my_r + units::spec(n.kind).radius;
+                if steer::vec_len(n.pos_x - my_pos.0, n.pos_y - my_pos.1) < sep {
+                    blockers.push(j);
+                    if sep > max_sep {
+                        max_sep = sep;
+                    }
+                }
+            }
+            if !waiting {
+                let (pvx, pvy) = plan_vel[i];
+                let plan_len = steer::vec_len(pvx, pvy);
+                if plan_len > I16F16::ZERO {
+                    let disp = steer::vec_len(my_pos.0 - pre_pos.0, my_pos.1 - pre_pos.1);
+                    if disp.to_bits() as i64 * 4 >= plan_len.to_bits() as i64 {
+                        // Real progress: the streak ends.
+                        if counter != 0 {
+                            self.entities[i]
+                                .order
+                                .as_mut()
+                                .expect("order checked above")
+                                .blocked_ticks = 0;
+                        }
+                        continue;
+                    }
+                } else {
+                    // Steering asked for no motion without
+                    // completing the order — nothing to bump
+                    // against this tick.
+                    continue;
+                }
+                if blockers.is_empty() {
+                    // Stalled with no unit in the way (a terrain
+                    // slide, a task-layer concern): not a bump.
+                    if counter != 0 {
+                        self.entities[i]
+                            .order
+                            .as_mut()
+                            .expect("order checked above")
+                            .blocked_ticks = 0;
+                    }
+                    continue;
+                }
+            }
+            // A bumped tick (or a waiting unit's retry clock).
+            let new_counter = counter + 1;
+            self.entities[i]
+                .order
+                .as_mut()
+                .expect("order checked above")
+                .blocked_ticks = new_counter;
+            let due = new_counter == steer::BUMP_WINDOW_TICKS
+                || (waiting
+                    && new_counter > steer::BUMP_WINDOW_TICKS
+                    && (new_counter - steer::BUMP_WINDOW_TICKS) % steer::BUMP_REPATH_INTERVAL
+                        == 0);
+            if !due {
+                continue;
+            }
+            // Repath around the blockers' current cells.
+            let mut avoid: Vec<(u32, u32)> = Vec::with_capacity(blockers.len());
+            for &j in &blockers {
+                let n = &self.entities[j];
+                let cell = self.grid.world_to_cell(n.pos_x, n.pos_y);
+                if !avoid.contains(&cell) {
+                    avoid.push(cell);
+                }
+            }
+            let gates = if domain == crate::grid::Domain::Land {
+                self.gate_cells_of(owner)
+            } else {
+                Vec::new()
+            };
+            match self
+                .grid
+                .find_path_avoiding_for(domain, my_pos, target, &gates, &avoid)
+            {
+                Some(wps) if !wps.is_empty() => {
+                    let o = self.entities[i]
+                        .order
+                        .as_mut()
+                        .expect("order checked above");
+                    o.waypoints = wps;
+                    o.wp_index = 0;
+                    o.blocked_ticks = 0;
+                    o.bump_wait = false;
+                }
+                _ => {
+                    // No route around. If the occupied point is
+                    // the target itself and the unit already
+                    // stands as close as contact allows, the
+                    // order is complete; otherwise it waits.
+                    let d_target = steer::vec_len(target.0 - my_pos.0, target.1 - my_pos.1);
+                    if !blockers.is_empty() && d_target <= max_sep + arrive {
+                        let e = &mut self.entities[i];
+                        e.order = None;
+                        e.vel_x = I16F16::ZERO;
+                        e.vel_y = I16F16::ZERO;
+                    } else {
+                        self.entities[i]
+                            .order
+                            .as_mut()
+                            .expect("order checked above")
+                            .bump_wait = true;
+                    }
+                }
+            }
+        }
+    }
+
     fn set_move_order(&mut self, idx: usize, x: I16F16, y: I16F16) -> bool {
         let (px, py) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
         // Package J (BLD-13): a unit paths through its OWN
@@ -10774,6 +10979,9 @@ impl Sim {
                 // over player-issued orders, after issue.
                 group_id: 0,
                 group_cap: I16F16::ZERO,
+                formation_id: 0,
+                blocked_ticks: 0,
+                bump_wait: false,
             }),
             _ => None,
         };
@@ -10834,6 +11042,9 @@ impl Sim {
             arrive: steer::WAYPOINT_REACH,
             group_id: 0,
             group_cap: I16F16::ZERO,
+            formation_id: 0,
+            blocked_ticks: 0,
+            bump_wait: false,
         });
         true
     }
@@ -13101,6 +13312,26 @@ impl Sim {
                         h.write_u8(0xC2);
                         h.write_u32(o.group_id);
                         h.write_i32(o.group_cap.to_bits());
+                    }
+                    // MOV-03 (2026-11-17): the formation stamp,
+                    // written ONLY while a formation order stands,
+                    // behind marker 0xC7 (grepped free in
+                    // `hash_parts` at build time — taken: 0xAE,
+                    // 0xB0–0xBE, 0xC1–0xC6, 0xD1, 0xF1). A stream
+                    // that never orders a formation — the golden
+                    // scenario included — stays byte-identical.
+                    if o.formation_id != 0 {
+                        h.write_u8(0xC7);
+                        h.write_u32(o.formation_id);
+                    }
+                    // MOV-03: the bump state, written only while
+                    // a bump streak stands or the unit waits,
+                    // behind marker 0xC8 — an unbumped stream
+                    // stays byte-identical, golden included.
+                    if o.blocked_ticks != 0 || o.bump_wait {
+                        h.write_u8(0xC8);
+                        h.write_u32(o.blocked_ticks);
+                        h.write_u8(u8::from(o.bump_wait));
                     }
                 }
             }
