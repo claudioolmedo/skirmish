@@ -7339,8 +7339,9 @@ async function main() {
     playing = true;
   });
   // Match end (M5): Restart runs the menu's checked mode again from
-  // the same seed; Back to menu resets a fresh match and opens the
-  // pause menu over it (there is no start screen anymore).
+  // the same seed; Back to menu leaves to the Lobby Browser (the
+  // solo path joined the AI-room path on 2026-11-16 — see the
+  // endMenuBtn handler below).
   endRestartBtn.addEventListener('click', () => {
     enterGameCapture(); // every path here begins a fresh match
     if (net) {
@@ -7374,17 +7375,22 @@ async function main() {
       openLobby(null);
       return;
     }
-    // The pause menu over a fresh match IS this client's menu
-    // (see the handler's header note) — so the game view stays ON
-    // screen under it. Clearing .in-match here (bot-loop live
-    // proof, 2026-11-04) opened the pause menu over a black page,
-    // and closing it then left a black screen with no game and no
-    // menu: reload was the only recovery. Resume/✕ from here must
-    // land in the visible fresh match, like the lobby return path.
-    setInMatch(true); // fresh match stays visible under the menu
-    resetSim(builtMode || matchMode);
-    playing = true;
-    setPaused(true);
+    // Solo (client batch, 2026-11-16 — Claudio's standing
+    // DE-fidelity rule): Back to menu means the Lobby Browser
+    // here too, exactly as from an AI-room match above — the
+    // button now lands in the same place from every mode. The
+    // old solo path (bf599f8, 2026-10-17) reset a fresh match and
+    // opened the pause menu over it; that design is retired.
+    // openLobby takes the game off screen itself (setInMatch
+    // (false) — the pre-match state, the lobby on the plain
+    // background, not a black page: the 2026-11-04 black-screen
+    // defect came from clearing .in-match while keeping the
+    // pause menu as the only surface; here the lobby IS the
+    // surface, and its Play solo button starts the next match).
+    // matchEnded still stands, so the lobby offers no
+    // return-to-match for the finished game.
+    endOverlay.style.display = 'none';
+    openLobby(null);
   });
 
   // End-of-match feedback: stars paint on click, Send posts to
