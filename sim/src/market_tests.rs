@@ -20,7 +20,7 @@ fn n(v: I16F16) -> i32 {
 /// shape), complete or not as asked.
 fn market_at(sim: &Sim, id: u32, owner: u8, cell: (u32, u32), complete: bool) -> Building {
     let kind = BuildingKind::Market;
-    let size = kind.footprint_size();
+    let size = kind.footprint().w;
     let (x0, y0) = sim.grid().cell_center(cell.0, cell.1);
     let half = I16F16::from_num(size as i32 * 2);
     Building {
@@ -74,7 +74,7 @@ fn market_building_table_is_the_wiki_row() {
     assert_eq!(k.tag(), 12);
     assert_eq!(k.wood_cost(), I16F16::from_num(175));
     assert_eq!(k.build_ticks(), 3600);
-    assert_eq!(k.footprint_size(), 4);
+    assert_eq!(k.footprint().w, 4);
     assert_eq!(k.age_required(), Age::Feudal);
     assert_eq!(k.requires_building(), Some(BuildingKind::Mill));
     assert_eq!(k.max_hp(), 1800);

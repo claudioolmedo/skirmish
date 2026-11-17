@@ -57,7 +57,7 @@ fn dock_anchor(sim: &Sim) -> Option<(u32, u32)> {
 fn placed_dock(sim: &mut Sim, id: u32) -> u32 {
     let (ax, ay) = dock_anchor(sim).expect("seed pond offers a Dock site");
     let kind = BuildingKind::Dock;
-    let size = kind.footprint_size();
+    let size = kind.footprint().w;
     let (x0, y0) = sim.grid().cell_center(ax, ay);
     let half = I16F16::from_num(size as i32 * 2);
     for dy in 0..size {
@@ -230,7 +230,7 @@ fn fish_trap_tables_are_the_spec_rows() {
     assert_eq!(k.stone_cost(), I16F16::ZERO);
     assert_eq!(k.gold_cost(), I16F16::ZERO);
     assert_eq!(k.build_ticks(), 2400);
-    assert_eq!(k.footprint_size(), 1);
+    assert_eq!(k.footprint().w, 1);
     assert_eq!(k.age_required(), Age::Feudal);
     assert_eq!(k.placement(), Placement::Water);
     assert!(!k.blocks_footprint());

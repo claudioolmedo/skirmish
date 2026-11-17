@@ -45,7 +45,7 @@ fn wood(sim: &Sim) -> I16F16 {
 /// one open ring cell — scanned in rings around `(cx, cy)`.
 /// Whether the cells are explored is the caller's concern.
 fn open_house_anchor(sim: &Sim, cx: u32, cy: u32) -> (u32, u32) {
-    let size = HOUSE.footprint_size();
+    let size = HOUSE.footprint().w;
     let tc_cells: Vec<(u32, u32)> = sim
         .entities()
         .iter()
@@ -131,7 +131,7 @@ fn footprint_visibility(sim: &Sim, owner: u8, ax: u32, ay: u32, size: u32) -> Ve
 fn far_unexplored_plot(sim: &Sim) -> (u32, u32) {
     let (ax, ay) = open_house_anchor(sim, 60, 30);
     assert!(
-        !footprint_explored(sim, OWNER_PLAYER, ax, ay, HOUSE.footprint_size()),
+        !footprint_explored(sim, OWNER_PLAYER, ax, ay, HOUSE.footprint().w),
         "plot at ({ax}, {ay}) must start unexplored"
     );
     (ax, ay)
@@ -172,7 +172,7 @@ fn placement_on_explored_but_fogged_ground_is_allowed() {
     let villager = villager_of(&sim, OWNER_PLAYER);
     let scout = scout_of(&sim, OWNER_PLAYER);
     let (ax, ay) = far_unexplored_plot(&sim);
-    let size = HOUSE.footprint_size();
+    let size = HOUSE.footprint().w;
     let (px, py) = cell_point(&sim, ax, ay);
 
     // Ride the Scout to the plot: the ground becomes explored.

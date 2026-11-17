@@ -37,7 +37,7 @@ fn sim_in_imperial() -> Sim {
 
 fn placed(sim: &mut Sim, kind: BuildingKind, owner: u8, cell: (u32, u32)) -> u32 {
     let id = 900 + sim.buildings.len() as u32;
-    let size = kind.footprint_size();
+    let size = kind.footprint().w;
     let (x0, y0) = sim.grid().cell_center(cell.0, cell.1);
     let half = I16F16::from_num(size as i32 * 2);
     let hp = sim.building_max_hp(kind, owner);
@@ -158,7 +158,7 @@ fn tower_line_rows_match_the_documented_values() {
     assert_eq!(g.wood_cost().to_num::<i32>(), 35);
     assert_eq!(g.stone_cost().to_num::<i32>(), 125);
     assert_eq!(g.build_ticks(), 4800, "80 s at 60 Hz");
-    assert_eq!(g.footprint_size(), 1);
+    assert_eq!(g.footprint().w, 1);
     assert_eq!(g.max_hp_at(Age::Castle), 1500);
     assert_eq!(g.max_hp_at(Age::Imperial), 1500, "flat row — the kind is the tier");
     assert_eq!(g.armor_melee_at(Age::Castle), 2);
@@ -186,7 +186,7 @@ fn tower_line_rows_match_the_documented_values() {
     assert_eq!(k.wood_cost().to_num::<i32>(), 35);
     assert_eq!(k.stone_cost().to_num::<i32>(), 125);
     assert_eq!(k.build_ticks(), 4800);
-    assert_eq!(k.footprint_size(), 1);
+    assert_eq!(k.footprint().w, 1);
     assert_eq!(k.max_hp_at(Age::Imperial), 2250);
     assert_eq!(k.armor_melee_at(Age::Imperial), 3);
     assert_eq!(k.armor_pierce_at(Age::Imperial), 9);

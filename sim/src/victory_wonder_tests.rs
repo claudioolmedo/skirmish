@@ -30,7 +30,7 @@ fn wonder_settings() -> VictorySettings {
 }
 
 fn placed(sim: &Sim, id: u32, kind: BuildingKind, owner: u8, cell: (u32, u32)) -> Building {
-    let size = kind.footprint_size();
+    let size = kind.footprint().w;
     let (x0, y0) = sim.grid().cell_center(cell.0, cell.1);
     let half = I16F16::from_num(size as i32 * 2);
     Building {
@@ -127,7 +127,7 @@ fn wonder_row_matches_the_dossier() {
     // The full 3000 is the VIC-04 Society value of the building.
     assert_eq!(k.total_cost(), I16F16::from_num(3000));
     assert_eq!(k.build_ticks(), 210_000); // 3500 s at 60 Hz
-    assert_eq!(k.footprint_size(), 5);
+    assert_eq!(k.footprint().w, 5);
     assert_eq!(k.max_hp(), 4800); // flat — no BLD-11 step
     assert_eq!(k.armor_melee(), 3);
     assert_eq!(k.armor_pierce(), 10);

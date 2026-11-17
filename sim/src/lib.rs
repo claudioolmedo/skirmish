@@ -149,12 +149,13 @@ mod wasm;
 
 pub use build::{
     build_rate_thirds, gate_span_cells, repair_rate_hp_per_min, wall_line_cells, Building,
-    BuildingKind, Placement, ARCHERY_RANGE_BUILD_TICKS, ARCHERY_RANGE_WOOD_COST,
+    BuildingKind, Footprint, Placement, TC_FOOTPRINT, ARCHERY_RANGE_BUILD_TICKS,
+    ARCHERY_RANGE_WOOD_COST,
     BARRACKS_BUILD_TICKS, BARRACKS_WOOD_COST, BLACKSMITH_BUILD_TICKS, BLACKSMITH_WOOD_COST,
     BUILD_RANGE, CAMP_BUILD_TICKS, CAMP_WOOD_COST, CASTLE_BUILD_TICKS, CASTLE_POP_SUPPORT,
     CASTLE_STONE_COST, DOCK_BUILD_TICKS, DOCK_PRODUCTION_GARRISON_CAPACITY,
     DOCK_SHELTER_GARRISON_CAPACITY, DOCK_WOOD_COST, FARM_BUILD_TICKS, FARM_WOOD_COST,
-    FOOTPRINT_CELLS, GATE_BUILD_RANGE, GATE_OPEN_RADIUS, GATE_SPAN_CELLS, HOUSE_BUILD_TICKS,
+    GATE_BUILD_RANGE, GATE_OPEN_RADIUS, GATE_SPAN_CELLS, HOUSE_BUILD_TICKS,
     HOUSE_POP_SUPPORT, HOUSE_WOOD_COST, PALISADE_GATE_BUILD_TICKS, PALISADE_GATE_HP_DARK,
     PALISADE_GATE_WOOD_COST, REPAIR_COST_FRACTION, REPAIR_HP_PER_MIN_EXTRA,
     REPAIR_HP_PER_MIN_FIRST, STABLE_BUILD_TICKS, STABLE_WOOD_COST, STONE_GATE_BUILD_TICKS,
@@ -2049,11 +2050,16 @@ impl Sim {
     /// function of the generated map (a mid-map forest can push
     /// it a few cells off center, never onto a node or a tree).
     fn place_monument(&mut self) {
-        let size = BuildingKind::Monument.footprint_size() as i32;
+        let fp = BuildingKind::Monument.footprint();
         let c = (GRID_DIM / 2) as i32;
-        if let Some((ax, ay)) =
-            self.find_start_anchor(c - size / 2, c - size / 2, size as u32, 0, 12)
-        {
+        if let Some((ax, ay)) = self.find_start_anchor(
+            c - fp.w as i32 / 2,
+            c - fp.h as i32 / 2,
+            fp.w,
+            fp.h,
+            0,
+            12,
+        ) {
             self.place_start_building(entity::OWNER_GAIA, BuildingKind::Monument, ax, ay);
         }
     }
@@ -2153,19 +2159,24 @@ impl Sim {
     /// Used only at match creation (Package I's start packages
     /// and the Monument), where placement is the match's
     /// definition rather than a player's order.
-    fn start_footprint_free(&self, ax: u32, ay: u32, size: u32) -> bool {
-        if ax + size > GRID_DIM || ay + size > GRID_DIM {
+    fn start_footprint_free(&self, ax: u32, ay: u32, w: u32, h: u32) -> bool {
+        if ax + w > GRID_DIM || ay + h > GRID_DIM {
             return false;
         }
-        // Living Town Centers' reserved ground (BLD-16).
+        // Living Town Centers' reserved ground (BLD-16) — the
+        // reserve is the TC's declared footprint (`TC_FOOTPRINT`,
+        // BLD-06), anchored one cell up-left of the TC's cell
+        // (anchor = its cell − (w/2 − 1) on each axis).
+        let (tw, th) = build::TC_FOOTPRINT;
+        let (tox, toy) = ((tw / 2 - 1) as i32, (th / 2 - 1) as i32);
         let mut reserved = [(0u32, 0u32); 32];
         let mut reserved_len = 0usize;
         for e in &self.entities {
             if e.kind == EntityKind::TownCenter && !e.dead {
                 let (tx, ty) = self.grid.world_to_cell(e.pos_x, e.pos_y);
-                for dy in -1i32..=2 {
-                    for dx in -1i32..=2 {
-                        let (rx, ry) = (tx as i32 + dx, ty as i32 + dy);
+                for dy in 0..th as i32 {
+                    for dx in 0..tw as i32 {
+                        let (rx, ry) = (tx as i32 - tox + dx, ty as i32 - toy + dy);
                         if rx >= 0 && ry >= 0 && reserved_len < reserved.len() {
                             reserved[reserved_len] = (rx as u32, ry as u32);
                             reserved_len += 1;
@@ -2174,7 +2185,7 @@ impl Sim {
                 }
             }
         }
-        for (cx, cy) in build::footprint_cells(ax, ay, size) {
+        for (cx, cy) in build::rect_cells(ax, ay, w, h) {
             if self.grid.is_blocked(cx, cy) {
                 return false;
             }
@@ -2193,8 +2204,11 @@ impl Sim {
             }
         }
         for b in &self.buildings {
-            let bs = b.kind.footprint_size();
-            if ax < b.cell_x + bs && b.cell_x < ax + size && ay < b.cell_y + bs && b.cell_y < ay + size
+            let bfp = b.kind.footprint();
+            if ax < b.cell_x + bfp.w
+                && b.cell_x < ax + w
+                && ay < b.cell_y + bfp.h
+                && b.cell_y < ay + h
             {
                 return false;
             }
@@ -2211,7 +2225,8 @@ impl Sim {
         &self,
         tx: i32,
         ty: i32,
-        size: u32,
+        w: u32,
+        h: u32,
         min_ring: u32,
         max_ring: u32,
     ) -> Option<(u32, u32)> {
@@ -2226,7 +2241,7 @@ impl Sim {
                     if ax < 0 || ay < 0 {
                         continue;
                     }
-                    if self.start_footprint_free(ax as u32, ay as u32, size) {
+                    if self.start_footprint_free(ax as u32, ay as u32, w, h) {
                         return Some((ax as u32, ay as u32));
                     }
                 }
@@ -2251,7 +2266,8 @@ impl Sim {
     ) -> Option<u32> {
         let id = self.next_building_id;
         self.next_building_id += 1;
-        let (pos_x, pos_y) = build::footprint_center(cell_x, cell_y, kind.footprint_size());
+        let fp = kind.footprint();
+        let (pos_x, pos_y) = build::footprint_center(cell_x, cell_y, fp.w, fp.h);
         let mut building = Building {
             id,
             kind,
@@ -2388,7 +2404,8 @@ impl Sim {
         // The Mill beside the berry patch.
         let berries = cells_of(NodeKind::BerryBush);
         let bc = centroid(&berries);
-        let mill_anchor = self.find_start_anchor(bc.0, bc.1, BuildingKind::Mill.footprint_size(), 0, 10);
+        let mill_fp = BuildingKind::Mill.footprint();
+        let mill_anchor = self.find_start_anchor(bc.0, bc.1, mill_fp.w, mill_fp.h, 0, 10);
         if let Some((ax, ay)) = mill_anchor {
             self.place_start_building(owner, BuildingKind::Mill, ax, ay);
         }
@@ -2405,8 +2422,9 @@ impl Sim {
             None => Vec::new(),
         };
         let gc = centroid(&gold_cluster);
+        let mining_fp = BuildingKind::MiningCamp.footprint();
         if let Some((ax, ay)) =
-            self.find_start_anchor(gc.0, gc.1, BuildingKind::MiningCamp.footprint_size(), 0, 10)
+            self.find_start_anchor(gc.0, gc.1, mining_fp.w, mining_fp.h, 0, 10)
         {
             self.place_start_building(owner, BuildingKind::MiningCamp, ax, ay);
         }
@@ -2418,6 +2436,7 @@ impl Sim {
         let mut trees = cells_of(NodeKind::Tree);
         trees.sort_by_key(|&c| (cheb(c, pkg.tc_cell), c.1, c.0));
         let mut camp_centers: Vec<(I16F16, I16F16)> = Vec::new();
+        let lumber_fp = BuildingKind::LumberCamp.footprint();
         if !trees.is_empty() {
             for k in 0..3 {
                 let start = k * trees.len() / 3;
@@ -2427,7 +2446,8 @@ impl Sim {
                     if let Some(a) = self.find_start_anchor(
                         tx as i32,
                         ty as i32,
-                        BuildingKind::LumberCamp.footprint_size(),
+                        lumber_fp.w,
+                        lumber_fp.h,
                         0,
                         8,
                     ) {
@@ -2443,7 +2463,8 @@ impl Sim {
                         camp_centers.push(build::footprint_center(
                             ax,
                             ay,
-                            BuildingKind::LumberCamp.footprint_size(),
+                            lumber_fp.w,
+                            lumber_fp.h,
                         ));
                     }
                 }
@@ -2453,14 +2474,16 @@ impl Sim {
         // The Barracks, then the six Houses, around the Town
         // Center (outside its reserved ground, by the footprint
         // rules themselves).
+        let barracks_fp = BuildingKind::Barracks.footprint();
         if let Some((ax, ay)) =
-            self.find_start_anchor(tcx, tcy, BuildingKind::Barracks.footprint_size(), 3, 12)
+            self.find_start_anchor(tcx, tcy, barracks_fp.w, barracks_fp.h, 3, 12)
         {
             self.place_start_building(owner, BuildingKind::Barracks, ax, ay);
         }
+        let house_fp = BuildingKind::House.footprint();
         for _ in 0..6 {
             if let Some((ax, ay)) =
-                self.find_start_anchor(tcx, tcy, BuildingKind::House.footprint_size(), 2, 12)
+                self.find_start_anchor(tcx, tcy, house_fp.w, house_fp.h, 2, 12)
             {
                 self.place_start_building(owner, BuildingKind::House, ax, ay);
             }
@@ -2473,10 +2496,12 @@ impl Sim {
             .unwrap_or((tcx, tcy));
         let mut farm_nodes: Vec<u32> = Vec::new();
         for _ in 0..5 {
+            let farm_fp = BuildingKind::Farm.footprint();
             if let Some((ax, ay)) = self.find_start_anchor(
                 farm_target.0,
                 farm_target.1,
-                BuildingKind::Farm.footprint_size(),
+                farm_fp.w,
+                farm_fp.h,
                 2,
                 12,
             ) {
@@ -4328,7 +4353,7 @@ impl Sim {
             if gatherer == EntityKind::FishingShip && b.kind != BuildingKind::Dock {
                 continue;
             }
-            let d = self.distance_to_footprint(from_x, from_y, b.pos_x, b.pos_y, b.kind);
+            let d = self.distance_to_footprint(from_x, from_y, b.pos_x, b.pos_y, b.half_extents());
             let db = d.to_bits() as i64;
             let key = db * db;
             if best.map(|(bk, _)| key < bk).unwrap_or(true) {
@@ -4348,11 +4373,10 @@ impl Sim {
         py: I16F16,
         bx: I16F16,
         by: I16F16,
-        kind: BuildingKind,
+        half: (I16F16, I16F16),
     ) -> I16F16 {
-        let half = I16F16::from_num(kind.footprint_size() as i32 * 2);
-        let qx = (px - bx).clamp(-half, half) + bx;
-        let qy = (py - by).clamp(-half, half) + by;
+        let qx = (px - bx).clamp(-half.0, half.0) + bx;
+        let qy = (py - by).clamp(-half.1, half.1) + by;
         steer::vec_len(px - qx, py - qy)
     }
 
@@ -4380,14 +4404,14 @@ impl Sim {
             Dropoff::Building(bid) => {
                 let bi = self.building_index(bid)?;
                 let b = &self.buildings[bi];
-                let half = I16F16::from_num(b.kind.footprint_size() as i32 * 2);
-                let qx = from_x.clamp(b.pos_x - half, b.pos_x + half);
-                let qy = from_y.clamp(b.pos_y - half, b.pos_y + half);
+                let (hx, hy) = b.half_extents();
+                let qx = from_x.clamp(b.pos_x - hx, b.pos_x + hx);
+                let qy = from_y.clamp(b.pos_y - hy, b.pos_y + hy);
                 let (dx, dy) = (from_x - qx, from_y - qy);
                 if dx == I16F16::ZERO && dy == I16F16::ZERO {
                     // The hauler is somehow inside the footprint:
                     // steer to the east edge's standing point.
-                    return Some((b.pos_x + half + I16F16::from_num(2), b.pos_y));
+                    return Some((b.pos_x + hx + I16F16::from_num(2), b.pos_y));
                 }
                 let len = steer::vec_len(dx, dy);
                 let out = I16F16::from_num(2);
@@ -4412,7 +4436,7 @@ impl Sim {
             Dropoff::Building(bid) => match self.building_index(bid) {
                 Some(bi) => {
                     let b = &self.buildings[bi];
-                    self.distance_to_footprint(px, py, b.pos_x, b.pos_y, b.kind)
+                    self.distance_to_footprint(px, py, b.pos_x, b.pos_y, b.half_extents())
                         <= DEPOSIT_RANGE
                 }
                 None => false,
@@ -8447,10 +8471,10 @@ impl Sim {
     /// the work machine grants at a tree, MAP-04).
     fn at_building(&self, idx: usize, bi: usize) -> bool {
         let b = &self.buildings[bi];
-        let half = I16F16::from_num(b.kind.footprint_size() as i32 * 2);
+        let (hx, hy) = b.half_extents();
         let e = &self.entities[idx];
-        let dx = ((e.pos_x - b.pos_x).abs() - half).max(I16F16::ZERO);
-        let dy = ((e.pos_y - b.pos_y).abs() - half).max(I16F16::ZERO);
+        let dx = ((e.pos_x - b.pos_x).abs() - hx).max(I16F16::ZERO);
+        let dy = ((e.pos_y - b.pos_y).abs() - hy).max(I16F16::ZERO);
         let edge = steer::vec_len(dx, dy);
         edge <= I16F16::from_num(4)
             || (e.order.is_none() && edge <= I16F16::from_num(6))
@@ -8461,9 +8485,10 @@ impl Sim {
     /// is reachable — the caller ends the route instead of
     /// re-pathing every tick (the M6 perf rule).
     fn trade_approach(&mut self, idx: usize, bi: usize) -> bool {
-        let (ax, ay, size) = {
+        let (ax, ay, w, h) = {
             let b = &self.buildings[bi];
-            (b.cell_x, b.cell_y, b.kind.footprint_size())
+            let (w, h) = b.footprint_dims();
+            (b.cell_x, b.cell_y, w, h)
         };
         // Water W5: a Cog approaches its Dock on the WATER
         // domain — the land ring search (`approach_point` reads
@@ -8477,7 +8502,7 @@ impl Sim {
         // cells for water, so the apron is the water-side ring.
         if self.entities[idx].kind.domain() == Domain::Water {
             let from = (self.entities[idx].pos_x, self.entities[idx].pos_y);
-            for (cx, cy) in build::ring_cells(ax, ay, size) {
+            for (cx, cy) in build::rect_ring_cells(ax, ay, w, h) {
                 if cx >= GRID_DIM || cy >= GRID_DIM {
                     continue;
                 }
@@ -8491,7 +8516,7 @@ impl Sim {
             }
             return false;
         }
-        match self.approach_point(idx, ax, ay, size) {
+        match self.approach_point(idx, ax, ay, w, h) {
             Some((px, py)) => {
                 self.set_move_order(idx, px, py);
                 true
@@ -8706,7 +8731,7 @@ impl Sim {
             e.task_building = None;
             e.task_dropoff = None;
         }
-        match self.approach_point(idx, ax, ay, 4) {
+        match self.approach_point(idx, ax, ay, build::TC_FOOTPRINT.0, build::TC_FOOTPRINT.1) {
             Some((px, py)) => {
                 self.set_move_order(idx, px, py);
             }
@@ -9547,17 +9572,19 @@ impl Sim {
         }
         let id = self.next_building_id;
         self.next_building_id += 1;
-        let (pos_x, pos_y) = if kind.is_gate() {
-            // The span's center: the anchor cell's center shifted
-            // 1.5 cells (6 units) along the span's axis.
-            let anchor = build::footprint_center(cell_x, cell_y, 1);
-            if gate_along_x {
-                (anchor.0 + I16F16::from_num(6), anchor.1)
+        // The footprint rectangle's center (BLD-06): for a gate
+        // this is the span's center — the anchor cell's center
+        // shifted 1.5 cells (6 units) along the span's axis,
+        // which is exactly the (4, 1) / (1, 4) rectangle's
+        // center, so no kind is a special case here anymore.
+        let (pos_x, pos_y) = {
+            let fp = kind.footprint();
+            let (w, h) = if kind.is_gate() && !gate_along_x {
+                (fp.h, fp.w)
             } else {
-                (anchor.0, anchor.1 + I16F16::from_num(6))
-            }
-        } else {
-            build::footprint_center(cell_x, cell_y, kind.footprint_size())
+                (fp.w, fp.h)
+            };
+            build::footprint_center(cell_x, cell_y, w, h)
         };
         let building = Building {
             id,
@@ -9663,7 +9690,7 @@ impl Sim {
         for (cx, cy) in build::wall_line_cells(ax, ay, bx, by) {
             // A point strictly inside the segment's cell — the
             // same anchor convention the client's placement uses.
-            let (wx, wy) = build::footprint_center(cx, cy, 1);
+            let (wx, wy) = build::footprint_center(cx, cy, 1, 1);
             match self.validate_build(entity, kind, wx, wy) {
                 BuildVerdict::Reject => {}
                 BuildVerdict::Resume(bid) => {
@@ -9744,7 +9771,7 @@ impl Sim {
         let (ax, ay) = self.grid.world_to_cell(clamp_pos(x0), clamp_pos(y0));
         let (bx, by) = self.grid.world_to_cell(clamp_pos(x1), clamp_pos(y1));
         for (cx, cy) in build::wall_line_cells(ax, ay, bx, by) {
-            let (wx, wy) = build::footprint_center(cx, cy, 1);
+            let (wx, wy) = build::footprint_center(cx, cy, 1, 1);
             match self.validate_build(entity, kind, wx, wy) {
                 BuildVerdict::Resume(_) => return true,
                 BuildVerdict::Place(_, _) => {
@@ -10102,7 +10129,7 @@ impl Sim {
         if kind == BuildingKind::Monument {
             return BuildVerdict::Reject;
         }
-        let size = kind.footprint_size();
+        let fp = kind.footprint();
         let (ax, ay) = self.grid.world_to_cell(x, y);
         // Resume before placement checks: the footprint of a standing
         // incomplete building is *supposed* to be occupied — by
@@ -10157,7 +10184,7 @@ impl Sim {
             return self.validate_build_fish_trap(idx, ax, ay);
         }
         // The whole footprint must be inside the grid.
-        if ax + size > GRID_DIM || ay + size > GRID_DIM {
+        if ax + fp.w > GRID_DIM || ay + fp.h > GRID_DIM {
             return BuildVerdict::Reject;
         }
         // Water W1 (BLD-14): a Shoreline kind (the Dock) must
@@ -10171,7 +10198,7 @@ impl Sim {
         // 2026-11-16, the live-node check exempting fish for
         // the Shoreline kind (the shoal overlap, in the loop).
         if kind.placement() == crate::build::Placement::Shoreline
-            && !self.grid.dock_placement_ok(ax, ay, size)
+            && !self.grid.dock_placement_ok(ax, ay, fp.w)
         {
             return BuildVerdict::Reject;
         }
@@ -10180,18 +10207,22 @@ impl Sim {
         // an entity and never enters the blocking grid — but its
         // ground is reserved against building placement, both
         // players', the way the reference game reserves the TC's
-        // tiles for construction. The 4x4 is centered on the TC's
-        // cell (anchor = its cell − 1 on each axis), the sim half of
-        // the 4x4 art contract (half-extent 8 world units). At most
-        // two TCs stand in a match, so 32 slots always suffice.
+        // tiles for construction. The reserve is the TC's declared
+        // footprint (`TC_FOOTPRINT`, BLD-06), centered on the TC's
+        // cell (anchor = its cell − (w/2 − 1) on each axis), the
+        // sim half of the 4x4 art contract (half-extent 8 world
+        // units). At most two TCs stand in a match, so 32 slots
+        // always suffice.
+        let (tw, th) = build::TC_FOOTPRINT;
+        let (tox, toy) = ((tw / 2 - 1) as i32, (th / 2 - 1) as i32);
         let mut tc_reserved = [(0u32, 0u32); 32];
         let mut tc_reserved_len = 0usize;
         for e in &self.entities {
             if e.kind == EntityKind::TownCenter && !e.dead {
                 let (tx, ty) = self.grid.world_to_cell(e.pos_x, e.pos_y);
-                for dy in -1i32..=2 {
-                    for dx in -1i32..=2 {
-                        let (rx, ry) = (tx as i32 + dx, ty as i32 + dy);
+                for dy in 0..th as i32 {
+                    for dx in 0..tw as i32 {
+                        let (rx, ry) = (tx as i32 - tox + dx, ty as i32 - toy + dy);
                         if rx >= 0 && ry >= 0 && tc_reserved_len < tc_reserved.len() {
                             tc_reserved[tc_reserved_len] = (rx as u32, ry as u32);
                             tc_reserved_len += 1;
@@ -10200,7 +10231,7 @@ impl Sim {
                 }
             }
         }
-        let cells = build::footprint_cells(ax, ay, size);
+        let cells = build::rect_cells(ax, ay, fp.w, fp.h);
         // MAP-07: a footprint may not straddle a cliff border —
         // the reference game refuses foundations on a cliff edge,
         // and a building spanning the face would stand on two
@@ -10311,8 +10342,20 @@ impl Sim {
         // Two square footprints overlap iff their anchor ranges
         // intersect on both axes (each spans `size` cells).
         for b in &self.buildings {
-            let bs = b.kind.footprint_size();
-            if ax < b.cell_x + bs && b.cell_x < ax + size && ay < b.cell_y + bs && b.cell_y < ay + size {
+            // BLD-06 (sk-07 §B.2.3): the standing side still
+            // reads the row's ACROSS edge (min(w, h)) on both
+            // axes — for every square kind that is its edge,
+            // exactly as before; for a standing GATE it reads 1,
+            // so this arithmetic alone does not reserve the
+            // span's other three cells (a closed gate's span is
+            // reserved by the blocking grid instead). Rectifying
+            // this check to true rectangle intersection is the
+            // one behaviour change the BLD-06 study records as
+            // Claudio's decision (§d.3) — deliberately NOT taken
+            // in the data refactor; the value now at least comes
+            // from the one table, like everything else.
+            let bs = b.kind.footprint().w.min(b.kind.footprint().h);
+            if ax < b.cell_x + bs && b.cell_x < ax + fp.w && ay < b.cell_y + bs && b.cell_y < ay + fp.h {
                 return BuildVerdict::Reject;
             }
         }
@@ -10333,7 +10376,7 @@ impl Sim {
         }
         // Reachable-ish: at least one ring cell stands open and the
         // builder has a path to it.
-        if self.approach_point(idx, ax, ay, size).is_none() {
+        if self.approach_point(idx, ax, ay, fp.w, fp.h).is_none() {
             return BuildVerdict::Reject;
         }
         BuildVerdict::Place(ax, ay)
@@ -10458,8 +10501,12 @@ impl Sim {
             if e.kind == EntityKind::TownCenter && !e.dead {
                 let (tx, ty) = self.grid.world_to_cell(e.pos_x, e.pos_y);
                 let (tx, ty) = (tx as i32, ty as i32);
-                if (tx - 1..=tx + 2).contains(&(ax as i32))
-                    && (ty - 1..=ty + 2).contains(&(ay as i32))
+                // The reserve is `TC_FOOTPRINT` (BLD-06),
+                // anchored at the TC's cell − (w/2 − 1).
+                let (tw, th) = build::TC_FOOTPRINT;
+                let (x0, y0) = (tx - (tw / 2 - 1) as i32, ty - (th / 2 - 1) as i32);
+                if (x0..x0 + tw as i32).contains(&(ax as i32))
+                    && (y0..y0 + th as i32).contains(&(ay as i32))
                 {
                     return BuildVerdict::Reject;
                 }
@@ -10537,7 +10584,8 @@ impl Sim {
         idx: usize,
         ax: u32,
         ay: u32,
-        size: u32,
+        w: u32,
+        h: u32,
     ) -> Option<(I16F16, I16F16)> {
         // A 1×1 site's builder must stand BESIDE his segment
         // (SMALL_BUILD_RANGE, 5.8): targeting the ring cell's
@@ -10552,12 +10600,12 @@ impl Sim {
         // (which spans 2.0–6.0 orthogonally, 2.83–8.49
         // diagonally), and his walk crosses into build range
         // before steering can complete the order.
-        let pull = if size == 1 {
+        let pull = if w == 1 && h == 1 {
             Some((self.grid.cell_center(ax, ay), I16F16::from_bits(301_466))) // ≈4.6
         } else {
             None
         };
-        self.approach_point_cells(idx, &build::ring_cells(ax, ay, size), pull)
+        self.approach_point_cells(idx, &build::rect_ring_cells(ax, ay, w, h), pull)
     }
 
     /// The standing spot for building `bid` (Package J): square
@@ -10583,7 +10631,8 @@ impl Sim {
                 Some(((b.pos_x, b.pos_y), I16F16::from_bits(622_592))), // 9.5
             );
         }
-        self.approach_point(idx, b.cell_x, b.cell_y, b.kind.footprint_size())
+        let fp = b.kind.footprint();
+        self.approach_point(idx, b.cell_x, b.cell_y, fp.w, fp.h)
     }
 
     /// The first cell of `cells` (fixed order) that is in bounds,
@@ -10974,7 +11023,7 @@ impl Sim {
             None => return,
         };
         let b = &self.buildings[bi];
-        let (ax, ay, size) = (b.cell_x, b.cell_y, b.kind.footprint_size());
+        let (ax, ay) = (b.cell_x, b.cell_y);
         let (cx0, cy0) = (b.pos_x, b.pos_y);
         let (rally, rally_node) = (b.rally, b.rally_node);
         let owner = b.owner; // the unit belongs to the building's player (M5)
@@ -10984,7 +11033,7 @@ impl Sim {
         // read the standing land check, unchanged.
         let domain = kind.domain();
         let mut pos = None;
-        for (cx, cy) in build::ring_cells(ax, ay, size) {
+        for (cx, cy) in b.ring_cells() {
             if cx >= GRID_DIM || cy >= GRID_DIM {
                 continue;
             }
@@ -10994,7 +11043,7 @@ impl Sim {
             }
         }
         if pos.is_none() {
-            let half = I16F16::from_num(size as i32 * 2) + I16F16::from_num(2);
+            let half = b.half_extents().0 + I16F16::from_num(2);
             for (ox, oy) in [
                 (half, I16F16::ZERO),
                 (-half, I16F16::ZERO),
@@ -11536,7 +11585,7 @@ impl Sim {
                     e.vel_x = I16F16::ZERO;
                     e.vel_y = I16F16::ZERO;
                 } else if self.entities[idx].order.is_none() {
-                    match self.approach_point(idx, ax, ay, 4) {
+                    match self.approach_point(idx, ax, ay, build::TC_FOOTPRINT.0, build::TC_FOOTPRINT.1) {
                         Some((px, py)) => {
                             self.set_move_order(idx, px, py);
                         }
@@ -12386,11 +12435,12 @@ impl Sim {
         }
         if let Dropoff::Building(bid) = target {
             if let Some(bi) = self.building_index(bid) {
-                let (ax, ay, size) = {
+                let (ax, ay, w, h) = {
                     let b = &self.buildings[bi];
-                    (b.cell_x, b.cell_y, b.kind.footprint_size())
+                    let (w, h) = b.footprint_dims();
+                    (b.cell_x, b.cell_y, w, h)
                 };
-                if let Some((axp, ayp)) = self.approach_point(idx, ax, ay, size) {
+                if let Some((axp, ayp)) = self.approach_point(idx, ax, ay, w, h) {
                     return self.set_move_order(idx, axp, ayp);
                 }
             }

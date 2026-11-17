@@ -256,9 +256,9 @@ fn gate_on_open_ground_and_vertical_orientation() {
                     let cx = ax + k;
                     sim.grid().is_blocked(cx, ay)
                         || sim.buildings().iter().any(|b| {
-                            let bs = b.kind.footprint_size();
-                            cx >= b.cell_x && cx < b.cell_x + bs
-                                && ay >= b.cell_y && ay < b.cell_y + bs
+                            let (bw, bh) = b.footprint_dims();
+                            cx >= b.cell_x && cx < b.cell_x + bw
+                                && ay >= b.cell_y && ay < b.cell_y + bh
                         })
                 });
                 if x_blocked {

@@ -767,21 +767,21 @@ impl Sim {
         }
         let bi = self.building_index(building).unwrap();
         let b = &self.buildings[bi];
-        let (bx, by, kind) = (b.pos_x, b.pos_y, b.kind);
+        let (bx, by) = (b.pos_x, b.pos_y);
+        let (hx, hy) = b.half_extents();
         let (mx, my) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
-        let dist = self.distance_to_footprint(mx, my, bx, by, kind);
+        let dist = self.distance_to_footprint(mx, my, bx, by, (hx, hy));
         if dist > crate::combat::MELEE_REACH {
             // Automatic chase (MNK-07): steer to the standing
             // point just outside the footprint edge on the monk's
             // approach line (the drop-off steer geometry), and
             // only re-path when the standing order is stale. The
             // chase does NOT reset progress.
-            let half = I16F16::from_num(kind.footprint_size() as i32 * 2);
-            let qx = mx.clamp(bx - half, bx + half);
-            let qy = my.clamp(by - half, by + half);
+            let qx = mx.clamp(bx - hx, bx + hx);
+            let qy = my.clamp(by - hy, by + hy);
             let (dx, dy) = (mx - qx, my - qy);
             let (sx, sy) = if dx == I16F16::ZERO && dy == I16F16::ZERO {
-                (bx + half + I16F16::from_num(2), by)
+                (bx + hx + I16F16::from_num(2), by)
             } else {
                 let len = crate::steer::vec_len(dx, dy);
                 let out = I16F16::from_num(2);
@@ -1347,10 +1347,10 @@ impl Sim {
     ) -> (I16F16, I16F16) {
         let (mx, my) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
         let b = &self.buildings[bi];
-        let half = I16F16::from_num(b.kind.footprint_size() as i32 * 2);
+        let (hx, hy) = b.half_extents();
         (
-            mx.clamp(b.pos_x - half, b.pos_x + half),
-            my.clamp(b.pos_y - half, b.pos_y + half),
+            mx.clamp(b.pos_x - hx, b.pos_x + hx),
+            my.clamp(b.pos_y - hy, b.pos_y + hy),
         )
     }
 
@@ -1461,7 +1461,7 @@ impl Sim {
                     return false;
                 }
                 let (mx, my) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
-                if self.distance_to_footprint(mx, my, bx, by, bkind) <= MELEE_REACH {
+                if self.distance_to_footprint(mx, my, bx, by, self.buildings[bi].half_extents()) <= MELEE_REACH {
                     // Take it out: the store, the pointers, the
                     // carry — written together (the lifecycle
                     // invariant). The ECO-16 trickle stops with
@@ -1521,7 +1521,7 @@ impl Sim {
             return false;
         }
         let (mx, my) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
-        if self.distance_to_footprint(mx, my, bx, by, bkind) <= MELEE_REACH {
+        if self.distance_to_footprint(mx, my, bx, by, self.buildings[bi].half_extents()) <= MELEE_REACH {
             self.buildings[bi].relics.push(relic);
             if let Some(ri) = self.entity_index(relic) {
                 let rel = &mut self.entities[ri];

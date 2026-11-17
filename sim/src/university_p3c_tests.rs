@@ -26,7 +26,7 @@ fn sim_in_castle() -> Sim {
 
 fn placed(sim: &mut Sim, kind: BuildingKind, owner: u8, cell: (u32, u32)) -> u32 {
     let id = 900 + sim.buildings.len() as u32;
-    let size = kind.footprint_size();
+    let size = kind.footprint().w;
     let (x0, y0) = sim.grid().cell_center(cell.0, cell.1);
     let half = I16F16::from_num(size as i32 * 2);
     let hp = sim.building_max_hp(kind, owner);
@@ -106,7 +106,7 @@ fn university_row_matches_the_dossier() {
     assert_eq!(BuildingKind::from_tag(16), Some(k));
     assert_eq!(k.wood_cost().to_num::<i32>(), 200);
     assert_eq!(k.build_ticks(), 3600, "60 s at 60 Hz");
-    assert_eq!(k.footprint_size(), 4);
+    assert_eq!(k.footprint().w, 4);
     assert_eq!(k.max_hp_at(Age::Castle), 2100);
     assert_eq!(k.armor_melee_at(Age::Castle), 2);
     assert_eq!(k.armor_pierce_at(Age::Castle), 9);

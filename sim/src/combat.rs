@@ -2488,7 +2488,10 @@ impl Sim {
         if self.is_resigned(b.owner) {
             return;
         }
-        let (owner, bx, by, size) = (b.owner, b.pos_x, b.pos_y, b.kind.footprint_size());
+        let (owner, bx, by) = (b.owner, b.pos_x, b.pos_y);
+        // BLD-06: the firing building's footprint half extents,
+        // per axis (every firing kind is square, so hx == hy).
+        let (hx, hy) = b.half_extents();
         // Water W2a (BLD-14/GAR-06 pattern): the Dock's weapon
         // exists ONLY while shelter-garrisoned — an empty Dock
         // never acquires or looses (its stored arrow count is 0
@@ -2500,7 +2503,7 @@ impl Sim {
         let Some(w) = self.building_weapon(owner, b.kind) else {
             return;
         };
-        let half = I16F16::from_num(size as i32 * 2);
+        let half = hx;
 
         // --- validate the standing target -------------------------
         let mut target_unit = self.buildings[bi].weapon_target;
@@ -2525,10 +2528,9 @@ impl Sim {
                 match self.building_index(tbid) {
                     Some(tbi) => {
                         let tb = &self.buildings[tbi];
-                        let thalf =
-                            I16F16::from_num(tb.kind.footprint_size() as i32 * 2);
-                        let dx = ((tb.pos_x - bx).abs() - (half + thalf)).max(I16F16::ZERO);
-                        let dy = ((tb.pos_y - by).abs() - (half + thalf)).max(I16F16::ZERO);
+                        let (thx, thy) = tb.half_extents();
+                        let dx = ((tb.pos_x - bx).abs() - (hx + thx)).max(I16F16::ZERO);
+                        let dy = ((tb.pos_y - by).abs() - (hy + thy)).max(I16F16::ZERO);
                         let d = steer::vec_len(dx, dy);
                         if d > w.range_max {
                             target_bld = None;
@@ -2610,9 +2612,9 @@ impl Sim {
                     if !self.can_auto_acquire(owner, ob.owner, false) || ob.kind == BuildingKind::Farm {
                         continue;
                     }
-                    let thalf = I16F16::from_num(ob.kind.footprint_size() as i32 * 2);
-                    let dx = ((ob.pos_x - bx).abs() - (half + thalf)).max(I16F16::ZERO);
-                    let dy = ((ob.pos_y - by).abs() - (half + thalf)).max(I16F16::ZERO);
+                    let (thx, thy) = ob.half_extents();
+                    let dx = ((ob.pos_x - bx).abs() - (hx + thx)).max(I16F16::ZERO);
+                    let dy = ((ob.pos_y - by).abs() - (hy + thy)).max(I16F16::ZERO);
                     let d = steer::vec_len(dx, dy);
                     if d > w.range_max {
                         continue;
@@ -2691,9 +2693,12 @@ impl Sim {
     ) {
         let tick = self.tick;
         let b = &self.buildings[bi];
-        let (bid, owner, bx, by, size) = (b.id, b.owner, b.pos_x, b.pos_y, b.kind.footprint_size());
+        let (bid, owner, bx, by) = (b.id, b.owner, b.pos_x, b.pos_y);
         let bkind = b.kind;
-        let half = I16F16::from_num(size as i32 * 2);
+        // BLD-06: per-axis footprint half extents (firing kinds
+        // are square, so hx == hy here).
+        let (hx, hy) = b.half_extents();
+        let half = hx;
         // Aim + band from the target as it stands NOW.
         let resolved = if let Some(tid) = b.weapon_target {
             self.entity_index(tid).and_then(|ti| {
@@ -2712,9 +2717,9 @@ impl Sim {
         } else if let Some(tbid) = b.weapon_target_building {
             self.building_index(tbid).map(|tbi| {
                 let tb = &self.buildings[tbi];
-                let thalf = I16F16::from_num(tb.kind.footprint_size() as i32 * 2);
-                let dx = ((tb.pos_x - bx).abs() - (half + thalf)).max(I16F16::ZERO);
-                let dy = ((tb.pos_y - by).abs() - (half + thalf)).max(I16F16::ZERO);
+                let (thx, thy) = tb.half_extents();
+                let dx = ((tb.pos_x - bx).abs() - (hx + thx)).max(I16F16::ZERO);
+                let dy = ((tb.pos_y - by).abs() - (hy + thy)).max(I16F16::ZERO);
                 (
                     (tb.pos_x, tb.pos_y),
                     None,
@@ -2857,7 +2862,9 @@ impl Sim {
         if self.is_resigned(owner) {
             return;
         }
-        let half = I16F16::from_num(8); // the TC's 4x4 footprint
+        // The TC's footprint half extent, from its one
+        // declaration (BLD-06: `TC_FOOTPRINT`, 4×4 → 8).
+        let half = I16F16::from_num(crate::build::TC_FOOTPRINT.0 as i32 * 2);
         if self.tc_states[si].garrison.is_empty() {
             // No garrison, no fire — and no held engagement.
             let st = &mut self.tc_states[si];
@@ -2895,10 +2902,9 @@ impl Sim {
                 match self.building_index(tbid) {
                     Some(tbi) => {
                         let tb = &self.buildings[tbi];
-                        let thalf =
-                            I16F16::from_num(tb.kind.footprint_size() as i32 * 2);
-                        let dx = ((tb.pos_x - bx).abs() - (half + thalf)).max(I16F16::ZERO);
-                        let dy = ((tb.pos_y - by).abs() - (half + thalf)).max(I16F16::ZERO);
+                        let (thx, thy) = tb.half_extents();
+                        let dx = ((tb.pos_x - bx).abs() - (half + thx)).max(I16F16::ZERO);
+                        let dy = ((tb.pos_y - by).abs() - (half + thy)).max(I16F16::ZERO);
                         let d = steer::vec_len(dx, dy);
                         if d > w.range_max {
                             target_bld = None;
@@ -2971,9 +2977,9 @@ impl Sim {
                     if !self.can_auto_acquire(owner, ob.owner, false) || ob.kind == BuildingKind::Farm {
                         continue;
                     }
-                    let thalf = I16F16::from_num(ob.kind.footprint_size() as i32 * 2);
-                    let dx = ((ob.pos_x - bx).abs() - (half + thalf)).max(I16F16::ZERO);
-                    let dy = ((ob.pos_y - by).abs() - (half + thalf)).max(I16F16::ZERO);
+                    let (thx, thy) = ob.half_extents();
+                    let dx = ((ob.pos_x - bx).abs() - (half + thx)).max(I16F16::ZERO);
+                    let dy = ((ob.pos_y - by).abs() - (half + thy)).max(I16F16::ZERO);
                     let d = steer::vec_len(dx, dy);
                     if d > w.range_max {
                         continue;
@@ -3034,7 +3040,7 @@ impl Sim {
             let e = &self.entities[ei];
             (e.owner, e.pos_x, e.pos_y)
         };
-        let half = I16F16::from_num(8);
+        let half = I16F16::from_num(crate::build::TC_FOOTPRINT.0 as i32 * 2);
         let st = &self.tc_states[si];
         let resolved = if let Some(tid) = st.weapon_target {
             self.entity_index(tid).and_then(|ti| {

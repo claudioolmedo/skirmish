@@ -846,7 +846,7 @@ fn find_anchor(
     cy: I16F16,
 ) -> Option<(I16F16, I16F16)> {
     let (tcx, tcy) = sim.grid().world_to_cell(cx, cy);
-    let size = kind.footprint_size();
+    let fp = kind.footprint();
     let mut tried = 0;
     for r in 3..=9i32 {
         for dy in -r..=r {
@@ -859,7 +859,7 @@ fn find_anchor(
                     continue;
                 }
                 let (ax, ay) = (ax as u32, ay as u32);
-                let (x, y) = crate::build::footprint_center(ax, ay, size);
+                let (x, y) = crate::build::footprint_center(ax, ay, fp.w, fp.h);
                 tried += 1;
                 // The cap sits far out on purpose: a grown base
                 // crowds the inner rings with buildings and with
@@ -2159,7 +2159,7 @@ mod tests {
         kind: BuildingKind,
         cell: (u32, u32),
     ) -> crate::build::Building {
-        let size = kind.footprint_size();
+        let size = kind.footprint().w;
         let (x0, y0) = sim.grid().cell_center(cell.0, cell.1);
         let half = I16F16::from_num(size as i32 * 2);
         crate::build::Building {

@@ -57,11 +57,6 @@ use crate::entity::EntityKind;
 use crate::grid::{CELL_SIZE, WORLD_HALF};
 use crate::tech::{Age, ProdEntry};
 
-/// Footprint edge length, in grid cells, of the 2×2 kinds
-/// (House and the drop-off camps). The Farm and the Barracks are 3
-/// (`BuildingKind::footprint_size`).
-pub const FOOTPRINT_CELLS: u32 = 2;
-
 /// House construction cost: 25 wood (study §5).
 pub const HOUSE_WOOD_COST: I16F16 = I16F16::from_bits(1_638_400); // 25
 /// House build time: 25 s at 60 Hz (study §5).
@@ -330,6 +325,57 @@ pub enum Placement {
     /// `Grid::fish_trap_placement_ok`).
     Water,
 }
+
+/// One row of the footprint table (BLD-06): in the reference
+/// game's data model a building's footprint is DATA, not code —
+/// Unit Size X and Unit Size Y are separate columns of the
+/// object's row, and whether the object obstructs is another
+/// column of the same row (AoE2DE UGC Guide, *Attributes*:
+/// Unit Size X/Y, Obstruction Type 78, Blockage Class 79).
+/// Skirmish keeps the same shape since the BLD-06 refactor
+/// (2026-11-17): every kind's footprint lives in exactly one
+/// row of `BuildingKind::footprint`, and placement, pathing,
+/// combat geometry, the ABI and the client all read that row —
+/// no second copy of a size exists anywhere.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Footprint {
+    /// Footprint width in grid cells, along the anchor's x axis.
+    /// A gate's row reads 4×1: the span along the wall line; the
+    /// instance resolves the orientation (`Building::footprint_dims`).
+    pub w: u32,
+    /// Footprint height in grid cells, along the anchor's y axis.
+    pub h: u32,
+    /// Whether a standing building of this kind blocks its
+    /// footprint cells for pathing (the row's obstruction
+    /// column). Farms never block (BLD-12), a gate's block is
+    /// conditional on its derived open state and owned by
+    /// `Sim::refresh_gate_blocking`, and a Fish Trap never
+    /// blocks its water cell.
+    pub blocks: bool,
+    /// The placement-terrain classification of the row.
+    pub placement: Placement,
+    /// The row's explicit build range, where the (w, h) class
+    /// formula in `build_range` cannot reproduce the adopted
+    /// value: the Market's 15.5 against the 4×4 class's 15.0
+    /// (the pair is one footprint with two adopted margins —
+    /// probe P1 of the BLD-06 study decides whether 15.0 is a
+    /// stall bug; until then the difference is a column, never
+    /// an `if`), and the Monument's generic 10.0 (the
+    /// unconstructible kind never joined the 4×4 class's range;
+    /// its adopted value is the generic fall-through). `None`
+    /// derives the range from (w, h).
+    pub build_range: Option<I16F16>,
+}
+
+/// The Town Center's footprint in cells, declared ONCE
+/// (BLD-06): the standing Town Center is an entity, not a
+/// placed building (BLD-16), so it has no instance row for
+/// consumers to read — its 4×4 lives here, as the TownCenter
+/// kind row's own source, and the placement reserve in
+/// `Sim::validate_build`, combat's TC geometry and the client
+/// (through the kind-table ABI export) all read this one
+/// declaration. DE: 4×4 (wiki, Building comparative table).
+pub const TC_FOOTPRINT: (u32, u32) = (4, 4);
 
 /// A buildable building kind.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -665,12 +711,100 @@ impl BuildingKind {
     /// `Shoreline` (the Dock alone) must straddle a shoreline
     /// under the grid's Dock predicate; `Water` (Water W2b —
     /// the Fish Trap alone) floats on a water-side cell under
-    /// the grid's trap predicate.
+    /// the grid's trap predicate. Since the BLD-06 refactor
+    /// this reads the footprint row's placement column
+    /// (`footprint`), like every other footprint fact.
     pub fn placement(self) -> Placement {
+        self.footprint().placement
+    }
+
+    /// THE footprint table (BLD-06): one row per kind — size
+    /// per axis, the obstruction column and the placement
+    /// column, the DE data model's shape (see `Footprint`).
+    /// Every value is the value the pre-refactor matches
+    /// carried (the study's footprints where it gives them;
+    /// MECHANICS-STUDY §5 and the wiki Building comparative
+    /// table's Sz column agree on every row — sk-07's closing
+    /// check found zero value divergences). The Farm's 3×3 is
+    /// Claudio's decision of 2026-10-22 (ECO-14); the
+    /// Blacksmith's 3×3 is adopted (see the module docs); the
+    /// Monument's 4×4 is ADOPTED with no DE source (the wiki
+    /// gives the Monument the Wonder's appearance and no
+    /// separate footprint — recorded as Claudio's open
+    /// decision in the BLD-06 study, §d.2). A gate's row is
+    /// the true rectangle, 4×1: the span along the wall line,
+    /// with the instance's orientation resolved by
+    /// `Building::footprint_dims`.
+    pub fn footprint(self) -> Footprint {
+        const fn fp(
+            w: u32,
+            h: u32,
+            blocks: bool,
+            placement: Placement,
+        ) -> Footprint {
+            Footprint { w, h, blocks, placement, build_range: None }
+        }
         match self {
-            BuildingKind::Dock => Placement::Shoreline,
-            BuildingKind::FishTrap => Placement::Water,
-            _ => Placement::Normal,
+            BuildingKind::House => fp(2, 2, true, Placement::Normal),
+            BuildingKind::Farm => fp(3, 3, false, Placement::Normal),
+            BuildingKind::Barracks => fp(3, 3, true, Placement::Normal),
+            BuildingKind::LumberCamp => fp(2, 2, true, Placement::Normal),
+            BuildingKind::Mill => fp(2, 2, true, Placement::Normal),
+            BuildingKind::MiningCamp => fp(2, 2, true, Placement::Normal),
+            BuildingKind::ArcheryRange => fp(3, 3, true, Placement::Normal),
+            BuildingKind::Stable => fp(3, 3, true, Placement::Normal),
+            BuildingKind::Blacksmith => fp(3, 3, true, Placement::Normal),
+            BuildingKind::PalisadeWall => fp(1, 1, true, Placement::Normal),
+            BuildingKind::WatchTower => fp(1, 1, true, Placement::Normal),
+            BuildingKind::Outpost => fp(1, 1, true, Placement::Normal),
+            BuildingKind::Market => Footprint {
+                w: 4,
+                h: 4,
+                blocks: true,
+                placement: Placement::Normal,
+                // The Market's adopted 15.5 against the 4×4
+                // class's 15.0 (see `Footprint::build_range`).
+                build_range: Some(MARKET_BUILD_RANGE),
+            },
+            BuildingKind::TownCenter => fp(
+                TC_FOOTPRINT.0,
+                TC_FOOTPRINT.1,
+                true,
+                Placement::Normal,
+            ),
+            BuildingKind::StoneWall => fp(1, 1, true, Placement::Normal),
+            BuildingKind::Castle => fp(4, 4, true, Placement::Normal),
+            BuildingKind::University => fp(4, 4, true, Placement::Normal),
+            BuildingKind::SiegeWorkshop => fp(4, 4, true, Placement::Normal),
+            // Package J: the gates' rows are 4×1 and do not
+            // block through the generic writes — a gate's grid
+            // block is conditional (it lifts while the gate
+            // stands open) and owned outright by
+            // `Sim::refresh_gate_blocking`.
+            BuildingKind::PalisadeGate => fp(4, 1, false, Placement::Normal),
+            BuildingKind::StoneGate => fp(4, 1, false, Placement::Normal),
+            BuildingKind::Monastery => fp(3, 3, true, Placement::Normal),
+            BuildingKind::Monument => Footprint {
+                w: 4,
+                h: 4,
+                blocks: true,
+                placement: Placement::Normal,
+                // The unconstructible kind's adopted range is
+                // the generic one (see `Footprint::build_range`).
+                build_range: Some(BUILD_RANGE),
+            },
+            BuildingKind::Wonder => fp(5, 5, true, Placement::Normal),
+            BuildingKind::Dock => fp(3, 3, true, Placement::Shoreline),
+            // Water W2b: the Fish Trap floats on ONE water cell
+            // and never blocks it — the working ship must stand
+            // on the trap cell to gather (the Farm's exemption,
+            // on water).
+            BuildingKind::FishTrap => fp(1, 1, false, Placement::Water),
+            // BLD-18 completion: the tower line is 1×1
+            // throughout (the DE comparative table carries the
+            // line on the Watch Tower's row).
+            BuildingKind::GuardTower => fp(1, 1, true, Placement::Normal),
+            BuildingKind::Keep => fp(1, 1, true, Placement::Normal),
         }
     }
 
@@ -830,23 +964,13 @@ impl BuildingKind {
     /// works on. A Town Center *construction record* blocks like
     /// any foundation; the standing Town Center it converts into
     /// never does (BLD-16 pass-through) — the conversion frees the
-    /// cells.
+    /// cells. Since the BLD-06 refactor this reads the footprint
+    /// row's obstruction column (`footprint`): the Farm's, the
+    /// gates' (conditional block, owned by
+    /// `Sim::refresh_gate_blocking`) and the Fish Trap's
+    /// exemptions are the row's `false` entries.
     pub fn blocks_footprint(self) -> bool {
-        match self {
-            BuildingKind::Farm => false,
-            // Package J: a gate's grid block is CONDITIONAL (it
-            // lifts while the gate stands open), so the generic
-            // place/complete/destroy footprint writes must not
-            // touch it — `Sim::refresh_gate_blocking` owns the
-            // gate cells outright.
-            BuildingKind::PalisadeGate | BuildingKind::StoneGate => false,
-            // Water W2b: a Fish Trap never blocks its cell —
-            // the working ship must stand on the trap cell to
-            // gather (the Farm's exemption, on water), and a
-            // completed trap must not displace its own worker.
-            BuildingKind::FishTrap => false,
-            _ => true,
-        }
+        self.footprint().blocks
     }
 
     /// Population room granted on completion.
@@ -859,99 +983,41 @@ impl BuildingKind {
         }
     }
 
-    /// Footprint edge length in grid cells: 2 for the House and the
-    /// camps, 3 for the Farm, the Barracks and the Feudal buildings
-    /// (the study's footprints where it gives them; the Blacksmith's
-    /// 3×3 is adopted — UNVERIFIED, see the module docs). The Farm's
-    /// 3×3 is Claudio's decision of 2026-10-22, adopting the
-    /// DE-documented footprint over the earlier 2×2 specification),
-    /// and 4 for the Town Center (study §5).
-    pub fn footprint_size(self) -> u32 {
-        match self {
-            BuildingKind::PalisadeWall
-            | BuildingKind::StoneWall
-            | BuildingKind::WatchTower
-            // BLD-18 completion: the tower line is 1×1 throughout.
-            | BuildingKind::GuardTower
-            | BuildingKind::Keep
-            | BuildingKind::Outpost
-            // Water W2b: the Fish Trap floats on ONE water cell.
-            | BuildingKind::FishTrap
-            // Package J: a gate's ACROSS edge is 1 cell; its span
-            // geometry (4 cells along the line) lives in
-            // `Building::footprint_cells` / `half_extents`, which
-            // are orientation-aware. Consumers that need the true
-            // rectangle use those, never this scalar.
-            | BuildingKind::PalisadeGate
-            | BuildingKind::StoneGate => 1,
-            BuildingKind::House
-            | BuildingKind::LumberCamp
-            | BuildingKind::Mill
-            | BuildingKind::MiningCamp => FOOTPRINT_CELLS,
-            BuildingKind::Farm
-            | BuildingKind::Barracks
-            | BuildingKind::ArcheryRange
-            | BuildingKind::Stable
-            | BuildingKind::Blacksmith
-            // Castle P5a: the Monastery is 3×3 (dossier §5.6).
-            | BuildingKind::Monastery
-            // Water W1 (BLD-14): the Dock is 3×3 (WATER-SPEC §2).
-            | BuildingKind::Dock => 3,
-            // The placed 4×4 kinds: the Market, the Town Center
-            // construction record (the standing Town Center is an
-            // entity, not a kind — BLD-16), the Castle
-            // (Castle P3a, dossier §2), the University
-            // (Castle P3c, dossier §5.5) and the Siege Workshop
-            // (Castle P4a, RISKS R8: the DE footprint is 4×4).
-            BuildingKind::Market
-            | BuildingKind::TownCenter
-            | BuildingKind::Castle
-            | BuildingKind::University
-            | BuildingKind::SiegeWorkshop
-            // Package I: the Monument stands in the game's 4×4
-            // class (adopted — the wiki gives the Monument the
-            // Wonder's appearance and no separate footprint).
-            | BuildingKind::Monument => 4,
-            // VIC-02: the Wonder is the game's only 5×5 kind
-            // (Wonder dossier: the DE footprint).
-            BuildingKind::Wonder => 5,
-        }
-    }
-
     /// A builder this close to the building's center is actively
     /// building (see the range constants for the geometry).
+    /// Since the BLD-06 refactor the range DERIVES from the
+    /// footprint row: the (w, h) class formula below reproduces
+    /// every adopted constant exactly (each constant's own
+    /// geometry note stands — corner ring cell distance plus
+    /// margin), and the two rows the formula cannot speak for
+    /// carry their value as the row's explicit `build_range`
+    /// column (the Market's 15.5 and the Monument's generic
+    /// 10.0 — see `Footprint::build_range`). The equivalence is
+    /// pinned kind by kind in `footprint_build_ranges_match_the_pre_table_values`.
     pub fn build_range(self) -> I16F16 {
-        if self.is_gate() {
-            // Package J: the 4×1 span's own range (see the
-            // constant's geometry note).
-            GATE_BUILD_RANGE
-        } else if self == BuildingKind::Market {
-            // The 4×4 kinds keep their own ranges (Market 15.5,
-            // Town Center 15.0 — see the constants' geometry notes).
-            MARKET_BUILD_RANGE
-        } else if self == BuildingKind::TownCenter
-            || self == BuildingKind::Castle
-            || self == BuildingKind::University
-            || self == BuildingKind::SiegeWorkshop
-        {
-            // The Castle is the third 4×4 kind (Castle P3a): the
-            // Town Center's 15.0 covers its ring by the same
-            // geometry (corner ring cell ≈14.1 from the center).
-            // The University (Castle P3c) is the fourth, the
-            // Siege Workshop (Castle P4a) the fifth.
-            TOWN_CENTER_BUILD_RANGE
-        } else if self == BuildingKind::Wonder {
-            // VIC-02: the 5×5 kind's own range (see the
-            // constant's geometry note).
-            WONDER_BUILD_RANGE
-        } else if self.footprint_size() == 3 {
-            BARRACKS_BUILD_RANGE
-        } else if self.footprint_size() == 1 {
-            // Walls, Watch Tower, Outpost: the builder must stand
-            // beside the segment (see SMALL_BUILD_RANGE).
-            SMALL_BUILD_RANGE
-        } else {
-            BUILD_RANGE
+        let fp = self.footprint();
+        if let Some(range) = fp.build_range {
+            return range;
+        }
+        match (fp.w, fp.h) {
+            // Walls, the tower line, the Outpost, the Fish
+            // Trap: the builder must stand beside the segment
+            // (see SMALL_BUILD_RANGE).
+            (1, 1) => SMALL_BUILD_RANGE,
+            (2, 2) => BUILD_RANGE,
+            (3, 3) => BARRACKS_BUILD_RANGE,
+            // The 4×4 class: the Town Center's 15.0 covers the
+            // ring by the corner geometry (≈14.1 from the
+            // center) — the Castle, the University and the
+            // Siege Workshop share it.
+            (4, 4) => TOWN_CENTER_BUILD_RANGE,
+            // VIC-02: the 5×5 kind's own range.
+            (5, 5) => WONDER_BUILD_RANGE,
+            // Package J: the 4×1 span's own range.
+            (4, 1) | (1, 4) => GATE_BUILD_RANGE,
+            // No current row lands here; a future class takes
+            // the generic range until its constant is calibrated.
+            _ => BUILD_RANGE,
         }
     }
 
@@ -2343,49 +2409,51 @@ pub struct Building {
 }
 
 impl Building {
+    /// This instance's footprint rectangle in cells, (w, h):
+    /// the kind's table row (`BuildingKind::footprint`) with a
+    /// gate's orientation resolved — the row reads 4×1 (the
+    /// span along the wall line), and an instance laid along y
+    /// occupies (1, 4). Every other kind is square, so the row
+    /// reads through unchanged. (BLD-06: geometry is generic
+    /// over this rectangle — no kind is a special case.)
+    pub fn footprint_dims(&self) -> (u32, u32) {
+        let fp = self.kind.footprint();
+        if self.kind.is_gate() && !self.gate_along_x {
+            (fp.h, fp.w)
+        } else {
+            (fp.w, fp.h)
+        }
+    }
+
     /// The footprint cells, in fixed (row-major) order. A gate's
     /// footprint is its 4×1 span (Package J): four cells from the
     /// anchor along its orientation — the one non-square
     /// footprint in the game.
     pub fn footprint_cells(&self) -> Vec<(u32, u32)> {
-        if self.kind.is_gate() {
-            return gate_span_cells(self.cell_x, self.cell_y, self.gate_along_x);
-        }
-        footprint_cells(self.cell_x, self.cell_y, self.kind.footprint_size())
+        let (w, h) = self.footprint_dims();
+        rect_cells(self.cell_x, self.cell_y, w, h)
     }
 
     /// The cells ringing this building's footprint (the builder /
     /// repairer / attacker standing spots), in fixed row-major
-    /// order. Square kinds use `ring_cells`; a gate rings its
-    /// 4×1 rectangle.
+    /// order: the ring of its rectangle — a gate rings its 4×1
+    /// span exactly as a square kind rings its square.
     pub fn ring_cells(&self) -> Vec<(u32, u32)> {
-        if self.kind.is_gate() {
-            return rect_ring_cells(
-                self.cell_x,
-                self.cell_y,
-                if self.gate_along_x { GATE_SPAN_CELLS } else { 1 },
-                if self.gate_along_x { 1 } else { GATE_SPAN_CELLS },
-            );
-        }
-        ring_cells(self.cell_x, self.cell_y, self.kind.footprint_size())
+        let (w, h) = self.footprint_dims();
+        rect_ring_cells(self.cell_x, self.cell_y, w, h)
     }
 
     /// The footprint rectangle's half extents in world units,
     /// (x, y): the geometry combat and approach math clamp
-    /// against. Square kinds read `footprint_size × 2` on both
-    /// axes (a cell is 4 units, so a size-N footprint spans 4N
-    /// units, half 2N); a gate's 4×1 span reads (8, 2) along its
-    /// orientation.
+    /// against. A cell is 4 units, so a w×h footprint reads
+    /// (2w, 2h) — a gate's 4×1 span reads (8, 2) along its
+    /// orientation, (2, 8) across it.
     pub fn half_extents(&self) -> (I16F16, I16F16) {
-        if self.kind.is_gate() {
-            return if self.gate_along_x {
-                (I16F16::from_num(8), I16F16::from_num(2))
-            } else {
-                (I16F16::from_num(2), I16F16::from_num(8))
-            };
-        }
-        let half = I16F16::from_num(self.kind.footprint_size() as i32 * 2);
-        (half, half)
+        let (w, h) = self.footprint_dims();
+        (
+            I16F16::from_num(w as i32 * 2),
+            I16F16::from_num(h as i32 * 2),
+        )
     }
 
     /// Build progress as a fraction of the kind's build total, in raw
@@ -2437,36 +2505,16 @@ impl Building {
     }
 }
 
-/// The cells of a square footprint of edge `size` anchored at
-/// `(cell_x, cell_y)`, in fixed (row-major) order.
-pub fn footprint_cells(cell_x: u32, cell_y: u32, size: u32) -> Vec<(u32, u32)> {
-    let mut out = Vec::with_capacity((size * size) as usize);
-    for dy in 0..size {
-        for dx in 0..size {
+/// The cells of a rectangular footprint of `w`×`h` cells
+/// anchored at `(cell_x, cell_y)`, in fixed (row-major) order
+/// (BLD-06: the one cell enumerator — a square footprint is the
+/// w = h case, and a gate's 4×1 span is the same enumeration
+/// `gate_span_cells` spells out, pinned equal in the tests).
+pub fn rect_cells(cell_x: u32, cell_y: u32, w: u32, h: u32) -> Vec<(u32, u32)> {
+    let mut out = Vec::with_capacity((w * h) as usize);
+    for dy in 0..h {
+        for dx in 0..w {
             out.push((cell_x + dx, cell_y + dy));
-        }
-    }
-    out
-}
-
-/// The cells ringing a square footprint of edge `size` (the builder's
-/// standing spots), in fixed row-major order: the (size+2)² block
-/// around the footprint minus the footprint itself. May contain
-/// out-of-grid cells; callers check bounds.
-pub fn ring_cells(cell_x: u32, cell_y: u32, size: u32) -> Vec<(u32, u32)> {
-    let mut out = Vec::with_capacity(((size + 2) * (size + 2) - size * size) as usize);
-    let span = size as i32 + 2;
-    for dy in 0..span {
-        for dx in 0..span {
-            let x = cell_x as i32 + dx - 1;
-            let y = cell_y as i32 + dy - 1;
-            if (1..=size as i32).contains(&dx) && (1..=size as i32).contains(&dy) {
-                continue; // the footprint itself
-            }
-            if x < 0 || y < 0 {
-                continue;
-            }
-            out.push((x as u32, y as u32));
         }
     }
     out
@@ -2570,10 +2618,10 @@ pub fn gate_span_cells(cell_x: u32, cell_y: u32, along_x: bool) -> Vec<(u32, u32
 }
 
 /// The cells ringing a rectangular footprint of `w`×`h` cells
-/// anchored at `(cell_x, cell_y)`, in fixed row-major order:
-/// the (w+2)×(h+2) block around it minus the footprint itself.
-/// The rectangle form of `ring_cells` (a gate's standing spots).
-/// May contain out-of-grid cells; callers check bounds.
+/// anchored at `(cell_x, cell_y)` (the builder's standing
+/// spots), in fixed row-major order: the (w+2)×(h+2) block
+/// around it minus the footprint itself. May contain
+/// out-of-grid cells; callers check bounds.
 pub fn rect_ring_cells(cell_x: u32, cell_y: u32, w: u32, h: u32) -> Vec<(u32, u32)> {
     let mut out = Vec::with_capacity(((w + 2) * (h + 2) - w * h) as usize);
     for dy in 0..(h as i32 + 2) {
@@ -2592,13 +2640,16 @@ pub fn rect_ring_cells(cell_x: u32, cell_y: u32, w: u32, h: u32) -> Vec<(u32, u3
     out
 }
 
-/// World coordinates of a footprint's center: `anchor + size/2 cells`
-/// along each axis from the grid origin — for a 2×2 footprint, the
-/// corner shared by its four cells.
-pub fn footprint_center(cell_x: u32, cell_y: u32, size: u32) -> (I16F16, I16F16) {
-    let half = I16F16::from_num(size as i32) * CELL_SIZE / I16F16::from_num(2);
-    let x = I16F16::from_num(cell_x as i32) * CELL_SIZE + half - WORLD_HALF;
-    let y = I16F16::from_num(cell_y as i32) * CELL_SIZE + half - WORLD_HALF;
+/// World coordinates of a footprint's center: `anchor + (w/2, h/2)
+/// cells` along each axis from the grid origin — for a 2×2
+/// footprint, the corner shared by its four cells; for a gate's
+/// 4×1 span, the anchor cell's center shifted 1.5 cells (6
+/// units) along the span's axis.
+pub fn footprint_center(cell_x: u32, cell_y: u32, w: u32, h: u32) -> (I16F16, I16F16) {
+    let half_x = I16F16::from_num(w as i32) * CELL_SIZE / I16F16::from_num(2);
+    let half_y = I16F16::from_num(h as i32) * CELL_SIZE / I16F16::from_num(2);
+    let x = I16F16::from_num(cell_x as i32) * CELL_SIZE + half_x - WORLD_HALF;
+    let y = I16F16::from_num(cell_y as i32) * CELL_SIZE + half_y - WORLD_HALF;
     (x, y)
 }
 
@@ -2622,9 +2673,9 @@ mod tests {
         // Footprints: 2×2 for the House, 3×3 for the Farm and the
         // Barracks. Farm 3×3: Claudio's decision 2026-10-22 (the
         // DE-documented footprint, superseding the 2×2 spec).
-        assert_eq!(BuildingKind::House.footprint_size(), 2);
-        assert_eq!(BuildingKind::Farm.footprint_size(), 3);
-        assert_eq!(BuildingKind::Barracks.footprint_size(), 3);
+        assert_eq!(BuildingKind::House.footprint().w, 2);
+        assert_eq!(BuildingKind::Farm.footprint().w, 3);
+        assert_eq!(BuildingKind::Barracks.footprint().w, 3);
         assert!(BuildingKind::Barracks.blocks_footprint());
         assert!(BuildingKind::Barracks.is_production());
         // M5 building combat numbers (study §5, Dark Age rows):
@@ -2650,7 +2701,7 @@ mod tests {
         ] {
             assert_eq!(camp.wood_cost(), I16F16::from_num(100));
             assert_eq!(camp.build_ticks(), 35 * 60);
-            assert_eq!(camp.footprint_size(), 2);
+            assert_eq!(camp.footprint().w, 2);
             assert!(camp.is_dropoff());
             assert!(camp.counts_toward_feudal());
         }
@@ -2662,7 +2713,7 @@ mod tests {
         for kind in [BuildingKind::ArcheryRange, BuildingKind::Stable] {
             assert_eq!(kind.wood_cost(), I16F16::from_num(175));
             assert_eq!(kind.build_ticks(), 50 * 60);
-            assert_eq!(kind.footprint_size(), 3);
+            assert_eq!(kind.footprint().w, 3);
             assert_eq!(kind.max_hp(), 1500);
             assert_eq!(kind.armor_melee(), 1);
             assert_eq!(kind.armor_pierce(), 8);
@@ -2683,7 +2734,7 @@ mod tests {
         assert_eq!(wt.stone_cost(), I16F16::from_num(125));
         assert_eq!(wt.total_cost(), I16F16::from_num(160));
         assert_eq!(wt.build_ticks(), 80 * 60);
-        assert_eq!(wt.footprint_size(), 1);
+        assert_eq!(wt.footprint().w, 1);
         assert_eq!(wt.age_required(), Age::Feudal);
         assert_eq!(wt.max_hp(), 850);
         assert_eq!(wt.armor_melee(), 1);
@@ -2696,7 +2747,7 @@ mod tests {
         assert_eq!(op.wood_cost(), I16F16::from_num(25));
         assert_eq!(op.stone_cost(), I16F16::from_num(5));
         assert_eq!(op.build_ticks(), 15 * 60);
-        assert_eq!(op.footprint_size(), 1);
+        assert_eq!(op.footprint().w, 1);
         assert_eq!(op.age_required(), Age::Dark);
         assert_eq!(op.max_hp(), 500);
         assert!(!op.counts_toward_feudal());
@@ -2721,7 +2772,7 @@ mod tests {
         assert_eq!(BuildingKind::TownCenter.wood_cost(), I16F16::from_num(275));
         assert_eq!(BuildingKind::TownCenter.stone_cost(), I16F16::from_num(100));
         assert_eq!(BuildingKind::TownCenter.build_ticks(), 150 * 60);
-        assert_eq!(BuildingKind::TownCenter.footprint_size(), 4);
+        assert_eq!(BuildingKind::TownCenter.footprint().w, 4);
         assert_eq!(BuildingKind::TownCenter.age_required(), Age::Castle);
         assert_eq!(BuildingKind::TownCenter.max_hp(), 2400);
         assert_eq!(BuildingKind::House.stone_cost(), I16F16::ZERO);
@@ -2875,26 +2926,231 @@ mod tests {
 
     #[test]
     fn footprint_and_ring_are_the_right_shape() {
-        let cells = footprint_cells(10, 10, 2);
+        let cells = rect_cells(10, 10, 2, 2);
         assert_eq!(
             cells,
             vec![(10, 10), (11, 10), (10, 11), (11, 11)]
         );
-        let ring = ring_cells(10, 10, 2);
+        let ring = rect_ring_cells(10, 10, 2, 2);
         assert_eq!(ring.len(), 12, "a 2x2 footprint has 12 ring cells");
         for c in ring {
             assert!(!cells.contains(&c), "ring cell inside footprint");
         }
         // Ring at the map corner: out-of-grid cells are dropped.
-        assert!(ring_cells(0, 0, 2).len() < 12);
+        assert!(rect_ring_cells(0, 0, 2, 2).len() < 12);
         // The 3×3 Barracks: 9 footprint cells, 16 ring cells.
-        let cells3 = footprint_cells(10, 10, 3);
+        let cells3 = rect_cells(10, 10, 3, 3);
         assert_eq!(cells3.len(), 9);
         assert_eq!(cells3[8], (12, 12));
-        let ring3 = ring_cells(10, 10, 3);
+        let ring3 = rect_ring_cells(10, 10, 3, 3);
         assert_eq!(ring3.len(), 16, "a 3x3 footprint has 16 ring cells");
         for c in ring3 {
             assert!(!cells3.contains(&c), "ring cell inside footprint");
+        }
+    }
+
+    #[test]
+    fn footprint_table_matches_de() {
+        // BLD-06 (sk-07 §A): the DE data model — per building,
+        // a Unit Size X/Y (cells), the obstruction/blockage pair
+        // (Attributes 78/79) and a placement class. The values
+        // below are the Age of Empires wiki's *Building*
+        // comparative table, "Sz" column (fetched 2026-10-28,
+        // cross-checked per kind against the infoboxes), read
+        // together with the construction behaviour: the gates
+        // carry no blockage (their span obstructs through the
+        // foundation rule — a gate may be placed over its own
+        // wall line), the Farm carries no obstruction either,
+        // and the Fish Trap sits on the water class. Rows are
+        // (kind, w, h, blocks, placement).
+        use BuildingKind::*;
+        let rows: [(BuildingKind, u32, u32, bool, Placement); 27] = [
+            (House, 2, 2, true, Placement::Normal),
+            (Farm, 3, 3, false, Placement::Normal),
+            (Barracks, 3, 3, true, Placement::Normal),
+            (LumberCamp, 2, 2, true, Placement::Normal),
+            (Mill, 2, 2, true, Placement::Normal),
+            (MiningCamp, 2, 2, true, Placement::Normal),
+            (ArcheryRange, 3, 3, true, Placement::Normal),
+            (Stable, 3, 3, true, Placement::Normal),
+            (Blacksmith, 3, 3, true, Placement::Normal),
+            (PalisadeWall, 1, 1, true, Placement::Normal),
+            (WatchTower, 1, 1, true, Placement::Normal),
+            (Outpost, 1, 1, true, Placement::Normal),
+            // The Town Center: its 4×4 is declared ONCE, in
+            // `TC_FOOTPRINT` (the standing TC is an entity,
+            // BLD-16); the kind row is built from it.
+            (TownCenter, 4, 4, true, Placement::Normal),
+            (Market, 4, 4, true, Placement::Normal),
+            (StoneWall, 1, 1, true, Placement::Normal),
+            (Castle, 4, 4, true, Placement::Normal),
+            (University, 4, 4, true, Placement::Normal),
+            (SiegeWorkshop, 4, 4, true, Placement::Normal),
+            (PalisadeGate, 4, 1, false, Placement::Normal),
+            (StoneGate, 4, 1, false, Placement::Normal),
+            (Monastery, 3, 3, true, Placement::Normal),
+            // Monument 4×4: ADOPTED, no DE source (the King of
+            // the Hill monument is scenario property, not a
+            // buildable) — sk-07 §d.2, Claudio's call pending.
+            (Monument, 4, 4, true, Placement::Normal),
+            (Wonder, 5, 5, true, Placement::Normal),
+            (Dock, 3, 3, true, Placement::Shoreline),
+            (FishTrap, 1, 1, false, Placement::Water),
+            // The tower line's upgrades keep the tower's 1×1
+            // (BLD-18: the wiki's Guard Tower / Keep rows).
+            (GuardTower, 1, 1, true, Placement::Normal),
+            (Keep, 1, 1, true, Placement::Normal),
+        ];
+        for (kind, w, h, blocks, placement) in rows {
+            let fp = kind.footprint();
+            assert_eq!((fp.w, fp.h), (w, h), "{kind:?} footprint dims");
+            assert_eq!(fp.blocks, blocks, "{kind:?} blocks");
+            assert_eq!(fp.placement, placement, "{kind:?} placement");
+            assert_eq!(kind.blocks_footprint(), blocks, "{kind:?} blocks_footprint");
+            assert_eq!(kind.placement(), placement, "{kind:?} placement()");
+        }
+        assert_eq!(TC_FOOTPRINT, (4, 4));
+        assert_eq!(BuildingKind::TownCenter.footprint().w, TC_FOOTPRINT.0);
+        assert_eq!(BuildingKind::TownCenter.footprint().h, TC_FOOTPRINT.1);
+    }
+
+    #[test]
+    fn footprint_cells_rect() {
+        // BLD-06 (sk-07 §c.2): the rectangle geometry IS the old
+        // square geometry at w == h — same cells, same ring,
+        // same center — and a gate's rectangles reproduce the
+        // hand-written span (`gate_span_cells`) in both
+        // orientations, with the span's center where the old
+        // hand-shifted position put it.
+        for size in 1..=5u32 {
+            let want: Vec<(u32, u32)> = (0..size)
+                .flat_map(|dy| (0..size).map(move |dx| (10 + dx, 10 + dy)))
+                .collect();
+            assert_eq!(rect_cells(10, 10, size, size), want, "square {size} cells");
+            assert_eq!(
+                rect_ring_cells(10, 10, size, size).len(),
+                (4 * size + 4) as usize,
+                "square {size} ring"
+            );
+            assert_eq!(
+                footprint_center(10, 10, size, size),
+                (
+                    I16F16::from_num(10 * 4 + size as i32 * 2 - 240),
+                    I16F16::from_num(10 * 4 + size as i32 * 2 - 240)
+                ),
+                "square {size} center"
+            );
+        }
+        let mut gate = Building {
+            id: 0,
+            kind: BuildingKind::PalisadeGate,
+            owner: crate::entity::OWNER_PLAYER,
+            hp: I16F16::from_num(BuildingKind::PalisadeGate.max_hp()),
+            cell_x: 10,
+            cell_y: 10,
+            pos_x: I16F16::ZERO,
+            pos_y: I16F16::ZERO,
+            progress_thirds: 0,
+            repair_hp_remainder: 0,
+            repair_cost_remainder: 0,
+            repair_stone_remainder: 0,
+            repair_gold_remainder: 0,
+            build_rate_remainder: 0,
+            gate_along_x: true,
+            queue_rate_remainder: 0,
+            complete: true,
+            node_id: None,
+            queue: Vec::new(),
+            train_progress: 0,
+            rally: None,
+            rally_node: None,
+            weapon_target: None,
+            weapon_target_building: None,
+            weapon_strike_tick: None,
+            weapon_next_tick: 0,
+            weapon_engaged: false,
+            garrison: Vec::new(),
+            garrison_arrows: 0,
+            relics: Vec::new(),
+            relic_gold_remainder: 0,
+        };
+        // Along x: the 4×1 span.
+        assert_eq!(gate.footprint_dims(), (4, 1));
+        assert_eq!(gate.footprint_cells(), gate_span_cells(10, 10, true));
+        assert_eq!(
+            gate.footprint_cells(),
+            vec![(10, 10), (11, 10), (12, 10), (13, 10)]
+        );
+        assert_eq!(gate.ring_cells(), rect_ring_cells(10, 10, 4, 1));
+        assert_eq!(gate.ring_cells().len(), 14);
+        assert_eq!(
+            gate.half_extents(),
+            (I16F16::from_num(8), I16F16::from_num(2))
+        );
+        assert_eq!(
+            footprint_center(10, 10, 4, 1),
+            (
+                I16F16::from_num(10 * 4 + 8 - 240),
+                I16F16::from_num(10 * 4 + 2 - 240)
+            )
+        );
+        // Along y: the 1×4 span.
+        gate.gate_along_x = false;
+        assert_eq!(gate.footprint_dims(), (1, 4));
+        assert_eq!(gate.footprint_cells(), gate_span_cells(10, 10, false));
+        assert_eq!(
+            gate.footprint_cells(),
+            vec![(10, 10), (10, 11), (10, 12), (10, 13)]
+        );
+        assert_eq!(gate.ring_cells(), rect_ring_cells(10, 10, 1, 4));
+        assert_eq!(
+            gate.half_extents(),
+            (I16F16::from_num(2), I16F16::from_num(8))
+        );
+    }
+
+    #[test]
+    fn footprint_build_ranges_match_the_pre_table_values() {
+        // BLD-06 (sk-07 §c.1): the ranges the exception chain
+        // produced before the table existed, per kind — the
+        // table's derivation (the row's own column first, else
+        // the footprint class) must reproduce every one. The
+        // two documented columns ride the rows: the Market
+        // reads 15.5 where its 4×4 class reads 15.0, and the
+        // Monument reads the generic 10.0 its fall-through
+        // always produced.
+        use BuildingKind::*;
+        let rows: [(BuildingKind, I16F16); 27] = [
+            (House, BUILD_RANGE),
+            (Farm, BARRACKS_BUILD_RANGE),
+            (Barracks, BARRACKS_BUILD_RANGE),
+            (LumberCamp, BUILD_RANGE),
+            (Mill, BUILD_RANGE),
+            (MiningCamp, BUILD_RANGE),
+            (ArcheryRange, BARRACKS_BUILD_RANGE),
+            (Stable, BARRACKS_BUILD_RANGE),
+            (Blacksmith, BARRACKS_BUILD_RANGE),
+            (PalisadeWall, SMALL_BUILD_RANGE),
+            (WatchTower, SMALL_BUILD_RANGE),
+            (Outpost, SMALL_BUILD_RANGE),
+            (TownCenter, TOWN_CENTER_BUILD_RANGE),
+            (Market, MARKET_BUILD_RANGE),
+            (StoneWall, SMALL_BUILD_RANGE),
+            (Castle, TOWN_CENTER_BUILD_RANGE),
+            (University, TOWN_CENTER_BUILD_RANGE),
+            (SiegeWorkshop, TOWN_CENTER_BUILD_RANGE),
+            (PalisadeGate, GATE_BUILD_RANGE),
+            (StoneGate, GATE_BUILD_RANGE),
+            (Monastery, BARRACKS_BUILD_RANGE),
+            (Monument, BUILD_RANGE),
+            (Wonder, WONDER_BUILD_RANGE),
+            (Dock, BARRACKS_BUILD_RANGE),
+            (FishTrap, SMALL_BUILD_RANGE),
+            (GuardTower, SMALL_BUILD_RANGE),
+            (Keep, SMALL_BUILD_RANGE),
+        ];
+        for (kind, want) in rows {
+            assert_eq!(kind.build_range(), want, "{kind:?} build range");
         }
     }
 
@@ -2909,7 +3165,7 @@ mod tests {
         assert!(w.is_wall());
         assert_eq!(w.wood_cost(), I16F16::from_num(3));
         assert_eq!(w.build_ticks(), 7 * 60);
-        assert_eq!(w.footprint_size(), 1);
+        assert_eq!(w.footprint().w, 1);
         assert!(w.blocks_footprint());
         assert_eq!(w.age_required(), Age::Dark);
         assert_eq!(w.requires_building(), None);
@@ -3044,7 +3300,7 @@ mod tests {
         assert_eq!(k.stone_cost(), I16F16::ZERO);
         assert_eq!(k.gold_cost(), I16F16::ZERO);
         assert_eq!(k.build_ticks(), 2100); // 35 s
-        assert_eq!(k.footprint_size(), 3);
+        assert_eq!(k.footprint().w, 3);
         assert_eq!(k.age_required(), Age::Dark);
         assert_eq!(k.requires_building(), None);
         // HP 1800 flat at every Age; armor steps by Age.
@@ -3100,13 +3356,13 @@ mod tests {
         // M7 geometry (120×120 cells, world [-240, 240)): cell (0,0)
         // spans [-240,-236); the 2x2 footprint there spans
         // [-240,-232) on both axes, so its center is (-236, -236).
-        let (x, y) = footprint_center(0, 0, 2);
+        let (x, y) = footprint_center(0, 0, 2, 2);
         assert_eq!((x, y), (I16F16::from_num(-236), I16F16::from_num(-236)));
         // World center: footprint (59,59) spans [-4, 4) → center 0.
-        let (x, y) = footprint_center(59, 59, 2);
+        let (x, y) = footprint_center(59, 59, 2, 2);
         assert_eq!((x, y), (I16F16::from_num(0), I16F16::from_num(0)));
         // A 3×3 footprint at (20,20) spans [-160,-148) → center -154.
-        let (x, y) = footprint_center(20, 20, 3);
+        let (x, y) = footprint_center(20, 20, 3, 3);
         assert_eq!((x, y), (I16F16::from_num(-154), I16F16::from_num(-154)));
     }
 }

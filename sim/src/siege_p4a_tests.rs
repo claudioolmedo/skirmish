@@ -42,7 +42,7 @@ fn spawn(sim: &mut Sim, id: u32, kind: EntityKind, owner: u8, cell: (u32, u32)) 
 }
 
 fn placed(sim: &Sim, id: u32, kind: BuildingKind, owner: u8, cell: (u32, u32)) -> Building {
-    let size = kind.footprint_size();
+    let size = kind.footprint().w;
     let (x0, y0) = sim.grid().cell_center(cell.0, cell.1);
     let half = I16F16::from_num(size as i32 * 2);
     Building {
@@ -133,7 +133,7 @@ fn p4a_siege_workshop_row() {
     assert_eq!(f(k.wood_cost()), 200.0);
     assert_eq!(f(k.stone_cost()), 0.0);
     assert_eq!(k.build_ticks(), 2400); // 40 s
-    assert_eq!(k.footprint_size(), 4); // RISKS R8: 4×4, not 3×3
+    assert_eq!(k.footprint().w, 4); // RISKS R8: 4×4, not 3×3
     assert_eq!(k.max_hp(), 1800); // Castle column
     assert_eq!(k.max_hp_at(Age::Castle), 1800);
     assert_eq!(k.max_hp_at(Age::Imperial), 2100);

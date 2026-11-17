@@ -1474,16 +1474,45 @@ proportional line's floor. Tests:
 tiles (TC 4×4, House 2×2, Farm 3×3, Tower 1×1, Castle 4×4,
 MECHANICS-STUDY §5). The footprint blocks pathing (except farms, BLD-12)
 and defines placement validity (BLD-01).
-*Source:* MECHANICS-STUDY §5. · *Impl:* footprint columns in the building
-table; the full set landed with M6 (2×2 House/camps, 3×3
-Barracks/Range/Stable/Blacksmith), and the Farm moved from 2×2 to
-the reference's 3×3 on 2026-10-22 (Claudio's decision, ECO-14).
-One divergence remains: the TC is an entity rather than a placed
-building: its 4×4 footprint is placement-reserved but, per BLD-16,
-passable to units instead of blocking pathing. The Castle-Age set's
-footprints completed on 2026-10-30 (Castle P4a): the Siege Workshop
-takes its documented 4×4 (the study §5 row is explicit — not the
-3×3 a first pass might guess), the Castle set's last 4×4. ·
+*Source:* MECHANICS-STUDY §5; the Age of Empires wiki's *Building*
+comparative table ("Sz" column) and the AoE2DE UGC Guide's data
+attributes (Unit Size X/Y, Obstruction Type 78, Blockage Class 79)
+— sk-07 (2026-11-17). · *Impl:* ONE rectangular table:
+`BuildingKind::footprint()` returns `{ w, h, blocks, placement }`
+per kind, and every footprint reader — placement validity, the
+blocking grid, combat/garrison/monk geometry, build ranges, the
+client — reads it (landed 2026-11-17). All 27 values already
+matched DE (the study verified 25/25 square kinds; the tower
+line's Guard Tower/Keep rows are 1×1, BLD-18); the change is the
+form: the gates are a 4×1 row of the table instead of a scalar
+that read 1 plus hand-written span code, the rectangle geometry
+(`rect_cells` / `rect_ring_cells` / per-axis half extents) is
+generic, and the client deleted its own BUILD_SIZE copy — it
+reads the same table through the `kind_footprints()` export and
+the (w, h) pair `buildings()` now carries. The Farm moved from
+2×2 to the reference's 3×3 on 2026-10-22 (Claudio's decision,
+ECO-14); the Castle-Age set's footprints completed on 2026-10-30
+(Castle P4a): the Siege Workshop takes its documented 4×4 (the
+study §5 row is explicit — not the 3×3 a first pass might
+guess), the Castle set's last 4×4. The build ranges ride the
+table too (a row column where a kind departs from its footprint
+class: the Market's documented 15.5 against the 4×4 class's
+15.0; the Monument's 10.0 fall-through kept, its 4×4 ADOPTED —
+no DE source, sk-07 §d.2, Claudio's call pending). Two
+divergences remain, both recorded as Claudio's decisions in
+sk-07 §d: (1) the TC is an entity rather than a placed building
+— its 4×4 is now declared ONCE (`TC_FOOTPRINT`, from which the
+kind row, both placement reserves and every TC geometry reader
+derive) and is placement-reserved, but per BLD-16 it stays
+passable to units instead of blocking pathing; whether that is
+a declared exception or a divergence is decision §d.1, still
+open. (2) `validate_build`'s standing-overlap check still reads
+a standing building's ACROSS edge on both axes (the value now
+comes from the table) — for squares that is the edge itself,
+but a standing gate's span is reserved by the blocking grid,
+not by this arithmetic; rectifying the check to true rectangle
+intersection is sk-07's step 4, gated on decision §d.3, not yet
+taken. ·
 *Status:* **DIFFERS**.
 
 **BLD-07 — Repair.** Villagers repair damaged buildings, ships, and siege.

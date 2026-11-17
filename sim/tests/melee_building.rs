@@ -143,7 +143,7 @@ fn scene(seed: u64, kind: BuildingKind) -> Scene {
         sim,
         bid,
         anchor: (ax, ay),
-        size: kind.footprint_size(),
+        size: kind.footprint().w,
     }
 }
 

@@ -43,7 +43,7 @@ fn run_until(sim: &mut Sim, cap: u64, mut done: impl FnMut(&Sim) -> bool) -> boo
 /// A complete, idle building record at a cell anchor (the
 /// `water_w5_tests::placed` fixture's shape, copied).
 fn placed(sim: &mut Sim, id: u32, kind: BuildingKind, owner: u8, cell: (u32, u32)) -> Building {
-    let size = kind.footprint_size();
+    let size = kind.footprint().w;
     for dy in 0..size {
         for dx in 0..size {
             sim.grid.set_dynamic(cell.0 + dx, cell.1 + dy, true);

@@ -61,15 +61,16 @@ impl Sim {
         self.tc_states.iter().position(|s| s.tc_id == tc)
     }
 
-    /// (owner, center x, center y, footprint edge in cells) of a
-    /// host, if it still stands: a placed building must exist; a
-    /// Town Center entity must be alive.
-    fn host_geometry(&self, host: GarrisonRef) -> Option<(u8, I16F16, I16F16, u32)> {
+    /// (owner, center x, center y, footprint (w, h) in cells) of
+    /// a host, if it still stands: a placed building must exist;
+    /// a Town Center entity must be alive. The Town Center's
+    /// dims are its one declaration (BLD-06: `TC_FOOTPRINT`).
+    fn host_geometry(&self, host: GarrisonRef) -> Option<(u8, I16F16, I16F16, (u32, u32))> {
         match host {
             GarrisonRef::Building(bid) => {
                 let bi = self.building_index(bid)?;
                 let b = &self.buildings[bi];
-                Some((b.owner, b.pos_x, b.pos_y, b.kind.footprint_size()))
+                Some((b.owner, b.pos_x, b.pos_y, b.footprint_dims()))
             }
             GarrisonRef::TownCenter(tc) => {
                 let ei = self.entity_index(tc)?;
@@ -77,7 +78,7 @@ impl Sim {
                 if e.dead || e.kind != EntityKind::TownCenter {
                     return None;
                 }
-                Some((e.owner, e.pos_x, e.pos_y, 4))
+                Some((e.owner, e.pos_x, e.pos_y, crate::build::TC_FOOTPRINT))
             }
             GarrisonRef::Unit(uid) => {
                 // GAR-10: the Ram's geometry is its LIVE position
@@ -90,7 +91,7 @@ impl Sim {
                 if e.dead || e.kind != EntityKind::BatteringRam {
                     return None;
                 }
-                Some((e.owner, e.pos_x, e.pos_y, 1))
+                Some((e.owner, e.pos_x, e.pos_y, (1, 1)))
             }
         }
     }
@@ -235,10 +236,11 @@ impl Sim {
             let r = crate::units::spec(e.kind).radius;
             return Some(if d > r { d - r } else { I16F16::ZERO });
         }
-        let (_, bx, by, size) = self.host_geometry(host)?;
-        let half = I16F16::from_num(size as i32 * 2);
-        let qx = (px - bx).clamp(-half, half) + bx;
-        let qy = (py - by).clamp(-half, half) + by;
+        let (_, bx, by, (w, h)) = self.host_geometry(host)?;
+        let hx = I16F16::from_num(w as i32 * 2);
+        let hy = I16F16::from_num(h as i32 * 2);
+        let qx = (px - bx).clamp(-hx, hx) + bx;
+        let qy = (py - by).clamp(-hy, hy) + by;
         Some(crate::steer::vec_len(px - qx, py - qy))
     }
 
@@ -246,13 +248,13 @@ impl Sim {
     /// in-bounds and unblocked), then edge offsets as a fallback —
     /// the exit/spawn placement discipline of `spawn_trained_unit`.
     fn host_exit_points(&self, host: GarrisonRef) -> Vec<(I16F16, I16F16)> {
-        let (anchor, size, cx0, cy0) = match host {
+        let (anchor, (w, h), cx0, cy0) = match host {
             GarrisonRef::Building(bid) => match self.building_index(bid) {
                 Some(bi) => {
                     let b = &self.buildings[bi];
                     (
                         (b.cell_x, b.cell_y),
-                        b.kind.footprint_size(),
+                        b.footprint_dims(),
                         b.pos_x,
                         b.pos_y,
                     )
@@ -263,9 +265,13 @@ impl Sim {
                 Some(ei) => {
                     let e = &self.entities[ei];
                     let (tx, ty) = self.grid.world_to_cell(e.pos_x, e.pos_y);
+                    let (tw, th) = crate::build::TC_FOOTPRINT;
                     (
-                        (tx.saturating_sub(1), ty.saturating_sub(1)),
-                        4,
+                        (
+                            tx.saturating_sub(tw / 2 - 1),
+                            ty.saturating_sub(th / 2 - 1),
+                        ),
+                        (tw, th),
                         e.pos_x,
                         e.pos_y,
                     )
@@ -282,7 +288,7 @@ impl Sim {
                         return Vec::new();
                     }
                     let (ux, uy) = self.grid.world_to_cell(e.pos_x, e.pos_y);
-                    ((ux, uy), 1, e.pos_x, e.pos_y)
+                    ((ux, uy), (1, 1), e.pos_x, e.pos_y)
                 }
                 None => return Vec::new(),
             },
@@ -305,7 +311,7 @@ impl Sim {
             }
         };
         let mut out = Vec::new();
-        for (cx, cy) in crate::build::ring_cells(anchor.0, anchor.1, size) {
+        for (cx, cy) in crate::build::rect_ring_cells(anchor.0, anchor.1, w, h) {
             if cx >= crate::GRID_DIM || cy >= crate::GRID_DIM {
                 continue;
             }
@@ -314,12 +320,13 @@ impl Sim {
             }
         }
         if out.is_empty() {
-            let half = I16F16::from_num(size as i32 * 2) + I16F16::from_num(2);
+            let half_x = I16F16::from_num(w as i32 * 2) + I16F16::from_num(2);
+            let half_y = I16F16::from_num(h as i32 * 2) + I16F16::from_num(2);
             for (ox, oy) in [
-                (half, I16F16::ZERO),
-                (-half, I16F16::ZERO),
-                (I16F16::ZERO, half),
-                (I16F16::ZERO, -half),
+                (half_x, I16F16::ZERO),
+                (-half_x, I16F16::ZERO),
+                (I16F16::ZERO, half_y),
+                (I16F16::ZERO, -half_y),
             ] {
                 let p = (cx0 + ox, cy0 + oy);
                 if dock_host {
@@ -639,7 +646,8 @@ impl Sim {
             GarrisonRef::Building(bid) => match self.building_index(bid) {
                 Some(bi) => {
                     let b = &self.buildings[bi];
-                    self.approach_point(idx, b.cell_x, b.cell_y, b.kind.footprint_size())
+                    let (w, h) = b.footprint_dims();
+                    self.approach_point(idx, b.cell_x, b.cell_y, w, h)
                 }
                 None => None,
             },
@@ -667,8 +675,8 @@ impl Sim {
                 // Crowded site: aim at the host's east edge point;
                 // the arrival check in the garrison tick certifies
                 // entry from beside the footprint.
-                if let Some((_, bx, by, size)) = self.host_geometry(host) {
-                    let half = I16F16::from_num(size as i32 * 2) + I16F16::from_num(2);
+                if let Some((_, bx, by, (w, _))) = self.host_geometry(host) {
+                    let half = I16F16::from_num(w as i32 * 2) + I16F16::from_num(2);
                     self.set_move_order(idx, bx + half, by);
                 }
             }
@@ -1202,12 +1210,12 @@ impl Sim {
             if b.owner != owner || !b.complete || b.kind.garrison_capacity().is_none() {
                 continue;
             }
-            let half = I16F16::from_num(b.kind.footprint_size() as i32 * 2);
+            let (hx, hy) = b.half_extents();
             // Boundary is NOT inside: a rally point exactly on the
             // footprint edge is open ground (a walk, SEL-13) — the
             // pre-P3b TC rally test rallies exactly 8 units east of
             // the TC, on its footprint edge, and must keep walking.
-            if (rx - b.pos_x).abs() >= half || (ry - b.pos_y).abs() >= half {
+            if (rx - b.pos_x).abs() >= hx || (ry - b.pos_y).abs() >= hy {
                 continue;
             }
             let host = GarrisonRef::Building(b.id);

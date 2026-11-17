@@ -28,7 +28,7 @@ fn sim_in_imperial() -> Sim {
 
 fn placed(sim: &mut Sim, kind: BuildingKind, owner: u8, cell: (u32, u32)) -> u32 {
     let id = 900 + sim.buildings.len() as u32;
-    let size = kind.footprint_size();
+    let size = kind.footprint().w;
     let (x0, y0) = sim.grid().cell_center(cell.0, cell.1);
     let half = I16F16::from_num(size as i32 * 2);
     let hp = sim.building_max_hp(kind, owner);

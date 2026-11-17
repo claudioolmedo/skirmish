@@ -47,7 +47,7 @@ fn dock_anchor(sim: &Sim) -> Option<(u32, u32)> {
 fn placed_dock(sim: &mut Sim, id: u32) -> u32 {
     let (ax, ay) = dock_anchor(sim).expect("seed pond offers a Dock site");
     let kind = BuildingKind::Dock;
-    let size = kind.footprint_size();
+    let size = kind.footprint().w;
     let (x0, y0) = sim.grid().cell_center(ax, ay);
     let half = I16F16::from_num(size as i32 * 2);
     for dy in 0..size {

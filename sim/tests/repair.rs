@@ -206,7 +206,7 @@ fn damaged_building(seed: u64, kind: BuildingKind, stop_hp: f64) -> Damaged {
             stall = 0;
             let (wax, way) = {
                 let b = building(&sim, bid);
-                (b.cell_x - 1, b.cell_y + b.kind.footprint_size() / 2)
+                (b.cell_x - 1, b.cell_y + b.kind.footprint().w / 2)
             };
             let (wx, wy) = anchor_point(&sim, wax, way);
             sim.push_command(Command::Move {

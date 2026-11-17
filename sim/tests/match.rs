@@ -845,7 +845,7 @@ fn nearest_building(sim: &Sim, owner: u8, x: I16F16, y: I16F16) -> Option<u32> {
 fn find_anchor(sim: &Sim, builder: u32, kind: BuildingKind) -> Option<(I16F16, I16F16)> {
     let tc = sim.town_center();
     let (tcx, tcy) = sim.grid().world_to_cell(tc.pos_x, tc.pos_y);
-    let size = kind.footprint_size();
+    let size = kind.footprint().w;
     for r in 3..=9i32 {
         for dy in -r..=r {
             for dx in -r..=r {

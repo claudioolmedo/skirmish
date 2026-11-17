@@ -37,7 +37,7 @@ fn build(sim: &mut Sim, entity: u32, kind: BuildingKind, cx: u32, cy: u32) {
     // the builder to the footprint's centre first and let its
     // own sight settle the fog, exactly as a player must,
     // before the build order goes in.
-    let size = kind.footprint_size();
+    let size = kind.footprint().w;
     let (mx, my) = anchor_point(sim, cx + size / 2, cy + size / 2);
     sim.push_command(Command::Move {
         entity,

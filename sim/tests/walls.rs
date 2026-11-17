@@ -1150,7 +1150,7 @@ fn open_run_for(sim: &Sim, entity: u32, kind: BuildingKind, len: u32) -> (u32, u
                 // Resume and hand back the same run forever.
                 let occupied = |cx: u32, cy: u32| {
                     sim.buildings().iter().any(|b| {
-                        let bs = b.kind.footprint_size();
+                        let bs = b.kind.footprint().w;
                         cx >= b.cell_x && cx < b.cell_x + bs && cy >= b.cell_y && cy < b.cell_y + bs
                     })
                 };

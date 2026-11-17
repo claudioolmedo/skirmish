@@ -57,7 +57,7 @@ fn spawn(sim: &mut Sim, id: u32, kind: EntityKind, owner: u8, cell: (u32, u32)) 
 /// water cells must block ships, or the Cog would sail through
 /// its own depot.
 fn placed(sim: &mut Sim, id: u32, kind: BuildingKind, owner: u8, cell: (u32, u32)) -> Building {
-    let size = kind.footprint_size();
+    let size = kind.footprint().w;
     for dy in 0..size {
         for dx in 0..size {
             sim.grid.set_dynamic(cell.0 + dx, cell.1 + dy, true);

@@ -254,7 +254,7 @@ fn ai_repairs_its_barracks_under_attack() {
             let squad = living_militia(&sim);
             let (cell_x, cell_y, size) = {
                 let b = building(&sim, bid);
-                (b.cell_x, b.cell_y, b.kind.footprint_size())
+                (b.cell_x, b.cell_y, b.kind.footprint().w)
             };
             if cell_x >= 1 {
                 for (i, mid) in squad.iter().enumerate() {
