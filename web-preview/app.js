@@ -2558,7 +2558,18 @@ updateQualityUi();
 // --- Isometric camera -------------------------------------------------
 // Fixed angle, 2:1 dimetric. Pure functions of explicit parameters so
 // the projection math can be unit-tested headlessly in Node.
-const INITIAL_S = 5; // screen px per iso unit at load
+// Screen px per iso unit at load. Raised 5 → 8 (client batch,
+// 2026-11-16 — Claudio's standing DE-fidelity rule, resolving
+// the black-pause-screen decision): at 5 the start view spanned
+// ~48 cells along the diagonal of a 1920 canvas, so the small
+// explored diamond around the Town Center read as an island in
+// black — and under the Pause overlay the screen read as simply
+// black. At 8 the span is ~30 cells, DE's default-view scale:
+// the starting base (TC, villagers, the nearest resources)
+// fills the frame. Only the STARTING zoom changes — S_MIN /
+// S_MAX and every zoom control are untouched, and resetSim /
+// adoptSim / the replay entry all read this one constant.
+const INITIAL_S = 8;
 const S_MIN = 1.2;
 const S_MAX = 24;
 let camS = INITIAL_S;
@@ -9589,8 +9600,10 @@ function drawTree(sx, sy, frac = 1, wx = 0, wy = 0) {
   // so the shake Claudio asked for never reached the screen (three
   // live sessions saw a perfectly still tree). At 0.30 units /
   // 0.08 rad the trunk shifts ~1.5 px and the treetop swings
-  // ~2.2 px at default zoom: a clear hit shudder, still well short
-  // of cartoonish. treefeedback.test.mjs pins this floor.
+  // ~2.2 px at that zoom: a clear hit shudder, still well short
+  // of cartoonish. (INITIAL_S is 8 since 2026-11-16, so both read
+  // proportionally larger now.) treefeedback.test.mjs pins this
+  // floor.
   let ox = 0;
   let wob = 0;
   const hitAt = treeWobble.get(key);
