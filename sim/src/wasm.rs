@@ -2174,7 +2174,7 @@ impl WasmSim {
     /// instead of keeping a second table of its own.
     pub fn kind_footprints(&self) -> Vec<f64> {
         let mut out = Vec::with_capacity(54);
-        for tag in 0..=26u32 {
+        for tag in 0..=26u8 {
             let kind = crate::build::BuildingKind::from_tag(tag)
                 .expect("every tag in 0..=26 names a building kind");
             let fp = kind.footprint();
