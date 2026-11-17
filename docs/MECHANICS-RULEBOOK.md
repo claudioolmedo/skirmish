@@ -4848,8 +4848,17 @@ diplomacy screen reads only the public per-player fields
 **INF-08 — The game clock counts game time.** The displayed clock is
 elapsed *game* time (ticks ÷ 60), formatted mm:ss (h:mm:ss past an hour),
 so speed settings (SIM-11) stretch it exactly as they stretch the game.
-*Source:* GAP 11.9. · *Impl:* shipped — the top bar derives mm:ss from
-`tick_count()`. · *Status:* **MATCHES**.
+*Source:* GAP 11.9. · *Impl:* shipped, removed, restored — the clock
+originally shipped in the top bar, was removed on 2026-10-17
+(`1432660`, "space for nothing"; this entry's MATCHES went stale for
+the whole interval — the time showed only on the end screen), and was
+restored on 2026-11-16 (client batch, under Claudio's standing rule
+that basic fidelity decisions resolve by documented DE): the
+`#game-clock` element is a permanent top-bar child again and
+`updateTopBar` derives its text from `tick_count()` on every frame in
+every state — playing, paused (the frozen game time, as the tick
+count itself stands still), the end screen and playback — so it
+persists through Pause/Resume instead of disappearing. · *Status:* **MATCHES**.
 
 **INF-09 — Order feedback is drawn, not simulated.** Move markers,
 attack pings, queued-order flags (SEL-12), and the placement ghost are

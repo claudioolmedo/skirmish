@@ -235,6 +235,14 @@
   <button id="idle-mil-btn" class="idle-ind" type="button" title="Idle military — click (or press ,) to select the next one">
     <svg class="ui-icon"><use href="#i-militia"/></svg><span id="idle-mil-count">0</span>
   </button>
+  <!-- INF-08: the match clock — elapsed game time, restored
+       2026-11-16 (client batch, Claudio's standing DE-fidelity
+       rule; DE's top bar carries it). It was removed 2026-10-17
+       (1432660, "space for nothing"); the element is a permanent
+       top-bar child again, refreshed by updateTopBar every
+       frame, so it persists through Pause/Resume (paused game
+       time stands still, as the sim's tick count does). -->
+  <span class="ui-clock" id="game-clock">00:00</span>
   <button id="diplo-btn" class="btn btn-ghost btn-sm" type="button" title="Diplomacy">
     <svg class="ui-icon" style="width:15px;height:15px"><use href="#i-diplomacy"/></svg> <span id="diplo-btn-label">Diplomacy</span>
   </button>

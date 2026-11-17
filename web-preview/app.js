@@ -192,6 +192,7 @@ const resGold = document.getElementById('res-gold');
 const resStone = document.getElementById('res-stone');
 const resPop = document.getElementById('res-pop');
 const resAge = document.getElementById('res-age'); // M6: the player's age
+const gameClock = document.getElementById('game-clock'); // INF-08: the match clock (restored 2026-11-16)
 const relicCountdownChip = document.getElementById('relic-countdown-chip'); // VIC-03: the relic countdown readout
 const relicCountdownVal = document.getElementById('relic-countdown');
 const kothCountdownChip = document.getElementById('koth-countdown-chip'); // Package I: the Monument countdown readout
@@ -13468,6 +13469,23 @@ function updateTopBar() {
   const pop = myPop();
   const cap = myPopCap();
   resPop.textContent = `${pop} / ${cap}`;
+  // INF-08: the match clock — elapsed GAME time (ticks ÷ 60, the
+  // sim ticks at 60 Hz), mm:ss, h:mm:ss past an hour, so speed
+  // settings stretch it exactly as they stretch the game.
+  // Restored 2026-11-16 (client batch, Claudio's standing
+  // DE-fidelity rule), reversing the 2026-10-17 removal
+  // (1432660). updateTopBar runs on every frame in every state
+  // (the frame loop draws through Pause, the end screen and
+  // playback), and the element is a permanent top-bar child —
+  // so the clock cannot disappear after Resume, and while
+  // paused it shows the frozen game time, as DE's does.
+  if (gameClock) {
+    const secs = Math.floor(sim.tick_count() / 60);
+    const hh = Math.floor(secs / 3600);
+    const mm = String(Math.floor((secs % 3600) / 60)).padStart(2, '0');
+    const ss = String(secs % 60).padStart(2, '0');
+    gameClock.textContent = hh > 0 ? `${hh}:${mm}:${ss}` : `${mm}:${ss}`;
+  }
   // VIC-03: the relic countdown readout — the Package C
   // conditions ship no in-match clock, so this chip is the
   // minimal readout in their style: it appears only while an
