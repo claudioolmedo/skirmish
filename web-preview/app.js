@@ -15984,11 +15984,12 @@ function drawRallyFlag(from, rx, ry, nodeId) {
 // source rect, dest rect, transform). After the pass, a unit
 // whose alpha-tight rect is materially covered by items drawn
 // in front of it (buildings, the Town Center, trees) gets its
-// silhouette — its own sprite alpha, flattened to its owner's
-// colour — painted over the occluders, clipped to the
-// occluders' own alpha, so exactly the hidden part shows
-// through, as in DE. The decision (geometry + the fog fairness
-// gate) is occlusion.js's; nothing here touches the sim.
+// outline — its own sprite alpha, flattened to its owner's
+// colour and reduced to its border — painted over the
+// occluders, clipped to the occluders' own alpha, so exactly
+// the hidden part's outline shows through, as in DE. The
+// decision (geometry + the fog fairness gate) is occlusion.js's;
+// nothing here touches the sim.
 //
 // Bot-loop fix2 (2026-11-02): three building kinds have no art
 // at all (BUILDING_ART_KEY has no 16 University / 17 Siege
@@ -16160,8 +16161,11 @@ function unionRectOf(a, b) {
 
 // The unit's sprite region flattened to a flat colour (its own
 // alpha, the colour filled in) — cached per image + region +
-// colour. This is DE's "player-colored outline": the shape is
-// the unit's silhouette, the colour is the owner's.
+// colour. This flattened silhouette is the raw material for
+// DE's "player-colored outline": paintOccludedSilhouette keeps
+// only its border (see OCC_OUTLINE_PX there), so what shows
+// through the occluder is the unit's outline in its owner's
+// colour, never the filled shape.
 const occTintCache = new WeakMap();
 function tintedSpriteOf(call, color) {
   let per = occTintCache.get(call.im);
@@ -16200,6 +16204,24 @@ function outlineColorFor(owner) {
 
 const occMaskCv = document.createElement('canvas');
 const occSilCv = document.createElement('canvas');
+const occErodeCv = document.createElement('canvas');
+
+// Outline-only (client batch, 2026-11-16 — Claudio's standing
+// DE-fidelity rule): DE shows an occluded unit's OUTLINE in the
+// owner's colour, not the filled silhouette this pass used to
+// paint. The outline is what remains of the clipped silhouette
+// after its eroded interior is cut away; the erosion keeps only
+// pixels whose 8 neighbours at this distance (device px) are
+// also inside the silhouette, so the surviving band is about
+// this thick. A shape thinner than the erosion keeps its full
+// silhouette — at that size the outline IS the shape.
+const OCC_OUTLINE_PX = 2;
+const OCC_ERODE_OFFSETS = [
+  [OCC_OUTLINE_PX, 0], [-OCC_OUTLINE_PX, 0],
+  [0, OCC_OUTLINE_PX], [0, -OCC_OUTLINE_PX],
+  [OCC_OUTLINE_PX, OCC_OUTLINE_PX], [OCC_OUTLINE_PX, -OCC_OUTLINE_PX],
+  [-OCC_OUTLINE_PX, OCC_OUTLINE_PX], [-OCC_OUTLINE_PX, -OCC_OUTLINE_PX],
+];
 
 // Synthesized occluder geometry for a placed building: the
 // screen-space silhouette of the generic building box (the
@@ -16233,13 +16255,15 @@ function buildingOccGeo(b) {
   };
 }
 
-// Paint one unit's silhouette over its occluders: the unit's own
+// Paint one unit's OUTLINE over its occluders: the unit's own
 // tinted alpha, clipped to the union of the covering occluders'
 // alpha (their recorded images replayed into a mask the size of
-// the unit's rect). LOW quality keeps the aid but clips to the
-// occluders' rects instead of their pixel alpha — cheaper, and
-// per the governor's doctrine information is never shed, only
-// cosmetic fidelity is.
+// the unit's rect), then reduced to its border — the filled
+// silhouette minus its eroded interior — so only the outline
+// shows through, as in DE. LOW quality keeps the aid but clips
+// to the occluders' rects instead of their pixel alpha —
+// cheaper, and per the governor's doctrine information is never
+// shed, only cosmetic fidelity is.
 function paintOccludedSilhouette(unitEntry, cover, color) {
   const r = unitEntry.rect;
   const bx = Math.floor(r.x);
@@ -16299,6 +16323,23 @@ function paintOccludedSilhouette(unitEntry, cover, color) {
   sg.globalCompositeOperation = 'destination-in';
   sg.drawImage(occMaskCv, 0, 0);
   sg.globalCompositeOperation = 'source-over';
+  // Outline-only: cut the eroded interior out of the clipped
+  // silhouette, leaving its border band. The erosion replays
+  // the silhouette into a scratch canvas and keeps, via
+  // destination-in at each neighbour offset, only the pixels
+  // that are inside from every side.
+  occErodeCv.width = bw;
+  occErodeCv.height = bh;
+  const eg = occErodeCv.getContext('2d');
+  eg.drawImage(occSilCv, 0, 0);
+  eg.globalCompositeOperation = 'destination-in';
+  for (const [dx, dy] of OCC_ERODE_OFFSETS) {
+    eg.drawImage(occSilCv, dx, dy);
+  }
+  eg.globalCompositeOperation = 'source-over';
+  sg.globalCompositeOperation = 'destination-out';
+  sg.drawImage(occErodeCv, 0, 0);
+  sg.globalCompositeOperation = 'source-over';
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.drawImage(occSilCv, bx, by);
@@ -16307,7 +16348,7 @@ function paintOccludedSilhouette(unitEntry, cover, color) {
 
 // The occlusion pass itself: group the recorded items into
 // units and occluders (with their alpha-tight rects), ask
-// occlusion.js who is hidden, and paint those silhouettes.
+// occlusion.js who is hidden, and paint those units' outlines.
 function drawOccludedOutlines(items) {
   const units = [];
   const occluders = [];

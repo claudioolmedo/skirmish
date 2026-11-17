@@ -5011,7 +5011,11 @@ unit-tested, incl. the enemy-scout-behind-own-TC case; `app.js`
 records each draw item's sprite calls during the painter's pass
 and paints an occluded unit's own sprite alpha, flattened to its
 owner's colour, over the occluders, clipped to the occluders'
-alpha. The Town Center occludes as the entity it is; trees
+alpha — reduced to the silhouette's border (the clipped shape
+minus its eroded interior, ~2 device px), so only the OUTLINE
+shows through, as in DE; the earlier filled-silhouette rendering
+was aligned to this rule's own text on 2026-11-16 (client batch,
+Claudio's standing DE-fidelity rule). The Town Center occludes as the entity it is; trees
 occlude as nodes; a foundation occludes at its full drawn height
 (the construction clip is not replayed into the mask — a transient
 of seconds). No sim, command or hash contact. · *Status:* **MATCHES**.
