@@ -462,8 +462,11 @@ const BUILD_PNG = ['house.png', 'farm.png', 'barracks.png', 'lumber-camp.png',
 // the Watch Tower's 850 is its pre-Castle value (BLD-18). The
 // gates follow the same convention: 240 is the Palisade Gate's
 // Dark column (400 from Feudal), 1650 the Stone Gate's Feudal
-// column (2700 from Castle).
-const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200, 150, 850, 500, 1800, 2400, 1080, 4800, 2100, 1800, 240, 1650, 2100, 4800, 4800, 1800];
+// column (2700 from Castle). The last entry completes the table
+// (client batch, 2026-11-16): the Fish Trap (kind 24) was
+// missing, so its panel HP read NaN — the sim's FISH_TRAP_HP
+// (480, the Farm row it adopts) is the value.
+const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200, 150, 850, 500, 1800, 2400, 1080, 4800, 2100, 1800, 240, 1650, 2100, 4800, 4800, 1800, 480];
 // the Watch Tower's 850 is its pre-Castle value (BLD-18).
 // WASM build commands by kind tag (M6 completes the set; BLD-13
 // adds the palisade's single-segment form — dragged lines go
@@ -15889,6 +15892,35 @@ function updateSelPanel() {
     selPortrait.innerHTML = '';
     selName.textContent = t('sel.none');
     selInfo.textContent = t('sel.noneInfo');
+  }
+  // Building HP number (client batch, 2026-11-16 — Claudio's
+  // standing DE-fidelity rule): a selected unit's line leads
+  // with "HP cur / max" (sel.hp), and the foe-building line has
+  // always carried the number — but an OWN building's line
+  // showed none (the only HP read was the world-space bar over
+  // a damaged building). Own TC / production / plain buildings
+  // now lead with the same sel.hp text: the TC from the entity
+  // HP pair (the foe-TC read), a placed building from its HP
+  // fraction over the kind's max (the foe-building read).
+  if ((context === 'tc' || context === 'production' || context === 'building')
+      && selectedBuilding) {
+    let hpTxt = null;
+    if (selectedBuilding.type === 'tc') {
+      const id = selectedBuilding.id;
+      hpTxt = t('sel.hp', {
+        cur: Math.max(0, Math.ceil(st.hp[id * 2])),
+        max: st.hp[id * 2 + 1],
+      });
+    } else if (bk && BUILD_MAXHP[bk.kind] != null) {
+      hpTxt = t('sel.hp', {
+        cur: Math.round(bk.hpFrac * BUILD_MAXHP[bk.kind]),
+        max: BUILD_MAXHP[bk.kind],
+      });
+    }
+    if (hpTxt) {
+      selInfo.textContent = selInfo.textContent
+        ? `${hpTxt} · ${selInfo.textContent}` : hpTxt;
+    }
   }
   // Castle P3b: a garrison host's info line carries its garrison
   // count — and, for the armed shelters, the live arrows per
