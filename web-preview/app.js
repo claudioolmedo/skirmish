@@ -6212,23 +6212,39 @@ function connectToRoom() {
 // pause menu, so nothing ever brought the game view back).
 let lobbyReturnToMatch = false;
 
+/// Set when the lobby was opened over a FINISHED match (the
+/// end card dismissed via View map, then Menu → Play online —
+/// bot-loop live trap, confirmed 12+ runs through 2026-11-17,
+/// #405–#412): matchEnded excluded this state from
+/// lobbyReturnToMatch, so the lobby offered NO ✕ at all, Esc
+/// does not close the lobby, and the pause menu underneath was
+/// unreachable — the player was trapped and could only escape
+/// by starting a new game. Closing from here returns to the
+/// finished match exactly as the live-match return does (game
+/// view back, pause menu up over it); the end state itself
+/// (end card / View-map chip) is untouched by the round-trip.
+let lobbyReturnToEnded = false;
+
 /// The lobby's ✕ only exists when closing has somewhere to go:
 /// back to the live match it was opened over (lobbyReturnToMatch),
-/// or out of a room back to the browser. On the front door itself
-/// there is NOTHING under the lobby — openLobby cleared .in-match
-/// and the browser IS the page's home screen — so a visible ✕
-/// there stranded the player on a completely black page (bot-loop
-/// live reproduction, 2026-11-03: close the auto-opened Lobby
-/// Browser on the main menu → black page, only the beta banner
-/// left; reload the only recovery). Hide it in that state.
+/// back to the finished match it was opened over
+/// (lobbyReturnToEnded), or out of a room back to the browser.
+/// On the front door itself there is NOTHING under the lobby —
+/// openLobby cleared .in-match and the browser IS the page's
+/// home screen — so a visible ✕ there stranded the player on a
+/// completely black page (bot-loop live reproduction, 2026-11-03:
+/// close the auto-opened Lobby Browser on the main menu → black
+/// page, only the beta banner left; reload the only recovery).
+/// Hide it in that state.
 function updateLobbyClose() {
   if (!netUi || !netUi.onlineClose) return;
-  const canClose = lobbyReturnToMatch || !!(net && net.room);
+  const canClose = lobbyReturnToMatch || lobbyReturnToEnded || !!(net && net.room);
   netUi.onlineClose.style.display = canClose ? '' : 'none';
 }
 
 function openLobby(join) {
   lobbyReturnToMatch = !!(playing && paused && !matchEnded && !join);
+  lobbyReturnToEnded = !!(playing && matchEnded && !join);
   setInMatch(false); // the lobby is up: no game on screen
   aiRoom = null; // entering the lobby dissolves any AI-room match
   if (net) teardownNet();
@@ -7590,6 +7606,20 @@ async function main() {
   if (onlineBtn) onlineBtn.addEventListener('click', () => openLobby(null));
   if (netUi.onlineClose) {
     netUi.onlineClose.addEventListener('click', () => {
+      if (net && net.room) {
+        // In a room, the ✕ means "leave the room": tear the
+        // session down and land back on the Lobby Browser front
+        // door. (Before this, it merely hid the overlay — the
+        // session stayed alive invisibly and the page went black,
+        // the same stranding as the front-door case.) This check
+        // comes FIRST: a room entered from a lobby that was opened
+        // over a live or finished match must not be hijacked by
+        // the return flags below — openLobby(join) clears them,
+        // but the host's create flow sets net.room inside the
+        // same session, flags still standing.
+        openLobby(null);
+        return;
+      }
       if (lobbyReturnToMatch) {
         // Opened from the pause menu over a live match: closing
         // the lobby returns to that match — drop the lobby's net
@@ -7617,13 +7647,21 @@ async function main() {
         fitCanvas();
         return;
       }
-      if (net && net.room) {
-        // In a room, the ✕ means "leave the room": tear the
-        // session down and land back on the Lobby Browser front
-        // door. (Before this, it merely hid the overlay — the
-        // session stayed alive invisibly and the page went black,
-        // the same stranding as the front-door case.)
-        openLobby(null);
+      if (lobbyReturnToEnded) {
+        // Opened over a FINISHED match (View map → Menu → Play
+        // online — the bot-loop lobby trap, #405–#412): closing
+        // returns to that finished match exactly as the
+        // live-match return above does — drop the lobby's net
+        // session, bring the game view back, leave the pause
+        // menu up over it. matchEnded and the end state (end
+        // card hidden under View map, Results chip showing) are
+        // not touched: Resume lands back on the post-game map.
+        // Same canvas-refit discipline as the live return.
+        lobbyReturnToEnded = false;
+        teardownNet();
+        setInMatch(true);
+        setPaused(true);
+        fitCanvas();
         return;
       }
       // Front door (or any state with nothing under the lobby):
