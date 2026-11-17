@@ -51,7 +51,9 @@ test('the WASM sim exposes the Cog train verb; the techs ride the generic resear
   // Water W6: tags 50–52 (the Imperial trio) now validate too.
   assert.equal(validateCommand({ t: 'research_at', b: 1, tech: 50 }), true);
   assert.equal(validateCommand({ t: 'research_at', b: 1, tech: 52 }), true);
-  assert.equal(validateCommand({ t: 'research_at', b: 1, tech: 53 }), false);
+  // TEC-08: tag 53 (Siege Engineers) validates too; 54 does not.
+  assert.equal(validateCommand({ t: 'research_at', b: 1, tech: 53 }), true);
+  assert.equal(validateCommand({ t: 'research_at', b: 1, tech: 54 }), false);
 });
 
 test('the Dock panel gains the Cog train button behind the Feudal gate', () => {
@@ -82,7 +84,7 @@ test('panel order + letters: the Cog takes the V cell after the Transport Ship',
 
 test('the University gains the ship pair with the BigInt-safe done check', () => {
   // RB_TAGS reads both tags' blocks on the University panel.
-  assert.equal((app.match(/university: \[20, 21, 22, 23, 24, 48, 49, 50, 51, 52\]/g) || []).length, 2); // W6 trio appended
+  assert.equal((app.match(/university: \[20, 21, 22, 23, 24, 48, 49, 50, 51, 52, 53\]/g) || []).length, 2); // W6 trio appended; TEC-08's Siege Engineers after it
   // The University techBtn reads the mask via techMaskHas —
   // `(1 << 48)` would wrap; the camp panels' lesson applied.
   assert.match(app, /const done = techMaskHas\(techMask, tag\);\s*const rb = rbB\[tag\];/);
@@ -99,7 +101,7 @@ test('the University gains the ship pair with the BigInt-safe done check', () =>
 });
 
 test('the tech tree mirrors the University ship pair (tags 48/49)', () => {
-  assert.equal(TECH_TREE.length, 53); // 50 here at W5; +the Imperial trio (W6)
+  assert.equal(TECH_TREE.length, 54); // 50 here at W5; +the Imperial trio (W6); +Siege Engineers (TEC-08)
   assert.deepEqual(TECH_TREE[48], {
     tag: 48, host: 16, age: 2, cost: [100, 0, 200, 0], secs: 40, requires: null,
   });

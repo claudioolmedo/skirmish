@@ -518,6 +518,7 @@ let TECH_NAME = {
   45: 'Fishing Lines', 46: 'Gillnets', 47: 'Medium Warships',
   48: 'Careening', 49: 'Clinker Construction',
   50: 'Dry Dock', 51: 'Carvel Hull', 52: 'Shipwright',
+  53: 'Siege Engineers',
 };
 // Research-block explanations, indexed by the sim's ResearchBlock
 // tag (0 ok — unused, 1 funds, 2 queue full, 3 already done,
@@ -578,6 +579,7 @@ function refreshNames() {
     48: t('tech.careening'), 49: t('tech.clinkerconstruction'),
     50: t('tech.drydock'), 51: t('tech.carvelhull'),
     52: t('tech.shipwright'),
+    53: t('tech.siegeengineers'),
   };
   RESEARCH_BLOCK_TITLES = [
     '', t('block.noResources'), t('block.queueFullTrain'),
@@ -1567,7 +1569,7 @@ function updateEventFeed() {
   const lines = diffFeedEvents(prev, snap, {
     buildingName: (k) => BUILD_NAME[k],
     unitName: (k) => KIND_NAME[k],
-    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15, lightcavalry: 16, husbandry: 17, caravan: 19, coinage: 25, banking: 26, townwatch: 27, townpatrol: 28, conscription: 29, heavyplow: 30, croprotation: 31, sanctity: 32, fervor: 33, herbalmedicine: 34, atonement: 35, devotion: 36, redemption: 37, heresy: 38, blockprinting: 39, illumination: 40, theocracy: 41, faith: 42, bowsaw: 43, twomansaw: 44, fishinglines: 45, gillnets: 46, mediumwarships: 47, careening: 48, clinkerconstruction: 49, drydock: 50, carvelhull: 51, shipwright: 52 }[key]],
+    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15, lightcavalry: 16, husbandry: 17, caravan: 19, coinage: 25, banking: 26, townwatch: 27, townpatrol: 28, conscription: 29, heavyplow: 30, croprotation: 31, sanctity: 32, fervor: 33, herbalmedicine: 34, atonement: 35, devotion: 36, redemption: 37, heresy: 38, blockprinting: 39, illumination: 40, theocracy: 41, faith: 42, bowsaw: 43, twomansaw: 44, fishinglines: 45, gillnets: 46, mediumwarships: 47, careening: 48, clinkerconstruction: 49, drydock: 50, carvelhull: 51, shipwright: 52, siegeengineers: 53 }[key]],
   }, feedFmt());
   feedPrev = snap;
   for (const text of lines) pushFeedLine(text);
@@ -14016,6 +14018,7 @@ function runCommandButton(id, times = 1) {
       'research-mediumwarships': 47,
       'research-careening': 48, 'research-clinkerconstruction': 49,
       'research-drydock': 50, 'research-carvelhull': 51, 'research-shipwright': 52,
+      'research-siegeengineers': 53,
     }[id];
     if (tag != null && selectedBuilding && selectedBuilding.type === 'building') {
       if (!issue({ t: 'research_at', b: selectedBuilding.id, tech: tag })) {
@@ -14181,9 +14184,9 @@ function renderCommands() {
   const RB_TAGS = {
     blacksmith: [2, 3, 4, 7, 8], barracks: [5], stable: [9, 16, 17],
     lumbercamp: [10, 43, 44], miningcamp: [11, 12], mill: [13, 30, 31], market: [19, 25, 26],
-    university: [20, 21, 22, 23, 24, 48, 49, 50, 51, 52], castle: [29],
+    university: [20, 21, 22, 23, 24, 48, 49, 50, 51, 52, 53], castle: [29],
     lumbercamp: [10, 43, 44], miningcamp: [11, 12], mill: [13], market: [19, 25, 26],
-    university: [20, 21, 22, 23, 24, 48, 49, 50, 51, 52], monastery: [32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42],
+    university: [20, 21, 22, 23, 24, 48, 49, 50, 51, 52, 53], monastery: [32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42],
     dock: [45, 46, 47],
   };
   const rbB = bk && RB_TAGS[context]
@@ -15163,6 +15166,13 @@ function renderCommands() {
         [[350, 'food'], [200, 'wood']], 60, 8),
       techBtn('research-shipwright', 52, 'i-shipwright', 'cmd.shipwrightTitle',
         [[1000, 'food'], [300, 'gold']], 60, 9),
+      // TEC-08: Siege Engineers (siege weapons +20% attack vs
+      // buildings, Petards +40%, ranged siege +1 range, rams
+      // +1 LoS), Imperial Age research on the same lock law;
+      // cost/time VERIFIED (wiki Technology table, fetched
+      // 2026-11-16).
+      techBtn('research-siegeengineers', 53, 'i-siegeengineers', 'cmd.siegeengineersTitle',
+        [[500, 'food'], [600, 'wood']], 45, 10),
     );
   } else if (context === 'lumbercamp' || context === 'mill' || context === 'miningcamp') {
     // The economy researches (2026-10-22): Double-Bit Axe at the

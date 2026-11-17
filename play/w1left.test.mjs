@@ -46,9 +46,10 @@ test('ECO-14: the farm chain is on the Mill panel and the research map', () => {
   // Netplay lets the two new tags through research_at (the
   // ceiling was 44; Water W2's Dock pair raised it to 46,
   // Water W3b's Medium Warships raised it to 47, Water
-  // W5's University ship pair raised it to 49, and Water
-  // W6's Imperial University ship trio raised it to 52).
-  assert.ok(netplay.includes('(c.tech >= 29 && c.tech <= 52)'));
+  // W5's University ship pair raised it to 49, Water
+  // W6's Imperial University ship trio raised it to 52, and
+  // TEC-08's Siege Engineers raised it to 53).
+  assert.ok(netplay.includes('(c.tech >= 29 && c.tech <= 53)'));
   // Icons exist for both buttons and the reseed desk.
   for (const icon of ['i-heavyplow', 'i-croprotation', 'i-reseed']) {
     assert.ok(html.includes(`<symbol id="${icon}"`), `${icon} symbol`);
