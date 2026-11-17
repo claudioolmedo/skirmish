@@ -125,7 +125,12 @@ fn trio_table_rows_match_the_wiki() {
         Some(TechId::SiegeEngineers),
         "TEC-08 appends Siege Engineers at 53"
     );
-    assert_eq!(TechId::from_tag(54), None, "53 is the tail");
+    assert_eq!(
+        TechId::from_tag(56),
+        Some(TechId::Arrowslits),
+        "BLD-18's tower trio appends at 54/55/56 (integration renumber, 2026-11-17)"
+    );
+    assert_eq!(TechId::from_tag(57), None, "56 is the tail");
     // The chains (TEC-07): Dry Dock is Careening's further
     // upgrade, Carvel Hull is Clinker Construction's; Shipwright
     // stands alone.
