@@ -382,23 +382,22 @@ pub enum TechId {
     /// Tag 46.
     Gillnets,
     /// Dock, Castle: the line-upgrade technology of update
-    /// 169123 — standing Galleys, Fire Galleys, Hulks and
-    /// Demolition Rafts convert in place to War Galleys, Fire
-    /// Ships, War Hulks and Demolition Ships, and later
-    /// production spawns at the Castle tier (Water W3b, CLS-07;
-    /// the CLS-03 pattern Man-at-Arms uses). Cost/time re-pinned
-    /// at W3b Passo 0: **150 wood / 100 gold, 50 s** (wiki,
-    /// Medium Warships article + the Longboat comparison
-    /// table's research row + the official update-169123
-    /// preview, fetched 2026-11-06 — the WATER-SPEC §5 row's
-    /// garble caveat resolved). NOTE (recorded, dossier
-    /// governs): in current DE the Demolition Raft's upgrade
-    /// is a SEPARATE Dock technology ("Demolition Ship", also
-    /// 150 W / 100 G) — the water dossier folds all four lines
-    /// into this one research (WATER-EXECUTION-PLAN §3.4
-    /// writes the conversion over all four lines), so W3b
-    /// ships the dossier's form and flags the divergence in
-    /// its handoff. Tag 47.
+    /// 169123 — standing Galleys, Fire Galleys and Hulks
+    /// convert in place to War Galleys, Fire Ships and War
+    /// Hulks, and later production spawns at the Castle tier
+    /// (Water W3b, CLS-07; the CLS-03 pattern Man-at-Arms
+    /// uses). Cost/time re-pinned at W3b Passo 0: **150 wood /
+    /// 100 gold, 50 s** (wiki, Medium Warships article + the
+    /// Longboat comparison table's research row + the official
+    /// update-169123 preview, fetched 2026-11-06 — the
+    /// WATER-SPEC §5 row's garble caveat resolved). W3b
+    /// shipped this research folding in the Demolition line
+    /// too (the water dossier's form, WATER-EXECUTION-PLAN
+    /// §3.4), flagging the divergence from current DE; the
+    /// 2026-11-16 split (Claudio's DE rule) removes the
+    /// Demolition line from this research — it converts under
+    /// its own technology (tag 57, below), exactly as the
+    /// official preview rows the two. Tag 47.
     MediumWarships,
     /// University, Castle: ships +1 pierce armor (Water W5;
     /// moved from the Dock to the University in DE update
@@ -490,11 +489,31 @@ pub enum TechId {
     /// **250 food / 250 wood, 25 s**). Tag 56 (drafted 55,
     /// renumbered +1 at integration with BLD-18's trio).
     Arrowslits,
+    /// Dock, Castle: the Demolition line's OWN line-upgrade
+    /// technology (Water split, 2026-11-16, CLS-07) — standing
+    /// Demolition Rafts convert in place to Demolition Ships
+    /// and later production spawns at the new tier (the
+    /// CLS-03 pattern, the Medium Warships shape restricted
+    /// to this one line). Current DE rows it as a SEPARATE
+    /// Dock technology from Medium Warships: the official
+    /// update-169123 preview (ageofempires.com, fetched
+    /// 2026-11-06 at W3b Passo 0 and re-read 2026-11-16)
+    /// lists "Demolition Ship — Available at the Dock.
+    /// Standalone upgrade to Demolition Rafts. 150w 100g
+    /// (III)". Cost **150 wood / 100 gold**, Castle Age, no
+    /// prerequisite — the preview's row verbatim. Research
+    /// time mirrors Medium Warships' 50 s (the sibling Dock
+    /// line-upgrade of the same update; the preview pins no
+    /// seconds for either row). Tag 57 — drafted 53 on the
+    /// water base `a9edef6`, renumbered at integration
+    /// (2026-11-17): Siege Engineers holds 53 and the BLD-18
+    /// tower trio holds 54–56.
+    DemolitionShip,
 }
 
 impl TechId {
     /// All technologies, in tag order.
-    pub const ALL: [TechId; 57] = [
+    pub const ALL: [TechId; 58] = [
         TechId::Loom,
         TechId::FeudalAge,
         TechId::Fletching,
@@ -552,6 +571,7 @@ impl TechId {
         TechId::GuardTower,
         TechId::Keep,
         TechId::Arrowslits,
+        TechId::DemolitionShip,
     ];
 
     /// Stable tag: 0 loom, 1 feudal age, 2 fletching, 3 scale mail,
@@ -625,6 +645,10 @@ impl TechId {
     /// appended at the tail; drafted 53/54/55 on the BLD-18 base
     /// `a9edef6`, renumbered +1 at integration 2026-11-17 —
     /// Siege Engineers holds 53.)
+    /// 57 demolition ship (Water split, 2026-11-16 — the
+    /// Demolition line's own Dock technology, appended at the
+    /// tail; drafted 53 on the split's base `a9edef6`,
+    /// renumbered at integration 2026-11-17 — 53–56 live.)
     pub fn tag(self) -> u8 {
         match self {
             TechId::Loom => 0,
@@ -684,6 +708,7 @@ impl TechId {
             TechId::GuardTower => 54,
             TechId::Keep => 55,
             TechId::Arrowslits => 56,
+            TechId::DemolitionShip => 57,
         }
     }
 
@@ -775,9 +800,12 @@ impl TechId {
             | TechId::Faith => TechHost::Building(BuildingKind::Monastery),
             // Water W2a: the fishing pair is researched at the Dock.
             // Water W3b: Medium Warships joins them at the Dock.
-            TechId::FishingLines | TechId::Gillnets | TechId::MediumWarships => {
-                TechHost::Building(BuildingKind::Dock)
-            }
+            // Water split (2026-11-16): the Demolition Ship
+            // research joins them — a Dock technology in DE too.
+            TechId::FishingLines
+            | TechId::Gillnets
+            | TechId::MediumWarships
+            | TechId::DemolitionShip => TechHost::Building(BuildingKind::Dock),
         }
     }
 
@@ -843,6 +871,10 @@ impl TechId {
             // Castle Age research (wiki, Guard Tower).
             | TechId::Gillnets
             | TechId::MediumWarships
+            // Water split (2026-11-16): the Demolition Ship
+            // research is Castle Age research (the official
+            // preview's "(III)"), like Medium Warships.
+            | TechId::DemolitionShip
             | TechId::Careening
             | TechId::ClinkerConstruction
             | TechId::GuardTower => Age::Castle,
@@ -955,6 +987,7 @@ impl TechId {
             TechId::FishingLines => 1200, // 20 s (wiki, Technology table — WATER-SPEC §5)
             TechId::Gillnets => 2700, // 45 s (pinned at W2 Passo 0 — see the tag docs)
             TechId::MediumWarships => 3000, // 50 s (pinned at W3b Passo 0 — see the tag docs)
+            TechId::DemolitionShip => 3000, // 50 s (mirrors Medium Warships — see the tag docs)
             TechId::Careening => 2400, // 40 s — UNVERIFIED placeholder (see the tag docs)
             TechId::ClinkerConstruction => 2400, // 40 s — UNVERIFIED placeholder (see the tag docs)
             TechId::DryDock => 3600, // 60 s (wiki, Technology table — W6 Passo 0, VERIFIED)
@@ -1019,6 +1052,7 @@ impl TechId {
             TechId::FishingLines => (50, 100, 0, 0), // wiki, Technology table — WATER-SPEC §5
             TechId::Gillnets => (150, 200, 0, 0), // pinned at W2 Passo 0 — see the tag docs
             TechId::MediumWarships => (0, 150, 100, 0), // pinned at W3b Passo 0 — see the tag docs
+            TechId::DemolitionShip => (0, 150, 100, 0), // official update-169123 preview — see the tag docs
             TechId::Careening => (100, 0, 200, 0), // official update-169123 preview — see the tag docs
             TechId::ClinkerConstruction => (150, 100, 0, 0), // official update-169123 preview — see the tag docs
             TechId::DryDock => (200, 0, 400, 0), // wiki, Technology table — W6 Passo 0, VERIFIED
@@ -1416,7 +1450,10 @@ mod tests {
         assert_eq!(TechId::from_tag(54), Some(TechId::GuardTower));
         assert_eq!(TechId::from_tag(55), Some(TechId::Keep));
         assert_eq!(TechId::from_tag(56), Some(TechId::Arrowslits));
-        assert_eq!(TechId::from_tag(57), None);
+        // Water split (2026-11-16) appends Demolition Ship at
+        // 57 (drafted 53, renumbered at integration — 53–56 live).
+        assert_eq!(TechId::from_tag(57), Some(TechId::DemolitionShip));
+        assert_eq!(TechId::from_tag(58), None);
     }
 
     #[test]
@@ -1568,8 +1605,9 @@ mod tests {
         // ALL now holds 47; the count lives in the W2a test.)
         // (TEC-08 appends Siege Engineers at 53 — ALL then
         // held 54; BLD-18 completion appends the tower trio at
-        // 54/55/56 — ALL now holds 57.)
-        assert_eq!(TechId::ALL.len(), 57);
+        // 54/55/56 — ALL then held 57; the Water split appends
+        // Demolition Ship at 57 — ALL now holds 58.)
+        assert_eq!(TechId::ALL.len(), 58);
         // ECO-14: the farm gather lookup meets the farm's own
         // 0.4 food/s work-rate cap — the base farm rate sits
         // below it today, so the clamped value is the base rate,
@@ -1671,8 +1709,11 @@ mod tests {
         assert_eq!(TechId::from_tag(54), Some(TechId::GuardTower));
         assert_eq!(TechId::from_tag(55), Some(TechId::Keep));
         assert_eq!(TechId::from_tag(56), Some(TechId::Arrowslits));
-        assert_eq!(TechId::from_tag(57), None);
-        assert_eq!(TechId::ALL.len(), 57);
+        // Water split (2026-11-16) appends Demolition Ship at
+        // 57 (drafted 53, renumbered at integration).
+        assert_eq!(TechId::from_tag(57), Some(TechId::DemolitionShip));
+        assert_eq!(TechId::from_tag(58), None);
+        assert_eq!(TechId::ALL.len(), 58);
     }
 
     #[test]

@@ -67,7 +67,8 @@ test('the Dock panel gains the four train buttons behind the Feudal gate', () =>
   assert.deepEqual(PANEL_BUTTONS.dock,
     ['train-fishing-ship', 'research-fishinglines', 'research-gillnets',
       'train-galley', 'train-fire-galley', 'train-demolition-raft', 'train-hulk',
-      'research-mediumwarships', 'train-transport-ship', 'train-trade-cog']); // + Transport (W4), + the Cog (W5)
+      'research-mediumwarships', 'train-transport-ship', 'train-trade-cog',
+      'research-demolitionship']); // + Transport (W4), + the Cog (W5), + Demolition Ship (split)
   assert.deepEqual(PANEL_KEYS.dock['train-galley'], ['KeyA', 'A']);
   assert.deepEqual(PANEL_KEYS.dock['train-fire-galley'], ['KeyS', 'S']);
   assert.deepEqual(PANEL_KEYS.dock['train-demolition-raft'], ['KeyD', 'D']);

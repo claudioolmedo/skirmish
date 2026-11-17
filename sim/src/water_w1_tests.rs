@@ -9,8 +9,8 @@
 //! grid predicate's cell cases are pinned in `grid::tests`.
 
 use crate::build::BuildingKind;
-use crate::econ::ResourceKind;
-use crate::entity::{EntityKind, OWNER_PLAYER};
+use crate::econ::{NodeKind, ResourceKind};
+use crate::entity::{Entity, EntityKind, OWNER_PLAYER};
 use crate::{Command, Sim};
 use fixed::types::I16F16;
 
@@ -255,4 +255,178 @@ fn normal_buildings_are_refused_on_shallows() {
         }
     }
     assert!(checked, "no clean shallows straddle found in 40 seeds");
+}
+
+#[test]
+fn dock_may_overlap_a_fish_shoal_and_the_fish_stays() {
+    // (2026-11-16, Claudio's DE rule): a fish shoal does NOT
+    // block the Dock. Scan pond seeds for a shoreline straddle
+    // whose footprint holds a live fish node and nothing else
+    // that refuses (no tree block, no dynamic cell, no other
+    // live node, no standing unit).
+    let mut staged: Option<(Sim, u32, u32, u32, u32)> = None;
+    for seed in 1..=60u64 {
+        let mut sim = Sim::new(seed);
+        let villager = a_villager(&sim);
+        'scan: for ay in 0..=117u32 {
+            for ax in 0..=117u32 {
+                if !sim.grid().dock_terrain_ok(ax, ay, 3) {
+                    continue;
+                }
+                let cells: Vec<(u32, u32)> = (0..3)
+                    .flat_map(|dy| (0..3).map(move |dx| (ax + dx, ay + dy)))
+                    .collect();
+                let cell_of = |sim: &Sim, x: I16F16, y: I16F16| sim.grid().world_to_cell(x, y);
+                let fish = sim.nodes().iter().find(|n| {
+                    n.kind.is_fish()
+                        && !n.is_depleted()
+                        && cells.contains(&cell_of(&sim, n.pos_x, n.pos_y))
+                });
+                let Some(fish) = fish else { continue };
+                let fish_id = fish.id;
+                let clean = cells.iter().all(|&(x, y)| {
+                    !sim.grid().is_node_blocked(x, y)
+                        && !sim.grid().is_dynamic(x, y)
+                        && sim.nodes().iter().all(|n| {
+                            n.is_depleted()
+                                || n.kind.is_fish()
+                                || cell_of(&sim, n.pos_x, n.pos_y) != (x, y)
+                        })
+                        && sim.entities().iter().all(|e| {
+                            e.dead || cell_of(&sim, e.pos_x, e.pos_y) != (x, y)
+                        })
+                });
+                if !clean {
+                    continue;
+                }
+                staged = Some((sim, villager, ax, ay, fish_id));
+                break 'scan;
+            }
+        }
+        if staged.is_some() {
+            break;
+        }
+    }
+    let (mut sim, villager, ax, ay, fish_id) =
+        staged.expect("no fish-overlapping Dock straddle found in 60 seeds");
+    // Stage the builder on the site and let the fog settle
+    // (BLD-01: unexplored ground refuses before anything else
+    // is consulted — the W1 tests' pattern).
+    {
+        let (sx, sy) = sim.grid().cell_center(ax + 1, ay + 1);
+        let e = sim.entities.iter_mut().find(|e| e.id == villager).unwrap();
+        e.pos_x = sx;
+        e.pos_y = sy;
+    }
+    for _ in 0..600 {
+        if (0..3).all(|oy| (0..3).all(|ox| sim.cell_explored_by(OWNER_PLAYER, ax + ox, ay + oy))) {
+            break;
+        }
+        sim.tick();
+    }
+    assert!(
+        (0..3).all(|oy| (0..3).all(|ox| sim.cell_explored_by(OWNER_PLAYER, ax + ox, ay + oy))),
+        "the fish-straddle site never became explored"
+    );
+    let (px, py) = sim.grid().cell_center(ax, ay);
+    assert!(
+        sim.can_build(villager, BuildingKind::Dock, px, py),
+        "the Dock must accept a footprint that only overlaps fish"
+    );
+    // The exemption is fish-specific: stage a live gold node
+    // onto a footprint cell and the same anchor refuses again;
+    // move it back and the anchor accepts again. (No ticks run
+    // while the node is staged, so nothing else reads it.)
+    let gold = sim
+        .nodes
+        .iter()
+        .position(|n| n.kind == NodeKind::GoldMine)
+        .expect("the map stocks gold");
+    let (gx, gy) = (sim.nodes[gold].pos_x, sim.nodes[gold].pos_y);
+    let (fx, fy) = sim.grid().cell_center(ax, ay);
+    sim.nodes[gold].pos_x = fx;
+    sim.nodes[gold].pos_y = fy;
+    assert!(
+        !sim.can_build(villager, BuildingKind::Dock, px, py),
+        "a live gold node on the footprint must still refuse the Dock"
+    );
+    sim.nodes[gold].pos_x = gx;
+    sim.nodes[gold].pos_y = gy;
+    assert!(sim.can_build(villager, BuildingKind::Dock, px, py));
+    // Place it for real: the foundation lands on the shoal and
+    // the fish node is NOT swallowed — it stays in place, at
+    // its full amount, under the Dock.
+    sim.stockpile_mut(OWNER_PLAYER)
+        .add(ResourceKind::Wood, I16F16::from_num(1000));
+    let fish_amount = sim
+        .nodes()
+        .iter()
+        .find(|n| n.id == fish_id)
+        .expect("the overlapped fish")
+        .amount_left;
+    sim.push_command(Command::Build {
+        entity: villager,
+        kind: BuildingKind::Dock,
+        x: px,
+        y: py,
+    });
+    sim.tick();
+    let placed = sim
+        .buildings()
+        .iter()
+        .find(|b| b.kind == BuildingKind::Dock)
+        .expect("the Dock foundation lands over the shoal");
+    assert_eq!((placed.cell_x, placed.cell_y), (ax, ay));
+    let fish = sim
+        .nodes()
+        .iter()
+        .find(|n| n.id == fish_id)
+        .expect("the overlapped fish node was removed by placement");
+    assert_eq!(fish.amount_left, fish_amount, "placement ate the fish");
+    // And the shoal's remaining tiles stay fishable beside the
+    // Dock: a Fishing Ship works another fish node of the same
+    // pond (not under the footprint) and the node depletes.
+    let cells: Vec<(u32, u32)> = (0..3)
+        .flat_map(|dy| (0..3).map(move |dx| (ax + dx, ay + dy)))
+        .collect();
+    let other = sim
+        .nodes()
+        .iter()
+        .find(|n| {
+            n.kind.is_fish()
+                && n.id != fish_id
+                && !cells.contains(&sim.grid().world_to_cell(n.pos_x, n.pos_y))
+        })
+        .expect("the pond stocks another fish node")
+        .id;
+    let (ox, oy) = {
+        let n = sim.nodes().iter().find(|n| n.id == other).unwrap();
+        (n.pos_x, n.pos_y)
+    };
+    sim.entities.push(Entity::spawned(
+        950,
+        EntityKind::FishingShip,
+        OWNER_PLAYER,
+        ox,
+        oy,
+    ));
+    let before = sim
+        .nodes()
+        .iter()
+        .find(|n| n.id == other)
+        .unwrap()
+        .amount_left;
+    sim.push_command(Command::Gather {
+        entity: 950,
+        node: other,
+    });
+    let mut worked = false;
+    for _ in 0..60_000 {
+        sim.tick();
+        if sim.nodes().iter().find(|n| n.id == other).unwrap().amount_left < before {
+            worked = true;
+            break;
+        }
+    }
+    assert!(worked, "the ship never gathered from the shoal beside the Dock");
 }

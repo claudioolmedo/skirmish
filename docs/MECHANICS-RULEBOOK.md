@@ -1822,7 +1822,15 @@ ghost mirror and mapgen validation): a 3×3 placement is legal iff
 footprint cell is land or land-adjacent shallows AND every footprint
 cell is unobstructed (BLD-01's standing checks on top). The predicate
 is the contract: an all-water 3×3 in open sea refuses, all-land
-refuses, a single corner land cell accepts. Drop-off: food-only in
+refuses, a single corner land cell accepts. One obstruction
+exception (2026-11-16, Claudio's DE rule): a live FISH node does
+not obstruct the Dock — a shoal may sit under the footprint. The
+node is never swallowed: placement and completion leave it in
+place at its amount (workable again if the Dock falls), and the
+shoal's remaining tiles stay fishable beside the Dock, as in DE;
+every other live node (trees, gold, stone, berries, carcasses, the
+Fish Trap's stamped node) still refuses the Dock as it refuses
+every footprint. Drop-off: food-only in
 ECO-06's mask, as data — it goes live with fishing (W2). Production
 host with an empty train table in W1 (ships are W2); production
 garrison 10 and Fishing-Ship shelter 5 recorded as data constants,
@@ -2872,7 +2880,9 @@ the Castle Age set and completes the rule as documented for
 the generic roster: **Medium Warships** (TechId 47, Dock,
 Castle Age, 150 W / 100 G, 50 s — re-pinned at W3b Passo 0)
 converts standing hulls in place and later production spawns
-at the Castle tier (the CLS-03 pattern): **War Galley** (28;
+at the Castle tier (the CLS-03 pattern) — the Galley, Fire
+Galley and Hulk lines; the Demolition line converts under its
+own research (the split below): **War Galley** (28;
 125 HP, 0/4, 7 pierce, +5 vs Long-Ranged Warships ADOPTED —
 the Galley's +4 plus the article's +1 anti-ship delta — +6
 vs buildings / +3 vs rams pinned for this tier, range 6,
@@ -2889,14 +2899,20 @@ and is recorded in the W3b handoff, not averaged) and **War
 Hulk** (31; 110 HP, 4/1 per the article's update-185872
 changelog, 4 melee +1 vs the FIRE_SHIP class, RoF 1.5). The
 tier patch rows ride the same swaps (Fletching → War Galley,
-Forging → War Hulk). Two divergences are recorded, not
-hidden: current DE upgrades the Demolition Raft through a
-SEPARATE Dock technology of the same cost, where the dossier
-folds all four lines into Medium Warships (the dossier
-governs this package; flagged in the W3b handoff), and the
+Forging → War Hulk). Two divergences were recorded at W3b,
+not hidden: current DE upgrades the Demolition Raft through
+a SEPARATE Dock technology of the same cost, where the
+dossier folded all four lines into Medium Warships, and the
 Ballistics lead on the Fire line still rides the generic
 PRJ-05 release — its post-overhaul applicability remains
-UNVERIFIED, as W3a left it. The Imperial tiers (§3.4 of the
+UNVERIFIED, as W3a left it. **The first divergence is CLOSED
+(2026-11-16, Claudio's DE rule):** Medium Warships no longer
+touches the Demolition line; the line converts under its own
+Dock technology, **Demolition Ship** (TechId 57, Dock,
+Castle Age, 150 W / 100 G, 50 s — the official update-169123
+preview's row, its research time mirroring Medium Warships),
+converting standing Rafts in place and later production at
+spawn, exactly the CLS-03 pattern restricted to this line. The Imperial tiers (§3.4 of the
 SPEC) are a later slice, outside this rule's documented
 generic-roster scope as landed. **Water W5 extension (2026-11-06): the class's technology half lands** — Careening (University, Castle, 100 F / 200 G: ships +1 pierce armor) and Clinker Construction (University, Castle, 150 F / 100 W: ships +10% speed) as TEC-06 lookup patches keyed on the SHIP class mask in `stats_for`, so every hull — the Trade Cog included — inherits both from its table row alone. Costs pin to the official update-169123 preview (fetched 2026-11-06; Careening's "changed from 250f 150g → 100f 200g" is explicit there); the two RESEARCH TIMES are UNVERIFIED in every fetched source and ship as a named 40 s placeholder in `tech.rs`, never presented as DE data. Carvel Hull (the Imperial third ship tech) stays out — a W5 non-goal in the execution plan §1.1. **Water W6 extension (2026-11-06): the Imperial University ship trio lands** — Dry Dock (University, Imperial, 200 F / 400 G, 60 s: ships +1 pierce armor only, the further upgrade of Careening — current-DE form; see the correction note below), Carvel Hull (University, Imperial, 350 F / 200 W, 60 s: ships +10% speed, the further upgrade of Clinker Construction) and Shipwright (University, Imperial, 1 000 F / 300 G, 60 s: ship wood cost −20% and ship creation +54% faster at the Dock, unit heads only — research heads never scale, per the Shipwright article's explicit clause). The stat halves are TEC-06 lookup patches keyed on the SHIP class mask in `stats_for`, layered after the W5 pair in tag order (speeds stack multiplicatively, each step truncating); Shipwright's halves live in `tech.rs` (`train_wood_cost`, read by the afford/spend/refund paths; `shipwright_scales`, read by the Dock's queue-progress step on the Conscription remainder mechanism). Costs/times are VERIFIED at W6 Passo 0 from the wiki Technology table (fetched 2026-11-06) — unlike the W5 pair, no placeholder times. Correction (W6fix, 2026-11-06): Dry Dock is armor-only in current DE — the live wiki's current Dry Dock article reads +1 pierce armor only, its changelog recording that update 169123 removed the speed increase. The W6 build originally shipped the WATER-SPEC §5 dossier form (armor AND +15% speed); that dossier form is superseded by verified current DE, and W6fix removes the speed leg (armor only). Pinned by `sim/src/water_w6_tests.rs` (the trio's rows/chains, the Dry Dock flow, the multiplicative speed stack to the Cog's 10 466 bits with Caravan layered — Caravan → Clinker → Carvel, Dry Dock contributing no speed — Shipwright's exact 72-wood Galley charge, its tick-1403 birth against the 2160 control, and the unscaled 3000-tick research head). · *Status:* **MATCHES**.
 

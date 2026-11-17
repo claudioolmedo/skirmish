@@ -62,7 +62,8 @@ test('the Dock panel gains the Transport train button (Dark Age, no gate)', () =
   assert.deepEqual(PANEL_BUTTONS.dock,
     ['train-fishing-ship', 'research-fishinglines', 'research-gillnets',
       'train-galley', 'train-fire-galley', 'train-demolition-raft', 'train-hulk',
-      'research-mediumwarships', 'train-transport-ship', 'train-trade-cog']);
+      'research-mediumwarships', 'train-transport-ship', 'train-trade-cog',
+      'research-demolitionship']); // + Demolition Ship (split)
   // (The Trade Cog appends after the Transport Ship on the
   // merged tree — Water W5 merge; it takes KeyV, see the W5
   // client suite. The Transport Ship's own cell is unchanged.)

@@ -1,12 +1,16 @@
 //! Water W3b tests (CLS-07 → MATCHES): the Castle Age ship
-//! set — Medium Warships (TechId 47) converts the four Feudal
-//! lines in place to War Galley (28), Fire Ship (29),
-//! Demolition Ship (30) and War Hulk (31), later production
-//! spawns at the Castle tier (the CLS-03 pattern), the tier
-//! patch rows ride the same Blacksmith swaps, and the
-//! Demolition Ship's blast is the second profile on the shared
-//! helper: radius 3.0 tiles, **untapered** — 100% of its
-//! 80-melee table across the whole radius, enemies only.
+//! set — Medium Warships (TechId 47) converts the Galley,
+//! Fire Galley and Hulk lines in place to War Galley (28),
+//! Fire Ship (29) and War Hulk (31), later production spawns
+//! at the Castle tier (the CLS-03 pattern), the tier patch
+//! rows ride the same Blacksmith swaps, and the Demolition
+//! Ship's blast is the second profile on the shared helper:
+//! radius 3.0 tiles, **untapered** — 100% of its 80-melee
+//! table across the whole radius, enemies only. The
+//! Demolition line's own conversion (Raft → Ship, kind 30)
+//! rides its OWN Dock technology (TechId 53) since the
+//! 2026-11-16 split — the last test in this module pins the
+//! split both ways.
 
 use crate::build::{Building, BuildingKind};
 use crate::classes as cls;
@@ -181,13 +185,28 @@ fn castle_ship_rows_are_the_spec_rows() {
     }
     // The tech row (W3b Passo 0 pin; the ALL count extends
     // with Water W5's University ship pair at 48/49, Water
-    // W6's Imperial University ship trio at 50/51/52 and
-    // TEC-08's Siege Engineers at 53).
+    // W6's Imperial University ship trio at 50/51/52,
+    // TEC-08's Siege Engineers at 53, BLD-18's tower trio at
+    // 54–56 and the 2026-11-16 split's Demolition Ship at 57).
     assert_eq!(TechId::MediumWarships.tag(), 47);
-    assert_eq!(TechId::ALL.len(), 57); // 54 after TEC-08; +the tower trio 54–56 (BLD-18, integration 2026-11-17)
+    assert_eq!(TechId::ALL.len(), 58); // 54 after TEC-08; +the tower trio 54–56 (BLD-18, integration 2026-11-17); +Demolition Ship 57 (Water split, integration renumber 2026-11-17)
     assert_eq!(TechId::MediumWarships.age_required(), Age::Castle);
     assert_eq!(TechId::MediumWarships.ticks(), 3000); // 50 s
     assert_eq!(TechId::MediumWarships.cost(), (0, 150, 100, 0));
+    // The split's row (2026-11-16): the Demolition line's own
+    // Dock technology — appended tag, Castle Age, Dock host,
+    // no prerequisite, the official preview's 150 W / 100 G,
+    // and Medium Warships' 50 s mirrored.
+    assert_eq!(TechId::DemolitionShip.tag(), 57); // drafted 53; integration renumber 2026-11-17 (53–56 live)
+    assert_eq!(TechId::from_tag(57), Some(TechId::DemolitionShip));
+    assert_eq!(TechId::DemolitionShip.age_required(), Age::Castle);
+    assert_eq!(TechId::DemolitionShip.ticks(), 3000); // 50 s
+    assert_eq!(TechId::DemolitionShip.cost(), (0, 150, 100, 0));
+    assert_eq!(TechId::DemolitionShip.requires_tech(), None);
+    assert!(matches!(
+        TechId::DemolitionShip.host(),
+        crate::tech::TechHost::Building(BuildingKind::Dock)
+    ));
 
     let g = crate::units::spec(EntityKind::WarGalley);
     assert_eq!(g.max_hp, 125);
@@ -323,7 +342,10 @@ fn medium_warships_researches_at_the_dock_and_converts_standing_ships() {
     assert!(done, "Medium Warships never completed at the Dock");
     assert_eq!(kind_of(&sim, galley), EntityKind::WarGalley);
     assert_eq!(kind_of(&sim, fire), EntityKind::FireShip);
-    assert_eq!(kind_of(&sim, raft), EntityKind::DemolitionShip);
+    // The split (2026-11-16): Medium Warships no longer
+    // converts the Demolition line — the raft stays a raft
+    // until its OWN research lands (the next test).
+    assert_eq!(kind_of(&sim, raft), EntityKind::DemolitionRaft);
     assert_eq!(kind_of(&sim, hulk), EntityKind::WarHulk);
     assert_eq!(kind_of(&sim, foe), EntityKind::Galley, "the enemy's Galley converted");
     assert_eq!(hp_of(&sim, galley), I16F16::from_num(55), "conversion rewrote the HP");
@@ -562,3 +584,123 @@ fn demolition_ship_blast_is_full_strength_at_the_radius_edge() {
     );
 }
 
+
+#[test]
+fn demolition_ship_tech_converts_rafts_and_only_rafts() {
+    // The split (2026-11-16, CLS-07): the Demolition line's
+    // own Dock technology (TechId 53) — Castle-gated like
+    // Medium Warships but independent of it (neither requires
+    // the other, as DE rows them), charging the preview's
+    // 150 wood / 100 gold on enqueue, converting standing
+    // rafts on completion and later production at spawn.
+    let mut sim = Sim::new(42);
+    let dock = placed_dock(&mut sim, 900);
+    set_age(&mut sim, OWNER_PLAYER, Age::Feudal);
+    assert!(!sim.can_research_at(dock, TechId::DemolitionShip));
+    set_age(&mut sim, OWNER_PLAYER, Age::Castle);
+    assert!(sim.can_research_at(dock, TechId::DemolitionShip));
+
+    let (x, y) = pond_point(&sim);
+    let raft = spawn_at(&mut sim, 950, EntityKind::DemolitionRaft, OWNER_PLAYER, x, y);
+    let galley = spawn_at(
+        &mut sim,
+        951,
+        EntityKind::Galley,
+        OWNER_PLAYER,
+        x + I16F16::from_num(6),
+        y,
+    );
+    let foe_raft = spawn_at(
+        &mut sim,
+        952,
+        EntityKind::DemolitionRaft,
+        OWNER_OPPONENT,
+        x,
+        y + I16F16::from_num(6),
+    );
+
+    sim.stockpile_mut(OWNER_PLAYER)
+        .add(ResourceKind::Wood, I16F16::from_num(1000));
+    sim.stockpile_mut(OWNER_PLAYER)
+        .add(ResourceKind::Gold, I16F16::from_num(1000));
+    let wood_before = sim.stockpile_of(OWNER_PLAYER).amount(ResourceKind::Wood);
+    let gold_before = sim.stockpile_of(OWNER_PLAYER).amount(ResourceKind::Gold);
+    sim.push_command(Command::ResearchAt {
+        building: dock,
+        tech: TechId::DemolitionShip,
+    });
+    sim.tick();
+    assert_eq!(
+        sim.stockpile_of(OWNER_PLAYER).amount(ResourceKind::Wood),
+        wood_before - I16F16::from_num(150)
+    );
+    assert_eq!(
+        sim.stockpile_of(OWNER_PLAYER).amount(ResourceKind::Gold),
+        gold_before - I16F16::from_num(100)
+    );
+    let done = run_until(&mut sim, 10_000, |s| {
+        s.has_tech(OWNER_PLAYER, TechId::DemolitionShip)
+    });
+    assert!(done, "Demolition Ship never completed at the Dock");
+    assert_eq!(kind_of(&sim, raft), EntityKind::DemolitionShip);
+    assert_eq!(
+        kind_of(&sim, galley),
+        EntityKind::Galley,
+        "the Demolition research converted another line"
+    );
+    assert_eq!(
+        kind_of(&sim, foe_raft),
+        EntityKind::DemolitionRaft,
+        "the enemy's raft converted"
+    );
+
+    // Production, both directions of the split: with ONLY
+    // Medium Warships a queued raft still leaves the Dock as
+    // a raft; once the line's own research is held, the next
+    // queued raft leaves as a Demolition Ship.
+    let mut sim = Sim::new(42);
+    let dock = placed_dock(&mut sim, 900);
+    set_age(&mut sim, OWNER_PLAYER, Age::Castle);
+    grant(&mut sim, OWNER_PLAYER, TechId::MediumWarships);
+    sim.stockpile_mut(OWNER_PLAYER)
+        .add(ResourceKind::Wood, I16F16::from_num(2000));
+    sim.stockpile_mut(OWNER_PLAYER)
+        .add(ResourceKind::Gold, I16F16::from_num(1000));
+    sim.push_command(Command::TrainAt {
+        building: dock,
+        kind: EntityKind::DemolitionRaft,
+    });
+    let left = run_until(&mut sim, 10_000, |s| {
+        s.entities().iter().any(|e| e.kind == EntityKind::DemolitionRaft)
+    });
+    assert!(left, "no Demolition Raft ever left the Dock queue");
+    assert!(
+        !sim.entities().iter().any(|e| e.kind == EntityKind::DemolitionShip),
+        "Medium Warships alone spawned a Demolition Ship"
+    );
+    // Free the population slot the raft holds before queueing
+    // the next hull (the production test's pattern above).
+    let r = sim
+        .entities
+        .iter_mut()
+        .find(|e| e.kind == EntityKind::DemolitionRaft)
+        .expect("the raft");
+    r.hp = I16F16::ZERO;
+    let cleared = run_until(&mut sim, 1_000, |s| {
+        s.entities()
+            .iter()
+            .all(|e| e.kind != EntityKind::DemolitionRaft || e.dead)
+    });
+    assert!(cleared, "the raft never cleared the population slot");
+    grant(&mut sim, OWNER_PLAYER, TechId::DemolitionShip);
+    sim.push_command(Command::TrainAt {
+        building: dock,
+        kind: EntityKind::DemolitionRaft,
+    });
+    let left = run_until(&mut sim, 10_000, |s| {
+        s.entities()
+            .iter()
+            .any(|e| e.kind == EntityKind::DemolitionShip && !e.dead)
+    });
+    assert!(left, "no Demolition Ship ever left the Dock queue");
+}

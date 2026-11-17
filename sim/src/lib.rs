@@ -5897,24 +5897,43 @@ impl Sim {
             }
             TechId::MediumWarships => {
                 // Water W3b (CLS-07): the Dock's line-upgrade
-                // technology — every standing ship of the four
-                // Feudal lines converts in place to its Castle
-                // tier, HP kept exactly as the CLS-03 precedent
-                // keeps it (the Man-at-Arms sweep above: current
-                // HP is untouched, the new tier's maximum simply
-                // reads off the new row). Later production spawns
-                // at the new tier (the spawn-site conversion
-                // below, the same pattern).
+                // technology — every standing ship of the three
+                // Feudal lines it covers converts in place to
+                // its Castle tier, HP kept exactly as the CLS-03
+                // precedent keeps it (the Man-at-Arms sweep
+                // above: current HP is untouched, the new tier's
+                // maximum simply reads off the new row). Later
+                // production spawns at the new tier (the
+                // spawn-site conversion below, the same pattern).
+                // The Demolition line is NOT this research's:
+                // since the 2026-11-16 split it converts under
+                // its own Dock technology (the next arm), as
+                // current DE rows the two.
                 self.players[slot].techs |= tech.bit();
                 for e in &mut self.entities {
                     if e.owner == owner && !e.dead {
                         e.kind = match e.kind {
                             EntityKind::Galley => EntityKind::WarGalley,
                             EntityKind::FireGalley => EntityKind::FireShip,
-                            EntityKind::DemolitionRaft => EntityKind::DemolitionShip,
                             EntityKind::Hulk => EntityKind::WarHulk,
                             other => other,
                         };
+                    }
+                }
+            }
+            TechId::DemolitionShip => {
+                // Water split (2026-11-16, CLS-07): the
+                // Demolition line's own Dock technology (current
+                // DE, update 169123 — a standalone upgrade) —
+                // every standing Demolition Raft converts in
+                // place to a Demolition Ship, HP kept (the
+                // CLS-03 precedent), and later production spawns
+                // at the new tier (the spawn-site conversion
+                // below). No other line is touched.
+                self.players[slot].techs |= tech.bit();
+                for e in &mut self.entities {
+                    if e.owner == owner && e.kind == EntityKind::DemolitionRaft && !e.dead {
+                        e.kind = EntityKind::DemolitionShip;
                     }
                 }
             }
@@ -10146,9 +10165,11 @@ impl Sim {
         // implementation — terrain straddle plus unobstructed
         // cells. The standing checks below (cliff straddle, Town
         // Center reserve, standing units, live nodes, registry
-        // overlap, price, reach) then run for the Dock exactly as
-        // for every other kind; only the per-cell terrain reading
-        // differs (see the footprint loop).
+        // overlap, price, reach) then run for the Dock as for
+        // every other kind, with the per-cell terrain reading
+        // differing (see the footprint loop) and, since
+        // 2026-11-16, the live-node check exempting fish for
+        // the Shoreline kind (the shoal overlap, in the loop).
         if kind.placement() == crate::build::Placement::Shoreline
             && !self.grid.dock_placement_ok(ax, ay, size)
         {
@@ -10262,11 +10283,25 @@ impl Sim {
             // swallow a live one. Depleted nodes reserve nothing —
             // like the reference game, what is harvested is gone and
             // the ground is free again (this is also what lets a
-            // depleted farm's own plot be replanted).
+            // depleted farm's own plot be replanted). ONE exception
+            // (2026-11-16, Claudio's DE rule): a Shoreline footprint
+            // — the Dock — may overlap a live FISH node. A shoal is
+            // not swallowed: the node is never removed by placement
+            // or completion, so the fish stays in place under the
+            // Dock (workable again if the Dock falls) and the
+            // shoal's remaining tiles stay fishable beside it, as
+            // in DE. Every other live node — trees, mines, berries,
+            // carcasses, the Fish Trap's stamped node — still
+            // refuses every footprint, the Dock's included.
             for n in &self.nodes {
                 if !n.is_depleted()
                     && self.grid.world_to_cell(n.pos_x, n.pos_y) == (cx, cy)
                 {
+                    if kind.placement() == crate::build::Placement::Shoreline
+                        && n.kind.is_fish()
+                    {
+                        continue;
+                    }
                     return BuildVerdict::Reject;
                 }
             }
@@ -10994,19 +11029,30 @@ impl Sim {
         } else {
             kind
         };
-        // The same pattern on the four ship lines (Water W3b,
-        // CLS-07): with Medium Warships researched, new Feudal
-        // hull production spawns at the Castle tier — the queue
-        // entries still say Galley / Fire Galley / Demolition
-        // Raft / Hulk.
+        // The same pattern on the three ship lines Medium
+        // Warships covers (Water W3b, CLS-07): with it
+        // researched, new Feudal hull production spawns at the
+        // Castle tier — the queue entries still say Galley /
+        // Fire Galley / Hulk.
         let kind = if self.has_tech(owner, TechId::MediumWarships) {
             match kind {
                 EntityKind::Galley => EntityKind::WarGalley,
                 EntityKind::FireGalley => EntityKind::FireShip,
-                EntityKind::DemolitionRaft => EntityKind::DemolitionShip,
                 EntityKind::Hulk => EntityKind::WarHulk,
                 other => other,
             }
+        } else {
+            kind
+        };
+        // The Demolition line spawns at its new tier on its
+        // OWN technology (Water split, 2026-11-16): with
+        // Demolition Ship researched, a queued Demolition Raft
+        // leaves the Dock as a Demolition Ship — Medium
+        // Warships alone no longer upgrades it.
+        let kind = if kind == EntityKind::DemolitionRaft
+            && self.has_tech(owner, TechId::DemolitionShip)
+        {
+            EntityKind::DemolitionShip
         } else {
             kind
         };

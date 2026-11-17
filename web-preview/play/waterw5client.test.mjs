@@ -53,10 +53,13 @@ test('the WASM sim exposes the Cog train verb; the techs ride the generic resear
   assert.equal(validateCommand({ t: 'research_at', b: 1, tech: 52 }), true);
   // TEC-08: tag 53 (Siege Engineers) validates too. BLD-18
   // completion (2026-11-16, renumbered at integration): tags
-  // 54–56 (the tower trio) validate; 57 is past the table.
+  // 54–56 (the tower trio) validate. The Water split's
+  // Demolition Ship (renumbered 57 at integration) raised
+  // the ceiling: 57 validates; 58 is past the table.
   assert.equal(validateCommand({ t: 'research_at', b: 1, tech: 53 }), true);
   assert.equal(validateCommand({ t: 'research_at', b: 1, tech: 56 }), true);
-  assert.equal(validateCommand({ t: 'research_at', b: 1, tech: 57 }), false);
+  assert.equal(validateCommand({ t: 'research_at', b: 1, tech: 57 }), true);
+  assert.equal(validateCommand({ t: 'research_at', b: 1, tech: 58 }), false);
 });
 
 test('the Dock panel gains the Cog train button behind the Feudal gate', () => {
@@ -77,7 +80,8 @@ test('panel order + letters: the Cog takes the V cell after the Transport Ship',
   assert.deepEqual(PANEL_BUTTONS.dock,
     ['train-fishing-ship', 'research-fishinglines', 'research-gillnets',
       'train-galley', 'train-fire-galley', 'train-demolition-raft', 'train-hulk',
-      'research-mediumwarships', 'train-transport-ship', 'train-trade-cog']);
+      'research-mediumwarships', 'train-transport-ship', 'train-trade-cog',
+      'research-demolitionship']); // + Demolition Ship (split)
   assert.deepEqual(PANEL_KEYS.dock['train-trade-cog'], ['KeyV', 'V']);
   assert.deepEqual(PANEL_KEYS.dock['train-transport-ship'], ['KeyC', 'C']);
   // The W2/W3a/W3b letters are untouched.
@@ -104,7 +108,7 @@ test('the University gains the ship pair with the BigInt-safe done check', () =>
 });
 
 test('the tech tree mirrors the University ship pair (tags 48/49)', () => {
-  assert.equal(TECH_TREE.length, 57); // 50 here at W5; +the Imperial trio (W6); +Siege Engineers (TEC-08); +the tower trio (BLD-18 completion)
+  assert.equal(TECH_TREE.length, 58); // 50 here at W5; +the Imperial trio (W6); +Siege Engineers (TEC-08); +the tower trio (BLD-18 completion); +Demolition Ship (split)
   assert.deepEqual(TECH_TREE[48], {
     tag: 48, host: 16, age: 2, cost: [100, 0, 200, 0], secs: 40, requires: null,
   });

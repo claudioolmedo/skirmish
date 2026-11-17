@@ -58,7 +58,7 @@ test('Medium Warships is wired as Dock research, tag 47', () => {
   assert.match(app, /45: 'Fishing Lines', 46: 'Gillnets', 47: 'Medium Warships',/);
   assert.match(app, /47: t\('tech\.mediumwarships'\),/);
   // The panel signature reads its research block.
-  assert.match(app, /dock: \[45, 46, 47\],/);
+  assert.match(app, /dock: \[45, 46, 47, 57\],/);
   // The click dispatch maps the button to the tag.
   assert.match(app, /'research-mediumwarships': 47,/);
   // The button itself: Castle gate in the title until Castle,
@@ -73,7 +73,7 @@ test('Medium Warships is wired as Dock research, tag 47', () => {
   // The tech-tree mirror row (INF-06): Dock host, Castle Age,
   // no prerequisite (the upgrade keys off the age, not off
   // Gillnets).
-  assert.equal(TECH_TREE.length, 57); // 48 at W3b; +Careening/Clinker (W5); +Dry Dock/Carvel Hull/Shipwright (W6); +Siege Engineers (TEC-08); +the tower trio (BLD-18 completion)
+  assert.equal(TECH_TREE.length, 58); // 48 at W3b; +Careening/Clinker (W5); +Dry Dock/Carvel Hull/Shipwright (W6); +Siege Engineers (TEC-08); +the tower trio (BLD-18 completion); +Demolition Ship (split)
   assert.deepEqual(TECH_TREE[47], {
     tag: 47, host: 23, age: 2, cost: [0, 150, 100, 0], secs: 50, requires: null,
   });
@@ -83,7 +83,8 @@ test('panel order + letters: the research button takes the X cell', () => {
   assert.deepEqual(PANEL_BUTTONS.dock,
     ['train-fishing-ship', 'research-fishinglines', 'research-gillnets',
       'train-galley', 'train-fire-galley', 'train-demolition-raft', 'train-hulk',
-      'research-mediumwarships', 'train-transport-ship', 'train-trade-cog']); // + Transport (W4), + the Cog (W5)
+      'research-mediumwarships', 'train-transport-ship', 'train-trade-cog',
+      'research-demolitionship']); // + Transport (W4), + the Cog (W5), + Demolition Ship (split)
   assert.deepEqual(PANEL_KEYS.dock['research-mediumwarships'], ['KeyX', 'X']);
   // The W2/W3a letters are untouched.
   assert.deepEqual(PANEL_KEYS.dock['train-galley'], ['KeyA', 'A']);
@@ -134,4 +135,45 @@ test('the five new icons are defined', () => {
     assert.ok(indexHtml.includes(`<symbol id="${icon}"`), `${icon} symbol exists`);
   }
   assert.ok(indexHtml.includes('<symbol id="i-mediumwarships"'), 'i-mediumwarships symbol exists');
+});
+
+test('the split: Demolition Ship is its own Dock research, tag 57', () => {
+  // Water split (2026-11-16, CLS-07): the Demolition line's
+  // own Dock technology, split out of Medium Warships to
+  // match current DE (official update-169123 preview:
+  // standalone upgrade, 150 W / 100 G, Castle Age).
+  // TECH_NAME (default + localized refresh) carries the tag.
+  assert.match(app, /57: 'Demolition Ship',/);
+  assert.match(app, /57: t\('tech\.demolitionship'\),/);
+  // Dispatch: the research command id maps to tag 57
+  // (drafted 53; renumbered at integration 2026-11-17).
+  assert.match(app, /'research-demolitionship': 57,/);
+  // The Dock panel button: appended after the Trade Cog,
+  // 150 wood / 100 gold, Castle gate, its own icon.
+  assert.match(app, /id: 'research-demolitionship', icon: 'i-demolitionship', label: 'Demolition Ship',\s*costIcon: 'i-wood', cost: 150, cost2Icon: 'i-gold', cost2: 100,/);
+  assert.match(app, /costText\(\[\[150, 'wood'\], \[100, 'gold'\]\]\), secs: 50 \}\)/);
+  assert.match(app, /const dsDone = techMaskHas\(techMask, 57\);/);
+  // The button takes the positional grid's N cell (index 10,
+  // after the Cog's V).
+  assert.equal(PANEL_BUTTONS.dock.at(-1), 'research-demolitionship');
+  assert.deepEqual(PANEL_KEYS.dock['research-demolitionship'], ['KeyN', 'N']);
+  // The netplay validator admits tag 57 as a research target.
+  assert.match(netplay, /c\.tech >= 29 && c\.tech <= 57/);
+  assert.equal(validateCommand({ t: 'research_at', b: 3, tech: 57 }), true);
+  // The tech tree mirror carries the row: Dock host (23),
+  // Castle (2), 150 W / 100 G, 50 s, no prerequisite.
+  assert.deepEqual(TECH_TREE[57], { tag: 57, host: 23, age: 2, cost: [0, 150, 100, 0], secs: 50, requires: null });
+  // i18n: the tech name and the tooltip in all three locales;
+  // the tooltip names the N hotkey, and Medium Warships'
+  // tooltip no longer claims the Demolition line.
+  for (const loc of ['en', 'pt-BR', 'es']) {
+    assert.ok(STRINGS[loc]['tech.demolitionship'], `tech.demolitionship missing in ${loc}`);
+    assert.ok(STRINGS[loc]['cmd.demolitionshipTitle'], `cmd.demolitionshipTitle missing in ${loc}`);
+    assert.match(STRINGS[loc]['cmd.demolitionshipTitle'], /N\./);
+    assert.ok(!/Demolition Rafts upgrade to War Galleys, Fire Ships, War Hulks and Demolition Ships/.test(STRINGS[loc]['cmd.mediumwarshipsTitle']),
+      `Medium Warships tooltip still folds the line in (${loc})`);
+  }
+  // The tech icon exists as its own original symbol (not the
+  // unit icon i-demolition-ship).
+  assert.match(indexHtml, /<symbol id="i-demolitionship"/);
 });

@@ -47,7 +47,7 @@ test('the tech tree mirrors the Dock researches (tags 45/46)', () => {
   // TECH_TREE.length grew to 48 with Water W3b's Medium
   // Warships (tag 47, pinned in waterw3bclient.test.mjs), and
   // to 50 with Water W5's University ship pair (tags 48/49).
-  assert.equal(TECH_TREE.length, 57); // 50 at W5; +the Imperial trio (W6); +Siege Engineers (TEC-08); +the tower trio (BLD-18 completion)
+  assert.equal(TECH_TREE.length, 58); // 50 at W5; +the Imperial trio (W6); +Siege Engineers (TEC-08); +the tower trio (BLD-18 completion); +Demolition Ship (split)
   assert.deepEqual(TECH_TREE[45], {
     tag: 45, host: 23, age: 1, cost: [50, 100, 0, 0], secs: 20, requires: null,
   });
@@ -59,14 +59,15 @@ test('the tech tree mirrors the Dock researches (tags 45/46)', () => {
 test('the Dock panel exists: context, train block, research rows', () => {
   assert.match(app, /23: 'dock', 25: 'tower', 26: 'tower' \};/); // 25/26: the Guard Tower / Keep ride the tower context (BLD-18 completion)
   assert.match(app, /const blockFS = bk && context === 'dock' \? sim\.building_train_block\(bk\.id, 23\) : -1;/);
-  assert.match(app, /dock: \[45, 46, 47\],/);
+  assert.match(app, /dock: \[45, 46, 47, 53\],/);
   assert.match(app, /id: 'train-fishing-ship', icon: 'i-fishing-ship', label: 'Fishing Ship',\s*costIcon: 'i-wood', cost: 75,/);
   assert.match(app, /id: 'research-fishinglines', icon: 'i-fishinglines', label: 'Fishing Lines',\s*costIcon: 'i-food', cost: 50, cost2Icon: 'i-wood', cost2: 100,/);
   assert.match(app, /id: 'research-gillnets', icon: 'i-gillnets', label: 'Gillnets',\s*costIcon: 'i-food', cost: 150, cost2Icon: 'i-wood', cost2: 200,/);
   assert.deepEqual(PANEL_BUTTONS.dock,
     ['train-fishing-ship', 'research-fishinglines', 'research-gillnets',
       'train-galley', 'train-fire-galley', 'train-demolition-raft', 'train-hulk',
-      'research-mediumwarships', 'train-transport-ship', 'train-trade-cog']); // + Transport (W4), + the Cog (W5)
+      'research-mediumwarships', 'train-transport-ship', 'train-trade-cog',
+      'research-demolitionship']); // + Transport (W4), + the Cog (W5), + Demolition Ship (split)
 });
 
 test('the Dock is a full production + shelter host client-side', () => {
