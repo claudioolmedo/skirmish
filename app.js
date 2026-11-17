@@ -3837,6 +3837,13 @@ function toggleFullscreen() {
 // keydown handler) instead of exiting fullscreen. Leaving
 // fullscreen is then by holding Esc ~2 s — Chrome shows its
 // own warning for that — or by the fullscreen button.
+// SEL-10 (sk-15 §(e), approved by Claudio 2026-11-16): the
+// SAME lock also takes KeyL, so Ctrl+L / Ctrl+Shift+L (the
+// DE go-to for the Stable) reach the page in fullscreen
+// instead of focusing the browser's address bar. CRITICAL:
+// each lock() call REPLACES the locked set — both keys must
+// stay in this one array; a separate lock(['KeyL']) call
+// would silently unlock Escape.
 // Feature-detected: browsers without navigator.keyboard
 // (Safari/Firefox today) keep the previous behaviour exactly,
 // and a refused lock must never break fullscreen or play.
@@ -3844,7 +3851,7 @@ function lockEscapeKey() {
   try {
     const kb = typeof navigator !== 'undefined' ? navigator.keyboard : null;
     if (kb && typeof kb.lock === 'function') {
-      const p = kb.lock(['Escape']);
+      const p = kb.lock(['Escape', 'KeyL']);
       if (p && p.catch) p.catch(() => {});
     }
   } catch { /* no Keyboard Lock API: current behaviour stands */ }

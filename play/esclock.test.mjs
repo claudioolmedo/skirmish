@@ -16,6 +16,12 @@
 // the previous behaviour stands and nothing may throw.
 // The mouse twin of step 3: clicking the selected unit's
 // portrait in the selection panel deselects it.
+// SEL-10 extension (sk-15 §(e), approved by Claudio
+// 2026-11-16): the same single lock call also takes KeyL, so
+// Ctrl+L / Ctrl+Shift+L (Stable go-to) reach the page in
+// fullscreen. Each lock() call REPLACES the locked set, so
+// the pin below demands the combined array — a separate
+// lock(['KeyL']) would unlock Escape and fail this test.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -35,8 +41,11 @@ function escBlock() {
 
 test('fullscreen entry locks Escape through the Keyboard Lock API, feature-detected', () => {
   assert.ok(
-    appJs.includes("kb.lock(['Escape'])"),
-    'lockEscapeKey must call navigator.keyboard.lock(["Escape"])');
+    appJs.includes("kb.lock(['Escape', 'KeyL'])"),
+    'lockEscapeKey must call navigator.keyboard.lock(["Escape", "KeyL"]) — one call, both keys (SEL-10)');
+  assert.ok(
+    !appJs.includes("kb.lock(['KeyL'])"),
+    'a separate lock(["KeyL"]) call would replace the set and unlock Escape');
   assert.ok(
     appJs.includes("typeof kb.lock === 'function'"),
     'the lock call must be feature-detected so Safari/Firefox keep the old behaviour');
