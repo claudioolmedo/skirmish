@@ -21,7 +21,7 @@ const app = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
 const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 const wasmRs = readFileSync(new URL('../../sim/src/wasm.rs', import.meta.url), 'utf8');
 
-test('the trio rides the generic research path; the validator ceiling is 56', () => {
+test('the trio rides the generic research path; the validator ceiling is 57', () => {
   // No dedicated research exports: the trio rides
   // push_research_at by tag, like every placed-building tech.
   assert.doesNotMatch(wasmRs, /push_research_dry_dock|push_research_carvel|push_research_shipwright/);
@@ -30,11 +30,13 @@ test('the trio rides the generic research path; the validator ceiling is 56', ()
   }
   // TEC-08: tag 53 (Siege Engineers) raised the ceiling. The
   // BLD-18 completion (2026-11-16, renumbered at integration)
-  // appended the tower trio at 54–56, so 56 validates now and
-  // 57 is the first junk tag.
+  // appended the tower trio at 54–56, and the Water split's
+  // Demolition Ship (renumbered 57 at integration) appended
+  // at 57, so 57 validates now and 58 is the first junk tag.
   assert.equal(validateCommand({ t: 'research_at', b: 1, tech: 53 }), true);
   assert.equal(validateCommand({ t: 'research_at', b: 1, tech: 56 }), true);
-  assert.equal(validateCommand({ t: 'research_at', b: 1, tech: 57 }), false);
+  assert.equal(validateCommand({ t: 'research_at', b: 1, tech: 57 }), true);
+  assert.equal(validateCommand({ t: 'research_at', b: 1, tech: 58 }), false);
 });
 
 test('the University gains the Imperial trio after the W5 pair', () => {
@@ -66,7 +68,7 @@ test('the University gains the Imperial trio after the W5 pair', () => {
 });
 
 test('the tech tree mirrors the Imperial trio (tags 50/51/52)', () => {
-  assert.equal(TECH_TREE.length, 57); // + Siege Engineers 53 (TEC-08); +the tower trio 54–56 (BLD-18 completion)
+  assert.equal(TECH_TREE.length, 58); // + Siege Engineers 53 (TEC-08); +the tower trio 54–56 (BLD-18 completion); +Demolition Ship 57 (split)
   assert.deepEqual(TECH_TREE[50], {
     tag: 50, host: 16, age: 3, cost: [200, 0, 400, 0], secs: 60, requires: 48,
   });

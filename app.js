@@ -535,6 +535,7 @@ let TECH_NAME = {
   48: 'Careening', 49: 'Clinker Construction',
   50: 'Dry Dock', 51: 'Carvel Hull', 52: 'Shipwright',
   53: 'Siege Engineers', 54: 'Guard Tower', 55: 'Keep', 56: 'Arrowslits',
+  57: 'Demolition Ship',
 };
 // Research-block explanations, indexed by the sim's ResearchBlock
 // tag (0 ok — unused, 1 funds, 2 queue full, 3 already done,
@@ -597,6 +598,7 @@ function refreshNames() {
     52: t('tech.shipwright'),
     53: t('tech.siegeengineers'), 54: t('tech.guardtower'), 55: t('tech.keep'),
     56: t('tech.arrowslits'),
+    57: t('tech.demolitionship'),
   };
   RESEARCH_BLOCK_TITLES = [
     '', t('block.noResources'), t('block.queueFullTrain'),
@@ -2898,9 +2900,10 @@ function mirrorGateValid(kind, cx, cy) {
 // layer — at least one footprint cell water-side (deep water or
 // shallows) and at least one land-side (land, or a shallows cell
 // orthogonally adjacent to land) — plus the standing checks the
-// square mirror runs (no Town Center reserve, no live node, no
-// tree on a land/shallows cell, no building overlap) and the
-// price. The sim re-validates every order itself.
+// square mirror runs (no Town Center reserve, no live node —
+// fish shoals excepted since 2026-11-16, see the cell loop —
+// no tree on a land/shallows cell, no building overlap) and
+// the price. The sim re-validates every order itself.
 function mirrorDockValid(cx, cy) {
   const kind = 23;
   const size = BUILD_SIZE[kind];
@@ -2928,10 +2931,16 @@ function mirrorDockValid(cx, cy) {
       if (t === 0 || (t === 2 && landNeighbor(x, y))) landSide = true;
       if (tcReserved.has(y * GW + x)) return false;
       // A tree (the static obstacle layer on a non-deep cell)
-      // or a live resource node refuses, as in the sim.
+      // or a live resource node refuses, as in the sim — with
+      // one exception (2026-11-16, Claudio's DE rule): a fish
+      // shoal (node kinds 7/8, shore/deep fish) does NOT block
+      // the Dock. The fish stays in place under the Dock and
+      // the shoal's remaining tiles stay fishable beside it,
+      // as in DE; every other live node still refuses.
       if (t !== 1 && OBST[y * GW + x]) return false;
       for (const n of nodes) {
         if (n.amount <= 0) continue;
+        if (n.kind === 7 || n.kind === 8) continue;
         const nc = worldToCell(n.x, n.y);
         if (nc[0] === x && nc[1] === y) return false;
       }
@@ -14170,6 +14179,7 @@ function runCommandButton(id, times = 1) {
       'research-bowsaw': 43, 'research-twomansaw': 44,
       'research-fishinglines': 45, 'research-gillnets': 46,
       'research-mediumwarships': 47,
+      'research-demolitionship': 57,
       'research-careening': 48, 'research-clinkerconstruction': 49,
       'research-drydock': 50, 'research-carvelhull': 51, 'research-shipwright': 52,
       'research-siegeengineers': 53,
@@ -14342,7 +14352,7 @@ function renderCommands() {
     university: [20, 21, 22, 23, 24, 48, 49, 50, 51, 52, 53, 54, 55, 56], castle: [29],
     lumbercamp: [10, 43, 44], miningcamp: [11, 12], mill: [13], market: [19, 25, 26],
     university: [20, 21, 22, 23, 24, 48, 49, 50, 51, 52, 53, 54, 55, 56], monastery: [32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42],
-    dock: [45, 46, 47],
+    dock: [45, 46, 47, 57],
   };
   const rbB = bk && RB_TAGS[context]
     ? Object.fromEntries(RB_TAGS[context].map((t) => [t, sim.research_block_at(bk.id, t)]))
@@ -14966,6 +14976,7 @@ function renderCommands() {
     const flDone = techMaskHas(techMask, 45);
     const gnDone = techMaskHas(techMask, 46);
     const mwDone = techMaskHas(techMask, 47);
+    const dsDone = techMaskHas(techMask, 57);
     cmdGrid.append(
       cmdButton({
         id: 'train-fishing-ship', icon: 'i-fishing-ship', label: 'Fishing Ship',
@@ -15054,13 +15065,15 @@ function renderCommands() {
             : t('cmd.trainTitleTime', { name: KIND_NAME[27], cost: costText([[75, 'wood'], [35, 'gold']]), secs: 42 }) + (TRAIN_BLOCK_TITLES[blockHu] ? ' ' + TRAIN_BLOCK_TITLES[blockHu] : ''),
       }),
       // Water W3b (CLS-07): Medium Warships — the Castle Age
-      // line upgrade. Standing Galleys / Fire Galleys / Hulks /
-      // Demolition Rafts convert in the sim on completion and
-      // later production spawns at the Castle tier, so the four
-      // train buttons above keep their Feudal faces (the
-      // Man-at-Arms pattern: the queue entry keeps the base
-      // kind). The button follows the fishing pair's research
-      // law: hard blocks grey, funds stays clickable.
+      // line upgrade. Standing Galleys / Fire Galleys / Hulks
+      // convert in the sim on completion and later production
+      // spawns at the Castle tier, so the train buttons above
+      // keep their Feudal faces (the Man-at-Arms pattern: the
+      // queue entry keeps the base kind). The button follows
+      // the fishing pair's research law: hard blocks grey,
+      // funds stays clickable. (The Demolition line converts
+      // under its OWN research — the button at the grid's end,
+      // per current DE; the 2026-11-16 split.)
       cmdButton({
         id: 'research-mediumwarships', icon: 'i-mediumwarships', label: 'Medium Warships',
         costIcon: 'i-wood', cost: 150, cost2Icon: 'i-gold', cost2: 100,
@@ -15106,6 +15119,32 @@ function renderCommands() {
           : age < 1
             ? t('cmd.buildGate', { name: KIND_NAME[33], gate: t('gate.feudal') })
             : t('cmd.trainTitleTime', { name: KIND_NAME[33], cost: costText([[100, 'wood'], [50, 'gold']]), secs: 36 }) + (TRAIN_BLOCK_TITLES[blockTCog] ? ' ' + TRAIN_BLOCK_TITLES[blockTCog] : ''),
+      }),
+      // Water split (2026-11-16, CLS-07): Demolition Ship —
+      // the Demolition line's OWN Dock research (current DE,
+      // update 169123: a standalone upgrade, 150 wood /
+      // 100 gold, Castle Age, 50 s), split out of Medium
+      // Warships, which no longer touches the line. Standing
+      // Demolition Rafts convert in the sim on completion and
+      // later production spawns Demolition Ships, so the
+      // Raft's train button keeps its Feudal face (the same
+      // CLS-03 pattern). The button appends at the grid's end
+      // (index 10, KeyN — the positional grid's fourth row
+      // continues past the Trade Cog's V), with the
+      // research-block law of every Dock research: hard blocks
+      // grey, funds stays clickable.
+      cmdButton({
+        id: 'research-demolitionship', icon: 'i-demolitionship', label: 'Demolition Ship',
+        costIcon: 'i-wood', cost: 150, cost2Icon: 'i-gold', cost2: 100,
+        disabled: underConstruction || dsDone || rbB[57] === 2 || rbB[57] === 3 || rbB[57] === 4,
+        key: badgeForButton({ context, id: 'research-demolitionship', index: 10 }),
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: TECH_NAME[57], building: BUILD_NAME[23] })
+          : dsDone
+            ? t('cmd.researchDone', { name: TECH_NAME[57] })
+            : age < 2
+              ? t('cmd.buildGate', { name: TECH_NAME[57], gate: t('gate.castle') })
+              : t('cmd.demolitionshipTitle', { name: TECH_NAME[57], cost: costText([[150, 'wood'], [100, 'gold']]), secs: 50 }) + (RESEARCH_BLOCK_TITLES[rbB[57]] ? ' ' + RESEARCH_BLOCK_TITLES[rbB[57]] : ''),
       }),
     );
     // Water W2b (ECO-15): the trap-reseed desk — the Mill

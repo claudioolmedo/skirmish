@@ -76,7 +76,7 @@ test('the full Dock panel fits the grown grid with unique cells', () => {
   const ids = ['train-fishing-ship', 'research-fishinglines', 'research-gillnets',
     'train-galley', 'train-fire-galley', 'train-demolition-raft', 'train-hulk',
     'research-mediumwarships', 'train-transport-ship', 'train-trade-cog',
-    'reseed-queue', 'reseed-auto', 'ungarrison', 'delete-building'];
+    'research-demolitionship', 'reseed-queue', 'reseed-auto', 'ungarrison', 'delete-building'];
   const definite = new Map();
   for (const id of ids) {
     const letter = panelCellFor({ context: 'dock', id });

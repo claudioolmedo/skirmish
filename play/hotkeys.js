@@ -217,7 +217,12 @@ export const PANEL_BUTTONS = {
     // Water W5 (TRD-05): the Trade Cog appends after the
     // Transport Ship — the merged Dock order (W4's Transport
     // took the slot after Medium Warships first).
-    'train-trade-cog'],
+    'train-trade-cog',
+    // Water split (2026-11-16, CLS-07): the Demolition Ship
+    // research appends at the grid's end — the Demolition
+    // line's own Dock technology, split out of Medium
+    // Warships to match current DE.
+    'research-demolitionship'],
 };
 
 // The slot letter of every button on every building panel
@@ -447,6 +452,10 @@ export const PANEL_KEYS = {
     // first cell (V) — the cell W5's own tree gave it at the
     // merge, since W4's Transport Ship holds KeyC.
     'train-trade-cog': ['KeyV', 'V'],
+    // Water split (2026-11-16, CLS-07): the Demolition Ship
+    // research takes the fourth row's second cell (N) — the
+    // positional grid continues past the Cog's V.
+    'research-demolitionship': ['KeyN', 'N'],
   },
 };
 export const POSITION_CODES = ['KeyQ', 'KeyW', 'KeyE'];
