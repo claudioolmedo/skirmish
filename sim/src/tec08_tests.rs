@@ -116,8 +116,9 @@ fn siege_engineers_row_is_the_documented_one() {
     assert_eq!(t.tag(), 53);
     assert_eq!(TechId::from_tag(53), Some(t));
     // 54 on this package's landing tree; BLD-18's tower trio
-    // appended three more at integration (2026-11-17).
-    assert_eq!(TechId::ALL.len(), 57);
+    // appended three more at integration (2026-11-17), and
+    // the Water split's Demolition Ship one more (57).
+    assert_eq!(TechId::ALL.len(), 58);
     assert_eq!(t.host(), TechHost::Building(BuildingKind::University));
     assert_eq!(t.age_required(), Age::Imperial);
     assert_eq!(t.cost(), (500, 600, 0, 0));

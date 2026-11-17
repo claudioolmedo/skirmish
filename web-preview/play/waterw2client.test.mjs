@@ -59,7 +59,7 @@ test('the tech tree mirrors the Dock researches (tags 45/46)', () => {
 test('the Dock panel exists: context, train block, research rows', () => {
   assert.match(app, /23: 'dock', 25: 'tower', 26: 'tower' \};/); // 25/26: the Guard Tower / Keep ride the tower context (BLD-18 completion)
   assert.match(app, /const blockFS = bk && context === 'dock' \? sim\.building_train_block\(bk\.id, 23\) : -1;/);
-  assert.match(app, /dock: \[45, 46, 47, 53\],/);
+  assert.match(app, /dock: \[45, 46, 47, 57\],/);
   assert.match(app, /id: 'train-fishing-ship', icon: 'i-fishing-ship', label: 'Fishing Ship',\s*costIcon: 'i-wood', cost: 75,/);
   assert.match(app, /id: 'research-fishinglines', icon: 'i-fishinglines', label: 'Fishing Lines',\s*costIcon: 'i-food', cost: 50, cost2Icon: 'i-wood', cost2: 100,/);
   assert.match(app, /id: 'research-gillnets', icon: 'i-gillnets', label: 'Gillnets',\s*costIcon: 'i-food', cost: 150, cost2Icon: 'i-wood', cost2: 200,/);
