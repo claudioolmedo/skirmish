@@ -21,22 +21,25 @@ const app = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
 const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 const wasmRs = readFileSync(new URL('../../sim/src/wasm.rs', import.meta.url), 'utf8');
 
-test('the trio rides the generic research path; the validator ceiling is 53', () => {
+test('the trio rides the generic research path; the validator ceiling is 56', () => {
   // No dedicated research exports: the trio rides
   // push_research_at by tag, like every placed-building tech.
   assert.doesNotMatch(wasmRs, /push_research_dry_dock|push_research_carvel|push_research_shipwright/);
   for (const tech of [50, 51, 52]) {
     assert.equal(validateCommand({ t: 'research_at', b: 1, tech }), true, `tech ${tech}`);
   }
-  // TEC-08: tag 53 (Siege Engineers) raised the ceiling; 54 is
-  // the first invalid tag now.
+  // TEC-08: tag 53 (Siege Engineers) raised the ceiling. The
+  // BLD-18 completion (2026-11-16, renumbered at integration)
+  // appended the tower trio at 54–56, so 56 validates now and
+  // 57 is the first junk tag.
   assert.equal(validateCommand({ t: 'research_at', b: 1, tech: 53 }), true);
-  assert.equal(validateCommand({ t: 'research_at', b: 1, tech: 54 }), false);
+  assert.equal(validateCommand({ t: 'research_at', b: 1, tech: 56 }), true);
+  assert.equal(validateCommand({ t: 'research_at', b: 1, tech: 57 }), false);
 });
 
 test('the University gains the Imperial trio after the W5 pair', () => {
   // RB_TAGS reads all three tags' blocks on the University panel.
-  assert.equal((app.match(/university: \[20, 21, 22, 23, 24, 48, 49, 50, 51, 52, 53\]/g) || []).length, 2);
+  assert.equal((app.match(/university: \[20, 21, 22, 23, 24, 48, 49, 50, 51, 52, 53, 54, 55, 56\]/g) || []).length, 2); // +Siege Engineers (TEC-08); +the tower trio (BLD-18 completion)
   assert.match(app, /techBtn\('research-drydock', 50, 'i-drydock', 'cmd\.drydockTitle',\s*\[\[200, 'food'\], \[400, 'gold'\]\], 60, 7\)/);
   assert.match(app, /techBtn\('research-carvelhull', 51, 'i-carvelhull', 'cmd\.carvelhullTitle',\s*\[\[350, 'food'\], \[200, 'wood'\]\], 60, 8\)/);
   assert.match(app, /techBtn\('research-shipwright', 52, 'i-shipwright', 'cmd\.shipwrightTitle',\s*\[\[1000, 'food'\], \[300, 'gold'\]\], 60, 9\)/);
@@ -49,7 +52,11 @@ test('the University gains the Imperial trio after the W5 pair', () => {
   assert.deepEqual(PANEL_BUTTONS.university.slice(7),
     ['research-drydock', 'research-carvelhull', 'research-shipwright',
      // TEC-08: Siege Engineers appends after the trio.
-     'research-siegeengineers']);
+     'research-siegeengineers',
+     // BLD-18 completion appends Guard Tower after it, lettered
+     // M (the grid's last cell); Keep / Arrowslits render
+     // unlettered past the grid and are not in this table.
+     'research-guardtower']);
   assert.deepEqual(PANEL_KEYS.university['research-drydock'], ['KeyX', 'X']);
   assert.deepEqual(PANEL_KEYS.university['research-carvelhull'], ['KeyC', 'C']);
   assert.deepEqual(PANEL_KEYS.university['research-shipwright'], ['KeyV', 'V']);
@@ -59,7 +66,7 @@ test('the University gains the Imperial trio after the W5 pair', () => {
 });
 
 test('the tech tree mirrors the Imperial trio (tags 50/51/52)', () => {
-  assert.equal(TECH_TREE.length, 54); // + Siege Engineers 53 (TEC-08)
+  assert.equal(TECH_TREE.length, 57); // + Siege Engineers 53 (TEC-08); +the tower trio 54–56 (BLD-18 completion)
   assert.deepEqual(TECH_TREE[50], {
     tag: 50, host: 16, age: 3, cost: [200, 0, 400, 0], secs: 60, requires: 48,
   });

@@ -85,6 +85,9 @@ export const TECH_TREE = [
   { tag: 51, host: 16, age: 3, cost: [350, 200, 0, 0], secs: 60, requires: 49 }, // Carvel Hull (Water W6; same sourcing)
   { tag: 52, host: 16, age: 3, cost: [1000, 0, 300, 0], secs: 60, requires: null }, // Shipwright (Water W6; same sourcing)
   { tag: 53, host: 16, age: 3, cost: [500, 600, 0, 0], secs: 45, requires: null }, // Siege Engineers (TEC-08; cost/time VERIFIED, wiki Technology table + article, fetched 2026-11-16)
+  { tag: 54, host: 16, age: 2, cost: [100, 250, 0, 0], secs: 30, requires: null }, // Guard Tower (BLD-18 completion, 2026-11-16; wiki Technology table via sk-08)
+  { tag: 55, host: 16, age: 3, cost: [500, 350, 0, 0], secs: 75, requires: 54 }, // Keep (BLD-18 completion; chains from Guard Tower)
+  { tag: 56, host: 16, age: 3, cost: [250, 250, 0, 0], secs: 25, requires: null }, // Arrowslits (BLD-18 completion)
 ];
 
 /** The age-advancement tags and the age each one reaches. */

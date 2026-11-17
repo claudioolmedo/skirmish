@@ -560,6 +560,20 @@ export class WasmSim {
      */
     push_build_fish_trap_queued(entity: number, x: number, y: number): boolean;
     /**
+     * BLD-18 completion (2026-11-16): the Guard Tower kind's
+     * direct form. Towers are normally ordered as Watch Towers
+     * and born at the owner's researched tier (the placement
+     * conversion in `Sim::place_building`); the direct form
+     * exists so the kind set's ABI stays complete, on the
+     * Watch Tower's terms.
+     */
+    push_build_guard_tower(entity: number, x: number, y: number): boolean;
+    /**
+     * Queue a Guard Tower build (BLD-18 completion) — see
+     * `push_build_guard_tower`.
+     */
+    push_build_guard_tower_queued(entity: number, x: number, y: number): boolean;
+    /**
      * Order a villager to build a House with its 2×2-cell footprint
      * anchored at the cell containing the world point `(x, y)`. The
      * 25-wood cost is deducted at placement (next tick). Returns
@@ -574,6 +588,16 @@ export class WasmSim {
      * see `Sim::can_queue`.
      */
     push_build_house_queued(entity: number, x: number, y: number): boolean;
+    /**
+     * BLD-18 completion (2026-11-16): the Keep kind's direct
+     * form, on the Guard Tower's terms.
+     */
+    push_build_keep(entity: number, x: number, y: number): boolean;
+    /**
+     * Queue a Keep build (BLD-18 completion) — see
+     * `push_build_keep`.
+     */
+    push_build_keep_queued(entity: number, x: number, y: number): boolean;
     /**
      * Order a villager to build a Lumber Camp (100 wood, 2×2 —
      * M6; the wood drop-off) — see `push_build_house`.
@@ -1647,8 +1671,12 @@ export interface InitOutput {
     readonly wasmsim_push_build_farm_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_fish_trap: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_fish_trap_queued: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_guard_tower: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_guard_tower_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_house: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_house_queued: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_keep: (a: number, b: number, c: number, d: number) => number;
+    readonly wasmsim_push_build_keep_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_lumber_camp: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_lumber_camp_queued: (a: number, b: number, c: number, d: number) => number;
     readonly wasmsim_push_build_market: (a: number, b: number, c: number, d: number) => number;

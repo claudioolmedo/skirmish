@@ -85,8 +85,12 @@ export const wasmsim_push_build_farm: (a: number, b: number, c: number, d: numbe
 export const wasmsim_push_build_farm_queued: (a: number, b: number, c: number, d: number) => number;
 export const wasmsim_push_build_fish_trap: (a: number, b: number, c: number, d: number) => number;
 export const wasmsim_push_build_fish_trap_queued: (a: number, b: number, c: number, d: number) => number;
+export const wasmsim_push_build_guard_tower: (a: number, b: number, c: number, d: number) => number;
+export const wasmsim_push_build_guard_tower_queued: (a: number, b: number, c: number, d: number) => number;
 export const wasmsim_push_build_house: (a: number, b: number, c: number, d: number) => number;
 export const wasmsim_push_build_house_queued: (a: number, b: number, c: number, d: number) => number;
+export const wasmsim_push_build_keep: (a: number, b: number, c: number, d: number) => number;
+export const wasmsim_push_build_keep_queued: (a: number, b: number, c: number, d: number) => number;
 export const wasmsim_push_build_lumber_camp: (a: number, b: number, c: number, d: number) => number;
 export const wasmsim_push_build_lumber_camp_queued: (a: number, b: number, c: number, d: number) => number;
 export const wasmsim_push_build_market: (a: number, b: number, c: number, d: number) => number;

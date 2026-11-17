@@ -65,10 +65,10 @@ test('both prematch surfaces offer the three modes', () => {
 });
 
 test('the Monument has client tables at tag 21 and a draw routine', () => {
-  assert.ok(appJs.includes("'monastery', 'monument', 'wonder', 'dock', 'fishtrap']"), 'BUILD_I18N names tag 21 (the Wonder follows at 22, VIC-02; the Dock appends at 23, Water W1; the Fish Trap at 24, Water W2b)');
-  assert.ok(appJs.includes("'Monastery', 'Monument', 'Wonder', 'Dock', 'Fish Trap']"), 'BUILD_NAME names tag 21');
-  assert.ok(appJs.includes("'i-monastery', 'i-monument', 'i-wonder', 'i-dock', 'i-fish-trap']"), 'BUILD_ICON has the monument symbol');
-  assert.ok(appJs.includes("'monastery.png', 'monument.png', 'wonder.png', 'dock.png', 'fish-trap.png']"), 'BUILD_PNG has the monument portrait');
+  assert.ok(appJs.includes("'monastery', 'monument', 'wonder', 'dock', 'fishtrap', 'guardtower', 'keep']"), 'BUILD_I18N names tag 21 (the Wonder follows at 22, VIC-02; the Dock appends at 23, Water W1; the Fish Trap at 24, Water W2b; the Guard Tower / Keep at 25/26, BLD-18 completion)');
+  assert.ok(appJs.includes("'Monastery', 'Monument', 'Wonder', 'Dock', 'Fish Trap', 'Guard Tower', 'Keep']"), 'BUILD_NAME names tag 21');
+  assert.ok(appJs.includes("'i-monastery', 'i-monument', 'i-wonder', 'i-dock', 'i-fish-trap', 'i-watchtower', 'i-watchtower']"), 'BUILD_ICON has the monument symbol');
+  assert.ok(appJs.includes("'monastery.png', 'monument.png', 'wonder.png', 'dock.png', 'fish-trap.png', 'watchtower.png', 'watchtower.png']"), 'BUILD_PNG has the monument portrait');
   assert.ok(appJs.includes('} else if (b.kind === 21) {\n    drawMonument(b);'),
     'drawBuilding routes kind 21 to drawMonument');
   assert.ok(fnBody('function drawMonument(').includes('b.owner === foeOwner() ? ENEMY_CLOTH'),

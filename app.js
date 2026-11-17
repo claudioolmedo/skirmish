@@ -104,6 +104,9 @@ import { pennantsForSelection, pennantShape } from './play/pennants.js';
 import { occlusionFor, intersectionRect } from './play/occlusion.js';
 import { wallLineCells, wallPiece } from './play/walls.js';
 import {
+  dir16FromVector, turnedDir16, faceForDir16, sheetRowForDir16,
+} from './play/facing.js';
+import {
   t, getLocale, setLocale, costText, genderOf,
 } from './play/i18n.js';
 
@@ -419,23 +422,23 @@ function pngIcon(png, cls) {
 // 715-food node, worked by one own Fishing Ship).
 // Costs and footprints mirror the sim (MECHANICS-STUDY §5; the
 // palisade row is the current DE wiki row — 3 wood per segment).
-const BUILD_COST = [25, 60, 175, 100, 100, 100, 175, 175, 150, 3, 35, 25, 175, 275, 0, 0, 200, 200, 20, 0, 175, 0, 1000, 150, 100];
+const BUILD_COST = [25, 60, 175, 100, 100, 100, 175, 175, 150, 3, 35, 25, 175, 275, 0, 0, 200, 200, 20, 0, 175, 0, 1000, 150, 100, 35, 35];
 // Stone paid at placement, by kind tag (BLD-18's two defensive
 // structures, the Town Center, the Stone Wall and the Castle
 // cost stone; every other entry 0).
-const BUILD_COST_STONE = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 125, 5, 0, 100, 5, 650, 0, 0, 0, 30, 0, 0, 1000, 0, 0];
+const BUILD_COST_STONE = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 125, 5, 0, 100, 5, 650, 0, 0, 0, 30, 0, 0, 1000, 0, 0, 125, 125];
 // Gold paid at placement, by kind tag (VIC-02: the Wonder is
 // the first gold-cost kind; every other entry 0).
-const BUILD_COST_GOLD = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1000, 0, 0];
+const BUILD_COST_GOLD = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1000, 0, 0, 0, 0];
 const BUILD_I18N = ['house', 'farm', 'barracks', 'lumber', 'mill',
   'mining', 'range', 'stable', 'blacksmith', 'palisade', 'watchtower',
-  'outpost', 'market', 'towncenter', 'stonewall', 'castle', 'university', 'siegeworkshop', 'palisadegate', 'stonegate', 'monastery', 'monument', 'wonder', 'dock', 'fishtrap'];
+  'outpost', 'market', 'towncenter', 'stonewall', 'castle', 'university', 'siegeworkshop', 'palisadegate', 'stonegate', 'monastery', 'monument', 'wonder', 'dock', 'fishtrap', 'guardtower', 'keep'];
 let BUILD_NAME = ['House', 'Farm', 'Barracks', 'Lumber Camp', 'Mill',
   'Mining Camp', 'Archery Range', 'Stable', 'Blacksmith', 'Palisade Wall',
-  'Watch Tower', 'Outpost', 'Market', 'Town Center', 'Stone Wall', 'Castle', 'University', 'Siege Workshop', 'Palisade Gate', 'Stone Gate', 'Monastery', 'Monument', 'Wonder', 'Dock', 'Fish Trap'];
+  'Watch Tower', 'Outpost', 'Market', 'Town Center', 'Stone Wall', 'Castle', 'University', 'Siege Workshop', 'Palisade Gate', 'Stone Gate', 'Monastery', 'Monument', 'Wonder', 'Dock', 'Fish Trap', 'Guard Tower', 'Keep'];
 // Farm footprint is 3 (DE-documented; Claudio's decision
 // 2026-10-22, superseding the earlier 2x2 specification).
-const BUILD_SIZE = [2, 3, 3, 2, 2, 2, 3, 3, 3, 1, 1, 1, 4, 4, 1, 4, 4, 4, 1, 1, 3, 4, 5, 3, 1];
+const BUILD_SIZE = [2, 3, 3, 2, 2, 2, 3, 3, 3, 1, 1, 1, 4, 4, 1, 4, 4, 4, 1, 1, 3, 4, 5, 3, 1, 1, 1];
 // The wall kinds (BLD-13 palisade, BLD-20 stone): 1×1 segments
 // placed by dragged lines, not single footprints.
 function isWallKind(kind) { return kind === 9 || kind === 14; }
@@ -448,14 +451,14 @@ const GATE_OF_WALL = { 9: 18, 14: 19 };
 const WALL_OF_GATE = { 18: 9, 19: 14 };
 const BUILD_ICON = ['i-house', 'i-farm', 'i-tc', 'i-lumber', 'i-mill',
   'i-mining', 'i-range', 'i-stable', 'i-blacksmith', 'i-palisade',
-  'i-watchtower', 'i-outpost', 'i-market', 'i-tc', 'i-stonewall', 'i-castle', 'i-university', 'i-siegeworkshop', 'i-palisade', 'i-stonewall', 'i-monastery', 'i-monument', 'i-wonder', 'i-dock', 'i-fish-trap'];
+  'i-watchtower', 'i-outpost', 'i-market', 'i-tc', 'i-stonewall', 'i-castle', 'i-university', 'i-siegeworkshop', 'i-palisade', 'i-stonewall', 'i-monastery', 'i-monument', 'i-wonder', 'i-dock', 'i-fish-trap', 'i-watchtower', 'i-watchtower'];
 // The PNG set above, per building kind tag (same order as
 // BUILD_ICON): command buttons and building portraits.
 const BUILD_PNG = ['house.png', 'farm.png', 'barracks.png', 'lumber-camp.png',
   'mill.png', 'mining-camp.png', 'archery-range.png', 'stable.png',
   'blacksmith.png', 'palisade-wall.png', 'watchtower.png', 'outpost.png',
   'market.png', 'town-center.png', 'stone-wall.png', 'castle.png', 'university.png',
-  'siege-workshop.png', 'palisade-wall.png', 'stone-wall.png', 'monastery.png', 'monument.png', 'wonder.png', 'dock.png', 'fish-trap.png'];
+  'siege-workshop.png', 'palisade-wall.png', 'stone-wall.png', 'monastery.png', 'monument.png', 'wonder.png', 'dock.png', 'fish-trap.png', 'watchtower.png', 'watchtower.png'];
 // Building max HP by kind tag (the sim's building table, study
 // §5) — for the enemy-building info panel (M5). The palisade
 // entry is its Dark-Age value (150; 250 from Feudal, BLD-13 —
@@ -466,8 +469,9 @@ const BUILD_PNG = ['house.png', 'farm.png', 'barracks.png', 'lumber-camp.png',
 // column (2700 from Castle). The last entry completes the table
 // (client batch, 2026-11-16): the Fish Trap (kind 24) was
 // missing, so its panel HP read NaN — the sim's FISH_TRAP_HP
-// (480, the Farm row it adopts) is the value.
-const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200, 150, 850, 500, 1800, 2400, 1080, 4800, 2100, 1800, 240, 1650, 2100, 4800, 4800, 1800, 480];
+// (480, the Farm row it adopts) is the value. Kinds 25/26
+// (BLD-18 completion): Guard Tower 1500, Keep 2250.
+const BUILD_MAXHP = [550, 480, 1200, 550, 550, 550, 1500, 1500, 1200, 150, 850, 500, 1800, 2400, 1080, 4800, 2100, 1800, 240, 1650, 2100, 4800, 4800, 1800, 480, 1500, 2250];
 // the Watch Tower's 850 is its pre-Castle value (BLD-18).
 // WASM build commands by kind tag (M6 completes the set; BLD-13
 // adds the palisade's single-segment form — dragged lines go
@@ -490,6 +494,13 @@ PUSH_BUILD_QUEUED[23] = 'push_build_dock_queued';
 // Water W2b (ECO-15): tag 24 is the Fish Trap.
 PUSH_BUILD[24] = 'push_build_fish_trap';
 PUSH_BUILD_QUEUED[24] = 'push_build_fish_trap_queued';
+// BLD-18 completion (2026-11-16): tags 25/26 are the Guard
+// Tower and the Keep — the upgrade kinds standing Watch
+// Towers convert into (and are born as, once researched).
+PUSH_BUILD[25] = 'push_build_guard_tower';
+PUSH_BUILD_QUEUED[25] = 'push_build_guard_tower_queued';
+PUSH_BUILD[26] = 'push_build_keep';
+PUSH_BUILD_QUEUED[26] = 'push_build_keep_queued';
 // Own-building minimap colors by kind tag (M6); kinds without an
 // entry keep the minimap's parchment default, the enemy's
 // buildings are always ENEMY_COLOR.
@@ -498,6 +509,7 @@ const BUILDING_MINIMAP_COLOR = {
   9: '#7a5a34', 10: '#7a7a72', 11: '#a8843f', 12: '#b03a2e',
   13: '#d8cf9f', 14: '#8d8578', 15: '#a9a294', 16: '#7d7466', 17: '#6e5a41',
   18: '#7a5a34', 19: '#8d8578', 20: '#b3a284', 22: '#d4af37', 23: '#4a7a96',
+  25: '#7a7a72', 26: '#7a7a72',
 };
 
 // Ages and technologies (M6). Age tags match the sim's Age::tag;
@@ -522,7 +534,7 @@ let TECH_NAME = {
   45: 'Fishing Lines', 46: 'Gillnets', 47: 'Medium Warships',
   48: 'Careening', 49: 'Clinker Construction',
   50: 'Dry Dock', 51: 'Carvel Hull', 52: 'Shipwright',
-  53: 'Siege Engineers',
+  53: 'Siege Engineers', 54: 'Guard Tower', 55: 'Keep', 56: 'Arrowslits',
 };
 // Research-block explanations, indexed by the sim's ResearchBlock
 // tag (0 ok — unused, 1 funds, 2 queue full, 3 already done,
@@ -583,7 +595,8 @@ function refreshNames() {
     48: t('tech.careening'), 49: t('tech.clinkerconstruction'),
     50: t('tech.drydock'), 51: t('tech.carvelhull'),
     52: t('tech.shipwright'),
-    53: t('tech.siegeengineers'),
+    53: t('tech.siegeengineers'), 54: t('tech.guardtower'), 55: t('tech.keep'),
+    56: t('tech.arrowslits'),
   };
   RESEARCH_BLOCK_TITLES = [
     '', t('block.noResources'), t('block.queueFullTrain'),
@@ -1573,7 +1586,7 @@ function updateEventFeed() {
   const lines = diffFeedEvents(prev, snap, {
     buildingName: (k) => BUILD_NAME[k],
     unitName: (k) => KIND_NAME[k],
-    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15, lightcavalry: 16, husbandry: 17, caravan: 19, coinage: 25, banking: 26, townwatch: 27, townpatrol: 28, conscription: 29, heavyplow: 30, croprotation: 31, sanctity: 32, fervor: 33, herbalmedicine: 34, atonement: 35, devotion: 36, redemption: 37, heresy: 38, blockprinting: 39, illumination: 40, theocracy: 41, faith: 42, bowsaw: 43, twomansaw: 44, fishinglines: 45, gillnets: 46, mediumwarships: 47, careening: 48, clinkerconstruction: 49, drydock: 50, carvelhull: 51, shipwright: 52, siegeengineers: 53 }[key]],
+    techName: (key) => TECH_NAME[{ loom: 0, feudal: 1, fletching: 2, scalemail: 3, padded: 4, maa: 5, wheelbarrow: 6, forging: 7, barding: 8, bloodlines: 9, doublebit: 10, goldmining: 11, stonemining: 12, horsecollar: 13, handcart: 15, lightcavalry: 16, husbandry: 17, caravan: 19, coinage: 25, banking: 26, townwatch: 27, townpatrol: 28, conscription: 29, heavyplow: 30, croprotation: 31, sanctity: 32, fervor: 33, herbalmedicine: 34, atonement: 35, devotion: 36, redemption: 37, heresy: 38, blockprinting: 39, illumination: 40, theocracy: 41, faith: 42, bowsaw: 43, twomansaw: 44, fishinglines: 45, gillnets: 46, mediumwarships: 47, careening: 48, clinkerconstruction: 49, drydock: 50, carvelhull: 51, shipwright: 52, siegeengineers: 53, guardtower: 54, keep: 55, arrowslits: 56 }[key]],
   }, feedFmt());
   feedPrev = snap;
   for (const text of lines) pushFeedLine(text);
@@ -1840,6 +1853,11 @@ const BUILDING_ART_KEY = {
   14: 'stonewall',
   15: 'castle',
   23: 'dock', // Water W1 (BLD-14)
+  // BLD-18 completion (2026-11-16): the Guard Tower / Keep
+  // kinds draw the line's Watch Tower art until a per-tier
+  // art front gives them their own (sk-08 §e).
+  25: 'watchtower',
+  26: 'watchtower',
 };
 // The settle cap: the loading gate waits for the art, but a hung
 // image (stalled connection) must never block a match longer
@@ -2000,7 +2018,7 @@ function whenUnitArtSettled() {
 
 // --- Directional sprite sheets (ours — sprite pipeline, §10) --------
 // The directional milestone: sheets rendered from the procedural
-// models in tools/sprite-pipeline/models/ — rows = 8 facing
+// models in tools/sprite-pipeline/models/ — rows = 16 facing
 // directions (row 0 faces +X world, increasing toward +Y, the same
 // quantization updateVilAnim uses), columns = frames, cell/anchor
 // per unit below, drawn at the pipeline's 1.35 readability scale.
@@ -2133,7 +2151,7 @@ function drawDirUnit(unit, act, sx, sy) {
   const C = spec.cell;
   const rows = Math.max(1, Math.round((im.naturalHeight || im.height) / C));
   const frames = Math.max(1, Math.round((im.naturalWidth || im.width) / C));
-  const d = ((Math.floor((act.dir * rows) / 8) % rows) + rows) % rows;
+  const d = sheetRowForDir16(act.dir, rows);
   const f = ((dirSheetFrame(act, frames) % frames) + frames) % frames;
   const k = (camS * 1.35) / 46;
   ctx.drawImage(im, f * C, d * C, C, C,
@@ -2223,8 +2241,9 @@ const prevPos = new Map();
 function updateVilAnim(i, wx, wy, now) {
   let a = vilAnim.get(i);
   if (!a) {
-    // Default facing: +Y (screen down-left) — row dirs/4 at any tier.
-    a = { dir: VIL_ORIGINAL.dirs / 4, phase: 0, still: 0 };
+    // Default facing (MOV-09 model, play/facing.js): dir16 4 =
+    // +Y (screen down-left) — sheet row dirs/4 at any tier.
+    a = { dir: VIL_ORIGINAL.dirs / 4, dir16: 4, phase: 0, still: 0 };
     vilAnim.set(i, a);
   }
   const p = prevPos.get(i);
@@ -2239,10 +2258,11 @@ function updateVilAnim(i, wx, wy, now) {
       a.still = 0;
       a.phase += dist / 1.5; // ~1.5 world units travelled per walk cycle
       if (dist > 0.02) {
-        // Quantize the facing to the loaded tier's direction rows.
-        const dirs = VIL_ORIGINAL.dirs;
-        const d = Math.round(Math.atan2(dy, dx) / ((Math.PI * 2) / dirs));
-        a.dir = ((d % dirs) + dirs) % dirs;
+        // MOV-09: the facing model is 16-way at every quality
+        // tier; the loaded sheet's row for the facing is derived
+        // at the end of this update (sheet rows are storage —
+        // SPRITE-PIPELINE §10.5 — not the facing model).
+        a.dir16 = turnedDir16(a.dir16 ?? 4, dx, dy);
       }
     } else if (++a.still > 3) {
       a.phase = 0;
@@ -2265,9 +2285,14 @@ function updateVilAnim(i, wx, wy, now) {
   // read as "standing by the tree".
   const gTarget = state === 'gather' ? atNodeTarget.get(i) : null;
   if (gTarget) {
-    const dirs = VIL_ORIGINAL.dirs;
-    const d = Math.round(Math.atan2(gTarget.y - wy, gTarget.x - wx) / ((Math.PI * 2) / dirs));
-    a.dir = ((d % dirs) + dirs) % dirs;
+    a.dir16 = turnedDir16(a.dir16 ?? 4, gTarget.x - wx, gTarget.y - wy);
+  }
+  // MOV-09: melee engagement turns the unit toward its target —
+  // a villager fighting a boar or an enemy strikes in the facing
+  // it turned to, like the footmen (unitActionFor's turn).
+  if (state === 'attack') {
+    const tgt = foeTargetFor(i, wx, wy);
+    if (tgt) a.dir16 = turnedDir16(a.dir16 ?? 4, tgt.x - wx, tgt.y - wy);
   }
   let frame;
   if (state === 'walk' || state === 'carry') {
@@ -2335,6 +2360,12 @@ function updateVilAnim(i, wx, wy, now) {
       if (!playSfx(key, gain)) playAudioCueScaled('work', gain);
     }
   }
+  // The sheet row is storage: the modeled 16-way facing mapped
+  // onto the loaded tier's rows — the same mapping drawDirUnit
+  // applies to the 16-row sheets (sheetRowForDir16). The tier16
+  // sheets take the facing exactly; tier8 pairs it, tier32
+  // doubles it.
+  a.dir = sheetRowForDir16(a.dir16 ?? 4, VIL_ORIGINAL.dirs);
   return { state, dir: a.dir, frame, carryRes: carryResOf(i) };
 }
 
@@ -3541,7 +3572,7 @@ function panelContext() {
   }
   if (selectedBuilding.type === 'tc') return 'tc';
   const bk = buildingList().find((b) => b.id === selectedBuilding.id);
-  return (bk && { 2: 'barracks', 3: 'lumbercamp', 4: 'mill', 5: 'miningcamp', 6: 'range', 7: 'stable', 8: 'blacksmith', 10: 'tower', 11: 'outpost', 15: 'castle', 17: 'siegeworkshop' }[bk.kind]) || 'none';
+  return (bk && { 2: 'barracks', 3: 'lumbercamp', 4: 'mill', 5: 'miningcamp', 6: 'range', 7: 'stable', 8: 'blacksmith', 10: 'tower', 11: 'outpost', 15: 'castle', 17: 'siegeworkshop', 25: 'tower', 26: 'tower' }[bk.kind]) || 'none';
 }
 
 /// AutoExplore toggle (SEL-17): flips the mode on the LOCAL
@@ -8514,7 +8545,7 @@ async function main() {
       if (any) { orderAck('order'); flash(t('flash.garrisoned')); return; }
     }
     if (bT && bT.owner === localOwner && bT.complete
-        && (bT.kind === 10 || bT.kind === 11 || bT.kind === 15)) {
+        && (bT.kind === 10 || bT.kind === 25 || bT.kind === 26 || bT.kind === 15)) {
       let any = false;
       for (const id of targets) {
         if (issue({ t: 'garrison_b', e: id, b: bT.id })) any = true;
@@ -10421,15 +10452,20 @@ function loadCorpseArt() {
   }
 }
 
-// The facing row (of 8) a corpse keeps: the last facing the
-// unit's own animation state recorded while it lived.
-function corpseDir8(i, unit) {
+// The facing row (of 16) a corpse keeps: the last facing the
+// unit's own animation state recorded while it lived. The die
+// sheets carry 16 rows, so the modeled facing IS the row.
+function corpseDir16(i, unit) {
   if (unit === 'villager') {
     const a = vilAnim.get(i);
-    return a ? (((Math.round((a.dir * 8) / VIL_ORIGINAL.dirs) % 8) + 8) % 8) : 2;
+    if (!a) return 4;
+    // The modeled 16-way facing; the tier-row conversion is the
+    // legacy fallback for an entry that predates the model.
+    return a.dir16 !== undefined ? a.dir16
+      : (((Math.round((a.dir * 16) / VIL_ORIGINAL.dirs) % 16) + 16) % 16);
   }
   const p = UNIT_POSE_STATE[i];
-  return p ? p.dir : 2;
+  return p ? p.dir : 4;
 }
 
 // Per-draw bookkeeping, mirroring updateRubble: a remembered
@@ -10448,7 +10484,7 @@ function updateCorpses(st) {
     const x = st.pos[i * 2], y = st.pos[i * 2 + 1];
     if (st.hp[i * 2] >= 1) {
       if (owner !== foeOwner() || fogAtWorld(x, y) === 2) {
-        corpseSeen.set(i, { unit, owner, x, y, dir: corpseDir8(i, unit) });
+        corpseSeen.set(i, { unit, owner, x, y, dir: corpseDir16(i, unit) });
       }
     } else if (corpseSeen.has(i)) {
       const seen = corpseSeen.get(i);
@@ -10865,6 +10901,8 @@ const NEW_BUILDING_STYLE = {
   7: { wall: '#96684a', wall2: '#77503a', roof: '#5d4630' }, // Stable
   8: { wall: '#6f6f76', wall2: '#54545c', roof: '#3f3f45' }, // Blacksmith: dark stone
   10: { wall: '#8d8578', wall2: '#6e675c', roof: '#5d4630' }, // Watch Tower: pale stone
+  25: { wall: '#8d8578', wall2: '#6e675c', roof: '#5d4630' }, // Guard Tower: the line's stone (BLD-18 completion)
+  26: { wall: '#8d8578', wall2: '#6e675c', roof: '#5d4630' }, // Keep: the line's stone (BLD-18 completion)
   11: { wall: '#8a6b42', wall2: '#6f5533', roof: '#7a4a35' }, // Outpost: timber
   12: { wall: '#a3763f', wall2: '#82592c', roof: '#b03a2e' }, // Market: timber + red canvas
   13: { wall: '#a08b62', wall2: '#7d6a48', roof: '#5d4630' }, // Town Center: heavy timber + stone
@@ -10974,8 +11012,8 @@ function drawBuildingFeature(kind, sx, sy, hgt) {
     ctx.beginPath();
     ctx.arc(sx - 0.8 * u, top + 0.45 * u, 0.2 * u, 0, 0, Math.PI * 2);
     ctx.fill();
-  } else if (kind === 10) {
-    // The tower's arrow slit.
+  } else if (kind === 10 || kind === 25 || kind === 26) {
+    // The tower's arrow slit (the whole line, BLD-18 completion).
     ctx.fillStyle = '#2e2a24';
     ctx.fillRect(sx - 0.14 * u, top - 0.5 * u, 0.28 * u, 0.8 * u);
   } else if (kind === 15) {
@@ -12852,7 +12890,7 @@ function drawArcher(i, wx, wy) {
 const ANIMAL_POSE_STATE = {};
 function animalPoseFor(i, wx, wy) {
   const st = ANIMAL_POSE_STATE[i] ||
-    (ANIMAL_POSE_STATE[i] = { x: wx, y: wy, face: -1, dir: 2, stamp: -1, pose: null });
+    (ANIMAL_POSE_STATE[i] = { x: wx, y: wy, face: -1, dir: 4, stamp: -1, pose: null });
   if (st.stamp === poseStamp && st.pose) return st.pose;
   const dx = wx - st.x;
   const dy = wy - st.y;
@@ -12862,8 +12900,9 @@ function animalPoseFor(i, wx, wy) {
     if (sdx > 0.0001) st.face = 1;
     else if (sdx < -0.0001) st.face = -1;
     if (Math.hypot(dx, dy) > 0.004) {
-      const d = Math.round(Math.atan2(dy, dx) / (Math.PI / 4));
-      st.dir = ((d % 8) + 8) % 8;
+      // MOV-09: the movement facing from the one facing model
+      // (play/facing.js), shared by every draw path.
+      st.dir = dir16FromVector(dx, dy);
     }
   }
   st.x = wx;
@@ -12877,10 +12916,23 @@ function animalPoseFor(i, wx, wy) {
 // The directional-sheet action for an animal this draw: walk
 // while it moves, the graze cycle on the same slow phase the
 // side-view poses use, idle otherwise — with the world facing.
-function dirAnimalAct(i, wx, wy) {
+function dirAnimalAct(i, wx, wy, engage = false) {
   const pose = animalPoseFor(i, wx, wy);
   const tick = sim.tick_count();
   if (pose.moving) return { action: 'walk', dir: pose.dir };
+  // MOV-09: melee engagement turns the unit toward its target.
+  // Only the boar engages among the grazers (it has no attack
+  // cycle — the turned facing is the whole read of the bite);
+  // its caller passes engage. Sheep and deer never engage.
+  if (engage && foeNearUnit(i, wx, wy)) {
+    const tgt = foeTargetFor(i, wx, wy);
+    if (tgt) {
+      const d = turnedDir16(pose.dir, tgt.x - wx, tgt.y - wy);
+      const pst = ANIMAL_POSE_STATE[i];
+      if (pst) pst.dir = d;
+      return { action: 'idle', dir: d };
+    }
+  }
   if ((Math.floor(tick / 240) + i) % 5 === 0) return { action: 'graze', dir: pose.dir };
   return { action: 'idle', dir: pose.dir };
 }
@@ -12966,7 +13018,7 @@ function drawBoar(i, wx, wy) {
   const u = camS;
   shadow(sx, sy, 1.25 * u);
   if (selection.has(i)) drawSelRing(sx, sy, 1.55);
-  if (drawDirUnit('boar', dirAnimalAct(i, wx, wy), sx, sy)) return;
+  if (drawDirUnit('boar', dirAnimalAct(i, wx, wy, true), sx, sy)) return;
   const boarPose = animalPoseImage('boar', i, wx, wy);
   if (drawAnimalPose(boarPose.im, sx, sy, 2.1, boarPose.flip)) return;
   legs(sx, sy, u, [-0.7, -0.25, 0.5, 0.9], '#3a2a20');
@@ -13034,7 +13086,18 @@ function drawDeer(i, wx, wy) {
 function dirWolfAct(i, wx, wy) {
   const pose = animalPoseFor(i, wx, wy);
   if (pose.moving) return { action: 'walk', dir: pose.dir };
-  if (foeNearUnit(i, wx, wy)) return { action: 'attack', dir: pose.dir };
+  if (foeNearUnit(i, wx, wy)) {
+    // MOV-09: the lunge turns the wolf toward its prey, and the
+    // turn persists in the pose state like the footmen's.
+    const tgt = foeTargetFor(i, wx, wy);
+    if (tgt) {
+      const d = turnedDir16(pose.dir, tgt.x - wx, tgt.y - wy);
+      const pst = ANIMAL_POSE_STATE[i];
+      if (pst) pst.dir = d;
+      return { action: 'attack', dir: d };
+    }
+    return { action: 'attack', dir: pose.dir };
+  }
   return { action: 'idle', dir: pose.dir };
 }
 
@@ -13104,7 +13167,7 @@ let frameSt = null; // the entityState() snapshot of the running draw
 
 function unitPoseFor(i, wx, wy) {
   const st = UNIT_POSE_STATE[i] ||
-    (UNIT_POSE_STATE[i] = { x: wx, y: wy, face: -1, dir: 2, stamp: -1, pose: null });
+    (UNIT_POSE_STATE[i] = { x: wx, y: wy, face: -1, dir: 4, stamp: -1, pose: null });
   if (st.stamp === poseStamp && st.pose) return st.pose;
   const dx = wx - st.x;
   const dy = wy - st.y;
@@ -13115,10 +13178,9 @@ function unitPoseFor(i, wx, wy) {
     else if (sdx < -0.0001) st.face = -1;
     if (Math.hypot(dx, dy) > 0.004) {
       // Facing for the directional sheets: the world movement
-      // angle quantized to the 8 rows (atan2 convention shared
-      // with the villager sheets, updateVilAnim).
-      const d = Math.round(Math.atan2(dy, dx) / (Math.PI / 4));
-      st.dir = ((d % 8) + 8) % 8;
+      // angle through the one facing model (play/facing.js,
+      // MOV-09) — the same quantization the villager sheets use.
+      st.dir = dir16FromVector(dx, dy);
     }
   }
   st.x = wx;
@@ -13176,11 +13238,10 @@ function updateUnitAnimState(buildings, st) {
     }
     if (best >= 0) {
       const sdx = (proj[p + 2] - proj[p]) - (proj[p + 3] - proj[p + 1]);
-      const wdir = Math.round(Math.atan2(proj[p + 3] - proj[p + 1],
-        proj[p + 2] - proj[p]) / (Math.PI / 4));
       archerShoot.set(best, {
         tick: proj[p + 4], face: sdx > 0 ? 1 : -1,
-        dir: ((wdir % 8) + 8) % 8,
+        // The shot's facing, through the one facing model.
+        dir: dir16FromVector(proj[p + 2] - proj[p], proj[p + 3] - proj[p + 1]),
       });
     }
   }
@@ -13204,6 +13265,31 @@ function foeNearUnit(i, wx, wy) {
     if (dx * dx + dy * dy <= 2.3 * 2.3) return true;
   }
   return false;
+}
+
+// The nearest entity foeNearUnit would flag, as a position —
+// the melee target a unit turns to face when it engages
+// (MOV-09: melee engagement turns the unit toward its target).
+// Same scan, same radius and exclusions; null when there is
+// no foe in reach.
+function foeTargetFor(i, wx, wy) {
+  if (!frameSt) return null;
+  const st = frameSt;
+  const pos = st.pos;
+  let best = null;
+  let bestD2 = 2.3 * 2.3;
+  for (let j = 0; j < st.count; j++) {
+    if (j === i || st.hp[j * 2] < 1) continue;
+    if (st.owners[j] === st.owners[i] || st.kinds[j] === KIND_TC) continue;
+    const dx = pos[j * 2] - wx;
+    const dy = pos[j * 2 + 1] - wy;
+    const d2 = dx * dx + dy * dy;
+    if (d2 <= bestD2) {
+      bestD2 = d2;
+      best = { x: pos[j * 2], y: pos[j * 2 + 1] };
+    }
+  }
+  return best;
 }
 
 // A UNIT_ART image is drawable when loaded; the enemy variant is a
@@ -13294,6 +13380,27 @@ function unitActionFor(unit, i, wx, wy) {
     } else if (foeNearUnit(i, wx, wy)) {
       action = 'attack';
       n = Math.floor(tick / 7) % 3 + 1;
+    }
+  }
+  // MOV-09: melee engagement turns the unit toward its target.
+  // The attack pose is rendered in the turned facing (the stale
+  // last-movement facing no longer strikes sideways), the turn
+  // is written back into the pose state so an idle unit keeps
+  // it (and its corpse inherits it), and the side-view flip
+  // follows the facing. Ranged units already face their shot
+  // (archerShoot above); work states face their node/site on
+  // their own paths (updateVilAnim).
+  if (action === 'attack') {
+    const tgt = foeTargetFor(i, wx, wy);
+    if (tgt) {
+      dir = turnedDir16(dir, tgt.x - wx, tgt.y - wy);
+      const f = faceForDir16(dir);
+      if (f !== 0) face = f;
+      const pst = UNIT_POSE_STATE[i];
+      if (pst) {
+        pst.dir = dir;
+        if (f !== 0) pst.face = f;
+      }
     }
   }
   // Generated combat audio: this runs on the draw path, so only
@@ -14066,6 +14173,7 @@ function runCommandButton(id, times = 1) {
       'research-careening': 48, 'research-clinkerconstruction': 49,
       'research-drydock': 50, 'research-carvelhull': 51, 'research-shipwright': 52,
       'research-siegeengineers': 53,
+      'research-guardtower': 54, 'research-keep': 55, 'research-arrowslits': 56,
     }[id];
     if (tag != null && selectedBuilding && selectedBuilding.type === 'building') {
       if (!issue({ t: 'research_at', b: selectedBuilding.id, tech: tag })) {
@@ -14158,7 +14266,7 @@ function renderCommands() {
   // context renders nothing, never command buttons.
   const foeSel = !!selectedBuilding && selectedBuilding.owner === foeOwner();
   // M6: each production/research building gets its own context.
-  const BUILDING_CONTEXT = { 2: 'barracks', 3: 'lumbercamp', 4: 'mill', 5: 'miningcamp', 6: 'range', 7: 'stable', 8: 'blacksmith', 10: 'tower', 11: 'outpost', 12: 'market', 15: 'castle', 16: 'university', 17: 'siegeworkshop', 20: 'monastery', 23: 'dock' };
+  const BUILDING_CONTEXT = { 2: 'barracks', 3: 'lumbercamp', 4: 'mill', 5: 'miningcamp', 6: 'range', 7: 'stable', 8: 'blacksmith', 10: 'tower', 11: 'outpost', 12: 'market', 15: 'castle', 16: 'university', 17: 'siegeworkshop', 20: 'monastery', 23: 'dock', 25: 'tower', 26: 'tower' };
   const context = selUnits.length > 0
     ? (hasVillager ? 'build' : 'units')
     : selectedBuilding
@@ -14231,9 +14339,9 @@ function renderCommands() {
   const RB_TAGS = {
     blacksmith: [2, 3, 4, 7, 8], barracks: [5], stable: [9, 16, 17],
     lumbercamp: [10, 43, 44], miningcamp: [11, 12], mill: [13, 30, 31], market: [19, 25, 26],
-    university: [20, 21, 22, 23, 24, 48, 49, 50, 51, 52, 53], castle: [29],
+    university: [20, 21, 22, 23, 24, 48, 49, 50, 51, 52, 53, 54, 55, 56], castle: [29],
     lumbercamp: [10, 43, 44], miningcamp: [11, 12], mill: [13], market: [19, 25, 26],
-    university: [20, 21, 22, 23, 24, 48, 49, 50, 51, 52, 53], monastery: [32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42],
+    university: [20, 21, 22, 23, 24, 48, 49, 50, 51, 52, 53, 54, 55, 56], monastery: [32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42],
     dock: [45, 46, 47],
   };
   const rbB = bk && RB_TAGS[context]
@@ -15220,6 +15328,18 @@ function renderCommands() {
       // 2026-11-16).
       techBtn('research-siegeengineers', 53, 'i-siegeengineers', 'cmd.siegeengineersTitle',
         [[500, 'food'], [600, 'wood']], 45, 10),
+      // BLD-18 completion (2026-11-16): the tower trio — the
+      // Guard Tower upgrade (Castle Age; every standing Watch
+      // Tower converts on completion, and towers built after
+      // are born Guard), the Keep upgrade (Imperial, chains
+      // from Guard Tower) and Arrowslits (+1/+2/+3 attack by
+      // tower tier). Costs/times mirror the sim's tech table.
+      techBtn('research-guardtower', 54, 'i-guardtower', 'cmd.guardtowerTitle',
+        [[100, 'food'], [250, 'wood']], 30, 11),
+      techBtn('research-keep', 55, 'i-keep', 'cmd.keepTitle',
+        [[500, 'food'], [350, 'wood']], 75, 12),
+      techBtn('research-arrowslits', 56, 'i-arrowslits', 'cmd.arrowslitsTitle',
+        [[250, 'food'], [250, 'wood']], 25, 13),
     );
   } else if (context === 'lumbercamp' || context === 'mill' || context === 'miningcamp') {
     // The economy researches (2026-10-22): Double-Bit Axe at the
@@ -15309,7 +15429,11 @@ function renderCommands() {
   // leave these cells to other occupants (the TC's W/E are not
   // letters at all in the reference), so — like the building
   // Delete — they render unbadged and answer to the mouse.
-  const GAR_PANEL = ['tc', 'castle', 'tower', 'outpost', 'barracks', 'range', 'stable', 'siegeworkshop', 'monastery', 'dock'];
+  // BLD-18 completion (2026-11-16): 'outpost' leaves the list —
+  // the Outpost's garrison capacity is 0 in DE, so it never
+  // shows garrison buttons (its panel context stays 'outpost'
+  // for the info display).
+  const GAR_PANEL = ['tc', 'castle', 'tower', 'barracks', 'range', 'stable', 'siegeworkshop', 'monastery', 'dock'];
   if (GAR_PANEL.includes(context)) {
     const gCount = context === 'tc' ? sim.tc_garrison_count(panelTcId())
       : (bk ? sim.building_garrison_count(bk.id) : 0);
@@ -15968,10 +16092,10 @@ function updateSelPanel() {
     const gN = isTc ? sim.tc_garrison_count(selectedBuilding.id)
       : (bk ? sim.building_garrison_count(bk.id) : 0);
     if (gN > 0) {
-      const cap = isTc ? 15 : ({ 10: 5, 11: 5, 15: 20, 23: 5 }[bk.kind] ?? 10);
+      const cap = isTc ? 15 : ({ 10: 5, 25: 5, 26: 5, 15: 20, 23: 5 }[bk.kind] ?? 10);
       let line = t('sel.garrisonLine', { n: gN, cap });
       const arrows = isTc ? sim.tc_garrison_arrows(selectedBuilding.id)
-        : (bk && (bk.kind === 10 || bk.kind === 11 || bk.kind === 15 || bk.kind === 23))
+        : (bk && (bk.kind === 10 || bk.kind === 25 || bk.kind === 26 || bk.kind === 15 || bk.kind === 23))
           ? sim.building_garrison_arrows(bk.id) : 0;
       if (arrows > 0) line += ' · ' + t('sel.garrisonArrows', { n: arrows });
       selInfo.textContent = selInfo.textContent ? `${selInfo.textContent} · ${line}` : line;

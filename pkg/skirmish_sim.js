@@ -1073,6 +1073,34 @@ export class WasmSim {
         return ret !== 0;
     }
     /**
+     * BLD-18 completion (2026-11-16): the Guard Tower kind's
+     * direct form. Towers are normally ordered as Watch Towers
+     * and born at the owner's researched tier (the placement
+     * conversion in `Sim::place_building`); the direct form
+     * exists so the kind set's ABI stays complete, on the
+     * Watch Tower's terms.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_guard_tower(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_guard_tower(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Queue a Guard Tower build (BLD-18 completion) — see
+     * `push_build_guard_tower`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_guard_tower_queued(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_guard_tower_queued(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
      * Order a villager to build a House with its 2×2-cell footprint
      * anchored at the cell containing the world point `(x, y)`. The
      * 25-wood cost is deducted at placement (next tick). Returns
@@ -1099,6 +1127,30 @@ export class WasmSim {
      */
     push_build_house_queued(entity, x, y) {
         const ret = wasm.wasmsim_push_build_house_queued(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * BLD-18 completion (2026-11-16): the Keep kind's direct
+     * form, on the Guard Tower's terms.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_keep(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_keep(this.__wbg_ptr, entity, x, y);
+        return ret !== 0;
+    }
+    /**
+     * Queue a Keep build (BLD-18 completion) — see
+     * `push_build_keep`.
+     * @param {number} entity
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    push_build_keep_queued(entity, x, y) {
+        const ret = wasm.wasmsim_push_build_keep_queued(this.__wbg_ptr, entity, x, y);
         return ret !== 0;
     }
     /**

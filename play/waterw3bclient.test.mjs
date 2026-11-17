@@ -73,7 +73,7 @@ test('Medium Warships is wired as Dock research, tag 47', () => {
   // The tech-tree mirror row (INF-06): Dock host, Castle Age,
   // no prerequisite (the upgrade keys off the age, not off
   // Gillnets).
-  assert.equal(TECH_TREE.length, 54); // 48 at W3b; +Careening/Clinker (W5); +Dry Dock/Carvel Hull/Shipwright (W6); +Siege Engineers (TEC-08)
+  assert.equal(TECH_TREE.length, 57); // 48 at W3b; +Careening/Clinker (W5); +Dry Dock/Carvel Hull/Shipwright (W6); +Siege Engineers (TEC-08); +the tower trio (BLD-18 completion)
   assert.deepEqual(TECH_TREE[47], {
     tag: 47, host: 23, age: 2, cost: [0, 150, 100, 0], secs: 50, requires: null,
   });
