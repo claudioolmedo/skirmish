@@ -440,7 +440,7 @@ export const PANEL_KEYS = {
 export const POSITION_CODES = ['KeyQ', 'KeyW', 'KeyE'];
 export const POSITION_LETTERS = ['Q', 'W', 'E'];
 
-/** Go-to: Ctrl + key code -> building kind (Stable unbound: Ctrl+L). */
+/** Go-to: Ctrl + key code -> building kind. */
 export const GOTO_KEYS = {
   KeyZ: 3, // Lumber Camp
   KeyI: 4, // Mill
@@ -449,9 +449,15 @@ export const GOTO_KEYS = {
   KeyB: 2, // Barracks
   KeyA: 6, // Archery Range
   KeyM: 12, // Market (the wiki's DE go-to table)
-  // Ctrl+L (Stable on the wiki's table) stays unbound: the
-  // browser reserves Ctrl+L for its address bar and the key
-  // never reaches the page (hotkeys.test.mjs pins this).
+  KeyL: 7, // Stable (SEL-10, sk-15 §(e), approved 2026-11-16)
+  // Ctrl+L is bound like every other go-to, but delivery is
+  // the platform's call: outside fullscreen the browser
+  // reserves Ctrl+L for its address bar and the event never
+  // reaches the page, so the binding is inert there by
+  // design. In fullscreen Chromium the Keyboard Lock in
+  // app.js (the same lock call as Escape) hands KeyL to the
+  // page, and Ctrl+Shift+L selects all Stables through the
+  // resolver's `all` flag, exactly like the other letters.
 };
 
 /**

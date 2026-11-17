@@ -217,7 +217,15 @@ test('go-to: Ctrl+letter jumps to a building type, in any context', () => {
   assert.deepEqual(go('KeyM'), { type: 'goto', kind: 12, all: false }, 'Market');
   assert.deepEqual(go('KeyZ', { shift: true }), { type: 'goto', kind: 3, all: true },
     'Ctrl+Shift selects all of the type');
-  assert.equal(go('KeyL'), null, 'Ctrl+L (Stable) is the browser\u2019s — never bound');
+  // SEL-10 (sk-15 §(e), approved 2026-11-16): KeyL resolves to
+  // the Stable go-to like every other letter. Whether the press
+  // ever reaches the page is the platform's call — in fullscreen
+  // Chromium the Keyboard Lock (app.js, same call as Escape)
+  // delivers it; elsewhere the browser reserves Ctrl+L for its
+  // address bar and the event never arrives.
+  assert.deepEqual(go('KeyL'), { type: 'goto', kind: 7, all: false }, 'Stable');
+  assert.deepEqual(go('KeyL', { shift: true }), { type: 'goto', kind: 7, all: true },
+    'Ctrl+Shift+L selects all Stables');
   assert.equal(go('KeyQ'), null, 'Ctrl+Q is not a go-to');
   // Even mid-build: go-to wins over the panel letters.
   assert.equal(build({ page: 'eco', code: 'KeyG', ctrl: true }).type, 'goto');

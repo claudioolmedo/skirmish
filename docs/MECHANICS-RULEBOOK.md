@@ -585,17 +585,28 @@ alert (INF-01).
 and centers the Town Center through the existing building selection.
 Ctrl+letter cycling shipped with the M13 go-to (every shipped kind:
 Ctrl+B Barracks, Ctrl+A Archery Range, Ctrl+S Blacksmith, Ctrl+G
-Mining Camp, Ctrl+Z Lumber Camp, Ctrl+I Mill — the wiki Hotkey page's
-table, fetched 2026-10-21); Space centering on the current selection
-shipped in the 2026-10-21/22 night run. The alert jump shipped
-2026-10-22 with INF-01: INF-01 now tracks alert locations
-client-side (`play/alerts.js`), and because the sources conflict
-(GAP says Backspace; the wiki's Return-of-Rome table says Home)
-BOTH keys are bound to the same jump to the most recent alert.
-One piece stays open: Ctrl+L (Stable) is reserved by the browser
-for its address bar — the key never reaches the page, so it stays
-deliberately unbound (pinned by `hotkeys.test.mjs`). · *Status:*
-**DIFFERS** (the platform-reserved Ctrl+L only).
+Mining Camp, Ctrl+Z Lumber Camp, Ctrl+I Mill, Ctrl+L Stable — the wiki
+Hotkey page's table, fetched 2026-10-21); Space centering on the
+current selection shipped in the 2026-10-21/22 night run. The alert
+jump shipped 2026-10-22 with INF-01: INF-01 now tracks alert
+locations client-side (`play/alerts.js`), and because the sources
+conflict (GAP says Backspace; the wiki's Return-of-Rome table says
+Home) BOTH keys are bound to the same jump to the most recent alert.
+The last piece closed 2026-11-16 (sk-15 §(e) plan, approved by
+Claudio): `GOTO_KEYS` binds KeyL to the Stable (kind 7), with
+Ctrl+Shift+L selecting all Stables through the resolver's `all`
+flag, and delivery runs through the Keyboard Lock the game already
+takes in fullscreen — `lockEscapeKey` in `web-preview/app.js` locks
+`['Escape', 'KeyL']` in the one call (each lock() call replaces the
+locked set, so the two keys share the array; pinned by
+`hotkeys.test.mjs` and `esclock.test.mjs`). Outside fullscreen the
+browser reserves Ctrl+L for its address bar and the event never
+reaches the page, so the binding is inert there by design, with the
+previous silent fallback unchanged. · *Status:* **MATCHES** in
+fullscreen Chromium via Keyboard Lock (same lock as Esc); **DIFFERS**
+outside fullscreen and in Firefox/Safari — Ctrl+L is reserved by the
+browser for the address bar, a platform deviation, not an
+implementation gap.
 
 **SEL-11 — Right-click is a smart order.** Right-clicking with a selection
 issues the context order implied by the target: resource node → gather;
