@@ -2776,7 +2776,11 @@ mod tests {
         assert_eq!(BuildingKind::Market.max_hp_at(Age::Castle), 2100);
         assert_eq!(BuildingKind::Market.armor_melee_at(Age::Castle), 2);
         assert_eq!(BuildingKind::Market.armor_pierce_at(Age::Castle), 9);
-        assert_eq!(BuildingKind::Outpost.sight_tiles_at(Age::Castle), 8);
+        // BLD-18 completion (2026-11-16): the Outpost's
+        // documented sight row is 6/8/10/12 by Age — Castle is
+        // 10 (this pin still read the pre-completion 8; caught
+        // at the convoy integration gate, 2026-11-17).
+        assert_eq!(BuildingKind::Outpost.sight_tiles_at(Age::Castle), 10);
         // The trainable relation (M6): one home per unit kind.
         assert!(BuildingKind::Barracks.trains(EntityKind::Militia));
         assert!(BuildingKind::Barracks.trains(EntityKind::Spearman));

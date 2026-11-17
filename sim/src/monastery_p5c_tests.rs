@@ -106,7 +106,7 @@ fn redemption_and_heresy_rows() {
     assert_eq!(TechId::Heresy.tag(), 38);
     assert_eq!(TechId::from_tag(37), Some(TechId::Redemption));
     assert_eq!(TechId::from_tag(38), Some(TechId::Heresy));
-    assert_eq!(TechId::ALL.len(), 54, "P5f's Imperial row appends at 39–42, the TEC-07 wood chain at 43/44, Water W2a's Dock fishing pair at 45/46, Water W3b's Medium Warships at 47, Water W5's University ship pair (Careening / Clinker Construction) at 48/49, Water W6's Imperial University ship trio (Dry Dock / Carvel Hull / Shipwright) at 50/51/52, TEC-08's Siege Engineers at 53");
+    assert_eq!(TechId::ALL.len(), 57, "P5f's Imperial row appends at 39–42, the TEC-07 wood chain at 43/44, Water W2a's Dock fishing pair at 45/46, Water W3b's Medium Warships at 47, Water W5's University ship pair (Careening / Clinker Construction) at 48/49, Water W6's Imperial University ship trio (Dry Dock / Carvel Hull / Shipwright) at 50/51/52, TEC-08's Siege Engineers at 53, BLD-18's tower trio (Guard Tower / Keep / Arrowslits) at 54/55/56");
     // Dossier §5.6 rows: Monastery, Castle Age.
     for t in [TechId::Redemption, TechId::Heresy] {
         assert_eq!(

@@ -103,7 +103,7 @@ const DOCK: u32 = 910;
 
 #[test]
 fn trio_table_rows_match_the_wiki() {
-    assert_eq!(TechId::ALL.len(), 54); // + Siege Engineers 53 (TEC-08)
+    assert_eq!(TechId::ALL.len(), 57); // + Siege Engineers 53 (TEC-08); +the tower trio 54–56 (BLD-18, integration 2026-11-17)
     for (tech, tag, cost) in [
         (TechId::DryDock, 50, (200, 0, 400, 0)),
         (TechId::CarvelHull, 51, (350, 200, 0, 0)),

@@ -125,7 +125,7 @@ fn imperial_monastery_rows() {
     assert_eq!(TechId::from_tag(41), Some(TechId::Theocracy));
     assert_eq!(TechId::from_tag(42), Some(TechId::Faith));
     assert_eq!(TechId::from_tag(43), Some(TechId::BowSaw));
-    assert_eq!(TechId::ALL.len(), 54, "the TEC-07 wood chain appends at 43/44, Water W2a's Dock fishing pair at 45/46, Water W3b's Medium Warships at 47, Water W5's University ship pair (Careening / Clinker Construction) at 48/49, Water W6's Imperial University ship trio (Dry Dock / Carvel Hull / Shipwright) at 50/51/52, TEC-08's Siege Engineers at 53");
+    assert_eq!(TechId::ALL.len(), 57, "the TEC-07 wood chain appends at 43/44, Water W2a's Dock fishing pair at 45/46, Water W3b's Medium Warships at 47, Water W5's University ship pair (Careening / Clinker Construction) at 48/49, Water W6's Imperial University ship trio (Dry Dock / Carvel Hull / Shipwright) at 50/51/52, TEC-08's Siege Engineers at 53, BLD-18's tower trio (Guard Tower / Keep / Arrowslits) at 54/55/56");
     // All four: Monastery, Imperial Age.
     for t in [
         TechId::BlockPrinting,

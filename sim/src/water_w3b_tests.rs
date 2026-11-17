@@ -184,7 +184,7 @@ fn castle_ship_rows_are_the_spec_rows() {
     // W6's Imperial University ship trio at 50/51/52 and
     // TEC-08's Siege Engineers at 53).
     assert_eq!(TechId::MediumWarships.tag(), 47);
-    assert_eq!(TechId::ALL.len(), 54);
+    assert_eq!(TechId::ALL.len(), 57); // 54 after TEC-08; +the tower trio 54–56 (BLD-18, integration 2026-11-17)
     assert_eq!(TechId::MediumWarships.age_required(), Age::Castle);
     assert_eq!(TechId::MediumWarships.ticks(), 3000); // 50 s
     assert_eq!(TechId::MediumWarships.cost(), (0, 150, 100, 0));
