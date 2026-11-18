@@ -8438,6 +8438,52 @@ async function main() {
     return id;
   }
 
+  // Record-rect pick (FIX #5, bot-loop occorder4, run #427):
+  // occludedUnitAt above names a click only inside the painted
+  // outline itself (the record's rect ∩ an occluder's rect).
+  // The rest of the same unit's sprite — the part the player
+  // sees standing BESIDE the occluder, continuous with the
+  // outline — fell back to the static picks: the sprite-body
+  // pick's per-kind content boxes (FIX #3), whose heights are
+  // the CACHED sprites' bounds. A unit drawn by a taller path
+  // (the DIR scout's attack pose reaches h ≈ 3.55–3.9 against
+  // the cached figure's 2.81) paints real pixels above that
+  // box, and a click on those pixels — the top of the very
+  // figure the player is aiming at, often the only part of it
+  // showing over a roof line — named nothing and degraded
+  // (occorder3's honesty bound named this slice). The record
+  // is the measured rect of the sprite AS DRAWN THIS FRAME,
+  // pose included, so for a unit that HAS a record its whole
+  // recorded rect is the click target, exactly as the whole
+  // sprite is in DE: a click anywhere on the figure names the
+  // unit. Same trust as the outline pick (the record exists
+  // only for a fog-visible unit — occlusion.js's fairness
+  // gate), same revalidation, frontmost record wins. Canvas
+  // picks only, by the caller's screenPick gate, like every
+  // record pick.
+  function occludedRectUnitAt(wx, wy) {
+    if (!lastOccludedOutlines.length) return null;
+    const [sx, sy] = worldToScreen(wx, wy);
+    let best = null;
+    let bestDepth = -Infinity;
+    for (const rec of lastOccludedOutlines) {
+      if (!rec || !rec.rect) continue;
+      if (sx >= rec.rect.x && sx < rec.rect.x + rec.rect.w
+          && sy >= rec.rect.y && sy < rec.rect.y + rec.rect.h
+          && rec.depth > bestDepth) {
+        bestDepth = rec.depth;
+        best = rec.id;
+      }
+    }
+    if (best === null) return null;
+    // The records are one frame old at worst: re-validate
+    // against the live state before the id can name a pick.
+    const st = entityState();
+    if (best >= st.count || st.hp[best * 2] < 1) return null;
+    if (st.garrisoned && st.garrisoned[best]) return null;
+    return best;
+  }
+
   // Right-click target pick: ANY living entity (ours or Gaia's —
   // the attack-target test). Slightly more generous radius: boars
   // are big, and a missed click should still read as an attack.
@@ -8469,6 +8515,16 @@ async function main() {
     // nothing and the order would degrade to a ground move.
     const occ = screenPick ? occludedUnitAt(wx, wy) : null;
     if (occ !== null) return occ;
+    // FIX #5 (bot-loop occorder4): the record-rect pick — a
+    // click on the VISIBLE part of a partially occluded unit's
+    // sprite names that unit too, through the frame's measured
+    // rect (see occludedRectUnitAt). It runs ahead of the
+    // static body pick because the measured rect is the
+    // authority for a unit the occlusion pass could see: it
+    // covers the tall draw paths' pixels above the FIX #3
+    // content boxes, which are the cached sprites' bounds.
+    const occRect = screenPick ? occludedRectUnitAt(wx, wy) : null;
+    if (occRect !== null) return occRect;
     // FIX #3 (bot-loop occorder3): the generalised sprite-body
     // pick (spriteBodyD2 above) — a click on a unit's drawn body
     // names that unit, ahead of the ground pick, exactly as the
@@ -9005,6 +9061,29 @@ async function main() {
         }
         if (any) { playAck('villager', 'order'); return; }
       }
+    }
+    // FIX #5 (bot-loop occorder4, run #427): a click that
+    // resolved to an ENEMY unit never falls through to the
+    // garrison / drop-off / ground-move readings below. The
+    // attack block above returns when any selected unit's
+    // attack order is accepted; reaching this line with an
+    // enemy still named means every attack was refused at
+    // issue time — and reinterpreting the same click from its
+    // raw ground point (which lies inside our own Town
+    // Center's footprint whenever the enemy stands under its
+    // roof) produced the two live failure shapes of run #427:
+    // a foot unit GARRISONED into the very TC it was ordered
+    // to defend ("Garrisoned."), and a mounted unit walked to
+    // the click point and idled beside the attacker. The
+    // click named an enemy: the only faithful outcomes are
+    // the attack or no order at all (the selection keeps its
+    // current orders). The branches above this guard that
+    // legitimately reuse an enemy-named click — a Monk's
+    // convert, the relic pickup, the building readings (they
+    // name a bT target, never this unit target) — have
+    // already run.
+    if (tgt != null && st.owners[tgt] === foeOwner()) {
+      return;
     }
     // Garrison (Castle P3b, GAR-01/SEL-11): a right-click on an
     // OWN garrisonable building — the Town Center, a tower, the
