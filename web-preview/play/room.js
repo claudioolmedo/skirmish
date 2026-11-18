@@ -1,3 +1,5 @@
+import { cleanDisplayName, GUEST_NAME } from './growth.js';
+
 // room.js — the M10 room model's decision logic, kept pure so it
 // is unit-testable without a DOM or a socket (same pattern as
 // lobby.js / groups.js).
@@ -190,6 +192,61 @@ export function teamLabel(pick, s = null) {
 /// localized pieces); the default opponent pick adds nothing —
 /// default rooms read exactly as before. Teams T3b: an unlocked
 /// room adds its segment the same way (`s.teamsUnlocked`).
+// --- Peer display name on the seat lines ---------------------------
+//
+// The peer's chosen display name rides its 'hello' (growth.js:
+// myName() in app.js) and app.js stores the cleaned copy in
+// net.peerName — chat has shown it all along. The room slot lines
+// and the loading rows, however, built their seat labels from
+// role + colour only ('Guest — Red' / 'Red — Guest' and the host
+// twins), so the other player NEVER saw the chosen name there
+// (bot-loop #422, live two-client proof: a guest named
+// "GuestPlayer" was only ever "Guest — Red" to the host).
+//
+// The label rule: a CUSTOM peer name replaces the role word and
+// keeps the colour (the caller's localized `named` template,
+// e.g. '{name} — Red' / 'Red — {name}'); anything else falls back
+// to the caller's classic label. "Anything else" includes the
+// GUEST_NAME sentinel itself — displayName() sends 'Guest' when
+// nothing was typed, so an unset name must read as the localized
+// classic label, never as the English word "Guest" in a pt/es UI.
+
+/// The peer's CUSTOM display name, cleaned, or null when the
+/// peer set none (unset / blank / the 'Guest' sentinel / junk).
+export function customPeerName(peerName) {
+  const name = cleanDisplayName(peerName);
+  return name && name !== GUEST_NAME ? name : null;
+}
+
+/// Escape a string for interpolation into the seat lines'
+/// innerHTML. A peer name is foreign input (chat already treats
+/// it as text-only for the same reason); the label templates and
+/// fallbacks are the client's own trusted strings, so only the
+/// name itself goes through here.
+export function escapeSeatName(name) {
+  return String(name)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/// The seat label for the PEER's seat: the peer's custom name in
+/// the caller's `named` template (a '{name}' string, as the i18n
+/// tables carry it) when one is set, else `fallback` (the classic
+/// role + colour label). Callers pass a null peerName for their
+/// OWN seat, which always yields the fallback.
+export function peerSeatLabel(peerName, { fallback = '', named = null } = {}) {
+  const name = customPeerName(peerName);
+  if (!name) return fallback;
+  const safe = escapeSeatName(name);
+  if (typeof named === 'string' && named.includes('{name}')) {
+    return named.split('{name}').join(safe);
+  }
+  return safe;
+}
+
 export function roomConfigText({ guestSlot = 'open', selfIsGuest = false, speed = 1.7, victory = 'Conquest', teamPick = 'opponent', teamsUnlocked = false } = {}, s = null) {
   const guest = selfIsGuest
     ? ((s && s.you) || 'You')

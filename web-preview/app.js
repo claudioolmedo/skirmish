@@ -87,7 +87,7 @@ import {
 import {
   checkPassword, peerAdmitted, guestAdmitted, canToggleReady,
   startGate, guestSlotOf, slotIsAi, slotSealed, slotAiMode,
-  slotLabel, roomConfigText,
+  slotLabel, roomConfigText, peerSeatLabel,
   teamPickOf, teamsForPick, teamPickForTeams,
 } from './play/room.js';
 import {
@@ -5001,12 +5001,22 @@ function renderLoading() {
   const row = (label, loaded) =>
     `<span class="slot-name">${label}</span>` +
     `<span class="slot-state">${loaded ? t('load.loaded') : t('load.loadingSeat')}</span>`;
-  netUi.loadSlotHost.innerHTML = row(t('load.blueHost'), m.blueLoaded);
+  // The peer's seat names the peer's chosen display name when
+  // they set one (net.peerName, from their hello — bot-loop #422:
+  // the name travelled but these rows never showed it); our own
+  // seat keeps the classic role + colour label.
+  const hostLabel = peerSeatLabel(net.role === 'host' ? null : net.peerName, {
+    fallback: t('load.blueHost'), named: t('load.blueNamed'),
+  });
+  netUi.loadSlotHost.innerHTML = row(hostLabel, m.blueLoaded);
   // M12: with an AI guest slot the red seat names the AI (it is
   // this same client's sim — it shows loaded the moment the
   // host's build verifies).
   const guestLabel = slotIsAi(net.guestSlot)
-    ? t('load.redAi', { slot: slotLabel(net.guestSlot, slotStrings()) }) : t('load.redGuest');
+    ? t('load.redAi', { slot: slotLabel(net.guestSlot, slotStrings()) })
+    : peerSeatLabel(net.role === 'host' ? net.peerName : null, {
+      fallback: t('load.redGuest'), named: t('load.redNamed'),
+    });
   netUi.loadSlotGuest.innerHTML = row(guestLabel, m.redLoaded);
 }
 
@@ -5384,13 +5394,22 @@ function renderRoom() {
     guestState = t('room.waitingGuest');
   }
   const badge = (r) => (r ? ` · <span class="slot-ready">${t('room.readyBadge')}</span>` : '');
+  // The peer's seat names the peer's chosen display name when
+  // they set one (net.peerName, from their hello — bot-loop #422);
+  // our own seat keeps the classic role + colour label.
+  const hostSeatLabel = peerSeatLabel(isHost ? null : net.peerName, {
+    fallback: t('room.hostSeat'), named: t('room.hostSeatNamed'),
+  });
+  const guestSeatLabel = peerSeatLabel(isHost ? net.peerName : null, {
+    fallback: t('room.guestSeat'), named: t('room.guestSeatNamed'),
+  });
   netUi.slotHost.innerHTML =
     '<span class="slot-dot dot-blue"></span>' +
-    `<span class="slot-name">${t('room.hostSeat')}</span>` +
+    `<span class="slot-name">${hostSeatLabel}</span>` +
     `<span class="slot-state">${hostState}${badge(hostReady)}</span>`;
   netUi.slotGuest.innerHTML =
     '<span class="slot-dot dot-red"></span>' +
-    `<span class="slot-name">${t('room.guestSeat')}</span>` +
+    `<span class="slot-name">${guestSeatLabel}</span>` +
     `<span class="slot-state">${guestState}${badge(guestReady)}</span>`;
   // M12: the configuration summary — the game's fixed facts
   // plus the guest seat, from the viewer's own side of it.
