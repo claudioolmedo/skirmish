@@ -8165,6 +8165,96 @@ async function main() {
     return (h - RAM_BODY_H / 2) ** 2 + dx ** 2;
   }
 
+  // Generalised unit sprite-body pick (FIX #3, bot-loop
+  // occorder3): the Ram's body pick above and the tree-canopy
+  // pick below are one-off instances of a general fact — EVERY
+  // unit sprite rises up the screen from its ground point, so a
+  // click on the visible body converts to a ground point up to
+  // ~4.2 wu north-west of the unit (sprite height along both
+  // axes), outside entityAt's 2.2 ground radius. FIX #2c closed
+  // the half of the Scout's sprite whose conversion still landed
+  // in radius; the upper half named nothing and degraded to a
+  // ground move (occordersweep2 S6: 48.4% of the sprite, with or
+  // without a coincident friendly). This pick names those clicks
+  // for every kind, in the Ram's own (h, dx) decomposition:
+  // h = height up the sprite, dx = screen-x offset from the
+  // unit's column, both in world units.
+  //
+  // UNIT_BODY_BOX maps an entity kind tag to [dxMin, dxMax, H]:
+  // the unit's BODY in that space — conservative content bounds
+  // read off the actual draw code, never the blit dest box's
+  // transparent margin and never a transient weapon/tool swing:
+  //  * cached-sprite kinds use the content bounds their own
+  //    painters document beside their *_BOX (Scout/cavalry
+  //    figure x [-1.17, 1.85], top 2.81; Petard [-0.6, 1.07],
+  //    2.23; Mangonel [-1.72, 1.74], 3.05; Scorpion
+  //    [-2.05, 1.95], 2.0; Monk [-0.62, 0.91], 2.62; King
+  //    [-0.66, 0.95], 2.85; Trade Cart [-1.35, 2.01], 2.18;
+  //    the Relic's painter spans [-0.6, 0.6] up to 1.62);
+  //  * DIR-sheet / UNIT_ART foot kinds use UNIT_ART_H as H
+  //    (drawUnitPose's own height) and the vector fallback's
+  //    body span (shield/sword/bow bodies — the spearman's and
+  //    skirmisher's upright shafts ARE their silhouette, so
+  //    their H is the shaft tip: 3.05 / 2.7);
+  //  * the Villager's H is the carry sheet's top (3.08 — the
+  //    load overhead is body, the gather swing is not);
+  //  * animals and ships use their vector draws' extents
+  //    (hull/mast/sail tops; a ship's sail corners over-claim —
+  //    the box is a rectangle, the sail a triangle — bounded by
+  //    the drawn extents and harmless on water, where no land
+  //    unit's ground click competes).
+  // Kind 1 (Town Center) has no entry — it is a building pick
+  // (tcAt), never a unit target here; kind 17 (Battering Ram)
+  // has none either — ramBodyD2 above already owns it, ahead of
+  // every other pick. spriteBodyD2 returns the squared distance
+  // to the box's centre in (dx, h) space when the click lands
+  // on the body, else null — ramBodyD2's exact contract.
+  const UNIT_BODY_BOX = {
+    0: [-1.1, 1.1, 3.1], // Villager
+    2: [-1.17, 1.85, 2.81], // Scout Cavalry
+    3: [-1.17, 1.15, 2.6], // Militia
+    4: [-0.9, 1.15, 2.55], // Archer
+    5: [-1.3, 1.3, 1.6], // Sheep
+    6: [-1.3, 1.8, 1.55], // Boar
+    7: [-1.05, 1.7, 2.3], // Deer
+    8: [-1.17, 1.15, 2.65], // Man-at-Arms
+    9: [-1.3, 0.65, 3.05], // Spearman
+    10: [-1.43, 0.65, 2.7], // Skirmisher
+    11: [-1.55, 1.85, 1.8], // Wolf
+    12: [-1.17, 1.85, 2.81], // Knight (cavalry figure)
+    13: [-1.17, 1.85, 2.81], // Light Cavalry
+    14: [-1.17, 1.85, 2.81], // Cavalry Archer
+    15: [-0.6, 1.07, 2.23], // Petard
+    16: [-1.35, 2.01, 2.18], // Trade Cart
+    18: [-1.72, 1.74, 3.05], // Mangonel
+    19: [-2.05, 1.95, 2.0], // Scorpion
+    20: [-0.62, 0.91, 2.62], // Monk
+    21: [-0.6, 0.6, 1.62], // Relic
+    22: [-0.66, 0.95, 2.85], // King
+    23: [-1.55, 1.55, 3.1], // Fishing Ship
+    24: [-1.7, 1.7, 3.6], // Galley
+    25: [-1.7, 1.7, 2.9], // Fire Galley
+    26: [-1.6, 1.6, 1.25], // Demolition Raft
+    27: [-1.75, 1.75, 3.0], // Hulk
+    28: [-1.8, 1.95, 3.9], // War Galley
+    29: [-1.8, 1.8, 3.4], // Fire Ship
+    30: [-1.8, 1.8, 1.35], // Demolition Ship
+    31: [-1.85, 1.85, 3.4], // War Hulk
+    32: [-1.9, 1.9, 3.0], // Transport Ship
+    33: [-1.7, 1.7, 3.6], // Trade Cog
+  };
+  function spriteBodyD2(st, i, wx, wy) {
+    const b = UNIT_BODY_BOX[st.kinds[i]];
+    if (!b) return null;
+    const dxw = wx - st.pos[i * 2];
+    const dyw = wy - st.pos[i * 2 + 1];
+    const h = -(dxw + dyw) / 2;
+    const dx = dxw - dyw;
+    if (h < 0 || h > b[2] || dx < b[0] || dx > b[1]) return null;
+    const cx = (b[0] + b[1]) / 2;
+    return (h - b[2] / 2) ** 2 + (dx - cx) ** 2;
+  }
+
   function unitAt(wx, wy) {
     const st = entityState();
     // A click on a Ram's drawn body names the Ram ahead of the
@@ -8288,6 +8378,46 @@ async function main() {
     // nothing and the order would degrade to a ground move.
     const occ = screenPick ? occludedUnitAt(wx, wy) : null;
     if (occ !== null) return occ;
+    // FIX #3 (bot-loop occorder3): the generalised sprite-body
+    // pick (spriteBodyD2 above) — a click on a unit's drawn body
+    // names that unit, ahead of the ground pick, exactly as the
+    // Ram's body pick above names the Ram ahead of a bystander
+    // at the click's ground point. Canvas only, like the outline
+    // pick it follows: it is gated on screenPick, so the minimap
+    // (which draws no sprites) keeps the plain ground pick
+    // (SEL-16). Fog rule: a non-own unit is body-pickable only
+    // while its cell is currently visible — the draw loop's own
+    // gate (VIS-01: non-own units draw only in visible cells),
+    // restated here so a body box reaching across a fog edge
+    // names nothing the player cannot see; orderAt's own fog
+    // gate below remains as the second line, untouched.
+    // Ownership classes carry FIX #2c's discipline into the
+    // body pick: an own Transport Ship (kind 32) is a load
+    // target and keeps its win (class 0 — the Ram's equivalent
+    // case already returned above), a non-own unit (class 1)
+    // beats our own bystander (class 2), and within a class the
+    // closest body centre wins, ramBodyD2's metric.
+    if (screenPick) {
+      let sBest = null;
+      let sBestD2 = Infinity;
+      let sBestCls = 3;
+      for (let i = 0; i < st.count; i++) {
+        if (st.hp[i * 2] < 1) continue;
+        if (st.garrisoned && st.garrisoned[i]) continue;
+        if (st.owners[i] !== localOwner
+            && !cellVisibleW(st.pos[i * 2], st.pos[i * 2 + 1])) continue;
+        const bd2 = spriteBodyD2(st, i, wx, wy);
+        if (bd2 === null) continue;
+        const cls = st.owners[i] === localOwner
+          ? (st.kinds[i] === 32 ? 0 : 2) : 1;
+        if (cls < sBestCls || (cls === sBestCls && bd2 < sBestD2)) {
+          sBestCls = cls;
+          sBestD2 = bd2;
+          sBest = i;
+        }
+      }
+      if (sBest !== null) return sBest;
+    }
     let best = null;
     let bestD2 = 2.2 * 2.2;
     let foeBest = null;
