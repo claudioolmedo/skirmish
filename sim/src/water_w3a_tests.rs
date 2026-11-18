@@ -442,8 +442,11 @@ fn demolition_blast_kills_the_cluster_and_spares_its_own() {
     // Spacing is load-bearing: hulls spawned closer than the
     // radii sum (3.2) get launched by the separation shove
     // before the raft closes (this test's first stagings lost
-    // the primary that way) — the pair stands 3 and (3, 4)
-    // from the raft, inside contact geometry without overlap.
+    // the primary that way) — the pair stands 3 and (3, 3)
+    // from the raft, inside contact geometry. (MOV-03: the
+    // launch is gone with the shove; the two Galleys now stand
+    // 3 apart, inside their 4.0 pair diameter — a tolerated
+    // overlap, MOV-04 — and hold there.)
     let foe_a = spawn_at(
         &mut sim,
         951,
@@ -458,7 +461,7 @@ fn demolition_blast_kills_the_cluster_and_spares_its_own() {
         EntityKind::Galley,
         OWNER_OPPONENT,
         x + I16F16::from_num(3),
-        y + I16F16::from_num(4),
+        y + I16F16::from_num(3),
     );
     let own = spawn_at(
         &mut sim,
@@ -490,8 +493,15 @@ fn demolition_blast_kills_the_cluster_and_spares_its_own() {
     // the pond while the raft closes — the steering of a fresh
     // Move order walks a victim back to its anchor between
     // shoves, so the geometry pinned here is the blast's.
+    // (MOV-03, 2026-11-17: the shove is gone — nothing drags
+    // the victims any more, and the anchors simply hold. The
+    // cluster spacing below was tightened 4 → 3 to compensate:
+    // the old kill margin came from that same shove drift
+    // pulling the pair a fraction of a unit deeper into the
+    // taper — measured post-MOV-03, the (3, 4) spacing left
+    // the second ship alive at 2.5 HP.)
     let (ax_a, ay_a) = (x + I16F16::from_num(3), y);
-    let (ax_b, ay_b) = (x + I16F16::from_num(3), y + I16F16::from_num(4));
+    let (ax_b, ay_b) = (x + I16F16::from_num(3), y + I16F16::from_num(3));
     let mut blown = false;
     for t in 0..60_000u64 {
         if t % 30 == 0 {

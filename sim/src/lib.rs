@@ -7392,7 +7392,17 @@ impl Sim {
             .entities
             .iter()
             .filter(|e| e.kind.is_mobile() && !e.dead && !e.is_contained())
-            .map(|e| (e.pos_x, e.pos_y, units::spec(e.kind).radius))
+            .map(|e| {
+                (
+                    e.pos_x,
+                    e.pos_y,
+                    units::spec(e.kind).radius,
+                    e.kind,
+                    // MOV-03: the formation stamp — same-formation
+                    // pairs never collide (sk-04 §2).
+                    e.order.as_ref().map_or(0, |o| o.formation_id),
+                )
+            })
             .collect();
         // Entity index -> index into the snapshot.
         let mut snap_idx = vec![usize::MAX; self.entities.len()];
@@ -7435,18 +7445,21 @@ impl Sim {
                     o.wp_index,
                     speed,
                     !e.suppress_separation,
+                    o.formation_id,
                     o.arrive,
                 ),
-                // No order: the unit stands still *except* for the
-                // separation shove — a stationary unit must never be an
-                // immovable wall on another's path (head-on pushes could
-                // otherwise cancel a traveler's velocity exactly, a
-                // deadlock found in M2 testing). A melee unit engaged
-                // in an attack is exempt (MOV-04): it holds its ground.
-                None if snap_idx[i] != usize::MAX && !e.suppress_separation => {
-                    let (vx, vy) = steer::shove(&snapshot, snap_idx[i], speed);
-                    (vx, vy, 0, false)
-                }
+                // No order: the unit holds its ground (MOV-03).
+                // Until this package an orderless unit took the
+                // separation `shove` — a stationary unit had to be
+                // displaceable or it became an immovable wall that
+                // could cancel a traveller's velocity exactly (the
+                // M2 deadlock). DE runs the other rule (sk-04):
+                // standing units ARE solid; the traveller bumps,
+                // stops and repaths around them (the bump pass
+                // below), and nobody is displaced. The one
+                // documented exception — herdables displacing
+                // villagers — is the herdable press pass, not a
+                // general shove.
                 _ => (I16F16::ZERO, I16F16::ZERO, 0, false),
             });
         }
@@ -7482,42 +7495,7 @@ impl Sim {
                 // mover — rounds the corner into the standing
                 // cell. Only the tree layer slides: buildings and
                 // water keep the M6 integrity teleport below.
-                let (ox, oy) = (e.pos_x, e.pos_y);
-                let (nx, ny) = (clamp_pos(ox + vx), clamp_pos(oy + vy));
-                let in_tree = |x: I16F16, y: I16F16| {
-                    let (cx, cy) = grid.world_to_cell(x, y);
-                    grid.is_node_blocked(cx, cy)
-                };
-                let (fx, fy) = if !in_tree(nx, ny) {
-                    (nx, ny)
-                } else if !in_tree(nx, oy) {
-                    (nx, oy)
-                } else if !in_tree(ox, ny) {
-                    (ox, ny)
-                } else {
-                    (ox, oy)
-                };
-                // MAP-07: continuous movement may not cross a cliff
-                // border either — steering and the separation shove
-                // can push a unit sideways across a border its A*
-                // path would never cross, which would silently
-                // unseal the face. Same axis-slide shape as the
-                // tree rule: the full move, then each axis alone,
-                // else the unit holds its ground this tick.
-                let crosses_cliff = |x: I16F16, y: I16F16| {
-                    let a = grid.world_to_cell(ox, oy);
-                    let b = grid.world_to_cell(x, y);
-                    a != b && grid.move_crosses_cliff(a, b)
-                };
-                let (fx, fy) = if !crosses_cliff(fx, fy) {
-                    (fx, fy)
-                } else if !crosses_cliff(fx, oy) {
-                    (fx, oy)
-                } else if !crosses_cliff(ox, fy) {
-                    (ox, fy)
-                } else {
-                    (ox, oy)
-                };
+                let (fx, fy) = slide_move(grid, e.pos_x, e.pos_y, vx, vy);
                 e.pos_x = fx;
                 e.pos_y = fy;
             }
@@ -7530,6 +7508,11 @@ impl Sim {
         //     repath parks it in the retrying wait. Nobody is
         //     displaced by this pass — the traveller pays.
         self.bump_pass(&snapshot, &snap_idx, &snap_entities, &plan_vel);
+
+        // 2.3 MOV-03 herdable press: the one documented
+        //     displacement (Update 153015) — a sheep pressing
+        //     into a villager's ground moves the villager.
+        self.herdable_press_pass(&snapshot, &snap_idx);
 
         // 2.5 Grid integrity (M6): separation can push a unit into
         //    a blocked cell (a wall cell, a building footprint) —
@@ -7991,6 +7974,16 @@ impl Sim {
                     && (slot.0, slot.1) != anchor
                 {
                     let _ = self.set_move_order(m.idx, anchor.0, anchor.1);
+                }
+                // MOV-03 stamp: EVERY member whose order stands
+                // after the re-aim carries the formation stamp —
+                // units of one formation do not collide with
+                // each other at all (sk-04 §2). Unlike the MOV-06
+                // stamp below this is not a speed device, so the
+                // cap does not gate it; it shares the batch's
+                // group id, which the counter never repeats.
+                if let Some(o) = self.entities[m.idx].order.as_mut() {
+                    o.formation_id = gid;
                 }
                 // MOV-06 stamp, on the same terms as
                 // `finalize_groups`: only a member the cap
@@ -9110,6 +9103,30 @@ impl Sim {
                 && e.kind == EntityKind::FishingShip
                 && e.task == Task::Gathering
                 && e.task_node == Some(node_id)
+        })
+    }
+
+    /// MOV-03 (2026-11-17): is entity `idx` standing at contact
+    /// with the ship that currently sits on the Fish Trap node
+    /// `node_id` (at `(nx, ny)`)? The ToNode gate's "beside the
+    /// trap" reading for a waiting second ship — see there.
+    fn beside_trap_worker(&self, idx: usize, node_id: u32, nx: I16F16, ny: I16F16) -> bool {
+        let ni = match self.node_index(node_id) {
+            Some(ni) => ni,
+            None => return false,
+        };
+        if !self.nodes[ni].kind.is_trap() {
+            return false;
+        }
+        let me = &self.entities[idx];
+        let my_r = units::spec(me.kind).radius;
+        self.entities.iter().any(|e| {
+            e.id != me.id
+                && !e.dead
+                && e.kind == EntityKind::FishingShip
+                && steer::vec_len(e.pos_x - nx, e.pos_y - ny) <= GATHER_RANGE
+                && steer::vec_len(e.pos_x - me.pos_x, e.pos_y - me.pos_y)
+                    <= my_r + units::spec(e.kind).radius + I16F16::from_bits(16_384)
         })
     }
 
@@ -10809,7 +10826,7 @@ impl Sim {
                 continue;
             }
             // Facts first (immutable borrows), mutation after.
-            let (waiting, counter, target, arrive, my_pos, pre_pos, my_r, domain, owner, atk_idx) = {
+            let (waiting, counter, target, arrive, my_pos, pre_pos, my_r, domain, owner, atk_idx, my_kind, heading_to) = {
                 let e = &self.entities[i];
                 let Some(o) = &e.order else { continue };
                 let pre = snapshot[si];
@@ -10824,6 +10841,13 @@ impl Sim {
                     e.kind.domain(),
                     e.owner,
                     e.attack_target.and_then(|t| self.entity_index(t)),
+                    e.kind,
+                    // The current leg's end: the heading the
+                    // blocker test reads "in front of" against.
+                    o.waypoints
+                        .get(o.wp_index)
+                        .copied()
+                        .unwrap_or((o.target_x, o.target_y)),
                 )
             };
             // Blockers: snapshot neighbours (id order) inside
@@ -10831,13 +10855,35 @@ impl Sim {
             // post-integration positions.
             let mut blockers: Vec<usize> = Vec::new();
             let mut max_sep = I16F16::ZERO;
+            let head = (heading_to.0 - my_pos.0, heading_to.1 - my_pos.1);
             for &j in snap_entities {
                 if j == i || Some(j) == atk_idx {
                     continue;
                 }
                 let n = &self.entities[j];
+                // The herdable-press pair never bumps: a sheep
+                // pressing a villager is the documented
+                // exception at work, not an obstruction.
+                if my_kind == EntityKind::Sheep && n.kind == EntityKind::Villager {
+                    continue;
+                }
+                // Nor does a herdable ever obstruct the other
+                // way: a unit under way herds the sheep (the
+                // herdable yield in the press pass moves it);
+                // it does not bump against it.
+                if n.kind == EntityKind::Sheep && my_kind != EntityKind::Sheep {
+                    continue;
+                }
                 let sep = my_r + units::spec(n.kind).radius;
                 if steer::vec_len(n.pos_x - my_pos.0, n.pos_y - my_pos.1) < sep {
+                    // In front only: a neighbour behind the
+                    // heading cannot be what the unit is
+                    // bumping into (a sheep pressing from
+                    // behind displaces; it does not obstruct).
+                    let rel = (n.pos_x - my_pos.0, n.pos_y - my_pos.1);
+                    if rel.0 * head.0 + rel.1 * head.1 <= I16F16::ZERO {
+                        continue;
+                    }
                     blockers.push(j);
                     if sep > max_sep {
                         max_sep = sep;
@@ -10847,10 +10893,40 @@ impl Sim {
             if !waiting {
                 let (pvx, pvy) = plan_vel[i];
                 let plan_len = steer::vec_len(pvx, pvy);
-                if plan_len > I16F16::ZERO {
+                // The expectation the displacement is measured
+                // against: the plan steering asked for — except
+                // at full contact, where contact projection has
+                // already zeroed the plan precisely BECAUSE the
+                // unit is stopped. There the expectation is the
+                // speed the order would run at (the plans loop's
+                // own computation, group cap included): a unit
+                // steering zeroed is a unit making no progress.
+                let expected = if plan_len > I16F16::ZERO {
+                    plan_len
+                } else {
+                    match &self.entities[i].order {
+                        Some(o) if o.group_id != 0 => {
+                            self.current_speed(i).min(o.group_cap)
+                        }
+                        _ => self.current_speed(i),
+                    }
+                };
+                if expected > I16F16::ZERO {
                     let disp = steer::vec_len(my_pos.0 - pre_pos.0, my_pos.1 - pre_pos.1);
-                    if disp.to_bits() as i64 * 4 >= plan_len.to_bits() as i64 {
-                        // Real progress: the streak ends.
+                    // Real progress: the streak ends — but only
+                    // when the tick ends OUT of contact. A unit
+                    // pressed against a blocker oscillates at
+                    // the separation distance (contact projection
+                    // engages a full step late by construction,
+                    // and the herdable press decays a pressed
+                    // villager back to exactly that distance), so
+                    // a single step INTO the blocker would
+                    // otherwise read as progress and forgive the
+                    // stall forever — the step is the bump, not
+                    // progress past it.
+                    if disp.to_bits() as i64 * 4 >= expected.to_bits() as i64
+                        && blockers.is_empty()
+                    {
                         if counter != 0 {
                             self.entities[i]
                                 .order
@@ -10861,9 +10937,8 @@ impl Sim {
                         continue;
                     }
                 } else {
-                    // Steering asked for no motion without
-                    // completing the order — nothing to bump
-                    // against this tick.
+                    // No speed at all (a zero-speed row): nothing
+                    // to bump against this tick.
                     continue;
                 }
                 if blockers.is_empty() {
@@ -10894,24 +10969,29 @@ impl Sim {
             if !due {
                 continue;
             }
-            // Repath around the blockers' current cells.
-            let mut avoid: Vec<(u32, u32)> = Vec::with_capacity(blockers.len());
-            for &j in &blockers {
-                let n = &self.entities[j];
-                let cell = self.grid.world_to_cell(n.pos_x, n.pos_y);
-                if !avoid.contains(&cell) {
-                    avoid.push(cell);
-                }
+            // The arrival tolerance comes FIRST: if the unit
+            // already stands as close to its target as contact
+            // with the blockers allows, the order is complete —
+            // a route around always exists on open ground, so
+            // checking only after a failed repath left units
+            // detouring forever around a bystander who stands
+            // beside their target point (the group-converging-
+            // on-one-point case this tolerance exists for).
+            let d_target = steer::vec_len(target.0 - my_pos.0, target.1 - my_pos.1);
+            if !blockers.is_empty() && d_target <= max_sep + arrive {
+                let e = &mut self.entities[i];
+                e.order = None;
+                e.vel_x = I16F16::ZERO;
+                e.vel_y = I16F16::ZERO;
+                continue;
             }
+            // Repath around the blockers.
             let gates = if domain == crate::grid::Domain::Land {
                 self.gate_cells_of(owner)
             } else {
                 Vec::new()
             };
-            match self
-                .grid
-                .find_path_avoiding_for(domain, my_pos, target, &gates, &avoid)
-            {
+            match self.repath_around(my_pos, target, domain, &gates, &blockers, my_r) {
                 Some(wps) if !wps.is_empty() => {
                     let o = self.entities[i]
                         .order
@@ -10942,6 +11022,237 @@ impl Sim {
                     }
                 }
             }
+        }
+    }
+
+    /// MOV-03: route an order around its blockers. Two attempts,
+    /// in order:
+    ///
+    /// 1. A continuous-space detour around the widest blocker:
+    ///    a waypoint beside the pivot blocker at (its separation
+    ///    distance + 1 world unit), on the side away from the
+    ///    blocker's offset from the heading (dead-on → the
+    ///    heading's left, deterministically), then ordinary
+    ///    terrain paths me → detour → target. This is the common
+    ///    case, and it exists because the cellular attempt below
+    ///    cannot express it: a traveller stopped at contact
+    ///    usually stands INSIDE the blocker's own cell, and a
+    ///    cell-avoiding A* then routes its first leg straight
+    ///    through the blocker it was avoiding.
+    /// 2. The cellular fallback: A* with the blockers' current
+    ///    cells as dynamic obstacles (`find_path_avoiding_for`)
+    ///    — the right shape when the traveller stopped outside
+    ///    the blockers' cells (a rank of units reads as a wall
+    ///    of cells) and for the waiting retry.
+    ///
+    /// `None` when neither produces a route: the caller waits
+    /// (or completes on the arrival tolerance).
+    fn repath_around(
+        &self,
+        my_pos: (I16F16, I16F16),
+        target: (I16F16, I16F16),
+        domain: crate::grid::Domain,
+        gates: &[(u32, u32)],
+        blockers: &[usize],
+        my_r: I16F16,
+    ) -> Option<Vec<(I16F16, I16F16)>> {
+        // The blockers' cells, avoided by every route this
+        // function builds (the detour legs included): a leg
+        // routed through a blocker's cell hands the traveller a
+        // waypoint inside that blocker's separation radius —
+        // physically unreachable — and the bump/repath cycle
+        // then repeats the identical route forever (measured:
+        // a Scout stalled 120,000 ticks on one sheep standing
+        // in a forest corridor). My own cell is excluded (I may
+        // be standing in the blocker's cell myself), and so is
+        // the detour point's cell when a detour is attempted.
+        let mut avoid: Vec<(u32, u32)> = Vec::with_capacity(blockers.len());
+        let my_cell = self.grid.world_to_cell(my_pos.0, my_pos.1);
+        for &j in blockers {
+            let n = &self.entities[j];
+            let cell = self.grid.world_to_cell(n.pos_x, n.pos_y);
+            if cell != my_cell && !avoid.contains(&cell) {
+                avoid.push(cell);
+            }
+        }
+        // 1. The detour around the widest blocker.
+        let heading = (target.0 - my_pos.0, target.1 - my_pos.1);
+        let hlen = steer::vec_len(heading.0, heading.1);
+        if hlen > I16F16::ZERO && !blockers.is_empty() {
+            let mut pivot = blockers[0];
+            let mut pivot_sep = I16F16::ZERO;
+            for &j in blockers {
+                let sep = my_r + units::spec(self.entities[j].kind).radius;
+                if sep > pivot_sep {
+                    pivot_sep = sep;
+                    pivot = j;
+                }
+            }
+            let p = &self.entities[pivot];
+            let (hx, hy) = (heading.0 / hlen, heading.1 / hlen);
+            // The heading's left perpendicular.
+            let perp = (-hy, hx);
+            let b = (p.pos_x - my_pos.0, p.pos_y - my_pos.1);
+            let leftness = b.0 * perp.0 + b.1 * perp.1;
+            // Detour on the side away from the blocker; dead-on
+            // (leftness == 0) takes the left, deterministically.
+            let preferred = if leftness > I16F16::ZERO {
+                -I16F16::ONE
+            } else {
+                I16F16::ONE
+            };
+            let reach = pivot_sep + I16F16::ONE; // +1 world unit of air
+            for side in [preferred, -preferred] {
+                let detour = (
+                    p.pos_x + perp.0 * reach * side,
+                    p.pos_y + perp.1 * reach * side,
+                );
+                // The detour point must be standable ground for
+                // the domain and clear of every blocker.
+                let (cx, cy) = self.grid.world_to_cell(detour.0, detour.1);
+                if self.grid.is_blocked_for(domain, cx, cy) {
+                    continue;
+                }
+                let clear = blockers.iter().all(|&j| {
+                    let n = &self.entities[j];
+                    steer::vec_len(n.pos_x - detour.0, n.pos_y - detour.1)
+                        >= my_r + units::spec(n.kind).radius + I16F16::from_bits(32_768)
+                });
+                if !clear {
+                    continue;
+                }
+                let mut leg_avoid = avoid.clone();
+                let detour_cell = self.grid.world_to_cell(detour.0, detour.1);
+                leg_avoid.retain(|&c| c != detour_cell);
+                let legs = (
+                    self.grid
+                        .find_path_avoiding_for(domain, my_pos, detour, gates, &leg_avoid)
+                        .or_else(|| {
+                            self.grid.find_path_through_for(domain, my_pos, detour, gates)
+                        }),
+                    self.grid
+                        .find_path_avoiding_for(domain, detour, target, gates, &leg_avoid)
+                        .or_else(|| {
+                            self.grid.find_path_through_for(domain, detour, target, gates)
+                        }),
+                );
+                if let (Some(mut leg1), Some(leg2)) = legs {
+                    leg1.extend(leg2);
+                    return Some(leg1);
+                }
+            }
+        }
+        // 2. The cellular fallback.
+        self.grid
+            .find_path_avoiding_for(domain, my_pos, target, gates, &avoid)
+    }
+
+    /// MOV-03 herdable press and yield (movement phase 2.3):
+    /// the documented displacements in DE's unit collision, all
+    /// of them herdable (official Update 153015: "Villagers can
+    /// no longer be pushed by herdable animals as easily" —
+    /// attenuated, not removed; the same update's patch notes
+    /// are the source for sheep traffic displacing villagers at
+    /// all). Two halves, one system: sheep traffic displaces a
+    /// villager who is not under way (the press, by the
+    /// `separation` half-overlap), and a sheep pressed by a unit
+    /// that IS under way yields out of its ground by the full
+    /// separation (the yield — herding). Both are computed out
+    /// of the tick-start snapshot — the same frame the sheep's
+    /// own motion was planned in — and applied through the same
+    /// terrain slide as ordinary movement. The magnitudes are
+    /// the pre-MOV-03 system's: DE publishes no number for them.
+    /// Nothing else in the sim displaces a unit this way:
+    /// player units bump and repath (the bump pass), they never
+    /// push each other.
+    fn herdable_press_pass(&mut self, snapshot: &[steer::SnapshotEntry], snap_idx: &[usize]) {
+        let mut pushes: Vec<(usize, I16F16, I16F16)> = Vec::new();
+        for (i, e) in self.entities.iter().enumerate() {
+            if e.dead || e.is_contained() || e.kind != EntityKind::Villager {
+                continue;
+            }
+            // A villager under way is the one pressing: the
+            // herdable yield below governs that pair (he herds
+            // the sheep). The press is for the documented case —
+            // sheep traffic reaching a villager who is at work
+            // or standing (Update 153015).
+            if e.order.is_some() {
+                continue;
+            }
+            let si = snap_idx[i];
+            if si == usize::MAX {
+                continue;
+            }
+            // Local slice: the villager at index 0, then every
+            // herdable in snapshot order — `separation` over it
+            // sums herdable neighbours only.
+            let mut local: Vec<steer::SnapshotEntry> = Vec::with_capacity(9);
+            local.push(snapshot[si]);
+            for entry in snapshot {
+                if entry.3 == EntityKind::Sheep {
+                    local.push(*entry);
+                }
+            }
+            if local.len() < 2 {
+                continue;
+            }
+            let (sx, sy) = steer::separation(&local, 0);
+            if sx != I16F16::ZERO || sy != I16F16::ZERO {
+                pushes.push((i, sx, sy));
+            }
+        }
+        // The herdable yield: a sheep pressed by a unit that is
+        // under way is displaced out of that unit's ground —
+        // herding, the other half of the §A.5.1 herdable
+        // collision system. The sheep takes the pair's FULL
+        // separation (separation() returns the half share a
+        // pair splits; the pressing unit does not stop, so it
+        // never takes its half), summed over the units under
+        // way in snapshot order. A standing unit herds nothing:
+        // a sheep that wanders up to one simply stops against
+        // it (contact projection), and a sheep that reaches a
+        // standing villager is the press case above.
+        for (i, e) in self.entities.iter().enumerate() {
+            if e.dead || e.is_contained() || e.kind != EntityKind::Sheep {
+                continue;
+            }
+            let si = snap_idx[i];
+            if si == usize::MAX {
+                continue;
+            }
+            let mut local: Vec<steer::SnapshotEntry> = Vec::with_capacity(9);
+            local.push(snapshot[si]);
+            for (k, other) in self.entities.iter().enumerate() {
+                if k == i
+                    || other.dead
+                    || other.is_contained()
+                    || other.kind == EntityKind::Sheep
+                    || other.order.is_none()
+                {
+                    continue;
+                }
+                let oi = snap_idx[k];
+                if oi != usize::MAX {
+                    local.push(snapshot[oi]);
+                }
+            }
+            if local.len() < 2 {
+                continue;
+            }
+            let (sx, sy) = steer::separation(&local, 0);
+            if sx != I16F16::ZERO || sy != I16F16::ZERO {
+                pushes.push((i, sx + sx, sy + sy));
+            }
+        }
+        if pushes.is_empty() {
+            return;
+        }
+        let grid = &self.grid;
+        for (i, sx, sy) in pushes {
+            let e = &mut self.entities[i];
+            let (fx, fy) = slide_move(grid, e.pos_x, e.pos_y, sx, sy);
+            e.pos_x = fx;
+            e.pos_y = fy;
         }
     }
 
@@ -11441,13 +11752,28 @@ impl Sim {
                 // the trap frees up (the worker filled up, left,
                 // or the trap depleted).
                 let trap_busy = self.trap_worker_busy(node_id, self.entities[idx].id);
-                if (d <= GATHER_RANGE || at_tree_stand || beside_shore_fish) && !trap_busy {
+                // MOV-03 (2026-11-17): standing at contact with
+                // the trap's worker counts as beside the trap.
+                // GATHER_RANGE (2.5) is smaller than a Fishing
+                // Ship pair's separation distance (3.2), so a
+                // waiting ship can never close within gather
+                // range of the node while the worker sits on it.
+                // Under displacement separation it could —
+                // its approach shoved the worker off the node
+                // point (measured on the pristine base: worker
+                // displaced 0.73, waiter admitted at 2.47) —
+                // which is exactly the pushing MOV-03 removed.
+                // The waiter's station is the worker's hull.
+                let beside_trap_worker = self.beside_trap_worker(idx, node_id, nx, ny);
+                if (d <= GATHER_RANGE || at_tree_stand || beside_shore_fish || beside_trap_worker)
+                    && !trap_busy
+                {
                     let e = &mut self.entities[idx];
                     e.task = Task::Gathering;
                     e.order = None;
                     e.vel_x = I16F16::ZERO;
                     e.vel_y = I16F16::ZERO;
-                } else if d <= GATHER_RANGE && trap_busy {
+                } else if (d <= GATHER_RANGE || beside_trap_worker) && trap_busy {
                     // Holding beside the worked trap: no order,
                     // no motion — the arrival test above re-runs
                     // every tick and admits this ship the moment
@@ -13920,6 +14246,53 @@ fn tribute_fee_whole(amount: i32, pct: i32) -> i64 {
 }
 
 /// Clamp a world coordinate into [-99, 99] without floats.
+/// One tick of continuous motion with the axis slides: the full
+/// step, then each axis alone, vetoed first by tree cells (M7 —
+/// the seed-109 woodcutter stall: sliding along the blocked axis
+/// rounds the corner into the standing cell; only the tree layer
+/// slides, buildings and water keep the M6 integrity teleport)
+/// and then by cliff borders (MAP-07: continuous movement may
+/// not cross a border its A* path would never cross). Shared by
+/// the movement integration and the MOV-03 herdable press pass,
+/// so a displaced villager obeys exactly the terrain rules a
+/// moving one does.
+fn slide_move(
+    grid: &crate::grid::Grid,
+    ox: I16F16,
+    oy: I16F16,
+    vx: I16F16,
+    vy: I16F16,
+) -> (I16F16, I16F16) {
+    let (nx, ny) = (clamp_pos(ox + vx), clamp_pos(oy + vy));
+    let in_tree = |x: I16F16, y: I16F16| {
+        let (cx, cy) = grid.world_to_cell(x, y);
+        grid.is_node_blocked(cx, cy)
+    };
+    let (fx, fy) = if !in_tree(nx, ny) {
+        (nx, ny)
+    } else if !in_tree(nx, oy) {
+        (nx, oy)
+    } else if !in_tree(ox, ny) {
+        (ox, ny)
+    } else {
+        (ox, oy)
+    };
+    let crosses_cliff = |x: I16F16, y: I16F16| {
+        let a = grid.world_to_cell(ox, oy);
+        let b = grid.world_to_cell(x, y);
+        a != b && grid.move_crosses_cliff(a, b)
+    };
+    if !crosses_cliff(fx, fy) {
+        (fx, fy)
+    } else if !crosses_cliff(fx, oy) {
+        (fx, oy)
+    } else if !crosses_cliff(ox, fy) {
+        (ox, fy)
+    } else {
+        (ox, oy)
+    }
+}
+
 fn clamp_pos(v: I16F16) -> I16F16 {
     if v < MIN_POS {
         MIN_POS

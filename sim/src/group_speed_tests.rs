@@ -167,7 +167,14 @@ fn group_arrives_together_within_a_stated_tolerance() {
         max_gap <= 10.0,
         "the group strung out en route: max separation {max_gap:.1} wu"
     );
-    assert!(dist(pos(&sim, 900), dest) < 1.5);
+    // MOV-03 re-pin (2026-11-17): the Knight's bound was 1.5
+    // under the old separation equilibrium. The Knight follows
+    // (staged 8 wu behind); with displacement removed it walks
+    // to contact with the Militia (pair diameter 1.8) and its
+    // order completes on the bump pass's arrival tolerance
+    // (max_sep + arrive = 2.8) — the DE end-state for two units
+    // on one point. The leader's 1.5 stands.
+    assert!(dist(pos(&sim, 900), dest) < 2.8);
     assert!(dist(pos(&sim, 901), dest) < 1.5);
 }
 

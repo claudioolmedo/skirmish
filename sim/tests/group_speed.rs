@@ -201,7 +201,16 @@ fn group_move_clamps_the_scout_to_the_villager() {
     );
     assert!(max_gap <= 10.0, "the pair strung out: max gap {max_gap:.1} wu");
     assert!(dist(pos(&sim, scout), end) < 1.5);
-    assert!(dist(pos(&sim, vil), end) < 1.5);
+    // MOV-03 re-pin (2026-11-17): the villager's bound was 1.5
+    // under the old separation equilibrium — the follower
+    // settled ~2.0 behind the leader yet stayed pulled toward
+    // the point. With displacement removed, the follower walks
+    // to contact with the leader (pair diameter 1.8), stalls,
+    // and its order completes on the bump pass's arrival
+    // tolerance (max_sep + arrive = 2.8): it ends at contact
+    // distance from the leader, who stands within reach of the
+    // point — the DE end-state for two units on one point.
+    assert!(dist(pos(&sim, vil), end) < 2.8);
 }
 
 #[test]

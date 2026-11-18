@@ -796,13 +796,53 @@ other by force. In the reference engine a unit that bumps into another
 stops and repaths around it; crowding is managed behaviorally, not
 physically.
 *Source:* Pottinger, "Coordinated Unit Movement"; DE pathfinding talk
-(2025), both via OPENAGE-RESEARCH §2.2. · *Impl:* **documented divergence**
-— Skirmish II uses displacement-based separation (units shove each other
-aside smoothly; even idle units are shovable, which prevents head-on
-deadlocks found in M2 testing). The M3 hybrid narrows the gap: separation
-for travel, suppressed while a melee unit is engaged (MOV-04). The
-divergence and its reason live in `steer.rs` comments. · *Status:*
-**DIFFERS** (deliberate; see OPENAGE-RESEARCH §4 flag 1).
+(2025), both via OPENAGE-RESEARCH §2.2; closed research sk-04
+(2026-11-16): Klingers (Engineering Director, Forgotten Empires),
+Meeting C++ 2025 — "Units bump into others, stop and repath around. No
+pushing allowed"; official Update 153015 (herdables DO displace
+villagers, attenuated not removed; a villager trapped by units cannot
+escape) and Update 81058 (collision → a correct re-path, never a
+displacement). · *Impl:* shipped 2026-11-17 (MOV-03 package, two
+phases). Steering no longer adds a displacement term: `contact_project`
+(`steer.rs`) removes the component of a unit's own velocity that
+points into a neighbour inside the pair's MOV-05 separation distance —
+the unit stops at contact and slides on its tangential remainder, and
+nobody is displaced; orderless units hold their ground (the M2 `shove`
+is deleted). A bump pass (movement phase 2.25) counts an ordered
+unit's near-zero-progress ticks against in-front neighbours; a full
+window repaths the order around the blockers — first via a
+continuous-space detour point beside the widest blocker, then a
+cellular A* with the blockers' cells as dynamic obstacles
+(`grid::find_path_avoiding_for`) — the detour's legs route with the
+blockers' cells avoided too, since a leg through a blocker's cell
+hands the traveller a waypoint inside its separation radius,
+physically unreachable, and the bump cycle repeats it forever —
+a failed repath parks the unit in a retrying wait, and a target
+point itself occupied inside the arrival tolerance completes the
+order instead. Two carve-outs ride inside: the herdable collision
+system, in both its halves — sheep traffic displaces a villager
+who is not under way (the press: the old `separation` half-overlap
+against herdable neighbours only), and a sheep pressed by a unit
+that IS under way yields out of its ground by the full separation
+(the yield — herding; contact projection and the bump pass never
+treat a sheep as an obstruction, since a sheep that could never
+be herded would seal a one-cell chokepoint forever, contradicting
+Update 81058's correct-path outcome — DE publishes no magnitude
+for either half; the values are the pre-MOV-03 system's), and
+units sharing one formation stamp do not collide at all (sk-04 §2;
+`finalize_formations` stamps every member). Deer "pushing" stays the
+AI-07 flee mechanism and foundation displacement stays the placement
+rule — separate mechanisms, untouched. Coincident-pair separation is
+a separate package, explicitly out of scope. The bump window (30
+ticks) and retry interval (60) are feel values: DE publishes no
+numbers for them (the DE team's own thread concedes the choice is
+open tuning), recorded as such in `steer.rs`, never as DE facts.
+Pinned by `mov03_tests` (standing unit bit-identical while the
+traveller repaths and arrives; head-on pair; the Update-153015 trap;
+the sheep exception and its herding mirror; the formation pass-through) and
+the re-choreographed MOV-05 approach-stop probes. · *Status:*
+**MATCHES** (from DIFFERS — the documented divergence is closed;
+OPENAGE-RESEARCH §4 flag 1 resolved).
 
 **MOV-04 — Overlap is tolerated in combat and formations.** Perfect
 non-overlap is impossible in a crowded RTS and the reference does not

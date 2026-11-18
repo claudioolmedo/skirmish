@@ -17,11 +17,17 @@
 //! the Petard (this table's own INFANTRY row) take the foot line.
 //! Scale: 1 tile = 4 world units; bits = tiles × 262 144.
 //!
-//! The behavioural probes spawn orderless pairs 1.0 world unit
-//! apart and let the mutual shove (steer.rs, M2) settle them:
-//! a pair comes to rest at exactly the sum of its two radii, so
-//! the resting distance IS the table value, observed through
-//! movement rather than read off the row.
+//! The behavioural probes originally spawned orderless pairs
+//! 1.0 world unit apart and let the mutual shove (steer.rs, M2)
+//! settle them to the sum of their radii. MOV-03 (2026-11-17)
+//! removed the shove — DE units never displace each other — so
+//! the probes were re-choreographed as approach-stop pairs: an
+//! ordered traveller walks straight at a standing blocker and
+//! contact stops it at the pair's diameter, so the closest
+//! approach IS the table value, observed through movement
+//! rather than read off the row — and the blocker's resting
+//! place, bit-identical to its spawn, pins MOV-03 at the same
+//! time.
 
 use crate::entity::{Entity, EntityKind, OWNER_PLAYER};
 use crate::steer::vec_len;
@@ -141,39 +147,75 @@ fn open_water_spot(sim: &Sim) -> (I16F16, I16F16) {
     panic!("seed 42: no open water spot");
 }
 
-/// Spawn two orderless units of `kind` 1.0 world unit apart
-/// around `centre`, run the sim, and return the pair's resting
-/// distance in raw bits.
-fn settled_pair_distance(kind: EntityKind, centre: (I16F16, I16F16), ticks: u64) -> i32 {
+/// MOV-03-era probe: a standing blocker of `kind` at `blocker`,
+/// a traveller of the same kind ordered from `from` straight
+/// through the blocker to `to`. Returns (the pair's closest
+/// approach in bits over the whole run, the blocker's total
+/// displacement in bits, whether the traveller's order
+/// completed). Contact must stop the traveller at the pair's
+/// diameter; the blocker must never move at all.
+fn approach_stop(
+    kind: EntityKind,
+    blocker: (I16F16, I16F16),
+    from: (I16F16, I16F16),
+    to: (I16F16, I16F16),
+) -> (i32, i32, bool) {
     let mut sim = Sim::new(42);
-    let half = I16F16::from_bits(32_768); // 0.5 world units
-    sim.entities.push(Entity::spawned(
-        9_001,
-        kind,
-        OWNER_PLAYER,
-        centre.0 - half,
-        centre.1,
-    ));
+    sim.entities.push(Entity::spawned(9_001, kind, OWNER_PLAYER, from.0, from.1));
     sim.entities.push(Entity::spawned(
         9_002,
         kind,
         OWNER_PLAYER,
-        centre.0 + half,
-        centre.1,
+        blocker.0,
+        blocker.1,
     ));
-    for _ in 0..ticks {
+    let ti = sim.entities().iter().position(|e| e.id == 9_001).unwrap();
+    assert!(
+        sim.set_move_order(ti, to.0, to.1),
+        "{kind:?} traveller's order refused"
+    );
+    let mut min_d = i32::MAX;
+    let mut arrived = false;
+    for _ in 0..2400 {
         sim.tick();
+        let (a, b) = (ent(&sim, 9_001), ent(&sim, 9_002));
+        let d = vec_len(b.pos_x - a.pos_x, b.pos_y - a.pos_y).to_bits();
+        min_d = min_d.min(d);
+        if a.order.is_none() {
+            arrived = true;
+            break;
+        }
     }
-    let (a, b) = (ent(&sim, 9_001), ent(&sim, 9_002));
-    vec_len(b.pos_x - a.pos_x, b.pos_y - a.pos_y).to_bits()
+    let b = ent(&sim, 9_002);
+    let disp = vec_len(b.pos_x - blocker.0, b.pos_y - blocker.1).to_bits();
+    (min_d, disp, arrived)
 }
 
-fn assert_settles(kind: EntityKind, centre: (I16F16, I16F16), expected_bits: i32) {
-    let measured = settled_pair_distance(kind, centre, 240);
+fn assert_approach_stops(
+    kind: EntityKind,
+    blocker: (I16F16, I16F16),
+    from: (I16F16, I16F16),
+    to: (I16F16, I16F16),
+    expected_bits: i32,
+) {
+    let (min_d, disp, arrived) = approach_stop(kind, blocker, from, to);
+    assert!(arrived, "{kind:?} traveller never arrived past its blocker");
+    assert_eq!(disp, 0, "{kind:?} blocker was displaced by {disp} bits (MOV-03)");
     assert!(
-        (measured - expected_bits).abs() <= 8,
-        "{kind:?} pair settled at {measured} bits, expected {expected_bits} (sum of radii)",
+        min_d >= expected_bits - 8_192,
+        "{kind:?} pair closed to {min_d} bits, inside the {expected_bits} diameter"
     );
+    assert!(
+        min_d <= expected_bits + 32_768,
+        "{kind:?} pair never reached contact ({min_d} bits vs {expected_bits})"
+    );
+}
+
+/// Land geometry: blocker at the spot, traveller 6 world units
+/// west, target 6 east — a straight through-run in the open.
+fn land_run(spot: (I16F16, I16F16)) -> ((I16F16, I16F16), (I16F16, I16F16), (I16F16, I16F16)) {
+    let six = I16F16::from_num(6);
+    (spot, (spot.0 - six, spot.1), (spot.0 + six, spot.1))
 }
 
 #[test]
@@ -182,7 +224,8 @@ fn foot_pairs_settle_at_the_documented_foot_diameter() {
     let spot = clear_land_spot(&sim);
     drop(sim);
     // Two villagers: 2 × 0.8 = 1.6 world units (was 2.0).
-    assert_settles(EntityKind::Villager, spot, 104_858);
+    let (b, f, t) = land_run(spot);
+    assert_approach_stops(EntityKind::Villager, b, f, t, 104_858);
 }
 
 #[test]
@@ -192,7 +235,8 @@ fn cavalry_pairs_keep_the_documented_cavalry_diameter() {
     drop(sim);
     // Two knights: 2 × 1.0 = 2.0 world units — the control family,
     // unchanged by MOV-05.
-    assert_settles(EntityKind::Knight, spot, 131_072);
+    let (b, f, t) = land_run(spot);
+    assert_approach_stops(EntityKind::Knight, b, f, t, 131_072);
 }
 
 #[test]
@@ -201,9 +245,11 @@ fn siege_pairs_settle_at_the_documented_siege_diameters() {
     let spot = clear_land_spot(&sim);
     drop(sim);
     // Two rams: 2 × 1.8 = 3.6 world units (was 2.4).
-    assert_settles(EntityKind::BatteringRam, spot, 235_930);
+    let (b, f, t) = land_run(spot);
+    assert_approach_stops(EntityKind::BatteringRam, b, f, t, 235_930);
     // Two scorpions: 2 × 2.0 = 4.0 world units (was 2.4).
-    assert_settles(EntityKind::Scorpion, spot, 262_144);
+    let (b, f, t) = land_run(spot);
+    assert_approach_stops(EntityKind::Scorpion, b, f, t, 262_144);
 }
 
 #[test]
@@ -211,51 +257,80 @@ fn warship_pairs_settle_at_the_documented_ship_diameter() {
     let sim = Sim::new(42);
     let spot = open_water_spot(&sim);
     drop(sim);
-    // Two galleys: 2 × 2.0 = 4.0 world units (was 3.2).
-    assert_settles(EntityKind::Galley, spot, 262_144);
+    // Two galleys: 2 × 2.0 = 4.0 world units (was 3.2). The run
+    // follows the pond's row: one cell west to one cell east of
+    // the deep centre the spot helper found.
+    let cell = I16F16::from_num(4);
+    let (b, f, t) = (spot, (spot.0 - cell, spot.1), (spot.0 + cell, spot.1));
+    assert_approach_stops(EntityKind::Galley, b, f, t, 262_144);
 }
 
 #[test]
 fn villager_clusters_pack_to_foot_spacing_not_tighter() {
-    // Four villagers spawned in a tight knot (0.4 world units
-    // from the centre) must end no closer than the foot diameter
-    // allows: the woodline bunch, in miniature.
+    // Four villagers in a line at 2.0 spacing, all ordered the
+    // same 12 world units east (parallel orders, no formation):
+    // the woodline bunch in motion. MOV-03 re-choreography: the
+    // original knot probe leaned on the shove to spread the
+    // knot; with displacement gone the invariant that remains —
+    // and the one DE promises — is that moving villagers never
+    // CLOSE below the foot diameter: contact, not pushing,
+    // keeps the spacing.
     let mut sim = Sim::new(42);
     let spot = clear_land_spot(&sim);
-    let off = I16F16::from_bits(26_214); // 0.4 world units
+    let two = I16F16::from_num(2);
+    // The line starts 6 west of the spot and walks 8 east, so
+    // spawns and targets all stay inside the spot's cleared
+    // 5x5 cells.
     let mut id = 9_100;
-    for (dx, dy) in [(-1, -1), (-1, 1), (1, -1), (1, 1)] {
+    for k in 0..4 {
         sim.entities.push(Entity::spawned(
             id,
             EntityKind::Villager,
             OWNER_PLAYER,
-            spot.0 + I16F16::from_bits(off.to_bits() * dx),
-            spot.1 + I16F16::from_bits(off.to_bits() * dy),
+            spot.0 - I16F16::from_num(6) + two * I16F16::from_num(k),
+            spot.1,
         ));
         id += 1;
     }
-    for _ in 0..240 {
-        sim.tick();
+    for k in 0..4 {
+        let idx = sim
+            .entities()
+            .iter()
+            .position(|e| e.id == 9_100 + k)
+            .unwrap();
+        let tx = spot.0 - I16F16::from_num(6) + two * I16F16::from_num(k as i32) + I16F16::from_num(8);
+        assert!(sim.set_move_order(idx, tx, spot.1));
     }
-    let pts: Vec<(i32, i32)> = (9_100..9_104)
-        .map(|i| {
-            let e = ent(&sim, i);
-            (e.pos_x.to_bits(), e.pos_y.to_bits())
-        })
-        .collect();
-    for a in 0..4 {
-        for b in (a + 1)..4 {
-            let d = vec_len(
-                I16F16::from_bits(pts[b].0 - pts[a].0),
-                I16F16::from_bits(pts[b].1 - pts[a].1),
-            )
-            .to_bits();
-            assert!(
-                d >= 104_858 - 8,
-                "villagers {a} and {b} ended {d} bits apart, inside the 1.6-unit foot diameter",
-            );
+    let mut min_pair = i32::MAX;
+    for _ in 0..1200 {
+        sim.tick();
+        let pts: Vec<(i32, i32)> = (9_100..9_104)
+            .map(|i| {
+                let e = ent(&sim, i);
+                (e.pos_x.to_bits(), e.pos_y.to_bits())
+            })
+            .collect();
+        for a in 0..4 {
+            for b in (a + 1)..4 {
+                let d = vec_len(
+                    I16F16::from_bits(pts[b].0 - pts[a].0),
+                    I16F16::from_bits(pts[b].1 - pts[a].1),
+                )
+                .to_bits();
+                min_pair = min_pair.min(d);
+            }
+        }
+        if (9_100..9_104).all(|i| ent(&sim, i).order.is_none()) {
+            break;
         }
     }
+    assert!(
+        (9_100..9_104).all(|i| ent(&sim, i).order.is_none()),
+        "the line never arrived"
+    );
+    assert!(
+        min_pair >= 104_858 - 8_192,
+        "villagers closed to {min_pair} bits, inside the 1.6-unit foot diameter",
+    );
 }
-
 

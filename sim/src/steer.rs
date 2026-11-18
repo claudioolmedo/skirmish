@@ -5,6 +5,7 @@
 //! as the rest of the sim. Distances are computed from raw fixed-point bits
 //! with a hand-rolled integer square root.
 
+use crate::entity::EntityKind;
 use fixed::types::I16F16;
 
 /// The M1/M2 uniform speed in world units per tick. Steering takes
@@ -51,9 +52,13 @@ pub const BUMP_WINDOW_TICKS: u32 = 30;
 /// exists; 60 ticks (1 s) by feel.
 pub const BUMP_REPATH_INTERVAL: u32 = 60;
 
-/// One steering-snapshot entry: position + collision radius. The sim
-/// builds the snapshot from the id-ordered entity list each tick.
-pub type SnapshotEntry = (I16F16, I16F16, I16F16);
+/// One steering-snapshot entry: position, collision radius, kind
+/// and the entity's formation stamp (0 = not moving as a
+/// formation). The sim builds the snapshot from the id-ordered
+/// entity list each tick. MOV-03 reads the last two: units of one
+/// formation do not collide with each other at all (sk-04 §2),
+/// and the herdable-press carve-out keys on kinds.
+pub type SnapshotEntry = (I16F16, I16F16, I16F16, EntityKind, u32);
 /// Separation displacement factor: 0.5 = 32768/65536 raw bits.
 ///
 /// Separation is *displacement*-based: a unit moves half the overlap per
@@ -98,19 +103,25 @@ pub fn vec_len(dx: I16F16, dy: I16F16) -> I16F16 {
 /// (MOV-05); for two standard 1.0-radius units it is the historical
 /// `SEPARATION_RADIUS` (2.0).
 ///
-/// The sim also applies it to entities with *no* move order (M2, see
-/// `shove`): a stationary villager must be shovable. If only ordered
-/// entities reacted, an idle unit standing on another's path could cancel
-/// its desired velocity exactly — a perfect head-on equilibrium, i.e. a
-/// deadlock. With mutual shove, the blocker slides aside (half the
-/// overlap per tick) and the traveler gets through.
+/// MOV-03 (2026-11-17): this displacement term is NO LONGER the
+/// steering separation — DE has no push-through between player
+/// units (sk-04: standing units are solid; a collision's outcome
+/// is a repath, never a displacement), so steering now uses
+/// `contact_project` and orderless units hold their ground. The
+/// term survives for exactly one documented carve-out: herdables
+/// DO displace villagers (official Update 153015 — sheep traffic
+/// pushes villagers; the update only attenuated it). The sim's
+/// herdable press pass applies this same half-overlap
+/// displacement to a villager, summed over herdable neighbours
+/// only; the magnitude is the pre-MOV-03 system's — DE publishes
+/// no number for it.
 pub fn separation(positions: &[SnapshotEntry], me: usize) -> (I16F16, I16F16) {
-    let (px, py, my_r) = positions[me];
+    let (px, py, my_r, _, _) = positions[me];
     let mut vx = I16F16::ZERO;
     let mut vy = I16F16::ZERO;
     // Iteration is over the id-ordered snapshot, so the sum is
     // deterministic.
-    for (j, &(ox, oy, other_r)) in positions.iter().enumerate() {
+    for (j, &(ox, oy, other_r, _, _)) in positions.iter().enumerate() {
         if j == me {
             continue;
         }
@@ -133,15 +144,79 @@ pub fn separation(positions: &[SnapshotEntry], me: usize) -> (I16F16, I16F16) {
     (vx, vy)
 }
 
-/// The velocity an entity with *no* move order gets this tick: just the
-/// separation shove, clamped to the entity's own speed. Standing units
-/// are nudged aside by neighbors instead of acting as immovable walls.
-pub fn shove(positions: &[SnapshotEntry], me: usize, max_speed: I16F16) -> (I16F16, I16F16) {
-    let (mut vx, mut vy) = separation(positions, me);
-    let vlen = vec_len(vx, vy);
-    if vlen > max_speed {
-        vx = vx / vlen * max_speed;
-        vy = vy / vlen * max_speed;
+/// MOV-03 contact projection: the steering-side half of "no
+/// pushing". For each neighbour already inside the pair's
+/// separation distance (MOV-05: the sum of the two table radii),
+/// remove the component of MY velocity that points INTO the
+/// neighbour — I stop at contact and keep whatever tangential
+/// component remains (sliding around a single blocker), and
+/// nobody is ever displaced: the neighbour's velocity is not
+/// mine to change. Applied per neighbour in snapshot order;
+/// each projection is an orthogonal decomposition, so the
+/// result never exceeds the incoming speed and never reverses
+/// a component the order asked for.
+///
+/// Skips, both documented (sk-04): a pair sharing one formation
+/// stamp does not collide at all (units in the same formation
+/// do not collide with each other in DE); and a herdable
+/// pressing a villager is not projected — the villager yields
+/// through the herdable press pass instead (Update 153015).
+/// A coincident pair (d == 0) has no contact normal and is
+/// skipped: separating coincident spawns is its own package,
+/// not MOV-03.
+pub fn contact_project(
+    positions: &[SnapshotEntry],
+    me: usize,
+    my_formation: u32,
+    mut vx: I16F16,
+    mut vy: I16F16,
+) -> (I16F16, I16F16) {
+    if vx == I16F16::ZERO && vy == I16F16::ZERO {
+        return (vx, vy);
+    }
+    let (px, py, my_r, my_kind, _) = positions[me];
+    for (j, &(ox, oy, other_r, other_kind, other_formation)) in positions.iter().enumerate() {
+        if j == me {
+            continue;
+        }
+        if my_formation != 0 && other_formation == my_formation {
+            continue; // same formation: no collision at all
+        }
+        if my_kind == EntityKind::Sheep && other_kind == EntityKind::Villager {
+            continue; // the herdable press: the villager yields
+        }
+        if other_kind == EntityKind::Sheep && my_kind != EntityKind::Sheep {
+            // The herdable yield: a unit under way does not stop
+            // for a sheep — it herds it. The press pass moves the
+            // sheep out of the unit's ground (the other half of
+            // the §A.5.1 herdable collision system: sheep traffic
+            // displaces villagers, and units herd sheep — a
+            // sheep that never yielded would make the documented
+            // collision outcome, a correct path (Update 81058),
+            // impossible wherever a sheep stands in a chokepoint).
+            continue;
+        }
+        let sep_r = my_r + other_r;
+        let sep_r_bits = sep_r.to_bits() as i64;
+        let sep_r2 = sep_r_bits * sep_r_bits;
+        let sx = px - ox;
+        let sy = py - oy;
+        let sxb = sx.to_bits() as i64;
+        let syb = sy.to_bits() as i64;
+        let d2 = sxb * sxb + syb * syb;
+        if d2 == 0 || d2 >= sep_r2 {
+            continue;
+        }
+        let d = I16F16::from_bits(isqrt(d2 as u64) as i32);
+        // Unit normal from the neighbour toward me.
+        let (nx, ny) = (sx / d, sy / d);
+        // The velocity component along that normal: negative
+        // means I am moving INTO the neighbour.
+        let vn = vx * nx + vy * ny;
+        if vn < I16F16::ZERO {
+            vx -= vn * nx;
+            vy -= vn * ny;
+        }
     }
     (vx, vy)
 }
@@ -152,7 +227,9 @@ pub fn shove(positions: &[SnapshotEntry], me: usize, max_speed: I16F16) -> (I16F
 /// `me` is this entity's index into it. `max_speed` is the entity's
 /// own table speed (M3: speed is a per-unit stat — MOV-01).
 /// `apply_separation` is false for a melee unit actively attacking:
-/// separation must not push it out of its target's reach (MOV-04).
+/// contact must not push it out of its target's reach (MOV-04).
+/// `my_formation` is the entity's formation stamp (0 = none):
+/// same-formation pairs never collide (MOV-03).
 /// `final_reach` is the arrival radius for the LAST waypoint only
 /// (intermediate waypoints always use `WAYPOINT_REACH`): most
 /// orders pass `WAYPOINT_REACH` itself; a woodcutter's tree order
@@ -166,9 +243,10 @@ pub fn steer(
     wp_index: usize,
     max_speed: I16F16,
     apply_separation: bool,
+    my_formation: u32,
     final_reach: I16F16,
 ) -> (I16F16, I16F16, usize, bool) {
-    let (px, py, _) = positions[me];
+    let (px, py, _, _, _) = positions[me];
 
     // Advance past already-reached waypoints. Reaching the last one means
     // the order is complete.
@@ -203,36 +281,65 @@ pub fn steer(
         (I16F16::ZERO, I16F16::ZERO)
     };
 
-    // Separation from neighbors, on top of the desired velocity —
-    // except while a melee attack is engaged (MOV-04).
+    // MOV-03 contact: a neighbour inside the pair's separation
+    // distance is a wall, not a spring — the component of the
+    // desired velocity that points into it is removed, the
+    // tangential remainder slides around it, and the neighbour
+    // is never displaced (see `contact_project`). Except while
+    // a melee attack is engaged (MOV-04).
+    //
+    // History: until MOV-03 this spot ADDED the `separation`
+    // displacement, capped at half the unit's speed (the 2026-10
+    // pace correction — uncapped, two neighbours flanking the
+    // desired direction could cancel an order exactly, the
+    // seed-9 forest-pocket freeze). Displacement itself was the
+    // divergence: DE units bump, stop and repath (sk-04); the
+    // pocket case is now the bump pass's business, not a push.
     if apply_separation {
-        let (mut sx, mut sy) = separation(positions, me);
-        // Pace correction (2026-10): separation is a per-tick
-        // DISPLACEMENT calibrated at the M1/M2 prototype pace, when a
-        // unit's speed was 1.0 world units/tick and a pair's push
-        // (≤ ~0.05 for a slight overlap) was a few percent of it. At
-        // the corrected tile scale a villager's whole speed is 0.053
-        // units/tick, so two neighbors flanking the desired direction
-        // can sum to a push that cancels the order exactly — a stable
-        // fixed point (three villagers wedged in a forest pocket on
-        // seed 9 froze bit-identically for 300k+ ticks: each pair at
-        // d≈1.95, the y-pushes summing to −3068 bits against a +3072
-        // desired, the residual axis-aligned step vetoed by the tree
-        // slide). Cap the separation term at half the unit's own
-        // speed: an order always keeps at least half its authority,
-        // exact cancellation becomes impossible, and crowds still
-        // spread (the term is unchanged below the cap). The orderless
-        // `shove` path is NOT capped this way — a standing unit must
-        // remain displaceable at up to its full speed, or it becomes
-        // the immovable wall M2 designed the shove against.
-        let slen = vec_len(sx, sy);
-        let cap = max_speed / 2;
-        if slen > cap {
-            sx = sx / slen * cap;
-            sy = sy / slen * cap;
+        let (seek_x, seek_y) = (vx, vy);
+        (vx, vy) = contact_project(positions, me, my_formation, vx, vy);
+        // Sequential projection against two flanking neighbours
+        // can leave a small component pointing back OUT of the
+        // pocket (the feasible cone between two contacts ahead
+        // opens backward). A unit never moves against its own
+        // order because of contact: if the projected velocity
+        // lost the ordered direction entirely, it is a stop —
+        // the bump pass's repath is what unsticks him.
+        if vx * seek_x + vy * seek_y < I16F16::ZERO {
+            vx = I16F16::ZERO;
+            vy = I16F16::ZERO;
         }
-        vx += sx;
-        vy += sy;
+        // Dead-on deflection: when contact has (nearly) stopped
+        // the unit outright — the head-on meeting, where the
+        // desired velocity is almost purely radial into the
+        // blocker — the tangential remainder is ~zero and the
+        // unit would sit out a whole bump window for what is
+        // only a passing manoeuvre. DE units slide past each
+        // other; the slide needs a tangential component to
+        // start from. Deflect the seek to the unit's own left
+        // (deterministic; two units meeting head-on deflect to
+        // opposite world sides and pass), project the deflected
+        // velocity against the same neighbours, and keep
+        // whichever velocity is faster. Nobody is displaced
+        // either way: this only chooses the unit's own heading.
+        // Measured motive: two villagers meeting dead-on on a
+        // woodline path each burned a full bump window per
+        // meeting — an 18% tax on a 3-villager gather cycle
+        // against the pre-MOV-03 flow, all of it stopped time.
+        let seek_len = vec_len(seek_x, seek_y);
+        if seek_len > I16F16::ZERO && vec_len(vx, vy) * 4 < seek_len {
+            let inv = I16F16::ONE / seek_len;
+            let (dvx0, dvy0) = (-seek_y * inv * seek_len, seek_x * inv * seek_len);
+            let (mut dvx, mut dvy) = contact_project(positions, me, my_formation, dvx0, dvy0);
+            if dvx * seek_x + dvy * seek_y < I16F16::ZERO {
+                dvx = I16F16::ZERO;
+                dvy = I16F16::ZERO;
+            }
+            if vec_len(dvx, dvy) > vec_len(vx, vy) {
+                vx = dvx;
+                vy = dvy;
+            }
+        }
     }
 
     // Clamp the combined velocity to the entity's own speed.
@@ -273,6 +380,18 @@ mod tests {
             I16F16::from_num(x),
             I16F16::from_num(y),
             I16F16::from_num(1), // standard 1.0 collision radius
+            EntityKind::Villager,
+            0, // no formation stamp
+        )
+    }
+
+    fn entry_kind(x: i32, y: i32, kind: EntityKind, formation: u32) -> SnapshotEntry {
+        (
+            I16F16::from_num(x),
+            I16F16::from_num(y),
+            I16F16::from_num(1),
+            kind,
+            formation,
         )
     }
 
@@ -280,7 +399,7 @@ mod tests {
     fn steer_heads_for_waypoint() {
         let positions = [entry(0, 0)];
         let wps = [(I16F16::from_num(10), I16F16::ZERO)];
-        let (vx, vy, idx, arrived) = steer(&positions, 0, &wps, 0, MAX_SPEED, true, WAYPOINT_REACH);
+        let (vx, vy, idx, arrived) = steer(&positions, 0, &wps, 0, MAX_SPEED, true, 0, WAYPOINT_REACH);
         assert!(!arrived);
         assert_eq!(idx, 0);
         assert!(vx > I16F16::ZERO, "must move toward +x");
@@ -293,7 +412,7 @@ mod tests {
         let positions = [entry(0, 0)];
         // 2 units away, inside SLOW_RADIUS (4): speed must be scaled to ~half.
         let wps = [(I16F16::from_num(2), I16F16::ZERO)];
-        let (vx, _, _, arrived) = steer(&positions, 0, &wps, 0, MAX_SPEED, true, WAYPOINT_REACH);
+        let (vx, _, _, arrived) = steer(&positions, 0, &wps, 0, MAX_SPEED, true, 0, WAYPOINT_REACH);
         assert!(!arrived);
         assert!(vx < MAX_SPEED, "arrival slowdown missing: {vx}");
         assert!(vx > I16F16::ZERO);
@@ -306,9 +425,9 @@ mod tests {
         // (he keeps walking to his stand point).
         let positions = [entry(0, 0)];
         let wps = [(I16F16::from_num(0.75), I16F16::ZERO)];
-        let (_, _, _, arrived) = steer(&positions, 0, &wps, 0, MAX_SPEED, true, WAYPOINT_REACH);
+        let (_, _, _, arrived) = steer(&positions, 0, &wps, 0, MAX_SPEED, true, 0, WAYPOINT_REACH);
         assert!(arrived, "generic reach must complete the order");
-        let (vx, _, _, arrived) = steer(&positions, 0, &wps, 0, MAX_SPEED, true, TREE_ARRIVE);
+        let (vx, _, _, arrived) = steer(&positions, 0, &wps, 0, MAX_SPEED, true, 0, TREE_ARRIVE);
         assert!(!arrived, "tree reach must keep him walking");
         assert!(vx > I16F16::ZERO);
         // An intermediate waypoint still uses the generic reach even
@@ -317,7 +436,7 @@ mod tests {
             (I16F16::from_num(0.75), I16F16::ZERO),
             (I16F16::from_num(10), I16F16::ZERO),
         ];
-        let (_, _, idx, arrived) = steer(&positions, 0, &wps2, 0, MAX_SPEED, true, TREE_ARRIVE);
+        let (_, _, idx, arrived) = steer(&positions, 0, &wps2, 0, MAX_SPEED, true, 0, TREE_ARRIVE);
         assert!(!arrived);
         assert_eq!(idx, 1, "intermediate waypoint must use WAYPOINT_REACH");
     }
@@ -330,22 +449,100 @@ mod tests {
         let positions = [entry(0, 0)];
         let wps = [(I16F16::from_num(100), I16F16::ZERO)];
         let slow = I16F16::from_bits(57_344); // 0.875
-        let (vx, _, _, _) = steer(&positions, 0, &wps, 0, slow, true, WAYPOINT_REACH);
+        let (vx, _, _, _) = steer(&positions, 0, &wps, 0, slow, true, 0, WAYPOINT_REACH);
         assert_eq!(vx, slow);
     }
 
     #[test]
-    fn separation_pushes_apart() {
-        // Two entities 1 unit apart on x, both ordered far away: the left
-        // one must feel a push toward -x on top of its desired velocity.
+    fn separation_term_still_displaces_for_the_herdable_carve_out() {
+        // MOV-03: `separation` itself is unchanged math — it is
+        // the herdable press pass's displacement term now. Two
+        // entities 1 unit apart: the term pushes each away from
+        // the other by half the overlap (0.5).
+        let p = [entry(0, 0), entry(1, 0)];
+        assert_eq!(
+            separation(&p, 0),
+            (I16F16::from_num(-0.5), I16F16::ZERO)
+        );
+        assert_eq!(
+            separation(&p, 1),
+            (I16F16::from_num(0.5), I16F16::ZERO)
+        );
+        let far = [entry(0, 0), entry(3, 0)];
+        assert_eq!(separation(&far, 0), (I16F16::ZERO, I16F16::ZERO));
+    }
+
+    #[test]
+    fn contact_stops_the_approach_and_keeps_the_slide() {
+        // MOV-03: two entities 1 unit apart on x (inside the 2.0
+        // separation distance), both ordered far +x. Entity 0's
+        // desired velocity points INTO entity 1: it is removed
+        // wholesale — entity 0 stops at contact, and entity 1 is
+        // not displaced by anything (steering never writes a
+        // neighbour's velocity). Entity 1, moving away, keeps
+        // full speed.
         let p = [entry(0, 0), entry(1, 0)];
         let wps = [(I16F16::from_num(100), I16F16::ZERO)];
-        let (vx0, _, _, _) = steer(&p, 0, &wps, 0, MAX_SPEED, true, WAYPOINT_REACH);
-        let (vx1, _, _, _) = steer(&p, 1, &wps, 0, MAX_SPEED, true, WAYPOINT_REACH);
-        // Entity 0 is pushed left (negative x contribution)…
-        assert!(vx0 < MAX_SPEED, "entity 0 felt no separation push");
-        // …entity 1 is pushed right (it keeps full speed toward +x).
+        let (vx0, vy0, _, _) = steer(&p, 0, &wps, 0, MAX_SPEED, true, 0, WAYPOINT_REACH);
+        let (vx1, _, _, _) = steer(&p, 1, &wps, 0, MAX_SPEED, true, 0, WAYPOINT_REACH);
+        // The into-component is gone (vx == 0: the approach is
+        // stopped) — but the dead-on deflection turns the stop
+        // into a slide to the unit's own left, the passing
+        // manoeuvre, instead of a full stop until the bump pass
+        // repaths (re-pinned with the deflection: a same-
+        // direction leader is passed, not queued behind, when
+        // there is room to pass).
+        assert_eq!(vx0, I16F16::ZERO, "approach not stopped");
+        assert!(vy0 > I16F16::ZERO, "no dead-on deflection: ({vx0}, {vy0})");
+        assert!(vec_len(vx0, vy0) <= MAX_SPEED);
         assert_eq!(vx1, MAX_SPEED);
+        // Offset blocker: the tangential component survives —
+        // the traveller slides around instead of stopping dead.
+        let p2 = [entry(0, 0), entry(1, 1)];
+        let (vx, vy, _, _) = steer(&p2, 0, &wps, 0, MAX_SPEED, true, 0, WAYPOINT_REACH);
+        assert!(vx > I16F16::ZERO && vy < I16F16::ZERO, "no slide: ({vx}, {vy})");
+        assert!(vec_len(vx, vy) <= MAX_SPEED);
+    }
+
+    #[test]
+    fn contact_skips_same_formation_pairs_and_the_herdable_press() {
+        // MOV-03: same formation stamp — no collision at all:
+        // the traveller keeps full speed straight at its mate.
+        let wps = [(I16F16::from_num(100), I16F16::ZERO)];
+        let p = [
+            entry_kind(0, 0, EntityKind::Villager, 7),
+            entry_kind(1, 0, EntityKind::Villager, 7),
+        ];
+        let (vx, vy, _, _) = steer(&p, 0, &wps, 0, MAX_SPEED, true, 7, WAYPOINT_REACH);
+        assert_eq!((vx, vy), (MAX_SPEED, I16F16::ZERO));
+        // A different stamp (or none) collides as usual: the
+        // into-component is removed (the dead-on deflection may
+        // turn the stop into a sideways slide, never a pass
+        // through).
+        let p = [
+            entry_kind(0, 0, EntityKind::Villager, 7),
+            entry_kind(1, 0, EntityKind::Villager, 9),
+        ];
+        let (vx, _, _, _) = steer(&p, 0, &wps, 0, MAX_SPEED, true, 7, WAYPOINT_REACH);
+        assert_eq!(vx, I16F16::ZERO);
+        // The herdable press: a sheep steering into a villager
+        // is not projected (the villager yields via the press
+        // pass); a villager steering into a sheep stops.
+        let p = [
+            entry_kind(0, 0, EntityKind::Sheep, 0),
+            entry_kind(1, 0, EntityKind::Villager, 0),
+        ];
+        let (vx, _, _, _) = steer(&p, 0, &wps, 0, MAX_SPEED, true, 0, WAYPOINT_REACH);
+        assert_eq!(vx, MAX_SPEED, "sheep was projected off the villager");
+        let (vx, _, _, _) = steer(&p, 1, &wps, 0, MAX_SPEED, true, 0, WAYPOINT_REACH);
+        assert_eq!(vx, MAX_SPEED, "villager moving away from the sheep");
+        let wps_back = [(I16F16::from_num(-100), I16F16::ZERO)];
+        let (vx, _, _, _) = steer(&p, 1, &wps_back, 0, MAX_SPEED, true, 0, WAYPOINT_REACH);
+        // The herdable yield (re-pinned): a villager under way
+        // does not stop for a sheep — he herds it (the press
+        // pass moves the sheep out of his ground), so he keeps
+        // his full speed toward it.
+        assert_eq!(vx, -MAX_SPEED, "villager stopped for the sheep instead of herding it");
     }
 
     #[test]
@@ -354,48 +551,41 @@ mod tests {
         // steers purely by its order — no sideways push at all.
         let p = [entry(0, 0), entry(1, 0)];
         let wps = [(I16F16::from_num(100), I16F16::ZERO)];
-        let (vx, vy, _, _) = steer(&p, 0, &wps, 0, MAX_SPEED, false, WAYPOINT_REACH);
+        let (vx, vy, _, _) = steer(&p, 0, &wps, 0, MAX_SPEED, false, 0, WAYPOINT_REACH);
         assert_eq!((vx, vy), (MAX_SPEED, I16F16::ZERO));
     }
 
     #[test]
-    fn separation_cannot_cancel_an_order() {
-        // Pace-correction regression: two neighbors flanking the
-        // desired direction at d≈1.95 (the seed-9 forest-pocket
-        // geometry) sum to a −y push of ≈3068 bits — enough to cancel
-        // a villager's +3072 desired y EXACTLY at the corrected speed
-        // (3495 bits), freezing the unit forever. With the separation
-        // term capped at half the unit's speed, the order keeps at
-        // least half its authority: vy must stay ≥ ~half speed.
+    fn contact_in_the_seed9_pocket_stops_without_reversing() {
+        // The seed-9 forest-pocket geometry that once froze three
+        // villagers bit-identically for 300k+ ticks: two neighbours
+        // flanking the desired direction at d≈1.95. Under the old
+        // displacement the pair's pushes cancelled the order
+        // exactly (a stable fixed point the pace correction then
+        // capped). Under MOV-03 the traveller simply STOPS at
+        // contact — symmetric projections leave no sideways drift
+        // and, the invariant that matters, projection never
+        // reverses the ordered direction or pushes the unit
+        // backward: vy stays ≥ 0, |vx| stays a rounding hair.
+        // Unsticking him is the bump pass's repath, not a push.
         let r = I16F16::from_num(1);
         let positions = [
-            (I16F16::ZERO, I16F16::ZERO, r),
-            (I16F16::from_num(-0.972), I16F16::from_num(1.686), r),
-            (I16F16::from_num(0.966), I16F16::from_num(1.688), r),
+            (I16F16::ZERO, I16F16::ZERO, r, EntityKind::Villager, 0),
+            (I16F16::from_num(-0.972), I16F16::from_num(1.686), r, EntityKind::Villager, 0),
+            (I16F16::from_num(0.966), I16F16::from_num(1.688), r, EntityKind::Villager, 0),
         ];
         let wps = [(I16F16::ZERO, I16F16::from_num(100))];
         let villager_speed = I16F16::from_bits(3_495); // 0.8 tiles/s
-        let (_, vy, _, arrived) = steer(&positions, 0, &wps, 0, villager_speed, true, WAYPOINT_REACH);
+        let (vx, vy, _, arrived) = steer(&positions, 0, &wps, 0, villager_speed, true, 0, WAYPOINT_REACH);
         assert!(!arrived);
+        assert!(vy >= I16F16::ZERO, "projection reversed the order: vy = {vy}");
         assert!(
-            vy >= villager_speed / 2 - I16F16::from_bits(64),
-            "separation cancelled the order: vy bits = {}",
-            vy.to_bits()
+            vy < villager_speed / 4,
+            "the pocket did not stop the traveller: vy = {vy}"
         );
-    }
-
-    #[test]
-    fn shove_moves_half_the_overlap() {
-        // Two orderless entities 1 unit apart: each is shoved away from
-        // the other by half the overlap (0.5), so one tick of mutual
-        // shove separates the pair to exactly the separation radius.
-        let p = [entry(0, 0), entry(1, 0)];
-        let (vx0, vy0) = shove(&p, 0, MAX_SPEED);
-        let (vx1, vy1) = shove(&p, 1, MAX_SPEED);
-        assert_eq!((vx0, vy0), (I16F16::from_num(-0.5), I16F16::ZERO));
-        assert_eq!((vx1, vy1), (I16F16::from_num(0.5), I16F16::ZERO));
-        // Beyond the radius there is no shove at all.
-        let far = [entry(0, 0), entry(3, 0)];
-        assert_eq!(shove(&far, 0, MAX_SPEED), (I16F16::ZERO, I16F16::ZERO));
+        assert!(
+            vx.abs() < I16F16::from_bits(256),
+            "asymmetric sideways drift in a symmetric pocket: vx = {vx}"
+        );
     }
 }
