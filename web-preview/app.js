@@ -8271,6 +8271,25 @@ async function main() {
       }
     }
     if (bodyBest !== null) return bodyBest;
+    // FIX #4 (selection parity, bot-loop selpick): our own units
+    // are selectable by their drawn body too — the generalised
+    // sprite-body pick (spriteBodyD2, FIX #3) restricted to own
+    // units. A click on a unit's upper body converts to ground
+    // up to ~4.2 wu north-west of it, outside the 1.9 ground
+    // radius below, so body clicks named nothing (or a bystander
+    // whose ground point sat near the displaced point). The Ram
+    // pick above keeps precedence; the closest body centre wins.
+    let sBest = null;
+    let sBestD2 = Infinity;
+    for (let i = 0; i < st.count; i++) {
+      if (!isOwnUnit(st, i)) continue;
+      const bd2 = spriteBodyD2(st, i, wx, wy);
+      if (bd2 !== null && bd2 < sBestD2) {
+        sBestD2 = bd2;
+        sBest = i;
+      }
+    }
+    if (sBest !== null) return sBest;
     let best = null;
     let bestD2 = 1.9 * 1.9;
     for (let i = 0; i < st.count; i++) {
@@ -8283,6 +8302,78 @@ async function main() {
       }
     }
     return best;
+  }
+
+  // Left-click selection pick (FIX #4, bot-loop selpick —
+  // selection parity with the right-click discipline): the
+  // plain-click handler's candidate, ANY living unit (ours →
+  // a real selection; anyone else's → an information selection
+  // through selectAnimal, exactly as the occluded-outline path
+  // already routes it). unitAt alone could not be this pick:
+  // it is own-only by contract (the double-click handler relies
+  // on that), and it ran BEFORE the occluded pick in the
+  // handler, so on ~44% of outline clicks the coincident OWN
+  // unit's ground radius named our unit instead of the enemy
+  // the player clicked (occordersweep2, H1) — and no non-Ram
+  // unit could be selected by its upper body at all (FIX #3
+  // named those clicks for orders only).
+  // Precedence mirrors entityAt exactly:
+  //   1. Ram body (any owner) — the Ram is what was clicked;
+  //   2. occluded outline — the painted outline names its unit
+  //      ahead of every ground/body candidate (FIX #2);
+  //   3. sprite body (spriteBodyD2) with FIX #2c/#3 ownership
+  //      classes: an own Transport Ship (kind 32, a load host)
+  //      keeps its win (class 0), a non-own unit (class 1)
+  //      beats our own coincident bystander (class 2), closest
+  //      body centre wins within a class. Fog gate as in
+  //      entityAt: a non-own unit is body-pickable only while
+  //      its cell is currently visible (it is not drawn
+  //      otherwise). The Relic (kind 21) takes no part — it is
+  //      a ground object, never a unit selection here; the Town
+  //      Center (kind 1) has no body box and stays tcAt's.
+  //   4. unitAt's own pick (Ram body / own body / own ground
+  //      radius) — own-unit selection exactly as before when no
+  //      outline or rival body claims the click.
+  // Canvas only by construction: the only caller is the canvas
+  // plain-click handler — the minimap's left click jumps the
+  // camera and never selects, so no minimap pick changes
+  // (SEL-16's ground-only doctrine is untouched).
+  function selectionAt(wx, wy) {
+    const st = entityState();
+    let bodyBest = null;
+    let bodyBestD2 = Infinity;
+    for (let i = 0; i < st.count; i++) {
+      if (st.kinds[i] !== KIND_RAM || st.hp[i * 2] < 1) continue;
+      const bd2 = ramBodyD2(st, i, wx, wy);
+      if (bd2 !== null && bd2 < bodyBestD2) {
+        bodyBestD2 = bd2;
+        bodyBest = i;
+      }
+    }
+    if (bodyBest !== null) return bodyBest;
+    const occ = occludedUnitAt(wx, wy);
+    if (occ !== null) return occ;
+    let sBest = null;
+    let sBestD2 = Infinity;
+    let sBestCls = 3;
+    for (let i = 0; i < st.count; i++) {
+      if (st.hp[i * 2] < 1) continue;
+      if (st.garrisoned && st.garrisoned[i]) continue;
+      if (st.kinds[i] === KIND_TC || st.kinds[i] === KIND_RELIC) continue;
+      if (st.owners[i] !== localOwner
+          && !cellVisibleW(st.pos[i * 2], st.pos[i * 2 + 1])) continue;
+      const bd2 = spriteBodyD2(st, i, wx, wy);
+      if (bd2 === null) continue;
+      const cls = st.owners[i] === localOwner
+        ? (st.kinds[i] === 32 ? 0 : 2) : 1;
+      if (cls < sBestCls || (cls === sBestCls && bd2 < sBestD2)) {
+        sBestCls = cls;
+        sBestD2 = bd2;
+        sBest = i;
+      }
+    }
+    if (sBest !== null) return sBest;
+    return unitAt(wx, wy);
   }
 
   // Left-click pick for an animal that is NOT ours (a wild Gaia
@@ -9440,8 +9531,16 @@ async function main() {
       return;
     }
     // Plain click.
-    const v = unitAt(wx, wy);
-    if (v != null) {
+    // FIX #4 (selection parity): the candidate comes from
+    // selectionAt — the occluded-outline and sprite-body picks
+    // run with the right-click discipline (entityAt), so a
+    // click on an enemy's outline or body names the enemy even
+    // when our own unit stands on the same tile, and any unit
+    // can be selected by its visible body. Our own unit is a
+    // real selection; anyone else's is an information selection
+    // through the animal path's machinery (selectAnimal).
+    const v = selectionAt(wx, wy);
+    if (v != null && isOwnUnit(entityState(), v)) {
       if (ev.shiftKey) {
         const next = new Set(selection);
         if (next.has(v)) next.delete(v);
@@ -9452,11 +9551,17 @@ async function main() {
       }
       playSelectAck();
     } else if (!ev.shiftKey) {
+      if (v != null) {
+        selectAnimal(v);
+        return;
+      }
       // FIX #2: a click on an occluded unit's painted outline
       // names the unit, ahead of the building it hides behind
       // (see occludedUnitAt) — our own unit becomes a real
       // selection; anyone else's is an information selection
       // through the animal path's machinery (selectAnimal).
+      // (selectionAt above already consulted the outline; this
+      // stays as the fallback if the picks ever diverge.)
       const occ = occludedUnitAt(wx, wy);
       if (occ != null) {
         if (isOwnUnit(entityState(), occ)) {
