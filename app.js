@@ -11352,6 +11352,83 @@ function legs(sx, sy, u, dxs, color) {
   }
 }
 
+// The Scout's vector figure, painted on an arbitrary context
+// (the cached sprite below, or the frame canvas as the last
+// resort). Shapes and colours are the pre-sprite fallback's own,
+// verbatim.
+function paintScoutFigure(g, sx, sy, u, cloth) {
+  paintLegsOn(g, sx, sy, u, [-0.75, -0.3, 0.45, 0.85], '#5d4630');
+  g.fillStyle = '#8a6844'; // horse body
+  g.beginPath();
+  g.ellipse(sx, sy - 0.95 * u, 1.15 * u, 0.55 * u, 0, 0, Math.PI * 2);
+  g.fill();
+  g.strokeStyle = '#8a6844'; // neck
+  g.lineWidth = 0.5 * u;
+  g.beginPath();
+  g.moveTo(sx + 0.85 * u, sy - 1.2 * u);
+  g.lineTo(sx + 1.3 * u, sy - 1.75 * u);
+  g.stroke();
+  g.fillStyle = '#77572f'; // head
+  g.beginPath();
+  g.ellipse(sx + 1.45 * u, sy - 1.8 * u, 0.38 * u, 0.22 * u, 0.5, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = cloth; // rider torso (player color)
+  g.beginPath();
+  g.ellipse(sx - 0.05 * u, sy - 1.85 * u, 0.42 * u, 0.55 * u, 0, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = '#e8c39a'; // rider head
+  g.beginPath();
+  g.arc(sx - 0.05 * u, sy - 2.55 * u, 0.26 * u, 0, Math.PI * 2);
+  g.fill();
+  g.strokeStyle = '#d8d8d8'; // spear, held diagonal
+  g.lineWidth = Math.max(1, 0.14 * u);
+  g.beginPath();
+  g.moveTo(sx + 0.25 * u, sy - 2.5 * u);
+  g.lineTo(sx + 1.05 * u, sy - 1.15 * u);
+  g.stroke();
+}
+
+// Bot-loop occorder fix (2026-11-18): the figure above used to be
+// stroked straight onto the frame canvas as drawScout's fallback.
+// The INF-12 occlusion pass (recordFrameSprites /
+// drawOccludedOutlines) can only see units whose draw records
+// drawImage calls — a call-less item is skipped outright — so a
+// Scout on this fallback could never be outlined or
+// outline-picked behind a building. The fallback is the Scout's
+// ONLY non-DIR path while ATTACKING (the UNIT_ART set carries
+// gallop/idle frames but no attack frames), which is exactly the
+// hidden-attacker state: with the directional sheet unavailable
+// the enemy Scout draining the Town Center lost its pick record,
+// and right-clicks on it degraded to ground moves (bot-loop runs
+// #420/#421; the stanceatk probe proved the sim itself executes
+// the explicit Attack in every stance). Like the monk and the
+// Castle cavalry before it, the figure is now painted ONCE into
+// a cached sprite per cloth and blitted with drawImage; the
+// direct vector paint remains only for a canvas-less stub.
+// Presentation only: sim and golden hash untouched.
+const SCOUT_SPRITE_U = 16; // cached-sprite pixels per world unit
+const SCOUT_BOX = { x0: -1.4, y0: -3.05, w: 3.5, h: 3.2 };
+const scoutSpriteCache = new Map(); // cloth -> canvas | null
+function scoutSprite(cloth) {
+  if (scoutSpriteCache.has(cloth)) return scoutSpriteCache.get(cloth);
+  let cv = null;
+  try {
+    cv = document.createElement('canvas');
+    cv.width = Math.ceil(SCOUT_BOX.w * SCOUT_SPRITE_U);
+    cv.height = Math.ceil(SCOUT_BOX.h * SCOUT_SPRITE_U);
+    const g = cv.getContext('2d');
+    if (!g) cv = null;
+    else {
+      paintScoutFigure(g, -SCOUT_BOX.x0 * SCOUT_SPRITE_U,
+        -SCOUT_BOX.y0 * SCOUT_SPRITE_U, SCOUT_SPRITE_U, cloth);
+    }
+  } catch {
+    cv = null; // no canvas available (test stubs): vector fallback
+  }
+  scoutSpriteCache.set(cloth, cv);
+  return cv;
+}
+
 function drawScout(i, wx, wy) {
   const [sx, sy] = worldToScreen(wx, wy);
   const u = camS;
@@ -11361,35 +11438,14 @@ function drawScout(i, wx, wy) {
   if (drawDirUnit('scout', act, sx, sy)) return;
   const ua = unitArtImage('scout', i, wx, wy, act);
   if (ua && drawUnitPose(ua.im, sx, sy, UNIT_ART_H.scout, ua.flip)) return;
-  legs(sx, sy, u, [-0.75, -0.3, 0.45, 0.85], '#5d4630');
-  ctx.fillStyle = '#8a6844'; // horse body
-  ctx.beginPath();
-  ctx.ellipse(sx, sy - 0.95 * u, 1.15 * u, 0.55 * u, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = '#8a6844'; // neck
-  ctx.lineWidth = 0.5 * u;
-  ctx.beginPath();
-  ctx.moveTo(sx + 0.85 * u, sy - 1.2 * u);
-  ctx.lineTo(sx + 1.3 * u, sy - 1.75 * u);
-  ctx.stroke();
-  ctx.fillStyle = '#77572f'; // head
-  ctx.beginPath();
-  ctx.ellipse(sx + 1.45 * u, sy - 1.8 * u, 0.38 * u, 0.22 * u, 0.5, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e'; // rider torso (player color)
-  ctx.beginPath();
-  ctx.ellipse(sx - 0.05 * u, sy - 1.85 * u, 0.42 * u, 0.55 * u, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#e8c39a'; // rider head
-  ctx.beginPath();
-  ctx.arc(sx - 0.05 * u, sy - 2.55 * u, 0.26 * u, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = '#d8d8d8'; // spear, held diagonal
-  ctx.lineWidth = Math.max(1, 0.14 * u);
-  ctx.beginPath();
-  ctx.moveTo(sx + 0.25 * u, sy - 2.5 * u);
-  ctx.lineTo(sx + 1.05 * u, sy - 1.15 * u);
-  ctx.stroke();
+  const cloth = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e';
+  const spr = scoutSprite(cloth);
+  if (spr) {
+    ctx.drawImage(spr, sx + SCOUT_BOX.x0 * u, sy + SCOUT_BOX.y0 * u,
+      SCOUT_BOX.w * u, SCOUT_BOX.h * u);
+  } else {
+    paintScoutFigure(ctx, sx, sy, u, cloth);
+  }
 }
 
 // Castle P2 cavalry draws (vector only — no art sheets exist
@@ -16667,6 +16723,41 @@ function buildingOccGeo(b) {
   };
 }
 
+// Synthesized occluder geometry for the Town Center — the
+// buildingOccGeo mirror for the one occluder that is an ENTITY,
+// not a placed building (bot-loop occorder fix, 2026-11-18).
+// Without it, a Town Center drawn by its vector fallback (the
+// art chain's last resort — no drawImage calls recorded) is a
+// call-less occluder: drawOccludedOutlines skips it outright,
+// so nothing behind the TC can be outlined or outline-picked —
+// the hidden-attacker case itself, the very scene INF-12 exists
+// for. The polygon mirrors drawTC's vector shape: the footprint
+// diamond raised by the 2.2-unit wall height. Used only when
+// the TC recorded no draw calls (occ.rect / occ.poly are the
+// pass's no-calls fallback, exactly as for placed buildings).
+function tcOccGeo(wx, wy) {
+  const a = tcHalf();
+  const t = worldToScreen(wx - a, wy - a);
+  const r = worldToScreen(wx + a, wy - a);
+  const bt = worldToScreen(wx + a, wy + a);
+  const l = worldToScreen(wx - a, wy + a);
+  const hgt = 2.2 * camS;
+  const up = (p) => [p[0], p[1] - hgt];
+  const poly = [up(t), up(r), r, bt, l, up(l)];
+  let minX = Infinity, minY = Infinity;
+  let maxX = -Infinity, maxY = -Infinity;
+  for (const [px, py] of poly) {
+    if (px < minX) minX = px;
+    if (py < minY) minY = py;
+    if (px > maxX) maxX = px;
+    if (py > maxY) maxY = py;
+  }
+  return {
+    rect: { x: minX, y: minY, w: maxX - minX, h: maxY - minY },
+    poly,
+  };
+}
+
 // Paint one unit's OUTLINE over its occluders: the unit's own
 // tinted alpha, clipped to the union of the covering occluders'
 // alpha (their recorded images replayed into a mask the size of
@@ -17087,7 +17178,9 @@ function draw() {
         key: wx + wy + tcHalf(),
         // INF-12: the TC is an occluder like any building — the
         // enemy scout hiding behind it is the case that counts.
-        occ: { role: 'occluder' },
+        // The synthesized geometry keeps it an occluder even
+        // when its draw records no calls (vector fallback).
+        occ: { role: 'occluder', ...tcOccGeo(wx, wy) },
         fn: () => {
           drawTC(wx, wy, owner);
           // M5: a Town Center under attack shows its HP like any
