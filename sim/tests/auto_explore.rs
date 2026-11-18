@@ -441,7 +441,19 @@ fn a_trained_scout_is_eligible_and_explores() {
         });
     }
     wait_wood(&mut sim, 175);
-    raise(&mut sim, 1, BuildingKind::Stable, 29, 80);
+    // MOV-03 landing adaptation (2026-11-17): the historical
+    // Stable anchor (29, 80) is rejected in the MOV-03 timeline —
+    // at the scripted tick a sheep stands on footprint cell
+    // (31, 80), and a living unit standing on the footprint
+    // blocks placement (the reference game's rule), so the Build
+    // command was dropped and the raise waited forever. (On the
+    // builder's tree the blocker was a villager on (28, 80); the
+    // blocking cell differs by timeline, the rule does not.)
+    // Same move as the AI-08 adaptation above: the Stable shifts
+    // one cell south to (29, 81) — probe-verified on the final
+    // tree: all nine cells explored, unblocked, unit- and
+    // node-free at the scripted tick.
+    raise(&mut sim, 1, BuildingKind::Stable, 29, 81);
     let stable = building_id(&sim, BuildingKind::Stable);
     let berry = first_live_node(&sim, NodeKind::BerryBush);
     sim.push_command(Command::Gather {
