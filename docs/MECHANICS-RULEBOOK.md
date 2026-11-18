@@ -4964,10 +4964,27 @@ content is what another player sees, and its MATCHES flip is
 gated on the bot-loop's live two-client proof (host sets the
 guest seat Ally + unlocked; the guest flares a point; the
 host's minimap shows the flashing X and plays the cue within
-the marker's life) — proof pending at this commit. ·
-*Status:* **DIFFERS** (map, fog and alert flashes yes; ally
-flares shipped and unit-proven, two-client live proof
-pending).
+the marker's life) — proof pending at this commit. **Live
+two-client proof landed 2026-11-18 (bot-loop run #422)**: a
+host created a 1v1 Arabia room with the guest seat set to
+Ally + Unlocked teams (+ Allied victory); the guest joined,
+readied, and placed 6 flares beside the minimap (game times
+01:28, 03:05, 04:34, 05:47, 06:58, 08:06), each showing the
+sender's own red X; the host independently observed the
+guest's red X on its minimap at game ~03:03–03:05,
+~04:35–04:37 (probable) and ~05:52–05:53 — matching the
+guest's 03:05, 04:34 and 05:47 placements within sampling —
+in the sender's player colour, at the guest's base area,
+short-lived within the adopted 6 s marker life. The blink
+cycle itself and the audio cue are not directly witnessable
+by the automated sessions (single-frame catches; no audio
+channel) — both remain covered by the unit pins on the
+painter/codec above. The same session incidentally proved
+the disconnect path live (88 s rejoin window, Claim victory
+enabling only after expiry). ·
+*Status:* **MATCHES** (map, fog and alert flashes yes; ally
+flares proven live between two clients — host saw the
+guest's X in the sender's colour within the marker's life).
 
 **INF-05 — Selection panel shows identity and health.** A single selected
 unit/building shows its portrait, HP bar, attack/armor stats, and (for
