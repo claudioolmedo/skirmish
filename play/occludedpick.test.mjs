@@ -208,7 +208,7 @@ test('the screen pick is canvas-only: orderAt threads its canvas flag', () => {
   // The canopy doctrine (SEL-16): screen-space picks belong to
   // the main canvas; the minimap draws no outlines and its
   // pick stays the plain ground pick.
-  assert.match(appJs, /let t = entityAt\(wx, wy, fromCanvas\);/,
+  assert.match(appJs, /let tgt = entityAt\(wx, wy, fromCanvas\);/,
     'orderAt passes its fromCanvas flag into entityAt');
   assert.match(appJs, /smartOrderAt\(wx, wy, e\.shiftKey, true\);/,
     'the main-canvas right-click sets the flag');

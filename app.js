@@ -978,6 +978,7 @@ let playback = null; // replay playback state while a replay runs
 /// decision — Restart and Back to menu are the exits.
 function showMatchEnd(ms) {
   matchEnded = true;
+  closeLivePanels(); // the end card replaces the live panels, never stacks over them
   syncCaptureOverlay();
   // The end card (score, feedback form) is real-cursor work.
   exitGamePointerLock();
@@ -1242,6 +1243,22 @@ function setTechTree(open) {
   if (!techtreeOverlay) return;
   techtreeOverlay.style.display = open ? 'flex' : 'none';
   if (open) refreshTechTree();
+}
+
+/// Close the three live, non-pausing panels (Diplomacy, Score,
+/// Technology Tree) at a match boundary (bot-loop leak, runs
+/// #418/#419): the panels are per-match views — left open, the
+/// tree stayed display:flex behind the end card, peered out
+/// behind the Lobby Browser after Back to menu, and was still
+/// open inside the next match. Called by showMatchEnd /
+/// netMatchEnd (match end), openLobby (leaving to the lobby)
+/// and the per-match adopters resetSim / adoptSim /
+/// adoptLoadedSim (new match). In-match behaviour is
+/// untouched: the panels still toggle live and never pause.
+function closeLivePanels() {
+  setDiplo(false);
+  setScore(false);
+  setTechTree(false);
 }
 
 /// INF-11's score timeline: the client samples both players'
@@ -4499,6 +4516,7 @@ function resetSim(mode = matchMode) {
   builtMode = mode;
   matchEnded = false;
   endOverlay.style.display = 'none';
+  closeLivePanels(); // a fresh match starts with no live panel open
   localOwner = 0; // local modes always play the first seat (M8)
   playback = null;
   if (typeof netUi !== 'undefined' && netUi && netUi.playbackBar) {
@@ -4655,6 +4673,7 @@ function adoptSim(newSim, owner) {
   builtMode = 'online';
   matchEnded = false;
   endOverlay.style.display = 'none';
+  closeLivePanels(); // a fresh match starts with no live panel open
   seenBuildings.clear();
   resetScoreHistory(); // INF-11: per-match, as in resetSim
   resetEventFeed();
@@ -4794,6 +4813,7 @@ function postTelemetry(result) {
 function netMatchEnd(localMs, opts) {
   if (!net || net.phase === 'ended') return;
   net.phase = 'ended';
+  closeLivePanels(); // incl. the desync exit below, which bypasses showMatchEnd
   exitGamePointerLock(); // end/desync cards are real-cursor work
   syncCaptureOverlay();
   if (net.session) net.session.stop();
@@ -6245,6 +6265,7 @@ function updateLobbyClose() {
 function openLobby(join) {
   lobbyReturnToMatch = !!(playing && paused && !matchEnded && !join);
   lobbyReturnToEnded = !!(playing && matchEnded && !join);
+  closeLivePanels(); // no live panel peers behind the Lobby Browser
   setInMatch(false); // the lobby is up: no game on screen
   aiRoom = null; // entering the lobby dissolves any AI-room match
   if (net) teardownNet();
@@ -6819,6 +6840,7 @@ function adoptLoadedSim(loaded) {
   builtMode = mode;
   matchEnded = false;
   endOverlay.style.display = 'none';
+  closeLivePanels(); // a loaded match starts with no live panel open
   localOwner = 0; // a loaded save is always played from the first seat
   playback = null;
   if (typeof netUi !== 'undefined' && netUi && netUi.playbackBar) {
@@ -8426,7 +8448,11 @@ async function main() {
       }
       if (any) { orderAck('attack'); return; }
     }
-    let t = entityAt(wx, wy, fromCanvas);
+    // Named tgt, never t: t is the i18n function, and this local
+    // used to shadow it for the whole function — every later
+    // flash(t('flash.…')) then called the entity id (or null)
+    // and threw AFTER the order had been issued.
+    let tgt = entityAt(wx, wy, fromCanvas);
     // FIX #2b (bot-loop runs #417–#419): a target named through
     // the occluded outline is exempt from the fog gate below.
     // The outline record exists only because the draw pass
@@ -8439,12 +8465,12 @@ async function main() {
     // outline degraded to a ground move (the ordered unit
     // walked to the outline point and idled while the hidden
     // enemy kept draining the Town Center), 7+ live attempts.
-    const tFromOutline = t != null && fromCanvas && occludedUnitAt(wx, wy) === t;
+    const tFromOutline = tgt != null && fromCanvas && occludedUnitAt(wx, wy) === tgt;
     // M7: a non-own unit is a target only while currently visible
     // — in explored memory or the black it cannot be clicked
     // (the click falls through to a ground move, as a miss does).
-    if (t != null && !tFromOutline && st.owners[t] !== localOwner
-        && !cellVisibleW(st.pos[t * 2], st.pos[t * 2 + 1])) t = null;
+    if (tgt != null && !tFromOutline && st.owners[tgt] !== localOwner
+        && !cellVisibleW(st.pos[tgt * 2], st.pos[tgt * 2 + 1])) tgt = null;
     // Relic pickup (Castle P5d, MNK-09): a right-click on a
     // relic with Monk(s) selected tasks every selected Monk to
     // pick it up — ahead of the generic Gaia-attack block below,
@@ -8453,20 +8479,20 @@ async function main() {
     // can_pickup_relic gates each monk (already carrying, or
     // the relic already carried, refuses there and the click
     // falls through to the ground move at the bottom).
-    if (t != null && st.kinds[t] === KIND_RELIC
+    if (tgt != null && st.kinds[tgt] === KIND_RELIC
         && targets.some((id) => st.kinds[id] === 20)) {
       let any = false;
       for (const id of targets) {
         if (st.kinds[id] !== 20) continue;
-        if (issue({ t: 'pickup', e: id, tg: t })) any = true;
+        if (issue({ t: 'pickup', e: id, tg: tgt })) any = true;
       }
       if (any) { orderAck('order'); return; }
     }
-    if (t != null && (st.owners[t] === 1 || st.owners[t] === foeOwner() || st.kinds[t] === KIND_SHEEP)) {
+    if (tgt != null && (st.owners[tgt] === 1 || st.owners[tgt] === foeOwner() || st.kinds[tgt] === KIND_SHEEP)) {
       let any = false;
       for (const id of targets) {
         if (st.kinds[id] === KIND_SHEEP) continue; // sheep don't fight
-        if (issue({ t: 'attack', e: id, tg: t, q: queued || undefined })) any = true;
+        if (issue({ t: 'attack', e: id, tg: tgt, q: queued || undefined })) any = true;
       }
       if (any) { orderAck('attack'); return; }
       // Nobody could attack (e.g. only sheep selected): fall through
@@ -8478,10 +8504,10 @@ async function main() {
     // buildings take below. The sim's can_garrison_unit gates
     // every unit (kind, ownership, capacity); ineligible members
     // of the selection are simply refused and stay put.
-    if (t != null && st.owners[t] === localOwner && st.kinds[t] === 17) {
+    if (tgt != null && st.owners[tgt] === localOwner && st.kinds[tgt] === 17) {
       let any = false;
       for (const id of targets) {
-        if (issue({ t: 'garrison_u', e: id, host: t })) any = true;
+        if (issue({ t: 'garrison_u', e: id, host: tgt })) any = true;
       }
       if (any) { orderAck('order'); flash(t('flash.garrisoned')); return; }
     }
@@ -8492,19 +8518,19 @@ async function main() {
     // The sim's can_load_transport gates every unit (land
     // domain, ownership, capacity 5); ineligible members of
     // the selection are simply refused and stay put.
-    if (t != null && st.owners[t] === localOwner && st.kinds[t] === 32) {
+    if (tgt != null && st.owners[tgt] === localOwner && st.kinds[tgt] === 32) {
       let any = false;
       for (const id of targets) {
         if (st.kinds[id] === 32) continue; // a ship cannot board
-        if (issue({ t: 'load_t', e: id, ship: t })) any = true;
+        if (issue({ t: 'load_t', e: id, ship: tgt })) any = true;
       }
       if (any) { orderAck('order'); flash(t('flash.loaded')); return; }
     }
     // The reverse gesture: an own Transport Ship selected and
     // a right-click on an own land unit loads THAT unit.
-    if (t != null && st.owners[t] === localOwner && targets.length === 1
-        && st.kinds[targets[0]] === 32 && st.kinds[t] !== 32) {
-      if (issue({ t: 'load_t', e: t, ship: targets[0] })) {
+    if (tgt != null && st.owners[tgt] === localOwner && targets.length === 1
+        && st.kinds[targets[0]] === 32 && st.kinds[tgt] !== 32) {
+      if (issue({ t: 'load_t', e: tgt, ship: targets[0] })) {
         orderAck('order'); flash(t('flash.loaded')); return;
       }
     }
@@ -8515,13 +8541,13 @@ async function main() {
     // with no monk selected keeps the ordinary meaning). The
     // sim's can_heal gates each monk (siege targets and the Town
     // Center are refused there and fall through).
-    if (t != null && st.owners[t] === localOwner
-        && st.hp[t * 2] < st.hp[t * 2 + 1]
+    if (tgt != null && st.owners[tgt] === localOwner
+        && st.hp[tgt * 2] < st.hp[tgt * 2 + 1]
         && targets.some((id) => st.kinds[id] === 20)) {
       let any = false;
       for (const id of targets) {
         if (st.kinds[id] !== 20) continue;
-        if (issue({ t: 'heal', e: id, tg: t })) any = true;
+        if (issue({ t: 'heal', e: id, tg: tgt })) any = true;
       }
       if (any) { orderAck('order'); return; }
     }
@@ -8531,12 +8557,12 @@ async function main() {
     // sim's can_convert gates each monk (faith, MNK-08's list —
     // a Ram without Redemption is refused there and the click
     // falls through to the ordinary meanings).
-    if (t != null && st.owners[t] !== localOwner && st.owners[t] !== 1
+    if (tgt != null && st.owners[tgt] !== localOwner && st.owners[tgt] !== 1
         && targets.some((id) => st.kinds[id] === 20)) {
       let any = false;
       for (const id of targets) {
         if (st.kinds[id] !== 20) continue;
-        if (issue({ t: 'convert', e: id, tg: t })) any = true;
+        if (issue({ t: 'convert', e: id, tg: tgt })) any = true;
       }
       if (any) { orderAck('order'); return; }
     }
