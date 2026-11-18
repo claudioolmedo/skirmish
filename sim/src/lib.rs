@@ -8268,6 +8268,23 @@ impl Sim {
     /// The mechanics of an attack order, shared by the `Attack`
     /// command and by queued-order execution.
     fn apply_attack(&mut self, idx: usize, target: u32) {
+        // A2 (bot-loop, 2026-11-18): a re-issue naming the
+        // attacker's CURRENT target is a no-op for the strike
+        // state. Unconditionally resetting `strike_tick` /
+        // `next_attack_tick` / `attack_engaged` here restarted
+        // the CMB-04 attack delay on every re-click, so a player
+        // (or harness) re-clicking the same enemy faster than
+        // the delay — a common human habit — starved the fight
+        // indefinitely (measured: re-issue every 30 ticks, zero
+        // damage in 18,000 ticks). A re-issue naming a DIFFERENT
+        // target resets the strike state exactly as before.
+        let same_target = self.entities[idx].attack_target == Some(target);
+        let (strike_tick, next_attack_tick, attack_engaged) = if same_target {
+            let e = &self.entities[idx];
+            (e.strike_tick, e.next_attack_tick, e.attack_engaged)
+        } else {
+            (None, 0, false)
+        };
         let e = &mut self.entities[idx];
         e.task = Task::Idle;
         e.task_node = None;
@@ -8279,9 +8296,9 @@ impl Sim {
         e.attack_target = Some(target);
         e.attack_building = None;
         e.attack_point = None;
-        e.strike_tick = None;
-        e.attack_engaged = false;
-        e.next_attack_tick = 0;
+        e.strike_tick = strike_tick;
+        e.attack_engaged = attack_engaged;
+        e.next_attack_tick = next_attack_tick;
         // CMB-09: an explicit order's provenance — the stance
         // chase gates never apply to it. CMB-10/11: it also ends
         // any standing order.
@@ -8304,6 +8321,17 @@ impl Sim {
         let idx = self.entity_index(entity).expect("validated");
         self.entities[idx].order_queue.clear();
         self.entities[idx].order_from_queue = false;
+        // A2 (bot-loop, 2026-11-18): the building counterpart of
+        // `apply_attack`'s same-target rule — a re-issue naming
+        // the building already under attack keeps the strike
+        // state; any other target resets it as before.
+        let same_building = self.entities[idx].attack_building == Some(building);
+        let (strike_tick, next_attack_tick, attack_engaged) = if same_building {
+            let e = &self.entities[idx];
+            (e.strike_tick, e.next_attack_tick, e.attack_engaged)
+        } else {
+            (None, 0, false)
+        };
         let e = &mut self.entities[idx];
         e.task = Task::Idle;
         e.task_node = None;
@@ -8315,9 +8343,9 @@ impl Sim {
         e.attack_target = None;
         e.attack_building = Some(building);
         e.attack_point = None;
-        e.strike_tick = None;
-        e.attack_engaged = false;
-        e.next_attack_tick = 0;
+        e.strike_tick = strike_tick;
+        e.attack_engaged = attack_engaged;
+        e.next_attack_tick = next_attack_tick;
         // CMB-09/10/11: explicit-order provenance (see apply_attack).
         e.attack_auto = false;
         e.attack_move = None;
