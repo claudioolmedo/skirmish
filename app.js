@@ -8427,10 +8427,23 @@ async function main() {
       if (any) { orderAck('attack'); return; }
     }
     let t = entityAt(wx, wy, fromCanvas);
+    // FIX #2b (bot-loop runs #417–#419): a target named through
+    // the occluded outline is exempt from the fog gate below.
+    // The outline record exists only because the draw pass
+    // could outline the unit, which already required current
+    // fog visibility (occlusion.js's fairness gate — the same
+    // trust the left-click pick places in the record, with no
+    // post-pick gate at all). Re-reading the cell here could
+    // only null a target the player is literally looking at:
+    // on the published build the right-click attack on a red
+    // outline degraded to a ground move (the ordered unit
+    // walked to the outline point and idled while the hidden
+    // enemy kept draining the Town Center), 7+ live attempts.
+    const tFromOutline = t != null && fromCanvas && occludedUnitAt(wx, wy) === t;
     // M7: a non-own unit is a target only while currently visible
     // — in explored memory or the black it cannot be clicked
     // (the click falls through to a ground move, as a miss does).
-    if (t != null && st.owners[t] !== localOwner
+    if (t != null && !tFromOutline && st.owners[t] !== localOwner
         && !cellVisibleW(st.pos[t * 2], st.pos[t * 2 + 1])) t = null;
     // Relic pickup (Castle P5d, MNK-09): a right-click on a
     // relic with Monk(s) selected tasks every selected Monk to
