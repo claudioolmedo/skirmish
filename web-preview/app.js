@@ -8290,6 +8290,8 @@ async function main() {
     if (occ !== null) return occ;
     let best = null;
     let bestD2 = 2.2 * 2.2;
+    let foeBest = null;
+    let foeBestD2 = 2.2 * 2.2;
     for (let i = 0; i < st.count; i++) {
       if (st.kinds[i] === KIND_TC || st.hp[i * 2] < 1) continue;
       const d2 = (st.pos[i * 2] - wx) ** 2 + (st.pos[i * 2 + 1] - wy) ** 2;
@@ -8297,6 +8299,34 @@ async function main() {
         bestD2 = d2;
         best = i;
       }
+      if (st.owners[i] !== localOwner && d2 < foeBestD2) {
+        foeBestD2 = d2;
+        foeBest = i;
+      }
+    }
+    // FIX #2c (bot-loop occorder2, run #423): a right-click pick
+    // never names our OWN unit while a non-own unit is also in
+    // pick range. The live failure: our Scout stood on (nearly)
+    // the hidden enemy's tile at the Town Center's east porch;
+    // whenever the outline record could not name the enemy (no
+    // record that frame, or the enemy beside the TC art's rect
+    // and not occluded at all), the ground pick named our own
+    // Scout — nearest, winning every equal-distance tie as the
+    // lower id — and orderAt degraded to a garrison attempt
+    // (refused: mounted units cannot garrison in a TC) and then
+    // a ground move onto the spot. Our own unit is never the
+    // target of a right-click order in this spot: the actionable
+    // reading of the click is the non-own unit. Two hosts keep
+    // their win — a Battering Ram (kind 17) or Transport Ship
+    // (kind 32) in range is a garrison/load target, not a
+    // bystander. (occordersweep2.mjs: with a coincident friendly
+    // and no record, 51.6% of the enemy sprite's clicks named
+    // our Scout and 100% issued a move; the record-present path
+    // above was already correct and is untouched.)
+    if (best !== null && foeBest !== null
+        && st.owners[best] === localOwner
+        && st.kinds[best] !== KIND_RAM && st.kinds[best] !== 32) {
+      return foeBest;
     }
     return best;
   }
