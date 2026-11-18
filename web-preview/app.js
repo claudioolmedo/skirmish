@@ -978,6 +978,7 @@ let playback = null; // replay playback state while a replay runs
 /// decision — Restart and Back to menu are the exits.
 function showMatchEnd(ms) {
   matchEnded = true;
+  closeLivePanels(); // the end card replaces the live panels, never stacks over them
   syncCaptureOverlay();
   // The end card (score, feedback form) is real-cursor work.
   exitGamePointerLock();
@@ -1242,6 +1243,22 @@ function setTechTree(open) {
   if (!techtreeOverlay) return;
   techtreeOverlay.style.display = open ? 'flex' : 'none';
   if (open) refreshTechTree();
+}
+
+/// Close the three live, non-pausing panels (Diplomacy, Score,
+/// Technology Tree) at a match boundary (bot-loop leak, runs
+/// #418/#419): the panels are per-match views — left open, the
+/// tree stayed display:flex behind the end card, peered out
+/// behind the Lobby Browser after Back to menu, and was still
+/// open inside the next match. Called by showMatchEnd /
+/// netMatchEnd (match end), openLobby (leaving to the lobby)
+/// and the per-match adopters resetSim / adoptSim /
+/// adoptLoadedSim (new match). In-match behaviour is
+/// untouched: the panels still toggle live and never pause.
+function closeLivePanels() {
+  setDiplo(false);
+  setScore(false);
+  setTechTree(false);
 }
 
 /// INF-11's score timeline: the client samples both players'
@@ -4499,6 +4516,7 @@ function resetSim(mode = matchMode) {
   builtMode = mode;
   matchEnded = false;
   endOverlay.style.display = 'none';
+  closeLivePanels(); // a fresh match starts with no live panel open
   localOwner = 0; // local modes always play the first seat (M8)
   playback = null;
   if (typeof netUi !== 'undefined' && netUi && netUi.playbackBar) {
@@ -4655,6 +4673,7 @@ function adoptSim(newSim, owner) {
   builtMode = 'online';
   matchEnded = false;
   endOverlay.style.display = 'none';
+  closeLivePanels(); // a fresh match starts with no live panel open
   seenBuildings.clear();
   resetScoreHistory(); // INF-11: per-match, as in resetSim
   resetEventFeed();
@@ -4794,6 +4813,7 @@ function postTelemetry(result) {
 function netMatchEnd(localMs, opts) {
   if (!net || net.phase === 'ended') return;
   net.phase = 'ended';
+  closeLivePanels(); // incl. the desync exit below, which bypasses showMatchEnd
   exitGamePointerLock(); // end/desync cards are real-cursor work
   syncCaptureOverlay();
   if (net.session) net.session.stop();
@@ -6245,6 +6265,7 @@ function updateLobbyClose() {
 function openLobby(join) {
   lobbyReturnToMatch = !!(playing && paused && !matchEnded && !join);
   lobbyReturnToEnded = !!(playing && matchEnded && !join);
+  closeLivePanels(); // no live panel peers behind the Lobby Browser
   setInMatch(false); // the lobby is up: no game on screen
   aiRoom = null; // entering the lobby dissolves any AI-room match
   if (net) teardownNet();
@@ -6819,6 +6840,7 @@ function adoptLoadedSim(loaded) {
   builtMode = mode;
   matchEnded = false;
   endOverlay.style.display = 'none';
+  closeLivePanels(); // a loaded match starts with no live panel open
   localOwner = 0; // a loaded save is always played from the first seat
   playback = null;
   if (typeof netUi !== 'undefined' && netUi && netUi.playbackBar) {
