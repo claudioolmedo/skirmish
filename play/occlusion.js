@@ -129,6 +129,40 @@ export function coveredFraction(rect, coverRects) {
   return f > 1 ? 1 : f;
 }
 
+// The pick decision for one screen point (FIX #2): the
+// caller keeps the last frame's occluded-unit records
+// ({id, rect, cover, depth} — rect the unit's alpha-tight
+// screen rect, cover the rects of the occluders that hid it,
+// depth its painter depth). The outline is painted exactly on
+// rect ∩ cover, so a point inside that region is a click ON
+// the unit, however far its ground position sits from the
+// point's ground conversion. Among overlapping outlines the
+// frontmost unit (greatest painter depth) wins. Returns the
+// unit's id, or null when the point hits no outline. Pure
+// geometry: the caller re-validates the id against the live
+// state (alive, present) before acting on it.
+export function occludedPickAt(records, sx, sy) {
+  let best = null;
+  let bestDepth = -Infinity;
+  for (const rec of records || []) {
+    if (!rec || !rec.rect || !rec.cover) continue;
+    let hit = false;
+    for (const c of rec.cover) {
+      const ir = intersectionRect(rec.rect, c);
+      if (ir && sx >= ir.x && sx < ir.x + ir.w
+          && sy >= ir.y && sy < ir.y + ir.h) {
+        hit = true;
+        break;
+      }
+    }
+    if (hit && rec.depth > bestDepth) {
+      bestDepth = rec.depth;
+      best = rec.id;
+    }
+  }
+  return best;
+}
+
 // The occlusion decision for one unit.
 //   unit:      {rect, depth, fogVisible}
 //   occluders: [{rect, depth, ...}] (extra fields pass through

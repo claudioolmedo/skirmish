@@ -101,7 +101,7 @@ import {
 } from './play/alerts.js';
 import { ClickMarkers, markerHeads } from './play/clickmarker.js';
 import { pennantsForSelection, pennantShape } from './play/pennants.js';
-import { occlusionFor, intersectionRect } from './play/occlusion.js';
+import { occlusionFor, intersectionRect, occludedPickAt } from './play/occlusion.js';
 import { wallLineCells, wallPiece } from './play/walls.js';
 import {
   dir16FromVector, turnedDir16, faceForDir16, sheetRowForDir16,
@@ -8135,10 +8135,51 @@ async function main() {
     return best;
   }
 
+  // Occluded-outline pick (FIX #2, bot-loop runs #402–#413):
+  // a unit hidden behind a building shows only its INF-12
+  // outline — the sprite clipped by the occluder — and the
+  // ground picks cannot name it: the visible outline sits
+  // screen-up from the unit's ground point, so a click on it
+  // converts to ground displaced north-west of the unit,
+  // outside entityAt's radius, and the building's own pick
+  // wins by default. The player watched an enemy outline
+  // attack their Town Center for minutes with no counter-play:
+  // clicking the outline selected only the TC. The pick
+  // therefore consults the occlusion pass's last-frame records
+  // (drawOccludedOutlines keeps them in lastOccludedOutlines):
+  // the click — converted back to screen space, the exact
+  // inverse of eventWorld's projection — names the unit when
+  // it falls inside the region the outline is actually painted
+  // on (the unit's alpha-tight rect ∩ an occluder's rect).
+  // Fog rule: a record exists only for a unit the pass could
+  // outline, which already required current fog visibility —
+  // the outline reveals pixel occlusion only, never fog.
+  // Among overlapping outlines the frontmost unit (greatest
+  // painter depth) wins. Records are one frame old at worst;
+  // each is re-validated against the live state (alive, not
+  // garrisoned) before it can name a pick.
+  function occludedUnitAt(wx, wy) {
+    if (!lastOccludedOutlines.length) return null;
+    const [sx, sy] = worldToScreen(wx, wy);
+    const id = occludedPickAt(lastOccludedOutlines, sx, sy);
+    if (id === null) return null;
+    // The records are one frame old at worst: re-validate
+    // against the live state before the id can name a pick.
+    const st = entityState();
+    if (id >= st.count || st.hp[id * 2] < 1) return null;
+    if (st.garrisoned && st.garrisoned[id]) return null;
+    return id;
+  }
+
   // Right-click target pick: ANY living entity (ours or Gaia's —
   // the attack-target test). Slightly more generous radius: boars
   // are big, and a missed click should still read as an attack.
-  function entityAt(wx, wy) {
+  // `screenPick` gates the FIX #2 occluded-outline candidate
+  // below: it is a MAIN-CANVAS pick (the outline exists only
+  // there), so callers pass it only for canvas clicks — the
+  // minimap's pick stays the plain ground pick, exactly like
+  // the tree-canopy fallback (SEL-16).
+  function entityAt(wx, wy, screenPick = false) {
     const st = entityState();
     // Same Ram-body precedence as unitAt: a right-click on the
     // drawn body is a click on the Ram (garrison / attack target),
@@ -8154,6 +8195,13 @@ async function main() {
       }
     }
     if (bodyBest !== null) return bodyBest;
+    // FIX #2: a click on an occluded unit's painted outline
+    // names that unit, ahead of the ground pick below — the
+    // ground point of an outline click is displaced off the
+    // unit, so the ground pick would name a bystander or
+    // nothing and the order would degrade to a ground move.
+    const occ = screenPick ? occludedUnitAt(wx, wy) : null;
+    if (occ !== null) return occ;
     let best = null;
     let bestD2 = 2.2 * 2.2;
     for (let i = 0; i < st.count; i++) {
@@ -8378,7 +8426,7 @@ async function main() {
       }
       if (any) { orderAck('attack'); return; }
     }
-    let t = entityAt(wx, wy);
+    let t = entityAt(wx, wy, fromCanvas);
     // M7: a non-own unit is a target only while currently visible
     // — in explored memory or the black it cannot be clicked
     // (the click falls through to a ground move, as a miss does).
@@ -8765,7 +8813,7 @@ async function main() {
   // the Heal order replaces, like Trade. The mirror flashes are
   // courtesies; the sim's can_heal is the authority.
   function attemptHeal(wx, wy) {
-    const tg = entityAt(wx, wy);
+    const tg = entityAt(wx, wy, true); // a canvas targeting click (FIX #2 screen pick applies)
     if (tg == null) {
       flash(t('flash.healArmUnit'));
       return;
@@ -8800,7 +8848,7 @@ async function main() {
   // replaces, like Heal. The mirror flashes are courtesies; the
   // sim's can_convert_target / can_convert are the authority.
   function attemptConvert(wx, wy) {
-    const tg = entityAt(wx, wy);
+    const tg = entityAt(wx, wy, true); // a canvas targeting click (FIX #2 screen pick applies)
     if (tg == null) {
       // Castle P5c (MNK-04): the armed click may name an enemy
       // BUILDING instead — every selected Monk takes the
@@ -9141,6 +9189,21 @@ async function main() {
       }
       playSelectAck();
     } else if (!ev.shiftKey) {
+      // FIX #2: a click on an occluded unit's painted outline
+      // names the unit, ahead of the building it hides behind
+      // (see occludedUnitAt) — our own unit becomes a real
+      // selection; anyone else's is an information selection
+      // through the animal path's machinery (selectAnimal).
+      const occ = occludedUnitAt(wx, wy);
+      if (occ != null) {
+        if (isOwnUnit(entityState(), occ)) {
+          selectUnits(new Set([occ]));
+          playSelectAck();
+        } else {
+          selectAnimal(occ);
+        }
+        return;
+      }
       // No unit hit: an animal that is not ours selects for
       // information (see animalAt); the Town Center and placed
       // buildings are selections of their own (kept OUT of the
@@ -16120,7 +16183,12 @@ function updateSelPanel() {
       ? (st.owners[i] === 1
         ? t('sel.gaiaSheepInfo', { hp: hpTxt })
         : t('sel.foeSheepInfo', { hp: hpTxt }))
-      : t('sel.wildAnimalInfo', { hp: hpTxt });
+      : (kind === 6 || kind === 7 || kind === 11)
+        ? t('sel.wildAnimalInfo', { hp: hpTxt })
+        // FIX #2: the info selection now also carries enemy
+        // UNITS (an occluded enemy picked through its outline)
+        // — their line says what they are, not "wild animal".
+        : t('sel.enemyUnitInfo', { hp: hpTxt });
   } else if (context === 'foe-tc') {
     selPortrait.classList.remove('empty');
     selPortrait.innerHTML = pngIcon('town-center.png', 'ui-icon');
@@ -16651,10 +16719,19 @@ function paintOccludedSilhouette(unitEntry, cover, color) {
   ctx.restore();
 }
 
+// The last frame's occluded-unit records, kept for the pick
+// functions (FIX #2, bot-loop): {id, rect, cover, depth} per
+// unit whose outline was painted — rect is the unit's
+// alpha-tight screen rect, cover the occluder rects that hid
+// it (the outline shows exactly on rect ∩ cover). Rebuilt by
+// every drawOccludedOutlines pass; empty between matches.
+let lastOccludedOutlines = [];
+
 // The occlusion pass itself: group the recorded items into
 // units and occluders (with their alpha-tight rects), ask
 // occlusion.js who is hidden, and paint those units' outlines.
 function drawOccludedOutlines(items) {
+  lastOccludedOutlines = [];
   const units = [];
   const occluders = [];
   for (const it of items) {
@@ -16682,6 +16759,18 @@ function drawOccludedOutlines(items) {
       occluders);
     if (!res.occluded) continue;
     paintOccludedSilhouette(u, res.cover, outlineColorFor(u.it.occ.owner));
+    // FIX #2: keep the record for the pick functions — a click
+    // on the painted outline must name this unit (see
+    // occludedUnitAt). Units whose draw entry carries no
+    // entity id (the ground relic) take no part in picking.
+    if (u.it.occ.id != null) {
+      lastOccludedOutlines.push({
+        id: u.it.occ.id,
+        rect: u.rect,
+        cover: res.cover.map((o) => o.rect),
+        depth: u.depth,
+      });
+    }
   }
 }
 
@@ -17018,7 +17107,7 @@ function draw() {
         // (own units always draw; others only in visible cells),
         // and occlusion.js enforces it as a hard gate.
         occ: {
-          role: 'unit', owner,
+          role: 'unit', owner, id: i,
           fogVisible: owner === localOwner || cellVisibleW(wx, wy),
         },
         fn: () => {
