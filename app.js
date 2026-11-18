@@ -403,9 +403,10 @@ function pngIcon(png, cls) {
 // 17 siege workshop (Castle P4a — 200 wood, 4×4, requires a
 // completed Blacksmith);
 // 18 palisade gate, 19 stone gate (Package J, BLD-13 — 4×1 spans:
-// 20 wood / 30 stone; BUILD_SIZE reads 1, the span's ACROSS edge —
-// the span itself is resolved by the sim and read back through
-// gate_states());
+// 20 wood / 30 stone; the footprint table comes from the sim
+// (BLD-06, `kind_footprints()`) — a gate's row reads 4x1 and
+// the standing orientation is read back through buildings()
+// and gate_states());
 // 20 monastery (Castle P5a — 175 wood, 3×3, no prerequisite);
 // 21 monument (Package I, AI-09/VIC-08 — the King of the Hill
 // Monument: unconstructible, placed by the sim at the map
@@ -436,9 +437,31 @@ const BUILD_I18N = ['house', 'farm', 'barracks', 'lumber', 'mill',
 let BUILD_NAME = ['House', 'Farm', 'Barracks', 'Lumber Camp', 'Mill',
   'Mining Camp', 'Archery Range', 'Stable', 'Blacksmith', 'Palisade Wall',
   'Watch Tower', 'Outpost', 'Market', 'Town Center', 'Stone Wall', 'Castle', 'University', 'Siege Workshop', 'Palisade Gate', 'Stone Gate', 'Monastery', 'Monument', 'Wonder', 'Dock', 'Fish Trap', 'Guard Tower', 'Keep'];
-// Farm footprint is 3 (DE-documented; Claudio's decision
-// 2026-10-22, superseding the earlier 2x2 specification).
-const BUILD_SIZE = [2, 3, 3, 2, 2, 2, 3, 3, 3, 1, 1, 1, 4, 4, 1, 4, 4, 4, 1, 1, 3, 4, 5, 3, 1, 1, 1];
+// Footprints come from the sim's one table (BLD-06): a lazy
+// cache over `kind_footprints()` — two values per kind tag,
+// [w, h] in cells. The Farm reads 3x3 (DE-documented; Claudio's
+// decision 2026-10-22, superseding the earlier 2x2
+// specification); a gate's row reads its canonical 4x1.
+let _kindFootprints = null;
+function kindFootprints() {
+  if (!_kindFootprints) {
+    const flat = typeof sim.kind_footprints === 'function'
+      ? sim.kind_footprints() : [];
+    _kindFootprints = [];
+    for (let t = 0; t + 1 < flat.length; t += 2) {
+      _kindFootprints.push([flat[t], flat[t + 1]]);
+    }
+  }
+  return _kindFootprints;
+}
+// The across edge of a kind's footprint (min(w, h)) — the
+// scalar the client's square-shaped readers used to take from
+// the client's own BUILD_SIZE table; for a gate it reads 1,
+// the span's across edge, exactly as that table did.
+function kindSize(kind) {
+  const fp = kindFootprints()[kind];
+  return fp ? Math.min(fp[0], fp[1]) : 2;
+}
 // The wall kinds (BLD-13 palisade, BLD-20 stone): 1×1 segments
 // placed by dragged lines, not single footprints.
 function isWallKind(kind) { return kind === 9 || kind === 14; }
@@ -2725,13 +2748,18 @@ function nodeList() {
 function buildingList() {
   const flat = sim.buildings();
   const out = [];
-  for (let i = 0; i < flat.length; i += 13) {
+  for (let i = 0; i < flat.length; i += 14) {
+    // BLD-06: the stride carries the footprint rectangle
+    // (w, h) as standing; `size` keeps its old meaning — the
+    // across edge, min(w, h) — for the square-shaped readers
+    // (a gate's size reads 1, as it always did).
+    const w = flat[i + 8], h = flat[i + 9];
     out.push({
       id: flat[i], kind: flat[i + 1], x: flat[i + 2], y: flat[i + 3],
       progress: flat[i + 4], complete: flat[i + 5] > 0.5,
-      cellX: flat[i + 6], cellY: flat[i + 7], size: flat[i + 8],
-      queue: flat[i + 9], trainFrac: flat[i + 10],
-      owner: flat[i + 11], hpFrac: flat[i + 12],
+      cellX: flat[i + 6], cellY: flat[i + 7], w, h, size: Math.min(w, h),
+      queue: flat[i + 10], trainFrac: flat[i + 11],
+      owner: flat[i + 12], hpFrac: flat[i + 13],
     });
   }
   return out;
@@ -2872,7 +2900,7 @@ function gateOrientationAt(kind, cx, cy) {
         const cells = gateSpanCells(b.cellX, b.cellY, gi ? gi.alongX : true);
         if (cells.some(([gx, gy]) => gx === x && gy === y)) return false;
       } else {
-        const bs = b.size || BUILD_SIZE[b.kind] || 2;
+        const bs = b.size || kindSize(b.kind);
         if (x >= b.cellX && x < b.cellX + bs && y >= b.cellY && y < b.cellY + bs) return false;
       }
     }
@@ -2906,11 +2934,11 @@ function mirrorGateValid(kind, cx, cy) {
 // the price. The sim re-validates every order itself.
 function mirrorDockValid(cx, cy) {
   const kind = 23;
-  const size = BUILD_SIZE[kind];
+  const size = kindSize(kind);
   if (cx < 0 || cy < 0 || cx + size > GW || cy + size > GH) return false;
   const buildings = buildingList();
   for (const b of buildings) {
-    const bs = b.size || BUILD_SIZE[b.kind] || 2;
+    const bs = b.size || kindSize(b.kind);
     if (cx < b.cellX + bs && b.cellX < cx + size &&
         cy < b.cellY + bs && b.cellY < cy + size) return false;
   }
@@ -2976,7 +3004,7 @@ function mirrorTrapValid(cx, cy) {
   if (t < 1) return false; // water-side only (deep water or shallows)
   if (OBST[cy * GW + cx]) return false;
   for (const b of buildings) {
-    const bs = b.size || BUILD_SIZE[b.kind] || 2;
+    const bs = b.size || kindSize(b.kind);
     if (cx >= b.cellX && cx < b.cellX + bs && cy >= b.cellY && cy < b.cellY + bs) return false;
   }
   for (const n of nodeList()) {
@@ -3004,7 +3032,7 @@ function mirrorValid(kind, cx, cy) {
   if (kind === 23) return mirrorDockValid(cx, cy);
   // Water W2b (ECO-15): the Fish Trap's mirror is its water rule.
   if (kind === 24) return mirrorTrapValid(cx, cy);
-  const size = BUILD_SIZE[kind];
+  const size = kindSize(kind);
   if (cx < 0 || cy < 0 || cx + size > GW || cy + size > GH) return false;
   const buildings = buildingList();
   // Resuming an incomplete building of the same kind at this anchor
@@ -3033,7 +3061,7 @@ function mirrorValid(kind, cx, cy) {
   if ((kind === 6 || kind === 7) && !ownDone.some((b) => b.kind === 2)) return false;
   // Any standing building's footprint (square range overlap).
   for (const b of buildings) {
-    const bs = b.size || BUILD_SIZE[b.kind] || 2;
+    const bs = b.size || kindSize(b.kind);
     if (cx < b.cellX + bs && b.cellX < cx + size &&
         cy < b.cellY + bs && b.cellY < cy + size) return false;
   }
@@ -6184,23 +6212,39 @@ function connectToRoom() {
 // pause menu, so nothing ever brought the game view back).
 let lobbyReturnToMatch = false;
 
+/// Set when the lobby was opened over a FINISHED match (the
+/// end card dismissed via View map, then Menu → Play online —
+/// bot-loop live trap, confirmed 12+ runs through 2026-11-17,
+/// #405–#412): matchEnded excluded this state from
+/// lobbyReturnToMatch, so the lobby offered NO ✕ at all, Esc
+/// does not close the lobby, and the pause menu underneath was
+/// unreachable — the player was trapped and could only escape
+/// by starting a new game. Closing from here returns to the
+/// finished match exactly as the live-match return does (game
+/// view back, pause menu up over it); the end state itself
+/// (end card / View-map chip) is untouched by the round-trip.
+let lobbyReturnToEnded = false;
+
 /// The lobby's ✕ only exists when closing has somewhere to go:
 /// back to the live match it was opened over (lobbyReturnToMatch),
-/// or out of a room back to the browser. On the front door itself
-/// there is NOTHING under the lobby — openLobby cleared .in-match
-/// and the browser IS the page's home screen — so a visible ✕
-/// there stranded the player on a completely black page (bot-loop
-/// live reproduction, 2026-11-03: close the auto-opened Lobby
-/// Browser on the main menu → black page, only the beta banner
-/// left; reload the only recovery). Hide it in that state.
+/// back to the finished match it was opened over
+/// (lobbyReturnToEnded), or out of a room back to the browser.
+/// On the front door itself there is NOTHING under the lobby —
+/// openLobby cleared .in-match and the browser IS the page's
+/// home screen — so a visible ✕ there stranded the player on a
+/// completely black page (bot-loop live reproduction, 2026-11-03:
+/// close the auto-opened Lobby Browser on the main menu → black
+/// page, only the beta banner left; reload the only recovery).
+/// Hide it in that state.
 function updateLobbyClose() {
   if (!netUi || !netUi.onlineClose) return;
-  const canClose = lobbyReturnToMatch || !!(net && net.room);
+  const canClose = lobbyReturnToMatch || lobbyReturnToEnded || !!(net && net.room);
   netUi.onlineClose.style.display = canClose ? '' : 'none';
 }
 
 function openLobby(join) {
   lobbyReturnToMatch = !!(playing && paused && !matchEnded && !join);
+  lobbyReturnToEnded = !!(playing && matchEnded && !join);
   setInMatch(false); // the lobby is up: no game on screen
   aiRoom = null; // entering the lobby dissolves any AI-room match
   if (net) teardownNet();
@@ -7562,6 +7606,20 @@ async function main() {
   if (onlineBtn) onlineBtn.addEventListener('click', () => openLobby(null));
   if (netUi.onlineClose) {
     netUi.onlineClose.addEventListener('click', () => {
+      if (net && net.room) {
+        // In a room, the ✕ means "leave the room": tear the
+        // session down and land back on the Lobby Browser front
+        // door. (Before this, it merely hid the overlay — the
+        // session stayed alive invisibly and the page went black,
+        // the same stranding as the front-door case.) This check
+        // comes FIRST: a room entered from a lobby that was opened
+        // over a live or finished match must not be hijacked by
+        // the return flags below — openLobby(join) clears them,
+        // but the host's create flow sets net.room inside the
+        // same session, flags still standing.
+        openLobby(null);
+        return;
+      }
       if (lobbyReturnToMatch) {
         // Opened from the pause menu over a live match: closing
         // the lobby returns to that match — drop the lobby's net
@@ -7589,13 +7647,21 @@ async function main() {
         fitCanvas();
         return;
       }
-      if (net && net.room) {
-        // In a room, the ✕ means "leave the room": tear the
-        // session down and land back on the Lobby Browser front
-        // door. (Before this, it merely hid the overlay — the
-        // session stayed alive invisibly and the page went black,
-        // the same stranding as the front-door case.)
-        openLobby(null);
+      if (lobbyReturnToEnded) {
+        // Opened over a FINISHED match (View map → Menu → Play
+        // online — the bot-loop lobby trap, #405–#412): closing
+        // returns to that finished match exactly as the
+        // live-match return above does — drop the lobby's net
+        // session, bring the game view back, leave the pause
+        // menu up over it. matchEnded and the end state (end
+        // card hidden under View map, Results chip showing) are
+        // not touched: Resume lands back on the post-game map.
+        // Same canvas-refit discipline as the live return.
+        lobbyReturnToEnded = false;
+        teardownNet();
+        setInMatch(true);
+        setPaused(true);
+        fitCanvas();
         return;
       }
       // Front door (or any state with nothing under the lobby):
@@ -8111,7 +8177,7 @@ async function main() {
     return null;
   }
 
-  // Town Center hit test: the TC whose footprint box (pos ± TC_HALF
+  // Town Center hit test: the TC whose footprint box (pos ± tcHalf()
   // on both axes) contains the point — deliberately more generous
   // than unitAt's pick radius, since the TC is a big building.
   function tcAt(wx, wy) {
@@ -8119,8 +8185,8 @@ async function main() {
     const pos = sim.positions();
     for (let i = 0; i < kinds.length; i++) {
       if (kinds[i] !== KIND_TC) continue;
-      if (Math.abs(pos[i * 2] - wx) <= TC_HALF &&
-          Math.abs(pos[i * 2 + 1] - wy) <= TC_HALF) return i;
+      if (Math.abs(pos[i * 2] - wx) <= tcHalf() &&
+          Math.abs(pos[i * 2 + 1] - wy) <= tcHalf()) return i;
     }
     return null;
   }
@@ -10010,17 +10076,24 @@ function drawFishTrap(sx, sy, frac) {
 const NODE_DRAW = [drawTree, drawBerry, drawGold, drawStone, drawFarm, drawCarcass, drawCarcass, drawShoreFish, drawDeepFish, drawFishTrap];
 
 // --- Building sprites -----------------------------------------------------
-const TC_HALF = 8; // world units: TC footprint half-extent (4x4 cells x 4 wu, BLD-16)
-// The Town Center's footprint is 4x4 cells (the DE study; the
-// prompt standard composes the TC art for exactly that). The art is
-// drawn footprint-based like the other Base44 buildings
-// (drawNewBuilding): width = footprint x 1.12, base planted
+// The Town Center's footprint metrics come from the sim's one
+// table (BLD-06): building kind tag 13's row in
+// `kind_footprints()` — the TC's declared 4x4 (BLD-16; the
+// fallback row below is that same 4x4 for a stale wasm).
+// tcHalf() is the half-extent in world units (4x4 cells x 4 wu
+// → 8). The art is drawn footprint-based like the other Base44
+// buildings (drawNewBuilding): width = footprint x 1.12, base planted
 // half-footprint x 0.45 toward the front corner — NOT the old
 // 9.5 / +1.6 placeholder contract, which left the compound small
 // inside its 4x4 footprint diamond with empty space at the sides.
-const TC_ART_CELLS = 4; // TC footprint edge, in cells
+// tcArtCells() is the footprint edge, in cells.
+function tcFootprint() {
+  return kindFootprints()[13] || [4, 4];
+}
+function tcHalf() { return tcFootprint()[0] * 2; }
+function tcArtCells() { return tcFootprint()[0]; }
 function drawTC(wx, wy, owner = 0) {
-  const a = TC_HALF;
+  const a = tcHalf();
   const t = worldToScreen(wx - a, wy - a);
   const r = worldToScreen(wx + a, wy - a);
   const b = worldToScreen(wx + a, wy + a);
@@ -10036,9 +10109,9 @@ function drawTC(wx, wy, owner = 0) {
   // above the sprite's bottom edge (half-footprint x 0.55), its
   // base corners land exactly on the 4x4 footprint diamond.
   // The CC0 placeholder is the fallback (same draw contract).
-  const tcArtHalf = (TC_ART_CELLS * CS) / 2;
+  const tcArtHalf = (tcArtCells() * CS) / 2;
   if (drawSpriteW(BUILDING_ART.img.tc, sx, sy,
-    TC_ART_CELLS * CS * 1.12, tcArtHalf * 0.55)) return;
+    tcArtCells() * CS * 1.12, tcArtHalf * 0.55)) return;
   // While the real art is still in flight — reachable only when
   // the loading gate's settle cap let the match start first —
   // fall through to the vector Town Center below instead of the
@@ -10047,7 +10120,7 @@ function drawTC(wx, wy, owner = 0) {
   // chain resumes: an errored image keeps the placeholder.
   if (!buildingArtPending('tc') &&
     drawSpriteW(SPRITES.tc, sx, sy,
-      TC_ART_CELLS * CS * 1.12, tcArtHalf * 0.55)) return;
+      tcArtCells() * CS * 1.12, tcArtHalf * 0.55)) return;
   const h = 2.2 * camS; // wall height
   poly([l, b, up(b, h), up(l, h)], '#b09468'); // front-left wall
   poly([b, r, up(r, h), up(b, h)], '#8a6f45'); // front-right wall
@@ -16883,7 +16956,7 @@ function draw() {
       const hp = st.hp[i * 2];
       const maxHp = st.hp[i * 2 + 1];
       draws.push({
-        key: wx + wy + TC_HALF,
+        key: wx + wy + tcHalf(),
         // INF-12: the TC is an occluder like any building — the
         // enemy scout hiding behind it is the case that counts.
         occ: { role: 'occluder' },
@@ -17089,7 +17162,7 @@ function draw() {
     let outline = null; // [centerX, centerY, halfExtent]
     if (selectedBuilding && selectedBuilding.type === 'tc') {
       const id = selectedBuilding.id;
-      outline = [pos[id * 2], pos[id * 2 + 1], TC_HALF];
+      outline = [pos[id * 2], pos[id * 2 + 1], tcHalf()];
     } else if (selectedBuilding && selectedBuilding.type === 'building') {
       const b = renderBuildings.find((bb) => bb.id === selectedBuilding.id);
       if (b) outline = [b.x, b.y, (b.size * CS) / 2];
@@ -17210,7 +17283,7 @@ function draw() {
       }
     } else {
       const ok = mirrorValid(placement.kind, cx, cy);
-      const size = BUILD_SIZE[placement.kind];
+      const size = kindSize(placement.kind);
       const x0 = -HALF + cx * CS;
       const y0 = -HALF + cy * CS;
       const pts = [

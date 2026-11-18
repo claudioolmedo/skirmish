@@ -42,18 +42,19 @@ export class WasmSim {
      */
     building_train_block(building: number, kind_tag: number): number;
     /**
-     * Placed buildings as a flat array: thirteen values per
+     * Placed buildings as a flat array: fourteen values per
      * building — `[id, kind, x, y, progress, complete, cell_x,
-     * cell_y, size, queue_len, train_progress, owner, hp]` — in
+     * cell_y, w, h, queue_len, train_progress, owner, hp]` — in
      * building id order. `kind` tags: 0 house, 1 farm, 2 barracks
      * (M3); 3 lumber camp, 4 mill, 5 mining camp, 6 archery range,
      * 7 stable, 8 blacksmith (M6); 9 palisade wall (BLD-13);
      * 16 university (Castle P3c), 17 siege workshop (Castle
-     * P4a); 18 palisade gate, 19 stone gate (Package J, BLD-13 — their
-     * `size` reads 1, the span's ACROSS edge; the span itself is
-     * in `gate_states`). `progress` is the construction fraction 0..1 (1 when
-     * complete); `complete` is 0/1; `size` is the footprint edge in
-     * cells; `queue_len` and `train_progress` (0..1 on the queue's
+     * P4a); 18 palisade gate, 19 stone gate (Package J, BLD-13).
+     * `progress` is the construction fraction 0..1 (1 when
+     * complete); `complete` is 0/1; `w`/`h` are the footprint
+     * rectangle in cells, AS STANDING (BLD-06: a gate along y
+     * reads w 1, h 4 — the span itself is also in `gate_states`);
+     * `queue_len` and `train_progress` (0..1 on the queue's
      * head) describe a production building's queue. M5 adds `owner`
      * (0 human, 2 opponent — the entity owner tags) and `hp`, the
      * remaining-HP fraction 0..1 (buildings take damage now; a
@@ -227,7 +228,7 @@ export class WasmSim {
      * when the 4×1 span runs along +x from the anchor cell (0 =
      * along +y) and `open` is the gate's derived open state
      * right now (1 while an owner's unit stands at the gate and
-     * no foreign unit does; foundations read 0). The 13-value
+     * no foreign unit does; foundations read 0). The 14-value
      * `buildings()` stride stays untouched; this side channel
      * carries what a rectangle needs that a square never did.
      */
@@ -262,6 +263,16 @@ export class WasmSim {
      * Ids of a specific player's idle villagers.
      */
     idle_villagers_for(owner: number): Uint32Array;
+    /**
+     * The footprint table itself (BLD-06): two values per
+     * building kind, in kind-tag order 0..=26 — `[w, h]` in
+     * cells, from the sim's one `BuildingKind::footprint` table
+     * (a gate reads its canonical 4×1; the Town Center kind
+     * reads its declared 4×4). The client reads its placement
+     * ghost, mirrors and Town Center art metrics from here
+     * instead of keeping a second table of its own.
+     */
+    kind_footprints(): Float64Array;
     /**
      * Package I's Monument holder for the client's readout: the
      * owner byte of the player currently holding the Monument
@@ -1627,6 +1638,7 @@ export interface InitOutput {
     readonly wasmsim_idle_military_for: (a: number, b: number) => [number, number];
     readonly wasmsim_idle_villagers: (a: number) => [number, number];
     readonly wasmsim_idle_villagers_for: (a: number, b: number) => [number, number];
+    readonly wasmsim_kind_footprints: (a: number) => [number, number];
     readonly wasmsim_koth_owner: (a: number) => number;
     readonly wasmsim_koth_ticks_left: (a: number) => number;
     readonly wasmsim_load_game: (a: number, b: number) => number;

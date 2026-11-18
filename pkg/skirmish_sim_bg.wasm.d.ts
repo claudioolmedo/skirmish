@@ -41,6 +41,7 @@ export const wasmsim_idle_military: (a: number) => [number, number];
 export const wasmsim_idle_military_for: (a: number, b: number) => [number, number];
 export const wasmsim_idle_villagers: (a: number) => [number, number];
 export const wasmsim_idle_villagers_for: (a: number, b: number) => [number, number];
+export const wasmsim_kind_footprints: (a: number) => [number, number];
 export const wasmsim_koth_owner: (a: number) => number;
 export const wasmsim_koth_ticks_left: (a: number) => number;
 export const wasmsim_load_game: (a: number, b: number) => number;

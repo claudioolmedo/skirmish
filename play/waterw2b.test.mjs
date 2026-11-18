@@ -45,7 +45,14 @@ test('the build tables carry kind 24 at the SPEC row', () => {
   assert.equal(table('BUILD_COST')[24], '100');
   assert.equal(table('BUILD_COST_STONE')[24], '0');
   assert.equal(table('BUILD_COST_GOLD')[24], '0');
-  assert.equal(table('BUILD_SIZE')[24], '1');
+  // BLD-06 (2026-11-17): the client's own BUILD_SIZE table is
+  // gone — footprints come from the sim's one table through
+  // kind_footprints(), and the Fish Trap's 1x1 lives there now
+  // (pinned sim-side by build::tests::footprint_table_matches_de).
+  assert.match(app, /function kindFootprints\(\)/);
+  assert.match(app, /sim\.kind_footprints\(\)/);
+  assert.match(app, /function kindSize\(kind\)/);
+  assert.match(wasmRs, /pub fn kind_footprints\(&self\) -> Vec<f64>/);
   assert.equal(table('BUILD_COST').length, 27); // 25 here at W2b; +Guard Tower / Keep (BLD-18 completion, 2026-11-16)
   assert.match(app, /'i-watchtower'\];?\s*$/m);
   assert.match(app, /'fishtrap', 'guardtower', 'keep'\]/);

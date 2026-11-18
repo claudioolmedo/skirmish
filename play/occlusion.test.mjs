@@ -63,7 +63,7 @@ test('occlusionFor: the fog gate is absolute', () => {
 test('occlusionFor: enemy scout fully behind the Town Center (Claudio’s case)', () => {
   // Enemy scout (small rect) standing on the far side of the
   // local TC: the TC's rect swallows it, the TC's painter depth
-  // (footprint key = wx + wy + TC_HALF) is strictly greater, and
+  // (footprint key = wx + wy + tcHalf()) is strictly greater, and
   // the scout's cell is in current fog visibility (it stands
   // beside OUR TC, inside our sight) -> the outline must show.
   const scout = { rect: R(100, 100, 24, 30), depth: 50, fogVisible: true };
