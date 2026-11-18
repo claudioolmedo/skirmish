@@ -11614,6 +11614,67 @@ function hpBar(sx, sy, frac) {
   ctx.fillRect(x, sy, w * f, h);
 }
 
+// The Villager's final vector figure, painted on an arbitrary
+// context (the cached sprite below, or the frame canvas as the
+// last resort). Shapes and colours are the pre-sprite fallback's
+// own, verbatim: a single filled circle in the unit's palette
+// colour (or the enemy colour) with a thin dark outline. The
+// centre rides 1.15 u above the ground point, exactly where the
+// fallback's `by` anchor put it.
+function paintVillagerFigure(g, sx, sy, u, color) {
+  const by = sy - 1.15 * u; // fallback body center
+  g.fillStyle = color;
+  g.beginPath();
+  g.arc(sx, by, 0.85 * u, 0, Math.PI * 2);
+  g.fill();
+  g.strokeStyle = 'rgba(0,0,0,0.4)';
+  g.lineWidth = 1;
+  g.stroke();
+}
+
+// Bot-loop H3b fix (2026-11-18): the figure above used to be
+// painted straight onto the frame canvas as drawVillager's last
+// fallback. The INF-12 occlusion pass (recordFrameSprites /
+// drawOccludedOutlines) can only see units whose draw records
+// drawImage calls — a call-less item is skipped outright — so a
+// Villager on this fallback could never be outlined or
+// outline-picked behind a building. The fallback sits behind
+// THREE sprite layers (the original sheet, the UNIT_ART poses,
+// the CC0 placeholder sprite), so it only paints when none of
+// them is drawable — but that is exactly the degraded state the
+// record matters in (occorder2-build H3). Like the monk, the
+// Castle cavalry, the Scout and the Spearman/Skirmisher before
+// him, the figure is now painted ONCE into a cached sprite per
+// fill colour (the 16-entry COLORS palette, or ENEMY_COLOR) and
+// blitted with drawImage; the direct vector paint remains only
+// for a canvas-less stub. Presentation only: sim and golden
+// hash untouched.
+const VILLAGER_SPRITE_U = 16; // cached-sprite pixels per world unit
+// Sprite content bounds in unit space (feet at the origin):
+// x [-0.85, 0.85] (the circle's rim), y [-2.0, -0.3] (circle
+// top → bottom); the box below adds a small margin.
+const VILLAGER_BOX = { x0: -1.1, y0: -2.25, w: 2.2, h: 2.4 };
+const villagerSpriteCache = new Map(); // color -> canvas | null
+function villagerSprite(color) {
+  if (villagerSpriteCache.has(color)) return villagerSpriteCache.get(color);
+  let cv = null;
+  try {
+    cv = document.createElement('canvas');
+    cv.width = Math.ceil(VILLAGER_BOX.w * VILLAGER_SPRITE_U);
+    cv.height = Math.ceil(VILLAGER_BOX.h * VILLAGER_SPRITE_U);
+    const g = cv.getContext('2d');
+    if (!g) cv = null;
+    else {
+      paintVillagerFigure(g, -VILLAGER_BOX.x0 * VILLAGER_SPRITE_U,
+        -VILLAGER_BOX.y0 * VILLAGER_SPRITE_U, VILLAGER_SPRITE_U, color);
+    }
+  } catch {
+    cv = null; // no canvas available (test stubs): vector fallback
+  }
+  villagerSpriteCache.set(color, cv);
+  return cv;
+}
+
 function drawVillager(i, wx, wy) {
   const [sx, sy] = worldToScreen(wx, wy);
   const u = camS;
@@ -11629,13 +11690,14 @@ function drawVillager(i, wx, wy) {
   const spr = art || orig || drawSpriteH(SPRITES.villager, sx, sy, 2.4);
   const by = sy - 1.15 * u; // fallback body center / label anchor
   if (!spr) {
-    ctx.fillStyle = drawOwner === foeOwner() ? ENEMY_COLOR : COLORS[i % COLORS.length];
-    ctx.beginPath();
-    ctx.arc(sx, by, 0.85 * u, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(0,0,0,0.4)';
-    ctx.lineWidth = 1;
-    ctx.stroke();
+    const color = drawOwner === foeOwner() ? ENEMY_COLOR : COLORS[i % COLORS.length];
+    const vspr = villagerSprite(color);
+    if (vspr) {
+      ctx.drawImage(vspr, sx + VILLAGER_BOX.x0 * u, sy + VILLAGER_BOX.y0 * u,
+        VILLAGER_BOX.w * u, VILLAGER_BOX.h * u);
+    } else {
+      paintVillagerFigure(ctx, sx, sy, u, color);
+    }
   }
   // The kind dot rides on the TRUE carry — the same state that
   // picks the cargo sheet: it appears with the load and is gone
@@ -13498,6 +13560,76 @@ function drawSkirmisher(i, wx, wy) {
     paintSkirmisherFigure(ctx, sx, sy, u, cloth);
   }
 }
+// The sword footmen's vector figure, painted on an arbitrary
+// context (the cached sprite below, or the frame canvas as the
+// last resort). Shapes and colours are the pre-sprite fallback's
+// own, verbatim: one shared body for Militia and Man-at-Arms,
+// as the fallback always drew them.
+function paintFootmanFigure(g, sx, sy, u, cloth) {
+  g.fillStyle = cloth; // tunic (player color)
+  g.beginPath();
+  g.ellipse(sx, sy - 0.85 * u, 0.62 * u, 0.8 * u, 0, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = '#e8c39a'; // head
+  g.beginPath();
+  g.arc(sx, sy - 1.95 * u, 0.34 * u, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = '#7a4a21'; // shield
+  g.beginPath();
+  g.arc(sx - 0.75 * u, sy - 1.0 * u, 0.42 * u, 0, Math.PI * 2);
+  g.fill();
+  g.strokeStyle = '#e8e8e8'; // sword
+  g.lineWidth = Math.max(1, 0.16 * u);
+  g.beginPath();
+  g.moveTo(sx + 0.55 * u, sy - 1.5 * u);
+  g.lineTo(sx + 1.15 * u, sy - 2.2 * u);
+  g.stroke();
+}
+
+// Bot-loop H3b fix (2026-11-18): the figure above used to be
+// painted straight onto the frame canvas as drawFootman's
+// fallback. The INF-12 occlusion pass (recordFrameSprites /
+// drawOccludedOutlines) can only see units whose draw records
+// drawImage calls — a call-less item is skipped outright — so a
+// Militia or Man-at-Arms on this fallback could never be
+// outlined or outline-picked behind a building. UNIT_ART covers
+// their attack states (militiaAttack* / maaAttack*) only when
+// those images are loaded; with the DIR sheet also unavailable
+// this pure vector paint is what an attacking footman degrades
+// to — the Scout's pre-5413df1 shape, named in occorder2-build
+// H3. Like the monk, the Castle cavalry, the Scout and the
+// Spearman/Skirmisher before him, the figure is now painted
+// ONCE into a cached sprite per cloth and blitted with
+// drawImage; the direct vector paint remains only for a
+// canvas-less stub. Presentation only: sim and golden hash
+// untouched.
+const FOOTMAN_SPRITE_U = 16; // cached-sprite pixels per world unit
+// Sprite content bounds in unit space (feet at the origin):
+// x [-1.17, 1.21] (shield edge → sword tip incl. stroke), y
+// [-2.29, 0] (head top → feet); the box below adds a small
+// margin.
+const FOOTMAN_BOX = { x0: -1.42, y0: -2.54, w: 2.88, h: 2.69 };
+const footmanSpriteCache = new Map(); // cloth -> canvas | null
+function footmanSprite(cloth) {
+  if (footmanSpriteCache.has(cloth)) return footmanSpriteCache.get(cloth);
+  let cv = null;
+  try {
+    cv = document.createElement('canvas');
+    cv.width = Math.ceil(FOOTMAN_BOX.w * FOOTMAN_SPRITE_U);
+    cv.height = Math.ceil(FOOTMAN_BOX.h * FOOTMAN_SPRITE_U);
+    const g = cv.getContext('2d');
+    if (!g) cv = null;
+    else {
+      paintFootmanFigure(g, -FOOTMAN_BOX.x0 * FOOTMAN_SPRITE_U,
+        -FOOTMAN_BOX.y0 * FOOTMAN_SPRITE_U, FOOTMAN_SPRITE_U, cloth);
+    }
+  } catch {
+    cv = null; // no canvas available (test stubs): vector fallback
+  }
+  footmanSpriteCache.set(cloth, cv);
+  return cv;
+}
+
 // Shared draw for the two sword footmen; `unit` picks the art set
 // (the Man-at-Arms wears the heavier armor in his own frames; the
 // vector fallback below is the same body for both, as before).
@@ -13510,24 +13642,83 @@ function drawFootman(i, wx, wy, unit) {
   if (drawDirUnit(unit, act, sx, sy)) return;
   const ua = unitArtImage(unit, i, wx, wy, act);
   if (ua && drawUnitPose(ua.im, sx, sy, UNIT_ART_H[unit], ua.flip)) return;
-  ctx.fillStyle = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e'; // tunic (player color)
-  ctx.beginPath();
-  ctx.ellipse(sx, sy - 0.85 * u, 0.62 * u, 0.8 * u, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#e8c39a'; // head
-  ctx.beginPath();
-  ctx.arc(sx, sy - 1.95 * u, 0.34 * u, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#7a4a21'; // shield
-  ctx.beginPath();
-  ctx.arc(sx - 0.75 * u, sy - 1.0 * u, 0.42 * u, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = '#e8e8e8'; // sword
-  ctx.lineWidth = Math.max(1, 0.16 * u);
-  ctx.beginPath();
-  ctx.moveTo(sx + 0.55 * u, sy - 1.5 * u);
-  ctx.lineTo(sx + 1.15 * u, sy - 2.2 * u);
-  ctx.stroke();
+  const cloth = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e';
+  const spr = footmanSprite(cloth);
+  if (spr) {
+    ctx.drawImage(spr, sx + FOOTMAN_BOX.x0 * u, sy + FOOTMAN_BOX.y0 * u,
+      FOOTMAN_BOX.w * u, FOOTMAN_BOX.h * u);
+  } else {
+    paintFootmanFigure(ctx, sx, sy, u, cloth);
+  }
+}
+
+// The Archer's vector figure, painted on an arbitrary context
+// (the cached sprite below, or the frame canvas as the last
+// resort). Shapes and colours are the pre-sprite fallback's own,
+// verbatim.
+function paintArcherFigure(g, sx, sy, u, cloth) {
+  g.fillStyle = cloth; // tunic (archer green / enemy red)
+  g.beginPath();
+  g.ellipse(sx, sy - 0.85 * u, 0.58 * u, 0.8 * u, 0, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = '#e8c39a'; // head
+  g.beginPath();
+  g.arc(sx, sy - 1.95 * u, 0.34 * u, 0, Math.PI * 2);
+  g.fill();
+  g.strokeStyle = '#8a6844'; // bow arc
+  g.lineWidth = Math.max(1, 0.16 * u);
+  g.beginPath();
+  g.arc(sx + 0.75 * u, sy - 1.35 * u, 0.62 * u, -1.1, 1.1);
+  g.stroke();
+  g.strokeStyle = '#e8e8e8'; // bowstring
+  g.lineWidth = 1;
+  g.beginPath();
+  g.moveTo(sx + 1.12 * u, sy - 1.92 * u);
+  g.lineTo(sx + 1.12 * u, sy - 0.78 * u);
+  g.stroke();
+}
+
+// Bot-loop H3b fix (2026-11-18): the figure above used to be
+// painted straight onto the frame canvas as drawArcher's
+// fallback. The INF-12 occlusion pass (recordFrameSprites /
+// drawOccludedOutlines) can only see units whose draw records
+// drawImage calls — a call-less item is skipped outright — so an
+// Archer on this fallback could never be outlined or
+// outline-picked behind a building. UNIT_ART covers his shoot
+// state (archerShoot*) only when those images are loaded; with
+// the DIR sheet also unavailable this pure vector paint is what
+// a shooting Archer degrades to — the Scout's pre-5413df1
+// shape, named in occorder2-build H3. Like the monk, the Castle
+// cavalry, the Scout and the Spearman/Skirmisher before him,
+// the figure is now painted ONCE into a cached sprite per cloth
+// and blitted with drawImage; the direct vector paint remains
+// only for a canvas-less stub. Presentation only: sim and
+// golden hash untouched.
+const ARCHER_SPRITE_U = 16; // cached-sprite pixels per world unit
+// Sprite content bounds in unit space (feet at the origin):
+// x [-0.58, 1.45] (tunic edge → bow arc incl. stroke), y
+// [-2.29, 0] (head top → feet); the box below adds a small
+// margin.
+const ARCHER_BOX = { x0: -0.83, y0: -2.54, w: 2.53, h: 2.69 };
+const archerSpriteCache = new Map(); // cloth -> canvas | null
+function archerSprite(cloth) {
+  if (archerSpriteCache.has(cloth)) return archerSpriteCache.get(cloth);
+  let cv = null;
+  try {
+    cv = document.createElement('canvas');
+    cv.width = Math.ceil(ARCHER_BOX.w * ARCHER_SPRITE_U);
+    cv.height = Math.ceil(ARCHER_BOX.h * ARCHER_SPRITE_U);
+    const g = cv.getContext('2d');
+    if (!g) cv = null;
+    else {
+      paintArcherFigure(g, -ARCHER_BOX.x0 * ARCHER_SPRITE_U,
+        -ARCHER_BOX.y0 * ARCHER_SPRITE_U, ARCHER_SPRITE_U, cloth);
+    }
+  } catch {
+    cv = null; // no canvas available (test stubs): vector fallback
+  }
+  archerSpriteCache.set(cloth, cv);
+  return cv;
 }
 
 function drawArcher(i, wx, wy) {
@@ -13539,25 +13730,14 @@ function drawArcher(i, wx, wy) {
   if (drawDirUnit('archer', act, sx, sy)) return;
   const ua = unitArtImage('archer', i, wx, wy, act);
   if (ua && drawUnitPose(ua.im, sx, sy, UNIT_ART_H.archer, ua.flip)) return;
-  ctx.fillStyle = drawOwner === foeOwner() ? ENEMY_ARCHER_CLOTH : '#4a6e46'; // tunic (archer green / enemy red)
-  ctx.beginPath();
-  ctx.ellipse(sx, sy - 0.85 * u, 0.58 * u, 0.8 * u, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#e8c39a'; // head
-  ctx.beginPath();
-  ctx.arc(sx, sy - 1.95 * u, 0.34 * u, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = '#8a6844'; // bow arc
-  ctx.lineWidth = Math.max(1, 0.16 * u);
-  ctx.beginPath();
-  ctx.arc(sx + 0.75 * u, sy - 1.35 * u, 0.62 * u, -1.1, 1.1);
-  ctx.stroke();
-  ctx.strokeStyle = '#e8e8e8'; // bowstring
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(sx + 1.12 * u, sy - 1.92 * u);
-  ctx.lineTo(sx + 1.12 * u, sy - 0.78 * u);
-  ctx.stroke();
+  const cloth = drawOwner === foeOwner() ? ENEMY_ARCHER_CLOTH : '#4a6e46';
+  const spr = archerSprite(cloth);
+  if (spr) {
+    ctx.drawImage(spr, sx + ARCHER_BOX.x0 * u, sy + ARCHER_BOX.y0 * u,
+      ARCHER_BOX.w * u, ARCHER_BOX.h * u);
+  } else {
+    paintArcherFigure(ctx, sx, sy, u, cloth);
+  }
 }
 
 // --- Animal pose art (Base44 sets, see ANIMAL_ART above) -----------
