@@ -13300,6 +13300,87 @@ function drawMilitia(i, wx, wy) {
 function drawManAtArms(i, wx, wy) {
   drawFootman(i, wx, wy, 'maa');
 }
+// The Spearman's vector figure, painted on an arbitrary context
+// (the cached sprite below, or the frame canvas as the last
+// resort). Shapes and colours are the pre-sprite fallback's own,
+// verbatim: the footman body with spearman's props — the long
+// spear upright in the right hand, the big round shield.
+function paintSpearmanFigure(g, sx, sy, u, cloth) {
+  g.fillStyle = cloth; // tunic (player color)
+  g.beginPath();
+  g.ellipse(sx, sy - 0.85 * u, 0.62 * u, 0.8 * u, 0, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = '#e8c39a'; // head
+  g.beginPath();
+  g.arc(sx, sy - 1.95 * u, 0.34 * u, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = cloth; // shield panel (player color)
+  g.beginPath();
+  g.arc(sx - 0.8 * u, sy - 1.05 * u, 0.5 * u, 0, Math.PI * 2);
+  g.fill();
+  g.strokeStyle = '#7a4a21'; // shield rim
+  g.lineWidth = Math.max(1, 0.1 * u);
+  g.beginPath();
+  g.arc(sx - 0.8 * u, sy - 1.05 * u, 0.5 * u, 0, Math.PI * 2);
+  g.stroke();
+  g.strokeStyle = '#8a6844'; // spear shaft
+  g.lineWidth = Math.max(1, 0.13 * u);
+  g.beginPath();
+  g.moveTo(sx + 0.55 * u, sy - 0.35 * u);
+  g.lineTo(sx + 0.55 * u, sy - 2.75 * u);
+  g.stroke();
+  g.fillStyle = '#d8d8d8'; // spear tip
+  g.beginPath();
+  g.moveTo(sx + 0.47 * u, sy - 2.75 * u);
+  g.lineTo(sx + 0.63 * u, sy - 2.75 * u);
+  g.lineTo(sx + 0.55 * u, sy - 3.05 * u);
+  g.closePath();
+  g.fill();
+}
+
+// Bot-loop H3 fix (2026-11-18): the figure above used to be
+// painted straight onto the frame canvas as drawSpearman's
+// fallback. The INF-12 occlusion pass (recordFrameSprites /
+// drawOccludedOutlines) can only see units whose draw records
+// drawImage calls — a call-less item is skipped outright — so a
+// Spearman on this fallback could never be outlined or
+// outline-picked behind a building. The fallback is the
+// Spearman's ONLY non-DIR path in EVERY state: UNIT_ART_FILES
+// carries no spearman entries at all, so unitArtImage can never
+// answer for him, and an unavailable DIR sheet leaves this pure
+// vector paint for idle, walk and attack alike — the
+// hidden-attacker state included (occorder2-build H3). Like the
+// monk, the Castle cavalry and the Scout before him, the figure
+// is now painted ONCE into a cached sprite per cloth and blitted
+// with drawImage; the direct vector paint remains only for a
+// canvas-less stub. Presentation only: sim and golden hash
+// untouched.
+const SPEARMAN_SPRITE_U = 16; // cached-sprite pixels per world unit
+// Sprite content bounds in unit space (feet at the origin):
+// x [-1.3, 0.65] (shield edge → spear tip), y [-3.05, 0]
+// (spear tip → feet); the box below adds a small margin.
+const SPEARMAN_BOX = { x0: -1.55, y0: -3.3, w: 2.45, h: 3.45 };
+const spearmanSpriteCache = new Map(); // cloth -> canvas | null
+function spearmanSprite(cloth) {
+  if (spearmanSpriteCache.has(cloth)) return spearmanSpriteCache.get(cloth);
+  let cv = null;
+  try {
+    cv = document.createElement('canvas');
+    cv.width = Math.ceil(SPEARMAN_BOX.w * SPEARMAN_SPRITE_U);
+    cv.height = Math.ceil(SPEARMAN_BOX.h * SPEARMAN_SPRITE_U);
+    const g = cv.getContext('2d');
+    if (!g) cv = null;
+    else {
+      paintSpearmanFigure(g, -SPEARMAN_BOX.x0 * SPEARMAN_SPRITE_U,
+        -SPEARMAN_BOX.y0 * SPEARMAN_SPRITE_U, SPEARMAN_SPRITE_U, cloth);
+    }
+  } catch {
+    cv = null; // no canvas available (test stubs): vector fallback
+  }
+  spearmanSpriteCache.set(cloth, cv);
+  return cv;
+}
+
 function drawSpearman(i, wx, wy) {
   const [sx, sy] = worldToScreen(wx, wy);
   const u = camS;
@@ -13309,39 +13390,96 @@ function drawSpearman(i, wx, wy) {
   if (drawDirUnit('spearman', act, sx, sy)) return;
   const ua = unitArtImage('spearman', i, wx, wy, act);
   if (ua && drawUnitPose(ua.im, sx, sy, UNIT_ART_H.spearman, ua.flip)) return;
-  // Vector fallback (the footman body, spearman's props): the
-  // long spear upright in the right hand, the big round shield.
-  ctx.fillStyle = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e'; // tunic (player color)
-  ctx.beginPath();
-  ctx.ellipse(sx, sy - 0.85 * u, 0.62 * u, 0.8 * u, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#e8c39a'; // head
-  ctx.beginPath();
-  ctx.arc(sx, sy - 1.95 * u, 0.34 * u, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e'; // shield panel (player color)
-  ctx.beginPath();
-  ctx.arc(sx - 0.8 * u, sy - 1.05 * u, 0.5 * u, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = '#7a4a21'; // shield rim
-  ctx.lineWidth = Math.max(1, 0.1 * u);
-  ctx.beginPath();
-  ctx.arc(sx - 0.8 * u, sy - 1.05 * u, 0.5 * u, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.strokeStyle = '#8a6844'; // spear shaft
-  ctx.lineWidth = Math.max(1, 0.13 * u);
-  ctx.beginPath();
-  ctx.moveTo(sx + 0.55 * u, sy - 0.35 * u);
-  ctx.lineTo(sx + 0.55 * u, sy - 2.75 * u);
-  ctx.stroke();
-  ctx.fillStyle = '#d8d8d8'; // spear tip
-  ctx.beginPath();
-  ctx.moveTo(sx + 0.47 * u, sy - 2.75 * u);
-  ctx.lineTo(sx + 0.63 * u, sy - 2.75 * u);
-  ctx.lineTo(sx + 0.55 * u, sy - 3.05 * u);
-  ctx.closePath();
-  ctx.fill();
+  const cloth = drawOwner === foeOwner() ? ENEMY_CLOTH : '#31579e';
+  const spr = spearmanSprite(cloth);
+  if (spr) {
+    ctx.drawImage(spr, sx + SPEARMAN_BOX.x0 * u, sy + SPEARMAN_BOX.y0 * u,
+      SPEARMAN_BOX.w * u, SPEARMAN_BOX.h * u);
+  } else {
+    paintSpearmanFigure(ctx, sx, sy, u, cloth);
+  }
 }
+// The Skirmisher's vector figure, painted on an arbitrary
+// context (the cached sprite below, or the frame canvas as the
+// last resort). Shapes and colours are the pre-sprite fallback's
+// own, verbatim: the archer body with skirmisher's props — the
+// large shield on the left arm, a javelin upright in the right.
+function paintSkirmisherFigure(g, sx, sy, u, cloth) {
+  g.fillStyle = cloth; // tunic (archer green / enemy red)
+  g.beginPath();
+  g.ellipse(sx, sy - 0.85 * u, 0.58 * u, 0.8 * u, 0, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = '#e8c39a'; // head
+  g.beginPath();
+  g.arc(sx, sy - 1.95 * u, 0.34 * u, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = cloth; // shield panel
+  g.beginPath();
+  g.arc(sx - 0.85 * u, sy - 1.05 * u, 0.58 * u, 0, Math.PI * 2);
+  g.fill();
+  g.strokeStyle = '#7a4a21'; // shield rim
+  g.lineWidth = Math.max(1, 0.1 * u);
+  g.beginPath();
+  g.arc(sx - 0.85 * u, sy - 1.05 * u, 0.58 * u, 0, Math.PI * 2);
+  g.stroke();
+  g.strokeStyle = '#8a6844'; // javelin shaft
+  g.lineWidth = Math.max(1, 0.12 * u);
+  g.beginPath();
+  g.moveTo(sx + 0.55 * u, sy - 0.7 * u);
+  g.lineTo(sx + 0.55 * u, sy - 2.45 * u);
+  g.stroke();
+  g.fillStyle = '#d8d8d8'; // javelin tip
+  g.beginPath();
+  g.moveTo(sx + 0.48 * u, sy - 2.45 * u);
+  g.lineTo(sx + 0.62 * u, sy - 2.45 * u);
+  g.lineTo(sx + 0.55 * u, sy - 2.7 * u);
+  g.closePath();
+  g.fill();
+}
+
+// Bot-loop H3 fix (2026-11-18): the figure above used to be
+// painted straight onto the frame canvas as drawSkirmisher's
+// fallback. The INF-12 occlusion pass (recordFrameSprites /
+// drawOccludedOutlines) can only see units whose draw records
+// drawImage calls — a call-less item is skipped outright — so a
+// Skirmisher on this fallback could never be outlined or
+// outline-picked behind a building. The fallback is the
+// Skirmisher's ONLY non-DIR path in EVERY state: UNIT_ART_FILES
+// carries no skirmisher entries at all, so unitArtImage can
+// never answer for him, and an unavailable DIR sheet leaves this
+// pure vector paint for idle, walk and shoot alike — the
+// hidden-attacker state included (occorder2-build H3). Like the
+// monk, the Castle cavalry and the Scout before him, the figure
+// is now painted ONCE into a cached sprite per cloth and blitted
+// with drawImage; the direct vector paint remains only for a
+// canvas-less stub. Presentation only: sim and golden hash
+// untouched.
+const SKIRMISHER_SPRITE_U = 16; // cached-sprite pixels per world unit
+// Sprite content bounds in unit space (feet at the origin):
+// x [-1.43, 0.65] (shield edge → javelin tip), y [-2.7, 0]
+// (javelin tip → feet); the box below adds a small margin.
+const SKIRMISHER_BOX = { x0: -1.68, y0: -2.95, w: 2.58, h: 3.1 };
+const skirmisherSpriteCache = new Map(); // cloth -> canvas | null
+function skirmisherSprite(cloth) {
+  if (skirmisherSpriteCache.has(cloth)) return skirmisherSpriteCache.get(cloth);
+  let cv = null;
+  try {
+    cv = document.createElement('canvas');
+    cv.width = Math.ceil(SKIRMISHER_BOX.w * SKIRMISHER_SPRITE_U);
+    cv.height = Math.ceil(SKIRMISHER_BOX.h * SKIRMISHER_SPRITE_U);
+    const g = cv.getContext('2d');
+    if (!g) cv = null;
+    else {
+      paintSkirmisherFigure(g, -SKIRMISHER_BOX.x0 * SKIRMISHER_SPRITE_U,
+        -SKIRMISHER_BOX.y0 * SKIRMISHER_SPRITE_U, SKIRMISHER_SPRITE_U, cloth);
+    }
+  } catch {
+    cv = null; // no canvas available (test stubs): vector fallback
+  }
+  skirmisherSpriteCache.set(cloth, cv);
+  return cv;
+}
+
 function drawSkirmisher(i, wx, wy) {
   const [sx, sy] = worldToScreen(wx, wy);
   const u = camS;
@@ -13351,38 +13489,14 @@ function drawSkirmisher(i, wx, wy) {
   if (drawDirUnit('skirmisher', act, sx, sy)) return;
   const ua = unitArtImage('skirmisher', i, wx, wy, act);
   if (ua && drawUnitPose(ua.im, sx, sy, UNIT_ART_H.skirmisher, ua.flip)) return;
-  // Vector fallback (the archer body, skirmisher's props): the
-  // large shield on the left arm, a javelin upright in the right.
-  ctx.fillStyle = drawOwner === foeOwner() ? ENEMY_ARCHER_CLOTH : '#4a6e46'; // tunic (archer green / enemy red)
-  ctx.beginPath();
-  ctx.ellipse(sx, sy - 0.85 * u, 0.58 * u, 0.8 * u, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#e8c39a'; // head
-  ctx.beginPath();
-  ctx.arc(sx, sy - 1.95 * u, 0.34 * u, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = drawOwner === foeOwner() ? ENEMY_ARCHER_CLOTH : '#4a6e46'; // shield panel
-  ctx.beginPath();
-  ctx.arc(sx - 0.85 * u, sy - 1.05 * u, 0.58 * u, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = '#7a4a21'; // shield rim
-  ctx.lineWidth = Math.max(1, 0.1 * u);
-  ctx.beginPath();
-  ctx.arc(sx - 0.85 * u, sy - 1.05 * u, 0.58 * u, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.strokeStyle = '#8a6844'; // javelin shaft
-  ctx.lineWidth = Math.max(1, 0.12 * u);
-  ctx.beginPath();
-  ctx.moveTo(sx + 0.55 * u, sy - 0.7 * u);
-  ctx.lineTo(sx + 0.55 * u, sy - 2.45 * u);
-  ctx.stroke();
-  ctx.fillStyle = '#d8d8d8'; // javelin tip
-  ctx.beginPath();
-  ctx.moveTo(sx + 0.48 * u, sy - 2.45 * u);
-  ctx.lineTo(sx + 0.62 * u, sy - 2.45 * u);
-  ctx.lineTo(sx + 0.55 * u, sy - 2.7 * u);
-  ctx.closePath();
-  ctx.fill();
+  const cloth = drawOwner === foeOwner() ? ENEMY_ARCHER_CLOTH : '#4a6e46';
+  const spr = skirmisherSprite(cloth);
+  if (spr) {
+    ctx.drawImage(spr, sx + SKIRMISHER_BOX.x0 * u, sy + SKIRMISHER_BOX.y0 * u,
+      SKIRMISHER_BOX.w * u, SKIRMISHER_BOX.h * u);
+  } else {
+    paintSkirmisherFigure(ctx, sx, sy, u, cloth);
+  }
 }
 // Shared draw for the two sword footmen; `unit` picks the art set
 // (the Man-at-Arms wears the heavier armor in his own frames; the
