@@ -94,7 +94,7 @@ import {
   PAGE_KINDS, resolveHotkey, badgeForButton, panelCellFor, GRID_CELLS, edgePan,
 } from './play/hotkeys.js';
 import { diffFeedEvents } from './play/feed.js';
-import { TECH_TREE, techState, techTreeColumns } from './play/techtree.js';
+import { TECH_TREE, BUILDING_TREE, buildingState, techState, techTreeColumns } from './play/techtree.js';
 import { createAudioEngine, cuesForSnapshotDiff, distanceGain } from './play/audio.js';
 import {
   firstHpDrop, nearestHpDrop, alertFresh, alertFlashOn, alertDue,
@@ -1170,14 +1170,17 @@ function setScore(open) {
 /// every technology in play/techtree.js (the pinned mirror of
 /// the sim's table), columns by the Age each requires, grouped
 /// under its host building, painted with the LOCAL player's
-/// met/unmet prerequisites. A view, not a panel: nothing here
-/// issues an order. Never pauses.
+/// met/unmet prerequisites — plus the BUILDING_TREE building
+/// entries, standing alone in their Age column (villagers
+/// build them; they have no host building). A view, not a
+/// panel: nothing here issues an order. Never pauses.
 let techtreeBuilt = false;
 function buildTechTree() {
   if (techtreeBuilt) return;
   techtreeBuilt = true;
   const body = document.getElementById('techtree-body');
   if (!body) return;
+  const cols = [];
   techTreeColumns().forEach((groups, ageIdx) => {
     const col = document.createElement('div');
     col.className = 'techtree-col';
@@ -1204,7 +1207,30 @@ function buildTechTree() {
       }
     }
     body.append(col);
+    cols.push(col);
   });
+  // The building entries (BUILDING_TREE, play/techtree.js):
+  // a building has no host building — villagers build it — so
+  // its node stands alone in its Age column, in the same node
+  // shape as a technology's. (The Palisade Wall, Dark Age, was
+  // missing from the tree entirely — bot-loop runs #405–#422:
+  // TECH_TREE is technologies only, so no building could ever
+  // appear; the only wall a player found was Fortified Wall.)
+  for (const e of BUILDING_TREE) {
+    const col = cols[e.age];
+    if (!col) continue;
+    const node = document.createElement('div');
+    node.className = 'techtree-node';
+    node.id = `tt-bld-${e.kind}`;
+    const name = document.createElement('span');
+    name.className = 'tt-name';
+    const cost = document.createElement('span');
+    cost.className = 'tt-cost';
+    const req = document.createElement('span');
+    req.className = 'tt-req';
+    node.append(name, cost, req);
+    col.append(node);
+  }
 }
 
 function refreshTechTree() {
@@ -1232,6 +1258,25 @@ function refreshTechTree() {
       e.requires != null && state !== 'done'
         ? t('tree.requires', { name: TECH_NAME[e.requires] || '' })
         : '';
+  }
+  // The building entries: named from BUILD_NAME (the i18n
+  // building table, exactly as the build panel names them),
+  // costed in the tech nodes' own line format, and painted
+  // available/locked from the player's Age alone — a building
+  // is built, never researched, so it is never 'done'.
+  for (const e of BUILDING_TREE) {
+    const node = document.getElementById(`tt-bld-${e.kind}`);
+    if (!node) continue;
+    const state = buildingState(e, age);
+    node.classList.toggle('done', state === 'done');
+    node.classList.toggle('locked', state === 'locked');
+    node.querySelector('.tt-name').textContent = BUILD_NAME[e.kind] || '';
+    const pairs = e.cost
+      .map((n, i) => [n, resKeys[i]])
+      .filter(([n]) => n > 0);
+    node.querySelector('.tt-cost').textContent =
+      `${costText(pairs)} · ${e.secs} s · ${t('tree.' + state)}`;
+    node.querySelector('.tt-req').textContent = '';
   }
   const legend = document.getElementById('techtree-legend');
   if (legend) {

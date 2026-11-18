@@ -8,6 +8,8 @@
 // source so the two can never drift silently). Display names do
 // NOT live here: app.js resolves them through its TECH_NAME
 // table (i18n), keyed by tag, exactly like the panels do.
+// BUILDING_TREE below is the separate building half of the
+// display (buildings are BuildingKinds, not TechIds).
 //
 // Hosts are BuildingKind tags (sim/src/build.rs): TownCenter 13,
 // Mill 4, Barracks 2, Lumber Camp 3, Mining Camp 5, Stable 7,
@@ -90,6 +92,39 @@ export const TECH_TREE = [
   { tag: 56, host: 16, age: 3, cost: [250, 250, 0, 0], secs: 25, requires: null }, // Arrowslits (BLD-18 completion)
   { tag: 57, host: 23, age: 2, cost: [0, 150, 100, 0], secs: 50, requires: null }, // Demolition Ship (Water split 2026-11-16; the Demolition line's own Dock tech — official update-169123 preview row, time mirrors Medium Warships; drafted tag 53, renumbered 57 at integration 2026-11-17)
 ];
+
+/**
+ * The building half of the tree (bot-loop defect, runs
+ * #405–#422): TECH_TREE above is technologies only — a pinned
+ * mirror of sim/src/tech.rs — so a BUILDING could never appear
+ * in the tree, and the Palisade Wall (BuildingKind 9, a Dark
+ * Age buildable in DE) was missing from all four Age columns;
+ * the only wall entry a player could find was the Fortified
+ * Wall research (tag 24, University, Castle Age). Buildings
+ * are not TechIds, so they live in this parallel table, in the
+ * same data shape: { kind, age, cost, secs, leadsTo } — kind
+ * is the BuildingKind tag (sim/src/build.rs), age the Age it
+ * becomes buildable, cost [food, wood, gold, stone] and secs
+ * the build time, both mirroring the sim's building table
+ * (the same rows app.js's BUILD_COST tables mirror), and
+ * leadsTo the TECH_TREE tag this building's line leads to, if
+ * any. The tree draws no connecting lines, so leadsTo is data
+ * only — the entry itself is the plain entry. Display names do
+ * NOT live here either: app.js resolves them through its
+ * BUILD_NAME table (i18n), keyed by kind.
+ */
+export const BUILDING_TREE = [
+  { kind: 9, age: 0, cost: [0, 3, 0, 0], secs: 7, leadsTo: 24 }, // Palisade Wall (BLD-13: Dark Age, 3 wood/segment, 7 s; its line leads to Fortified Wall)
+];
+
+/**
+ * The tree state of one building entry for a player at `age`:
+ * 'available' once its Age is reached (a building is built,
+ * never researched, so there is no 'done'), else 'locked'.
+ */
+export function buildingState(entry, age) {
+  return age >= entry.age ? 'available' : 'locked';
+}
 
 /** The age-advancement tags and the age each one reaches. */
 export const ADVANCEMENTS = { 1: 1, 14: 2, 18: 3 };
