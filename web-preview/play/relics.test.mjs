@@ -57,11 +57,11 @@ test('orders dispatch through the ordinary vocabulary, both seats', () => {
 });
 
 test('the right-click paths issue pickup before attack, deposit at an own Monastery', () => {
-  const pickupAt = appJs.indexOf("st.kinds[t] === KIND_RELIC");
-  const attackAt = appJs.indexOf("st.owners[t] === 1 || st.owners[t] === foeOwner()");
+  const pickupAt = appJs.indexOf("st.kinds[tgt] === KIND_RELIC");
+  const attackAt = appJs.indexOf("st.owners[tgt] === 1 || st.owners[tgt] === foeOwner()");
   assert.ok(pickupAt > 0 && attackAt > pickupAt,
     'the relic-pickup block precedes the generic Gaia-attack block');
-  assert.match(appJs, /issue\(\{ t: 'pickup', e: id, tg: t \}\)/, 'pickup order issued');
+  assert.match(appJs, /issue\(\{ t: 'pickup', e: id, tg: tgt \}\)/, 'pickup order issued');
   assert.match(appJs, /issue\(\{ t: 'deposit', e: id, b: bT\.id \}\)/, 'deposit order issued');
   assert.match(appJs, /issue\(\{ t: 'pickup', e: id, tg: rid \}\)/, 'retrieve order issued');
 });

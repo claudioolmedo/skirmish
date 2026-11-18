@@ -8448,7 +8448,11 @@ async function main() {
       }
       if (any) { orderAck('attack'); return; }
     }
-    let t = entityAt(wx, wy, fromCanvas);
+    // Named tgt, never t: t is the i18n function, and this local
+    // used to shadow it for the whole function — every later
+    // flash(t('flash.…')) then called the entity id (or null)
+    // and threw AFTER the order had been issued.
+    let tgt = entityAt(wx, wy, fromCanvas);
     // FIX #2b (bot-loop runs #417–#419): a target named through
     // the occluded outline is exempt from the fog gate below.
     // The outline record exists only because the draw pass
@@ -8461,12 +8465,12 @@ async function main() {
     // outline degraded to a ground move (the ordered unit
     // walked to the outline point and idled while the hidden
     // enemy kept draining the Town Center), 7+ live attempts.
-    const tFromOutline = t != null && fromCanvas && occludedUnitAt(wx, wy) === t;
+    const tFromOutline = tgt != null && fromCanvas && occludedUnitAt(wx, wy) === tgt;
     // M7: a non-own unit is a target only while currently visible
     // — in explored memory or the black it cannot be clicked
     // (the click falls through to a ground move, as a miss does).
-    if (t != null && !tFromOutline && st.owners[t] !== localOwner
-        && !cellVisibleW(st.pos[t * 2], st.pos[t * 2 + 1])) t = null;
+    if (tgt != null && !tFromOutline && st.owners[tgt] !== localOwner
+        && !cellVisibleW(st.pos[tgt * 2], st.pos[tgt * 2 + 1])) tgt = null;
     // Relic pickup (Castle P5d, MNK-09): a right-click on a
     // relic with Monk(s) selected tasks every selected Monk to
     // pick it up — ahead of the generic Gaia-attack block below,
@@ -8475,20 +8479,20 @@ async function main() {
     // can_pickup_relic gates each monk (already carrying, or
     // the relic already carried, refuses there and the click
     // falls through to the ground move at the bottom).
-    if (t != null && st.kinds[t] === KIND_RELIC
+    if (tgt != null && st.kinds[tgt] === KIND_RELIC
         && targets.some((id) => st.kinds[id] === 20)) {
       let any = false;
       for (const id of targets) {
         if (st.kinds[id] !== 20) continue;
-        if (issue({ t: 'pickup', e: id, tg: t })) any = true;
+        if (issue({ t: 'pickup', e: id, tg: tgt })) any = true;
       }
       if (any) { orderAck('order'); return; }
     }
-    if (t != null && (st.owners[t] === 1 || st.owners[t] === foeOwner() || st.kinds[t] === KIND_SHEEP)) {
+    if (tgt != null && (st.owners[tgt] === 1 || st.owners[tgt] === foeOwner() || st.kinds[tgt] === KIND_SHEEP)) {
       let any = false;
       for (const id of targets) {
         if (st.kinds[id] === KIND_SHEEP) continue; // sheep don't fight
-        if (issue({ t: 'attack', e: id, tg: t, q: queued || undefined })) any = true;
+        if (issue({ t: 'attack', e: id, tg: tgt, q: queued || undefined })) any = true;
       }
       if (any) { orderAck('attack'); return; }
       // Nobody could attack (e.g. only sheep selected): fall through
@@ -8500,10 +8504,10 @@ async function main() {
     // buildings take below. The sim's can_garrison_unit gates
     // every unit (kind, ownership, capacity); ineligible members
     // of the selection are simply refused and stay put.
-    if (t != null && st.owners[t] === localOwner && st.kinds[t] === 17) {
+    if (tgt != null && st.owners[tgt] === localOwner && st.kinds[tgt] === 17) {
       let any = false;
       for (const id of targets) {
-        if (issue({ t: 'garrison_u', e: id, host: t })) any = true;
+        if (issue({ t: 'garrison_u', e: id, host: tgt })) any = true;
       }
       if (any) { orderAck('order'); flash(t('flash.garrisoned')); return; }
     }
@@ -8514,19 +8518,19 @@ async function main() {
     // The sim's can_load_transport gates every unit (land
     // domain, ownership, capacity 5); ineligible members of
     // the selection are simply refused and stay put.
-    if (t != null && st.owners[t] === localOwner && st.kinds[t] === 32) {
+    if (tgt != null && st.owners[tgt] === localOwner && st.kinds[tgt] === 32) {
       let any = false;
       for (const id of targets) {
         if (st.kinds[id] === 32) continue; // a ship cannot board
-        if (issue({ t: 'load_t', e: id, ship: t })) any = true;
+        if (issue({ t: 'load_t', e: id, ship: tgt })) any = true;
       }
       if (any) { orderAck('order'); flash(t('flash.loaded')); return; }
     }
     // The reverse gesture: an own Transport Ship selected and
     // a right-click on an own land unit loads THAT unit.
-    if (t != null && st.owners[t] === localOwner && targets.length === 1
-        && st.kinds[targets[0]] === 32 && st.kinds[t] !== 32) {
-      if (issue({ t: 'load_t', e: t, ship: targets[0] })) {
+    if (tgt != null && st.owners[tgt] === localOwner && targets.length === 1
+        && st.kinds[targets[0]] === 32 && st.kinds[tgt] !== 32) {
+      if (issue({ t: 'load_t', e: tgt, ship: targets[0] })) {
         orderAck('order'); flash(t('flash.loaded')); return;
       }
     }
@@ -8537,13 +8541,13 @@ async function main() {
     // with no monk selected keeps the ordinary meaning). The
     // sim's can_heal gates each monk (siege targets and the Town
     // Center are refused there and fall through).
-    if (t != null && st.owners[t] === localOwner
-        && st.hp[t * 2] < st.hp[t * 2 + 1]
+    if (tgt != null && st.owners[tgt] === localOwner
+        && st.hp[tgt * 2] < st.hp[tgt * 2 + 1]
         && targets.some((id) => st.kinds[id] === 20)) {
       let any = false;
       for (const id of targets) {
         if (st.kinds[id] !== 20) continue;
-        if (issue({ t: 'heal', e: id, tg: t })) any = true;
+        if (issue({ t: 'heal', e: id, tg: tgt })) any = true;
       }
       if (any) { orderAck('order'); return; }
     }
@@ -8553,12 +8557,12 @@ async function main() {
     // sim's can_convert gates each monk (faith, MNK-08's list —
     // a Ram without Redemption is refused there and the click
     // falls through to the ordinary meanings).
-    if (t != null && st.owners[t] !== localOwner && st.owners[t] !== 1
+    if (tgt != null && st.owners[tgt] !== localOwner && st.owners[tgt] !== 1
         && targets.some((id) => st.kinds[id] === 20)) {
       let any = false;
       for (const id of targets) {
         if (st.kinds[id] !== 20) continue;
-        if (issue({ t: 'convert', e: id, tg: t })) any = true;
+        if (issue({ t: 'convert', e: id, tg: tgt })) any = true;
       }
       if (any) { orderAck('order'); return; }
     }

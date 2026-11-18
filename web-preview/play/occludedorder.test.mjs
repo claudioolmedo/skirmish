@@ -12,8 +12,8 @@
 // orderAt / entityAt / occludedUnitAt sliced out of app.js):
 // orderAt applies a post-pick fog gate —
 //
-//   if (t != null && st.owners[t] !== localOwner
-//       && !cellVisibleW(st.pos[t*2], st.pos[t*2+1])) t = null;
+//   if (tgt != null && st.owners[tgt] !== localOwner
+//       && !cellVisibleW(st.pos[tgt*2], st.pos[tgt*2+1])) tgt = null;
 //
 // — to EVERY entityAt result, including a pick that came from
 // the occluded-outline record. The outline record is already
@@ -261,9 +261,9 @@ function makeWorldNoRecord() {
 
 test('wiring: orderAt marks the outline-sourced target before the fog gate', () => {
   const body = sliceFn(appJs, 'function orderAt(wx, wy, queued = false, fromCanvas = false) {', '\n  // Repair targeting');
-  const gate = body.indexOf('cellVisibleW(st.pos[t * 2], st.pos[t * 2 + 1])) t = null;');
+  const gate = body.indexOf('cellVisibleW(st.pos[tgt * 2], st.pos[tgt * 2 + 1])) tgt = null;');
   assert.ok(gate >= 0, 'the post-pick fog gate is present');
-  const exempt = body.indexOf('occludedUnitAt(wx, wy) === t');
+  const exempt = body.indexOf('occludedUnitAt(wx, wy) === tgt');
   assert.ok(exempt >= 0 && exempt < gate,
     'the outline source of the pick is established before the gate and exempts it');
 });

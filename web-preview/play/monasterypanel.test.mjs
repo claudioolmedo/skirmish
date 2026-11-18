@@ -95,7 +95,7 @@ test('Castle P5b: Monastery panel carries Atonement + Devotion at tags 35/36', (
 test('Castle P5b: Convert order path — dispatch, smart order, arm, faith line', () => {
   assert.match(appJs, /case 'convert': return sim\.push_convert\(cmd\.e, cmd\.tg\)/,
     'applyCommand dispatches convert to the sim');
-  assert.match(appJs, /issue\(\{ t: 'convert', e: id, tg: t \}\)/,
+  assert.match(appJs, /issue\(\{ t: 'convert', e: id, tg: tgt \}\)/,
     'right-click smart order issues convert for selected monks');
   assert.match(appJs, /id: 'convert', icon: 'i-convert'/,
     'the monk panel carries the Convert button');

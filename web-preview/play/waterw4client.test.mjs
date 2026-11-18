@@ -73,8 +73,8 @@ test('the Dock panel gains the Transport train button (Dark Age, no gate)', () =
 
 test('the human load/unload paths ride the smart order and the panel', () => {
   // Right-click an own Transport with land units selected.
-  assert.match(app, /st\.kinds\[t\] === 32\) \{\s*let any = false;/);
-  assert.match(app, /issue\(\{ t: 'load_t', e: id, ship: t \}\)/);
+  assert.match(app, /st\.kinds\[tgt\] === 32\) \{\s*let any = false;/);
+  assert.match(app, /issue\(\{ t: 'load_t', e: id, ship: tgt \}\)/);
   // The panel's Unload button + its dispatch.
   assert.match(app, /id: 'unload-transport', icon: 'i-ungarrison', label: t\('cmd\.unloadTransport'\)/);
   assert.match(app, /issue\(\{ t: 'unload_t', ship: selT\[0\] \}\)/);
