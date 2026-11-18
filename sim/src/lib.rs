@@ -73,6 +73,8 @@ mod siege_p4a_tests;
 #[cfg(test)]
 mod siege_p4b_tests;
 #[cfg(test)]
+mod a2ground_tests;
+#[cfg(test)]
 mod siege_p4c_tests;
 #[cfg(test)]
 mod projectile_tests;
@@ -8393,6 +8395,24 @@ impl Sim {
     /// The mechanics of an attack-ground order, shared by the
     /// `AttackGround` command and by queued-order execution.
     fn apply_attack_ground(&mut self, idx: usize, x: I16F16, y: I16F16) {
+        // A2-ground (bot-loop, 2026-11-18): the `apply_attack`
+        // same-target rule, for the ground point. A re-issue
+        // naming the point already under bombardment is a no-op
+        // for the strike state; unconditionally resetting
+        // `strike_tick` / `next_attack_tick` / `attack_engaged`
+        // here wiped the Mangonel's 360-tick reload on every
+        // re-click, so re-issuing the same point every 30 ticks
+        // fired 120 stones in 3,600 ticks instead of the correct
+        // 10 (measured by probe on the pristine tree). A re-issue
+        // naming a DIFFERENT point resets the strike state
+        // exactly as before.
+        let same_point = self.entities[idx].attack_point == Some((x, y));
+        let (strike_tick, next_attack_tick, attack_engaged) = if same_point {
+            let e = &self.entities[idx];
+            (e.strike_tick, e.next_attack_tick, e.attack_engaged)
+        } else {
+            (None, 0, false)
+        };
         let e = &mut self.entities[idx];
         e.task = Task::Idle;
         e.task_node = None;
@@ -8404,9 +8424,9 @@ impl Sim {
         e.attack_target = None;
         e.attack_building = None;
         e.attack_point = Some((x, y));
-        e.strike_tick = None;
-        e.attack_engaged = false;
-        e.next_attack_tick = 0;
+        e.strike_tick = strike_tick;
+        e.attack_engaged = attack_engaged;
+        e.next_attack_tick = next_attack_tick;
         // CMB-09/10/11: explicit-order provenance (see apply_attack).
         e.attack_auto = false;
         e.attack_move = None;
