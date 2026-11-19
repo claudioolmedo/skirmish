@@ -155,6 +155,8 @@ mod retprobe_tests;
 mod bellprobe_tests;
 #[cfg(test)]
 mod buildprobe_tests;
+#[cfg(test)]
+mod occorder9_tests;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
