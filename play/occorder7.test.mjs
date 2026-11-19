@@ -336,19 +336,36 @@ test('record-rect stage: a click inside both rects but outside the outline also 
 // No regression: the garrison interpretation survives wherever
 // NO enemy is resolved at the point.
 
-test('no foe hit at the point: our own outline still names itself and the click degrades as before', () => {
+test('no foe RECORD hit at the point, foe in ground range — SUPERSEDED by occorder11/FIX #9 (run #434): the foe is resolved by ground', () => {
+  // PIN MOVED, with justification (occorder11): this bound
+  // was stated over record geometries only ("no non-own
+  // record hit → no preference"). Measured by ground
+  // distance, this staged pixel is ~0.96 wu from the enemy
+  // Scout 56 at (7,-1) — inside entityAt's 2.2 ground pick
+  // radius, the geometry FIX #2c arbitrates. Run #434 (the
+  // FIX #8 build, live) reproduced the hidden-attacker
+  // signature in exactly this configuration — foe coincident
+  // at ground level, click LOW at its feet, no foe
+  // outline/rect/body hit — and FIX #9 (occorder11) resolves
+  // the foe by ground there. The surviving no-widen bound is
+  // occorder11's World B: a foe outside the ground radius
+  // (and every foe geometry) still does not shadow our own
+  // outline winner, and the degradation shape below is
+  // preserved in that world.
   const w = makeWorld({});
   // A pixel low on our Scout's outline, below the enemy's
   // rect: only record 4 is hit there.
   const [esx, esy] = w.worldToScreen(7.5, -0.5);
   const [wx, wy] = w.s2w(esx - 9, esy - 1);
   assert.equal(w.occludedUnitAt(wx, wy), 4, 'staging: only our Scout\'s outline is hit');
-  assert.equal(w.entityAt(wx, wy, true), 4,
-    'with no non-own record hit at the point, the preference does not fire');
+  const dFoe = Math.hypot(w.st.pos[56 * 2] - wx, w.st.pos[56 * 2 + 1] - wy);
+  assert.ok(dFoe < 2.2,
+    `staging: the foe is ${dFoe.toFixed(2)} wu from the click — inside the ground pick radius FIX #2c arbitrates`);
+  assert.equal(w.entityAt(wx, wy, true), 56,
+    'FIX #9: with no non-own record hit but the foe in ground range, the ground candidate fires');
   w.orderAt(wx, wy, false, true);
-  const iss = w.occEntries.filter((e) => e.ev === 'issue');
-  assert.deepEqual(iss.map((e) => [e.cmd.t, e.ok]), [['garrison_tc', false], ['move', true]],
-    'the pre-fix shape is preserved exactly when no enemy is resolved: refused garrison, then a ground move');
+  assert.deepEqual(w.issued.map((c) => [c.t, c.e, c.tg]), [['attack', 4, 56]],
+    'exactly one command: {t:\'attack\', e:4, tg:56} — no garrison_tc, no move');
 });
 
 test('TC footprint with NO enemy present still garrisons a foot unit (and a Scout still degrades to move)', () => {

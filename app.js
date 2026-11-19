@@ -8776,6 +8776,69 @@ async function main() {
       }
       return fBest;
     };
+    // FIX #9 (bot-loop occorder11, run #434): the ground
+    // candidate for the outline stage's foe gate — FIX #2c's
+    // own geometry (the nearest non-own unit within
+    // entityAt's 2.2 ground pick radius), restated at the
+    // stage that can actually be reached. Run #434 (the
+    // FIX #8 build, live): attacker and foe are BOTH Scout
+    // Cavalry coincident under our Town Center, the attacker
+    // itself standing at the TC; the click LOW on the red
+    // outline resolved the attacker's OWN Scout from its
+    // outline (pick {selection:[4], picked:4, afterGate:4,
+    // tFromOutline:true, outline:4, outlineRect:4, records:5,
+    // recordIds:[2,56,4,1,3], pickedKind:2, pickedOwner:0})
+    // and degraded through the refused garrison_tc to a
+    // ground move — the foe Scout 56, present in recordIds,
+    // kept draining the TC. Harness discrimination
+    // (occorder11, sweep over the staged frame): wherever
+    // the foe's rect IS hit at the point, FIX #6/#7/#8 fire
+    // in this same configuration (same-kind foe, the winner
+    // the selected unit itself — neither blocks the gate);
+    // the one region that reproduces the capture is the band
+    // just BELOW the foe rect's bottom edge (~1–5 px, at the
+    // foe's feet, where a LOW click lands): the foe's
+    // recorded rect misses there, its outline intersection
+    // (a subset of the rect) misses, and its static body box
+    // misses too (the click is screen-down from the foe's
+    // ground point — h < 0 in spriteBodyD2's decomposition),
+    // so foeOcc / foeRectAtPoint / foeBodyAtPoint all find
+    // nothing. But the click's ground point lies ~0.35 wu
+    // from the foe — inside the 2.2 ground radius, nearer
+    // the foe than our own Scout — and the ground stage
+    // below already holds exactly that reading (FIX #2c: a
+    // right-click pick never names our own unit while a
+    // non-own unit is also in pick range), unreachable
+    // behind an own outline winner because the outline
+    // stage returns occ first and its foe preference never
+    // consulted the ground candidate. So the ground
+    // candidate is restated here, LAST inside the gate (the
+    // measured rect and the drawn body are tighter
+    // geometries and keep precedence): the ground stage's
+    // own loop (Town Centers skipped, alive, nearest wins),
+    // plus the garrison skip every other foe candidate in
+    // this gate carries. Fog discipline is the ground
+    // stage's own: a target named this way is not
+    // tFromOutline, so orderAt's fog gate still applies to
+    // it, exactly as for a ground-stage pick. The garrison
+    // reading still applies whenever NO enemy is resolved
+    // at the point by outline, rect, body or ground.
+    const foeGroundAtPoint = () => {
+      let gBest = null;
+      let gBestD2 = 2.2 * 2.2;
+      for (let i = 0; i < st.count; i++) {
+        if (st.kinds[i] === KIND_TC || st.hp[i * 2] < 1) continue;
+        if (st.owners[i] === localOwner) continue;
+        if (st.garrisoned && st.garrisoned[i]) continue;
+        const d2 = (st.pos[i * 2] - wx) ** 2
+          + (st.pos[i * 2 + 1] - wy) ** 2;
+        if (d2 < gBestD2) {
+          gBestD2 = d2;
+          gBest = i;
+        }
+      }
+      return gBest;
+    };
     // FIX #6 (bot-loop occorder7, run #431 capture): foe
     // preference inside the record picks — FIX #2c's ground-pick
     // discipline extended to the outline pick, as occorder5's
@@ -8827,6 +8890,14 @@ async function main() {
         if (foeRect !== null) return foeRect;
         const foeBody = foeBodyAtPoint();
         if (foeBody !== null) return foeBody;
+        // FIX #9 (occorder11) runs last inside that same
+        // gate: a foe resolved by the ground pick radius
+        // beats our own outline winner too (run #434 — the
+        // LOW click at the foe's feet, where outline, rect
+        // and body all miss but the foe stands within the
+        // ground radius FIX #2c already arbitrates).
+        const foeGround = foeGroundAtPoint();
+        if (foeGround !== null) return foeGround;
       }
     }
     if (occ !== null) return occ;
