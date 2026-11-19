@@ -268,6 +268,13 @@ fn p4c_line_friendly_untouched_and_does_not_stop_the_bolt() {
         sx,
         sy - I16F16::from_num(12),
     );
+    // AMOVEPROBE pin (2026-11-18): the Knight is a standing
+    // marker on the bolt's line. Since the acquisition gate
+    // covers Knights (CMB-08), an Aggressive marker would ride
+    // off the line at the enemies behind him — pinned to No
+    // Attack so he holds the line the test measures.
+    let ki = sim.entities().iter().position(|e| e.id == 993).unwrap();
+    sim.entities[ki].stance = crate::Stance::NoAttack;
     // An enemy Militia behind the Knight (non-primary)…
     spawn_at(
         &mut sim,
@@ -411,6 +418,14 @@ fn p4c_min_range_target_is_not_engaged_point_blank() {
     // An enemy Knight one tile north — inside the 2-tile dead
     // zone (PRJ-08).
     spawn(&mut sim, 991, EntityKind::Knight, OWNER_OPPONENT, (60, 65));
+    // AMOVEPROBE pin (2026-11-18): the Knight is this test's
+    // passive target dummy. Since the acquisition gate covers
+    // Knights (CMB-08), an Aggressive dummy would chase the
+    // Scorpion down — the dead-zone staging needs him standing,
+    // so he is pinned to No Attack. The test's subject (the
+    // Scorpion's own dead-zone discipline) is untouched.
+    let ki = sim.entities().iter().position(|e| e.id == 991).unwrap();
+    sim.entities[ki].stance = crate::Stance::NoAttack;
     sim.push_command(Command::Attack {
         entity: SCORP_ID,
         target: 991,

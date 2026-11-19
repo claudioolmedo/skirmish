@@ -398,6 +398,15 @@ fn p4b_min_range_target_is_not_engaged_point_blank() {
     // An enemy Knight two tiles north — inside the 3-tile dead
     // zone (PRJ-08).
     spawn(&mut sim, 991, EntityKind::Knight, OWNER_OPPONENT, (60, 64));
+    // AMOVEPROBE pin (2026-11-18): the Knight is this test's
+    // passive target dummy. Since the acquisition gate covers
+    // Knights (CMB-08), an Aggressive dummy would chase the
+    // Mangonel down and eat it — the dead-zone staging needs
+    // him standing, so he is pinned to No Attack. The test's
+    // subject (the Mangonel's own dead-zone discipline) is
+    // untouched.
+    let ki = sim.entities().iter().position(|e| e.id == 991).unwrap();
+    sim.entities[ki].stance = crate::Stance::NoAttack;
     sim.push_command(Command::Attack {
         entity: MANGO_ID,
         target: 991,

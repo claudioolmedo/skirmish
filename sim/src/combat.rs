@@ -962,6 +962,25 @@ impl Sim {
                         | EntityKind::ManAtArms
                         | EntityKind::Archer
                         | EntityKind::ScoutCavalry
+                        // AMOVEPROBE (2026-11-18): the Castle-age
+                        // roster kinds were never added to this
+                        // gate when they landed (P2/P4), so they
+                        // never auto-acquired at all — under an
+                        // attack-move they walked past enemies at
+                        // point-blank range and idled at the
+                        // destination (the occorder4 attempt-3
+                        // shape). CMB-08 promises the chain to "a
+                        // military unit"; these five are the
+                        // standard land combat kinds the roster
+                        // fields. Siege (Mangonel/Scorpion/Petard)
+                        // and ships stay out: their targeting runs
+                        // through the building/siege machinery and
+                        // is out of this fix's probed scope.
+                        | EntityKind::Spearman
+                        | EntityKind::Skirmisher
+                        | EntityKind::LightCavalry
+                        | EntityKind::Knight
+                        | EntityKind::CavalryArcher
                 )
                 || e.attack_target.is_some()
                 || e.attack_building.is_some()

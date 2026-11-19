@@ -356,6 +356,13 @@ fn heal_exclusions_hold() {
     assert!(!sim.can_heal(900, 901));
     // A wounded enemy Knight beside the monk: never healed.
     spawn(&mut sim, 902, EntityKind::Knight, OWNER_OPPONENT, (60, 61));
+    // AMOVEPROBE pin (2026-11-18): the Knight is a passive
+    // bystander for the heal-exclusion assertions. Since the
+    // acquisition gate covers Knights (CMB-08), an Aggressive
+    // bystander would kill the monk mid-test — pinned to No
+    // Attack; the heal rules under test are untouched.
+    let ki = sim.entities().iter().position(|e| e.id == 902).unwrap();
+    sim.entities[ki].stance = crate::Stance::NoAttack;
     wound(&mut sim, 902, 10);
     assert!(!sim.can_heal(900, 902));
     run_until(&mut sim, 600, |_| false);
