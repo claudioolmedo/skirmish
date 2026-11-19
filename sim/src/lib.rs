@@ -10912,6 +10912,19 @@ impl Sim {
                         .unwrap_or((o.target_x, o.target_y)),
                 )
             };
+            // MOV-04 press (engagefix, 2026-11-19): a unit whose
+            // contact is suppressed for its attack — engaged in
+            // range, or a melee chaser pressing through the last
+            // body-depth toward its victim (combat.rs) — is not
+            // bumped: the contact it stands in is its chosen
+            // path to the fight, and repathing it around the
+            // bodies it is pressing through would reopen the
+            // crowd-pocket orbit the press exists to close. The
+            // flag is last tick's combat verdict, the same one
+            // steering reads.
+            if self.entities[i].suppress_separation {
+                continue;
+            }
             // Blockers: snapshot neighbours (id order) inside
             // the pair's separation distance at their
             // post-integration positions.

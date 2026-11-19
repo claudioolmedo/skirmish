@@ -1243,6 +1243,53 @@ impl Sim {
                     _ => {}
                 }
             }
+            // MOV-04 press (engagefix, 2026-11-19): a melee chaser
+            // whose victim is within one body-depth of striking
+            // range presses through contact instead of steering
+            // around it. Proven mechanism (engageprobe crowd
+            // ring): MOV-03 contact projection makes a closed ring
+            // of standing bodies an absolute barrier — every
+            // approach corridor's clearance (r=3 ring: 1.15) is
+            // below the pair separation distance (1.8), so the
+            // chaser stops at contact 4.08–5.04 from its victim,
+            // outside MELEE_REACH, and the bump pass repaths it
+            // from pocket to pocket forever with the order held
+            // (74 repaths / 3,600 ticks, zero damage either way).
+            // The behaviour flips exactly at the contact geometry
+            // (r=4 ring freezes at clearance 1.53 < 1.8; r=5 and
+            // sparse rings engage at 1.91 / 2.12 > 1.8), and
+            // suppressing contact for the chaser alone engages
+            // immediately. This extends the in-range MOV-04
+            // exemption (contact must not keep an attacker out of
+            // its target's reach) to the final approach: inside
+            // MELEE_REACH + the widest standard pair separation,
+            // the chaser's remaining obstacle is bodies, not
+            // terrain, and it closes the last body-depth under
+            // the same suppression the fight itself uses. The
+            // bump pass skips a suppressed unit (lib.rs): contact
+            // on the press is the chosen path, not a bump.
+            //
+            // The press is gated on a STATIONARY victim: the
+            // barrier it answers is a standing crowd around a
+            // victim that is itself standing (in every staged
+            // pin the victim's velocity is zero — it stands
+            // draining the TC). A MOVING victim is a pursuit,
+            // not a barrier: contact discipline there is the
+            // pre-existing chase behaviour, and pressing changed
+            // it measurably (a wolf pack pressing through its
+            // own bodies killed a fleeing repairer that the
+            // un-pressed pack's self-contact had always spared —
+            // repairprobe baseline). Velocity is last tick's
+            // steering verdict, so a victim merely stalled by
+            // the same crowd (ordered but motionless) still
+            // reads stationary and can be pressed to.
+            if spec.range_max == I16F16::ZERO
+                && dist <= MELEE_REACH + steer::SEPARATION_RADIUS
+                && self.entities[ti].vel_x == I16F16::ZERO
+                && self.entities[ti].vel_y == I16F16::ZERO
+            {
+                self.entities[idx].suppress_separation = true;
+            }
             // Chase: refresh the internal move order when the victim
             // has drifted from where we are headed (CMB-06: chasing is
             // mechanism, not a player order).
