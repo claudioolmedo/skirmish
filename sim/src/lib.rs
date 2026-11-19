@@ -153,6 +153,8 @@ mod amoveprobe_tests;
 mod retprobe_tests;
 #[cfg(test)]
 mod bellprobe_tests;
+#[cfg(test)]
+mod buildprobe_tests;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
@@ -11703,6 +11705,24 @@ impl Sim {
         self.apply_spawn_rally(idx, rally, rally_node);
     }
 
+    /// BUILDPROBE (2026-11-19): whether entity `idx`'s current move
+    /// order targets a cell that has become blocked — for the
+    /// entity's movement domain — since the order was issued.
+    /// `approach_point*` never issues an order into an
+    /// already-blocked cell, and a wall/Fish-Trap stand cell never
+    /// blocks, so a `true` here is always a post-issue change: a
+    /// wall segment whose construction started on the stand cell,
+    /// or a later building placed over it. Steering cannot enter
+    /// such a cell, so an order into it can never complete.
+    fn build_order_target_blocked(&self, idx: usize) -> bool {
+        let e = &self.entities[idx];
+        let Some(o) = &e.order else {
+            return false;
+        };
+        let (cx, cy) = self.grid.world_to_cell(o.target_x, o.target_y);
+        self.grid.is_blocked_for(e.kind.domain(), cx, cy)
+    }
+
     /// One villager's work state machine step. Transitions trigger on
     /// *distance* (arrival ranges), not only on move-order completion:
     /// separation can hold a villager slightly off its target point, and
@@ -12046,7 +12066,30 @@ impl Sim {
                     e.order = None;
                     e.vel_x = I16F16::ZERO;
                     e.vel_y = I16F16::ZERO;
-                } else if self.entities[idx].order.is_none() {
+                } else if self.entities[idx].order.is_none()
+                    || self.build_order_target_blocked(idx)
+                {
+                    // BUILDPROBE fix (2026-11-19): a live order
+                    // whose target cell has been blocked since it
+                    // was issued — a wall segment started on the
+                    // stand cell, a later building placed over it —
+                    // can never complete: steering cannot enter a
+                    // blocked cell, so the arrival radius never
+                    // certifies and the retry below never ran. The
+                    // builder froze mid-field forever, foundation
+                    // at 1 HP, invisible to the idle-villager
+                    // query (probe scene A-seal-ortho froze for
+                    // the full 30,000-tick window at 10.6 wu from
+                    // the site). Drop the stale order and let the
+                    // ordinary retry decide: another stand cell if
+                    // one is reachable, else the documented
+                    // give-up to Idle.
+                    if self.entities[idx].order.is_some() {
+                        let e = &mut self.entities[idx];
+                        e.order = None;
+                        e.vel_x = I16F16::ZERO;
+                        e.vel_y = I16F16::ZERO;
+                    }
                     match self.approach_point_building(idx, bid) {
                         Some((px, py)) => {
                             self.set_move_order(idx, px, py);
