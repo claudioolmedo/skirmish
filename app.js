@@ -3039,14 +3039,24 @@ function tcReservedCells() {
   const set = new Set();
   const kinds = sim.entity_kinds();
   const pos = sim.positions();
+  // The sim reserves only a LIVING Town Center's ground (its
+  // loop skips dead entities) — a razed TC's tombstone kind
+  // still reads KIND_TC here, so the HP pair decides (wallghost
+  // fix, 2026-11-19: the ghost refused wall segments beside a
+  // dead TC that the sim would have founded).
+  const hp = typeof sim.entity_hp === 'function' ? sim.entity_hp() : null;
   for (let i = 0; i < kinds.length; i++) {
-    if (kinds[i] === KIND_TC) {
+    if (kinds[i] === KIND_TC && (!hp || hp[i * 2] >= 1)) {
       const [tx, ty] = worldToCell(pos[i * 2], pos[i * 2 + 1]);
       for (let dy = -1; dy <= 2; dy++) {
         for (let dx = -1; dx <= 2; dx++) {
           const rx = tx + dx;
           const ry = ty + dy;
-          if (rx >= 0 && ry >= 0) set.add(ry * GW + rx);
+          // In-grid only (wallghost fix): the sim stores the
+          // reserve as cell pairs and compares pairs, so its
+          // out-of-grid cells match nothing; a flat index here
+          // would alias (GW, y) onto (0, y+1) for an edge TC.
+          if (rx >= 0 && ry >= 0 && rx < GW && ry < GH) set.add(ry * GW + rx);
         }
       }
     }
@@ -3098,6 +3108,10 @@ function gateOrientationAt(kind, cx, cy) {
   const info = gateInfo();
   const cellOk = (x, y) => {
     if (x < 0 || y < 0 || x >= GW || y >= GH) return false;
+    // Unexplored ground refuses a gate span too (BLD-01: the
+    // sim's gate_span_placeable checks every span cell, exactly
+    // as the generic path does — wallghost fix, 2026-11-19).
+    if (FOG && FOG[y * GW + x] < 1) return false;
     if (tcReserved.has(y * GW + x)) return false;
     for (const n of nodes) {
       if (n.amount <= 0) continue;
@@ -3278,6 +3292,23 @@ function mirrorValid(kind, cx, cy) {
     const bs = b.size || kindSize(b.kind);
     if (cx < b.cellX + bs && b.cellX < cx + size &&
         cy < b.cellY + bs && b.cellY < cy + size) return false;
+    // A standing GATE reserves its whole 4×1 span, not just the
+    // anchor cell the square range above reads (its size is 1):
+    // in the sim the span is reserved by the blocking grid's
+    // dynamic layer — but only while the gate stands CLOSED;
+    // an open gate writes no dynamic block, and a wall segment
+    // may be founded on its span cells (wallghost fix,
+    // 2026-11-19: the ghost painted closed-gate span cells
+    // green and the sim silently skipped those segments).
+    if (isGateKind(b.kind)) {
+      const gi = gateInfo().get(b.id);
+      if (!gi || !gi.open) {
+        const span = gateSpanCells(b.cellX, b.cellY, gi ? gi.alongX : true);
+        for (const [gx, gy] of span) {
+          if (gx >= cx && gx < cx + size && gy >= cy && gy < cy + size) return false;
+        }
+      }
+    }
   }
   const cells = [];
   for (let dx = 0; dx < size; dx++) {
@@ -3293,6 +3324,25 @@ function mirrorValid(kind, cx, cy) {
   const tcReserved = tcReservedCells();
   const nodes = nodeList();
   for (const [x, y] of cells) {
+    // Unexplored ground refuses placement (BLD-01, the sim's
+    // per-cell explored check): a foundation may only stand on
+    // ground the placing player has explored at some point —
+    // explored-but-fogged (1) stays legal, the black (0) does
+    // not. The mirror never consulted the fog layer, so the
+    // wall-drag ghost painted segments green over the black
+    // and previewed their cost, while the sim skipped those
+    // segments silently and charged nothing for them — the
+    // "discontinuous walls / preview cost mismatch" reading
+    // (wallghost fix, 2026-11-19). FOG is the local player's
+    // grid as rendered (myFog, refreshed every draw).
+    if (FOG && FOG[y * GW + x] < 1) return false; // unexplored (BLD-01)
+    // Water-side terrain refuses a Normal footprint: deep
+    // water is already in OBST, but shallows are not (land
+    // units wade them, so they are not obstacles) — the sim
+    // refuses shallows separately for every Normal kind
+    // (validate_build's is_shallows check), and the mirror
+    // never read TERRAIN at all (wallghost fix).
+    if (TERRAIN && TERRAIN[y * GW + x] !== 0) return false; // deep water or shallows
     if (OBST[y * GW + x]) return false; // static wall
     if (tcReserved.has(y * GW + x)) return false; // a Town Center's reserve
     for (const n of nodes) { // a live node on this cell
