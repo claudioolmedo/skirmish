@@ -1754,10 +1754,29 @@ impl Sim {
                 t.flee_from_x = threat.0;
                 t.flee_from_y = threat.1;
             }
-            EntityKind::Militia | EntityKind::Archer => {
+            EntityKind::Militia
+            | EntityKind::ManAtArms
+            | EntityKind::Archer
+            | EntityKind::ScoutCavalry
+            | EntityKind::Spearman
+            | EntityKind::Skirmisher
+            | EntityKind::LightCavalry
+            | EntityKind::Knight
+            | EntityKind::CavalryArcher => {
                 // Retaliation: an idle military unit of either
                 // player answers its attacker (M5). (Villagers never
-                // auto-attack — task rule.) CMB-09: the answer is
+                // auto-attack — task rule.) RETPROBE (2026-11-18):
+                // the kind list is CMB-09's full standard land
+                // military roster — the rule documents retaliation
+                // for military units with no kind carve-out, but
+                // this arm still carried the M5-era `Militia |
+                // Archer` pair, so the other seven kinds stood
+                // idle while struck or shot (measured: a villager
+                // could beat an idle Man-at-Arms to death
+                // unanswered). Siege kinds, the Petard and the
+                // ships stay out: CMB-09 documents no retaliation
+                // for them (and CMB-08 gives rams their own
+                // buildings-only clause). CMB-09: the answer is
                 // stance-gated — a No Attack unit never retaliates,
                 // and a Stand Ground unit answers only an attacker
                 // already inside its attack range (it will not ride

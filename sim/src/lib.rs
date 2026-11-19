@@ -149,6 +149,8 @@ mod mov05_tests;
 mod mov03_tests;
 #[cfg(test)]
 mod amoveprobe_tests;
+#[cfg(test)]
+mod retprobe_tests;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
