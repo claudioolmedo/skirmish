@@ -209,7 +209,130 @@ function occLog(entry) {
   const e = { at: performance.now(), ...entry };
   occLogEntries.push(e);
   console.info('[occlog]', e);
+  occPanelUpdate();
 }
+
+// OCCLOG PANEL (bot-loop occorder6, 2026-11-19): the reader
+// half of the occorder5 instrument. Run #430's directed live
+// session proved the capture works — the scenario occurred and
+// the right-click failed again — but the log could not be READ:
+// the automated browser has no DevTools (Ctrl+Shift+J/I do
+// nothing, no Inspect menu), so window.__occlog stayed locked
+// behind a reader that does not exist there. This panel is
+// that reader, in the page itself: with ?occlog=1 (and only
+// then) a small fixed panel shows every entry as plain text as
+// it is recorded, readable in an ordinary screenshot by a
+// mouse-only agent. Placement: top-right under the resource
+// bar — top-left is already the event feed's and chat log's
+// column, and the height cap keeps it clear of the bottom
+// command panel and the minimap. It is collapsible (Hide) and
+// closeable (✕; window.__occlogShow() brings it back), and its
+// Copy / Download buttons hand the session the full JSON.
+// Without the flag nothing here runs: occPanelEnsure returns
+// before touching the DOM and occLog returns before updating,
+// so there are zero DOM additions and zero behaviour change.
+// All DOM access is typeof-guarded, exactly like the occLog
+// call sites, so the node harnesses that slice this block (and
+// provide no document) keep working unchanged. The recording
+// logic itself is untouched — the panel only READS
+// occLogEntries, at the one hook at the end of occLog above.
+let occPanelEl = null;
+let occPanelBodyEl = null;
+let occPanelTitleEl = null;
+let occPanelCollapsed = false;
+function occPanelText() {
+  return occLogEntries.map((e) => {
+    try { return JSON.stringify(e); } catch { return String(e); }
+  }).join('\n');
+}
+function occPanelEnsure() {
+  if (!OCCLOG_ON) return null;
+  if (occPanelEl) return occPanelEl;
+  if (typeof document === 'undefined' || !document
+      || typeof document.createElement !== 'function'
+      || !document.body || typeof document.body.appendChild !== 'function') return null;
+  try {
+    const panel = document.createElement('div');
+    panel.id = 'occlog-panel';
+    panel.style.cssText = 'position:fixed;top:calc(var(--beta-h, 30px) + 52px);right:12px;left:auto;z-index:60;width:min(460px,92vw);max-height:38vh;display:flex;flex-direction:column;background:rgba(8,6,2,0.93);border:1px solid rgba(201,162,39,0.8);border-radius:6px;color:#f0e6c8;font:11px/1.45 ui-monospace,Menlo,Consolas,monospace;box-shadow:0 8px 28px rgba(0,0,0,0.55);';
+    const head = document.createElement('div');
+    head.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 6px;border-bottom:1px solid rgba(201,162,39,0.35);flex:0 0 auto;';
+    const title = document.createElement('span');
+    title.id = 'occlog-panel-title';
+    title.textContent = 'occlog · 0';
+    title.style.cssText = 'font-weight:700;flex:1 1 auto;white-space:nowrap;overflow:hidden;';
+    head.appendChild(title);
+    const mkBtn = (label, id) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.id = id;
+      b.textContent = label;
+      b.style.cssText = 'background:rgba(201,162,39,0.16);color:#f0e6c8;border:1px solid rgba(201,162,39,0.55);border-radius:4px;padding:1px 7px;font:inherit;cursor:pointer;flex:0 0 auto;';
+      return b;
+    };
+    const copyBtn = mkBtn('Copy', 'occlog-copy');
+    copyBtn.addEventListener('click', () => {
+      try {
+        if (typeof navigator !== 'undefined' && navigator && navigator.clipboard
+            && typeof navigator.clipboard.writeText === 'function') {
+          navigator.clipboard.writeText(JSON.stringify(occLogEntries));
+        }
+      } catch { /* the visible text is the primary channel */ }
+    });
+    const dlBtn = mkBtn('Download', 'occlog-download');
+    dlBtn.addEventListener('click', () => {
+      try {
+        if (typeof Blob === 'undefined' || typeof URL === 'undefined'
+            || typeof URL.createObjectURL !== 'function') return;
+        const blob = new Blob([JSON.stringify(occLogEntries)], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'occlog.json';
+        a.click();
+      } catch { /* the visible text is the primary channel */ }
+    });
+    const collapseBtn = mkBtn('Hide', 'occlog-collapse');
+    collapseBtn.addEventListener('click', () => {
+      occPanelCollapsed = !occPanelCollapsed;
+      if (occPanelBodyEl) occPanelBodyEl.style.display = occPanelCollapsed ? 'none' : '';
+      collapseBtn.textContent = occPanelCollapsed ? 'Show' : 'Hide';
+    });
+    const closeBtn = mkBtn('✕', 'occlog-close');
+    closeBtn.addEventListener('click', () => { panel.style.display = 'none'; });
+    head.appendChild(copyBtn);
+    head.appendChild(dlBtn);
+    head.appendChild(collapseBtn);
+    head.appendChild(closeBtn);
+    const body = document.createElement('pre');
+    body.id = 'occlog-panel-body';
+    body.style.cssText = 'margin:0;padding:6px 8px;overflow:auto;white-space:pre-wrap;word-break:break-all;flex:1 1 auto;';
+    body.textContent = '';
+    panel.appendChild(head);
+    panel.appendChild(body);
+    document.body.appendChild(panel);
+    occPanelEl = panel;
+    occPanelBodyEl = body;
+    occPanelTitleEl = title;
+    if (typeof window !== 'undefined') window.__occlogPanel = panel;
+    return panel;
+  } catch { return null; }
+}
+function occPanelUpdate() {
+  if (!OCCLOG_ON) return;
+  const panel = occPanelEnsure();
+  if (!panel) return;
+  if (occPanelTitleEl) occPanelTitleEl.textContent = `occlog · ${occLogEntries.length}`;
+  if (occPanelBodyEl) {
+    occPanelBodyEl.textContent = occPanelText();
+    try { occPanelBodyEl.scrollTop = occPanelBodyEl.scrollHeight; } catch { /* cosmetic */ }
+  }
+}
+function occPanelShow() {
+  const panel = occPanelEnsure();
+  if (panel) panel.style.display = '';
+}
+if (OCCLOG_ON && typeof window !== 'undefined') window.__occlogShow = () => occPanelShow();
+if (OCCLOG_ON) occPanelEnsure();
 
 const canvas = document.getElementById('view');
 const ctx = canvas.getContext('2d');
