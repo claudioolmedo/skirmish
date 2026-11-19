@@ -94,6 +94,19 @@
 // is the mechanism and its signature, not which of the two
 // worlds the live pixel inhabited.
 //
+// AMENDMENT (occorder11, run #434, 2026-11-19): the vigia
+// this bound said would decide the question ran on the
+// FIX #8 build and DID reproduce trial 1's signature, in
+// the both-Scouts configuration with the foe coincident at
+// ground level. Measured by ground distance, World A2's
+// staged pixel is 0.79 wu from the foe — inside the 2.2
+// ground pick radius — so FIX #9 (occorder11) now resolves
+// A2's pixel by ground and the A2 pin below is updated to
+// the new behaviour, with its justification recorded there.
+// The paragraph above stands as the record of the FIX #8
+// era's reasoning; this amendment supersedes its A2
+// conclusion only. World B (trial 2) is untouched.
+//
 // ------------------------------------------------------------------
 // DISCRIMINATION — TRIAL 2 (proven in World B below)
 //
@@ -417,19 +430,38 @@ test('trial 1 post-fix: the right-click issues Attack on the rect-resolved enemy
 // The bound: a click resolving to NO foe geometry is unchanged
 // (passes before and after the fix — FIX #8 must not widen).
 
-test('bound A2: our own outline with no foe geometry at the point still degrades as before', () => {
+test('bound A2 — SUPERSEDED by occorder11/FIX #9 (run #434): the foe in ground range IS resolved', () => {
+  // PIN MOVED, with justification (occorder11): this test
+  // originally pinned the degradation below as "not a
+  // defect", on the reading that a click with no foe
+  // outline/rect/body hit was a click on our own Scout only.
+  // Measured the same way as occorder11 measures its capture
+  // pixel, this staged pixel (1016,566) → world (6.75,-0.25)
+  // is 0.79 wu from the foe Scout 57 at (6.5,-1) — inside
+  // entityAt's 2.2 ground pick radius, the geometry FIX #2c
+  // arbitrates. Run #434 (the FIX #8 build, live) reproduced
+  // trial 1's signature in exactly this configuration — foe
+  // coincident at ground level, click LOW at its feet — and
+  // occorder10's own honesty bound named that vigia as the
+  // deciding evidence. FIX #9 (occorder11) therefore resolves
+  // the foe here by ground, and this pin now asserts the new
+  // behaviour. The surviving no-widen bound is occorder11's
+  // World B: a foe outside the ground radius (and every foe
+  // geometry) still does not shadow our own outline winner.
   const w = makeWorldA({});
   // A pixel low on our Scout's outline, below the foe's rect:
   // only record 4's geometries are hit there.
   const [wx, wy] = w.s2w(1016, 566);
   assert.equal(w.occludedUnitAt(wx, wy), 4, 'staging: only our Scout\'s outline is hit');
   assert.equal(w.occludedRectUnitAt(wx, wy), 4, 'staging: only our Scout\'s rect is hit');
-  assert.equal(w.entityAt(wx, wy, true), 4,
-    'with no foe outline, rect or body hit at the point, the preference does not fire');
+  const dFoe = Math.hypot(w.st.pos[57 * 2] - wx, w.st.pos[57 * 2 + 1] - wy);
+  assert.ok(dFoe < 2.2,
+    `staging: the foe is ${dFoe.toFixed(2)} wu from the click — inside the ground pick radius FIX #2c arbitrates`);
+  assert.equal(w.entityAt(wx, wy, true), 57,
+    'FIX #9: the foe in ground range is resolved even though no foe outline, rect or body is hit at the point');
   w.orderAt(wx, wy, false, true);
-  const iss = w.occEntries.filter((e) => e.ev === 'issue');
-  assert.deepEqual(iss.map((e) => [e.cmd.t, e.ok]), [['garrison_tc', false], ['move', true]],
-    'the pre-fix shape is preserved exactly when no enemy is resolved: refused garrison, then a ground move');
+  assert.deepEqual(w.issued.map((c) => [c.t, c.e, c.tg]), [['attack', 4, 57]],
+    'exactly one command: {t:\'attack\', e:4, tg:57} — no garrison_tc, no move');
 });
 
 test('host exemption: an own Battering Ram outline winner keeps its win over a rect-resolved foe', () => {
