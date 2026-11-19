@@ -8721,6 +8721,61 @@ async function main() {
       }
       return bBest;
     };
+    // FIX #8 (bot-loop occorder10, run #433 trial 1): the foe
+    // candidate for the outline stage below, resolved by the
+    // unit's recorded RECT (the frame's measured sprite rect —
+    // FIX #5's geometry: for a unit that HAS a record, its
+    // whole recorded rect is the click target) instead of by
+    // the outline intersection (rect ∩ cover) or the body box.
+    // Trial 1 (the FIX #6/#7 build, live): the enemy Scout
+    // under our Town Center held a record (recordIds
+    // [2,57,4,1,3]) and our own selected Scout's outline was
+    // hit at the click pixel (picked:4, outline:4,
+    // outlineRect:4), yet no attack issued — the click
+    // degraded through the refused garrison_tc to a ground
+    // move, exactly as in run #431. The harness discrimination
+    // (occorder10) stages the one configuration consistent
+    // with every logged field in which a foe IS resolved at
+    // the point: the foe's recorded rect covers the point
+    // (its figure is drawn there — the tall attack pose,
+    // h ≈ 3.55–3.9 per occorder4), while its outline
+    // intersection misses (the foe is occluded by a
+    // neighbouring occluder whose cover rect intersects the
+    // foe's rect away from the point, so rect ∩ cover does
+    // not reach it — FIX #6's foeOcc, which re-picks by
+    // occludedPickAt, finds nothing) and its static body box
+    // misses too (the point sits at body height 3.0, above
+    // the Scout box top 2.81 — FIX #7's foeBodyAtPoint finds
+    // nothing). The record-rect stage further down already
+    // holds the rect foe preference (FIX #6, second half),
+    // but it is unreachable behind an own outline winner: the
+    // outline stage returns occ first. So the rect candidate
+    // is restated here, at the stage that can be reached:
+    // a non-own record whose rect covers the point, frontmost
+    // wins, alive / not garrisoned — the record-rect stage's
+    // own loop verbatim. Fog trust is the record's existence,
+    // exactly as for foeOcc (a record exists only for a
+    // fog-visible unit — occlusion.js's fairness gate). The
+    // garrison reading still applies whenever NO enemy is
+    // resolved at the point by outline, rect or body.
+    const foeRectAtPoint = () => {
+      const [frx, fry] = worldToScreen(wx, wy);
+      let fBest = null;
+      let fBestDepth = -Infinity;
+      for (const rec of lastOccludedOutlines) {
+        if (!rec || !rec.rect || rec.id == null) continue;
+        if (st.owners[rec.id] === localOwner) continue;
+        if (rec.id >= st.count || st.hp[rec.id * 2] < 1) continue;
+        if (st.garrisoned && st.garrisoned[rec.id]) continue;
+        if (frx >= rec.rect.x && frx < rec.rect.x + rec.rect.w
+            && fry >= rec.rect.y && fry < rec.rect.y + rec.rect.h
+            && rec.depth > fBestDepth) {
+          fBestDepth = rec.depth;
+          fBest = rec.id;
+        }
+      }
+      return fBest;
+    };
     // FIX #6 (bot-loop occorder7, run #431 capture): foe
     // preference inside the record picks — FIX #2c's ground-pick
     // discipline extended to the outline pick, as occorder5's
@@ -8760,7 +8815,16 @@ async function main() {
       // that frame). Only when an own winner would otherwise
       // short-circuit: with no record winner at all the click
       // falls through to the body stage's full discipline.
+      // FIX #8 (occorder10) runs first inside that same gate:
+      // a foe resolved by its recorded RECT beats our own
+      // outline winner too (trial 1 — the foe held a record
+      // whose rect, but neither its outline intersection nor
+      // its body box, covered the point; the measured rect is
+      // the authority, ahead of the static body box, exactly
+      // as the record-rect stage below orders them).
       if (occ !== null) {
+        const foeRect = foeRectAtPoint();
+        if (foeRect !== null) return foeRect;
         const foeBody = foeBodyAtPoint();
         if (foeBody !== null) return foeBody;
       }
