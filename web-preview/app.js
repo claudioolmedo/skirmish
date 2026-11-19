@@ -182,6 +182,35 @@ function playSelectAck() {
 const params = new URLSearchParams(location.search);
 const seed = parseInt(params.get('seed') || '7', 10);
 
+// OCCLOG (bot-loop occorder5, 2026-11-18): opt-in client
+// instrumentation for the occluded-outline attack defect (open
+// since run #402; still open on the FIX #5 build in run #428's
+// directed watch — the Scout walked to the hidden enemy's point
+// and idled, and no staging since has reproduced it). With
+// ?occlog=1 the client records, into window.__occlog (and the
+// console), every canvas right-click's screen pixel + world
+// point, orderAt's pick resolution (entityAt result, the
+// outline and record-rect picks, the fog gate's verdict, the
+// INF-12 record count), and every command issue() emits with
+// its verdict — so one live session settles from the client's
+// own mouth whether a right-click on an occluded enemy emitted
+// {t:'attack', tg:<enemy>} or degraded, and if it degraded,
+// which stage dropped it. Inert without the flag: occLog
+// returns before touching anything, and no behaviour changes
+// either way. Call sites inside the pick/order functions use
+// `typeof occLog === 'function'` so the node harnesses that
+// slice those functions out of this file (and stub their own
+// environment) keep working unchanged.
+const OCCLOG_ON = params.get('occlog') === '1';
+const occLogEntries = [];
+if (typeof window !== 'undefined') window.__occlog = occLogEntries;
+function occLog(entry) {
+  if (!OCCLOG_ON) return;
+  const e = { at: performance.now(), ...entry };
+  occLogEntries.push(e);
+  console.info('[occlog]', e);
+}
+
 const canvas = document.getElementById('view');
 const ctx = canvas.getContext('2d');
 // Interface chrome (play/index.html + play/ui.css). The command-grid
@@ -4545,12 +4574,15 @@ function issue(cmd) {
   if (playback) return false;
   if (net) {
     if (!net.session || net.phase !== 'playing') return false;
-    return net.session.localCommand(cmd) >= 0;
+    const sent = net.session.localCommand(cmd) >= 0;
+    occLog({ ev: 'issue', cmd, ok: sent, net: true });
+    return sent;
   }
   const ok = applyLocalOrder(cmd);
   if (ok && playing && localRecorder) {
     localRecorder.addLocal(sim.tick_count(), cmd);
   }
+  occLog({ ev: 'issue', cmd, ok });
   return ok;
 }
 // M5: the mode decides the construction — Sandbox is the plain
@@ -8070,7 +8102,10 @@ async function main() {
   minimapCanvas.addEventListener('pointerdown', (ev) => {
     if (ev.button === 2) {
       const w = minimapPointerWorld(ev);
-      if (w) smartOrderAt(w[0], w[1], ev.shiftKey);
+      if (w) {
+        occLog({ ev: 'rclick-minimap', world: [w[0], w[1]], shift: ev.shiftKey });
+        smartOrderAt(w[0], w[1], ev.shiftKey);
+      }
       return;
     }
     // Teams T3b (INF-04): with a flare armed, this left-click
@@ -8824,6 +8859,7 @@ async function main() {
     // flash(t('flash.…')) then called the entity id (or null)
     // and threw AFTER the order had been issued.
     let tgt = entityAt(wx, wy, fromCanvas);
+    const tgtPicked = tgt; // OCCLOG: the pick before the fog gate below
     // FIX #2b (bot-loop runs #417–#419): a target named through
     // the occluded outline is exempt from the fog gate below.
     // The outline record exists only because the draw pass
@@ -8842,6 +8878,25 @@ async function main() {
     // (the click falls through to a ground move, as a miss does).
     if (tgt != null && !tFromOutline && st.owners[tgt] !== localOwner
         && !cellVisibleW(st.pos[tgt * 2], st.pos[tgt * 2 + 1])) tgt = null;
+    // OCCLOG (occorder5): the pick resolution, recorded before
+    // any branch consumes it — picked vs after-gate is the
+    // discriminating pair for the occluded-outline defect: it
+    // separates "the click never named the enemy" (pick stage)
+    // from "named, then dropped" (gate stage) from "named and
+    // kept, yet no attack was issued" (branch/issue stage,
+    // whose verdicts the issue log records one by one).
+    if (typeof occLog === 'function') occLog({
+      ev: 'pick', wx, wy, fromCanvas, selection: targets.slice(),
+      picked: tgtPicked, afterGate: tgt, tFromOutline,
+      outline: fromCanvas ? occludedUnitAt(wx, wy) : null,
+      outlineRect: fromCanvas ? occludedRectUnitAt(wx, wy) : null,
+      records: lastOccludedOutlines.length,
+      recordIds: lastOccludedOutlines.map((r) => (r ? r.id : null)),
+      pickedKind: tgtPicked != null ? st.kinds[tgtPicked] : null,
+      pickedOwner: tgtPicked != null ? st.owners[tgtPicked] : null,
+      pickedFog: tgtPicked != null
+        ? cellVisibleW(st.pos[tgtPicked * 2], st.pos[tgtPicked * 2 + 1]) : null,
+    });
     // Relic pickup (Castle P5d, MNK-09): a right-click on a
     // relic with Monk(s) selected tasks every selected Monk to
     // pick it up — ahead of the generic Gaia-attack block below,
@@ -9083,6 +9138,7 @@ async function main() {
     // name a bT target, never this unit target) — have
     // already run.
     if (tgt != null && st.owners[tgt] === foeOwner()) {
+      if (typeof occLog === 'function') occLog({ ev: 'enemy-guard', tgt });
       return;
     }
     // Garrison (Castle P3b, GAR-01/SEL-11): a right-click on an
@@ -9796,6 +9852,7 @@ async function main() {
       return;
     }
     const [wx, wy] = eventWorld(e);
+    occLog({ ev: 'rclick', screen: eventScreen(e), world: [wx, wy], shift: e.shiftKey });
     smartOrderAt(wx, wy, e.shiftKey, true);
   });
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
