@@ -231,9 +231,12 @@ test('the record-rect pick is wired into entityAt (FIX #5a)', () => {
 });
 
 test('the enemy guard is wired into orderAt ahead of the garrison block (FIX #5b)', () => {
-  assert.match(orderAtSrc, /if \(tgt != null && st\.owners\[tgt\] === foeOwner\(\)\) \{\s*return;\s*\}/,
+  // occorder5: the guard now records its firing through the
+  // typeof-guarded occLog before returning — the pin's shape
+  // follows it; the guard's position and effect are unchanged.
+  assert.match(orderAtSrc, /if \(tgt != null && st\.owners\[tgt\] === foeOwner\(\)\) \{\s*if \(typeof occLog === 'function'\) occLog\(\{ ev: 'enemy-guard', tgt \}\);\s*return;\s*\}/,
     'an enemy-named target ends the click instead of falling through');
-  const guard = orderAtSrc.indexOf('st.owners[tgt] === foeOwner()) {\n      return;');
+  const guard = orderAtSrc.indexOf('st.owners[tgt] === foeOwner()) {');
   const convert = orderAtSrc.indexOf("t: 'convert'");
   const garrison = orderAtSrc.indexOf("t: 'garrison_tc'");
   assert.ok(convert >= 0 && guard > convert,
