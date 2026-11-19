@@ -8672,6 +8672,55 @@ async function main() {
     // unit, so the ground pick would name a bystander or
     // nothing and the order would degrade to a ground move.
     const occ = screenPick ? occludedUnitAt(wx, wy) : null;
+    // FIX #7 (bot-loop occorder8, run #431 addendum — capture B):
+    // the foe candidate for the two record stages below, resolved
+    // by the unit's drawn BODY (spriteBodyD2 — the same test the
+    // body stage further down and selectionAt's body pick use)
+    // instead of by an INF-12 record. Capture B (the FIX #6 live
+    // proof): the enemy Scout under our Town Center had NO record
+    // in that frame's record set at all (recordIds [2,4,1,3] —
+    // every record a friendly starting unit), while our own
+    // Villager's outline WAS hit at the click pixel (picked:1,
+    // outline:1), so FIX #6's record-only preference found no
+    // foe, the Villager won, and the click degraded through the
+    // refused garrison_tc to a ground move — the same failure
+    // shape as capture A, one layer down. A record is a volatile
+    // per-frame artefact: drawOccludedOutlines keeps one only
+    // while occlusionFor's covered fraction stays >= 0.15
+    // against an occluder drawn strictly in front, and at the
+    // Town Center art's edge that fraction falls off a cliff
+    // (the foe's own attack/reposition steps and its animation
+    // frames' alpha-tight rects move it across the threshold —
+    // measured in occorder8's sweep), so a unit the player can
+    // see outlined in one frame can hold no record in the next
+    // while standing in exactly the same place. Its BODY is the
+    // stable geometry: the click pixel of capture B lies inside
+    // the enemy's sprite-body box (harness-measured), and with
+    // the records emptied both picks name the enemy through the
+    // body stage — the record winner's short-circuit is the only
+    // thing that kept entityAt from reaching it. So when a
+    // record stage's winner is our own unit, a non-own unit
+    // whose BODY is also hit at the point is resolved at the
+    // point too, exactly as a record-hit foe is under FIX #6:
+    // same fog rule as the body stage (a non-own unit counts
+    // only while its cell is currently visible), closest body
+    // centre wins. The garrison reading still applies whenever
+    // NO enemy is resolved at the point by record OR body.
+    const foeBodyAtPoint = () => {
+      let bBest = null;
+      let bBestD2 = Infinity;
+      for (let i = 0; i < st.count; i++) {
+        if (st.owners[i] === localOwner || st.hp[i * 2] < 1) continue;
+        if (st.garrisoned && st.garrisoned[i]) continue;
+        if (!cellVisibleW(st.pos[i * 2], st.pos[i * 2 + 1])) continue;
+        const bd2 = spriteBodyD2(st, i, wx, wy);
+        if (bd2 !== null && bd2 < bBestD2) {
+          bBestD2 = bd2;
+          bBest = i;
+        }
+      }
+      return bBest;
+    };
     // FIX #6 (bot-loop occorder7, run #431 capture): foe
     // preference inside the record picks — FIX #2c's ground-pick
     // discipline extended to the outline pick, as occorder5's
@@ -8705,6 +8754,16 @@ async function main() {
           && st.owners[r.id] !== localOwner), fox, foy);
       if (foeOcc !== null && foeOcc < st.count && st.hp[foeOcc * 2] >= 1
           && !(st.garrisoned && st.garrisoned[foeOcc])) return foeOcc;
+      // FIX #7 (occorder8): no foe RECORD is hit at the point,
+      // but a foe resolved by its drawn body still beats our
+      // own outline winner (capture B — the foe held no record
+      // that frame). Only when an own winner would otherwise
+      // short-circuit: with no record winner at all the click
+      // falls through to the body stage's full discipline.
+      if (occ !== null) {
+        const foeBody = foeBodyAtPoint();
+        if (foeBody !== null) return foeBody;
+      }
     }
     if (occ !== null) return occ;
     // FIX #5 (bot-loop occorder4): the record-rect pick — a
@@ -8738,6 +8797,13 @@ async function main() {
         }
       }
       if (foeRect !== null) return foeRect;
+      // FIX #7 (occorder8): the same body extension at the
+      // record-rect stage — a foe resolved by its drawn body
+      // beats our own frontmost record-rect winner even when
+      // the foe holds no record this frame (capture B's layer,
+      // reached here when the outline stage missed the pixel).
+      const foeBody = foeBodyAtPoint();
+      if (foeBody !== null) return foeBody;
     }
     if (occRect !== null) return occRect;
     // FIX #3 (bot-loop occorder3): the generalised sprite-body
