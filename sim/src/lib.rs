@@ -156,6 +156,8 @@ mod bellprobe_tests;
 #[cfg(test)]
 mod buildprobe_tests;
 #[cfg(test)]
+mod repairprobe_tests;
+#[cfg(test)]
 mod occorder9_tests;
 
 #[cfg(target_arch = "wasm32")]
@@ -12174,7 +12176,28 @@ impl Sim {
                     e.order = None;
                     e.vel_x = I16F16::ZERO;
                     e.vel_y = I16F16::ZERO;
-                } else if self.entities[idx].order.is_none() {
+                } else if self.entities[idx].order.is_none()
+                    || self.build_order_target_blocked(idx)
+                {
+                    // REPAIRPROBE fix (2026-11-19): the
+                    // BUILDPROBE stale-order freeze, proven in
+                    // this arm too — a repairer whose stand
+                    // cell is blocked after his order was
+                    // issued (a wall segment started on it)
+                    // can never complete the order, and the
+                    // retry below only ran for order-less
+                    // repairers: he froze for the full
+                    // 14,400-tick probe window at 14.94 wu from
+                    // a sealed House (range 10.0), HP unmoved,
+                    // invisible to the idle-villager query.
+                    // Drop the stale order into the ordinary
+                    // retry/give-up path, exactly as `ToBuild`.
+                    if self.entities[idx].order.is_some() {
+                        let e = &mut self.entities[idx];
+                        e.order = None;
+                        e.vel_x = I16F16::ZERO;
+                        e.vel_y = I16F16::ZERO;
+                    }
                     match self.approach_point_building(idx, bid) {
                         Some((px, py)) => {
                             self.set_move_order(idx, px, py);
@@ -12220,7 +12243,25 @@ impl Sim {
                     e.order = None;
                     e.vel_x = I16F16::ZERO;
                     e.vel_y = I16F16::ZERO;
-                } else if self.entities[idx].order.is_none() {
+                } else if self.entities[idx].order.is_none()
+                    || self.build_order_target_blocked(idx)
+                {
+                    // REPAIRPROBE fix (2026-11-19): the same
+                    // stale-order freeze as the `Repair` arm
+                    // above — proven here with the Town
+                    // Center's ring sealed but for the
+                    // repairer's stand cell, then walled shut
+                    // behind his order: he froze for the full
+                    // 14,400-tick probe window at 17.55 wu
+                    // (range 15.0), HP unmoved, invisible to
+                    // the idle-villager query. Drop the stale
+                    // order into the retry/give-up path.
+                    if self.entities[idx].order.is_some() {
+                        let e = &mut self.entities[idx];
+                        e.order = None;
+                        e.vel_x = I16F16::ZERO;
+                        e.vel_y = I16F16::ZERO;
+                    }
                     match self.approach_point(idx, ax, ay, build::TC_FOOTPRINT.0, build::TC_FOOTPRINT.1) {
                         Some((px, py)) => {
                             self.set_move_order(idx, px, py);
