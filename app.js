@@ -3182,6 +3182,16 @@ function mirrorDockValid(cx, cy) {
   for (let dy = 0; dy < size; dy++) {
     for (let dx = 0; dx < size; dx++) {
       const x = cx + dx, y = cy + dy;
+      // Unexplored ground refuses placement (BLD-01, the
+      // sim's generic validate_build checks EVERY footprint
+      // cell, the Dock included): explored-but-fogged (1)
+      // stays legal, the black (0) does not. The mirror never
+      // consulted the fog layer, so the Dock ghost painted
+      // valid over black water where the sim silently refuses
+      // (docktrap fix, 2026-11-19 — the wallghost fix's same
+      // hole, flagged in its handoff). FOG is the local
+      // player's grid as rendered (myFog, refreshed every draw).
+      if (FOG && FOG[y * GW + x] < 1) return false; // unexplored (BLD-01)
       const t = TERRAIN[y * GW + x];
       if (t >= 1) waterSide = true;
       if (t === 0 || (t === 2 && landNeighbor(x, y))) landSide = true;
@@ -3227,6 +3237,17 @@ function mirrorTrapValid(cx, cy) {
       return true;
     }
   }
+  // Unexplored ground refuses placement (BLD-01: the explored
+  // check is the FIRST check of the sim's
+  // validate_build_fish_trap). It sits AFTER the resume return
+  // above, exactly as in the sim — validate_build's resume
+  // loop precedes the fish-trap branch, so resuming our own
+  // incomplete trap never reaches this check. Explored-but-
+  // fogged (1) stays legal, the black (0) does not; the mirror
+  // never consulted the fog layer, so the trap ghost painted
+  // valid over black water where the sim silently refuses
+  // (docktrap fix, 2026-11-19 — the wallghost fix's same hole).
+  if (FOG && FOG[cy * GW + cx] < 1) return false; // unexplored (BLD-01)
   if (myAge() < 1) return false; // the Fish Trap is Feudal-born
   const t = TERRAIN[cy * GW + cx];
   if (t < 1) return false; // water-side only (deep water or shallows)
