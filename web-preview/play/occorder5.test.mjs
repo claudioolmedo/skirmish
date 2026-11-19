@@ -329,28 +329,35 @@ test('BOUND: a record-rect-named enemy whose cell reads fog-hidden is nulled by 
     'current behaviour: the click degrades to a ground move (documented bound)');
 });
 
-test('BOUND: an overlapping OWN outline record wins the pick at a shared pixel (frontmost doctrine)', () => {
+test('BOUND 2 — RESOLVED by occorder7 FIX #6: the raw outline pick still names the frontmost OWN record, the ORDER pick now names the enemy behind it', () => {
   // occlusion.js's documented rule: among overlapping
   // outlines the frontmost unit (greatest painter depth) wins.
   // Our own Villager stands beside the enemy, slightly toward
   // the viewer, also occluded by the TC; at a pixel inside
-  // both records' rect ∩ cover the pick names the Villager —
-  // its outline is the one painted on top there — and the
-  // order degrades (the selected Scout cannot garrison; the
-  // click ends as a ground move). Whether live clicks ever
-  // land in such an overlap is one of the things the
-  // ?occlog=1 capture answers (recordIds + picked in the pick
-  // entry: picked = an own unit while the enemy's id is also
-  // in recordIds).
+  // both records' rect ∩ cover the RAW pick still names the
+  // Villager — its outline is the one painted on top there —
+  // and that raw layer is unchanged (selection parity).
+  // What changed (occorder7, run #431's capture having proven
+  // this bound live — picked:4/pickedOwner:0 with the enemy's
+  // record also hit at the point): entityAt's record picks
+  // now apply FIX #2c's foe preference, so the ORDER resolves
+  // to the enemy and the click attacks instead of degrading
+  // through the refused garrison to a ground move. This pin
+  // was occorder5's bound 2, asserted as the pre-fix behaviour
+  // so the change would have to move it consciously — this is
+  // that move; the full capture scene is pinned in
+  // occorder7.test.mjs.
   const w = makeWorld({ withVillager: true });
   const [wx, wy] = w.sharedPixelWorld;
   assert.equal(w.occludedUnitAt(wx, wy), 3,
-    'staging: the outline pick names the frontmost record — our Villager');
+    'staging: the RAW outline pick still names the frontmost record — our Villager');
   w.orderAt(wx, wy, false, true);
   const pick = w.occEntries.find((e) => e.ev === 'pick');
-  assert.equal(pick.picked, 3, 'the click resolved to our own Villager, not the enemy');
+  assert.equal(pick.picked, 7, 'the ORDER pick now resolves to the enemy behind the frontmost own outline');
+  assert.equal(pick.outline, 3, 'occLog\'s raw outline field still reports the frontmost own record');
   assert.deepEqual(pick.recordIds, [7, 3],
     'both records were present that frame — the enemy\u2019s among them');
-  assert.deepEqual(w.issued.map((c) => c.t), ['move'],
-    'current behaviour: an own-named click inside the TC footprint degrades to a ground move (documented bound)');
+  assert.deepEqual(w.issued.map((c) => c.t), ['attack'],
+    'FIX #6 behaviour: the click attacks the enemy (pre-fix it degraded to a ground move)');
+  assert.equal(w.issued[0].tg, 7, 'the attack names the occluded enemy');
 });

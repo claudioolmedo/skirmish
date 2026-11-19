@@ -8672,6 +8672,40 @@ async function main() {
     // unit, so the ground pick would name a bystander or
     // nothing and the order would degrade to a ground move.
     const occ = screenPick ? occludedUnitAt(wx, wy) : null;
+    // FIX #6 (bot-loop occorder7, run #431 capture): foe
+    // preference inside the record picks — FIX #2c's ground-pick
+    // discipline extended to the outline pick, as occorder5's
+    // bound 2 anticipated. The raw outline pick is frontmost-wins
+    // regardless of owner (occlusion.js's documented rule, kept
+    // for selection): when our own unit's outline stands in front
+    // of a non-own unit's outline at the SAME pixel, the raw pick
+    // names OURS — in run #431's capture the selected Scout
+    // itself (pick {picked:4, pickedOwner:0, pickedKind:2,
+    // outline:4} while the enemy's record 56 was also hit at the
+    // point) — and orderAt then reinterpreted the click from its
+    // ground point inside our own Town Center: garrison_tc
+    // (refused, mounted) and a ground move, the Scout walking to
+    // the point and idling while the enemy kept draining the TC.
+    // A right-click is an ORDER, not a selection: when a non-own
+    // record is also hit at the point, the actionable reading is
+    // the non-own unit (in DE, right-clicking an enemy unit
+    // orders an attack on it, even inside a friendly building's
+    // footprint; the garrison reading applies only when no enemy
+    // is resolved at the point). The same two hosts keep their
+    // win as in FIX #2c — an own Battering Ram (kind 17) or
+    // Transport Ship (kind 32) is a garrison/load target, not a
+    // bystander. Canvas-only, like every record pick; the raw
+    // picks (occludedUnitAt / occludedRectUnitAt) and the
+    // left-click selection path are untouched.
+    if (screenPick && (occ === null || (st.owners[occ] === localOwner
+        && st.kinds[occ] !== KIND_RAM && st.kinds[occ] !== 32))) {
+      const [fox, foy] = worldToScreen(wx, wy);
+      const foeOcc = occludedPickAt(
+        lastOccludedOutlines.filter((r) => r && r.id != null
+          && st.owners[r.id] !== localOwner), fox, foy);
+      if (foeOcc !== null && foeOcc < st.count && st.hp[foeOcc * 2] >= 1
+          && !(st.garrisoned && st.garrisoned[foeOcc])) return foeOcc;
+    }
     if (occ !== null) return occ;
     // FIX #5 (bot-loop occorder4): the record-rect pick — a
     // click on the VISIBLE part of a partially occluded unit's
@@ -8682,6 +8716,29 @@ async function main() {
     // covers the tall draw paths' pixels above the FIX #3
     // content boxes, which are the cached sprites' bounds.
     const occRect = screenPick ? occludedRectUnitAt(wx, wy) : null;
+    // FIX #6 (occorder7): the same foe preference at the
+    // record-rect stage — a non-own unit whose recorded rect
+    // also covers the point beats our own frontmost record-rect
+    // winner (same host exemptions as the outline stage above).
+    if (screenPick && occRect !== null && st.owners[occRect] === localOwner
+        && st.kinds[occRect] !== KIND_RAM && st.kinds[occRect] !== 32) {
+      const [frx, fry] = worldToScreen(wx, wy);
+      let foeRect = null;
+      let foeRectDepth = -Infinity;
+      for (const rec of lastOccludedOutlines) {
+        if (!rec || !rec.rect || rec.id == null) continue;
+        if (st.owners[rec.id] === localOwner) continue;
+        if (rec.id >= st.count || st.hp[rec.id * 2] < 1) continue;
+        if (st.garrisoned && st.garrisoned[rec.id]) continue;
+        if (frx >= rec.rect.x && frx < rec.rect.x + rec.rect.w
+            && fry >= rec.rect.y && fry < rec.rect.y + rec.rect.h
+            && rec.depth > foeRectDepth) {
+          foeRectDepth = rec.depth;
+          foeRect = rec.id;
+        }
+      }
+      if (foeRect !== null) return foeRect;
+    }
     if (occRect !== null) return occRect;
     // FIX #3 (bot-loop occorder3): the generalised sprite-body
     // pick (spriteBodyD2 above) — a click on a unit's drawn body
