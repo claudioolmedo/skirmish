@@ -9736,6 +9736,27 @@ async function main() {
   function orderAt(wx, wy, queued = false, fromCanvas = false) {
     const targets = selectedUnits();
     if (targets.length === 0) {
+      // FIX #16 (bot-loop occorder20, run #446): this return
+      // was the ONE order path invisible to ?occlog=1 — every
+      // other right-click logs its pick and its issues, this
+      // one logged nothing, so run #446's live capture (an
+      // enemy Spearman draining the TC at full HP; the
+      // diagnostic right-click with an own Militia believed
+      // selected produced rclick alone, the selection clear
+      // and the "Select a unit first." toast) could not be
+      // discriminated from its own log: the pick layer, the
+      // handler's early returns and this return all had to be
+      // eliminated by hand (occorder20's harness proves this
+      // return is the signature's unique producer — the
+      // selectUnitFirst fallback fires only with no unit
+      // selection, no info animal and no building selected).
+      // Record the skip, with the selection state that caused
+      // it, before flashing. Behaviour is unchanged: no
+      // selection, no order — DE's reading, exactly as before.
+      if (typeof occLog === 'function') occLog({
+        ev: 'order-skip', wx, wy, fromCanvas, reason: 'empty-selection',
+        selAnimal: selectedAnimal, selBuilding: selectedBuilding,
+      });
       flash(selectedAnimal != null
         ? t('flash.notYourAnimal')
         : selectedBuilding != null
