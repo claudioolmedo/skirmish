@@ -11068,7 +11068,11 @@ impl Sim {
             } else {
                 Vec::new()
             };
-            match self.repath_around(my_pos, target, domain, &gates, &blockers, my_r) {
+            let strict_avoid = matches!(
+                self.entities[i].task,
+                crate::entity::Task::ToBuild | crate::entity::Task::Building
+            );
+            match self.repath_around(my_pos, target, domain, &gates, &blockers, my_r, strict_avoid) {
                 Some(wps) if !wps.is_empty() => {
                     let o = self.entities[i]
                         .order
@@ -11132,6 +11136,7 @@ impl Sim {
         gates: &[(u32, u32)],
         blockers: &[usize],
         my_r: I16F16,
+        strict_avoid: bool,
     ) -> Option<Vec<(I16F16, I16F16)>> {
         // The blockers' cells, avoided by every route this
         // function builds (the detour legs included): a leg
@@ -11143,26 +11148,44 @@ impl Sim {
         // in a forest corridor). The detour point's cell is
         // exempted when a detour is attempted (below).
         //
-        // WALLSLOW fix (2026-11-20, run #442): a blocker's cell
-        // stays in `avoid` even when the traveller is standing
-        // IN it. The former exclusion emptied the avoid list in
-        // exactly the coincident case: a builder pressed against
-        // an idle villager inside that villager's own cell got
-        // "avoiding" routes that threaded the cell, whose centre
-        // waypoint sits inside the villager's separation radius
-        // — unreachable — and the bump cycle repeated the same
-        // route forever (probe J: 60,000+ ticks, foundation at
-        // 0 progress). The exclusion is not needed for the
-        // traveller to escape the cell: `find_path_avoiding_for`
-        // never blocks the querier's own start cell by `avoid`
-        // (its own documented rule), so a route out of the
-        // shared cell that never re-enters it is expressible —
-        // and is what the avoiding search now returns.
+        // WALLSLOW fix (2026-11-20, run #442), scoped to build
+        // travel (`strict_avoid`, set by the caller when the
+        // traveller's task is ToBuild/Building): a blocker's
+        // cell then stays in `avoid` even when the traveller is
+        // standing IN it. The exclusion empties the avoid list
+        // in exactly the coincident case: a builder pressed
+        // against an idle villager inside that villager's own
+        // cell got "avoiding" routes that threaded the cell,
+        // whose centre waypoint sits inside the villager's
+        // separation radius — unreachable — and the bump cycle
+        // repeated the same route forever (probe J: 60,000+
+        // ticks, foundation at 0 progress). The exclusion is
+        // not needed for the traveller to escape the cell:
+        // `find_path_avoiding_for` never blocks the querier's
+        // own start cell by `avoid` (its own documented rule),
+        // so a route out of the shared cell that never re-enters
+        // it is expressible — and is what the avoiding search
+        // now returns for a builder.
+        //
+        // The scoping is measured, not aesthetic: applied to
+        // ALL movement, the inclusion regressed the bellprobe
+        // resume tests (a garrisoned villager leaving the Town
+        // Center doorstep crowd for its gather point relies on
+        // the coincident exclusion), and removing the detour
+        // legs' through-fallback as well regressed five
+        // engageprobe crowd-ring tests (packed rings squeeze
+        // through cells an avoiding search cannot thread).
+        // Gather and military movement therefore keeps the
+        // base construction bit-for-bit; build travel — the
+        // class in the live observation (run #441: a wall's
+        // second segment at 0 progress for ~5 minutes beside
+        // its idle builder) — gets the strict list.
+        let my_cell = self.grid.world_to_cell(my_pos.0, my_pos.1);
         let mut avoid: Vec<(u32, u32)> = Vec::with_capacity(blockers.len());
         for &j in blockers {
             let n = &self.entities[j];
             let cell = self.grid.world_to_cell(n.pos_x, n.pos_y);
-            if !avoid.contains(&cell) {
+            if (strict_avoid || cell != my_cell) && !avoid.contains(&cell) {
                 avoid.push(cell);
             }
         }
@@ -11215,31 +11238,32 @@ impl Sim {
                 let mut leg_avoid = avoid.clone();
                 let detour_cell = self.grid.world_to_cell(detour.0, detour.1);
                 leg_avoid.retain(|&c| c != detour_cell);
-                // WALLSLOW fix (2026-11-20, run #442): the legs
-                // must AVOID the blockers' cells — this function's
-                // own contract ("avoided by every route this
-                // function builds, the detour legs included").
-                // The former `or_else` fallback to the plain
-                // through-path defeated the avoidance: when the
-                // only avoiding line to the detour or the target
-                // was a real detour, the fallback quietly returned
-                // a route threading the blocker's own cell, the
-                // traveller pushed against the standing blocker
-                // for another bump window, the repath produced the
-                // same through-route again, and the order never
-                // completed — a builder whose stand point lay past
-                // an idle villager in a one-cell corridor stood
-                // frozen beside a 0-progress foundation for 60,000+
-                // ticks (probe J: `wallslow` pocket staging). With
-                // no fallback, a detour side whose legs cannot
-                // avoid simply fails, the other side is tried, and
-                // the cellular attempt below — which always
-                // avoided — is finally reached.
+                // The legs keep their plain through-path
+                // fallback (measured DE crowd behaviour: in a
+                // packed ring or a Town Center doorstep crowd,
+                // travellers squeeze through cells that an
+                // avoiding search cannot thread, and the
+                // blockers there are themselves moving — the
+                // engageprobe crowd-ring and bellprobe suites
+                // pin that behaviour, and removing this fallback
+                // regressed 7 of their tests, run #442). The
+                // wallslow stall did not need the fallback
+                // removed: it needed the coincident blocker's
+                // cell IN `avoid` (above), which gives the
+                // avoiding search — tried first on every leg —
+                // the real detour around a stationary blocker
+                // instead of an empty avoid list.
                 let legs = (
                     self.grid
-                        .find_path_avoiding_for(domain, my_pos, detour, gates, &leg_avoid),
+                        .find_path_avoiding_for(domain, my_pos, detour, gates, &leg_avoid)
+                        .or_else(|| {
+                            self.grid.find_path_through_for(domain, my_pos, detour, gates)
+                        }),
                     self.grid
-                        .find_path_avoiding_for(domain, detour, target, gates, &leg_avoid),
+                        .find_path_avoiding_for(domain, detour, target, gates, &leg_avoid)
+                        .or_else(|| {
+                            self.grid.find_path_through_for(domain, detour, target, gates)
+                        }),
                 );
                 if let (Some(mut leg1), Some(leg2)) = legs {
                     leg1.extend(leg2);

@@ -15,37 +15,38 @@
 //! the stand cell, ~8 world units from the segment — outside the
 //! 5.8 build range, so construction never starts.
 //!
-//! Root cause, in `Sim::repath_around` (MOV-03's bump repath),
-//! two expressions of one defect — its routes did not actually
-//! avoid the blockers' cells:
-//!  1. The avoid list EXCLUDED a blocker's cell whenever the
-//!     traveller was standing in it. Pressed against the idle
-//!     villager inside that villager's own cell, the builder's
-//!     avoid list came up empty, so every "avoiding" route was
-//!     the plain shortest route — threading the cell, whose
-//!     centre waypoint sits inside the villager's separation
-//!     radius and can never be reached. (The exclusion was also
-//!     unnecessary: `find_path_avoiding_for` never blocks the
-//!     querier's own start cell by `avoid`, its documented rule.)
-//!  2. The detour legs fell back to the plain through-path
-//!     (`or_else(find_path_through_for)`) whenever the avoiding
-//!     leg failed, quietly re-threading the blocker's cell.
-//! Each bump window (83 ticks in the probe) re-ran the repath,
-//! got the same route, and pushed again — while a genuine
-//! avoiding route around the north existed the whole time. The
-//! task layer never intervened: the order existed and its target
-//! cell was unblocked, so neither stale-order retry fired.
-//! Measured pre-fix: segment 2 at progress 0 after 60,000 ticks,
-//! builder oscillating in `ToBuild` at the corridor mouth.
+//! Root cause, in `Sim::repath_around` (MOV-03's bump repath):
+//! the avoid list EXCLUDED a blocker's cell whenever the
+//! traveller was standing in it. Pressed against the idle
+//! villager inside that villager's own cell, the builder's
+//! avoid list came up empty, so every "avoiding" route was the
+//! plain shortest route — threading the cell, whose centre
+//! waypoint sits inside the villager's separation radius and
+//! can never be reached. (The exclusion was also unnecessary
+//! for escaping the cell: `find_path_avoiding_for` never blocks
+//! the querier's own start cell by `avoid`, its documented
+//! rule.) Each bump window (83 ticks in the probe) re-ran the
+//! repath, got the same route, and pushed again — while a
+//! genuine avoiding route around the north existed the whole
+//! time. The task layer never intervened: the order existed
+//! and its target cell was unblocked, so neither stale-order
+//! retry fired. Measured pre-fix: segment 2 at progress 0
+//! after 60,000 ticks, builder oscillating in `ToBuild` at
+//! the corridor mouth.
 //!
-//! Fix (both in `repath_around`): a blocker's cell stays in the
-//! avoid list even when the traveller shares it, and the detour
-//! legs no longer fall back to the through-path — a side that
-//! cannot avoid fails, the other side is tried, then the
-//! cellular avoiding attempt runs; no route at all means the
-//! documented bump wait, not a route through the blocker. No
-//! rule, cost, stat or design change: the same DE behaviour (a
-//! builder walks around a bystander to his stand point),
+//! Fix (in `repath_around`, scoped by the caller to build
+//! travel — task ToBuild/Building): a blocker's cell stays in
+//! the avoid list even when the traveller shares it, so the
+//! avoiding search returns the real detour around a stationary
+//! blocker. The scoping is measured: the same inclusion applied
+//! to all movement regressed the bellprobe resume tests (the
+//! Town Center doorstep crowd relies on the coincident
+//! exclusion), and removing the detour legs' through-path
+//! fallback as well regressed five engageprobe crowd-ring
+//! tests — so gather/military movement keeps the base
+//! construction bit-for-bit and the legs keep their fallback.
+//! No rule, cost, stat or design change: the same DE behaviour
+//! (a builder walks around a bystander to his stand point),
 //! reached by the sim's own documented route.
 
 use fixed::types::I16F16;
