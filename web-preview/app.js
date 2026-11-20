@@ -8808,8 +8808,11 @@ async function main() {
         if (st.owners[i] === localOwner) continue;
         if (st.garrisoned && st.garrisoned[i]) continue;
         if (!cellVisibleW(st.pos[i * 2], st.pos[i * 2 + 1])) continue;
-        if (Math.abs(st.pos[i * 2] - tx) > tcHalf()
-            || Math.abs(st.pos[i * 2 + 1] - ty) > tcHalf()) continue;
+        // FIX #14 (bot-loop occorder17, run #444): membership
+        // widened to tcHalf() + 2, as in entityAt's arena —
+        // see the full note there.
+        if (Math.abs(st.pos[i * 2] - tx) > tcHalf() + 2
+            || Math.abs(st.pos[i * 2 + 1] - ty) > tcHalf() + 2) continue;
         const d2 = (st.pos[i * 2] - wx) ** 2
           + (st.pos[i * 2 + 1] - wy) ** 2;
         const c2 = (st.pos[i * 2] - tx) ** 2
@@ -9247,8 +9250,43 @@ async function main() {
         if (st.owners[i] === localOwner) continue;
         if (st.garrisoned && st.garrisoned[i]) continue;
         if (!cellVisibleW(st.pos[i * 2], st.pos[i * 2 + 1])) continue;
-        if (Math.abs(st.pos[i * 2] - tx) > tcHalf()
-            || Math.abs(st.pos[i * 2 + 1] - ty) > tcHalf()) continue;
+        // FIX #14 (bot-loop occorder17, run #444): the
+        // membership box widens from tcHalf (8) to tcHalf + 2
+        // (10). Run #444 (the FIX #12 build, live): an enemy
+        // Scout's red outline showed through the player's TC
+        // roof from minute 1 (record 56 in the frame's record
+        // set, left-clicks on the outline selecting it
+        // repeatedly), yet the diagnostic right-click LOW at
+        // its feet returned picked:null / outline:null /
+        // outlineRect:null and degraded through the refused
+        // garrison_tc to a ground move. Discrimination
+        // (occorder17, pixel sweeps over every footprint
+        // position class): a foe inside the ±8 box is covered
+        // at every band (outline / rect / body / ground /
+        // arena — zero signature pixels), so the live foe
+        // stood OUTSIDE it; a foe anchored in the 9–10 strip
+        // behind the TC (west / north / NW) still holds a
+        // record — its sprite overlaps the TC art, the
+        // anchor up to ~2 wu past the art's edge with the
+        // sprite's own ~2.1 wu reach painting the rest — and
+        // its outline clicks resolve, but its FEET band
+        // (below the recorded rect: ground past 2.2, body
+        // missed with h < 0) falls to this arena alone, and
+        // the ±8 membership excluded it by 1–2 wu. The same
+        // strip on the east/south is inside the SIM's
+        // footprint (which spans −6..+10 around the entity
+        // position — the TC entity stands on its footprint's
+        // (1,1) cell centre): those foes hold no record and
+        // their tall sprite's top band (body height 3.75,
+        // above the cached box's 2.81) degraded identically.
+        // +2 is the sprite-reach strip: past +10 a foe cannot
+        // hold a TC-occluded record at all (measured covered
+        // fraction ~0.03 at (−11,0), under INF-12's 0.15).
+        // Both distance gates below are unchanged, so the
+        // earlier bounds (foes failing BOTH gates) keep their
+        // shapes exactly.
+        if (Math.abs(st.pos[i * 2] - tx) > tcHalf() + 2
+            || Math.abs(st.pos[i * 2 + 1] - ty) > tcHalf() + 2) continue;
         const d2 = (st.pos[i * 2] - wx) ** 2
           + (st.pos[i * 2 + 1] - wy) ** 2;
         // FIX #12 (bot-loop occorder14, run #440): the second
