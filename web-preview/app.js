@@ -3281,24 +3281,52 @@ function mirrorValid(kind, cx, cy) {
   if (kind === 23) return mirrorDockValid(cx, cy);
   // Water W2b (ECO-15): the Fish Trap's mirror is its water rule.
   if (kind === 24) return mirrorTrapValid(cx, cy);
+  // Package I: the Monument is unconstructible — the sim rejects
+  // it outright (it enters only as a King of the Hill match's
+  // definition), and its cost rows read 0, so without this gate
+  // the ghost would paint a free 4x4 green (ghostaudit fix,
+  // 2026-11-19).
+  if (kind === 21) return false;
   const size = kindSize(kind);
   if (cx < 0 || cy < 0 || cx + size > GW || cy + size > GH) return false;
   const buildings = buildingList();
-  // Resuming an incomplete building of the same kind at this anchor
-  // (M5: only our OWN — the sim refuses to resume the enemy's).
+  // Resuming an incomplete building of the same kind (M5: only
+  // our OWN — the sim refuses to resume the enemy's). The sim's
+  // resume test reads the standing footprint's cells, not only
+  // its anchor: a build order landing on ANY cell of our own
+  // foundation resumes it (SEL-11), before every placement, age
+  // and cost check. The mirror used to recognise the anchor
+  // only, so the foundation's other cells painted red via the
+  // overlap loop below while the sim resumed (ghostaudit fix,
+  // 2026-11-19).
   for (const b of buildings) {
-    if (!b.complete && b.owner === localOwner && b.kind === kind && b.cellX === cx && b.cellY === cy) {
-      return true;
+    if (!b.complete && b.owner === localOwner && b.kind === kind) {
+      const bw = b.w || b.size || kindSize(b.kind);
+      const bh = b.h || b.size || kindSize(b.kind);
+      if (cx >= b.cellX && cx < b.cellX + bw && cy >= b.cellY && cy < b.cellY + bh) {
+        return true;
+      }
     }
   }
   // M6 gates (mirrors of the sim's validate_build): Farms need a
   // completed Mill of ours; the Feudal buildings need the Feudal
   // Age; the Range and the Stable need a completed Barracks.
   // (The Feudal set is named explicitly — kind 9, the Palisade
-  // Wall, is a Dark Age building, BLD-13.)
+  // Wall, is a Dark Age building, BLD-13.) The ghostaudit pass
+  // (2026-11-19) completed the table against the sim's
+  // age_required / requires_building: the Watch Tower, Market
+  // and Town Center rows were missing here (the build PANEL
+  // gates those three — the ghost did not), as were the tower
+  // line's upgrade forms (Guard Tower / Keep, reached by
+  // research and never panel-placed today; the mirror now
+  // matches the sim if one is ever armed).
   const ownDone = buildings.filter((b) => b.owner === localOwner && b.complete);
   if (kind === 1 && !ownDone.some((b) => b.kind === 4)) return false;
   if ((kind === 6 || kind === 7 || kind === 8) && myAge() < 1) return false;
+  if (kind === 10 && myAge() < 1) return false; // Watch Tower is Feudal (BLD-18)
+  if (kind === 12 && myAge() < 1) return false; // Market is Feudal (BLD-19)
+  if (kind === 12 && !ownDone.some((b) => b.kind === 4)) return false; // Market needs a completed Mill (BLD-19)
+  if (kind === 13 && myAge() < 2) return false; // Town Center is Castle Age (Castle P1)
   if (kind === 14 && myAge() < 1) return false; // Stone Wall is Feudal (BLD-20)
   if (kind === 15 && myAge() < 2) return false; // Castle is Castle Age (Castle P3a)
   if (kind === 16 && myAge() < 2) return false; // University is Castle Age (Castle P3c)
@@ -3307,6 +3335,8 @@ function mirrorValid(kind, cx, cy) {
   if (kind === 17 && (myAge() < 2 || !ownDone.some((b) => b.kind === 8))) return false;
   if (kind === 20 && myAge() < 2) return false; // Monastery is Castle Age (Castle P5a); no prerequisite building
   if (kind === 22 && myAge() < 3) return false; // Wonder is Imperial Age (VIC-02); no prerequisite building
+  if (kind === 25 && myAge() < 2) return false; // Guard Tower is Castle Age (BLD-18)
+  if (kind === 26 && myAge() < 3) return false; // Keep is Imperial Age (BLD-18)
   if ((kind === 6 || kind === 7) && !ownDone.some((b) => b.kind === 2)) return false;
   // Any standing building's footprint (square range overlap).
   for (const b of buildings) {
@@ -3334,6 +3364,53 @@ function mirrorValid(kind, cx, cy) {
   const cells = [];
   for (let dx = 0; dx < size; dx++) {
     for (let dy = 0; dy < size; dy++) cells.push([cx + dx, cy + dy]);
+  }
+  // MAP-07: a footprint may not straddle a cliff border — the
+  // sim tests every border BETWEEN footprint cells against the
+  // height layer (a step of CLIFF_STEP = 3 or more), and the
+  // mirror never read HEIGHTS at all, so a House or Barracks
+  // spanning a cliff face painted green while the sim refused
+  // the whole footprint (ghostaudit fix, 2026-11-19). A 1x1
+  // footprint has no internal border and can never fire this,
+  // exactly as in the sim. HEIGHTS is guarded the way the other
+  // layers are: a staged harness without the layer skips the
+  // check rather than throwing.
+  const CLIFF_STEP = 3;
+  if (typeof HEIGHTS !== 'undefined' && HEIGHTS) {
+    const cellSet = new Set(cells.map(([x, y]) => y * GW + x));
+    for (const [x, y] of cells) {
+      for (const [nx, ny] of [[x + 1, y], [x, y + 1]]) {
+        if (cellSet.has(ny * GW + nx)
+          && Math.abs(HEIGHTS[y * GW + x] - HEIGHTS[ny * GW + nx]) >= CLIFF_STEP) return false;
+      }
+    }
+  }
+  // Standing units block placement (the sim's per-cell unit
+  // check): any LIVING entity standing on a footprint cell —
+  // any owner, Gaia included — refuses the foundation, except
+  // the ordering builder itself. Farms are exempt (their
+  // farmer stands on the plot by design) and walls are exempt
+  // (BLD-20), exactly as in the sim. The mirror never ran this
+  // check for the square kinds, so a House ghost painted green
+  // over a standing villager or sheep while the sim refused
+  // (ghostaudit fix, 2026-11-19). The exemption here follows
+  // mirrorTrapValid's precedent — the whole current selection
+  // is exempt, because mirrorValid receives only the anchor
+  // cell, not the raw click point attemptPlace uses to name
+  // the ONE exempt builder (the nearest selected villager);
+  // the multi-selected sub-case stays divergent and is pinned
+  // as a KNOWN RESIDUAL in ghostaudit.test.mjs.
+  const unitCells = new Set();
+  if (kind !== 1 && !isWallKind(kind)) {
+    const st = entityState();
+    const sel = selectedUnits();
+    for (let id = 0; id < st.count; id++) {
+      if (sel.includes(id)) continue; // the ordering side (see above)
+      if (st.hp[id * 2] < 1) continue; // dead (the sim's hp < 1 rule)
+      if (st.garrisoned && st.garrisoned[id]) continue; // out of the field
+      const uc = worldToCell(st.pos[id * 2], st.pos[id * 2 + 1]);
+      unitCells.add(uc[1] * GW + uc[0]);
+    }
   }
   // Every Town Center's reserved 4×4 is off-limits (M5: both
   // players'; BLD-16) — the sim reserves the TC's whole footprint
@@ -3366,6 +3443,7 @@ function mirrorValid(kind, cx, cy) {
     if (TERRAIN && TERRAIN[y * GW + x] !== 0) return false; // deep water or shallows
     if (OBST[y * GW + x]) return false; // static wall
     if (tcReserved.has(y * GW + x)) return false; // a Town Center's reserve
+    if (unitCells.has(y * GW + x)) return false; // a living unit standing on the cell
     for (const n of nodes) { // a live node on this cell
       if (n.amount <= 0) continue;
       const nc = worldToCell(n.x, n.y);
