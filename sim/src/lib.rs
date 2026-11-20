@@ -11068,11 +11068,58 @@ impl Sim {
             } else {
                 Vec::new()
             };
-            let strict_avoid = matches!(
+            // WALLSLOW2 (2026-11-20): the strict-avoid repath
+            // (the coincident blocker's cell kept in `avoid`,
+            // run #442's wallslow fix) is a FALLBACK for build
+            // travel, not its default. Run #442 applied it to
+            // every ToBuild/Building bump; measured on the
+            // auto_explore trained-scout flow (seed 101), that
+            // changed exactly one bump in the whole opening —
+            // tick 186, the Mill builder pressed against an
+            // idle villager in the Town Center doorstep cell
+            // (37,76) — where the BASE route was already fully
+            // executable (every waypoint >= 2.60 from the
+            // blocker, separation 1.6): the strict detour
+            // arrived 5 ticks earlier (Mill 2355 vs 2360), and
+            // that phase shift alone walked the later woodline
+            // gather into a three-villager stand-point deadlock
+            // (wood frozen at 40 for the full 240,000-tick
+            // wait; on the base route the same flow banks 175
+            // by ~tick 66,000). So: compute the base route
+            // first, and only when it is missing or DEGENERATE
+            // — some waypoint inside a blocker's separation
+            // radius, the wallslow pocket's signature (the
+            // route threads the blocker's own cell centre,
+            // which contact can never reach) — retry with the
+            // strict avoid list, for build travel only. Every
+            // bump whose base route was executable keeps the
+            // base route bit-for-bit, and non-build travel
+            // never retries, exactly as in run #442's scoping.
+            let build_travel = matches!(
                 self.entities[i].task,
                 crate::entity::Task::ToBuild | crate::entity::Task::Building
             );
-            match self.repath_around(my_pos, target, domain, &gates, &blockers, my_r, strict_avoid) {
+            let base_route =
+                self.repath_around(my_pos, target, domain, &gates, &blockers, my_r, false);
+            let degenerate = match &base_route {
+                Some(wps) if !wps.is_empty() => wps.iter().any(|w| {
+                    blockers.iter().any(|&j| {
+                        let n = &self.entities[j];
+                        steer::vec_len(w.0 - n.pos_x, w.1 - n.pos_y)
+                            < my_r + units::spec(n.kind).radius
+                    })
+                }),
+                _ => true,
+            };
+            let chosen = if build_travel && degenerate {
+                match self.repath_around(my_pos, target, domain, &gates, &blockers, my_r, true) {
+                    Some(wps) if !wps.is_empty() => Some(wps),
+                    _ => base_route,
+                }
+            } else {
+                base_route
+            };
+            match chosen {
                 Some(wps) if !wps.is_empty() => {
                     let o = self.entities[i]
                         .order
@@ -11180,6 +11227,17 @@ impl Sim {
         // class in the live observation (run #441: a wall's
         // second segment at 0 progress for ~5 minutes beside
         // its idle builder) — gets the strict list.
+        //
+        // WALLSLOW2 (2026-11-20): the caller invokes the
+        // strict list only as a fallback, when the base
+        // (non-strict) repath produced no route or a
+        // degenerate one (a waypoint inside a blocker's
+        // separation radius — the pocket's through-route).
+        // Applied unconditionally to build travel, the strict
+        // detour re-timed a Town Center doorstep bump whose
+        // base route was already executable and, through the
+        // phase shift, deadlocked the auto_explore woodline
+        // gather (measured in the caller's comment above).
         let my_cell = self.grid.world_to_cell(my_pos.0, my_pos.1);
         let mut avoid: Vec<(u32, u32)> = Vec::with_capacity(blockers.len());
         for &j in blockers {

@@ -48,6 +48,17 @@
 //! No rule, cost, stat or design change: the same DE behaviour
 //! (a builder walks around a bystander to his stand point),
 //! reached by the sim's own documented route.
+//!
+//! WALLSLOW2 addendum (2026-11-20): the strict list is now a
+//! FALLBACK, invoked by the caller only when the base repath
+//! produced no route or a degenerate one (a waypoint inside a
+//! blocker's separation radius — this pocket's through-route
+//! qualifies; its (20,66) centre waypoint is unreachable by
+//! construction). Run #442's unconditional version re-timed a
+//! Town Center doorstep bump whose base route was already
+//! executable and deadlocked the auto_explore woodline gather
+//! downstream; the fallback keeps that bump bit-identical to
+//! base while this pocket still gets the strict detour.
 
 use fixed::types::I16F16;
 use skirmish_sim::{BuildingKind, Command, Entity, EntityKind, Sim, OWNER_PLAYER};
