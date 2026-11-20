@@ -8756,6 +8756,56 @@ async function main() {
       }
       return gBest;
     };
+    // FIX #12 (bot-loop occorder14, run #440): the selection
+    // pick's TC-arena shadow — entityAt's foeTcArenaAtPoint
+    // discipline (FIX #11 + the centre-disc gate below in
+    // entityAt), which selectionAt never had. Run #440's
+    // Test B (the FIX #11 build, live): a left-click LOW at
+    // the centre foe's feet selected the player's own Scout
+    // standing in front/south of the TC. Measured in the
+    // harness (occorder14): at the foe's feet past the 2.2
+    // ground radius, where the foe's body misses (h < 0) and
+    // no outline winner exists, the body stage names our
+    // Scout by its body and the unitAt fallback names it by
+    // its ground radius, while entityAt (post-FIX #12)
+    // resolves the foe by the arena — the selection layer
+    // alone diverged. So the arena candidate is restated
+    // here with the same two gates (click inside OUR Town
+    // Center's footprint; foe inside that same footprint
+    // within one half-extent of the click, or within 5.0 of
+    // the TC centre — the draining disc) and the same fog
+    // rule (this pick has no post-pick gate, as for
+    // foeGroundSelAtPoint above). Like the ground shadow it
+    // only SHADOWS an own winner (the body stage's class 2,
+    // or the unitAt fallback's own pick): it never creates
+    // a selection from nothing, and the outline stage above
+    // keeps the frontmost-outline doctrine (occorder8).
+    const foeTcArenaSelAtPoint = () => {
+      const tc = tcAt(wx, wy);
+      if (tc === null || st.owners[tc] !== localOwner) return null;
+      const tx = st.pos[tc * 2];
+      const ty = st.pos[tc * 2 + 1];
+      let aBest = null;
+      let aBestD2 = Infinity;
+      for (let i = 0; i < st.count; i++) {
+        if (st.kinds[i] === KIND_TC || st.hp[i * 2] < 1) continue;
+        if (st.owners[i] === localOwner) continue;
+        if (st.garrisoned && st.garrisoned[i]) continue;
+        if (!cellVisibleW(st.pos[i * 2], st.pos[i * 2 + 1])) continue;
+        if (Math.abs(st.pos[i * 2] - tx) > tcHalf()
+            || Math.abs(st.pos[i * 2 + 1] - ty) > tcHalf()) continue;
+        const d2 = (st.pos[i * 2] - wx) ** 2
+          + (st.pos[i * 2 + 1] - wy) ** 2;
+        const c2 = (st.pos[i * 2] - tx) ** 2
+          + (st.pos[i * 2 + 1] - ty) ** 2;
+        if (d2 >= tcHalf() * tcHalf() && c2 > 5.0 * 5.0) continue;
+        if (d2 < aBestD2) {
+          aBestD2 = d2;
+          aBest = i;
+        }
+      }
+      return aBest;
+    };
     let sBest = null;
     let sBestD2 = Infinity;
     let sBestCls = 3;
@@ -8784,6 +8834,13 @@ async function main() {
       if (sBestCls === 2) {
         const foeSel = foeGroundSelAtPoint();
         if (foeSel !== null) return foeSel;
+        // FIX #12 (occorder14): the TC-arena shadow after the
+        // ground shadow, as in entityAt — a centre-foe click
+        // on our own unit's drawn body inside the footprint,
+        // past the ground radius, selects the foe under the
+        // same roof instead of our bystander.
+        const foeArenaSel = foeTcArenaSelAtPoint();
+        if (foeArenaSel !== null) return foeArenaSel;
       }
       return sBest;
     }
@@ -8794,6 +8851,12 @@ async function main() {
     if (unitAt(wx, wy) !== null) {
       const foeSel = foeGroundSelAtPoint();
       if (foeSel !== null) return foeSel;
+      // FIX #12 (occorder14): the TC-arena shadow at the
+      // ground fallback too, after the ground shadow — the
+      // run #440 Test B shape (our Scout named by its ground
+      // radius at the centre foe's feet).
+      const foeArenaSel = foeTcArenaSelAtPoint();
+      if (foeArenaSel !== null) return foeArenaSel;
     }
     return unitAt(wx, wy);
   }
@@ -9138,8 +9201,11 @@ async function main() {
     // and a non-own unit stands inside that SAME footprint
     // within one half-extent (tcHalf) of the click, that foe
     // is resolved at the point — the click landed on the very
-    // building the foe is under, in its near half. The
-    // half-extent limit is what keeps the earlier bounds:
+    // building the foe is under, in its near half.
+    // FIX #12 (occorder14, run #440) adds the centre-disc
+    // gate inside the candidate (see its loop): a foe within
+    // 5.0 of the TC centre is resolved at any inside-footprint
+    // click. The half-extent limit is what keeps the earlier bounds:
     // occorder11's bound B (foe 12.25 wu from the click) and
     // occorder12's bound R (13.75 wu) keep their garrison/move
     // shapes, and a click outside the footprint (occorder12's
@@ -9159,7 +9225,7 @@ async function main() {
       const tx = st.pos[tc * 2];
       const ty = st.pos[tc * 2 + 1];
       let aBest = null;
-      let aBestD2 = tcHalf() * tcHalf();
+      let aBestD2 = Infinity;
       for (let i = 0; i < st.count; i++) {
         if (st.kinds[i] === KIND_TC || st.hp[i * 2] < 1) continue;
         if (st.owners[i] === localOwner) continue;
@@ -9169,6 +9235,50 @@ async function main() {
             || Math.abs(st.pos[i * 2 + 1] - ty) > tcHalf()) continue;
         const d2 = (st.pos[i * 2] - wx) ** 2
           + (st.pos[i * 2 + 1] - wy) ** 2;
+        // FIX #12 (bot-loop occorder14, run #440): the second
+        // eligibility gate — the CENTRE DISC. Run #440 (the
+        // FIX #11 build, live, served-verified): the enemy
+        // stood at the CENTRE of the player's TC draining it
+        // (2400 → 2047), the player's Aggressive Militia stood
+        // ~1 tile south of the centre, and a right-click LOW
+        // at the bottom tip of the red outline GARRISONED
+        // again — the #438 signature on the build whose
+        // directed test had PASSED at the SE-pillar geometry
+        // (#439). Discrimination (occorder14, column scans +
+        // sweeps over every centre staging): on the FIX #11
+        // build the ONLY inside-footprint garrison band left
+        // is the arena's own radius — every own-win gate
+        // consults the arena, the foe inside the footprint is
+        // visible and alive, tcAt(click) is the own TC (the
+        // garrison branch itself proves it), so the one gate
+        // that can still fail is d(click, foe) >= tcHalf (8):
+        // the band runs from d = 8 to the footprint corner at
+        // d = 11.31 for a centre foe. At the SE edge (#439's
+        // pass) that band is harmless — it lies on the far
+        // NW sliver of the footprint, while a LOW click there
+        // is either within 8 of the edge foe or outside the
+        // footprint entirely (a move). At the CENTRE the band
+        // covers the footprint's whole southern half — the
+        // TC art's lower region a LOW click at the outline's
+        // bottom tip lands on. A foe DRAINING the TC entity
+        // stands within melee reach of its centre (the
+        // engageprobe/acqprobe disc, r <= 3 around the
+        // centre), so: a foe inside the footprint AND within
+        // 5.0 of the TC centre (the draining disc plus a
+        // half-tile margin) is resolved at ANY click inside
+        // the same footprint, whatever the click distance.
+        // The earlier bounds keep their shapes because their
+        // foe fails BOTH gates: occorder11 bound B /
+        // occorder12 bound R / occorder13's bound stage a foe
+        // at (-6,-1) — 6.08 from the centre, outside the
+        // disc — with clicks 8.39–13.75 away, outside the
+        // radius. Deliberate garrison is untouched where it
+        // was live-proven (#439): a footprint click with NO
+        // foe inside the footprint still garrisons, and a
+        // far-side click past a non-centre foe still does.
+        const c2 = (st.pos[i * 2] - tx) ** 2
+          + (st.pos[i * 2 + 1] - ty) ** 2;
+        if (d2 >= tcHalf() * tcHalf() && c2 > 5.0 * 5.0) continue;
         if (d2 < aBestD2) {
           aBestD2 = d2;
           aBest = i;

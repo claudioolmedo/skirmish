@@ -334,8 +334,25 @@ test('FIX #11 wiring: the arena lives in entityAt, the ground shadow in selectio
     'the selection ground candidate is defined in selectionAt');
   assert.ok(!/FIX #11|foeTcArenaAtPoint|foeGroundSelAtPoint/.test(occSrc),
     'the raw outline/record-rect picks carry no foe preference (selection parity)');
-  assert.ok(!/foeTcArenaAtPoint/.test(selectionAtSrc),
-    'selectionAt does not consult the TC arena — its shadow is the 2.2 ground candidate only');
+  // AMENDMENT (occorder14, 2026-11-20): this pin originally
+  // asserted selectionAt does NOT consult the TC arena (its
+  // shadow was the 2.2 ground candidate only). Run #440's
+  // Test B is the live capture proving that shape wrong at
+  // the centre geometry: a left-click LOW at the centre
+  // foe's feet selected the player's own Scout (body /
+  // ground-radius winner, foe 4.24–7.07 away) while
+  // entityAt resolved the foe. FIX #12 therefore gives
+  // selectionAt its own arena candidate
+  // (foeTcArenaSelAtPoint, consulted only to shadow an own
+  // winner at the ground shadow's two sites); the pin now
+  // asserts that FIX #12 state instead. Every other pin in
+  // this test is unchanged, and this suite's behavioural
+  // tests (S1/S2, sweeps, bounds, fog) pass unamended on
+  // the FIX #12 build.
+  assert.match(selectionAtSrc, /const foeTcArenaSelAtPoint = \(\) =>/,
+    'selectionAt consults its own TC-arena candidate since FIX #12 (occorder14 amendment — see note above)');
+  assert.ok(!/const foeTcArenaAtPoint = \(\) =>/.test(selectionAtSrc),
+    'entityAt\'s arena candidate itself is not duplicated in selectionAt — the selection candidate is its own restatement');
 });
 
 // ------------------------------------------------------------------
