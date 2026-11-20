@@ -397,7 +397,9 @@ test('sweep (order): every inside-footprint click resolves the centre foe', () =
 // ------------------------------------------------------------------
 // Bounds: both gates closed — the arena does not fire.
 
-test('bound: a west-edge foe outside both gates does not shadow our outline winner — the garrison stands (occorder13 bound, restaged)', () => {
+test('bound: a west-edge foe outside both gates does not shadow our outline winner — the pick stands, the order falls through (occorder13 bound, restaged; occorder18)', () => {
+  // occorder18 (FIX #15) supersedes this bound's order half,
+  // as in occorder13: the pick stands, the order is a move.
   const w = makeWorld({ foePos: [-6, -1], frontVil: true, scoutPos: [2, 2] });
   const [wx, wy] = w.pointO.world;
   assert.equal(w.occludedUnitAt(wx, wy), 1, 'staging: only our Villager\'s outline is hit');
@@ -408,8 +410,8 @@ test('bound: a west-edge foe outside both gates does not shadow our outline winn
   assert.equal(w.entityAt(wx, wy, true), 1,
     'with no foe outline, rect, body, ground or arena hit at the point, the preference does not fire');
   w.orderAt(wx, wy, false, true);
-  assert.deepEqual(w.issued.map((c) => [c.t, c.e, c.tc]), [['garrison_tc', 4, 0]],
-    'legitimate garrison preserved: the foot Militia enters its own TC exactly as before');
+  assert.deepEqual(w.issued.map((c) => [c.t, c.e, c.tc]), [['move', 4, undefined]],
+    'occorder18: an own-unit pick inside the footprint issues a move, never a garrison');
 });
 
 test('bound: a TC-footprint click with no enemy present still garrisons a foot unit', () => {

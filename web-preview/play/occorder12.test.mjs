@@ -384,7 +384,12 @@ test('sweep: no click point with the foe in ground range resolves to our own uni
 // Bounds: the garrison reading survives wherever NO enemy is
 // resolved at the point.
 
-test('bound R: a foe outside the ground radius still does not shadow our own rect winner — the garrison stands', () => {
+test('bound R: a foe outside the ground radius still does not shadow our own rect winner — the pick stands, the order falls through (occorder18)', () => {
+  // occorder18 (FIX #15) supersedes this bound's order half:
+  // the rect pick still stands (our Militia 4, no foe
+  // preference), but a click naming an own unit no longer
+  // garrisons — garrison is a click on the TC itself (tgt
+  // null), per run #445. The click falls through to a move.
   const w = makeWorld({ foePos: [-6, -1] });
   const [wx, wy] = w.worldR;
   assert.equal(w.occludedRectUnitAt(wx, wy), 4, 'staging: only our Militia\'s rect is hit');
@@ -393,8 +398,8 @@ test('bound R: a foe outside the ground radius still does not shadow our own rec
   assert.equal(w.entityAt(wx, wy, true), 4,
     'with no foe outline, rect, body or ground hit at the point, the preference does not fire');
   w.orderAt(wx, wy, false, true);
-  assert.deepEqual(w.issued.map((c) => [c.t, c.e, c.tc]), [['garrison_tc', 4, 0]],
-    'legitimate garrison preserved: the foot Militia enters its own TC exactly as before');
+  assert.deepEqual(w.issued.map((c) => [c.t, c.e, c.tc]), [['move', 4, undefined]],
+    'occorder18: an own-unit pick inside the footprint issues a move, never a garrison');
 });
 
 test('bound: a TC-footprint click with no enemy present still garrisons a foot unit', () => {

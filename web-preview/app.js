@@ -10115,7 +10115,23 @@ async function main() {
     // the older gesture: a LOADED villager clicking the Town
     // Center still drops off first (the block below), so loaded
     // villagers are skipped here and fall through to it.
-    if (tcT != null && st.owners[tcT] === localOwner) {
+    // FIX #15 (bot-loop occorder18, run #445): the TC branch is
+    // gated on what the pick resolved to, not only on where the
+    // point lies. In the capture the click resolved to an OWN
+    // unit standing in the footprint (picked:72) and this
+    // branch — testing tcT alone — swallowed it as a garrison
+    // of the selected Militia (e:73). In the DE, garrison is
+    // ordered by right-clicking the building itself; a click
+    // that names a unit is an order on that unit. entityAt
+    // skips Town Centers, so a click on the TC itself names no
+    // unit (tgt null) — the gate admits exactly that case, and
+    // the TC entity itself, and lets every unit-named click
+    // fall through to the ordinary readings below. FIX #5's
+    // enemy guard above covers the foe-named case; this gate
+    // covers every other unit, ours included. The branches
+    // above that legitimately reuse an own-unit click (Ram
+    // garrison, Transport load, Monk heal) have already run.
+    if (tcT != null && st.owners[tcT] === localOwner && (tgt == null || tgt === tcT)) {
       let any = false;
       for (const id of targets) {
         if (st.kinds[id] === 0 && carryKind.has(id)) continue;

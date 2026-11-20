@@ -453,8 +453,12 @@ test('bound B: a foe outside the ground radius still does not shadow our own out
     'with no foe outline, rect, body or ground hit at the point, the preference does not fire');
   w.orderAt(wx, wy, false, true);
   const iss = w.occEntries.filter((e) => e.ev === 'issue');
-  assert.deepEqual(iss.map((e) => [e.cmd.t, e.ok]), [['garrison_tc', false], ['move', true]],
-    'the pre-fix shape is preserved exactly when no enemy is resolved: refused garrison, then a ground move');
+  // occorder18 (FIX #15) supersedes the order half of this
+  // bound: the pick still stands (our Scout 4, no foe
+  // preference), but an own-unit pick no longer reaches the
+  // TC garrison branch — the click is simply the ground move.
+  assert.deepEqual(iss.map((e) => [e.cmd.t, e.ok]), [['move', true]],
+    'occorder18: no garrison_tc is attempted on an own-unit pick — the ground move only');
 });
 
 test('host exemption: an own Battering Ram outline winner keeps its win over a ground-resolved foe', () => {
