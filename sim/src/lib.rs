@@ -161,6 +161,8 @@ mod repairprobe_tests;
 mod occorder9_tests;
 #[cfg(test)]
 mod engageprobe_tests;
+#[cfg(test)]
+mod occorder15_tests;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;

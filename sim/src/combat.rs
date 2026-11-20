@@ -1284,9 +1284,37 @@ impl Sim {
             // the same crowd (ordered but motionless) still
             // reads stationary and can be pressed to.
             if spec.range_max == I16F16::ZERO
-                && dist <= MELEE_REACH + steer::SEPARATION_RADIUS
                 && self.entities[ti].vel_x == I16F16::ZERO
                 && self.entities[ti].vel_y == I16F16::ZERO
+                && (dist <= MELEE_REACH + steer::SEPARATION_RADIUS
+                    // OCCORDER15 (bot-loop run #442, 2026-11-20):
+                    // the press band above is calibrated to a
+                    // body ring AT the victim (r <= 3): the
+                    // chaser contact-stops one body-depth outside
+                    // the ring, at reach + separation. A ring
+                    // standing further out — the Town Center's
+                    // own dropoff ring at r = 5 around a foe at
+                    // the TC centre is the live shape — stops the
+                    // chaser one body-depth outside IT, at
+                    // 6.05-7.90 from the victim: outside the band,
+                    // so the press never armed, and the bump pass
+                    // orbited the chaser between detour pockets
+                    // inside the footprint for the full window
+                    // (measured: 3,600 ticks, zero damage, order
+                    // held, in contact toward the victim on
+                    // 1,266 of those ticks). The band's premise
+                    // is that the chaser's remaining obstacle is
+                    // bodies, not terrain — and that premise is
+                    // directly testable at any distance: if the
+                    // chaser is RIGHT NOW in contact with a mobile
+                    // body that lies toward its stationary
+                    // victim, contact is the proximate blocker
+                    // whatever the ring's radius, and the same
+                    // press applies. Contact is steering's own
+                    // test (pair separation, MOV-05 radii, the
+                    // contact_project skips: sheep never block a
+                    // mover, same-formation pairs never collide).
+                    || self.melee_chaser_contact_blocked(idx, ti, tx, ty))
             {
                 self.entities[idx].suppress_separation = true;
             }
@@ -1308,6 +1336,60 @@ impl Sim {
                 }
             }
         }
+    }
+
+    /// OCCORDER15: is melee chaser `idx` right now in contact
+    /// with a mobile body that lies toward its victim at
+    /// `(tx, ty)`? Contact is steering's own test (MOV-03 /
+    /// MOV-05): another living, non-contained, mobile entity
+    /// inside the pair's separation distance (the sum of the
+    /// two table radii), with the contact_project skips — a
+    /// sheep never blocks a mover (the herdable yield), and a
+    /// pair sharing one formation stamp never collides. The
+    /// body must lie in the victim's half-plane from the
+    /// chaser: a body behind the chaser is not what stands
+    /// between it and the fight. The victim itself is excluded
+    /// (contact with it at chase distances cannot occur —
+    /// inside the pair separation is inside MELEE_REACH, the
+    /// in-range arm's ground — and naming it here would make
+    /// the test vacuous).
+    fn melee_chaser_contact_blocked(
+        &self,
+        idx: usize,
+        ti: usize,
+        tx: I16F16,
+        ty: I16F16,
+    ) -> bool {
+        let (px, py) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
+        let my_r = units::spec(self.entities[idx].kind).radius;
+        let my_formation = self.entities[idx]
+            .order
+            .as_ref()
+            .map_or(0, |o| o.formation_id);
+        for (j, o) in self.entities.iter().enumerate() {
+            if j == idx || j == ti || o.dead || o.is_contained() || !o.kind.is_mobile() {
+                continue;
+            }
+            if o.kind == crate::entity::EntityKind::Sheep {
+                continue; // the herdable yield: a sheep never blocks a mover
+            }
+            if my_formation != 0
+                && o.order.as_ref().map_or(0, |oo| oo.formation_id) == my_formation
+            {
+                continue; // same formation: no collision at all (MOV-03)
+            }
+            let sep = my_r + units::spec(o.kind).radius;
+            let (dx, dy) = (o.pos_x - px, o.pos_y - py);
+            if steer::vec_len(dx, dy) >= sep {
+                continue;
+            }
+            // Toward the victim: the body lies in the half-plane
+            // the chaser is trying to enter.
+            if dx * (tx - px) + dy * (ty - py) > I16F16::ZERO {
+                return true;
+            }
+        }
+        false
     }
 
     /// PRJ-05 (Castle P3c): the Ballistics aim point — the
