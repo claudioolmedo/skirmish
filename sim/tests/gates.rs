@@ -526,6 +526,70 @@ fn gate_foundation_blocking_and_delete_frees_the_span() {
 }
 
 #[test]
+fn open_gate_span_is_reserved_against_new_placement() {
+    // BLD-06 step 4 (sk-07 §d.3, resolved by the DE rule): a
+    // standing building reserves its WHOLE footprint against new
+    // placement. A closed gate's span is also covered by the
+    // blocking grid, but an OPEN gate's span cells are passable
+    // ground — the registry overlap check is the only guard there,
+    // and it must read the gate's true 4×1 rectangle, not its
+    // 1-cell across edge.
+    let mut sim = Sim::with_mode(50, MatchMode::TwoPlayer);
+    let vil = villagers_of(&sim, OWNER_PLAYER)[0];
+    let (ax, ay) = open_run_near_tc(&sim, OWNER_PLAYER, vil, 12);
+    raise_line(&mut sim, vil, ax, ay, 12);
+    raise_gate(&mut sim, vil, PGATE, ax + 4, ay);
+    let g = gate_of(&sim, OWNER_PLAYER).unwrap().clone();
+    let span = g.footprint_cells();
+    assert_eq!(span.len(), 4, "gate span is 4 cells");
+    // An Outpost (1×1, Dark Age) on the span's LAST cell overlaps
+    // the gate but not its anchor cell — the exact hole the
+    // across-edge read left (it read a standing gate as 1×1).
+    let (hx, hy) = cell_point(&sim, ax + 7, ay);
+    // Closed gate: refused (the blocking grid already covers it).
+    assert!(
+        !sim.can_build(vil, BuildingKind::Outpost, hx, hy),
+        "outpost over a closed gate's span must be refused"
+    );
+    // Open the gate: an owner villager walks to the gate's center
+    // (the staging the deterministic/ally gate tests use) and
+    // stands there — on the span's middle, two cells away from
+    // the candidate cell, so the standing-unit check cannot be
+    // what refuses the placement below.
+    let vil2 = villagers_of(&sim, OWNER_PLAYER)[1];
+    sim.push_command(Command::Move {
+        entity: vil2,
+        x: g.pos_x,
+        y: g.pos_y,
+    });
+    let opened = run_until(&mut sim, 60_000, |s| {
+        let g = gate_of(s, OWNER_PLAYER).unwrap();
+        s.gate_is_open(g)
+    });
+    assert!(opened, "gate never opened for its owner's villager");
+    for &(cx, cy) in &span {
+        assert!(
+            !sim.grid().is_dynamic(cx, cy),
+            "open gate cell must be passable ground"
+        );
+    }
+    // Open gate: STILL refused — the standing gate reserves its
+    // span in the registry, open or closed.
+    assert!(
+        !sim.can_build(vil, BuildingKind::Outpost, hx, hy),
+        "outpost over an open gate's span must be refused"
+    );
+    // Control: the same Outpost validates on genuinely open ground
+    // nearby, so the refusals above are the gate's reservation,
+    // not a broken validator.
+    let (cx2, cy2) = cell_point(&sim, ax + 1, ay + 3);
+    assert!(
+        sim.can_build(vil, BuildingKind::Outpost, cx2, cy2),
+        "outpost on open ground must validate"
+    );
+}
+
+#[test]
 fn gate_takes_damage_through_combat() {
     let mut sim = Sim::with_mode(48, MatchMode::TwoPlayer);
     let vil = villagers_of(&sim, OWNER_PLAYER)[0];

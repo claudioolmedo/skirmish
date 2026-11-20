@@ -10452,23 +10452,21 @@ impl Sim {
         }
         // Overlap with any standing building's footprint (farms do not
         // block cells, so they are only visible in this registry).
-        // Two square footprints overlap iff their anchor ranges
-        // intersect on both axes (each spans `size` cells).
+        // Two footprints overlap iff their anchor ranges intersect
+        // on both axes, each spanning its own rectangle.
         for b in &self.buildings {
-            // BLD-06 (sk-07 §B.2.3): the standing side still
-            // reads the row's ACROSS edge (min(w, h)) on both
-            // axes — for every square kind that is its edge,
-            // exactly as before; for a standing GATE it reads 1,
-            // so this arithmetic alone does not reserve the
-            // span's other three cells (a closed gate's span is
-            // reserved by the blocking grid instead). Rectifying
-            // this check to true rectangle intersection is the
-            // one behaviour change the BLD-06 study records as
-            // Claudio's decision (§d.3) — deliberately NOT taken
-            // in the data refactor; the value now at least comes
-            // from the one table, like everything else.
-            let bs = b.kind.footprint().w.min(b.kind.footprint().h);
-            if ax < b.cell_x + bs && b.cell_x < ax + fp.w && ay < b.cell_y + bs && b.cell_y < ay + fp.h {
+            // BLD-06 (sk-07 step 4, §d.3 resolved by the DE rule —
+            // a standing building reserves its whole footprint,
+            // BLD-01): the standing side reads the building's own
+            // rectangle through `footprint_dims()`. For every square
+            // kind that is exactly the old across-edge read; for a
+            // standing GATE it reserves the full 4×1 span — which
+            // the blocking grid alone does NOT cover while the gate
+            // stands open (or is a not-yet-advanced foundation), so
+            // without this a foundation could be placed over the
+            // span's far cells.
+            let (bw, bh) = b.footprint_dims();
+            if ax < b.cell_x + bw && b.cell_x < ax + fp.w && ay < b.cell_y + bh && b.cell_y < ay + fp.h {
                 return BuildVerdict::Reject;
             }
         }

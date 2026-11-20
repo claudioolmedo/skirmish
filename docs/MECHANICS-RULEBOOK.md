@@ -1538,21 +1538,22 @@ guess), the Castle set's last 4×4. The build ranges ride the
 table too (a row column where a kind departs from its footprint
 class: the Market's documented 15.5 against the 4×4 class's
 15.0; the Monument's 10.0 fall-through kept, its 4×4 ADOPTED —
-no DE source, sk-07 §d.2, Claudio's call pending). Two
-divergences remain, both recorded as Claudio's decisions in
-sk-07 §d: (1) the TC is an entity rather than a placed building
+no DE source, sk-07 §d.2, Claudio's call pending). One
+divergence remains, recorded as Claudio's decision in
+sk-07 §d: the TC is an entity rather than a placed building
 — its 4×4 is now declared ONCE (`TC_FOOTPRINT`, from which the
 kind row, both placement reserves and every TC geometry reader
 derive) and is placement-reserved, but per BLD-16 it stays
 passable to units instead of blocking pathing; whether that is
 a declared exception or a divergence is decision §d.1, still
-open. (2) `validate_build`'s standing-overlap check still reads
-a standing building's ACROSS edge on both axes (the value now
-comes from the table) — for squares that is the edge itself,
-but a standing gate's span is reserved by the blocking grid,
-not by this arithmetic; rectifying the check to true rectangle
-intersection is sk-07's step 4, gated on decision §d.3, not yet
-taken. ·
+open. (The former second divergence is closed: sk-07's step 4
+landed 2026-11-20 — `validate_build`'s standing-overlap check
+now reads the standing building's true footprint rectangle
+(`footprint_dims()`, orientation-aware for gates) instead of
+its across edge on both axes, so a foundation can no longer be
+placed over an open gate's span; §d.3 resolved by the standing
+DE-fidelity rule. Pinned by
+`gates::open_gate_span_is_reserved_against_new_placement`.) ·
 *Status:* **DIFFERS**.
 
 **BLD-07 — Repair.** Villagers repair damaged buildings, ships, and siege.
