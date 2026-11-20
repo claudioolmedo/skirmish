@@ -3158,13 +3158,34 @@ function mirrorGateValid(kind, cx, cy) {
 // orthogonally adjacent to land) — plus the standing checks the
 // square mirror runs (no Town Center reserve, no live node —
 // fish shoals excepted since 2026-11-16, see the cell loop —
-// no tree on a land/shallows cell, no building overlap) and
-// the price. The sim re-validates every order itself.
+// no tree on a land/shallows cell, no building overlap, no
+// living unit standing on a footprint cell) and the price.
+// Resuming our own incomplete Dock is valid before any of
+// those checks run. The sim re-validates every order itself.
 function mirrorDockValid(cx, cy) {
   const kind = 23;
   const size = kindSize(kind);
   if (cx < 0 || cy < 0 || cx + size > GW || cy + size > GH) return false;
   const buildings = buildingList();
+  // Resuming an incomplete Dock of ours (M5: only our OWN —
+  // the sim refuses to resume the enemy's). The sim's resume
+  // loop precedes every placement check and reads the standing
+  // footprint's cells, not only its anchor: an order landing
+  // on ANY cell of our own foundation resumes it (SEL-11),
+  // before the age, explored and cost checks. The Dock mirror
+  // had no resume path, so its building-overlap loop below
+  // refused the foundation itself while the sim resumed
+  // (dockghost2 fix, 2026-11-19 — docktrap residual #2; the
+  // square mirror's any-cell form, ghostaudit 2026-11-19).
+  for (const b of buildings) {
+    if (!b.complete && b.owner === localOwner && b.kind === kind) {
+      const bw = b.w || b.size || kindSize(b.kind);
+      const bh = b.h || b.size || kindSize(b.kind);
+      if (cx >= b.cellX && cx < b.cellX + bw && cy >= b.cellY && cy < b.cellY + bh) {
+        return true;
+      }
+    }
+  }
   for (const b of buildings) {
     const bs = b.size || kindSize(b.kind);
     if (cx < b.cellX + bs && b.cellX < cx + size &&
@@ -3172,6 +3193,31 @@ function mirrorDockValid(cx, cy) {
   }
   const tcReserved = tcReservedCells();
   const nodes = nodeList();
+  // Standing units block placement (the sim's per-cell unit
+  // check on the generic path): any LIVING entity standing on
+  // a footprint cell — any owner, Gaia included, water cells
+  // included — refuses the foundation, except the ordering
+  // builder itself. The Dock mirror never ran this check, so
+  // the ghost painted green over a standing villager or ship
+  // while the sim refused (dockghost2 fix, 2026-11-19 —
+  // docktrap residual #1). The exemption follows the square
+  // mirror's precedent — the whole current selection is
+  // exempt, because the mirror receives only the anchor cell,
+  // not the raw click point that names the ONE exempt builder;
+  // the multi-selected sub-case stays divergent and is pinned
+  // as a KNOWN RESIDUAL in dockghost2.test.mjs.
+  const unitCells = new Set();
+  {
+    const st = entityState();
+    const sel = selectedUnits();
+    for (let id = 0; id < st.count; id++) {
+      if (sel.includes(id)) continue; // the ordering side (see above)
+      if (st.hp[id * 2] < 1) continue; // dead (the sim's hp < 1 rule)
+      if (st.garrisoned && st.garrisoned[id]) continue; // out of the field
+      const uc = worldToCell(st.pos[id * 2], st.pos[id * 2 + 1]);
+      unitCells.add(uc[1] * GW + uc[0]);
+    }
+  }
   const landNeighbor = (x, y) => [[1, 0], [-1, 0], [0, 1], [0, -1]]
     .some(([dx, dy]) => {
       const nx = x + dx, ny = y + dy;
@@ -3196,6 +3242,7 @@ function mirrorDockValid(cx, cy) {
       if (t >= 1) waterSide = true;
       if (t === 0 || (t === 2 && landNeighbor(x, y))) landSide = true;
       if (tcReserved.has(y * GW + x)) return false;
+      if (unitCells.has(y * GW + x)) return false; // a living unit stands here
       // A tree (the static obstacle layer on a non-deep cell)
       // or a live resource node refuses, as in the sim — with
       // one exception (2026-11-16, Claudio's DE rule): a fish
@@ -3223,11 +3270,12 @@ function mirrorDockValid(cx, cy) {
 // ECO-15): one water-side cell (deep water or shallows — the
 // TERRAIN layer's water readings), unobstructed — no live node
 // on the cell, no standing building over it, no OTHER living
-// unit standing on it (the ordering ship itself may), the
-// Feudal Age, and the price. Resuming our own incomplete trap
-// at the cell is valid, as in the square mirror. The sim
-// re-validates every order itself (including the water-domain
-// reach this mirror cannot see).
+// unit standing on it (the ordering ship itself may), no living
+// Town Center's reserved 4x4 over it, the Feudal Age, and the
+// price. Resuming our own incomplete trap at the cell is
+// valid, as in the square mirror. The sim re-validates every
+// order itself (including the water-domain reach this mirror
+// cannot see).
 function mirrorTrapValid(cx, cy) {
   const kind = 24;
   if (cx < 0 || cy < 0 || cx >= GW || cy >= GH) return false;
@@ -3270,6 +3318,16 @@ function mirrorTrapValid(cx, cy) {
     const uc = worldToCell(st.pos[id * 2], st.pos[id * 2 + 1]);
     if (uc[0] === cx && uc[1] === cy) return false;
   }
+  // A living Town Center's reserved 4x4 refuses the cell too
+  // (BLD-16): validate_build_fish_trap reads the reserve
+  // exactly like the generic path — a shoreline TC's reserve
+  // can reach a shallows cell — after the unit check and
+  // before the price, the placement this check takes here.
+  // The trap mirror never consulted tcReservedCells, so a
+  // trap inside the reserve painted valid while the sim
+  // refused (dockghost2 fix, 2026-11-19 — docktrap
+  // residual #3).
+  if (tcReservedCells().has(cy * GW + cx)) return false;
   if (myStock()[1] < BUILD_COST[kind]) return false;
   return true;
 }

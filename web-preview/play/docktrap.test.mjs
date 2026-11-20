@@ -302,34 +302,36 @@ test('wiring: both mirrors consult the fog layer; the trap check sits after the 
 });
 
 // ------------------------------------------------------------------
-// KNOWN RESIDUALS (measured, NOT fixed — see the handoff):
-// divergences between these two mirrors and the sim that this
-// package deliberately leaves alone (explored hole only).
-// Each test pins the CURRENT (residual) behaviour and must be
-// inverted by whichever front closes that gap.
+// RESIDUALS #1–#3 CLOSED by the dockghost2 package (2026-11-19,
+// handoff dockghost2-build.md): the three pins below were
+// inverted in place with the fix — each now asserts the SIM's
+// behaviour, with the deeper coverage in dockghost2.test.mjs.
+// Residual #4 (Trap deep water) remains a live KNOWN RESIDUAL
+// pin: it still asserts the CURRENT (residual) behaviour and
+// must be inverted by whichever front closes that gap.
 
-test('KNOWN RESIDUAL Dock units: a living unit on a footprint cell still previews valid (sim refuses)', () => {
+test('Dock units (was KNOWN RESIDUAL #1, closed 2026-11-19): a living unit on a footprint cell reads NOT buildable', () => {
   const { W, mirrorDockValid } = makeWorld();
   stageDock(W);
   W.units.push({ x: 6, y: 6, hp: 100 }); // a living unit on a land footprint cell
-  assert.equal(mirrorDockValid(5, 5), true,
-    'RESIDUAL: the generic sim path refuses a footprint with a living unit on it (builder exempt); the Dock mirror has no unit check at all');
+  assert.equal(mirrorDockValid(5, 5), false,
+    'the generic sim path refuses a footprint with a living unit on it (builder exempt); the Dock mirror now runs the same per-cell unit check (dockghost2)');
 });
 
-test('KNOWN RESIDUAL Dock resume: our own incomplete Dock still previews invalid (sim would Resume)', () => {
+test('Dock resume (was KNOWN RESIDUAL #2, closed 2026-11-19): our own incomplete Dock reads buildable (sim Resumes)', () => {
   const { W, mirrorDockValid } = makeWorld();
   stageDock(W);
   addBuilding(W, { kind: 23, cellX: 5, cellY: 5, w: 3, h: 3, complete: false });
-  assert.equal(mirrorDockValid(5, 5), false,
-    'RESIDUAL: the sim resume loop precedes every placement check, but the Dock mirror has no resume path — its building-overlap loop refuses the foundation itself');
+  assert.equal(mirrorDockValid(5, 5), true,
+    'the sim resume loop precedes every placement check; the Dock mirror now has the resume path ahead of its building-overlap loop (dockghost2)');
 });
 
-test('KNOWN RESIDUAL Trap TC reserve: a trap cell inside a living Town Center reserve still previews valid (sim refuses)', () => {
+test('Trap TC reserve (was KNOWN RESIDUAL #3, closed 2026-11-19): a trap cell inside a living Town Center reserve reads NOT buildable', () => {
   const { W, mirrorTrapValid } = makeWorld();
   stageTrap(W);
   W.tcs.push({ x: 5, y: 5, hp: 2400 }); // the trap cell is the TC cell itself — inside its 4x4 reserve
-  assert.equal(mirrorTrapValid(5, 5), true,
-    'RESIDUAL: validate_build_fish_trap reads the TC reserve (BLD-16) exactly like the generic path; the trap mirror never consults tcReservedCells');
+  assert.equal(mirrorTrapValid(5, 5), false,
+    'validate_build_fish_trap reads the TC reserve (BLD-16) exactly like the generic path; the trap mirror now consults tcReservedCells (dockghost2)');
 });
 
 test('KNOWN RESIDUAL Trap deep water: a deep-water cell still previews invalid (sim allows)', () => {
