@@ -200,7 +200,8 @@ pub use formation::{
     layer_of, FormationKind, FormationMember,
 };
 pub use grid::{
-    Domain, Grid, CELL_SIZE, GRID_DIM, TERRAIN_LAND, TERRAIN_SHALLOWS, TERRAIN_WATER, WORLD_HALF,
+    terrain_row, Domain, Grid, TerrainRow, CELL_SIZE, GRID_DIM, TERRAIN_LAND, TERRAIN_SHALLOWS,
+    TERRAIN_WATER, WORLD_HALF,
 };
 pub use mapgen::GeneratedMap;
 pub use hash::Fnv1a64;
@@ -10386,7 +10387,13 @@ impl Sim {
                 if self.grid.is_node_blocked(cx, cy) || self.grid.is_dynamic(cx, cy) {
                     return BuildVerdict::Reject;
                 }
-            } else if self.grid.is_blocked(cx, cy) || self.grid.is_shallows(cx, cy) {
+            } else if self.grid.is_blocked(cx, cy) || !self.grid.terrain_buildable(cx, cy) {
+                // MAP03-A: the shallows half of this terrain check
+                // now reads the terrain table (`terrain_buildable`:
+                // land only, for the existing tags) instead of the
+                // exact shallows tag; `is_blocked` still carries
+                // deep water plus the node/dynamic layers, so the
+                // verdict for tags 0/1/2 is unchanged.
                 return BuildVerdict::Reject;
             }
             // Any living Town Center's reserved 4x4 cell (BLD-16:

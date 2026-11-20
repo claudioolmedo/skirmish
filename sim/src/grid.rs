@@ -50,6 +50,90 @@ pub const TERRAIN_WATER: u8 = 1;
 /// text amendment rides the complete-W1 commit, not this one.
 pub const TERRAIN_SHALLOWS: u8 = 2;
 
+/// MAP03-A: the single terrain table — one row per existing tag,
+/// the only place the passability / water-side / buildability
+/// facts of a terrain live. Before this refactor those facts were
+/// scattered as exact-tag comparisons across `is_blocked_for`
+/// (`== TERRAIN_WATER` / `== TERRAIN_LAND`), `is_water_side`
+/// (deep ∨ shallows), `blocked_bytes` (`== TERRAIN_WATER`) and
+/// the terrain half of `Sim::validate_build` (`is_blocked` ∨
+/// `is_shallows`); MAP03-B adds a terrain by adding a row here
+/// (plus its tag constant), not by hunting comparisons.
+///
+/// Identity predicates stay tag comparisons on purpose:
+/// `is_water` / `is_shallows` answer "is this exactly that tag",
+/// which map validation, the floods and the Dock straddle mean
+/// literally — they are not passability facts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TerrainRow {
+    /// A land-domain unit may enter a cell of this terrain
+    /// (the terrain half only; node/dynamic layers still apply).
+    pub land_passable: bool,
+    /// A water-domain unit (ship) may enter a cell of this
+    /// terrain (terrain half only; the dynamic layer applies).
+    pub ship_passable: bool,
+    /// The cell is on the water side of a shoreline (the Dock
+    /// straddle and the shoreline helpers read this).
+    pub water_side: bool,
+    /// A Normal-placement building may stand on this terrain
+    /// (the terrain half of `validate_build`; obstruction,
+    /// reserve, unit and price checks are separate).
+    pub buildable: bool,
+}
+
+/// The table rows for the existing tags, indexed by tag value:
+/// land (0), deep water (1), shallows (2) — exactly the readings
+/// the pre-refactor comparisons produced for those tags.
+const TERRAIN_TABLE: [TerrainRow; 3] = [
+    // TERRAIN_LAND: ordinary land.
+    TerrainRow {
+        land_passable: true,
+        ship_passable: false,
+        water_side: false,
+        buildable: true,
+    },
+    // TERRAIN_WATER: deep water.
+    TerrainRow {
+        land_passable: false,
+        ship_passable: true,
+        water_side: true,
+        buildable: false,
+    },
+    // TERRAIN_SHALLOWS: amphibious — both domains enter, counts
+    // water-side, and no building is constructed on shallows.
+    TerrainRow {
+        land_passable: true,
+        ship_passable: true,
+        water_side: true,
+        buildable: false,
+    },
+];
+
+/// The row for an unassigned tag (≥ 3): the exact fallthrough the
+/// pre-refactor comparisons produced for a tag none of them
+/// named — passable to both domains (neither `== WATER` nor
+/// `== LAND` refused it), not water-side, not shallows (so the
+/// old `validate_build` terrain half admitted it). MAP03-B must
+/// give every tag it assigns an explicit table row; this fallback
+/// exists so an unassigned byte can never silently change
+/// behaviour by acquiring a row meant for another terrain.
+const TERRAIN_ROW_UNASSIGNED: TerrainRow = TerrainRow {
+    land_passable: true,
+    ship_passable: true,
+    water_side: false,
+    buildable: true,
+};
+
+/// The terrain table row for a tag (MAP03-A). Pure lookup, no
+/// state: the same tag always yields the same row on every
+/// platform.
+pub fn terrain_row(tag: u8) -> TerrainRow {
+    TERRAIN_TABLE
+        .get(tag as usize)
+        .copied()
+        .unwrap_or(TERRAIN_ROW_UNASSIGNED)
+}
+
 /// The movement domain a path query runs for (W1 grid half). The
 /// domain is a *parameter* of the passability/A* functions, never
 /// a fork of them: one grid, one A*, two passability readings.
@@ -148,11 +232,13 @@ impl Grid {
             return true;
         }
         let i = Self::idx(x, y);
+        // MAP03-A: the terrain half reads the terrain table —
+        // a domain is refused exactly when its row entry is not
+        // passable; the node/dynamic layers are unchanged.
+        let row = terrain_row(self.terrain[i]);
         match domain {
-            Domain::Land => {
-                self.terrain[i] == TERRAIN_WATER || self.node_block[i] != 0 || self.dynamic[i] != 0
-            }
-            Domain::Water => self.terrain[i] == TERRAIN_LAND || self.dynamic[i] != 0,
+            Domain::Land => !row.land_passable || self.node_block[i] != 0 || self.dynamic[i] != 0,
+            Domain::Water => !row.ship_passable || self.dynamic[i] != 0,
         }
     }
 
@@ -188,7 +274,22 @@ impl Grid {
     /// the shoreline helpers of the complete W1 read this; the
     /// grid half ships the predicate, not the Dock.
     pub fn is_water_side(&self, x: u32, y: u32) -> bool {
-        self.is_water(x, y) || self.is_shallows(x, y)
+        // MAP03-A: read from the terrain table. `terrain_at`
+        // reads out of bounds as deep water, so an edge cell is
+        // water-side exactly as the old deep ∨ shallows reading
+        // made it.
+        terrain_row(self.terrain_at(x, y)).water_side
+    }
+
+    /// Whether a Normal-placement building may stand on this
+    /// cell's terrain (MAP03-A: the terrain half of
+    /// `Sim::validate_build`, read from the terrain table).
+    /// Terrain only: obstruction (node/dynamic), reserves,
+    /// standing units and price are `validate_build`'s other
+    /// checks. Out of bounds reads as deep water (via
+    /// `terrain_at`), hence never buildable.
+    pub fn terrain_buildable(&self, x: u32, y: u32) -> bool {
+        terrain_row(self.terrain_at(x, y)).buildable
     }
 
     /// The terrain tag of a possibly out-of-bounds neighbour
@@ -571,9 +672,13 @@ impl Grid {
     /// its placement ghost — terrain truth, without the building
     /// layer (the client reads buildings separately).
     pub fn blocked_bytes(&self) -> Vec<u8> {
+        // MAP03-A: the terrain half reads the terrain table — a
+        // cell is a static land obstacle exactly when its terrain
+        // is not land-passable (deep water, for the existing
+        // tags; shallows are land-passable, so not obstacles).
         (0..cell_count())
             .map(|i| {
-                u8::from(self.terrain[i] == TERRAIN_WATER || self.node_block[i] != 0)
+                u8::from(!terrain_row(self.terrain[i]).land_passable || self.node_block[i] != 0)
             })
             .collect()
     }
@@ -936,6 +1041,68 @@ mod tests {
         // Out of bounds is a wall (MAP-11).
         assert!(g.is_blocked(120, 0));
         assert!(g.is_blocked(0, 120));
+    }
+
+    #[test]
+    fn terrain_table_matches_the_existing_tags() {
+        // MAP03-A: the table rows ARE the pre-refactor readings
+        // for tags 0/1/2 — land (passable to land only, buildable),
+        // deep water (ships only, water-side), shallows (both
+        // domains, water-side, unbuildable).
+        assert_eq!(
+            terrain_row(TERRAIN_LAND),
+            TerrainRow {
+                land_passable: true,
+                ship_passable: false,
+                water_side: false,
+                buildable: true,
+            }
+        );
+        assert_eq!(
+            terrain_row(TERRAIN_WATER),
+            TerrainRow {
+                land_passable: false,
+                ship_passable: true,
+                water_side: true,
+                buildable: false,
+            }
+        );
+        assert_eq!(
+            terrain_row(TERRAIN_SHALLOWS),
+            TerrainRow {
+                land_passable: true,
+                ship_passable: true,
+                water_side: true,
+                buildable: false,
+            }
+        );
+        // An unassigned tag keeps the legacy fallthrough row.
+        assert_eq!(
+            terrain_row(3),
+            TerrainRow {
+                land_passable: true,
+                ship_passable: true,
+                water_side: false,
+                buildable: true,
+            }
+        );
+        // And the grid predicates agree with the table on a
+        // hand-set row of one cell per tag (row 60, no layers).
+        let mut g = Grid::new();
+        g.set_terrain(10, 60, TERRAIN_WATER);
+        g.set_terrain(11, 60, TERRAIN_SHALLOWS);
+        // (12, 60) stays land.
+        for &(x, tag) in &[(10u32, TERRAIN_WATER), (11, TERRAIN_SHALLOWS), (12, TERRAIN_LAND)] {
+            let row = terrain_row(tag);
+            assert_eq!(g.is_blocked_for(Domain::Land, x, 60), !row.land_passable);
+            assert_eq!(g.is_blocked_for(Domain::Water, x, 60), !row.ship_passable);
+            assert_eq!(g.is_water_side(x, 60), row.water_side);
+            assert_eq!(g.terrain_buildable(x, 60), row.buildable);
+            assert_eq!(g.blocked_bytes()[Grid::idx(x, 60)], u8::from(!row.land_passable));
+        }
+        // Out of bounds reads as deep water through the table too.
+        assert!(g.is_water_side(120, 0));
+        assert!(!g.terrain_buildable(120, 0));
     }
 
     #[test]
