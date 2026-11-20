@@ -9010,6 +9010,28 @@ async function main() {
       // reached here when the outline stage missed the pixel).
       const foeBody = foeBodyAtPoint();
       if (foeBody !== null) return foeBody;
+      // FIX #10 (bot-loop occorder12, run #437): the same
+      // ground extension FIX #9 gave the outline stage, at the
+      // record-rect stage — the gap occorder11's honesty bound
+      // named and left for a live capture. Run #437 (build
+      // 579708a) is that capture: our Militia right-clicked the
+      // enemy Scout under our Town Center twice; attempt 2
+      // GARRISONED into the TC ("Garrisoned.", TC 1/15) — with
+      // a FOOT attacker the refused-garrison shape of the
+      // mounted captures becomes a successful garrison. The
+      // harness sweep (occorder12) stages the fork: where the
+      // click lands on our own unit's recorded rect but
+      // OUTSIDE every rect ∩ cover (the visible part of our
+      // unit beside the TC art's edge — occ === null, so the
+      // outline stage's ground candidate never runs), at the
+      // foe's feet (its rect and body both miss, h < 0), the
+      // foe stands inside the 2.2 ground radius yet this stage
+      // never consulted it, returned our own unit, and orderAt
+      // reinterpreted the click as a garrison. Consulted LAST
+      // here, exactly as at the outline stage: the measured
+      // rect and the drawn body keep precedence.
+      const foeGround = foeGroundAtPoint();
+      if (foeGround !== null) return foeGround;
     }
     if (occRect !== null) return occRect;
     // FIX #3 (bot-loop occorder3): the generalised sprite-body
@@ -9049,6 +9071,28 @@ async function main() {
           sBestD2 = bd2;
           sBest = i;
         }
+      }
+      // FIX #10 (occorder12, run #437): the body stage's own
+      // ground gap — the second half of the same fork. A click
+      // on our own unit's drawn BODY (its box is wider than its
+      // recorded rect, so a band of body points reaches this
+      // stage with occ === null and occRect === null), at the
+      // foe's feet where the foe's body misses (h < 0), short-
+      // circuited to our own unit before the ground stage's
+      // FIX #2c reading could run — same garrison/move
+      // degradation, measured in the same occorder12 sweep.
+      // So when the body winner is our own unit, a non-own
+      // unit inside the ground pick radius wins first — the
+      // ground stage's own arbitration, restated at the stage
+      // that can be reached. The class-0 host (an own
+      // Transport Ship, kind 32) keeps its win, as in FIX #2c;
+      // a foe body winner (class 1) is untouched. Fog
+      // discipline is the ground candidate's own (see FIX #9):
+      // the target is not tFromOutline, so orderAt's fog gate
+      // still applies to it.
+      if (sBest !== null && sBestCls === 2) {
+        const foeGround = foeGroundAtPoint();
+        if (foeGround !== null) return foeGround;
       }
       if (sBest !== null) return sBest;
     }
