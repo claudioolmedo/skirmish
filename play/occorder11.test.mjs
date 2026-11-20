@@ -319,8 +319,10 @@ test('FIX #9 wiring: the ground extension lives in entityAt\'s outline stage onl
     'the fix is marked in entityAt');
   assert.match(entityAtSrc, /const foeGroundAtPoint = \(\) =>/,
     'the foe-ground candidate is defined in entityAt');
-  assert.equal((entityAtSrc.match(/foeGroundAtPoint\(\)/g) || []).length, 1,
-    'only the outline stage consults it (the record-rect stage is deliberately not widened)');
+  assert.equal((entityAtSrc.match(/foeGroundAtPoint\(\)/g) || []).length, 3,
+    'the outline stage consults it once (FIX #9); occorder12 (FIX #10) widened the count to 3 — ' +
+    'the record-rect and body stages now consult it too, on run #437\'s live garrison capture, ' +
+    'the evidence this suite\'s honesty bound said would decide the record-rect gap');
   assert.match(entityAtSrc, /if \(occ !== null\) return occ;/,
     'the outline return line is preserved (earlier wiring pins index it)');
   assert.match(entityAtSrc, /if \(occRect !== null\) return occRect;/,
@@ -429,6 +431,16 @@ test('capture post-fix: the right-click issues Attack on the ground-resolved ene
 // radius included — does not shadow our own outline winner
 // (passes before and after the fix — FIX #9 must not widen
 // past FIX #2c's own radius).
+//
+// AMENDMENT (occorder12, 2026-11-19): the honesty bound below
+// left the record-rect stage's identical ground gap unwidened
+// for lack of a live capture. Run #437 supplied it — a FOOT
+// attacker (Militia) GARRISONED into the TC on the second
+// click — and occorder12's sweep measured the gap at BOTH the
+// record-rect and the body stages. FIX #10 widens the ground
+// consultation to those two stages; this suite's wiring pin
+// count for foeGroundAtPoint() therefore moves 1 -> 3 (in
+// place, above). Every other pin in this suite is unchanged.
 
 test('bound B: a foe outside the ground radius still does not shadow our own outline winner', () => {
   const w = makeWorldA({ foePos: [-6, -1] });
