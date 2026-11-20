@@ -401,7 +401,12 @@ test('capture A regression: the foe with a record still wins through FIX #6 (FIX
   assert.deepEqual(pick.recordIds, [2, 1, 56, 4, 3]);
 });
 
-test('no enemy resolved at the point: capture B geometry without the foe still degrades as before', () => {
+test('no enemy resolved at the point: capture B geometry without the foe — own-unit pick, no garrison (occorder18)', () => {
+  // occorder18 (FIX #15) supersedes this bound's order shape:
+  // the pick still stands (our Villager 1), but a click that
+  // names an own unit no longer reaches the TC garrison
+  // branch at all — run #445's capture is this shape. The
+  // Scout's click is now simply the ground move.
   const w = makeWorld('B');
   w.st.hp[56 * 2] = 0; // the foe is gone — no record, no body, nothing resolved
   const [wx, wy] = w.captureWorld;
@@ -409,8 +414,8 @@ test('no enemy resolved at the point: capture B geometry without the foe still d
     'with no enemy resolved at the point, our own outline winner stands');
   w.orderAt(wx, wy, false, true);
   const iss = w.occEntries.filter((e) => e.ev === 'issue');
-  assert.deepEqual(iss.map((e) => [e.cmd.t, e.ok]), [['garrison_tc', false], ['move', true]],
-    'the pre-fix shape is preserved exactly: refused garrison, then a ground move');
+  assert.deepEqual(iss.map((e) => [e.cmd.t, e.ok]), [['move', true]],
+    'occorder18: no garrison_tc is attempted on an own-unit pick — the ground move only');
 });
 
 test('TC footprint with NO enemy present still garrisons a foot unit', () => {

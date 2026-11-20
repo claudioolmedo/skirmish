@@ -519,7 +519,11 @@ test('sweep (selection): no foe-feet point with no outline winner selects the fr
 // Bounds: the arena is limited — by distance, by the
 // footprint, by the enemy's presence, by the pick surface.
 
-test('bound: a foe inside the footprint but beyond one half-extent of the click does not shadow our outline winner — the garrison stands', () => {
+test('bound: a foe inside the footprint but beyond one half-extent of the click does not shadow our outline winner — the pick stands, the order falls through (occorder18)', () => {
+  // occorder18 (FIX #15) supersedes this bound's order half:
+  // the outline pick still stands (our Villager 1, no arena
+  // preference), but a click naming an own unit no longer
+  // garrisons — run #445's capture is this shape.
   const w = makeWorld({ frontVil: true, foePos: [-6, -1] });
   const [wx, wy] = w.pointO.world;
   assert.equal(w.occludedUnitAt(wx, wy), 1, 'staging: only our Villager\'s outline is hit');
@@ -529,8 +533,8 @@ test('bound: a foe inside the footprint but beyond one half-extent of the click 
   assert.equal(w.entityAt(wx, wy, true), 1,
     'with no foe outline, rect, body, ground or arena hit at the point, the preference does not fire');
   w.orderAt(wx, wy, false, true);
-  assert.deepEqual(w.issued.map((c) => [c.t, c.e, c.tc]), [['garrison_tc', 4, 0]],
-    'legitimate garrison preserved: the foot Militia enters its own TC exactly as before');
+  assert.deepEqual(w.issued.map((c) => [c.t, c.e, c.tc]), [['move', 4, undefined]],
+    'occorder18: an own-unit pick inside the footprint issues a move, never a garrison');
 });
 
 test('bound: a TC-footprint click with no enemy present still garrisons a foot unit', () => {
@@ -559,8 +563,11 @@ test('bound: the minimap pick is untouched — no arena, no record stages (SEL-1
   assert.equal(w.entityAt(wx, wy, false), 1,
     'with screenPick off, the pick is the plain ground pick (our Villager beside the point) — the arena never consults');
   w.orderAt(wx, wy, false, false);
-  assert.deepEqual(w.issued.map((c) => [c.t, c.e, c.tc]), [['garrison_tc', 4, 0]],
-    'the minimap order at the same world point keeps its pre-fix shape');
+  // occorder18 (FIX #15): the minimap PICK above is untouched
+  // (SEL-16), but the order follows the same rule — the pick
+  // named our Villager, so the click is not a TC garrison.
+  assert.deepEqual(w.issued.map((c) => [c.t, c.e, c.tc]), [['move', 4, undefined]],
+    'occorder18: the minimap pick is unchanged, the order is a move — an own-unit pick never garrisons');
 });
 
 test('host exemptions: an own Transport Ship / Battering Ram in front of the foe keeps its win over the arena', () => {
