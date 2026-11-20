@@ -822,6 +822,7 @@ function selectUnits(set) {
   buildingGroup = null;
 }
 function selectBuilding(descOrNull) {
+  occDeselect('building'); // FIX #18 (occorder21): a building selection replaces the unit selection
   selectedBuilding = descOrNull;
   selection = new Set();
   selectedAnimal = null;
@@ -829,11 +830,32 @@ function selectBuilding(descOrNull) {
   buildingGroup = null;
 }
 function selectAnimal(id) {
+  occDeselect('animal'); // FIX #18 (occorder21): an info selection replaces the unit selection
   selectedAnimal = id;
   selection = new Set();
   selectedBuilding = null;
   buildPage = null;
   buildingGroup = null;
+}
+
+// FIX #18 (bot-loop occorder21, 2026-11-20): deselection
+// instrumentation, client-only, ?occlog=1 only. Run #446's
+// capture was proven (occorder20) to be orderAt's
+// empty-selection return: at click time the unit selection
+// was already empty, but WHO cleared it was unproven — the
+// client emptied the selection at several sites and none of
+// them logged. Every site that empties the unit selection
+// now calls occDeselect(via) BEFORE clearing, so the next
+// live capture names the clearer in the log itself. Only a
+// non-empty unit selection is a deselection event worth
+// naming (a clear of an already-empty selection clears
+// nothing); the size before clearing rides along. No
+// behaviour changes: occLog is inert without the flag, and
+// nothing here touches selection state.
+function occDeselect(via) {
+  if (typeof occLog === 'function' && selection.size) {
+    occLog({ ev: 'deselect', via, size: selection.size });
+  }
 }
 
 // SEL-05: the selection cap (the rulebook's number).
@@ -3803,6 +3825,7 @@ addEventListener('keydown', (e) => {
     } else if (techtreeOverlay && techtreeOverlay.style.display !== 'none') {
       setTechTree(false);
     } else if (selection.size || selectedBuilding || selectedAnimal != null) {
+      occDeselect('esc'); // FIX #18 (occorder21)
       selectUnits(new Set()); // deselect units / building / animal
     }
     return;
@@ -4987,6 +5010,7 @@ function resetSim(mode = matchMode) {
   archerShoot.clear();
   seenProjKeys.clear();
   for (const k of Object.keys(UNIT_POSE_STATE)) delete UNIT_POSE_STATE[k];
+  occDeselect('restart'); // FIX #18 (occorder21): a (re)started match clears the selection
   selectUnits(new Set()); // also clears any building selection
   placement = null;
   // Bot-loop (2026-11-02): armed targeting belongs to the OLD match —
@@ -5110,6 +5134,7 @@ function adoptSim(newSim, owner) {
   archerShoot.clear();
   seenProjKeys.clear();
   for (const k of Object.keys(UNIT_POSE_STATE)) delete UNIT_POSE_STATE[k];
+  occDeselect('restart'); // FIX #18 (occorder21): a (re)started match clears the selection
   selectUnits(new Set());
   placement = null;
   // Bot-loop (2026-11-02): same disarm as resetSim — an online or
@@ -7306,6 +7331,7 @@ function adoptLoadedSim(loaded) {
   archerShoot.clear();
   seenProjKeys.clear();
   for (const k of Object.keys(UNIT_POSE_STATE)) delete UNIT_POSE_STATE[k];
+  occDeselect('restart'); // FIX #18 (occorder21): a (re)started match clears the selection
   selectUnits(new Set()); // also clears any building selection
   placement = null;
   controlGroups.clear();
@@ -7865,6 +7891,7 @@ async function main() {
   if (selPortrait) {
     selPortrait.addEventListener('click', () => {
       if (selection.size || selectedBuilding || selectedAnimal != null) {
+        occDeselect('portrait'); // FIX #18 (occorder21)
         selectUnits(new Set());
         selSig = '';
       }
@@ -10687,6 +10714,7 @@ async function main() {
         for (const id of boxed) next.add(id);
         selectUnits(next);
       } else {
+        if (!boxed.length) occDeselect('empty-ground'); // FIX #18 (occorder21): a box over empty ground
         selectUnits(new Set(boxed));
       }
       if (boxed.length) playSelectAck();
@@ -10760,7 +10788,10 @@ async function main() {
         if (b && (b.owner !== foeOwner() || cellExploredW(b.x, b.y))) {
           selectBuilding({ type: 'building', id: b.id, kind: b.kind, owner: b.owner });
           playSelectAck();
-        } else selectUnits(new Set());
+        } else {
+          occDeselect('empty-ground'); // FIX #18 (occorder21)
+          selectUnits(new Set());
+        }
       }
     }
   });
