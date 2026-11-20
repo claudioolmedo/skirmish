@@ -4235,12 +4235,30 @@ function handleHotkey(e) {
   }
 }
 
+/// The camera-pan gate, shared by the pan keys and edge
+/// scrolling (bot-loop applykeys, 2026-11-20): the view rests
+/// while the game is paused or ended, during replay playback,
+/// outside a match (the lobby, room, loading and end card all
+/// sit outside body.in-match), and while the help overlay or
+/// the pause menu is visible. Extracted from applyEdgeScroll,
+/// whose gate this always was — applyKeys panned ungated, so
+/// held WASD/arrow keys drifted the camera behind the pause
+/// menu while edge scrolling correctly rested.
+function cameraPanGated() {
+  if (paused || matchEnded || playback) return true;
+  if (!document.body || !document.body.classList.contains('in-match')) return true;
+  if (helpOverlay.style.display !== 'none' || pauseMenu.style.display !== 'none') return true;
+  return false;
+}
+
 function applyKeys(now) {
   const P = 14; // screen px per frame while a pan key is held
-  if (keys.has('KeyA') || keys.has('ArrowLeft')) camOx += P;
-  if (keys.has('KeyD') || keys.has('ArrowRight')) camOx -= P;
-  if (keys.has('KeyW') || keys.has('ArrowUp')) camOy += P;
-  if (keys.has('KeyS') || keys.has('ArrowDown')) camOy -= P;
+  if (!cameraPanGated()) {
+    if (keys.has('KeyA') || keys.has('ArrowLeft')) camOx += P;
+    if (keys.has('KeyD') || keys.has('ArrowRight')) camOx -= P;
+    if (keys.has('KeyW') || keys.has('ArrowUp')) camOy += P;
+    if (keys.has('KeyS') || keys.has('ArrowDown')) camOy -= P;
+  }
   applyEdgeScroll(now);
 }
 
@@ -4269,9 +4287,7 @@ function applyEdgeScroll(now) {
   const dt = Math.min(Math.max(now - lastEdgeAt, 0), 100);
   lastEdgeAt = now;
   if (!mouseClientPt) return;
-  if (paused || matchEnded || playback) return;
-  if (!document.body || !document.body.classList.contains('in-match')) return;
-  if (helpOverlay.style.display !== 'none' || pauseMenu.style.display !== 'none') return;
+  if (cameraPanGated()) return;
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   if (!vw || !vh) return;
