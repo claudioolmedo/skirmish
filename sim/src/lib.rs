@@ -11140,15 +11140,29 @@ impl Sim {
         // physically unreachable — and the bump/repath cycle
         // then repeats the identical route forever (measured:
         // a Scout stalled 120,000 ticks on one sheep standing
-        // in a forest corridor). My own cell is excluded (I may
-        // be standing in the blocker's cell myself), and so is
-        // the detour point's cell when a detour is attempted.
+        // in a forest corridor). The detour point's cell is
+        // exempted when a detour is attempted (below).
+        //
+        // WALLSLOW fix (2026-11-20, run #442): a blocker's cell
+        // stays in `avoid` even when the traveller is standing
+        // IN it. The former exclusion emptied the avoid list in
+        // exactly the coincident case: a builder pressed against
+        // an idle villager inside that villager's own cell got
+        // "avoiding" routes that threaded the cell, whose centre
+        // waypoint sits inside the villager's separation radius
+        // — unreachable — and the bump cycle repeated the same
+        // route forever (probe J: 60,000+ ticks, foundation at
+        // 0 progress). The exclusion is not needed for the
+        // traveller to escape the cell: `find_path_avoiding_for`
+        // never blocks the querier's own start cell by `avoid`
+        // (its own documented rule), so a route out of the
+        // shared cell that never re-enters it is expressible —
+        // and is what the avoiding search now returns.
         let mut avoid: Vec<(u32, u32)> = Vec::with_capacity(blockers.len());
-        let my_cell = self.grid.world_to_cell(my_pos.0, my_pos.1);
         for &j in blockers {
             let n = &self.entities[j];
             let cell = self.grid.world_to_cell(n.pos_x, n.pos_y);
-            if cell != my_cell && !avoid.contains(&cell) {
+            if !avoid.contains(&cell) {
                 avoid.push(cell);
             }
         }
@@ -11201,17 +11215,31 @@ impl Sim {
                 let mut leg_avoid = avoid.clone();
                 let detour_cell = self.grid.world_to_cell(detour.0, detour.1);
                 leg_avoid.retain(|&c| c != detour_cell);
+                // WALLSLOW fix (2026-11-20, run #442): the legs
+                // must AVOID the blockers' cells — this function's
+                // own contract ("avoided by every route this
+                // function builds, the detour legs included").
+                // The former `or_else` fallback to the plain
+                // through-path defeated the avoidance: when the
+                // only avoiding line to the detour or the target
+                // was a real detour, the fallback quietly returned
+                // a route threading the blocker's own cell, the
+                // traveller pushed against the standing blocker
+                // for another bump window, the repath produced the
+                // same through-route again, and the order never
+                // completed — a builder whose stand point lay past
+                // an idle villager in a one-cell corridor stood
+                // frozen beside a 0-progress foundation for 60,000+
+                // ticks (probe J: `wallslow` pocket staging). With
+                // no fallback, a detour side whose legs cannot
+                // avoid simply fails, the other side is tried, and
+                // the cellular attempt below — which always
+                // avoided — is finally reached.
                 let legs = (
                     self.grid
-                        .find_path_avoiding_for(domain, my_pos, detour, gates, &leg_avoid)
-                        .or_else(|| {
-                            self.grid.find_path_through_for(domain, my_pos, detour, gates)
-                        }),
+                        .find_path_avoiding_for(domain, my_pos, detour, gates, &leg_avoid),
                     self.grid
-                        .find_path_avoiding_for(domain, detour, target, gates, &leg_avoid)
-                        .or_else(|| {
-                            self.grid.find_path_through_for(domain, detour, target, gates)
-                        }),
+                        .find_path_avoiding_for(domain, detour, target, gates, &leg_avoid),
                 );
                 if let (Some(mut leg1), Some(leg2)) = legs {
                     leg1.extend(leg2);
