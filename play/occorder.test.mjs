@@ -53,6 +53,15 @@
 // untouched. The behavioural pins below document the mechanism
 // the record prevents (they pass before and after — the record
 // logic itself never changed); the wiring pins fail on pristine.
+//
+// AMENDMENT (occorder13, 2026-11-19): ONE behavioural pin below
+// no longer passes unchanged — "with the record absent, the same
+// click degrades to a ground move" inverts under FIX #11's
+// TC-arena candidate, because its staging (enemy inside our own
+// TC footprint near its centre, click inside the same footprint)
+// is the configuration run #438 proved live. The justification
+// is recorded in place at that test; every other pin in this
+// file is unchanged.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -273,12 +282,37 @@ test('mechanism: with the record absent, the same click degrades to a ground mov
   // orderAt: the ordered unit walks to the click point and —
   // stance-gated auto-acquisition being the sim's side of the
   // story — a Stand Ground unit then idles there.
+  //
+  // AMENDMENT (occorder13, 2026-11-19): the expectation below
+  // INVERTS under FIX #11. This staging's enemy stands at
+  // (-2.1,-2.1) — inside our own Town Center's footprint, near
+  // its centre — and the click's ground point (-4.85,-5.20)
+  // also lies inside that footprint, 4.14 wu from the foe:
+  // exactly the configuration run #438 proved live on the
+  // FIX #10 build (enemy at the TC CENTRE, record-frame
+  // dependent, right-clicks degrading to a successful
+  // garrison — here, with a mounted Scout selected and this
+  // harness's issue() refusing garrison orders, the same
+  // degradation surfaces as the ground move this pin was
+  // written to document). FIX #11's TC-arena candidate
+  // (entityAt) resolves a foe inside the same own-TC
+  // footprint within one half-extent of an inside-footprint
+  // click, so the click now issues the attack whether or not
+  // the record survived the frame. The mechanism this pin
+  // documents — no record, no outline pick, ground conversion
+  // outside the 2.2 radius — is unchanged and still asserted;
+  // only the order's outcome moves, for this inside-footprint
+  // configuration. Record-absent degradation OUTSIDE the
+  // arena (a foe under any other occluder, or past the
+  // half-extent) keeps the move shape — occorder13's bounds
+  // pin it there.
   const w = makeWorld({ record: false });
   const sx = w.unitRect.x + w.unitRect.w / 2;
   const sy = w.unitRect.y + 1;
   const [wx, wy] = w.eventWorld(sx, sy);
   assert.equal(w.occludedUnitAt(wx, wy), null, 'no record, no outline pick');
   w.orderAt(wx, wy, false, true);
-  assert.deepEqual(w.issued.map((c) => c.t), ['move'],
-    'the attack silently degrades to a ground move to the click point');
+  assert.deepEqual(w.issued.map((c) => c.t), ['attack'],
+    'FIX #11: the foe inside our own TC footprint is resolved by the TC arena — the attack issues even with the record absent');
+  assert.equal(w.issued[0].tg, 7);
 });

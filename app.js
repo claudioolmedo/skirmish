@@ -8660,6 +8660,44 @@ async function main() {
     if (bodyBest !== null) return bodyBest;
     const occ = occludedUnitAt(wx, wy);
     if (occ !== null) return occ;
+    // FIX #11 (bot-loop occorder13, run #438): the selection
+    // pick's ground foe candidate — entityAt's foeGroundAtPoint
+    // discipline (FIX #2c/#9), which selectionAt never had.
+    // Run #438 (the FIX #10 build, live): an enemy under the
+    // player's Town Center roof at the CENTRE of the footprint,
+    // a friendly Villager standing in front of it; a left-click
+    // LOW on the outline selected the Villager. Measured in the
+    // harness (occorder13): at the foe's feet the foe's body
+    // misses (the click is screen-down from its ground point,
+    // h < 0) and no outline winner exists, so the body stage
+    // below named our Villager by its body and the unitAt
+    // fallback named it by its ground radius, while the foe
+    // stood inside the 2.2 ground pick radius the order pick
+    // has arbitrated since FIX #2c. A non-own unit counts only
+    // while its cell is currently visible — this pick has no
+    // post-pick fog gate, so the gate is restated here, exactly
+    // as the body stage's own fog rule above. The candidate
+    // only SHADOWS an own winner (the body stage's class 2, or
+    // the unitAt fallback's own pick): it never creates a
+    // selection from nothing, and the outline stage above keeps
+    // the frontmost-outline doctrine (occorder8) untouched.
+    const foeGroundSelAtPoint = () => {
+      let gBest = null;
+      let gBestD2 = 2.2 * 2.2;
+      for (let i = 0; i < st.count; i++) {
+        if (st.kinds[i] === KIND_TC || st.hp[i * 2] < 1) continue;
+        if (st.owners[i] === localOwner) continue;
+        if (st.garrisoned && st.garrisoned[i]) continue;
+        if (!cellVisibleW(st.pos[i * 2], st.pos[i * 2 + 1])) continue;
+        const d2 = (st.pos[i * 2] - wx) ** 2
+          + (st.pos[i * 2 + 1] - wy) ** 2;
+        if (d2 < gBestD2) {
+          gBestD2 = d2;
+          gBest = i;
+        }
+      }
+      return gBest;
+    };
     let sBest = null;
     let sBestD2 = Infinity;
     let sBestCls = 3;
@@ -8679,7 +8717,26 @@ async function main() {
         sBest = i;
       }
     }
-    if (sBest !== null) return sBest;
+    if (sBest !== null) {
+      // FIX #11: an own body winner (class 2 only — an own
+      // Transport Ship's class-0 host win and a foe's class-1
+      // win are untouched) is shadowed by a ground-resolved
+      // foe, exactly as entityAt's body stage has done since
+      // FIX #10.
+      if (sBestCls === 2) {
+        const foeSel = foeGroundSelAtPoint();
+        if (foeSel !== null) return foeSel;
+      }
+      return sBest;
+    }
+    // FIX #11: the same shadow at the ground fallback — when
+    // unitAt would name our own unit and a foe stands inside
+    // the ground pick radius, the foe is the selection (an
+    // information selection, as for any non-own pick here).
+    if (unitAt(wx, wy) !== null) {
+      const foeSel = foeGroundSelAtPoint();
+      if (foeSel !== null) return foeSel;
+    }
     return unitAt(wx, wy);
   }
 
@@ -8988,6 +9045,79 @@ async function main() {
       }
       return gBest;
     };
+    // FIX #11 (bot-loop occorder13, run #438): the TC-arena
+    // ground candidate — the foe geometry that remains when a
+    // hidden foe stands at the CENTRE of our own Town Center's
+    // footprint instead of at its east edge. Run #438 (the
+    // FIX #10 build, live): the enemy sat under the roof at the
+    // TC centre from minute 1; the player selected his own
+    // Militia (Aggressive) and right-clicked LOW at the feet /
+    // bottom edge of the red outline, TWICE, with two different
+    // Militia — BOTH garrisoned into the TC ("Garrisoned.",
+    // TC "Garrisoned: 1/15", then "2/15"). No attack. The
+    // harness discrimination (occorder13, column scan at the
+    // foe's column, centre staging): on the foe's figure and
+    // for ~11 px below its feet the pick already resolves the
+    // foe (outline / rect / body / the 2.2 ground radius); the
+    // garrison band begins exactly where the ground distance
+    // passes 2.2 (measured: attack at d = 1.94, garrison at
+    // d = 2.30) and runs down the TC art to its bottom edge —
+    // every foe geometry misses there (the click is screen-
+    // down from the foe, h < 0; below its recorded rect), yet
+    // the click is still ON the Town Center the foe is hiding
+    // under, inside its footprint. At the east edge this band
+    // was masked twice over: below the foe's feet lay open
+    // ground outside the footprint (a move, not a garrison),
+    // and our own defending unit's rect/body stood in the band
+    // carrying the foeGround consultation (FIX #10). At the
+    // centre the band lies on the TC art itself: where our
+    // front Villager's record extends into it, the Villager
+    // wins the pick outright and orderAt garrisons; where
+    // nothing wins, orderAt's tcAt garrison branch fires with
+    // no foe arbitration at all — the ground candidate is
+    // suppressed inside the footprint. So: when the click's
+    // ground point lies inside OUR Town Center's footprint
+    // and a non-own unit stands inside that SAME footprint
+    // within one half-extent (tcHalf) of the click, that foe
+    // is resolved at the point — the click landed on the very
+    // building the foe is under, in its near half. The
+    // half-extent limit is what keeps the earlier bounds:
+    // occorder11's bound B (foe 12.25 wu from the click) and
+    // occorder12's bound R (13.75 wu) keep their garrison/move
+    // shapes, and a click outside the footprint (occorder12's
+    // attempt-1 shape) never reaches this candidate. Fog
+    // discipline is the ground candidate's own: a target named
+    // this way is not tFromOutline, so orderAt's fog gate
+    // still applies to it. Canvas picks only, by the call
+    // sites' screenPick gates — the minimap path is untouched.
+    // The candidate ALSO carries the body candidate's fog
+    // rule at the pick level (foeBodyAtPoint's discipline,
+    // pinned by occorder8): a foe whose cell is not currently
+    // visible names nothing here — the arena arbitrates only
+    // what the player can see under their own roof.
+    const foeTcArenaAtPoint = () => {
+      const tc = tcAt(wx, wy);
+      if (tc === null || st.owners[tc] !== localOwner) return null;
+      const tx = st.pos[tc * 2];
+      const ty = st.pos[tc * 2 + 1];
+      let aBest = null;
+      let aBestD2 = tcHalf() * tcHalf();
+      for (let i = 0; i < st.count; i++) {
+        if (st.kinds[i] === KIND_TC || st.hp[i * 2] < 1) continue;
+        if (st.owners[i] === localOwner) continue;
+        if (st.garrisoned && st.garrisoned[i]) continue;
+        if (!cellVisibleW(st.pos[i * 2], st.pos[i * 2 + 1])) continue;
+        if (Math.abs(st.pos[i * 2] - tx) > tcHalf()
+            || Math.abs(st.pos[i * 2 + 1] - ty) > tcHalf()) continue;
+        const d2 = (st.pos[i * 2] - wx) ** 2
+          + (st.pos[i * 2 + 1] - wy) ** 2;
+        if (d2 < aBestD2) {
+          aBestD2 = d2;
+          aBest = i;
+        }
+      }
+      return aBest;
+    };
     // FIX #6 (bot-loop occorder7, run #431 capture): foe
     // preference inside the record picks — FIX #2c's ground-pick
     // discipline extended to the outline pick, as occorder5's
@@ -9047,6 +9177,13 @@ async function main() {
         // ground radius FIX #2c already arbitrates).
         const foeGround = foeGroundAtPoint();
         if (foeGround !== null) return foeGround;
+        // FIX #11 (occorder13) runs after it: a foe resolved
+        // by the TC arena beats our own outline winner too
+        // (run #438 — the LOW click below the centre foe's
+        // feet, on our front Villager's outline inside the
+        // footprint, past the ground radius).
+        const foeArena = foeTcArenaAtPoint();
+        if (foeArena !== null) return foeArena;
       }
     }
     if (occ !== null) return occ;
@@ -9110,6 +9247,13 @@ async function main() {
       // rect and the drawn body keep precedence.
       const foeGround = foeGroundAtPoint();
       if (foeGround !== null) return foeGround;
+      // FIX #11 (occorder13): the TC-arena candidate after
+      // the ground candidate, as at the outline stage — a
+      // centre-foe click on our own unit's recorded rect
+      // inside the footprint, past the ground radius, names
+      // the foe under the same roof instead of garrisoning.
+      const foeArena = foeTcArenaAtPoint();
+      if (foeArena !== null) return foeArena;
     }
     if (occRect !== null) return occRect;
     // FIX #3 (bot-loop occorder3): the generalised sprite-body
@@ -9171,6 +9315,13 @@ async function main() {
       if (sBest !== null && sBestCls === 2) {
         const foeGround = foeGroundAtPoint();
         if (foeGround !== null) return foeGround;
+        // FIX #11 (occorder13): the TC-arena candidate after
+        // the ground candidate, as at the record stages — a
+        // centre-foe click on our own unit's drawn body inside
+        // the footprint, past the ground radius, names the
+        // foe under the same roof instead of garrisoning.
+        const foeArena = foeTcArenaAtPoint();
+        if (foeArena !== null) return foeArena;
       }
       if (sBest !== null) return sBest;
     }
@@ -9213,6 +9364,26 @@ async function main() {
         && st.owners[best] === localOwner
         && st.kinds[best] !== KIND_RAM && st.kinds[best] !== 32) {
       return foeBest;
+    }
+    // FIX #11 (occorder13, run #438): the ground stage's own
+    // TC-arena gap — the second half of the centre fork. A
+    // LOW click below the centre foe's feet on the TC art
+    // where NO stage named anything (outline, rect and body
+    // all miss; the foe past the 2.2 radius) reached this
+    // stage with best === null and fell out of entityAt as
+    // nothing, so orderAt reinterpreted the click from its
+    // ground point inside our own TC footprint as a pure
+    // garrison — no foe arbitration anywhere in the order
+    // path. Canvas picks only (screenPick), like the body
+    // stage above: the minimap keeps the plain ground pick.
+    // The Ram / Transport host wins keep their exemption, as
+    // in FIX #2c: the arena is consulted only when the ground
+    // winner is our own non-host unit or nothing at all.
+    if (screenPick && (best === null
+        || (st.owners[best] === localOwner
+          && st.kinds[best] !== KIND_RAM && st.kinds[best] !== 32))) {
+      const foeArena = foeTcArenaAtPoint();
+      if (foeArena !== null) return foeArena;
     }
     return best;
   }
