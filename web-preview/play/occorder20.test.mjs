@@ -386,8 +386,12 @@ test('capture scene, selection present: the real right-click at the foe\'s feet 
   const camBefore = w.cam();
   // The diagnostic right-click, through the REAL handlers.
   w.rightClick(FEET);
-  assert.deepEqual(w.occEntries.map((e) => e.ev), ['rclick', 'pick', 'issue'],
-    'rclick → pick → issue, the healthy shape every other right-click in the session showed');
+  // SUPERSESSION (selpicklog / FIX #21): the staging
+  // left-click above now emits its own selpick line first —
+  // the sequence gains 'selpick' ahead of the right-click's
+  // shape, which is otherwise unchanged.
+  assert.deepEqual(w.occEntries.map((e) => e.ev), ['selpick', 'rclick', 'pick', 'issue'],
+    'selpick (the staging left-click, FIX #21) → rclick → pick → issue, the healthy shape every other right-click in the session showed');
   const pick = w.occEntries.find((e) => e.ev === 'pick');
   assert.ok(pick.picked === 56 && pick.afterGate === 56 && pick.selection.length === 1 && pick.selection[0] === 4,
     'the pick names the Spearman (56) for the selected Militia (4) — the pick layer is healthy at this geometry');

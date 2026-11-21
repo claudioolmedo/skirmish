@@ -8772,6 +8772,21 @@ async function main() {
   // camera and never selects, so no minimap pick changes
   // (SEL-16's ground-only doctrine is untouched).
   function selectionAt(wx, wy) {
+    // FIX #21 (bot-loop selpick, 2026-11-20): selection-pick
+    // instrumentation, client-only, ?occlog=1 only — the
+    // residual occorder22 left open. The `pick` occLog line
+    // lives only in orderAt (right-click); this pick logged
+    // NOTHING, so run #450's failed left-click on a hidden foe
+    // could not be discriminated from its own capture (three
+    // pixel classes had to be proven by staging instead).
+    // Every return below first records WHICH stage resolved
+    // it in selectionAt.lastStage; the plain-click handler
+    // reads that and emits the single { ev:'selpick', ... }
+    // line for the click (its own fallback stages included,
+    // and the null case). No behaviour changes: lastStage is
+    // write-only bookkeeping no pick reads, and occLog is
+    // inert without the flag.
+    selectionAt.lastStage = null;
     const st = entityState();
     let bodyBest = null;
     let bodyBestD2 = Infinity;
@@ -8783,8 +8798,10 @@ async function main() {
         bodyBest = i;
       }
     }
+    selectionAt.lastStage = 'ram-body';
     if (bodyBest !== null) return bodyBest;
     const occ = occludedUnitAt(wx, wy);
+    selectionAt.lastStage = 'outline';
     if (occ !== null) return occ;
     // FIX #11 (bot-loop occorder13, run #438): the selection
     // pick's ground foe candidate — entityAt's foeGroundAtPoint
@@ -8904,6 +8921,7 @@ async function main() {
       // FIX #10.
       if (sBestCls === 2) {
         const foeSel = foeGroundSelAtPoint();
+        selectionAt.lastStage = 'body-ground-shadow';
         if (foeSel !== null) return foeSel;
         // FIX #12 (occorder14): the TC-arena shadow after the
         // ground shadow, as in entityAt — a centre-foe click
@@ -8911,8 +8929,10 @@ async function main() {
         // past the ground radius, selects the foe under the
         // same roof instead of our bystander.
         const foeArenaSel = foeTcArenaSelAtPoint();
+        selectionAt.lastStage = 'body-arena-shadow';
         if (foeArenaSel !== null) return foeArenaSel;
       }
+      selectionAt.lastStage = 'body';
       return sBest;
     }
     // FIX #11: the same shadow at the ground fallback — when
@@ -8921,12 +8941,14 @@ async function main() {
     // information selection, as for any non-own pick here).
     if (unitAt(wx, wy) !== null) {
       const foeSel = foeGroundSelAtPoint();
+      selectionAt.lastStage = 'fallback-ground-shadow';
       if (foeSel !== null) return foeSel;
       // FIX #12 (occorder14): the TC-arena shadow at the
       // ground fallback too, after the ground shadow — the
       // run #440 Test B shape (our Scout named by its ground
       // radius at the centre foe's feet).
       const foeArenaSel = foeTcArenaSelAtPoint();
+      selectionAt.lastStage = 'fallback-arena-shadow';
       if (foeArenaSel !== null) return foeArenaSel;
     }
     // FIX #20 (bot-loop occorder22, run #450): the CREATOR
@@ -8976,11 +8998,15 @@ async function main() {
     // this pick has no post-pick fog gate to catch a
     // fog-hidden foe later, so the gates stay inside.
     const occRectSel = occludedRectUnitAt(wx, wy);
+    selectionAt.lastStage = 'record-rect';
     if (occRectSel !== null) return occRectSel;
     const foeGroundCreate = foeGroundSelAtPoint();
+    selectionAt.lastStage = 'ground-create';
     if (foeGroundCreate !== null) return foeGroundCreate;
     const foeArenaCreate = foeTcArenaSelAtPoint();
+    selectionAt.lastStage = 'arena-create';
     if (foeArenaCreate !== null) return foeArenaCreate;
+    selectionAt.lastStage = 'unitAt';
     return unitAt(wx, wy);
   }
 
@@ -10806,8 +10832,33 @@ async function main() {
     // can be selected by its visible body. Our own unit is a
     // real selection; anyone else's is an information selection
     // through the animal path's machinery (selectAnimal).
+    // FIX #21 (bot-loop selpick): the one selpick line for
+    // this click — the resolved candidate and the stage that
+    // resolved it (selectionAt's substage, read from
+    // selectionAt.lastStage, or one of this handler's own
+    // fallback stages below, or 'none' for the null case).
+    // Emitted at each terminal point of the plain-click path,
+    // before the branch consumes the candidate — exactly once
+    // per plain click, in the `pick` line's style.
+    // Instrumentation only: occLog is inert without
+    // ?occlog=1, and nothing here touches selection state.
+    const logSelPick = (picked, stage, kind, owner) => {
+      if (typeof occLog !== 'function') return;
+      let k = kind;
+      let o = owner;
+      if (k === undefined) {
+        const pst = entityState();
+        k = picked != null ? (pst.kinds[picked] ?? null) : null;
+        o = picked != null ? (pst.owners[picked] ?? null) : null;
+      }
+      occLog({
+        ev: 'selpick', wx, wy, shift: ev.shiftKey, picked, stage,
+        pickedKind: k, pickedOwner: o,
+      });
+    };
     const v = selectionAt(wx, wy);
     if (v != null && isOwnUnit(entityState(), v)) {
+      logSelPick(v, selectionAt.lastStage);
       if (ev.shiftKey) {
         const next = new Set(selection);
         if (next.has(v)) next.delete(v);
@@ -10819,6 +10870,7 @@ async function main() {
       playSelectAck();
     } else if (!ev.shiftKey) {
       if (v != null) {
+        logSelPick(v, selectionAt.lastStage);
         selectAnimal(v);
         return;
       }
@@ -10831,6 +10883,7 @@ async function main() {
       // stays as the fallback if the picks ever diverge.)
       const occ = occludedUnitAt(wx, wy);
       if (occ != null) {
+        logSelPick(occ, 'outline-fallback');
         if (isOwnUnit(entityState(), occ)) {
           selectUnits(new Set([occ]));
           playSelectAck();
@@ -10848,6 +10901,7 @@ async function main() {
       // panels gate on it).
       const a = animalAt(wx, wy);
       if (a != null) {
+        logSelPick(a, 'animal');
         selectAnimal(a);
         return;
       }
@@ -10858,18 +10912,26 @@ async function main() {
       // explored; in the black the click is plain empty ground.
       if (tc != null && (st.owners[tc] === localOwner
           || cellExploredW(st.pos[tc * 2], st.pos[tc * 2 + 1]))) {
+        logSelPick(tc, 'tc');
         selectBuilding({ type: 'tc', id: tc, owner: st.owners[tc] });
         playSelectAck();
       } else {
         const b = buildingAt(wx, wy);
         if (b && (b.owner !== foeOwner() || cellExploredW(b.x, b.y))) {
+          logSelPick(b.id, 'building', b.kind, b.owner);
           selectBuilding({ type: 'building', id: b.id, kind: b.kind, owner: b.owner });
           playSelectAck();
         } else {
+          logSelPick(null, 'none');
           occDeselect('empty-ground'); // FIX #18 (occorder21)
           selectUnits(new Set());
         }
       }
+    } else {
+      // Shift held and selectionAt named nobody of ours (a
+      // non-own candidate, or nothing): the handler changes
+      // no selection — the click still gets its selpick line.
+      logSelPick(v, v != null ? selectionAt.lastStage : 'none');
     }
   });
   canvas.addEventListener('dblclick', (ev) => {
