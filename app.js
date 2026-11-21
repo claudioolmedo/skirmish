@@ -858,6 +858,66 @@ function occDeselect(via) {
   }
 }
 
+// QUALITYLOG (bot-loop qualitylog, 2026-11-21): quality/fog
+// instrumentation, client-only, ?occlog=1 only — the
+// discriminating instrument for the qualitymm defect (runs
+// #451/#452: after Medium→Low→Medium the minimap showed NO
+// terrain fill except a small patch around the base in every
+// state, explored ground revealed by the Scout never appeared
+// on it, and the main ground at Medium SOMETIMES rendered flat
+// — the Low cosmetic set — including once after a hard reload).
+// The qualitymm scoping handoff proved the switch reversible
+// through the real modules in a stub DOM, so the defect lives
+// in state that harness cannot see: the live session's fog, or
+// the governor's live level vs the menu's active button, or the
+// real minimap canvas. This instrument records exactly those
+// three readings, from the REAL render path: draw() calls
+// occQualState(mmTerrainCells) once per rendered frame, AFTER
+// that frame's ground pass and renderMinimap, with the census
+// renderMinimap itself returned for the terrain fillRects it
+// issued and a census of the same FOG snapshot the frame drew
+// from — never a parallel computation that could diverge.
+// Emission is throttled to one line per 60 rendered frames,
+// plus one line on the first frame after qualLogRequest():
+// applyQuality (every quality change, manual or governor),
+// setPaused opening the pause menu, and the three match-entry
+// resets (resetSim / adoptSim / adoptLoadedSim — Restart and
+// every match start) each request one, so a live capture holds
+// a qualstate line at every discriminating moment. Inert
+// without the flag, exactly like occDeselect above: occLog
+// returns before recording anything, the request flag and the
+// frame counter are invisible client state, and no behaviour
+// changes either way — no render, quality, fog or sim logic
+// moves; this block only READS live state at draw time.
+let qualLogFrameCount = 0;
+let qualLogPending = false;
+function qualLogRequest() {
+  qualLogPending = true;
+}
+function fogCensus(fog) {
+  let fog0 = 0, fog1 = 0, fog2 = 0;
+  if (fog) {
+    for (let i = 0; i < fog.length; i++) {
+      if (fog[i] === 0) fog0++;
+      else if (fog[i] === 1) fog1++;
+      else if (fog[i] === 2) fog2++;
+    }
+  }
+  return { fog0, fog1, fog2 };
+}
+function occQualState(mmTerrainCells) {
+  qualLogFrameCount += 1;
+  const forced = qualLogPending;
+  qualLogPending = false;
+  if (!forced && qualLogFrameCount % 60 !== 0) return;
+  if (typeof occLog !== 'function') return;
+  const c = fogCensus(FOG);
+  occLog({
+    ev: 'qualstate', level: governor.level, groundStrokes: !!Q.groundStrokes,
+    fog0: c.fog0, fog1: c.fog1, fog2: c.fog2, mmTerrainCells,
+  });
+}
+
 // SEL-05: the selection cap (the rulebook's number).
 const SELECTION_CAP = 60;
 
@@ -2844,6 +2904,7 @@ function applyQuality(level, { announce = false } = {}) {
   dprScale = Math.min(window.devicePixelRatio || 1, Q.dprCap);
   fitCanvas();
   updateQualityUi();
+  qualLogRequest(); // QUALITYLOG: the next rendered frame reports the new level
   if (announce) {
     flash(t('flash.qualitySet', { name: t('quality.' + level) }));
   }
@@ -4752,6 +4813,9 @@ function setPaused(v) {
   const wasPaused = paused;
   paused = v;
   pauseMenu.style.display = paused ? 'flex' : 'none';
+  // QUALITYLOG: a pause OPEN asks the next rendered frame for a
+  // qualstate line (level truth vs the menu's active button).
+  if (v && !wasPaused) qualLogRequest();
   syncCaptureOverlay();
   // Generated audio: the menu's own open/close cues.
   if (wasPaused !== paused) playAudioCue(paused ? 'menuOpen' : 'menuClose');
@@ -5064,6 +5128,7 @@ function resetSim(mode = matchMode) {
   seenProjKeys.clear();
   for (const k of Object.keys(UNIT_POSE_STATE)) delete UNIT_POSE_STATE[k];
   occDeselect('restart'); // FIX #18 (occorder21): a (re)started match clears the selection
+  qualLogRequest(); // QUALITYLOG: the fresh match's first frames report qualstate
   selectUnits(new Set()); // also clears any building selection
   placement = null;
   // Bot-loop (2026-11-02): armed targeting belongs to the OLD match —
@@ -5188,6 +5253,7 @@ function adoptSim(newSim, owner) {
   seenProjKeys.clear();
   for (const k of Object.keys(UNIT_POSE_STATE)) delete UNIT_POSE_STATE[k];
   occDeselect('restart'); // FIX #18 (occorder21): a (re)started match clears the selection
+  qualLogRequest(); // QUALITYLOG: the fresh match's first frames report qualstate
   selectUnits(new Set());
   placement = null;
   // Bot-loop (2026-11-02): same disarm as resetSim — an online or
@@ -7385,6 +7451,7 @@ function adoptLoadedSim(loaded) {
   seenProjKeys.clear();
   for (const k of Object.keys(UNIT_POSE_STATE)) delete UNIT_POSE_STATE[k];
   occDeselect('restart'); // FIX #18 (occorder21): a (re)started match clears the selection
+  qualLogRequest(); // QUALITYLOG: the fresh match's first frames report qualstate
   selectUnits(new Set()); // also clears any building selection
   placement = null;
   controlGroups.clear();
@@ -9794,6 +9861,84 @@ async function main() {
     return null;
   }
 
+  // Placed-building ART hit test (FIX #23, bot-loop bldgsel,
+  // 2026-11-21): the selection fallback for a click on a placed
+  // building's drawn art ABOVE the ground plane — the
+  // generalisation of tcArtAt (FIX #22) named as that fix's
+  // residual. buildingAt above tests the click's GROUND point
+  // against the footprint box, but the art rises straight up
+  // the screen from that footprint (drawBarracks: width 13.5,
+  // base +2.6; drawHouse: HOUSE_W 8.6, HOUSE_DY 2.0) — a click
+  // on the roof converts to a ground point displaced
+  // north-west of the centre (screen-up is the (-d, -d) world
+  // direction), past the footprint edge on one or both axes:
+  // the click named no unit and no building and the plain-
+  // click handler fell through to its empty-ground deselect
+  // (the old "Barracks roof click cleared" sightings; staged
+  // per-pixel in play/bldgsel.test.mjs on the pristine FIX #22
+  // build: five Barracks roof/tower pixels and four House
+  // roof/chimney pixels, every one solid art — alpha 255,
+  // solid 5x5 neighbourhood in the shipped sprite — and every
+  // one deselecting). In DE the building is the large object:
+  // clicking any visible part of it selects it. So the click
+  // is decomposed against the building's centre in SCREEN
+  // space — ix = dxw - dyw, iy = (dxw + dyw) / 2, the w2s
+  // axes — and tested against the kind's art bands, stepped
+  // UNDER the sprite's measured per-row alpha silhouette
+  // (barracks.png 243x253, house.png 237x273: the rows are
+  // solid, and each band's ix interval fits every sprite row
+  // in its iy interval, so a claimed pixel is opaque art;
+  // the silhouettes' diagonal notches and the blit rect's
+  // transparent margins claim nothing). Only the two staged
+  // kinds carry bands (House 0, Barracks 2); every other kind
+  // keeps its ground-only reading, unstaged here. The bands'
+  // bottom edges ride the draw contracts' base offsets
+  // (House +2.0, Barracks +2.6); the body bands' lower corners
+  // sit over the footprint diamond, where buildingAt has
+  // already named the building — the fallback is reachable
+  // only above/behind it. Selection-only by its call site
+  // (the plain-click handler's building fallback, consulted
+  // only where buildingAt named nothing and after every unit
+  // pick has named nothing); buildingAt's other callers
+  // (orders, repair, garrison) keep the ground-only test,
+  // untouched.
+  const BUILDING_ART_BANDS = {
+    0: [ // House (drawHouse: 8.6 wide, base +2.0; silhouette
+      // widens from the chimney [1.76, 2.34] at iy -7.62 to
+      // [-3.86, 4.01] at iy -3.99)
+      [-7.6, -7.0, 1.8, 2.3],
+      [-7.0, -6.3, 0.7, 2.55],
+      [-6.3, -5.7, -0.8, 2.9],
+      [-5.7, -4.9, -2.0, 3.1],
+      [-4.9, -4.2, -3.0, 3.6],
+      [-4.2, 2.0, -3.6, 3.6],
+    ],
+    2: [ // Barracks (drawBarracks: 13.5 wide, base +2.6;
+      // silhouette widens from the tower tip [2.81, 4.03] at
+      // iy -11.01 to [-5.81, 5.75] at iy -6.12)
+      [-11.0, -10.3, 2.9, 4.0],
+      [-10.3, -9.2, 1.4, 4.3],
+      [-9.2, -8.1, -0.6, 4.9],
+      [-8.1, -7.4, -2.9, 5.5],
+      [-7.4, -6.2, -4.2, 5.6],
+      [-6.2, 2.6, -5.5, 5.5],
+    ],
+  };
+  function buildingArtAt(wx, wy) {
+    for (const b of buildingList()) {
+      const bands = BUILDING_ART_BANDS[b.kind];
+      if (!bands) continue;
+      const dxw = wx - b.x;
+      const dyw = wy - b.y;
+      const ix = dxw - dyw;
+      const iy = (dxw + dyw) / 2;
+      for (const [top, bottom, lo, hi] of bands) {
+        if (iy >= top && iy <= bottom && ix >= lo && ix <= hi) return b;
+      }
+    }
+    return null;
+  }
+
   // Town Center hit test: the TC whose footprint box (pos ± tcHalf()
   // on both axes) contains the point — deliberately more generous
   // than unitAt's pick radius, since the TC is a big building.
@@ -9804,6 +9949,57 @@ async function main() {
       if (kinds[i] !== KIND_TC) continue;
       if (Math.abs(pos[i * 2] - wx) <= tcHalf() &&
           Math.abs(pos[i * 2 + 1] - wy) <= tcHalf()) return i;
+    }
+    return null;
+  }
+
+  // Town Center ART hit test (FIX #22, bot-loop tcsel, run
+  // #452): the selection fallback for a click on the TC's
+  // drawn art ABOVE the ground plane. tcAt above tests the
+  // click's GROUND point against the footprint box, but the
+  // art rises straight up the screen from that footprint —
+  // a click on the roof or a tower converts to a ground
+  // point displaced north-west of the centre (screen-up is
+  // the (-d, -d) world direction, the tree-canopy / Ram-body
+  // family), up to ~11.5 wu out, past the ±8 footprint edge:
+  // the click named no unit and no building and the plain-
+  // click handler fell through to its empty-ground deselect
+  // ("No selection" on a click squarely on the TC's roof,
+  // live proof #452 — with or without an enemy under the
+  // porch; the pixels that DO land inside the footprint
+  // select the TC as always). In DE the building is the
+  // large object: clicking any visible part of it selects
+  // it. So the click is decomposed against the TC's centre
+  // in SCREEN space — ix = screen-x offset, iy = screen-y
+  // offset, both in camS units (the w2s projection's own
+  // axes: ix = dxw - dyw, iy = (dxw + dyw) / 2) — and tested
+  // against the art's content bands, read off drawTC's
+  // sprite contract (width tcArtCells x CS x 1.12 = 17.92,
+  // bottom anchored 4.4 above the sprite's bottom edge) and
+  // the Base44 art's measured alpha content: the main body
+  // spans ix in [-8.0, 8.0] for iy in [-5.9, 1.75], and the
+  // narrower upperworks (roof block and tower tops) span
+  // |ix| <= 4.5 for iy in [-11.5, 1.75]. Conservative by
+  // construction, like UNIT_BODY_BOX: the transparent
+  // margins of the blit rect claim nothing. Selection-only
+  // by its call site (the plain-click handler's building
+  // fallback, consulted only after every unit pick has
+  // named nothing — a pixel that names a hidden foe through
+  // FIX #20's creators still selects the foe, exactly as
+  // before); tcAt's other callers (orders, repair, garrison)
+  // keep the ground-only test, untouched.
+  function tcArtAt(wx, wy) {
+    const kinds = sim.entity_kinds();
+    const pos = sim.positions();
+    for (let i = 0; i < kinds.length; i++) {
+      if (kinds[i] !== KIND_TC) continue;
+      const dxw = wx - pos[i * 2];
+      const dyw = wy - pos[i * 2 + 1];
+      const ix = dxw - dyw;
+      const iy = (dxw + dyw) / 2;
+      if (iy < -11.5 || iy > 1.75) continue;
+      if (Math.abs(ix) <= 8.0 && iy >= -5.9) return i;
+      if (Math.abs(ix) <= 4.5) return i;
     }
     return null;
   }
@@ -10950,19 +11146,42 @@ async function main() {
         return;
       }
       const tc = tcAt(wx, wy);
+      // FIX #22 (bot-loop tcsel, run #452): the art fallback —
+      // a click on the TC's drawn art above the ground plane
+      // converts to a ground point outside the footprint box
+      // tcAt tests, so the roof/tower pixels fell through to
+      // the empty-ground deselect below. Consult tcArtAt only
+      // where tcAt named nothing (every ground click keeps
+      // its old reading), and only here, after every unit
+      // pick above has named nothing — a pixel that names a
+      // hidden foe through FIX #20's creators never reaches
+      // this fallback and still selects the foe.
+      const tcArt = tc === null ? tcArtAt(wx, wy) : null;
+      const tcPick = tc !== null ? tc : tcArt;
       const st = entityState();
       // M7: information selection obeys fog too — an enemy Town
       // Center or building selects only once its ground is
       // explored; in the black the click is plain empty ground.
-      if (tc != null && (st.owners[tc] === localOwner
-          || cellExploredW(st.pos[tc * 2], st.pos[tc * 2 + 1]))) {
-        logSelPick(tc, 'tc');
-        selectBuilding({ type: 'tc', id: tc, owner: st.owners[tc] });
+      if (tcPick != null && (st.owners[tcPick] === localOwner
+          || cellExploredW(st.pos[tcPick * 2], st.pos[tcPick * 2 + 1]))) {
+        logSelPick(tcPick, tc !== null ? 'tc' : 'tc-art');
+        selectBuilding({ type: 'tc', id: tcPick, owner: st.owners[tcPick] });
         playSelectAck();
       } else {
-        const b = buildingAt(wx, wy);
+        // FIX #23 (bot-loop bldgsel, 2026-11-21): the art
+        // fallback — a click on a placed building's drawn art
+        // above the ground plane converts to a ground point
+        // outside the footprint box buildingAt tests, so the
+        // roof pixels fell through to the empty-ground deselect
+        // below. Consult buildingArtAt only where buildingAt
+        // named nothing (every ground click keeps its old
+        // reading), and only here, after every unit pick above
+        // and the TC readings have named nothing; the fog gate
+        // below applies to the art pick unchanged.
+        const bGround = buildingAt(wx, wy);
+        const b = bGround !== null ? bGround : buildingArtAt(wx, wy);
         if (b && (b.owner !== foeOwner() || cellExploredW(b.x, b.y))) {
-          logSelPick(b.id, 'building', b.kind, b.owner);
+          logSelPick(b.id, bGround !== null ? 'building' : 'building-art', b.kind, b.owner);
           selectBuilding({ type: 'building', id: b.id, kind: b.kind, owner: b.owner });
           playSelectAck();
         } else {
@@ -19556,6 +19775,7 @@ function draw() {
   // Minimap: reuses this frame's nodes/buildings/entity state, so
   // it costs no extra ABI calls. Gaia animals get their own dot
   // colors; the dead are skipped.
+  let mmTerrainCells = 0; // QUALITYLOG census for this frame (0 = the minimap pass painted no terrain)
   if (mmGeom) {
     const GAIA_COLORS = { 5: '#cfd4d8', 6: '#a2532f', 7: '#c9a35f', 21: '#e8c95a' };
     const mmEntities = [];
@@ -19586,7 +19806,7 @@ function draw() {
         selected: selection.has(i),
       });
     }
-    renderMinimap(mmCtx, mmGeom, {
+    const mmResult = renderMinimap(mmCtx, mmGeom, {
       gridW: GW, gridH: GH, cellSize: CS, obstacles: OBST,
       // M7: terrain + heights + fog — the minimap's ground IS the
       // world as the local player knows it (VIS-10).
@@ -19622,7 +19842,14 @@ function draw() {
       })(),
       cam: { s: camS, ox: camOx, oy: camOy, viewW: W, viewH: H },
     });
+    if (mmResult && typeof mmResult.terrainCells === 'number') {
+      mmTerrainCells = mmResult.terrainCells;
+    }
   }
+  // QUALITYLOG: the frame is fully rendered (ground pass +
+  // minimap) — report its qualstate on the throttled cadence,
+  // or on this frame when an event requested one.
+  occQualState(mmTerrainCells);
 }
 
 main().catch((e) => {

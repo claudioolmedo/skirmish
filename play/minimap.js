@@ -191,10 +191,20 @@ function drawDiamond(ctx, g, cxWorld, cyWorld, halfWorld, fill) {
  * The caller pre-filters nodes/buildings/entities by the same fog;
  * the base is the only part drawn here. Absent layers keep the
  * pre-M7 rendering exactly (the headless tests rely on it).
+ *
+ * Returns { terrainCells }: the number of terrain fillRects the
+ * per-cell pass issued this call (gridW * gridH when the fog +
+ * terrain pass ran, 0 when it did not — no layers, or a context
+ * without setTransform). QUALITYLOG instrumentation (bot-loop
+ * qualitylog, 2026-11-21): app.js reads this census off the REAL
+ * render to report what the minimap pass actually painted; the
+ * count changes no drawing, and callers that ignore the return
+ * are unaffected.
  */
 export function renderMinimap(ctx, g, state) {
   const H = g.worldHalf;
   const { gridW, gridH, cellSize, obstacles } = state;
+  let terrainCells = 0; // QUALITYLOG census: terrain fillRects issued below
 
   // Ground.
   diamondPath(ctx, g);
@@ -235,6 +245,7 @@ export function renderMinimap(ctx, g, state) {
             ctx.fillStyle = f === 2 ? MM_LAND[h] : MM_LAND_DIM[h];
           }
           ctx.fillRect(gx, gy, 1, 1);
+          terrainCells += 1;
         }
       }
       ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -360,4 +371,6 @@ export function renderMinimap(ctx, g, state) {
   ctx.strokeStyle = 'rgba(232, 227, 213, 0.55)';
   ctx.lineWidth = 1;
   ctx.stroke();
+
+  return { terrainCells };
 }

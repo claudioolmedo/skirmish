@@ -298,6 +298,11 @@ export class WasmSim {
      */
     static load_game(bytes: Uint8Array): WasmSim | undefined;
     /**
+     * The map kind tag this match runs under (MAP03-C0):
+     * 0 = Arabia (the only kind today).
+     */
+    map_kind_tag(): number;
+    /**
      * The live trade prices as a flat array in canonical
      * commodity order, sell then buy per commodity:
      * [sell_food, buy_food, sell_wood, buy_wood, sell_stone,
@@ -394,6 +399,26 @@ export class WasmSim {
      * golden included — do not move.
      */
     static new_match_victory_teams(seed: number, mode_tag: number, time_limit_ticks: number, score_target: number, flags: number, teams: number): WasmSim;
+    /**
+     * Create a match under explicit victory settings, team
+     * settings AND a map kind (MAP03-C0): `new_match_victory_teams`
+     * plus the kind tag — 0 = Arabia, the only kind today. An
+     * unknown tag falls back to Arabia (the `new_match` mode-tag
+     * discipline: a kind this build does not carry cannot be
+     * generated). This is a NEW export rather than a widened
+     * `new_match_victory_teams`, for the T1 reason: the old
+     * export keeps its exact meaning, and the client falls back
+     * to it when this one is absent (a stale wasm), losing the
+     * kind pick exactly the way a stale wasm loses the team
+     * pick, with netplay's construction-hash check refusing a
+     * mixed pair once a non-default kind exists. Tag 0 builds a
+     * sim identical to `new_match_victory_teams`'s: the kind
+     * joins the hash only while non-default, so default streams
+     * — the golden included — do not move. No client calls this
+     * yet: the lobby still offers Arabia alone, and the kind
+     * selector ships with the first real second kind (C1).
+     */
+    static new_match_victory_teams_kind(seed: number, mode_tag: number, time_limit_ticks: number, score_target: number, flags: number, teams: number, kind_tag: number): WasmSim;
     /**
      * Resource nodes as a flat array: five values per node —
      * `[id, x, y, kind, amount_left]` — in node id order. `kind` tags:
@@ -1644,6 +1669,7 @@ export interface InitOutput {
     readonly wasmsim_koth_owner: (a: number) => number;
     readonly wasmsim_koth_ticks_left: (a: number) => number;
     readonly wasmsim_load_game: (a: number, b: number) => number;
+    readonly wasmsim_map_kind_tag: (a: number) => number;
     readonly wasmsim_market_prices: (a: number) => [number, number];
     readonly wasmsim_market_rates: (a: number) => [number, number];
     readonly wasmsim_match_state: (a: number) => number;
@@ -1655,6 +1681,7 @@ export interface InitOutput {
     readonly wasmsim_new_match: (a: number, b: number) => number;
     readonly wasmsim_new_match_victory: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly wasmsim_new_match_victory_teams: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
+    readonly wasmsim_new_match_victory_teams_kind: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
     readonly wasmsim_nodes: (a: number) => [number, number];
     readonly wasmsim_obstacles: (a: number) => [number, number];
     readonly wasmsim_population: (a: number) => number;
