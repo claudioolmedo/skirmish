@@ -858,6 +858,66 @@ function occDeselect(via) {
   }
 }
 
+// QUALITYLOG (bot-loop qualitylog, 2026-11-21): quality/fog
+// instrumentation, client-only, ?occlog=1 only — the
+// discriminating instrument for the qualitymm defect (runs
+// #451/#452: after Medium→Low→Medium the minimap showed NO
+// terrain fill except a small patch around the base in every
+// state, explored ground revealed by the Scout never appeared
+// on it, and the main ground at Medium SOMETIMES rendered flat
+// — the Low cosmetic set — including once after a hard reload).
+// The qualitymm scoping handoff proved the switch reversible
+// through the real modules in a stub DOM, so the defect lives
+// in state that harness cannot see: the live session's fog, or
+// the governor's live level vs the menu's active button, or the
+// real minimap canvas. This instrument records exactly those
+// three readings, from the REAL render path: draw() calls
+// occQualState(mmTerrainCells) once per rendered frame, AFTER
+// that frame's ground pass and renderMinimap, with the census
+// renderMinimap itself returned for the terrain fillRects it
+// issued and a census of the same FOG snapshot the frame drew
+// from — never a parallel computation that could diverge.
+// Emission is throttled to one line per 60 rendered frames,
+// plus one line on the first frame after qualLogRequest():
+// applyQuality (every quality change, manual or governor),
+// setPaused opening the pause menu, and the three match-entry
+// resets (resetSim / adoptSim / adoptLoadedSim — Restart and
+// every match start) each request one, so a live capture holds
+// a qualstate line at every discriminating moment. Inert
+// without the flag, exactly like occDeselect above: occLog
+// returns before recording anything, the request flag and the
+// frame counter are invisible client state, and no behaviour
+// changes either way — no render, quality, fog or sim logic
+// moves; this block only READS live state at draw time.
+let qualLogFrameCount = 0;
+let qualLogPending = false;
+function qualLogRequest() {
+  qualLogPending = true;
+}
+function fogCensus(fog) {
+  let fog0 = 0, fog1 = 0, fog2 = 0;
+  if (fog) {
+    for (let i = 0; i < fog.length; i++) {
+      if (fog[i] === 0) fog0++;
+      else if (fog[i] === 1) fog1++;
+      else if (fog[i] === 2) fog2++;
+    }
+  }
+  return { fog0, fog1, fog2 };
+}
+function occQualState(mmTerrainCells) {
+  qualLogFrameCount += 1;
+  const forced = qualLogPending;
+  qualLogPending = false;
+  if (!forced && qualLogFrameCount % 60 !== 0) return;
+  if (typeof occLog !== 'function') return;
+  const c = fogCensus(FOG);
+  occLog({
+    ev: 'qualstate', level: governor.level, groundStrokes: !!Q.groundStrokes,
+    fog0: c.fog0, fog1: c.fog1, fog2: c.fog2, mmTerrainCells,
+  });
+}
+
 // SEL-05: the selection cap (the rulebook's number).
 const SELECTION_CAP = 60;
 
@@ -2844,6 +2904,7 @@ function applyQuality(level, { announce = false } = {}) {
   dprScale = Math.min(window.devicePixelRatio || 1, Q.dprCap);
   fitCanvas();
   updateQualityUi();
+  qualLogRequest(); // QUALITYLOG: the next rendered frame reports the new level
   if (announce) {
     flash(t('flash.qualitySet', { name: t('quality.' + level) }));
   }
@@ -4752,6 +4813,9 @@ function setPaused(v) {
   const wasPaused = paused;
   paused = v;
   pauseMenu.style.display = paused ? 'flex' : 'none';
+  // QUALITYLOG: a pause OPEN asks the next rendered frame for a
+  // qualstate line (level truth vs the menu's active button).
+  if (v && !wasPaused) qualLogRequest();
   syncCaptureOverlay();
   // Generated audio: the menu's own open/close cues.
   if (wasPaused !== paused) playAudioCue(paused ? 'menuOpen' : 'menuClose');
@@ -5064,6 +5128,7 @@ function resetSim(mode = matchMode) {
   seenProjKeys.clear();
   for (const k of Object.keys(UNIT_POSE_STATE)) delete UNIT_POSE_STATE[k];
   occDeselect('restart'); // FIX #18 (occorder21): a (re)started match clears the selection
+  qualLogRequest(); // QUALITYLOG: the fresh match's first frames report qualstate
   selectUnits(new Set()); // also clears any building selection
   placement = null;
   // Bot-loop (2026-11-02): armed targeting belongs to the OLD match —
@@ -5188,6 +5253,7 @@ function adoptSim(newSim, owner) {
   seenProjKeys.clear();
   for (const k of Object.keys(UNIT_POSE_STATE)) delete UNIT_POSE_STATE[k];
   occDeselect('restart'); // FIX #18 (occorder21): a (re)started match clears the selection
+  qualLogRequest(); // QUALITYLOG: the fresh match's first frames report qualstate
   selectUnits(new Set());
   placement = null;
   // Bot-loop (2026-11-02): same disarm as resetSim — an online or
@@ -7385,6 +7451,7 @@ function adoptLoadedSim(loaded) {
   seenProjKeys.clear();
   for (const k of Object.keys(UNIT_POSE_STATE)) delete UNIT_POSE_STATE[k];
   occDeselect('restart'); // FIX #18 (occorder21): a (re)started match clears the selection
+  qualLogRequest(); // QUALITYLOG: the fresh match's first frames report qualstate
   selectUnits(new Set()); // also clears any building selection
   placement = null;
   controlGroups.clear();
@@ -19556,6 +19623,7 @@ function draw() {
   // Minimap: reuses this frame's nodes/buildings/entity state, so
   // it costs no extra ABI calls. Gaia animals get their own dot
   // colors; the dead are skipped.
+  let mmTerrainCells = 0; // QUALITYLOG census for this frame (0 = the minimap pass painted no terrain)
   if (mmGeom) {
     const GAIA_COLORS = { 5: '#cfd4d8', 6: '#a2532f', 7: '#c9a35f', 21: '#e8c95a' };
     const mmEntities = [];
@@ -19586,7 +19654,7 @@ function draw() {
         selected: selection.has(i),
       });
     }
-    renderMinimap(mmCtx, mmGeom, {
+    const mmResult = renderMinimap(mmCtx, mmGeom, {
       gridW: GW, gridH: GH, cellSize: CS, obstacles: OBST,
       // M7: terrain + heights + fog — the minimap's ground IS the
       // world as the local player knows it (VIS-10).
@@ -19622,7 +19690,14 @@ function draw() {
       })(),
       cam: { s: camS, ox: camOx, oy: camOy, viewW: W, viewH: H },
     });
+    if (mmResult && typeof mmResult.terrainCells === 'number') {
+      mmTerrainCells = mmResult.terrainCells;
+    }
   }
+  // QUALITYLOG: the frame is fully rendered (ground pass +
+  // minimap) — report its qualstate on the throttled cadence,
+  // or on this frame when an event requested one.
+  occQualState(mmTerrainCells);
 }
 
 main().catch((e) => {
