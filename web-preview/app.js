@@ -9861,6 +9861,84 @@ async function main() {
     return null;
   }
 
+  // Placed-building ART hit test (FIX #23, bot-loop bldgsel,
+  // 2026-11-21): the selection fallback for a click on a placed
+  // building's drawn art ABOVE the ground plane — the
+  // generalisation of tcArtAt (FIX #22) named as that fix's
+  // residual. buildingAt above tests the click's GROUND point
+  // against the footprint box, but the art rises straight up
+  // the screen from that footprint (drawBarracks: width 13.5,
+  // base +2.6; drawHouse: HOUSE_W 8.6, HOUSE_DY 2.0) — a click
+  // on the roof converts to a ground point displaced
+  // north-west of the centre (screen-up is the (-d, -d) world
+  // direction), past the footprint edge on one or both axes:
+  // the click named no unit and no building and the plain-
+  // click handler fell through to its empty-ground deselect
+  // (the old "Barracks roof click cleared" sightings; staged
+  // per-pixel in play/bldgsel.test.mjs on the pristine FIX #22
+  // build: five Barracks roof/tower pixels and four House
+  // roof/chimney pixels, every one solid art — alpha 255,
+  // solid 5x5 neighbourhood in the shipped sprite — and every
+  // one deselecting). In DE the building is the large object:
+  // clicking any visible part of it selects it. So the click
+  // is decomposed against the building's centre in SCREEN
+  // space — ix = dxw - dyw, iy = (dxw + dyw) / 2, the w2s
+  // axes — and tested against the kind's art bands, stepped
+  // UNDER the sprite's measured per-row alpha silhouette
+  // (barracks.png 243x253, house.png 237x273: the rows are
+  // solid, and each band's ix interval fits every sprite row
+  // in its iy interval, so a claimed pixel is opaque art;
+  // the silhouettes' diagonal notches and the blit rect's
+  // transparent margins claim nothing). Only the two staged
+  // kinds carry bands (House 0, Barracks 2); every other kind
+  // keeps its ground-only reading, unstaged here. The bands'
+  // bottom edges ride the draw contracts' base offsets
+  // (House +2.0, Barracks +2.6); the body bands' lower corners
+  // sit over the footprint diamond, where buildingAt has
+  // already named the building — the fallback is reachable
+  // only above/behind it. Selection-only by its call site
+  // (the plain-click handler's building fallback, consulted
+  // only where buildingAt named nothing and after every unit
+  // pick has named nothing); buildingAt's other callers
+  // (orders, repair, garrison) keep the ground-only test,
+  // untouched.
+  const BUILDING_ART_BANDS = {
+    0: [ // House (drawHouse: 8.6 wide, base +2.0; silhouette
+      // widens from the chimney [1.76, 2.34] at iy -7.62 to
+      // [-3.86, 4.01] at iy -3.99)
+      [-7.6, -7.0, 1.8, 2.3],
+      [-7.0, -6.3, 0.7, 2.55],
+      [-6.3, -5.7, -0.8, 2.9],
+      [-5.7, -4.9, -2.0, 3.1],
+      [-4.9, -4.2, -3.0, 3.6],
+      [-4.2, 2.0, -3.6, 3.6],
+    ],
+    2: [ // Barracks (drawBarracks: 13.5 wide, base +2.6;
+      // silhouette widens from the tower tip [2.81, 4.03] at
+      // iy -11.01 to [-5.81, 5.75] at iy -6.12)
+      [-11.0, -10.3, 2.9, 4.0],
+      [-10.3, -9.2, 1.4, 4.3],
+      [-9.2, -8.1, -0.6, 4.9],
+      [-8.1, -7.4, -2.9, 5.5],
+      [-7.4, -6.2, -4.2, 5.6],
+      [-6.2, 2.6, -5.5, 5.5],
+    ],
+  };
+  function buildingArtAt(wx, wy) {
+    for (const b of buildingList()) {
+      const bands = BUILDING_ART_BANDS[b.kind];
+      if (!bands) continue;
+      const dxw = wx - b.x;
+      const dyw = wy - b.y;
+      const ix = dxw - dyw;
+      const iy = (dxw + dyw) / 2;
+      for (const [top, bottom, lo, hi] of bands) {
+        if (iy >= top && iy <= bottom && ix >= lo && ix <= hi) return b;
+      }
+    }
+    return null;
+  }
+
   // Town Center hit test: the TC whose footprint box (pos ± tcHalf()
   // on both axes) contains the point — deliberately more generous
   // than unitAt's pick radius, since the TC is a big building.
@@ -11090,9 +11168,20 @@ async function main() {
         selectBuilding({ type: 'tc', id: tcPick, owner: st.owners[tcPick] });
         playSelectAck();
       } else {
-        const b = buildingAt(wx, wy);
+        // FIX #23 (bot-loop bldgsel, 2026-11-21): the art
+        // fallback — a click on a placed building's drawn art
+        // above the ground plane converts to a ground point
+        // outside the footprint box buildingAt tests, so the
+        // roof pixels fell through to the empty-ground deselect
+        // below. Consult buildingArtAt only where buildingAt
+        // named nothing (every ground click keeps its old
+        // reading), and only here, after every unit pick above
+        // and the TC readings have named nothing; the fog gate
+        // below applies to the art pick unchanged.
+        const bGround = buildingAt(wx, wy);
+        const b = bGround !== null ? bGround : buildingArtAt(wx, wy);
         if (b && (b.owner !== foeOwner() || cellExploredW(b.x, b.y))) {
-          logSelPick(b.id, 'building', b.kind, b.owner);
+          logSelPick(b.id, bGround !== null ? 'building' : 'building-art', b.kind, b.owner);
           selectBuilding({ type: 'building', id: b.id, kind: b.kind, owner: b.owner });
           playSelectAck();
         } else {

@@ -193,6 +193,7 @@ function makeHarness(st, records, issued, flashes, occEntriesBundle) {
     cellVisibleW: () => true,
     cellExploredW: () => true,
     buildingAt: () => null,
+    buildingArtAt: () => null, // FIX #23: no placed buildings in this harness's scenes
     animalAt: () => null,
     nodeAt: () => null,
     treeCanopyAt: () => null,
