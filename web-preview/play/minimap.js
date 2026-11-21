@@ -115,6 +115,23 @@ export const MM_WATER_DIM = '#1d3a56';
 // lighter water, in full and pre-dimmed variants.
 export const MM_SHALLOWS = '#6dadd8';
 export const MM_SHALLOWS_DIM = '#3d5a74';
+// MAP03-B minimap colours (our own palette, matching the main
+// view's ground colours): dirt, sand, snow, ice, navigable
+// ice, beach, mangrove shallows — full and pre-dimmed variants.
+export const MM_DIRT = '#8a6b48';
+export const MM_DIRT_DIM = '#4a3a28';
+export const MM_SAND = '#c2a878';
+export const MM_SAND_DIM = '#6e5c3a';
+export const MM_SNOW = '#e8edf2';
+export const MM_SNOW_DIM = '#77808a';
+export const MM_ICE = '#a8c8dc';
+export const MM_ICE_DIM = '#59707f';
+export const MM_ICE_NAV = '#8fbcd8';
+export const MM_ICE_NAV_DIM = '#4c6575';
+export const MM_BEACH = '#b8a06a';
+export const MM_BEACH_DIM = '#655737';
+export const MM_MANGROVE = '#67a07e';
+export const MM_MANGROVE_DIM = '#37543f';
 export const BUILDING_COLOR = '#e8e3d5'; // own buildings when no color is given
 export const VIEWPORT_COLOR = 'rgba(255, 255, 255, 0.9)';
 export const SELECTED_COLOR = '#ffcf4d'; // matches the main view's selection gold
@@ -206,6 +223,13 @@ export function renderMinimap(ctx, g, state) {
           if (f === 0) ctx.fillStyle = SHROUD_COLOR;
           else if (state.terrain[i] === 1) ctx.fillStyle = f === 2 ? MM_WATER : MM_WATER_DIM;
           else if (state.terrain[i] === 2) ctx.fillStyle = f === 2 ? MM_SHALLOWS : MM_SHALLOWS_DIM;
+          else if (state.terrain[i] === 3) ctx.fillStyle = f === 2 ? MM_DIRT : MM_DIRT_DIM;
+          else if (state.terrain[i] === 4) ctx.fillStyle = f === 2 ? MM_SAND : MM_SAND_DIM;
+          else if (state.terrain[i] === 5) ctx.fillStyle = f === 2 ? MM_SNOW : MM_SNOW_DIM;
+          else if (state.terrain[i] === 6) ctx.fillStyle = f === 2 ? MM_ICE : MM_ICE_DIM;
+          else if (state.terrain[i] === 7) ctx.fillStyle = f === 2 ? MM_ICE_NAV : MM_ICE_NAV_DIM;
+          else if (state.terrain[i] === 8) ctx.fillStyle = f === 2 ? MM_BEACH : MM_BEACH_DIM;
+          else if (state.terrain[i] === 9) ctx.fillStyle = f === 2 ? MM_MANGROVE : MM_MANGROVE_DIM;
           else {
             const h = Math.min(4, (state.heights && state.heights[i]) || 0);
             ctx.fillStyle = f === 2 ? MM_LAND[h] : MM_LAND_DIM[h];

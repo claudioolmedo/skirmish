@@ -49,6 +49,38 @@ pub const TERRAIN_WATER: u8 = 1;
 /// MAP-08's study-era "no wading" parenthetical; the rulebook
 /// text amendment rides the complete-W1 commit, not this one.
 pub const TERRAIN_SHALLOWS: u8 = 2;
+/// Terrain tag: dirt — DE class 1 (ordinary land row: land Yes,
+/// ships No, build Full). MAP03-B: a real hashed sim tag with the
+/// land row (sk-02 D4); presentation differs, mechanics do not.
+/// No generator emits it yet (MAP03-B scope: types + gates only).
+pub const TERRAIN_DIRT: u8 = 3;
+/// Terrain tag: desert sand — DE class 1, the land row (MAP03-B).
+/// Distinct from the client's shoreline-sand rendering trick,
+/// which is derived presentation on any coast land cell.
+pub const TERRAIN_SAND: u8 = 4;
+/// Terrain tag: snow — DE class 1, the land row (MAP03-B). DE has
+/// no snow slowdown (sk-02 §a: forum suggestion, not mechanics).
+pub const TERRAIN_SNOW: u8 = 5;
+/// Terrain tag: ice — DE class 4: land Yes, ships No, build None
+/// (MAP03-B, sk-02 editor table).
+pub const TERRAIN_ICE: u8 = 6;
+/// Terrain tag: ice, navigable — DE class 5 (frozen shallows):
+/// land Yes, ships Yes, build None; counts water-side like
+/// shallows (MAP03-B, sk-02 editor table).
+pub const TERRAIN_ICE_NAV: u8 = 7;
+/// Terrain tag: beach — DE class 2 (navigable beach): land Yes,
+/// ships Yes, build WallsDocks only (MAP03-B). The build row is
+/// resolved from the wiki Scenario Editor table as the primary
+/// source (Walls/Docks only), superseding WATER-SPEC §1's
+/// UNVERIFIED note, per the MAP03 scoping handoff. Beach counts
+/// water-side and also counts as the land side of a Dock
+/// straddle: it is the shoreline itself.
+pub const TERRAIN_BEACH: u8 = 8;
+/// Terrain tag: mangrove shallows — DE class 6b (Rise of the
+/// Rajas amphibious terrain): land Yes, ships Yes, build FULL —
+/// the one water-side terrain buildings may stand on (MAP03-B,
+/// sk-02 D2).
+pub const TERRAIN_MANGROVE_SHALLOWS: u8 = 9;
 
 /// MAP03-A: the single terrain table — one row per existing tag,
 /// the only place the passability / water-side / buildability
@@ -64,6 +96,21 @@ pub const TERRAIN_SHALLOWS: u8 = 2;
 /// `is_water` / `is_shallows` answer "is this exactly that tag",
 /// which map validation, the floods and the Dock straddle mean
 /// literally — they are not passability facts.
+/// A terrain's build class (MAP03-B, sk-02 Phase 1 step 1): how
+/// `Sim::validate_build`'s terrain half treats a footprint cell
+/// of this terrain. `Full` admits every villager-built kind;
+/// `None` refuses all construction on the terrain (the Dock's
+/// shoreline straddle and the Fish Trap's water cell are their
+/// own placement branches and do not read this class); the
+/// `WallsDocks` class (DE beach, class 2) admits walls — and the
+/// Dock, through its straddle — and refuses everything else.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BuildClass {
+    Full,
+    None,
+    WallsDocks,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TerrainRow {
     /// A land-domain unit may enter a cell of this terrain
@@ -77,39 +124,107 @@ pub struct TerrainRow {
     pub water_side: bool,
     /// A Normal-placement building may stand on this terrain
     /// (the terrain half of `validate_build`; obstruction,
-    /// reserve, unit and price checks are separate).
+    /// reserve, unit and price checks are separate). Exactly
+    /// `build_class == BuildClass::Full` — kept as a field so
+    /// the MAP03-A readers keep their shape.
     pub buildable: bool,
+    /// The terrain's build class (MAP03-B): the placement half
+    /// of the row. `validate_build` admits a wall on a
+    /// `WallsDocks` cell even though `buildable` is false there.
+    pub build_class: BuildClass,
 }
 
-/// The table rows for the existing tags, indexed by tag value:
-/// land (0), deep water (1), shallows (2) — exactly the readings
-/// the pre-refactor comparisons produced for those tags.
-const TERRAIN_TABLE: [TerrainRow; 3] = [
-    // TERRAIN_LAND: ordinary land.
+/// The table rows, indexed by tag value: land (0), deep water
+/// (1), shallows (2) — exactly the readings the pre-refactor
+/// comparisons produced for those tags — plus the MAP03-B tags
+/// (3..=9) with their documented DE rows (sk-02's class table).
+const TERRAIN_TABLE: [TerrainRow; 10] = [
+    // TERRAIN_LAND: ordinary land (class 1).
     TerrainRow {
         land_passable: true,
         ship_passable: false,
         water_side: false,
         buildable: true,
+        build_class: BuildClass::Full,
     },
-    // TERRAIN_WATER: deep water.
+    // TERRAIN_WATER: deep water (class 7).
     TerrainRow {
         land_passable: false,
         ship_passable: true,
         water_side: true,
         buildable: false,
+        build_class: BuildClass::None,
     },
-    // TERRAIN_SHALLOWS: amphibious — both domains enter, counts
-    // water-side, and no building is constructed on shallows.
+    // TERRAIN_SHALLOWS: amphibious (class 6) — both domains
+    // enter, counts water-side, no building stands on it.
     TerrainRow {
         land_passable: true,
         ship_passable: true,
         water_side: true,
         buildable: false,
+        build_class: BuildClass::None,
+    },
+    // TERRAIN_DIRT / SAND / SNOW: DE class 1 — the land row.
+    TerrainRow {
+        land_passable: true,
+        ship_passable: false,
+        water_side: false,
+        buildable: true,
+        build_class: BuildClass::Full,
+    },
+    TerrainRow {
+        land_passable: true,
+        ship_passable: false,
+        water_side: false,
+        buildable: true,
+        build_class: BuildClass::Full,
+    },
+    TerrainRow {
+        land_passable: true,
+        ship_passable: false,
+        water_side: false,
+        buildable: true,
+        build_class: BuildClass::Full,
+    },
+    // TERRAIN_ICE: DE class 4 — walkable, ships refused,
+    // nothing builds on ice.
+    TerrainRow {
+        land_passable: true,
+        ship_passable: false,
+        water_side: false,
+        buildable: false,
+        build_class: BuildClass::None,
+    },
+    // TERRAIN_ICE_NAV: DE class 5 — frozen shallows: both
+    // domains enter, counts water-side, build None.
+    TerrainRow {
+        land_passable: true,
+        ship_passable: true,
+        water_side: true,
+        buildable: false,
+        build_class: BuildClass::None,
+    },
+    // TERRAIN_BEACH: DE class 2 — both domains enter, counts
+    // water-side, build WallsDocks only.
+    TerrainRow {
+        land_passable: true,
+        ship_passable: true,
+        water_side: true,
+        buildable: false,
+        build_class: BuildClass::WallsDocks,
+    },
+    // TERRAIN_MANGROVE_SHALLOWS: DE class 6b — both domains
+    // enter, counts water-side, build FULL.
+    TerrainRow {
+        land_passable: true,
+        ship_passable: true,
+        water_side: true,
+        buildable: true,
+        build_class: BuildClass::Full,
     },
 ];
 
-/// The row for an unassigned tag (≥ 3): the exact fallthrough the
+/// The row for an unassigned tag (≥ 10): the exact fallthrough the
 /// pre-refactor comparisons produced for a tag none of them
 /// named — passable to both domains (neither `== WATER` nor
 /// `== LAND` refused it), not water-side, not shallows (so the
@@ -122,6 +237,7 @@ const TERRAIN_ROW_UNASSIGNED: TerrainRow = TerrainRow {
     ship_passable: true,
     water_side: false,
     buildable: true,
+    build_class: BuildClass::Full,
 };
 
 /// The terrain table row for a tag (MAP03-A). Pure lookup, no
@@ -292,23 +408,41 @@ impl Grid {
         terrain_row(self.terrain_at(x, y)).buildable
     }
 
-    /// The terrain tag of a possibly out-of-bounds neighbour
-    /// position: out of bounds reads as deep water, exactly as
-    /// `terrain_at` reads the edge (the wall at the world's edge).
-    fn terrain_at_signed(&self, x: i32, y: i32) -> u8 {
-        if x < 0 || y < 0 || x >= GRID_DIM as i32 || y >= GRID_DIM as i32 {
-            return TERRAIN_WATER;
-        }
-        self.terrain_at(x as u32, y as u32)
+    /// The build class of a cell's terrain (MAP03-B): the
+    /// placement half of the terrain table, read the same way
+    /// as `terrain_buildable` (out of bounds = deep water =
+    /// `BuildClass::None`). `Sim::validate_build` reads this to
+    /// admit walls on `WallsDocks` terrain (beach).
+    pub fn terrain_build_class(&self, x: u32, y: u32) -> BuildClass {
+        terrain_row(self.terrain_at(x, y)).build_class
     }
 
-    /// Whether cell `(x, y)` has an orthogonal (4-neighbour) cell
-    /// whose terrain tag is exactly `tag` (out-of-bounds neighbours
-    /// read as deep water, per `terrain_at_signed`).
-    fn has_terrain_neighbor4(&self, x: u32, y: u32, tag: u8) -> bool {
+    /// Whether a cell's terrain counts as dry coast land for the
+    /// shoreline helpers (MAP03-B): the class-1 land row (land,
+    /// dirt, sand, snow) or beach — the terrains a coast is made
+    /// of. Ice is walkable land but not coast land for the Dock
+    /// straddle (frozen water is not a building coast).
+    fn is_coast_land(&self, x: u32, y: u32) -> bool {
+        matches!(
+            self.terrain_at(x, y),
+            TERRAIN_LAND | TERRAIN_DIRT | TERRAIN_SAND | TERRAIN_SNOW | TERRAIN_BEACH
+        )
+    }
+
+    /// Whether any orthogonal neighbour of `(x, y)` is coast
+    /// land (`is_coast_land`); out-of-bounds neighbours read as
+    /// deep water, hence never coast land.
+    fn has_coast_land_neighbor4(&self, x: u32, y: u32) -> bool {
         [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)]
             .iter()
-            .any(|&(dx, dy)| self.terrain_at_signed(x as i32 + dx, y as i32 + dy) == tag)
+            .any(|&(dx, dy)| {
+                let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                nx >= 0
+                    && ny >= 0
+                    && nx < GRID_DIM as i32
+                    && ny < GRID_DIM as i32
+                    && self.is_coast_land(nx as u32, ny as u32)
+            })
     }
 
     /// Whether a cell stands on a shoreline (complete W1): a land
@@ -323,16 +457,36 @@ impl Grid {
         if x >= GRID_DIM || y >= GRID_DIM {
             return false;
         }
-        if self.terrain_at(x, y) == TERRAIN_LAND {
-            [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dy)| {
-                let (nx, ny) = (x as i32 + dx, y as i32 + dy);
-                // Out of bounds is water-side (the edge wall reads
-                // as deep water), so an edge land cell is a shore.
-                (nx < 0 || ny < 0 || nx >= GRID_DIM as i32 || ny >= GRID_DIM as i32)
-                    || self.is_water_side(nx as u32, ny as u32)
-            })
+        // MAP03-B: the two readings are stated over the terrain
+        // table's rows, not the land tag alone — a shore is the
+        // boundary between water-side ground and walkable
+        // non-water-side ground (land, dirt, sand, snow, ice).
+        // For tags 0/1/2 this is exactly the pre-MAP03-B reading.
+        let row = terrain_row(self.terrain_at(x, y));
+        if row.land_passable && !row.water_side {
+            [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .any(|&(dx, dy)| {
+                    let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                    // Out of bounds is water-side (the edge wall reads
+                    // as deep water), so an edge land cell is a shore.
+                    (nx < 0 || ny < 0 || nx >= GRID_DIM as i32 || ny >= GRID_DIM as i32)
+                        || self.is_water_side(nx as u32, ny as u32)
+                })
         } else if self.is_water_side(x, y) {
-            self.has_terrain_neighbor4(x, y, TERRAIN_LAND)
+            // A water-side cell beside walkable dry ground —
+            // coast land, or any land-passable non-water-side
+            // terrain (ice shores included).
+            [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .any(|&(dx, dy)| {
+                    let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                    if nx < 0 || ny < 0 || nx >= GRID_DIM as i32 || ny >= GRID_DIM as i32 {
+                        return false;
+                    }
+                    let nrow = terrain_row(self.terrain_at(nx as u32, ny as u32));
+                    nrow.land_passable && !nrow.water_side
+                })
         } else {
             false
         }
@@ -345,8 +499,16 @@ impl Grid {
     /// beside a coast, per the wiki's "in shallow water or on
     /// shallows, next to the coast"). Deep water never counts.
     fn is_dock_land_side(&self, x: u32, y: u32) -> bool {
-        self.terrain_at(x, y) == TERRAIN_LAND
-            || (self.is_shallows(x, y) && self.has_terrain_neighbor4(x, y, TERRAIN_LAND))
+        // MAP03-B: coast land (class-1 row or beach itself)
+        // counts directly; the amphibious terrains (shallows,
+        // mangrove shallows) count beside coast land, as the
+        // shallows beside land always did. Ice never counts:
+        // frozen water is not a building coast.
+        self.is_coast_land(x, y)
+            || (matches!(
+                self.terrain_at(x, y),
+                TERRAIN_SHALLOWS | TERRAIN_MANGROVE_SHALLOWS
+            ) && self.has_coast_land_neighbor4(x, y))
     }
 
     /// The terrain half of the Dock placement predicate (complete
@@ -956,7 +1118,11 @@ impl Grid {
                                 || avoid.contains(&(x, y))
                         }
                         Domain::Water => {
-                            self.terrain_at(x, y) == TERRAIN_LAND
+                            // MAP03-B: the hard corner is any
+                            // terrain ships may not enter (the
+                            // class-1 row and ice, not just the
+                            // land tag) — read from the table.
+                            !terrain_row(self.terrain_at(x, y)).ship_passable
                                 || self.is_dynamic(x, y)
                                 || avoid.contains(&(x, y))
                         }
@@ -1056,6 +1222,7 @@ mod tests {
                 ship_passable: false,
                 water_side: false,
                 buildable: true,
+                build_class: BuildClass::Full,
             }
         );
         assert_eq!(
@@ -1065,6 +1232,7 @@ mod tests {
                 ship_passable: true,
                 water_side: true,
                 buildable: false,
+                build_class: BuildClass::None,
             }
         );
         assert_eq!(
@@ -1074,16 +1242,18 @@ mod tests {
                 ship_passable: true,
                 water_side: true,
                 buildable: false,
+                build_class: BuildClass::None,
             }
         );
         // An unassigned tag keeps the legacy fallthrough row.
         assert_eq!(
-            terrain_row(3),
+            terrain_row(200),
             TerrainRow {
                 land_passable: true,
                 ship_passable: true,
                 water_side: false,
                 buildable: true,
+                build_class: BuildClass::Full,
             }
         );
         // And the grid predicates agree with the table on a
@@ -1103,6 +1273,89 @@ mod tests {
         // Out of bounds reads as deep water through the table too.
         assert!(g.is_water_side(120, 0));
         assert!(!g.terrain_buildable(120, 0));
+    }
+
+    #[test]
+    fn terrain_table_covers_the_map03b_tags() {
+        // MAP03-B: every new tag carries its documented DE row
+        // (sk-02's class table): class 1 = the land row; ice (4)
+        // walkable/unbuildable/ships refused; ice navigable (5)
+        // both domains, water-side, build None; beach (2) both
+        // domains, water-side, WallsDocks; mangrove shallows
+        // (6b) both domains, water-side, build Full.
+        let row = |land, ship, ws, b, c| TerrainRow {
+            land_passable: land,
+            ship_passable: ship,
+            water_side: ws,
+            buildable: b,
+            build_class: c,
+        };
+        assert_eq!(terrain_row(TERRAIN_DIRT), row(true, false, false, true, BuildClass::Full));
+        assert_eq!(terrain_row(TERRAIN_SAND), row(true, false, false, true, BuildClass::Full));
+        assert_eq!(terrain_row(TERRAIN_SNOW), row(true, false, false, true, BuildClass::Full));
+        assert_eq!(terrain_row(TERRAIN_ICE), row(true, false, false, false, BuildClass::None));
+        assert_eq!(terrain_row(TERRAIN_ICE_NAV), row(true, true, true, false, BuildClass::None));
+        assert_eq!(terrain_row(TERRAIN_BEACH), row(true, true, true, false, BuildClass::WallsDocks));
+        assert_eq!(
+            terrain_row(TERRAIN_MANGROVE_SHALLOWS),
+            row(true, true, true, true, BuildClass::Full)
+        );
+        // The grid predicates agree with the table on hand-set
+        // cells (row 60, one cell per new tag, no layers).
+        let mut g = Grid::new();
+        let tags = [
+            TERRAIN_DIRT,
+            TERRAIN_SAND,
+            TERRAIN_SNOW,
+            TERRAIN_ICE,
+            TERRAIN_ICE_NAV,
+            TERRAIN_BEACH,
+            TERRAIN_MANGROVE_SHALLOWS,
+        ];
+        for (k, &tag) in tags.iter().enumerate() {
+            let x = 10 + k as u32;
+            g.set_terrain(x, 60, tag);
+            let r = terrain_row(tag);
+            assert_eq!(g.is_blocked_for(Domain::Land, x, 60), !r.land_passable, "tag {tag} land");
+            assert_eq!(g.is_blocked_for(Domain::Water, x, 60), !r.ship_passable, "tag {tag} ship");
+            assert_eq!(g.is_water_side(x, 60), r.water_side, "tag {tag} water-side");
+            assert_eq!(g.terrain_buildable(x, 60), r.buildable, "tag {tag} buildable");
+            assert_eq!(g.terrain_build_class(x, 60), r.build_class, "tag {tag} class");
+            assert_eq!(g.blocked_bytes()[Grid::idx(x, 60)], u8::from(!r.land_passable));
+        }
+        // A ship sails on beach / ice-nav / mangrove but never
+        // on dirt: a water-domain path from deep water onto a
+        // dirt cell fails, onto a beach cell succeeds.
+        let mut sea = Grid::new();
+        for x in 55..65 {
+            sea.set_terrain(x, 60, TERRAIN_WATER);
+        }
+        sea.set_terrain(65, 60, TERRAIN_DIRT);
+        sea.set_terrain(54, 60, TERRAIN_BEACH);
+        let from = sea.cell_center(57, 60);
+        assert!(sea.find_path_for(Domain::Water, from, sea.cell_center(65, 60)).is_none());
+        assert!(sea.find_path_for(Domain::Water, from, sea.cell_center(54, 60)).is_some());
+        // Land crosses ice and beach freely.
+        let to_ice = {
+            sea.set_terrain(66, 60, TERRAIN_ICE);
+            sea.cell_center(66, 60)
+        };
+        let land_from = sea.cell_center(70, 60);
+        assert!(sea.find_path_for(Domain::Land, land_from, to_ice).is_some());
+        // The Dock straddle reads beach as both sides, and
+        // shallows beside dirt (coast land) as a land side.
+        let mut dock = Grid::new();
+        for x in 20..23 {
+            for y in 20..23 {
+                dock.set_terrain(x, y, TERRAIN_BEACH);
+            }
+        }
+        assert!(dock.dock_terrain_ok(20, 20, 3), "a Dock straddles pure beach");
+        let mut dock2 = Grid::new();
+        dock2.set_terrain(30, 30, TERRAIN_DIRT);
+        dock2.set_terrain(31, 30, TERRAIN_SHALLOWS);
+        dock2.set_terrain(32, 30, TERRAIN_WATER);
+        assert!(dock2.dock_terrain_ok(30, 30, 3), "dirt + shallows + deep straddles");
     }
 
     #[test]

@@ -324,6 +324,15 @@ pub enum Placement {
     /// unobstructed (the Fish Trap predicate,
     /// `Grid::fish_trap_placement_ok`).
     Water,
+    /// WallsDocks terrain class (MAP03-B, DE beach class 2): not
+    /// a footprint placement of any kind — the TERRAIN-side
+    /// class (`grid::BuildClass::WallsDocks`) under which a
+    /// `Normal` wall kind is admitted on beach by
+    /// `Sim::validate_build` and the Dock is admitted through
+    /// its `Shoreline` straddle, while every other kind is
+    /// refused on that terrain. Named here so the two halves of
+    /// the placement vocabulary stay in one documented place.
+    WallsDocks,
 }
 
 /// One row of the footprint table (BLD-06): in the reference

@@ -131,6 +131,8 @@ mod victory_teams_tests;
 mod diplomacy_tests;
 mod water_w1_tests;
 #[cfg(test)]
+mod map03b_tests;
+#[cfg(test)]
 mod water_w2a_tests;
 #[cfg(test)]
 mod water_w2b_tests;
@@ -200,8 +202,9 @@ pub use formation::{
     layer_of, FormationKind, FormationMember,
 };
 pub use grid::{
-    terrain_row, Domain, Grid, TerrainRow, CELL_SIZE, GRID_DIM, TERRAIN_LAND, TERRAIN_SHALLOWS,
-    TERRAIN_WATER, WORLD_HALF,
+    terrain_row, BuildClass, Domain, Grid, TerrainRow, CELL_SIZE, GRID_DIM, TERRAIN_BEACH,
+    TERRAIN_DIRT, TERRAIN_ICE, TERRAIN_ICE_NAV, TERRAIN_LAND, TERRAIN_MANGROVE_SHALLOWS,
+    TERRAIN_SAND, TERRAIN_SHALLOWS, TERRAIN_SNOW, TERRAIN_WATER, WORLD_HALF,
 };
 pub use mapgen::GeneratedMap;
 pub use hash::Fnv1a64;
@@ -10394,7 +10397,21 @@ impl Sim {
                 // exact shallows tag; `is_blocked` still carries
                 // deep water plus the node/dynamic layers, so the
                 // verdict for tags 0/1/2 is unchanged.
-                return BuildVerdict::Reject;
+                // MAP03-B: the one exception — a WALL on
+                // WallsDocks terrain (beach, DE class 2): walls
+                // and the Dock (its own Shoreline branch above)
+                // are admitted on beach, everything else is
+                // refused. The cell must still be unobstructed:
+                // `is_blocked` above carries the node/dynamic
+                // layers, so a beach cell under a tree or a
+                // building stays refused even for a wall.
+                if !(kind.is_wall()
+                    && !self.grid.is_blocked(cx, cy)
+                    && self.grid.terrain_build_class(cx, cy)
+                        == crate::grid::BuildClass::WallsDocks)
+                {
+                    return BuildVerdict::Reject;
+                }
             }
             // Any living Town Center's reserved 4x4 cell (BLD-16:
             // both players' — supersedes the pre-2026-10-19 check,
