@@ -275,8 +275,8 @@ test('FIX #14 wiring: the widened arena membership lives in both arena candidate
     'the selection mirror is marked in selectionAt');
   assert.match(selectionAtSrc, /tcHalf\(\) \+ 2/,
     'selectionAt\'s arena membership widens identically (selection parity)');
-  assert.equal((selectionAtSrc.match(/foeTcArenaSelAtPoint\(\)/g) || []).length, 2,
-    'the selection arena is still consulted at its two shadow sites (occorder14 pin)');
+  assert.equal((selectionAtSrc.match(/foeTcArenaSelAtPoint\(\)/g) || []).length, 3,
+    'the selection arena is consulted at its two shadow sites (occorder14 pin) plus the FIX #20 creator site (occorder22 supersession, count 2 -> 3)');
   assert.ok(!/foeTcArenaSelAtPoint|foeTcArenaAtPoint/.test(occSrc),
     'the raw outline/record-rect picks carry no foe preference (selection parity)');
 });
