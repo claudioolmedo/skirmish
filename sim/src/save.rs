@@ -36,7 +36,9 @@ use crate::market::Market;
 use crate::rng::Pcg32;
 use crate::tech::{Age, ProdEntry, TechId};
 use crate::formation::FormationKind;
-use crate::{Command, MatchMode, PlayerState, Sim, TcState, TeamSettings, VictorySettings};
+use crate::{
+    Command, MapKind, MatchMode, PlayerState, Sim, TcState, TeamSettings, VictorySettings,
+};
 
 /// File magic: "SKSV" (Skirmish Save).
 const MAGIC: &[u8; 4] = b"SKSV";
@@ -209,6 +211,16 @@ const MAGIC: &[u8; 4] = b"SKSV";
 /// are hashed state (markers 0xC7/0xC8) exactly while their
 /// presence bytes are set, so a save that dropped them could
 /// never pass the load-time hash check.
+/// MAP03-C0 note, recorded on this version — NO new version:
+/// the match's map kind joins the sim (Arabia, the only kind).
+/// A kind joins the hash only while non-default (marker 0xC9
+/// in `Sim::hash_parts`), and no non-default kind exists yet,
+/// so there is no kind state a v21 save could carry: the
+/// restore below sets `MapKind::Arabia` by construction, which
+/// is exactly what every v21 save ever written describes. The
+/// first non-default kind (the MAP03-C front's C1+) owes the
+/// bump-or-not call with its reasoning at its own landing
+/// (the scoping handoff's DC-6).
 const SAVE_VERSION: u32 = 21;
 
 /// Little-endian byte writer over a growable buffer.
@@ -2143,6 +2155,7 @@ impl Sim {
             mode,
             victory,
             teams,
+            map_kind: MapKind::Arabia,
             stance,
             relic_holder,
             relic_hold_ticks,

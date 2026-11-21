@@ -51,7 +51,7 @@ use crate::entity::EntityKind;
 use crate::grid;
 use crate::tech::TechId;
 use crate::formation::FormationKind;
-use crate::{Command, MatchMode, QueuedOrder, Sim, Stance, TeamSettings, VictorySettings};
+use crate::{Command, MapKind, MatchMode, QueuedOrder, Sim, Stance, TeamSettings, VictorySettings};
 
 /// Unpack the victory flags word shared by the `new_match_victory`
 /// family (see that export's comment for the bit meanings).
@@ -200,6 +200,53 @@ impl WasmSim {
         WasmSim {
             inner: Sim::with_settings_teams(seed as u64, mode, victory, teams_from_packed(teams)),
         }
+    }
+
+    /// Create a match under explicit victory settings, team
+    /// settings AND a map kind (MAP03-C0): `new_match_victory_teams`
+    /// plus the kind tag — 0 = Arabia, the only kind today. An
+    /// unknown tag falls back to Arabia (the `new_match` mode-tag
+    /// discipline: a kind this build does not carry cannot be
+    /// generated). This is a NEW export rather than a widened
+    /// `new_match_victory_teams`, for the T1 reason: the old
+    /// export keeps its exact meaning, and the client falls back
+    /// to it when this one is absent (a stale wasm), losing the
+    /// kind pick exactly the way a stale wasm loses the team
+    /// pick, with netplay's construction-hash check refusing a
+    /// mixed pair once a non-default kind exists. Tag 0 builds a
+    /// sim identical to `new_match_victory_teams`'s: the kind
+    /// joins the hash only while non-default, so default streams
+    /// — the golden included — do not move. No client calls this
+    /// yet: the lobby still offers Arabia alone, and the kind
+    /// selector ships with the first real second kind (C1).
+    #[wasm_bindgen]
+    pub fn new_match_victory_teams_kind(
+        seed: u32,
+        mode_tag: u32,
+        time_limit_ticks: u32,
+        score_target: i32,
+        flags: u32,
+        teams: u32,
+        kind_tag: u32,
+    ) -> WasmSim {
+        let mode = MatchMode::from_tag(mode_tag as u8).unwrap_or(MatchMode::Sandbox);
+        let victory = victory_from_flags(time_limit_ticks, score_target, flags);
+        let kind = MapKind::from_tag(kind_tag as u8).unwrap_or(MapKind::Arabia);
+        WasmSim {
+            inner: Sim::with_settings_teams_kind(
+                seed as u64,
+                mode,
+                victory,
+                teams_from_packed(teams),
+                kind,
+            ),
+        }
+    }
+
+    /// The map kind tag this match runs under (MAP03-C0):
+    /// 0 = Arabia (the only kind today).
+    pub fn map_kind_tag(&self) -> u32 {
+        self.inner.map_kind().tag() as u32
     }
 
     /// VIC-03's countdown holder for the client's readout: the

@@ -133,6 +133,8 @@ mod water_w1_tests;
 #[cfg(test)]
 mod map03b_tests;
 #[cfg(test)]
+mod map03c0_tests;
+#[cfg(test)]
 mod water_w2a_tests;
 #[cfg(test)]
 mod water_w2b_tests;
@@ -206,7 +208,7 @@ pub use grid::{
     TERRAIN_DIRT, TERRAIN_ICE, TERRAIN_ICE_NAV, TERRAIN_LAND, TERRAIN_MANGROVE_SHALLOWS,
     TERRAIN_SAND, TERRAIN_SHALLOWS, TERRAIN_SNOW, TERRAIN_WATER, WORLD_HALF,
 };
-pub use mapgen::GeneratedMap;
+pub use mapgen::{GeneratedMap, MapKind};
 pub use hash::Fnv1a64;
 pub use rng::Pcg32;
 pub use steer::{MAX_SPEED, SEPARATION_RADIUS, SLOW_RADIUS, WAYPOINT_REACH};
@@ -1528,6 +1530,12 @@ pub struct Sim {
     /// unless the match was opened with other settings. Set at
     /// construction alongside `victory`; never changes.
     teams: TeamSettings,
+    /// The map kind in force (MAP03-C0): Arabia unless the match
+    /// was opened under another kind. Set at construction
+    /// alongside `teams`; never changes. Hashed only while
+    /// non-default (see `hash_parts`), so an Arabia stream — the
+    /// golden included — stays byte-identical to the pre-C0 one.
+    map_kind: MapKind,
     /// The directed diplomacy stance table (Teams T3a, NET-11):
     /// `stance[viewer slot][other slot]`, a `STANCE_*` tag per
     /// cell. Initialized from `teams` at construction (same
@@ -1689,6 +1697,22 @@ impl Sim {
         Self::with_settings(seed, mode, victory)
     }
 
+    /// Create a match under an explicit map kind (MAP03-C0):
+    /// plain Conquest and default teams, with the map generated
+    /// under `kind`. `MapKind::Arabia` here is exactly
+    /// `new_match` — Arabia is the only kind today; this is the
+    /// constructor a future kind's lobby pick will call.
+    pub fn new_match_kind(seed: u64, mode: MatchMode, kind: MapKind) -> Self {
+        debug_assert!(mode.is_match());
+        Self::with_settings_teams_kind(
+            seed,
+            mode,
+            VictorySettings::conquest(),
+            TeamSettings::default(),
+            kind,
+        )
+    }
+
     /// Plain-Conquest construction: `with_settings` with the
     /// default victory settings.
     pub fn with_mode(seed: u64, mode: MatchMode) -> Self {
@@ -1718,8 +1742,24 @@ impl Sim {
         victory: VictorySettings,
         teams: TeamSettings,
     ) -> Self {
+        Self::with_settings_teams_kind(seed, mode, victory, teams, MapKind::Arabia)
+    }
+
+    /// The shared constructor with explicit team settings AND
+    /// map kind (MAP03-C0): `with_settings_teams` plus the kind
+    /// the map is generated under (`mapgen::generate_for`).
+    /// Every older constructor passes `MapKind::Arabia` (the
+    /// only kind), under which the match is byte-identical to
+    /// before C0.
+    pub fn with_settings_teams_kind(
+        seed: u64,
+        mode: MatchMode,
+        victory: VictorySettings,
+        teams: TeamSettings,
+        map_kind: MapKind,
+    ) -> Self {
         let rng = Pcg32::new(seed);
-        let map = mapgen::generate(seed);
+        let map = mapgen::generate_for(map_kind, seed);
         let grid = map.grid.clone();
         let pkg = &map.starts[0];
         let (tc_x, tc_y) = grid.cell_center(pkg.tc_cell.0, pkg.tc_cell.1);
@@ -1788,6 +1828,7 @@ impl Sim {
             victory,
             stance: initial_stance_table(&teams),
             teams,
+            map_kind,
             relic_holder: None,
             relic_hold_ticks: 0,
             wonder_holder: None,
@@ -1916,6 +1957,11 @@ impl Sim {
     /// The team assignment this match runs under (Teams T1).
     pub fn team_settings(&self) -> TeamSettings {
         self.teams
+    }
+
+    /// The map kind this match runs under (MAP03-C0).
+    pub fn map_kind(&self) -> MapKind {
+        self.map_kind
     }
 
     /// The team id of a player seat (Teams T1): the seat's raw
@@ -13486,6 +13532,22 @@ impl Sim {
             h.write_u8(self.teams.teams[0]);
             h.write_u8(self.teams.teams[1]);
             h.write_u8(self.teams.locked_teams as u8);
+        }
+        // MAP03-C0: the map kind joins the hash only when
+        // non-default, behind marker 0xC9 — grepped free in
+        // `hash_parts` at build time (taken: 0xAE, 0xB0–0xBE,
+        // 0xC1 relic, 0xC2 MOV-06 stamp, 0xC3 wonder, 0xC4
+        // teams, 0xC5 diplomacy, 0xC6 trap reseed, 0xC7/0xC8
+        // MOV-03 stamps, 0xD1 resignation, 0xF1 queue
+        // provenance) — right after the teams block, so a
+        // default-kind (Arabia) stream — the golden scenario
+        // included — stays byte-identical to the pre-C0 stream,
+        // and two matches under different kinds can never
+        // silently agree. Unreachable today (Arabia is the only
+        // kind); it is the plumbing the C1+ kinds inherit.
+        if !self.map_kind.is_default() {
+            h.write_u8(0xC9);
+            h.write_u8(self.map_kind.tag());
         }
         // Teams T3a (NET-11): the diplomacy stance table joins
         // the hash only while a cell differs from its

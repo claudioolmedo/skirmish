@@ -72,6 +72,52 @@ const MARGIN: i32 = 3;
 /// Minimum land distance from a Town Center to any water cell.
 const WATER_START_CLEARANCE: i32 = 22;
 
+/// The map kind a match is generated under (MAP03-C0 plumbing):
+/// which generator family produces the map. Exactly one kind
+/// exists today — `Arabia`, the shipped map — and each later
+/// package of the MAP03-C front (see the scoping handoff
+/// `map03cscope-build.md` §3) adds its kind here when its
+/// biome/map lands (C1+), each gated so the Arabia path stays
+/// bit-identical.
+///
+/// The kind is part of a match's definition from tick 0, like
+/// the victory/team settings: it enters through the constructor,
+/// never changes mid-match, and joins the state hash and the
+/// save only when non-default (the VictorySettings conditional-
+/// write precedent), so an Arabia stream — the golden scenario
+/// included — stays byte-identical to the pre-C0 stream.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MapKind {
+    /// Arabia: the shipped map — the seeded generator below,
+    /// unchanged. The default kind.
+    #[default]
+    Arabia,
+}
+
+impl MapKind {
+    /// Whether this is the default kind (Arabia).
+    pub fn is_default(&self) -> bool {
+        *self == Self::Arabia
+    }
+
+    /// The WASM ABI tag: 0 = Arabia. Future kinds take the next
+    /// free tags in landing order; tags are append-only, like
+    /// every other ABI tag in this codebase.
+    pub fn tag(&self) -> u8 {
+        match self {
+            MapKind::Arabia => 0,
+        }
+    }
+
+    /// Inverse of `tag`; `None` for a tag no kind carries.
+    pub fn from_tag(tag: u8) -> Option<Self> {
+        match tag {
+            0 => Some(MapKind::Arabia),
+            _ => None,
+        }
+    }
+}
+
 /// One player's start package: its Town Center cell and the
 /// resources/animals generated for it, in deterministic order
 /// (nodes: stragglers, forests, berries, gold, stone; animals:
@@ -287,9 +333,27 @@ fn chebyshev(ax: u32, ay: u32, bx: u32, by: u32) -> u32 {
     ax.abs_diff(bx).max(ay.abs_diff(by))
 }
 
-/// Generate the map for a match seed: the first validated candidate
-/// from the deterministic sub-seed stream, or the fallback template.
+/// Generate the map for a match seed, under the default kind
+/// (Arabia): exactly `generate_for(MapKind::Arabia, seed)`, so
+/// every pre-C0 caller is untouched.
 pub fn generate(seed: u64) -> GeneratedMap {
+    generate_for(MapKind::Arabia, seed)
+}
+
+/// Generate the map of `kind` for a match seed (MAP03-C0): the
+/// kind-taking sibling of `generate`. Arabia is the only kind
+/// today; a future kind adds its arm here, and its generator
+/// must leave this Arabia arm — and therefore the golden hash —
+/// bit-identical.
+pub fn generate_for(kind: MapKind, seed: u64) -> GeneratedMap {
+    match kind {
+        MapKind::Arabia => generate_arabia(seed),
+    }
+}
+
+/// The Arabia generator: the first validated candidate from the
+/// deterministic sub-seed stream, or the fallback template.
+fn generate_arabia(seed: u64) -> GeneratedMap {
     for attempt in 0..MAX_ATTEMPTS {
         let sub_seed = seed
             .wrapping_mul(0x9E37_79B9_7F4A_7C15)
