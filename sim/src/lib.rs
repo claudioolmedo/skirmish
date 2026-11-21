@@ -169,6 +169,8 @@ mod engageprobe_tests;
 mod occorder15_tests;
 #[cfg(test)]
 mod engagepersist_tests;
+#[cfg(test)]
+mod occorder23_tests;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
@@ -8373,6 +8375,8 @@ impl Sim {
         // chase gates never apply to it. CMB-10/11: it also ends
         // any standing order.
         e.attack_auto = false;
+        // OCCORDER23: a fresh order carries no chase hold.
+        e.chase_retry_tick = 0;
         e.attack_move = None;
         e.patrol.clear();
         e.patrol_next = 0;
@@ -8418,6 +8422,8 @@ impl Sim {
         e.next_attack_tick = next_attack_tick;
         // CMB-09/10/11: explicit-order provenance (see apply_attack).
         e.attack_auto = false;
+        // OCCORDER23: a fresh order carries no chase hold.
+        e.chase_retry_tick = 0;
         e.attack_move = None;
         e.patrol.clear();
         e.patrol_next = 0;
@@ -8497,6 +8503,8 @@ impl Sim {
         e.next_attack_tick = next_attack_tick;
         // CMB-09/10/11: explicit-order provenance (see apply_attack).
         e.attack_auto = false;
+        // OCCORDER23: a fresh order carries no chase hold.
+        e.chase_retry_tick = 0;
         e.attack_move = None;
         e.patrol.clear();
         e.patrol_next = 0;
@@ -14506,6 +14514,20 @@ impl Sim {
                     }
                 }
                 h.write_u8(u8::from(e.transport_unload_pending));
+            }
+            // OCCORDER23: the chase retry hold — written ONLY
+            // while a hold stands, behind marker 0xCA (grepped
+            // free in `hash_parts` at build time — the entity
+            // section's taken bytes are 0xAE, 0xB0–0xBF, 0xC2,
+            // 0xC7, 0xC8, 0xF1; renumbered 0xC9 → 0xCA at
+            // integration in run #453 because MAP03-C0's
+            // Sim-level block took 0xC9 in the same window), so
+            // a stream whose chases never fail a path — the
+            // golden scenario included — stays byte-identical
+            // to the pre-fix stream.
+            if e.chase_retry_tick != 0 {
+                h.write_u8(0xCA);
+                h.write_u64(e.chase_retry_tick);
             }
         }
         // M3: projectiles in flight, in spawn order.

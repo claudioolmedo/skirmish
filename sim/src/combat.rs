@@ -88,6 +88,23 @@ const HIT_SLACK: I16F16 = I16F16::from_bits(49_152); // 0.75
 /// A chasing attacker re-paths when its order's target has drifted
 /// this far from the victim's current position.
 const CHASE_REPATH: I16F16 = I16F16::from_bits(196_608); // 3.0
+/// OCCORDER23: after a chase's exact path fails and the fallback
+/// stand point is installed, the exact path is retried only this
+/// many ticks later (the enclosure may open — a gate, a razed
+/// wall segment — and a moving victim bounds the staleness the
+/// same way). DE publishes no number for a re-approach cadence;
+/// 600 ticks (10 s at 60 tps) is a feel value in the BUMP_WINDOW
+/// precedent's status, recorded as such, never as a DE fact.
+/// The retry gate is also the M6 perf discipline: a held chase
+/// never re-runs a failing full-grid A* per tick.
+pub const CHASE_RETRY_TICKS: u64 = 600;
+/// OCCORDER23: the fallback stand-point search expands ring by
+/// ring around the victim's cell out to this Chebyshev radius
+/// (in cells; 12 cells = 48 wu). A victim no free cell within
+/// this radius can be pathed to at all (e.g. a land unit ordered
+/// onto a ship in deep water) keeps the pre-fix outcome: the
+/// chase ends.
+const CHASE_FALLBACK_MAX_RING: i32 = 12;
 /// How long a deer keeps fleeing after a hit.
 const DEER_FLEE_TICKS: u64 = 90;
 /// How close a non-Gaia unit must come to restart a deer's flee
@@ -1326,16 +1343,92 @@ impl Sim {
                 Some(o) => steer::vec_len(o.target_x - tx, o.target_y - ty) > CHASE_REPATH,
             };
             if need {
-                if !self.set_move_order(idx, tx, ty) {
-                    // The victim cannot be reached from here (it
-                    // stands inside a footprint pocket, or this
-                    // attacker is enclosed): the chase is over —
-                    // retrying would re-run a failing full-grid A*
-                    // every tick (M6 perf fix).
-                    self.entities[idx].clear_combat();
+                // OCCORDER23 (bot-loop runs #448/#451): the pre-fix
+                // chase DISCARDED the attack order on the first
+                // tick its exact path failed — measured: a Militia
+                // ordered onto a Spearman draining the player's TC
+                // from inside a completed palisade ring lost its
+                // target at tick 0, never moved (travel 0.0), and
+                // stood idle at its spawn while the foe drained
+                // the TC indefinitely; the identical scene with a
+                // one-cell gap in the ring engages and kills. An
+                // unreachable victim is not a completed order: the
+                // attacker walks to the closest stand point it CAN
+                // path to (the DE observable — a unit ordered onto
+                // an enemy it cannot reach closes as far as the
+                // ground allows and holds there, it does not idle
+                // at spawn), keeps the target, and retries the
+                // exact path on the CHASE_RETRY_TICKS cadence. The
+                // hold gate is what keeps the M6 perf discipline:
+                // while it stands, no failing A* re-runs. Only a
+                // victim no fallback point can reach at all (the
+                // deep-water ship) still ends the chase, as before.
+                if self.entities[idx].chase_retry_tick != 0
+                    && tick < self.entities[idx].chase_retry_tick
+                {
+                    // Holding at (or walking to) the fallback stand
+                    // point installed by the failure below.
+                } else if !self.set_move_order(idx, tx, ty) {
+                    if self.chase_fallback_order(idx, tx, ty) {
+                        self.entities[idx].chase_retry_tick = tick + CHASE_RETRY_TICKS;
+                    } else {
+                        self.entities[idx].clear_combat();
+                    }
+                } else {
+                    self.entities[idx].chase_retry_tick = 0;
                 }
             }
         }
+    }
+
+    /// OCCORDER23: install a move order to the closest stand
+    /// point to the victim at `(tx, ty)` that this attacker can
+    /// actually path to, when the exact chase path has failed.
+    /// Candidates are the free cells on expanding Chebyshev
+    /// rings around the victim's cell (ring 1, 2, … up to
+    /// CHASE_FALLBACK_MAX_RING), nearest-to-the-attacker first
+    /// within a ring (ties to the lower cell coordinates — a
+    /// deterministic order, in `building_approach_point`'s
+    /// preference shape); the first candidate whose
+    /// `set_move_order` succeeds is installed and wins. Returns
+    /// false when no candidate in range paths at all. Each
+    /// failed candidate costs one A* over the attacker's
+    /// reachable component — bounded by the ring cap and paid
+    /// at most once per CHASE_RETRY_TICKS per held chase (the
+    /// retry gate in `attack_step`), never per tick.
+    fn chase_fallback_order(&mut self, idx: usize, tx: I16F16, ty: I16F16) -> bool {
+        let (gx, gy) = self.grid.world_to_cell(tx, ty);
+        let (px, py) = (self.entities[idx].pos_x, self.entities[idx].pos_y);
+        let (gw, gh) = (self.grid.width() as i32, self.grid.height() as i32);
+        for r in 1..=CHASE_FALLBACK_MAX_RING {
+            let mut cells: Vec<(i64, u32, u32)> = Vec::new();
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    if dx.abs() != r && dy.abs() != r {
+                        continue;
+                    }
+                    let (cx, cy) = (gx as i32 + dx, gy as i32 + dy);
+                    if cx < 0 || cy < 0 || cx >= gw || cy >= gh {
+                        continue;
+                    }
+                    let (cx, cy) = (cx as u32, cy as u32);
+                    if self.grid.is_blocked(cx, cy) {
+                        continue;
+                    }
+                    let (wx, wy) = self.grid.cell_center(cx, cy);
+                    let d = steer::vec_len(wx - px, wy - py).to_bits() as i64;
+                    cells.push((d * d, cx, cy));
+                }
+            }
+            cells.sort();
+            for (_, cx, cy) in cells {
+                let (wx, wy) = self.grid.cell_center(cx, cy);
+                if self.set_move_order(idx, wx, wy) {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// OCCORDER15: is melee chaser `idx` right now in contact

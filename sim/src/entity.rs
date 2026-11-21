@@ -985,6 +985,19 @@ pub struct Entity {
     /// current target (the attack delay applies only to the first
     /// strike of an engagement).
     pub attack_engaged: bool,
+    /// OCCORDER23: the tick at which an entity-target chase whose
+    /// exact path failed (the victim stands somewhere this unit
+    /// cannot path to — e.g. inside a completed palisade ring
+    /// around the Town Center) may retry the exact path. While
+    /// `tick < chase_retry_tick` the chase holds the fallback
+    /// stand point the failure installed instead of re-running a
+    /// failing full-grid A* every tick (the M6 perf discipline)
+    /// — and, critically, the attack target is RETAINED, where
+    /// the pre-fix chase discarded it on the first failed tick.
+    /// Zero = no hold. Cleared with the engagement
+    /// (`clear_combat`) and by every fresh attack order. Part of
+    /// the hashed state only while nonzero (marker 0xCA).
+    pub chase_retry_tick: u64,
     /// The last entity that damaged this one — kill credit: a villager
     /// credited with killing an animal starts harvesting its carcass.
     pub last_hit_by: Option<u32>,
@@ -1318,6 +1331,7 @@ impl Entity {
             strike_tick: None,
             next_attack_tick: 0,
             attack_engaged: false,
+            chase_retry_tick: 0,
             last_hit_by: None,
             last_hit_owner: None,
             suppress_separation: false,
@@ -1410,6 +1424,8 @@ impl Entity {
         self.attack_point = None;
         self.strike_tick = None;
         self.attack_engaged = false;
+        // OCCORDER23: the chase hold ends with the engagement.
+        self.chase_retry_tick = 0;
         // The engagement is over, so its provenance is too (CMB-09).
         self.attack_auto = false;
     }

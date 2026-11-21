@@ -211,7 +211,7 @@ const MAGIC: &[u8; 4] = b"SKSV";
 /// are hashed state (markers 0xC7/0xC8) exactly while their
 /// presence bytes are set, so a save that dropped them could
 /// never pass the load-time hash check.
-/// MAP03-C0 note, recorded on this version — NO new version:
+/// MAP03-C0 note, recorded on version 21 — NO new version:
 /// the match's map kind joins the sim (Arabia, the only kind).
 /// A kind joins the hash only while non-default (marker 0xC9
 /// in `Sim::hash_parts`), and no non-default kind exists yet,
@@ -221,7 +221,16 @@ const MAGIC: &[u8; 4] = b"SKSV";
 /// first non-default kind (the MAP03-C front's C1+) owes the
 /// bump-or-not call with its reasoning at its own landing
 /// (the scoping handoff's DC-6).
-const SAVE_VERSION: u32 = 21;
+/// Version 22: OCCORDER23 — the entity record gains the chase
+/// retry hold at its end: a presence byte in every v22 save,
+/// then the retry tick only while a hold stands. The hold is
+/// hashed state (marker 0xCA — renumbered at integration in
+/// run #453: 0xC9 was taken by MAP03-C0's Sim-level block in
+/// the same landing window) exactly while nonzero, so a save
+/// taken mid-hold could never pass the load-time hash check
+/// without it; a save with no held chase carries only the
+/// presence byte's difference from v21.
+const SAVE_VERSION: u32 = 22;
 
 /// Little-endian byte writer over a growable buffer.
 struct W {
@@ -1094,6 +1103,12 @@ impl Sim {
             w.opt_u32(e.transported_in);
             w.opt_u32(e.transport_target);
             w.bool(e.transport_unload_pending);
+            // OCCORDER23 (v22): the chase retry hold — presence
+            // byte always, the tick only while a hold stands.
+            w.bool(e.chase_retry_tick != 0);
+            if e.chase_retry_tick != 0 {
+                w.u64(e.chase_retry_tick);
+            }
         }
         // --- projectiles ---
         w.usize(self.projectiles.len());
@@ -2002,6 +2017,8 @@ impl Sim {
             let transported_in = r.opt_u32()?;
             let transport_target = r.opt_u32()?;
             let transport_unload_pending = r.bool()?;
+            // OCCORDER23 (v22): the chase retry hold.
+            let chase_retry_tick = if r.bool()? { r.u64()? } else { 0 };
             entities.push(Entity {
                 id,
                 kind,
@@ -2078,6 +2095,7 @@ impl Sim {
                 transported_in,
                 transport_target,
                 transport_unload_pending,
+                chase_retry_tick,
                 garrison,
             });
         }
