@@ -1800,9 +1800,18 @@ let placement = null; // { kind } while placing a building
 // BLD-13: while Palisade Wall placement is armed and the left
 // button is down, the wall line's anchor cell [cx, cy] (the drag
 // start). The drag's live end is the cursor's cell; on release a
-// moved drag commits the whole line (attemptPlaceWallLine), a
-// plain click places the single segment.
+// moved drag commits the whole line (attemptPlaceWallLine).
+// Walldrag fix (bot-loop, 2026-11-21): a PLAIN CLICK with a wall
+// kind armed no longer places a lone segment and disarms — it
+// anchors the line here and keeps placement armed
+// (wallAnchorPending), and the next plain click commits the
+// whole line from this anchor (a second click on the anchor
+// cell itself places the single segment). Live drags delivered
+// as click-move-click, or with their intermediate moves lost,
+// otherwise founded only the two endpoint segments and lost
+// placement mode mid-placement (runs #453, two sessions).
 let wallAnchor = null;
+let wallAnchorPending = false; // wallAnchor waits for its commit click
 let repairArm = false; // Repair targeting armed (villager root panel, E)
 let orderArm = null; // CMB-10/11 order targeting armed: 'attackmove' | 'patrol' | 'attackground' | null
 let healArm = false; // Heal targeting armed (Castle P5a — the Monk panel's Heal button)
@@ -3919,6 +3928,8 @@ addEventListener('keydown', (e) => {
       setFlareArm(false); // Teams T3b: Esc disarms an armed flare
     } else if (placement) {
       placement = null;
+      wallAnchor = null;
+      wallAnchorPending = false; // walldrag fix: Esc drops a pending wall anchor too
     } else if (repairArm) {
       repairArm = false;
     } else if (healArm) {
@@ -5141,6 +5152,7 @@ function resetSim(mode = matchMode) {
   healArm = false;
   convertArm = false;
   wallAnchor = null;
+  wallAnchorPending = false;
   flareMarkers = []; // Teams T3b: flare markers are per-match
   flareArm = false;
   // M4 client state resets with the match: control groups and the
@@ -5263,6 +5275,7 @@ function adoptSim(newSim, owner) {
   healArm = false;
   convertArm = false;
   wallAnchor = null;
+  wallAnchorPending = false;
   flareMarkers = []; // Teams T3b: flare markers are per-match
   flareArm = false;
   controlGroups.clear();
@@ -10984,9 +10997,16 @@ async function main() {
     const [sx, sy] = eventScreen(ev);
     lDrag = { x0: sx, y0: sy, x1: sx, y1: sy, moved: false };
     // BLD-13/BLD-20: with wall placement armed, the press cell
-    // anchors the wall line; the release cell ends it.
-    wallAnchor = placement && isWallKind(placement.kind)
-      ? worldToCell(...eventWorld(ev)) : null;
+    // anchors the wall line; the release cell ends it. Walldrag
+    // fix: a pending click anchor (wallAnchorPending) is NOT
+    // overwritten — this press is its commit click (or a drag
+    // whose release cell ends the anchored line).
+    if (placement && isWallKind(placement.kind)) {
+      if (!wallAnchorPending) wallAnchor = worldToCell(...eventWorld(ev));
+    } else {
+      wallAnchor = null;
+      wallAnchorPending = false;
+    }
   });
   window.addEventListener('mousemove', (ev) => {
     if (!lDrag) return;
@@ -11013,15 +11033,34 @@ async function main() {
       return;
     }
     if (placement) {
-      if (isWallKind(placement.kind) && d.moved && wallAnchor) {
-        // BLD-13/BLD-20: a dragged wall placement commits the
-        // line from the press cell to the release cell.
+      if (isWallKind(placement.kind)) {
+        // BLD-13/BLD-20 + walldrag fix (2026-11-21): a wall
+        // release commits the line from the anchor cell to the
+        // release cell. The drag classification reads the
+        // release event itself, not only `d.moved` — that flag
+        // is set by the intermediate mousemove handler, so a
+        // drag whose moves were coalesced, dropped or never
+        // delivered (fast flick, automation press/release)
+        // used to collapse into a single segment at the
+        // release cell. A plain click with no pending anchor
+        // ANCHORS the line and keeps placement armed; the
+        // next plain click (or a drag release) commits it.
         const [ex, ey] = worldToCell(wx, wy);
-        attemptPlaceWallLine(wallAnchor[0], wallAnchor[1], ex, ey);
+        const [rsx, rsy] = eventScreen(ev);
+        const releaseMoved = d.moved
+          || Math.abs(rsx - d.x0) + Math.abs(rsy - d.y0) > 6;
+        if ((releaseMoved || wallAnchorPending) && wallAnchor) {
+          attemptPlaceWallLine(wallAnchor[0], wallAnchor[1], ex, ey);
+          wallAnchorPending = false;
+        } else {
+          wallAnchor = [ex, ey];
+          wallAnchorPending = true;
+          playAudioCue('click');
+        }
       } else if (!d.moved) {
         attemptPlace(wx, wy, ev.shiftKey); // a placement click, not a drag
       }
-      wallAnchor = null;
+      if (!wallAnchorPending) wallAnchor = null;
       return;
     }
     if (repairArm) {
@@ -11290,6 +11329,8 @@ async function main() {
     if (!wasClick) return;
     if (placement) {
       placement = null;
+      wallAnchor = null;
+      wallAnchorPending = false; // walldrag fix: a right-click drops a pending wall anchor too
       return;
     }
     if (repairArm) {
@@ -16482,6 +16523,8 @@ function runCommandButton(id, times = 1) {
     // Fishing Ship's panel — the build-* branch below cannot
     // parse this id (its kind rides the button, not a number).
     repairArm = false;
+    wallAnchor = null;
+    wallAnchorPending = false; // walldrag fix: arming the trap starts with no wall anchor
     placement = placement && placement.kind === 24 ? null : { kind: 24 };
     playAudioCue(placement ? 'orderBuilding' : 'click');
   } else if (id === 'unload-transport') {
@@ -16558,6 +16601,8 @@ function runCommandButton(id, times = 1) {
   } else if (id.startsWith('build-')) {
     const kind = Number(id.slice(6));
     repairArm = false;
+    wallAnchor = null;
+    wallAnchorPending = false; // walldrag fix: (re)arming a kind starts with no wall anchor
     // Package J (BLD-13): a wall button's press cycle is wall →
     // its gate → off (the gate rides the wall's button — see
     // buildBtn); every other kind keeps the plain toggle.
@@ -19684,7 +19729,7 @@ function draw() {
   // will leave.
   if (placement && mouseWorld) {
     const [cx, cy] = worldToCell(mouseWorld[0], mouseWorld[1]);
-    if (isWallKind(placement.kind) && wallAnchor && lDrag && lDrag.moved) {
+    if (isWallKind(placement.kind) && wallAnchor && ((lDrag && lDrag.moved) || wallAnchorPending)) {
       const kind = placement.kind;
       const segCost = kind === 14 ? BUILD_COST_STONE[14] : BUILD_COST[kind];
       const cells = wallLineCells(wallAnchor[0], wallAnchor[1], cx, cy);
