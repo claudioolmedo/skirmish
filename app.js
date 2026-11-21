@@ -8929,6 +8929,58 @@ async function main() {
       const foeArenaSel = foeTcArenaSelAtPoint();
       if (foeArenaSel !== null) return foeArenaSel;
     }
+    // FIX #20 (bot-loop occorder22, run #450): the CREATOR
+    // half of the same three candidates — the selection
+    // pick's last divergence from the order pick. Run #450
+    // (live): an enemy (id 28) hidden under the player's
+    // Town Center roof drained the TC 2400 -> 1723; the
+    // diagnostic right-click resolved it through the
+    // outline (pick {picked:28, afterGate:28,
+    // tFromOutline:true}) and the Militia engaged, but a
+    // left-click on the same red unit selected nothing —
+    // the selection stayed on the Militia. Discrimination
+    // (occorder22, pixel classes staged against entityAt):
+    // at the outline pixel itself both picks agree (the
+    // outline stage above), but three pixel classes on the
+    // same figure resolve in entityAt and named NOTHING
+    // here, because every candidate this pick restated
+    // from entityAt was shadow-only (FIX #11's ground
+    // candidate "never creates a selection from nothing";
+    // FIX #12/#14's arena the same) and one entityAt stage
+    // was never restated at all:
+    //   R. the record-rect stage (FIX #5) — a click on the
+    //      VISIBLE part of a recorded foe's sprite, outside
+    //      rect n cover, at the tall attack pose's height
+    //      where the static body box misses (occorder8
+    //      already noted this stage "has no counterpart in
+    //      selectionAt"; FIX #7 closed the order side only);
+    //   G. the ground candidate — a record-less foe at the
+    //      click's feet, inside the 2.2 ground radius,
+    //      with no own winner to shadow (entityAt's ground
+    //      stage names foes directly, as its best);
+    //   A. the TC arena — a LOW inside-footprint click
+    //      past the ground radius on a centre foe, with no
+    //      own winner (entityAt's ground stage consults
+    //      the arena on a null winner, FIX #11).
+    // So the three candidates are consulted once more
+    // here, as creators, in entityAt's own stage order
+    // (record-rect, then ground, then arena) — ONLY where
+    // every stage above named nothing, so every previously
+    // non-null selection is unchanged by construction and
+    // occorder8's body-over-rect doctrine stands (a body
+    // winner, own or foe, is never shadowed by the rect
+    // creator). Fog discipline is each candidate's own,
+    // unchanged: a record exists only for a fog-visible
+    // unit (occlusion.js's fairness gate), and the ground
+    // / arena restatements above gate on cellVisibleW —
+    // this pick has no post-pick fog gate to catch a
+    // fog-hidden foe later, so the gates stay inside.
+    const occRectSel = occludedRectUnitAt(wx, wy);
+    if (occRectSel !== null) return occRectSel;
+    const foeGroundCreate = foeGroundSelAtPoint();
+    if (foeGroundCreate !== null) return foeGroundCreate;
+    const foeArenaCreate = foeTcArenaSelAtPoint();
+    if (foeArenaCreate !== null) return foeArenaCreate;
     return unitAt(wx, wy);
   }
 

@@ -289,8 +289,9 @@ test('FIX #12 wiring: the centre-disc gate lives in the arena candidates; earlie
     'the selection half of the fix is marked in selectionAt');
   assert.match(selectionAtSrc, /const foeTcArenaSelAtPoint = \(\) =>/,
     'the selection TC-arena candidate is defined in selectionAt');
-  assert.equal((selectionAtSrc.match(/foeTcArenaSelAtPoint\(\)/g) || []).length, 2,
-    'the selection arena is consulted at the body stage and at the unitAt fallback — the ground shadow\'s two sites');
+  assert.equal((selectionAtSrc.match(/foeTcArenaSelAtPoint\(\)/g) || []).length, 3,
+    'the selection arena is consulted at the body stage and at the unitAt fallback — the ground shadow\'s two sites ' +
+    '(occorder22 / FIX #20 supersedes the count 2 -> 3: the arena gains a third site, the creator consultation on the null fall-through)');
   assert.ok(!/foeTcArenaSelAtPoint|foeTcArenaAtPoint/.test(occSrc),
     'the raw outline/record-rect picks carry no foe preference (selection parity)');
 });
