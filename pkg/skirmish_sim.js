@@ -557,6 +557,15 @@ export class WasmSim {
         return ret === 0 ? undefined : WasmSim.__wrap(ret);
     }
     /**
+     * The map kind tag this match runs under (MAP03-C0):
+     * 0 = Arabia (the only kind today).
+     * @returns {number}
+     */
+    map_kind_tag() {
+        const ret = wasm.wasmsim_map_kind_tag(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
      * The live trade prices as a flat array in canonical
      * commodity order, sell then buy per commodity:
      * [sell_food, buy_food, sell_wood, buy_wood, sell_stone,
@@ -719,6 +728,37 @@ export class WasmSim {
      */
     static new_match_victory_teams(seed, mode_tag, time_limit_ticks, score_target, flags, teams) {
         const ret = wasm.wasmsim_new_match_victory_teams(seed, mode_tag, time_limit_ticks, score_target, flags, teams);
+        return WasmSim.__wrap(ret);
+    }
+    /**
+     * Create a match under explicit victory settings, team
+     * settings AND a map kind (MAP03-C0): `new_match_victory_teams`
+     * plus the kind tag — 0 = Arabia, the only kind today. An
+     * unknown tag falls back to Arabia (the `new_match` mode-tag
+     * discipline: a kind this build does not carry cannot be
+     * generated). This is a NEW export rather than a widened
+     * `new_match_victory_teams`, for the T1 reason: the old
+     * export keeps its exact meaning, and the client falls back
+     * to it when this one is absent (a stale wasm), losing the
+     * kind pick exactly the way a stale wasm loses the team
+     * pick, with netplay's construction-hash check refusing a
+     * mixed pair once a non-default kind exists. Tag 0 builds a
+     * sim identical to `new_match_victory_teams`'s: the kind
+     * joins the hash only while non-default, so default streams
+     * — the golden included — do not move. No client calls this
+     * yet: the lobby still offers Arabia alone, and the kind
+     * selector ships with the first real second kind (C1).
+     * @param {number} seed
+     * @param {number} mode_tag
+     * @param {number} time_limit_ticks
+     * @param {number} score_target
+     * @param {number} flags
+     * @param {number} teams
+     * @param {number} kind_tag
+     * @returns {WasmSim}
+     */
+    static new_match_victory_teams_kind(seed, mode_tag, time_limit_ticks, score_target, flags, teams, kind_tag) {
+        const ret = wasm.wasmsim_new_match_victory_teams_kind(seed, mode_tag, time_limit_ticks, score_target, flags, teams, kind_tag);
         return WasmSim.__wrap(ret);
     }
     /**
