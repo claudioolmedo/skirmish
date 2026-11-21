@@ -1502,6 +1502,22 @@ function sampleScore() {
   scoreHistory.push([sim.score_for(localOwner)[4], sim.score_for(foeOwner())[4]]);
 }
 
+/// The closing sample (endgame-ui fix, bot-loop runs #449/#451):
+/// the per-minute sampler above never records the scores AT the
+/// decision tick — a match that ends inside its last minute (the
+/// usual Resign) reached the end card with only the opening
+/// sample, or none at all if it ended inside minute zero. The
+/// end card appends the final totals once, unless the last
+/// sample already IS the final totals.
+function sampleScoreFinal() {
+  if (!sim) return;
+  const cur = [sim.score_for(localOwner)[4], sim.score_for(foeOwner())[4]];
+  const last = scoreHistory[scoreHistory.length - 1];
+  if (!last || last[0] !== cur[0] || last[1] !== cur[1]) {
+    scoreHistory.push(cur);
+  }
+}
+
 /// Fill the end card's statistics (INF-11): the timeline, the
 /// sim's run counters per player (kills/losses, buildings
 /// razed/lost, resources gathered — match_stats_for's flat
@@ -1527,6 +1543,7 @@ function renderEndStats() {
     .join(', ');
   set('end-techs-you', `${t('diplo.you')}: ${names(localOwner) || '—'}`);
   set('end-techs-foe', `${t('diplo.opponent')}: ${names(foeOwner()) || '—'}`);
+  sampleScoreFinal(); // the graph's last point is the final score
   drawScoreTimeline();
 }
 
@@ -1553,6 +1570,7 @@ function drawScoreTimeline() {
   ctx.stroke();
   const line = (idx, color) => {
     ctx.strokeStyle = color;
+    ctx.fillStyle = color;
     ctx.lineWidth = 2;
     ctx.beginPath();
     pts.forEach((p, i) => {
@@ -1560,6 +1578,16 @@ function drawScoreTimeline() {
       else ctx.lineTo(x(i), y(p[idx]));
     });
     ctx.stroke();
+    // A marker at every sample (endgame-ui fix, runs #449/#451):
+    // a one-sample history strokes NOTHING above — a lone moveTo
+    // has no segment — so a short match's graph rendered as an
+    // empty cream box even though the table above it was filled.
+    // The dots make every sampled minute visible, lone or not.
+    pts.forEach((p, i) => {
+      ctx.beginPath();
+      ctx.arc(x(i), y(p[idx]), 3, 0, Math.PI * 2);
+      ctx.fill();
+    });
     ctx.lineWidth = 1;
   };
   line(0, '#2c4f9e');
@@ -7979,6 +8007,22 @@ async function main() {
       leaveNetMatch('abandoned');
       return;
     }
+    // Back to menu LEAVES the finished match (endgame-ui fix,
+    // bot-loop runs #449/#451): the match-standing flags clear
+    // BEFORE openLobby derives its return flags from them, so
+    // the lobby this lands on is the front door — it offers no
+    // return-to-ended, its ✕ stays hidden, and closing it can
+    // never reveal the resigned match sitting paused underneath
+    // (frozen clock, pop 0/5). The clearing must be durable, not
+    // just for this openLobby call: a later room-leave inside
+    // the lobby re-derives the flags, and a still-standing
+    // matchEnded would resurrect the dead return there. The
+    // Play-online path over a finished match (View map → Menu →
+    // Play online) does NOT pass through this handler and keeps
+    // its return exactly as before (see lobbytrap.smoke.mjs).
+    playing = false;
+    matchEnded = false;
+    paused = false;
     // M12: from an AI-room match, Back to menu means the Lobby
     // Browser (the room was the way in).
     if (aiRoom) {
@@ -7998,8 +8042,8 @@ async function main() {
     // defect came from clearing .in-match while keeping the
     // pause menu as the only surface; here the lobby IS the
     // surface, and its Play solo button starts the next match).
-    // matchEnded still stands, so the lobby offers no
-    // return-to-match for the finished game.
+    // The match-standing flags were cleared above, so the lobby
+    // offers no return-to-match for the finished game.
     endOverlay.style.display = 'none';
     openLobby(null);
   });
