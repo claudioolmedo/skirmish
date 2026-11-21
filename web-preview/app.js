@@ -9875,6 +9875,57 @@ async function main() {
     return null;
   }
 
+  // Town Center ART hit test (FIX #22, bot-loop tcsel, run
+  // #452): the selection fallback for a click on the TC's
+  // drawn art ABOVE the ground plane. tcAt above tests the
+  // click's GROUND point against the footprint box, but the
+  // art rises straight up the screen from that footprint —
+  // a click on the roof or a tower converts to a ground
+  // point displaced north-west of the centre (screen-up is
+  // the (-d, -d) world direction, the tree-canopy / Ram-body
+  // family), up to ~11.5 wu out, past the ±8 footprint edge:
+  // the click named no unit and no building and the plain-
+  // click handler fell through to its empty-ground deselect
+  // ("No selection" on a click squarely on the TC's roof,
+  // live proof #452 — with or without an enemy under the
+  // porch; the pixels that DO land inside the footprint
+  // select the TC as always). In DE the building is the
+  // large object: clicking any visible part of it selects
+  // it. So the click is decomposed against the TC's centre
+  // in SCREEN space — ix = screen-x offset, iy = screen-y
+  // offset, both in camS units (the w2s projection's own
+  // axes: ix = dxw - dyw, iy = (dxw + dyw) / 2) — and tested
+  // against the art's content bands, read off drawTC's
+  // sprite contract (width tcArtCells x CS x 1.12 = 17.92,
+  // bottom anchored 4.4 above the sprite's bottom edge) and
+  // the Base44 art's measured alpha content: the main body
+  // spans ix in [-8.0, 8.0] for iy in [-5.9, 1.75], and the
+  // narrower upperworks (roof block and tower tops) span
+  // |ix| <= 4.5 for iy in [-11.5, 1.75]. Conservative by
+  // construction, like UNIT_BODY_BOX: the transparent
+  // margins of the blit rect claim nothing. Selection-only
+  // by its call site (the plain-click handler's building
+  // fallback, consulted only after every unit pick has
+  // named nothing — a pixel that names a hidden foe through
+  // FIX #20's creators still selects the foe, exactly as
+  // before); tcAt's other callers (orders, repair, garrison)
+  // keep the ground-only test, untouched.
+  function tcArtAt(wx, wy) {
+    const kinds = sim.entity_kinds();
+    const pos = sim.positions();
+    for (let i = 0; i < kinds.length; i++) {
+      if (kinds[i] !== KIND_TC) continue;
+      const dxw = wx - pos[i * 2];
+      const dyw = wy - pos[i * 2 + 1];
+      const ix = dxw - dyw;
+      const iy = (dxw + dyw) / 2;
+      if (iy < -11.5 || iy > 1.75) continue;
+      if (Math.abs(ix) <= 8.0 && iy >= -5.9) return i;
+      if (Math.abs(ix) <= 4.5) return i;
+    }
+    return null;
+  }
+
   function nodeAt(wx, wy) {
     let best = null;
     let bestD2 = 4 * 4;
@@ -11017,14 +11068,26 @@ async function main() {
         return;
       }
       const tc = tcAt(wx, wy);
+      // FIX #22 (bot-loop tcsel, run #452): the art fallback —
+      // a click on the TC's drawn art above the ground plane
+      // converts to a ground point outside the footprint box
+      // tcAt tests, so the roof/tower pixels fell through to
+      // the empty-ground deselect below. Consult tcArtAt only
+      // where tcAt named nothing (every ground click keeps
+      // its old reading), and only here, after every unit
+      // pick above has named nothing — a pixel that names a
+      // hidden foe through FIX #20's creators never reaches
+      // this fallback and still selects the foe.
+      const tcArt = tc === null ? tcArtAt(wx, wy) : null;
+      const tcPick = tc !== null ? tc : tcArt;
       const st = entityState();
       // M7: information selection obeys fog too — an enemy Town
       // Center or building selects only once its ground is
       // explored; in the black the click is plain empty ground.
-      if (tc != null && (st.owners[tc] === localOwner
-          || cellExploredW(st.pos[tc * 2], st.pos[tc * 2 + 1]))) {
-        logSelPick(tc, 'tc');
-        selectBuilding({ type: 'tc', id: tc, owner: st.owners[tc] });
+      if (tcPick != null && (st.owners[tcPick] === localOwner
+          || cellExploredW(st.pos[tcPick * 2], st.pos[tcPick * 2 + 1]))) {
+        logSelPick(tcPick, tc !== null ? 'tc' : 'tc-art');
+        selectBuilding({ type: 'tc', id: tcPick, owner: st.owners[tcPick] });
         playSelectAck();
       } else {
         const b = buildingAt(wx, wy);
