@@ -315,8 +315,8 @@ test('drag preview: the segment/cost label counts only cells the sim will found'
 test('wiring: mirrorValid consults the fog and terrain layers; tcReservedCells reads living TCs in-grid', () => {
   assert.match(mirrorSrc, /FOG\[y \* GW \+ x\] < 1/,
     'mirrorValid refuses unexplored cells (BLD-01)');
-  assert.match(mirrorSrc, /TERRAIN\[y \* GW \+ x\] !== 0/,
-    'mirrorValid refuses water-side terrain for Normal kinds (shallows included)');
+  assert.match(mirrorSrc, /!TERRAIN_BUILDABLE\.has\(TERRAIN\[y \* GW \+ x\]\)/,
+    'mirrorValid refuses non-buildable terrain for Normal kinds (shallows included; MAP03-B tag set)');
   const tcSrc = mirrorSrc.slice(0, mirrorSrc.indexOf('function gateSpanCells'));
   assert.match(tcSrc, /entity_hp/, 'tcReservedCells skips dead Town Centers');
   assert.match(tcSrc, /rx < GW && ry < GH/, 'tcReservedCells keeps the reserve in-grid');

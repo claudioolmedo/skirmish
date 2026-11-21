@@ -103,7 +103,7 @@ test('a human can build a trap: panel button, ghost mirror, ship placement', () 
   assert.match(app, /if \(kind === 24\) return mirrorTrapValid\(cx, cy\);/);
   assert.match(app, /function mirrorTrapValid\(cx, cy\) \{/);
   assert.match(app, /if \(myAge\(\) < 1\) return false; \/\/ the Fish Trap is Feudal-born/);
-  assert.match(app, /if \(t < 1\) return false; \/\/ water-side only \(deep water or shallows\)/);
+  assert.match(app, /if \(!TERRAIN_WATER_SIDE\.has\(t\)\) return false; \/\/ water-side only \(MAP03-B tag set\)/);
   // attemptPlace picks the nearest selected FISHING SHIP for
   // kind 24 (villagers for everything else) and flashes the
   // ship-specific refusal when none is selected.

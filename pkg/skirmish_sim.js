@@ -2920,7 +2920,9 @@ export class WasmSim {
     }
     /**
      * The generated map's terrain layer (M7, MAP-03): flat
-     * row-major bytes, one per cell — 0 land, 1 water.
+     * row-major bytes, one per cell — terrain tags (MAP03-B):
+     * 0 land, 1 deep water, 2 shallows, 3 dirt, 4 sand, 5 snow,
+     * 6 ice, 7 ice navigable, 8 beach, 9 mangrove shallows.
      * @returns {Uint8Array}
      */
     terrain() {

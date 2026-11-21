@@ -2948,13 +2948,16 @@ function refreshWorldLayers() {
   for (let gy = 0; gy < GH; gy++) {
     for (let gx = 0; gx < GW; gx++) {
       const i = gy * GW + gx;
-      // Water-side cells (deep water 1, shallows 2) are not
-      // shoreline sand themselves; a LAND cell touching either
-      // is (Water W1: the shallows rim fronts the same coast).
-      if (TERRAIN[i] === 1 || TERRAIN[i] === 2) continue;
+      // Water-side cells are not shoreline sand themselves; a
+      // class-1 land cell (land/dirt/sand/snow) touching a
+      // water-side cell is (Water W1: the shallows rim fronts
+      // the same coast). MAP03-B: the readings are tag sets,
+      // not >= 1 — ice, beach and mangrove cells carry their
+      // own ground colours and never take the sand trick.
+      if (!TERRAIN_COAST_LAND.has(TERRAIN[i]) || TERRAIN[i] === TERRAIN_BEACH) continue;
       for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
         const nx = gx + dx, ny = gy + dy;
-        if (nx >= 0 && ny >= 0 && nx < GW && ny < GH && TERRAIN[ny * GW + nx] >= 1) {
+        if (nx >= 0 && ny >= 0 && nx < GW && ny < GH && TERRAIN_WATER_SIDE.has(TERRAIN[ny * GW + nx])) {
           SHORE.add(i);
           break;
         }
@@ -3173,6 +3176,18 @@ function mirrorGateValid(kind, cx, cy) {
   return true;
 }
 
+// MAP03-B terrain tags (the sim's grid table, mirrored): 0 land,
+// 1 deep water, 2 shallows, 3 dirt, 4 sand, 5 snow, 6 ice,
+// 7 ice navigable, 8 beach, 9 mangrove shallows. The mirror
+// readings the placement ghosts need, by tag: WATER_SIDE (the
+// Dock straddle's water half, the Fish Trap's cell), BUILDABLE
+// (the terrain table's Full build class), COAST_LAND (class-1
+// land or beach — the straddle's land half and its adjacency).
+const TERRAIN_WATER_SIDE = new Set([1, 2, 7, 8, 9]);
+const TERRAIN_BUILDABLE = new Set([0, 3, 4, 5, 9]);
+const TERRAIN_COAST_LAND = new Set([0, 3, 4, 5, 8]);
+const TERRAIN_BEACH = 8;
+
 // Client mirror of the sim's Dock placement (Water W1, BLD-14):
 // the grid predicate's shoreline straddle, read off the terrain
 // layer — at least one footprint cell water-side (deep water or
@@ -3243,7 +3258,7 @@ function mirrorDockValid(cx, cy) {
   const landNeighbor = (x, y) => [[1, 0], [-1, 0], [0, 1], [0, -1]]
     .some(([dx, dy]) => {
       const nx = x + dx, ny = y + dy;
-      return nx >= 0 && ny >= 0 && nx < GW && ny < GH && TERRAIN[ny * GW + nx] === 0;
+      return nx >= 0 && ny >= 0 && nx < GW && ny < GH && TERRAIN_COAST_LAND.has(TERRAIN[ny * GW + nx]);
     });
   let waterSide = false;
   let landSide = false;
@@ -3261,8 +3276,13 @@ function mirrorDockValid(cx, cy) {
       // player's grid as rendered (myFog, refreshed every draw).
       if (FOG && FOG[y * GW + x] < 1) return false; // unexplored (BLD-01)
       const t = TERRAIN[y * GW + x];
-      if (t >= 1) waterSide = true;
-      if (t === 0 || (t === 2 && landNeighbor(x, y))) landSide = true;
+      // MAP03-B: the straddle's halves read the tag sets —
+      // water-side tags (deep, shallows, ice navigable, beach,
+      // mangrove) and land-side tags (coast land incl. beach
+      // itself, or shallows/mangrove beside coast land),
+      // exactly the sim's dock_terrain_ok readings.
+      if (TERRAIN_WATER_SIDE.has(t)) waterSide = true;
+      if (TERRAIN_COAST_LAND.has(t) || ((t === 2 || t === 9) && landNeighbor(x, y))) landSide = true;
       if (tcReserved.has(y * GW + x)) return false;
       if (unitCells.has(y * GW + x)) return false; // a living unit stands here
       // A tree (the static obstacle layer on a non-deep cell)
@@ -3320,7 +3340,7 @@ function mirrorTrapValid(cx, cy) {
   if (FOG && FOG[cy * GW + cx] < 1) return false; // unexplored (BLD-01)
   if (myAge() < 1) return false; // the Fish Trap is Feudal-born
   const t = TERRAIN[cy * GW + cx];
-  if (t < 1) return false; // water-side only (deep water or shallows)
+  if (!TERRAIN_WATER_SIDE.has(t)) return false; // water-side only (MAP03-B tag set)
   if (OBST[cy * GW + cx]) return false;
   for (const b of buildings) {
     const bs = b.size || kindSize(b.kind);
@@ -3520,7 +3540,12 @@ function mirrorValid(kind, cx, cy) {
     // refuses shallows separately for every Normal kind
     // (validate_build's is_shallows check), and the mirror
     // never read TERRAIN at all (wallghost fix).
-    if (TERRAIN && TERRAIN[y * GW + x] !== 0) return false; // deep water or shallows
+    // MAP03-B: a Normal footprint stands only on a Full build
+    // class terrain (land/dirt/sand/snow/mangrove shallows) —
+    // plus the WallsDocks exception: a WALL kind also stands
+    // on beach, as the sim's validate_build admits it.
+    if (TERRAIN && !TERRAIN_BUILDABLE.has(TERRAIN[y * GW + x])
+      && !(isWallKind(kind) && TERRAIN[y * GW + x] === TERRAIN_BEACH)) return false;
     if (OBST[y * GW + x]) return false; // static wall
     if (tcReserved.has(y * GW + x)) return false; // a Town Center's reserve
     if (unitCells.has(y * GW + x)) return false; // a living unit standing on the cell
@@ -18761,6 +18786,17 @@ function draw() {
       // water — the amphibious rim a player can wade and a Dock
       // can straddle; presentation only, no sim consequence.
       else if (TERRAIN[fi] === 2) base = (gx + gy) % 2 ? '#63a4cf' : '#6dadd8';
+      // MAP03-B ground colours (presentation only, our own
+      // palette): dirt, sand, snow, ice, navigable ice, beach
+      // (the shoreline sand, now a real terrain), mangrove
+      // shallows (green water).
+      else if (TERRAIN[fi] === 3) base = (gx + gy) % 2 ? '#8a6b48' : '#93744e';
+      else if (TERRAIN[fi] === 4) base = (gx + gy) % 2 ? '#c2a878' : '#cbb183';
+      else if (TERRAIN[fi] === 5) base = (gx + gy) % 2 ? '#e8edf2' : '#dfe7ee';
+      else if (TERRAIN[fi] === 6) base = (gx + gy) % 2 ? '#a8c8dc' : '#b4d2e4';
+      else if (TERRAIN[fi] === 7) base = (gx + gy) % 2 ? '#8fbcd8' : '#9ac6de';
+      else if (TERRAIN[fi] === 8) base = (gx + gy) % 2 ? '#b8a06a' : '#bfa971';
+      else if (TERRAIN[fi] === 9) base = (gx + gy) % 2 ? '#5e8f74' : '#67a07e';
       else if (SHORE.has(fi)) base = '#b8a06a';
       else base = (gx + gy) % 2 ? '#3f7a37' : '#457f3b';
       if (hgt > 0) {
