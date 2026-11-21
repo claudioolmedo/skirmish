@@ -170,6 +170,8 @@ mod occorder15_tests;
 #[cfg(test)]
 mod engagepersist_tests;
 #[cfg(test)]
+mod engageexec_tests;
+#[cfg(test)]
 mod occorder23_tests;
 
 #[cfg(target_arch = "wasm32")]
