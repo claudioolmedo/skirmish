@@ -7,20 +7,33 @@
 // an agreed execution turn; after every turn the two state hashes
 // are compared — a mismatch is a desync and the match stops.
 //
-// Layout of a match:
-//   * 1 turn = 3 ticks. A tick is 1/60 s of GAME time; the game
+// Layout of a match (NET-02, converged 2026-11-22 to the
+// documented reference model — Bettner & Terrano, confirmed for
+// DE by the 2026-11-22 research, skirmish-study/research-de/
+// tec11-net02.md §B):
+//   * 1 turn = 20 ticks. A tick is 1/60 s of GAME time; the game
 //     runs at GAME_SPEED x wall clock (DE's Normal speed), so a
-//     turn spans 3 x (1000/60) / 1.7 ≈ 29.4 ms of real time and
-//     there are 34 turns per real second.
-//   * Input delay: commands are stamped for the turn that is
-//     `delay` turns in the future (starts at 4 turns, the
-//     reference design's turnaround). A turn executes only when BOTH
-//     bundles for it have arrived; an empty bundle is a heartbeat.
-//     If a side's bundle is late, execution waits — the slowest
-//     machine sets the pace (NET-03), the game never drops sim time.
-//   * The delay adapts up (host proposes, both apply at an agreed
-//     future turn) when too many turns execute late; it never drops
-//     below the initial value mid-match.
+//     turn spans 20 x (1000/60) / 1.7 ≈ 196 ms of real time —
+//     the reference design's ≈200 ms communication turn, with
+//     ≈5.1 turns per real second.
+//   * Input delay: commands are stamped for execution exactly
+//     2 turns after the turn in progress when they are issued
+//     (N+2 ≈ 400 ms at the standard speed) — the reference
+//     design's scheduled turnaround, and the mechanism that
+//     hides latency: input is never executed immediately, so
+//     jitter inside the 2-turn window is invisible. The offset
+//     is FIXED for the whole match; it never adapts mid-match.
+//     What adapts to a slow peer is the PACE, never the offset:
+//     a turn's ticks begin only when BOTH bundles for it have
+//     arrived (an empty bundle is a heartbeat), so the slowest
+//     machine sets the pace (NET-03) and sim time never drops.
+//   * Within a turn, ticks execute one by one as their own
+//     wall-clock deadlines pass — the world advances smoothly
+//     tick by tick exactly as in the local game; only the
+//     APPLICATION of command bundles is quantized to turn
+//     boundaries (a turn's bundles apply before its first
+//     tick). After a stall, due ticks catch up in bounded
+//     bursts per pump, never skipping sim time.
 //   * Hash cadence (NET-04, bot-loop 2026-10-29): one hash per
 //     TICK — each turn's hash message carries the hash after every
 //     one of its ticks, plus the SIM-06 subsystem parts per tick
@@ -38,7 +51,11 @@
 // client-side.
 
 export const PROTOCOL_VERSION = 1;
-export const TURN_TICKS = 3;
+// NET-02: the communication turn is 20 ticks — ≈196 ms of wall
+// time at the standard 1.7x speed, the reference design's
+// ≈200 ms turn (see the header). Bundles, hash messages and
+// the rejoin accounting are all counted in these turns.
+export const TURN_TICKS = 20;
 // Game speed (2026-10-19 study fix, gap 2): DE's Normal speed
 // runs game time at 1.7x the wall clock — until now the client
 // ran 1.0x, so every build, train and research took 1.7x longer
@@ -49,10 +66,10 @@ export const TURN_TICKS = 3;
 // untouched — its ticks, rules and hashes do not know the
 // wall clock exists, and both lockstep clients run this same
 // build, so they pace identically. Input delay is counted in
-// TURNS and is unchanged (4 turns ≈ 118 ms at this speed).
+// TURNS (NET-02: 2 turns ≈ 392 ms at this speed).
 export const GAME_SPEED = 1.7;
 export const TICK_MS = 1000 / 60; // one sim tick at 1.0x (game ms)
-export const TURN_MS = (TURN_TICKS * TICK_MS) / GAME_SPEED; // ≈29.41 ms of wall time per turn
+export const TURN_MS = (TURN_TICKS * TICK_MS) / GAME_SPEED; // ≈196.08 ms of wall time per turn
 
 // SIM-11 (bot-loop, 2026-10-28): the match speed setting. DE lobbies
 // offer 1.0 / 1.5 / 2.0 with 1.7 as the standard ranked speed; the
@@ -85,8 +102,23 @@ export function advanceTicks(accGameMs, dtMs, speed = GAME_SPEED) {
   const ticks = Math.floor(total / TICK_MS);
   return { ticks, accMs: total - ticks * TICK_MS };
 }
-export const INITIAL_DELAY_TURNS = 4;
-export const MAX_DELAY_TURNS = 10;
+// NET-02: the fixed input delay, in turns. A command issued
+// during turn N is stamped for turn N+2 and executes there —
+// ≈400 ms of scheduled delay at the standard speed, the
+// reference design's turnaround and its latency-hiding
+// mechanism. It is a match constant: it never adapts mid-match
+// (the pre-convergence transport proposed raises on lagging
+// links; the documented model instead lets the slowest peer
+// set the pace, NET-03, and keeps the offset at +2). The name
+// is historical — this is no longer just the INITIAL delay.
+export const INITIAL_DELAY_TURNS = 2;
+// NET-02: the per-pump catch-up bound, in TICKS. After a stall
+// (a late peer, a backgrounded tab) many ticks can be due at
+// once; a pump executes at most this many before yielding to
+// the frame loop, so catch-up compresses wall time over a few
+// frames instead of freezing one frame. 240 ticks = 12 turns —
+// far above the ~2 ticks a 60 fps frame owes at standard speed.
+export const MAX_CATCHUP_TICKS = 240;
 // NET-07's per-player command budget: a player may contribute
 // at most BUNDLE_CAP commands to any one turn. The sender drops
 // the excess (counted in the session's droppedOverflow) and the
@@ -529,7 +561,14 @@ export function decodeMessage(text) {
     // string per subsystem, in HASH_PART_NAMES order.
     const isHexList = (v) => Array.isArray(v) && v.length >= 1 && v.length <= 8
       && v.every((h) => typeof h === 'string' && h.length <= 64);
-    const newForm = isHexList(msg.hashes)
+    // The hash list itself carries one entry per TICK of the
+    // turn — 20 since the NET-02 convergence (the subsystem
+    // rows inside `parts` stay ≤ 8 wide). The bound is a junk
+    // filter with headroom over the turn size, not the turn
+    // size itself.
+    const isHashList = (v) => Array.isArray(v) && v.length >= 1 && v.length <= 64
+      && v.every((h) => typeof h === 'string' && h.length <= 64);
+    const newForm = isHashList(msg.hashes)
       && (msg.parts === undefined
         || (Array.isArray(msg.parts) && msg.parts.length === msg.hashes.length
           && msg.parts.every((row) => isHexList(row) && row.length <= 8)));
@@ -538,6 +577,9 @@ export function decodeMessage(text) {
       return { ok: false, error: 'bad hash' };
     }
   }
+  // Legacy delay proposals (pre-NET-02-convergence clients):
+  // still decodable for wire compatibility, but the session
+  // never consumes them — the scheduling offset is fixed now.
   if (msg.type === 'delay' && (!isInt(msg.turns) || !isInt(msg.atTurn))) {
     return { ok: false, error: 'bad delay' };
   }
@@ -618,15 +660,27 @@ export function createSession({
   let nextExec = 0;
   let nextSendTurn = initialDelay;
   let nextSendAt = 0;
+  // NET-02: the scheduling offset is a match constant (+2 turns,
+  // INITIAL_DELAY_TURNS by default). startAt may restamp it from
+  // the resync handshake (the remaining peer's value — the same
+  // constant on any current build); nothing ever raises or
+  // lowers it mid-match.
   let delay = initialDelay;
-  let pendingDelay = null; // {atTurn, turns}
   const filling = new Map(); // turn -> cmds[] (local, unsent)
   const bundles = new Map(); // turn -> [cmds|null, cmds|null]
   const localHashes = new Map();
   const remoteHashes = new Map();
   let floorTurn = 0; // rebase floor: bundles below it are final/ignored
   let waiting = false;
-  let lateWindow = []; // booleans: did each recent turn execute late?
+  // NET-02: execution inside a turn is incremental — a turn's
+  // bundles apply at its first tick, then its ticks run one by
+  // one on the anchor schedule (see pump). ticksInTurn counts
+  // the ticks of turn `nextExec` already run; turnHashes /
+  // turnParts accumulate that turn's per-tick hash snapshots
+  // until it completes and its hash message goes out.
+  let ticksInTurn = 0;
+  let turnHashes = null;
+  let turnParts = null;
   let droppedDupes = 0;
   let droppedOverflow = 0;
   // NET-07: bundles the network delivered twice (or after their
@@ -636,7 +690,13 @@ export function createSession({
   // explicit instead of silent.
   let droppedRedelivered = 0;
 
-  const execTarget = (turn) => anchorMs + (turn - anchorTurn + 1) * TURN_MS;
+  // The wall-clock deadline of tick `k` (0-based) of `turn`:
+  // ticks are spaced evenly across the turn's span, so a turn
+  // completes exactly at the historical turn target (the anchor
+  // plus a whole number of turns).
+  const TICK_WALL_MS = TURN_MS / turnTicks;
+  const tickTarget = (turn, k) =>
+    anchorMs + ((turn - anchorTurn) * turnTicks + k + 1) * TICK_WALL_MS;
 
   function bundleFor(turn) {
     let b = bundles.get(turn);
@@ -701,26 +761,6 @@ export function createSession({
     }
   }
 
-  function syncDelay() {
-    if (!pendingDelay) return;
-    if (nextSendTurn < pendingDelay.atTurn) return;
-    // The open turn jumps forward by the delay delta: the skipped
-    // turns are sent empty at once (their input window is gone),
-    // and anything recorded for the old open turn moves to the new
-    // one — a player's orders are delayed, never lost.
-    const newOpen = nextSendTurn + (pendingDelay.turns - delay);
-    const carried = filling.get(nextSendTurn) || [];
-    for (let t = nextSendTurn; t < newOpen; t++) {
-      sendBundle(t, t === nextSendTurn ? carried.slice(0, 0) : []);
-    }
-    if (carried.length) filling.set(newOpen, carried);
-    filling.delete(nextSendTurn);
-    nextSendTurn = newOpen;
-    delay = pendingDelay.turns;
-    pendingDelay = null;
-    onEvent({ type: 'delay', turns: delay });
-  }
-
   function sendBundle(turn, cmds) {
     const clean = [];
     for (const c of cmds) {
@@ -740,40 +780,56 @@ export function createSession({
     send({ type: 'bundle', turn, cmds: clean });
   }
 
-  function maybeProposeDelay(now) {
-    if (localSlot !== 0 || pendingDelay || delay >= MAX_DELAY_TURNS) return;
-    if (lateWindow.length < 200) return;
-    const late = lateWindow.filter(Boolean).length;
-    if (late / lateWindow.length <= 0.35) return;
-    const turns = delay + 1;
-    const atTurn = nextExec + 4;
-    pendingDelay = { atTurn, turns };
-    send({ type: 'delay', turns, atTurn });
-    lateWindow = [];
-  }
-
-  function executeTurn(turn, now) {
+  // NET-02: a turn's execution, in three steps so pump can run
+  // it incrementally. beginTurn applies both bundles (slot
+  // order) before the turn's first tick — the ONLY moment
+  // commands ever enter the sim; stepTick runs one tick and
+  // records its hash snapshot; finishTurn ships the turn's
+  // per-tick hash message and advances the frontier.
+  function beginTurn(turn) {
     const b = bundles.get(turn);
     applyBundle(0, b[0]);
     applyBundle(1, b[1]);
-    const hashes = [];
-    const parts = hashParts ? [] : null;
-    for (let k = 0; k < turnTicks; k++) {
-      hashes.push(tickOnce());
-      if (parts) parts.push(hashParts());
-    }
+    turnHashes = [];
+    turnParts = hashParts ? [] : null;
+  }
+
+  function stepTick() {
+    turnHashes.push(tickOnce());
+    if (turnParts) turnParts.push(hashParts());
+    ticksInTurn++;
+  }
+
+  function finishTurn(turn) {
+    const b = bundles.get(turn);
+    const hashes = turnHashes;
+    const parts = turnParts;
+    turnHashes = null;
+    turnParts = null;
+    ticksInTurn = 0;
     localHashes.set(turn, { hashes, parts });
     send(parts
       ? { type: 'hash', turn, hashes, parts }
       : { type: 'hash', turn, hashes });
     const hash = hashes[hashes.length - 1];
-    const late = now > execTarget(turn) + TURN_MS;
-    lateWindow.push(late);
-    if (lateWindow.length > 240) lateWindow.shift();
     nextExec = turn + 1;
     checkHash(turn);
     if (onTurn) onTurn(turn, b[0], b[1], hash);
-    maybeProposeDelay(now);
+  }
+
+  // Run the in-flight turn (if any) to completion — its
+  // remaining ticks, hash message and onTurn included — and
+  // return the turn frontier. Callers that need the sim at a
+  // turn boundary (rebase's discard accounting, app.js's
+  // sendResync snapshot, whose tick count and recorded event
+  // stream are only defined at a boundary) settle first. A
+  // no-op when no turn is in flight.
+  function settleTurn() {
+    if (phase === 'running' && ticksInTurn > 0) {
+      while (ticksInTurn < turnTicks) stepTick();
+      finishTurn(nextExec);
+    }
+    return nextExec;
   }
 
   return {
@@ -785,6 +841,9 @@ export function createSession({
       anchorTurn = 0;
       anchorMs = nowMs;
       nextExec = 0;
+      ticksInTurn = 0;
+      turnHashes = null;
+      turnParts = null;
       nextSendTurn = delay;
       nextSendAt = nowMs + TURN_MS;
       floorTurn = 0;
@@ -802,10 +861,16 @@ export function createSession({
       return nextSendTurn;
     },
 
-    /// One frame of work: send due bundles, execute ready turns.
+    /// One frame of work: send due bundles, execute due ticks.
+    /// A turn's ticks begin only when BOTH of its bundles are
+    /// in hand (lockstep — NET-01/03); once begun they run tick
+    /// by tick on the anchor schedule, so the world advances as
+    /// smoothly as the local game and only command application
+    /// is quantized to turn boundaries (NET-02). After a stall
+    /// the due ticks catch up in a bounded burst per pump —
+    /// sim time is never dropped, only compressed.
     pump(nowMs) {
       if (phase !== 'running') return;
-      syncDelay();
       while (nowMs >= nextSendAt && phase === 'running') {
         const cmds = filling.get(nextSendTurn) || [];
         filling.delete(nextSendTurn);
@@ -815,14 +880,18 @@ export function createSession({
       }
       let isWaiting = false;
       let guard = 0;
-      while (phase === 'running' && guard++ < 40) {
+      while (phase === 'running' && guard++ < MAX_CATCHUP_TICKS) {
         const b = bundles.get(nextExec);
         if (!b || b[0] === null || b[1] === null) {
-          isWaiting = execTarget(nextExec) <= nowMs;
+          // The next tick is due but its turn's bundles are not
+          // both in hand: the slowest peer sets the pace.
+          isWaiting = tickTarget(nextExec, ticksInTurn) <= nowMs;
           break;
         }
-        if (execTarget(nextExec) > nowMs) break;
-        executeTurn(nextExec, nowMs);
+        if (tickTarget(nextExec, ticksInTurn) > nowMs) break;
+        if (ticksInTurn === 0) beginTurn(nextExec);
+        stepTick();
+        if (ticksInTurn === turnTicks) finishTurn(nextExec);
       }
       if (isWaiting !== waiting) {
         waiting = isWaiting;
@@ -871,13 +940,11 @@ export function createSession({
         checkHash(msg.turn);
         return true;
       }
-      if (msg.type === 'delay') {
-        // Only the host proposes; the guest applies.
-        if (localSlot === 1 && msg.turns > delay && msg.turns <= MAX_DELAY_TURNS) {
-          pendingDelay = { atTurn: msg.atTurn, turns: msg.turns };
-        }
-        return true;
-      }
+      // NET-02: there is no 'delay' message handling — the
+      // scheduling offset never changes mid-match, so a delay
+      // proposal (only a pre-convergence client sends one) is
+      // not consumed here; it falls through to the app layer,
+      // which ignores it.
       return false;
     },
 
@@ -920,11 +987,21 @@ export function createSession({
       anchorTurn = turn;
       anchorMs = nowMs;
       nextExec = turn;
+      ticksInTurn = 0;
+      turnHashes = null;
+      turnParts = null;
       floorTurn = turn;
       nextSendTurn = turn + delay;
       nextSendAt = nowMs + TURN_MS;
       for (let t = turn; t < turn + delay; t++) bundles.set(t, [[], []]);
     },
+
+    /// NET-02: settle any in-flight turn (see the closure) —
+    /// app.js calls this before taking the resync snapshot, so
+    /// the snapshot's tick count and event stream describe a
+    /// turn boundary, exactly as they did when a turn executed
+    /// atomically. Returns the turn frontier.
+    settleTurn,
 
     /// Rejoin support, remaining-peer side: discard every
     /// unexecuted bundle (the two sides may disagree about them —
@@ -939,6 +1016,15 @@ export function createSession({
     /// ground. Orders issued into the discarded window are lost —
     /// the honest cost of a dropped connection.
     rebase(atTurn, nowMs) {
+      // NET-02: execution inside a turn is incremental, so a
+      // turn can be IN FLIGHT (bundles applied, some ticks run)
+      // when the resume lands. That turn is already committed
+      // in both sides' turn accounting — it cannot be discarded
+      // like an unstarted one. Settle it first (its remaining
+      // ticks run, its hash message and onTurn fire as usual),
+      // restoring the invariant that rebase only ever discards
+      // turns that never began.
+      settleTurn();
       for (const t of [...bundles.keys()]) {
         if (t >= nextExec) bundles.delete(t);
       }
@@ -946,7 +1032,6 @@ export function createSession({
       for (let t = nextExec; t < atTurn; t++) bundles.set(t, [[], []]);
       floorTurn = atTurn;
       delay = Math.max(delay, initialDelay);
-      pendingDelay = null;
       anchorTurn = atTurn;
       anchorMs = nowMs;
       nextSendTurn = atTurn + delay;

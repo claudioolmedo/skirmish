@@ -64,7 +64,8 @@ import {
   FORMATIONS, createFormationChoice, formationApplies,
 } from './play/formation.js';
 import {
-  TURN_TICKS as NET_TURN_TICKS, REJOIN_GRACE_MS, LOAD_TIMEOUT_MS,
+  TURN_TICKS as NET_TURN_TICKS, INITIAL_DELAY_TURNS as NET_DELAY_TURNS,
+  REJOIN_GRACE_MS, LOAD_TIMEOUT_MS,
   PEER_STALL_TIMEOUT_MS,
   GAME_SPEED, GAME_SPEEDS, isGameSpeed, TICK_MS, advanceTicks,
   applyCommand as netApplyCommand, tcIdOf as netTcIdOf,
@@ -6182,13 +6183,19 @@ async function rejoinFromResync(msg) {
   });
   net.recorder.seed(msg.events || []);
   net.session = makeNetSession();
-  net.resyncDelay = msg.delay || 4;
+  net.resyncDelay = msg.delay || NET_DELAY_TURNS;
   net.client.send({ type: 'resync-done' });
   lobbyStatus(t('status.rebuilt'));
 }
 
 function sendResync() {
   if (!net || !net.session || !net.recorder) return;
+  // NET-02: the snapshot pairs a tick count with the recorded
+  // event stream — both are only defined at a turn boundary,
+  // and execution inside a turn is incremental now, so settle
+  // any in-flight turn first (its commands join the stream and
+  // the tick count lands on the boundary).
+  net.session.settleTurn();
   const snapshot = net.recorder.finish({ result: 'ongoing', ticks: sim.tick_count() });
   net.client.send({
     type: 'resync',

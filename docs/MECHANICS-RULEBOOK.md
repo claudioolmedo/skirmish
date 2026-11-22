@@ -4639,14 +4639,35 @@ state never crosses the wire. · *Status:* **MATCHES** (shipped M8,
 execution at tick N+2 communication turns (≈200 ms turns in the reference
 design), giving every packet a full turn to arrive. The delay is fixed
 per match settings, never adaptive mid-match.
-*Source:* Bettner & Terrano (the N+2 rule). · *Impl:* the transport
-stamps each bundle for an execution TURN `delay` turns ahead (turns of
-3 ticks / ≈29.4 ms wall at 1.7× game speed, not the reference's ≈200 ms turns) and holds it until
-that turn; the delay starts at 4 turns (≈118 ms) and adapts UP when the
-link lags, never fixed per match settings; local single-player input
-does not take the bundle path (it applies immediately, delay 0).
-· *Status:* **DIFFERS** (scheduling-ahead matches; turn size,
-adaptivity, and the unshared local path differ).
+*Source:* Bettner & Terrano (the N+2 rule); DE confirmation and the
+turn-length refinement (the ≈200 ms is an adaptive default — the
+slowest participant sets the pace — while the +2 offset is fixed):
+2026-11-22 research (skirmish-study/research-de/tec11-net02.md §B).
+· *Impl:* converged 2026-11-22 (NET-02 package): the transport's
+communication turn is 20 ticks — ≈196 ms wall at the standard 1.7×
+speed (the wall length scales with the match speed setting, the
+client's standing SIM-11 convention) — and every bundle is stamped
+for execution exactly 2 turns after the turn in progress when it
+was issued (N+2 ≈ 392 ms at standard speed), the offset fixed for
+the whole match: the lag-adaptation machinery (host delay
+proposals) is removed, and a stray proposal is decodable but never
+consumed. Execution inside a turn is incremental — a turn's
+bundles apply before its first tick, then its ticks run one by
+one on the anchor schedule (catch-up after a stall is bounded per
+pump) — so motion stays smooth and only command application is
+quantized to turn boundaries; a turn's ticks still begin only
+when both bundles are in hand (NET-03's pace adaptation). Local
+single-player input does not take the bundle path (it applies
+immediately, delay 0) — unchanged, and outside this rule's
+multiplayer scope. Pinned by `play/netplay.test.mjs` (the N+2
+application at the stamped turn in a two-session harness, the
+fixed delay under a 400 ms-lagging link, mid-turn rebase
+completion, settle-to-boundary before a resync snapshot) and
+verified against the production relay with the
+real WASM sim by `play/netplay.integration.mjs` (90 turns,
+per-turn hashes equal, replay re-executes identically) and
+`play/rejoin.integration.mjs` (two drop/rejoin cycles, 150
+compared turns each, 0 desyncs). · *Status:* **MATCHES**.
 
 **NET-03 — The slowest machine sets the pace.** If any client cannot keep
 up, the whole match slows (never drops sim time): the design deliberately
@@ -4663,7 +4684,7 @@ the per-tick checksum (SIM-05); a mismatch means the match has diverged
 and stops with diagnostics (tick, and per SIM-06 the subsystem) rather
 than playing on in two different worlds.
 *Source:* Bettner & Terrano; OPENAGE-RESEARCH §2.6. · *Impl:* the state
-hash is exchanged and compared after every TURN (every 3 ticks); a
+hash is exchanged and compared after every TURN (every 20 ticks); a
 mismatch stops both clients with the turn number and the recorded
 replay as diagnostics. · *Status:* **MATCHES** (from DIFFERS —
 bot-loop 2026-10-29, fidelity-audit Package B slice: the hash

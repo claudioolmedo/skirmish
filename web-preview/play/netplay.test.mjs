@@ -489,7 +489,7 @@ test('turn gating: nothing executes until BOTH bundles arrive', () => {
     'A ran past the pre-filled buffer without B\'s bundle');
   assert.equal(pair.a.state().waiting, true);
   // Now deliver B's bundles: A catches up.
-  run(pair, 1610, 2200);
+  run(pair, 1610, 3200);
   assert.ok(pair.a.state().turn > INITIAL_DELAY_TURNS + 5, 'A caught up after delivery');
   assert.equal(pair.a.state().turn, pair.b.state().turn);
 });
@@ -500,7 +500,7 @@ test('lockstep run: identical application order and hashes on both sides', () =>
   pair.b.start(0);
   pair.a.localCommand({ t: 'move', e: 3, x: 10, y: 20 });
   pair.b.localCommand({ t: 'gather', e: 8, n: 4 });
-  run(pair, 0, 3000);
+  run(pair, 0, 14000);
   assert.equal(pair.a.state().turn, pair.b.state().turn);
   assert.ok(pair.a.state().turn >= 55, `turns executed: ${pair.a.state().turn}`);
   assert.deepEqual(pair.simA.applied, pair.simB.applied);
@@ -645,7 +645,7 @@ test('NET-04: a legacy per-turn hash still compares against the last tick', () =
   // Rewrite every hash message bound for A into the legacy
   // single-hash form (a cached older client): the match must run
   // clean — the legacy hash is the turn's last-tick hash.
-  for (let t = 0; t <= 2000; t += 10) {
+  for (let t = 0; t <= 5000; t += 10) {
     pair.a.pump(t);
     pair.b.pump(t);
     for (const m of pair.inboxB.splice(0)) pair.b.receive(m);
@@ -666,6 +666,16 @@ test('NET-04 codec: per-tick hash messages validate strictly', () => {
   assert.equal(decodeMessage('{"type":"hash","turn":1,"hashes":"nope"}').ok, false);
   assert.equal(decodeMessage('{"type":"hash","turn":1,"hashes":["ha"],"parts":[["r"],["x"]]}').ok, false);
   assert.equal(decodeMessage('{"type":"hash","turn":1,"hashes":[]}').ok, false);
+  // NET-02: a turn is 20 ticks — a full turn's per-tick hash
+  // list (with its parts rows) must validate; past the codec's
+  // junk bound it must not.
+  const hashes20 = Array.from({ length: TURN_TICKS }, (_, i) => 'h' + i);
+  const parts20 = hashes20.map(() => ['r', 'w', 'e', 't']);
+  assert.equal(decodeMessage(JSON.stringify(
+    { type: 'hash', turn: 1, hashes: hashes20, parts: parts20 })).ok, true);
+  const hashes65 = Array.from({ length: 65 }, (_, i) => 'h' + i);
+  assert.equal(decodeMessage(JSON.stringify(
+    { type: 'hash', turn: 1, hashes: hashes65 })).ok, false);
 });
 
 test('NET-07: exact duplicates within one bundle collapse', () => {
@@ -676,7 +686,7 @@ test('NET-07: exact duplicates within one bundle collapse', () => {
   pair.a.localCommand(cmd);
   pair.a.localCommand({ ...cmd });
   pair.a.localCommand({ t: 'move', e: 4, x: 1, y: 1 });
-  run(pair, 0, 500);
+  run(pair, 0, 1000);
   const bundle = pair.simB.applied.find(([s, cmds]) => s === 0 && cmds.length > 0);
   assert.equal(bundle[1].length, 2, 'duplicate dropped, distinct kept');
   assert.equal(pair.a.state().droppedDupes, 1);
@@ -690,7 +700,7 @@ test('NET-07: a redelivered bundle is counted and never applied twice', () => {
   // Deliver every message bound for A twice: each bundle's
   // second copy is a network redelivery — its turn slot is
   // already filled, so it must be counted and discarded.
-  for (let t = 0; t <= 500; t += 10) {
+  for (let t = 0; t <= 1000; t += 10) {
     pair.a.pump(t);
     pair.b.pump(t);
     for (const m of pair.inboxA.splice(0)) {
@@ -708,14 +718,54 @@ test('NET-07: a redelivered bundle is counted and never applied twice', () => {
   assert.equal(withMove.length, 1, 'the redelivered bundle never re-applied');
 });
 
-test('delay adaptation: a lagging link raises the input delay for both', () => {
-  // B's bundles are delivered 400 ms late throughout: turns execute
-  // late persistently, so the host proposes a raise and both agree.
+test('NET-02: a command issued during turn N applies at turn N+2, never before', () => {
+  // The documented turnaround, pinned at the session level: the
+  // opening command is stamped for turn INITIAL_DELAY_TURNS (2),
+  // stays invisible to both sims while the buffer turns execute,
+  // and lands in slot order at turn 2's first tick — ≈392 ms of
+  // wall time after issue at the standard speed. Mid-match the
+  // same offset holds: the stamp is always the executing turn + 2.
+  const pair = linkedPair();
+  pair.a.start(0);
+  pair.b.start(0);
+  const cmd = { t: 'move', e: 3, x: 10, y: 20 };
+  const stamped = pair.a.localCommand(cmd);
+  assert.equal(stamped, INITIAL_DELAY_TURNS, 'opening command stamped +2');
+  // The buffer turns execute first: the command must NOT have
+  // reached either sim yet.
+  run(pair, 0, 390);
+  assert.ok(pair.a.state().turn >= 1, 'the buffer turns executed');
+  assert.equal(
+    pair.simA.applied.filter(([, cmds]) => cmds.length > 0).length, 0,
+    'nothing applied before turn N+2');
+  // Turn 2 runs: the command applies, on both sims, in slot 0.
+  run(pair, 400, 700);
+  assert.deepEqual(pair.simA.applied[INITIAL_DELAY_TURNS * 2], [0, [cmd]]);
+  assert.deepEqual(pair.simB.applied, pair.simA.applied);
+  // Mid-match: the stamp tracks the executing turn by exactly +2.
+  run(pair, 710, 3000);
+  const execTurn = pair.a.state().turn;
+  const stamped2 = pair.a.localCommand({ t: 'gather', e: 8, n: 4 });
+  assert.equal(stamped2, execTurn + INITIAL_DELAY_TURNS,
+    'mid-match stamp = executing turn + 2');
+  run(pair, 3010, 3000 + 3 * TURN_MS + 200);
+  assert.deepEqual(pair.simA.applied[stamped2 * 2],
+    [0, [{ t: 'gather', e: 8, n: 4 }]]);
+  assert.equal(pair.eventsA.filter((e) => e.type === 'desync').length, 0);
+});
+
+test('NET-02: the scheduling delay is fixed — a lagging link never raises it', () => {
+  // The pre-convergence transport adapted the input delay UP
+  // when turns executed late (host proposals, 'delay' messages).
+  // The documented model fixes the offset at +2 for the whole
+  // match: a lagging link slows the PACE (turns execute late,
+  // NET-03) but the stamp never moves. B's bundles are delivered
+  // 400 ms late throughout — execution lags, the delay must not.
   const pair = linkedPair();
   pair.a.start(0);
   pair.b.start(0);
   const held = [];
-  for (let t = 0; t <= 30000; t += 10) {
+  for (let t = 0; t <= 12000; t += 10) {
     pair.a.pump(t);
     pair.b.pump(t);
     for (const m of pair.inboxB.splice(0)) pair.b.receive(m);
@@ -727,10 +777,126 @@ test('delay adaptation: a lagging link raises the input delay for both', () => {
       }
     }
   }
-  assert.ok(pair.a.state().delay > INITIAL_DELAY_TURNS,
-    `host delay adapted: ${pair.a.state().delay}`);
-  assert.equal(pair.b.state().delay, pair.a.state().delay, 'guest applied the same delay');
+  assert.equal(pair.a.state().delay, INITIAL_DELAY_TURNS, 'host delay never adapted');
+  assert.equal(pair.b.state().delay, INITIAL_DELAY_TURNS, 'guest delay never adapted');
+  assert.ok(pair.a.state().turn > 30, `match still progressed: ${pair.a.state().turn}`);
   assert.equal(pair.eventsA.filter((e) => e.type === 'desync').length, 0);
+  // A delay proposal from the wire is not consumed or applied.
+  assert.equal(pair.b.receive({ type: 'delay', turns: 9, atTurn: 60 }), false);
+  assert.equal(pair.b.state().delay, INITIAL_DELAY_TURNS);
+});
+
+test('NET-02: rebase completes an in-flight turn before discarding', () => {
+  // Execution inside a turn is incremental, so a resume can
+  // land mid-turn. The in-flight turn is committed: rebase must
+  // run its remaining ticks (hash + onTurn fire) and only then
+  // discard unstarted turns — the tick accounting must come out
+  // exact, or the F2 turn invariant breaks and the resume
+  // desyncs.
+  const simA = fakeSim();
+  const simB = fakeSim();
+  const inboxA = [];
+  const inboxB = [];
+  const turnsA = [];
+  let ticksA = 0;
+  const a = createSession({
+    localSlot: 0,
+    send: (m) => inboxB.push(m),
+    applyBundle: (s, c) => simA.applyBundle(s, c),
+    tickOnce: () => { ticksA++; return simA.tick(); },
+    onEvent: () => {},
+    onTurn: (turn) => turnsA.push(turn),
+  });
+  const b = createSession({
+    localSlot: 1,
+    send: (m) => inboxA.push(m),
+    applyBundle: (s, c) => simB.applyBundle(s, c),
+    tickOnce: () => simB.tick(),
+    onEvent: () => {},
+  });
+  a.start(0);
+  b.start(0);
+  const flush = () => {
+    for (const m of inboxA.splice(0)) a.receive(m);
+    for (const m of inboxB.splice(0)) b.receive(m);
+  };
+  // Play to a moment partway through a turn: by t=1000 the
+  // sessions have completed turn 4 and are inside turn 5.
+  for (let t = 0; t <= 1000; t += 10) { a.pump(t); b.pump(t); flush(); }
+  assert.equal(a.state().turn, 5, 'turn 5 is the in-flight turn');
+  const ticksBefore = ticksA;
+  assert.ok(ticksBefore > 5 * TURN_TICKS && ticksBefore < 6 * TURN_TICKS,
+    `mid-turn tick count: ${ticksBefore}`);
+  // The resume lands: rebase to the production frontier
+  // (app.js: atTurn = turn + delay + 2).
+  const atTurn = a.state().turn + a.state().delay + 2;
+  a.rebase(atTurn, 2000);
+  assert.equal(ticksA, 6 * TURN_TICKS, 'the in-flight turn ran to completion');
+  assert.equal(a.state().tick, 6 * TURN_TICKS);
+  assert.ok(turnsA.includes(5), 'onTurn fired for the completed turn');
+  assert.ok(inboxB.some((m) => m.type === 'hash' && m.turn === 5),
+    'the completed turn\'s hash message went out');
+  // The pre-filled gap + delay buffer execute through pump on
+  // the new anchor: A advances exactly to atTurn + delay with
+  // an exact tick count and stalls there (the next turn needs
+  // the rejoined peer's bundles).
+  for (let t = 2000; t <= 2000 + 4 * TURN_MS; t += 10) a.pump(t);
+  assert.equal(a.state().turn, atTurn + INITIAL_DELAY_TURNS);
+  assert.equal(ticksA, (atTurn + INITIAL_DELAY_TURNS) * TURN_TICKS);
+});
+
+test('NET-02: settleTurn completes an in-flight turn to the boundary (the resync snapshot invariant)', () => {
+  // app.js's sendResync pairs a tick count with the recorded
+  // event stream — both only defined at a turn boundary. With
+  // incremental execution a snapshot could land mid-turn;
+  // settleTurn restores the boundary first.
+  let ticksA = 0;
+  let ticksB = 0;
+  const turnsA = [];
+  const sentA = [];
+  const inboxA = [];
+  const inboxB = [];
+  const simA = fakeSim();
+  const simB = fakeSim();
+  const a = createSession({
+    localSlot: 0,
+    send: (m) => { sentA.push(m); inboxB.push(m); },
+    applyBundle: (s, c) => simA.applyBundle(s, c),
+    tickOnce: () => { ticksA++; return simA.tick(); },
+    onTurn: (turn) => turnsA.push(turn),
+  });
+  const b = createSession({
+    localSlot: 1,
+    send: (m) => inboxA.push(m),
+    applyBundle: (s, c) => simB.applyBundle(s, c),
+    tickOnce: () => { ticksB++; return simB.tick(); },
+  });
+  a.start(0); b.start(0);
+  const run = (t0, t1) => {
+    for (let t = t0; t <= t1; t += 10) {
+      a.pump(t); b.pump(t);
+      for (const m of inboxA.splice(0)) a.receive(m);
+      for (const m of inboxB.splice(0)) b.receive(m);
+    }
+  };
+  run(0, 1000);
+  assert.ok(ticksA % TURN_TICKS !== 0,
+    `expected a mid-turn instant, got ${ticksA} ticks`);
+  const frontier = a.settleTurn();
+  assert.equal(ticksA, frontier * TURN_TICKS,
+    'the sim lands exactly on the turn boundary');
+  assert.equal(turnsA[turnsA.length - 1], frontier - 1,
+    'the settled turn fired onTurn (its commands join the recorded stream)');
+  assert.ok(sentA.some((m) => m.type === 'hash' && m.turn === frontier - 1),
+    'the settled turn shipped its hash message');
+  assert.equal(a.state().turn, frontier);
+  // A second settle at a boundary is a no-op.
+  assert.equal(a.settleTurn(), frontier);
+  assert.equal(ticksA, frontier * TURN_TICKS);
+  // And the match continues in lockstep afterwards.
+  run(1016, 4000);
+  assert.equal(ticksA, ticksB);
+  assert.deepEqual(simA.applied, simB.applied);
 });
 
 test('rejoin: rebase (remaining peer) vs startAt (rejoiner) keep identical tick streams', () => {
@@ -758,7 +924,7 @@ test('rejoin: rebase (remaining peer) vs startAt (rejoiner) keep identical tick 
   pair.b.start(0);
   pair.a.localCommand({ t: 'train_vil' });
   pair.b.localCommand({ t: 'train_vil' });
-  run(pair, 0, 2000);
+  run(pair, 0, 5200);
   const frontier = pair.a.state().turn;
   assert.equal(frontier, pair.b.state().turn);
   assert.ok(frontier > 20);
@@ -847,12 +1013,12 @@ test('startAt: rebuiltTicks ticks the empty gap before opening', () => {
     });
     return { session, counter };
   };
-  // Rebuilt to tick 282 (= the turn-94 frontier); the resume
-  // opens at turn 100: startAt must tick the (100 - 94) turns of
-  // command-free gap itself — the F2 invariant, counted.
+  // Rebuilt to the turn-94 frontier; the resume opens at turn
+  // 100: startAt must tick the (100 - 94) turns of command-free
+  // gap itself — the F2 invariant, counted.
   const { session, counter } = mkCounting();
-  session.startAt(100, 5000, INITIAL_DELAY_TURNS, 282);
-  assert.equal(counter.ticks, 100 * TURN_TICKS - 282);
+  session.startAt(100, 5000, INITIAL_DELAY_TURNS, 94 * TURN_TICKS);
+  assert.equal(counter.ticks, 100 * TURN_TICKS - 94 * TURN_TICKS);
   assert.equal(session.state().tick, 100 * TURN_TICKS);
   // Without rebuiltTicks the legacy contract stands: the caller
   // asserts the sim already stands at the frontier; nothing ticks.
@@ -1060,7 +1226,7 @@ test('startAt: a session opens at the frontier with an empty delay buffer', () =
   s.receive({ type: 'bundle', turn: 50, cmds: [{ t: 'move', e: 1, x: 0, y: 0 }] });
   // Turns [100, 100+delay) are pre-filled: they execute with no
   // traffic at all once their targets pass.
-  for (let t = 5000; t <= 5300; t += 10) s.pump(t);
+  for (let t = 5000; t <= 5600; t += 10) s.pump(t);
   assert.ok(s.state().turn >= 100 + INITIAL_DELAY_TURNS,
     `advanced through the buffer: ${s.state().turn}`);
   assert.deepEqual(sim.applied[0], [0, []]);
@@ -1090,8 +1256,10 @@ test('game speed setting: the DE lobby speeds, standard 1.7', () => {
   // Turn wall time scales inversely with the speed; the default
   // export stays the standard-speed value existing callers pin.
   assert.equal(turnMsFor(1.7), TURN_MS);
-  assert.ok(Math.abs(turnMsFor(1.0) - 50) < 1e-9, 'at 1.0x a turn is 50 wall ms');
-  assert.ok(Math.abs(turnMsFor(2.0) - 25) < 1e-9, 'at 2.0x a turn is 25 wall ms');
+  assert.ok(Math.abs(turnMsFor(1.0) - TURN_TICKS * TICK_MS) < 1e-9,
+    'at 1.0x a turn is ~333 wall ms (20 ticks at full length)');
+  assert.ok(Math.abs(turnMsFor(2.0) - (TURN_TICKS * TICK_MS) / 2) < 1e-9,
+    'at 2.0x a turn is ~167 wall ms');
   assert.equal(turnMsFor(9), TURN_MS, 'an unknown speed falls back to standard');
 });
 
@@ -1113,17 +1281,18 @@ test('game speed setting: two sessions at 2.0x pace turns at 2.0x, in lockstep',
   const fast = linkedPair({ speed: 2.0 });
   fast.a.start(0);
   fast.b.start(0);
-  run(fast, 0, 1500);
+  run(fast, 0, 6000);
   const std = linkedPair();
   std.a.start(0);
   std.b.start(0);
-  run(std, 0, 1500);
+  run(std, 0, 6000);
   assert.equal(fast.a.state().turn, fast.b.state().turn, 'fast pair stays in lockstep');
   assert.equal(fast.eventsA.filter((e) => e.type === 'desync').length, 0);
-  // 1500 wall ms hold 1500/25 = 60 turns at 2.0x and 1500/29.41 ≈ 51
-  // at the standard 1.7x: the executed-turn counts track the speeds.
-  assert.ok(Math.abs(fast.a.state().turn - 60) <= 2, `2.0x turns: ${fast.a.state().turn}`);
-  assert.ok(Math.abs(std.a.state().turn - 51) <= 2, `1.7x turns: ${std.a.state().turn}`);
+  // 6000 wall ms hold 6000/166.67 = 36 turns at 2.0x and
+  // 6000/196.08 ≈ 30.6 at the standard 1.7x: the executed-turn
+  // counts track the speeds.
+  assert.ok(Math.abs(fast.a.state().turn - 36) <= 2, `2.0x turns: ${fast.a.state().turn}`);
+  assert.ok(Math.abs(std.a.state().turn - 30) <= 2, `1.7x turns: ${std.a.state().turn}`);
   assert.ok(fast.a.state().turn > std.a.state().turn,
     'the faster setting executes more turns in the same wall time');
 });
@@ -1132,11 +1301,12 @@ test('game speed: 1.7x drives the turn interval math', () => {
   assert.equal(GAME_SPEED, 1.7, 'DE Normal speed');
   assert.equal(TICK_MS, 1000 / 60, 'a tick is 1/60 s of game time');
   // A turn is TURN_TICKS ticks of game time, compressed by the
-  // speed into wall time: 3 ticks x 16.67 ms / 1.7 ≈ 29.41 ms.
+  // speed into wall time: 20 ticks x 16.67 ms / 1.7 ≈ 196.08 ms
+  // (NET-02: the reference design's ≈200 ms communication turn).
   assert.ok(Math.abs(TURN_MS - (TURN_TICKS * TICK_MS) / GAME_SPEED) < 1e-9);
-  assert.ok(Math.abs(TURN_MS - 29.4118) < 0.001, `TURN_MS=${TURN_MS}`);
-  // 34 turns per real second; one game second per ~588 wall ms.
-  assert.ok(Math.abs(1000 / TURN_MS - 34) < 0.01);
+  assert.ok(Math.abs(TURN_MS - 196.0784) < 0.001, `TURN_MS=${TURN_MS}`);
+  // ≈5.1 turns per real second; one game second per ~588 wall ms.
+  assert.ok(Math.abs(1000 / TURN_MS - 5.1) < 0.01);
 });
 
 test('game speed: advanceTicks converts wall time to ticks at 1.7x', () => {
