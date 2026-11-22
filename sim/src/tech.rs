@@ -186,6 +186,31 @@
 //!   6 → 36 HP/min (0.1 → 0.6 HP/s), the Castle's 12 → 72 HP/min
 //!   (0.2 → 1.2 HP/s), and a zero base rate (production
 //!   buildings, the Ram) stays zero. No completion sweep.
+//! - The unique-technology pair (TEC-11, 2026-11-22; the
+//!   mechanism the rulebook reserves — one Castle-Age and one
+//!   Imperial-Age unique technology per empire, researched at
+//!   the Castle; the pattern, the cost/time envelope and the
+//!   effect categories are documented in the AoE2 wiki's
+//!   Unique technology list — see
+//!   `~/workspace/skirmish-study/research-de/tec11-net02.md` §A).
+//!   The roster ships ONE generic empire, so the pair's content
+//!   is original to it, in documented categories with values
+//!   inside the documented envelope (food+gold, the modal
+//!   two-resource shape): Drilled March — Castle Age,
+//!   400 food / 300 gold, 45 s (envelope ≈450–1,200 total /
+//!   30–60 s; anchored between Kasbah's 500 total and Atlatl's
+//!   750): infantry +10% speed, an INFANTRY-class percentage
+//!   patch in `Sim::stats_for_masked` in the Husbandry scalar's
+//!   shape. Siege Carpentry — Imperial Age, 600 food /
+//!   500 gold, 50 s (envelope ≈800–1,700 total / 40–60 s;
+//!   anchored on Furor Celtica's 1,200 total and Logistica's
+//!   1,400): siege weapons +25% HP, a SIEGE-class percentage
+//!   patch on the maximum in `Sim::stats_for_masked` (the
+//!   Masonry shape), with the Masonry proportional current-HP
+//!   sweep on completion in `apply_research`. The exact Castle
+//!   panel grid slot of the pair is NOT documented (research
+//!   §A.3) — the client appends them after Conscription in the
+//!   panel's positional grid, presentation only.
 
 use crate::build::BuildingKind;
 use crate::econ::NodeKind;
@@ -509,11 +534,29 @@ pub enum TechId {
     /// (2026-11-17): Siege Engineers holds 53 and the BLD-18
     /// tower trio holds 54–56.
     DemolitionShip,
+    /// Castle, Castle Age: the generic empire's Castle-Age
+    /// unique technology (TEC-11, 2026-11-22) — infantry
+    /// +10% speed, an INFANTRY-class percentage patch in
+    /// `Sim::stats_for_masked`. Cost/time are this game's own
+    /// content inside the documented UT envelope (400 food /
+    /// 300 gold, 45 s — module docs). Tag 58 — appended at
+    /// the tail; verified first free on the TEC-11 base
+    /// `b38ccfe`, where ALL held 58 entries, tags 0–57.
+    DrilledMarch,
+    /// Castle, Imperial Age: the generic empire's Imperial-Age
+    /// unique technology (TEC-11, 2026-11-22) — siege weapons
+    /// +25% HP, a SIEGE-class percentage patch on the maximum
+    /// in `Sim::stats_for_masked`, with the proportional
+    /// current-HP sweep on completion in `apply_research`.
+    /// Cost/time inside the documented UT envelope (600 food /
+    /// 500 gold, 50 s — module docs). Tag 59 — appended after
+    /// Drilled March.
+    SiegeCarpentry,
 }
 
 impl TechId {
     /// All technologies, in tag order.
-    pub const ALL: [TechId; 58] = [
+    pub const ALL: [TechId; 60] = [
         TechId::Loom,
         TechId::FeudalAge,
         TechId::Fletching,
@@ -572,6 +615,8 @@ impl TechId {
         TechId::Keep,
         TechId::Arrowslits,
         TechId::DemolitionShip,
+        TechId::DrilledMarch,
+        TechId::SiegeCarpentry,
     ];
 
     /// Stable tag: 0 loom, 1 feudal age, 2 fletching, 3 scale mail,
@@ -649,6 +694,11 @@ impl TechId {
     /// Demolition line's own Dock technology, appended at the
     /// tail; drafted 53 on the split's base `a9edef6`,
     /// renumbered at integration 2026-11-17 — 53–56 live.)
+    /// 58 drilled march, 59 siege carpentry (TEC-11,
+    /// 2026-11-22 — the generic empire's unique-technology
+    /// pair at the Castle, appended at the tail; verified
+    /// first free on the TEC-11 base `b38ccfe`, where ALL
+    /// held 58 entries, tags 0–57.)
     pub fn tag(self) -> u8 {
         match self {
             TechId::Loom => 0,
@@ -709,6 +759,8 @@ impl TechId {
             TechId::Keep => 55,
             TechId::Arrowslits => 56,
             TechId::DemolitionShip => 57,
+            TechId::DrilledMarch => 58,
+            TechId::SiegeCarpentry => 59,
         }
     }
 
@@ -784,6 +836,12 @@ impl TechId {
             // Package M: Conscription is researched at the Castle
             // itself (wiki, Conscription).
             TechId::Conscription => TechHost::Building(BuildingKind::Castle),
+            // TEC-11 (2026-11-22): the unique-technology pair
+            // is researched at the Castle — the documented host
+            // for every empire's two UTs (research §A.1/A.3).
+            TechId::DrilledMarch | TechId::SiegeCarpentry => {
+                TechHost::Building(BuildingKind::Castle)
+            }
             // Castle P5a/P5e: the Monastery set (grows with the
             // P5 slices — Redemption/Atonement/Heresy/Devotion
             // join this arm as they land).
@@ -833,7 +891,10 @@ impl TechId {
             | TechId::Shipwright
             // TEC-08: Siege Engineers is Imperial Age research
             // (wiki, Siege Engineers article).
-            | TechId::SiegeEngineers => Age::Imperial,
+            | TechId::SiegeEngineers
+            // TEC-11 (2026-11-22): Siege Carpentry is the
+            // pair's Imperial-Age member (research §A.1).
+            | TechId::SiegeCarpentry => Age::Imperial,
             // BLD-18 completion (2026-11-16): Keep and
             // Arrowslits are Imperial Age research (wiki, the
             // two articles).
@@ -877,6 +938,9 @@ impl TechId {
             | TechId::DemolitionShip
             | TechId::Careening
             | TechId::ClinkerConstruction
+            // TEC-11 (2026-11-22): Drilled March is the pair's
+            // Castle-Age member (research §A.1).
+            | TechId::DrilledMarch
             | TechId::GuardTower => Age::Castle,
             _ => Age::Feudal,
         }
@@ -997,6 +1061,8 @@ impl TechId {
             TechId::GuardTower => 1800, // 30 s (wiki, Technology table — BLD-18 completion, 2026-11-16)
             TechId::Keep => 4500, // 75 s (wiki, Technology table — BLD-18 completion, 2026-11-16)
             TechId::Arrowslits => 1500, // 25 s (wiki, Technology table — BLD-18 completion, 2026-11-16)
+            TechId::DrilledMarch => 2700, // 45 s (TEC-11 — inside the documented Castle-UT envelope, module docs)
+            TechId::SiegeCarpentry => 3000, // 50 s (TEC-11 — inside the documented Imperial-UT envelope, module docs)
         }
     }
 
@@ -1062,6 +1128,8 @@ impl TechId {
             TechId::GuardTower => (100, 250, 0, 0), // wiki, Technology table — BLD-18 completion, 2026-11-16
             TechId::Keep => (500, 350, 0, 0), // wiki, Technology table — BLD-18 completion, 2026-11-16
             TechId::Arrowslits => (250, 250, 0, 0), // wiki, Technology table — BLD-18 completion, 2026-11-16
+            TechId::DrilledMarch => (400, 0, 300, 0), // TEC-11 — own content inside the documented envelope (module docs)
+            TechId::SiegeCarpentry => (600, 0, 500, 0), // TEC-11 — own content inside the documented envelope (module docs)
         }
     }
 }
@@ -1453,7 +1521,11 @@ mod tests {
         // Water split (2026-11-16) appends Demolition Ship at
         // 57 (drafted 53, renumbered at integration — 53–56 live).
         assert_eq!(TechId::from_tag(57), Some(TechId::DemolitionShip));
-        assert_eq!(TechId::from_tag(58), None);
+        // TEC-11 (2026-11-22) appends the unique-technology
+        // pair at 58/59; 60 is the tail.
+        assert_eq!(TechId::from_tag(58), Some(TechId::DrilledMarch));
+        assert_eq!(TechId::from_tag(59), Some(TechId::SiegeCarpentry));
+        assert_eq!(TechId::from_tag(60), None);
     }
 
     #[test]
@@ -1606,8 +1678,10 @@ mod tests {
         // (TEC-08 appends Siege Engineers at 53 — ALL then
         // held 54; BLD-18 completion appends the tower trio at
         // 54/55/56 — ALL then held 57; the Water split appends
-        // Demolition Ship at 57 — ALL now holds 58.)
-        assert_eq!(TechId::ALL.len(), 58);
+        // Demolition Ship at 57 — ALL then held 58; TEC-11
+        // appends the unique-technology pair at 58/59 — ALL
+        // now holds 60.)
+        assert_eq!(TechId::ALL.len(), 60);
         // ECO-14: the farm gather lookup meets the farm's own
         // 0.4 food/s work-rate cap — the base farm rate sits
         // below it today, so the clamped value is the base rate,
@@ -1712,8 +1786,12 @@ mod tests {
         // Water split (2026-11-16) appends Demolition Ship at
         // 57 (drafted 53, renumbered at integration).
         assert_eq!(TechId::from_tag(57), Some(TechId::DemolitionShip));
-        assert_eq!(TechId::from_tag(58), None);
-        assert_eq!(TechId::ALL.len(), 58);
+        // TEC-11 (2026-11-22) appends the unique-technology
+        // pair at 58/59; 60 is the tail.
+        assert_eq!(TechId::from_tag(58), Some(TechId::DrilledMarch));
+        assert_eq!(TechId::from_tag(59), Some(TechId::SiegeCarpentry));
+        assert_eq!(TechId::from_tag(60), None);
+        assert_eq!(TechId::ALL.len(), 60);
     }
 
     #[test]

@@ -68,7 +68,7 @@ test('the University gains the Imperial trio after the W5 pair', () => {
 });
 
 test('the tech tree mirrors the Imperial trio (tags 50/51/52)', () => {
-  assert.equal(TECH_TREE.length, 58); // + Siege Engineers 53 (TEC-08); +the tower trio 54–56 (BLD-18 completion); +Demolition Ship 57 (split)
+  assert.equal(TECH_TREE.length, 60); // + Siege Engineers 53 (TEC-08); +the tower trio 54–56 (BLD-18 completion); +Demolition Ship 57 (split); +the TEC-11 pair 58/59
   assert.deepEqual(TECH_TREE[50], {
     tag: 50, host: 16, age: 3, cost: [200, 0, 400, 0], secs: 60, requires: 48,
   });

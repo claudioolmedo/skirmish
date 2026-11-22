@@ -103,7 +103,7 @@ const DOCK: u32 = 910;
 
 #[test]
 fn trio_table_rows_match_the_wiki() {
-    assert_eq!(TechId::ALL.len(), 58); // + Siege Engineers 53 (TEC-08); +the tower trio 54–56 (BLD-18, integration 2026-11-17); +Demolition Ship 57 (Water split, drafted 53, integration renumber 2026-11-17)
+    assert_eq!(TechId::ALL.len(), 60); // + Siege Engineers 53 (TEC-08); +the tower trio 54–56 (BLD-18, integration 2026-11-17); +Demolition Ship 57 (Water split, drafted 53, integration renumber 2026-11-17); +the TEC-11 pair 58/59
     for (tech, tag, cost) in [
         (TechId::DryDock, 50, (200, 0, 400, 0)),
         (TechId::CarvelHull, 51, (350, 200, 0, 0)),
@@ -135,7 +135,7 @@ fn trio_table_rows_match_the_wiki() {
         Some(TechId::DemolitionShip),
         "the Water split (2026-11-16) appends Demolition Ship at 57 (drafted 53, integration renumber 2026-11-17)"
     );
-    assert_eq!(TechId::from_tag(58), None, "57 is the tail");
+    assert_eq!(TechId::from_tag(60), None, "59 is the tail"); // TEC-11 pair holds 58/59
     // The chains (TEC-07): Dry Dock is Careening's further
     // upgrade, Carvel Hull is Clinker Construction's; Shipwright
     // stands alone.

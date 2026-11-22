@@ -189,7 +189,7 @@ fn castle_ship_rows_are_the_spec_rows() {
     // TEC-08's Siege Engineers at 53, BLD-18's tower trio at
     // 54–56 and the 2026-11-16 split's Demolition Ship at 57).
     assert_eq!(TechId::MediumWarships.tag(), 47);
-    assert_eq!(TechId::ALL.len(), 58); // 54 after TEC-08; +the tower trio 54–56 (BLD-18, integration 2026-11-17); +Demolition Ship 57 (Water split, integration renumber 2026-11-17)
+    assert_eq!(TechId::ALL.len(), 60); // 54 after TEC-08; +the tower trio 54–56 (BLD-18, integration 2026-11-17); +Demolition Ship 57 (Water split, integration renumber 2026-11-17); +the TEC-11 pair 58/59
     assert_eq!(TechId::MediumWarships.age_required(), Age::Castle);
     assert_eq!(TechId::MediumWarships.ticks(), 3000); // 50 s
     assert_eq!(TechId::MediumWarships.cost(), (0, 150, 100, 0));

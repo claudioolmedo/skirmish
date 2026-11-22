@@ -61,7 +61,7 @@ test('the tech mirror is not polluted: TECH_TREE stays the 58 technologies', () 
   // techtree.test.mjs pins TECH_TREE one-entry-per-TechId
   // against sim/src/tech.rs; the building entry must live in
   // its own table, never as a fake technology.
-  assert.equal(TECH_TREE.length, 58);
+  assert.equal(TECH_TREE.length, 60); // +the TEC-11 unique-technology pair 58/59
   assert.ok(!TECH_TREE.some((e) => e.kind === 9), 'no building entry inside TECH_TREE');
 });
 

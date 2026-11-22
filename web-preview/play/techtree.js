@@ -91,6 +91,9 @@ export const TECH_TREE = [
   { tag: 55, host: 16, age: 3, cost: [500, 350, 0, 0], secs: 75, requires: 54 }, // Keep (BLD-18 completion; chains from Guard Tower)
   { tag: 56, host: 16, age: 3, cost: [250, 250, 0, 0], secs: 25, requires: null }, // Arrowslits (BLD-18 completion)
   { tag: 57, host: 23, age: 2, cost: [0, 150, 100, 0], secs: 50, requires: null }, // Demolition Ship (Water split 2026-11-16; the Demolition line's own Dock tech — official update-169123 preview row, time mirrors Medium Warships; drafted tag 53, renumbered 57 at integration 2026-11-17)
+  // --- Castle (TEC-11 appends at the tail, the W5/W6 precedent) -------
+  { tag: 58, host: 15, age: 2, cost: [400, 0, 300, 0], secs: 45, requires: null }, // Drilled March (TEC-11, 2026-11-22; the generic empire's Castle-Age unique technology — own content inside the documented UT envelope)
+  { tag: 59, host: 15, age: 3, cost: [600, 0, 500, 0], secs: 50, requires: null }, // Siege Carpentry (TEC-11; the Imperial-Age unique technology)
 ];
 
 /**

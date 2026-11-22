@@ -3319,8 +3319,16 @@ one Castle-Age and one Imperial-Age unique technology, researched at the
 Castle. Mechanically they are ordinary techs (TEC-05/06/07); their
 *content* is empire design and out of scope for this rulebook (§C).
 *Source:* GAP 5.5. · *Impl:* two reserved per-empire rows in the tech
-table with the standard prerequisite shape (Castle, age). · *Status:*
-**MISSING**.
+table with the standard prerequisite shape (Castle, age). Shipped
+2026-11-22 for the roster's one generic empire (tags 58/59): Drilled
+March (Castle, Castle Age, 400 F / 300 G, 45 s — infantry +10% speed)
+and Siege Carpentry (Castle, Imperial Age, 600 F / 500 G, 50 s —
+siege weapons +25% HP), ordinary TEC-05/06/07 research in the
+Castle's queue with original content inside the documented
+cost/time envelope (AoE2 wiki, Unique technology; research-de
+tec11-net02 §A). Per-civilization content for future real empires
+remains the §C design work this rule scopes out. · *Status:*
+**MATCHES**.
 
 ---
 

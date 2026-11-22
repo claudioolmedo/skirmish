@@ -117,6 +117,8 @@ mod bowsaw_tests;
 #[cfg(test)]
 mod tec08_tests;
 #[cfg(test)]
+mod tec11_tests;
+#[cfg(test)]
 mod victory_relic_tests;
 #[cfg(test)]
 mod victory_wonder_tests;
@@ -4122,6 +4124,31 @@ impl Sim {
         if ship_class && p.techs & TechId::CarvelHull.bit() != 0 {
             s.speed = I16F16::from_bits(((s.speed.to_bits() as i64 * 11) / 10) as i32);
         }
+        // The unique-technology pair (TEC-11, 2026-11-22) —
+        // the generic empire's two Castle researches, keyed on
+        // class membership like every TEC-06 patch:
+        // Drilled March (Castle Age): infantry +10% speed —
+        // the Husbandry integer scalar over the layered row,
+        // keyed on the INFANTRY class (Militia, Man-at-Arms,
+        // Spearman and the Petard carry it in this roster's
+        // table; the class table is the scope, as always).
+        if s.classes & crate::classes::bit(crate::classes::INFANTRY) != 0
+            && p.techs & TechId::DrilledMarch.bit() != 0
+        {
+            s.speed = I16F16::from_bits(((s.speed.to_bits() as i64 * 11) / 10) as i32);
+        }
+        // Siege Carpentry (Imperial Age): siege weapons +25%
+        // HP — a percentage patch on the maximum in the
+        // Masonry integer shape (max × 5/4, truncating), keyed
+        // on the SIEGE class (Battering Ram, Mangonel,
+        // Scorpion). Standing units' current HP scales
+        // proportionally on completion (the Masonry sweep in
+        // `apply_research`).
+        if s.classes & crate::classes::bit(crate::classes::SIEGE) != 0
+            && p.techs & TechId::SiegeCarpentry.bit() != 0
+        {
+            s.max_hp = (s.max_hp * 5) / 4;
+        }
         // The Monastery patches (Castle P5a, MNK-01): keyed on
         // the MONK class mask, TEC-06's discipline — the Monk is
         // the class's only member today, and a future monk-class
@@ -5813,6 +5840,11 @@ impl Sim {
     /// - Bloodlines (2026-10-22) grants existing mounted units
     ///   the +20 HP with the new maximum — Loom's rule, on the
     ///   cavalry class mask.
+    /// - Siege Carpentry (TEC-11, 2026-11-22) scales existing
+    ///   siege units' current HP by the new maximum's ratio —
+    ///   the Masonry proportional rule, on the SIEGE class mask.
+    ///   Its pair Drilled March is a pure lookup patch (speed)
+    ///   and rides the default arm.
     /// - Horse Collar (2026-10-22) tops up the owner's standing
     ///   farms: since DE update 169123 a farm standing at the
     ///   research tick gains 75 × (remaining ⁄ full)², rounded up
@@ -6126,6 +6158,37 @@ impl Sim {
                     let b = &mut self.buildings[bi];
                     let bits = b.hp.to_bits() as i64;
                     b.hp = I16F16::from_bits((bits * 3000 / old_max) as i32);
+                }
+            }
+            TechId::SiegeCarpentry => {
+                // TEC-11 (2026-11-22): the Imperial unique
+                // technology's +25% siege maximum lands with
+                // the Masonry proportional rule — every
+                // standing siege unit of the owner keeps its
+                // HP FRACTION: current HP scales by
+                // new_max/old_max in fixed-point bits, the
+                // ratio taken on the integer maxima the
+                // `stats_for_masked` patch itself computes
+                // (base × 5/4, truncating), so a unit at full
+                // HP lands exactly on the new maximum, never
+                // above it. Drilled March needs no arm: speed
+                // has no stored current value — the default
+                // arm's bit is its whole effect (TEC-06).
+                self.players[slot].techs |= tech.bit();
+                for e in &mut self.entities {
+                    if e.owner == owner
+                        && !e.dead
+                        && units::spec(e.kind).classes
+                            & crate::classes::bit(crate::classes::SIEGE)
+                            != 0
+                    {
+                        let old_max = units::spec(e.kind).max_hp as i64;
+                        let new_max = old_max * 5 / 4;
+                        if old_max > 0 && new_max != old_max {
+                            let bits = e.hp.to_bits() as i64;
+                            e.hp = I16F16::from_bits((bits * new_max / old_max) as i32);
+                        }
+                    }
                 }
             }
             _ => {
