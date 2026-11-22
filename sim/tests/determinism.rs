@@ -363,6 +363,19 @@ fn golden_hash_regression() {
     // while a Monastery holds relics or a trickle remainder —
     // the golden script builds no Monastery and tasks no monk.
     //
+    // MAP-05 step 1 (2026-11-22, deliberate update):
+    // f89f443f9bd8a7fc -> d615c3fe453d4856. Step attribution: the
+    // ONLY change is `grid::MAX_HEIGHT` 4 -> 6 — the map now
+    // carries the reference's 7 elevation levels (0..=6). The
+    // generator still draws its white-noise field with one
+    // `below(MAX_HEIGHT + 1)` per cell, so the step widens the
+    // noise values (and, through `below`'s rejection thresholds,
+    // the downstream stream) but changes no other behavior: the
+    // combat factor is binary (MAP-06), so heights above 4 alter
+    // no damage, only the hashed height layer itself. Probe:
+    // baseline re-verified at f89f443f9bd8a7fc before the change;
+    // the new value reproduced identically on a second run.
+    //
     // Water W2a (ECO-15, deliberate update):
     // 4f2a70b0c1ab724c -> f89f443f9bd8a7fc. Step attribution: the
     // ONLY change entering this scenario is mapgen's fish
@@ -408,5 +421,5 @@ fn golden_hash_regression() {
         hash = sim.tick();
     }
     assert_eq!(sim.tick_count(), 360);
-    assert_eq!(format!("{:016x}", hash), "f89f443f9bd8a7fc");
+    assert_eq!(format!("{:016x}", hash), "d615c3fe453d4856");
 }

@@ -262,9 +262,11 @@ pub enum Domain {
     Water,
 }
 /// Highest elevation level the generator produces (MAP-05: the
-/// reference's per-tile height byte has 7 levels; Skirmish's Arabia
-/// hills use 0..=4 — see `mapgen`).
-pub const MAX_HEIGHT: u8 = 4;
+/// reference's per-tile height byte has 7 levels, and Skirmish's
+/// Arabia hills now use the full 0..=6 — see `mapgen`). The DE's
+/// 8–16 editor range (update 141935) has no documented random-map
+/// use, so no generated map exceeds this classic ceiling.
+pub const MAX_HEIGHT: u8 = 6;
 /// MAP-07: a height step of this many levels or more between two
 /// cells is a *cliff* — a discontinuous elevation break that land
 /// units can never cross, whatever the heights on either side.

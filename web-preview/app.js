@@ -2995,7 +2995,7 @@ const worldToScreen = (wx, wy) => {
 let sim, HALF, GW, GH, CS, OBST;
 // M7 world layers (flat row-major, one byte per cell, indexed
 // gy * GW + gx): terrain (0 land / 1 deep water / 2 shallows —
-// Water W1), heights (0..=4), and
+// Water W1), heights (0..=6 — MAP-05's seven levels), and
 // the LOCAL player's fog grid (0 unexplored / 1 explored /
 // 2 visible) — the only knowledge this client renders from.
 let TERRAIN = null, HEIGHTS = null, FOG = null;
