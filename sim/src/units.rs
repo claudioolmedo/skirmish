@@ -149,10 +149,13 @@ pub struct UnitSpec {
     /// (`Sim::eligible_target`, MNK-08) since the Package C
     /// landing put the King on a roster where conversion exists.
     pub immune_conversion: bool,
-    /// CLS-06: hit points regenerated per second (the heroes'
-    /// rate column). 0 = no regeneration. The King does NOT
-    /// regenerate (wiki, King) — only heroes do, and no hero
-    /// exists in the game yet, so no code path reads this yet.
+    /// CLS-06: hit points regenerated per MINUTE (the heroes'
+    /// rate column — re-dimensioned from HP/s by the CLS-06
+    /// landing, because the documented hero rate, 30 HP/min =
+    /// 0.5 HP/s, is not representable in an HP/s integer). Read
+    /// by the regeneration phase (`Sim::regen_tick`). 0 = no
+    /// regeneration. The King does NOT regenerate (wiki, King)
+    /// — only heroes do.
     pub regenerates: i32,
 }
 
@@ -195,6 +198,7 @@ pub fn spec(kind: EntityKind) -> &'static UnitSpec {
         EntityKind::WarHulk => &WAR_HULK,
         EntityKind::TransportShip => &TRANSPORT_SHIP,
         EntityKind::TradeCog => &TRADE_COG,
+        EntityKind::LiuBei => &LIU_BEI,
     }
 }
 
@@ -915,6 +919,54 @@ static KING: UnitSpec = UnitSpec {
     regicide_unit: true,
     immune_conversion: true,
     regenerates: 0,
+};
+
+/// Liu Bei (CLS-06 hero subject; wiki, Hero + Liu Bei unit
+/// page, and the Counterforge unit page, fetched 2026-11-22):
+/// HP 425, armor 3/3, attack 15 melee with +3 vs Shock
+/// Infantry, RoF 2.0 s, accuracy 100%, speed 0.9 tiles/s,
+/// LoS 5. Classes: Infantry + Heroes & Kings + Unique Units
+/// (the trainable heroes' documented stacking, wiki, Hero —
+/// update 144358). Hero flags: cannot be converted (hero-mode
+/// bit 2) and regenerates 30 HP/min (bit 4 — the CLS-06 rate).
+/// Attack delay adopts the Militia line's 30 ticks (no fetched
+/// source pins the hero's own figure — ADOPTED, as on the
+/// Man-at-Arms row). Radius is the MOV-05 foot size. Costs are
+/// inert — the hero is never trained (train_ticks 0, absent
+/// from `is_trainable` and from every building's train list);
+/// he exists for test/scenario spawns only. His documented
+/// aura (nearby allies regenerate 45 HP/min) is a passive of
+/// the trainable-hero content, NOT part of CLS-06's rule text,
+/// and is not implemented.
+static LIU_BEI: UnitSpec = UnitSpec {
+    max_hp: 425,
+    attacks: &[(cls::MELEE, 15), (cls::SHOCK_INFANTRY, 3)],
+    armor_melee: 3,
+    armor_pierce: 3,
+    armor_building: 0,
+    classes: cls::mask(&[cls::INFANTRY, cls::HEROES_AND_KINGS, cls::UNIQUE_UNIT]),
+    range_max: I16F16::ZERO,
+    range_min: I16F16::ZERO,
+    reload_ticks: 120, // 2.0 s
+    attack_delay_ticks: 30,
+    accuracy: 100,
+    projectile_speed: I16F16::ZERO,
+    scatter: I16F16::ZERO,
+    blast_radius: I16F16::ZERO,
+    pass_through: false,
+    blast_secondaries: 0,
+    speed: I16F16::from_bits(3_932), // 0.90 tiles/s (absolute scale, see header)
+    los: I16F16::from_bits(1_310_720), // 20 (5 tiles)
+    radius: I16F16::from_bits(52_429), // 0.8 (0.2 tiles — MOV-05 foot size)
+    carcass_food: 0,
+    carcass_decay_bits: 0,
+    food_cost: 0,
+    wood_cost: 0,
+    gold_cost: 0,
+    train_ticks: 0,
+    regicide_unit: false,
+    immune_conversion: true,
+    regenerates: 30,
 };
 
 /// Fishing Ship (Water W2a, ECO-15; wiki, Ship list fresh crawl

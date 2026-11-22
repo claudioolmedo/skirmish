@@ -104,6 +104,20 @@ pub const FIRE_SHIP: u8 = 23;
 /// table (+5 vs Stone Defense, the wiki Building table's
 /// secondary-projectile row).
 pub const STONE_DEFENSE: u8 = 24;
+/// Heroes & Kings (CLS-06): DE's armor class 36 (wiki, "Armor
+/// class: Heroes & Kings") — carried by hero units and the
+/// King. No attack row in standard play carries a bonus against
+/// it (the only documented anti-hero bonuses belong to
+/// campaign-exclusive units the roster does not have), so the
+/// membership is data, exactly like ELEPHANT and SHIP before
+/// their first consumers. Renumbered to our next free id 25.
+pub const HEROES_AND_KINGS: u8 = 25;
+/// Unique units (CLS-06): the membership the reference's
+/// trainable heroes carry beside Heroes & Kings (wiki, Hero —
+/// update 144358); the Liu Bei row carries it. No anti-unique
+/// row exists in the generic roster yet (the Samurai line is
+/// not in the game), so this too is data-first. Next free id 26.
+pub const UNIQUE_UNIT: u8 = 26;
 
 /// Membership bit for one class id.
 pub const fn bit(class: u8) -> u64 {

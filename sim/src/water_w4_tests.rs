@@ -123,9 +123,11 @@ fn transport_row_tags_and_dock_roster() {
     assert_eq!(EntityKind::TransportShip.tag(), 32);
     assert_eq!(EntityKind::from_tag(32), Some(EntityKind::TransportShip));
     // On the merged tree Water W5's Trade Cog fills tag 33;
-    // 34 is the next free tag.
+    // the CLS-06 hero subject (Liu Bei) fills tag 34, so 35 is
+    // the next free tag.
     assert_eq!(EntityKind::from_tag(33), Some(EntityKind::TradeCog));
-    assert_eq!(EntityKind::from_tag(34), None);
+    assert_eq!(EntityKind::from_tag(34), Some(EntityKind::LiuBei));
+    assert_eq!(EntityKind::from_tag(35), None);
     let spec = crate::units::spec(EntityKind::TransportShip);
     assert_eq!(spec.max_hp, 70);
     assert_eq!(spec.armor_melee, 0);

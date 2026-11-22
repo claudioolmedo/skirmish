@@ -55,6 +55,7 @@ mod econ;
 mod entity;
 mod formation;
 mod garrison;
+mod regen;
 mod transport;
 mod grid;
 mod hash;
@@ -68,6 +69,8 @@ mod tech;
 mod units;
 #[cfg(test)]
 mod castle_p3_tests;
+#[cfg(test)]
+mod cls06_tests;
 #[cfg(test)]
 mod siege_p4a_tests;
 #[cfg(test)]
@@ -7672,6 +7675,16 @@ impl Sim {
         //     joins this same phase.
         self.monk_tick();
 
+        // 4.65 Hero regeneration (CLS-06): the `regenerates`
+        //      column's tick path — a fielded hero restores its
+        //      documented HP/min through the GAR-04-pattern
+        //      accumulator. After monks, so a monk heal and the
+        //      self-regeneration stack in the same tick as the
+        //      reference's stacking rule requires. A no-op on
+        //      every rate-0 row (all current content but the
+        //      scenario-only hero subject).
+        self.regen_tick();
+
         // 4.7 Relics (Castle P5d, ECO-16): the Monastery gold
         //     trickle — every completed Monastery holding relics
         //     pays its owner 30 gold/min per relic. After the monk
@@ -14538,6 +14551,20 @@ impl Sim {
             if e.chase_retry_tick != 0 {
                 h.write_u8(0xCA);
                 h.write_u64(e.chase_retry_tick);
+            }
+            // CLS-06: the hero regeneration remainder — written
+            // ONLY while nonzero, behind marker 0xCB (grepped
+            // free in `hash_parts` at build time — the entity
+            // section's taken bytes are 0xAE, 0xB0–0xBF, 0xC2,
+            // 0xC7, 0xC8, 0xCA, 0xF1), on the same conditional
+            // pattern as every sibling block: the remainder is
+            // nonzero only on a wounded, fielded hero part-way
+            // through a minute, and no such entity exists in any
+            // default stream — the golden included — so every
+            // historical replay hashes bit-identically to before.
+            if e.regen_remainder != 0 {
+                h.write_u8(0xCB);
+                h.write_u64(e.regen_remainder as u64);
             }
         }
         // M3: projectiles in flight, in spawn order.

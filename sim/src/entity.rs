@@ -220,6 +220,19 @@ pub enum EntityKind {
     /// landing the two branches together kept both allocations
     /// exactly as the plan assigned them.
     TradeCog,
+    /// The hero subject (CLS-06): Liu Bei, a documented named
+    /// hero of the reference (wiki, Hero; Counterforge unit
+    /// page — HP 425, armor 3/3, attack 15 melee +3 vs Shock
+    /// Infantry, RoF 2.0 s, speed 0.9, LoS 5). Heroes are
+    /// scenario content in the reference: this kind is NEVER
+    /// trainable and never spawns in a normal match — it exists
+    /// so the CLS-06 hero flags (`immune_conversion`,
+    /// `regenerates` = 30 HP/min) have a documented bearer the
+    /// test/scenario spawn path can place. His documented aura
+    /// (nearby allies regenerate) is NOT part of CLS-06's rule
+    /// text and is not implemented. Reuses an existing infantry
+    /// sprite on the client — no new art.
+    LiuBei,
 }
 
 impl EntityKind {
@@ -259,6 +272,9 @@ impl EntityKind {
     /// the W5 tree off this same base `c9d1353` carried a
     /// deliberate one-tag gap at 32, filled by W4's landing
     /// when the two branches merged).
+    /// 34 = Liu Bei, the CLS-06 hero subject (appended after
+    /// the Trade Cog; verified first free on the CLS-06 base
+    /// `b38ccfe`, where 0–33 were taken).
     pub fn tag(self) -> u8 {
         match self {
             EntityKind::Villager => 0,
@@ -295,6 +311,7 @@ impl EntityKind {
             EntityKind::WarHulk => 31,
             EntityKind::TransportShip => 32,
             EntityKind::TradeCog => 33,
+            EntityKind::LiuBei => 34,
         }
     }
 
@@ -335,6 +352,7 @@ impl EntityKind {
             31 => Some(EntityKind::WarHulk),
             32 => Some(EntityKind::TransportShip),
             33 => Some(EntityKind::TradeCog),
+            34 => Some(EntityKind::LiuBei),
             _ => None,
         }
     }
@@ -449,6 +467,7 @@ impl EntityKind {
                 | EntityKind::WarHulk
                 | EntityKind::TransportShip
                 | EntityKind::TradeCog
+                | EntityKind::LiuBei
         )
     }
 
@@ -498,6 +517,14 @@ impl EntityKind {
                 | EntityKind::Archer
                 | EntityKind::Skirmisher
                 | EntityKind::Monk
+                // CLS-06 (sk-17 §c step 4): the King garrisons in
+                // the Town Center, towers and the Castle like any
+                // foot unit (wiki, Garrison) — the Ram exclusion
+                // lives on the `GarrisonRef::Unit` arm of
+                // `can_garrison`, where the reference forbids him.
+                | EntityKind::King
+                // CLS-06: the hero subject is foot infantry.
+                | EntityKind::LiuBei
         )
     }
 
@@ -542,6 +569,7 @@ impl EntityKind {
                 | EntityKind::FireShip
                 | EntityKind::DemolitionShip
                 | EntityKind::WarHulk
+                | EntityKind::LiuBei
         )
     }
 
@@ -1124,6 +1152,15 @@ pub struct Entity {
     /// quotient over 3600 is the HP bits restored; this holds the
     /// remainder (0 ≤ r < 3600). Reset on garrison entry/exit.
     pub garrison_heal_remainder: i64,
+    /// Hero self-regeneration fractional accumulator (CLS-06),
+    /// in the GAR-04 pattern: per tick the regen phase adds
+    /// `regenerates × 65536` (the row's HP-per-minute rate in
+    /// fixed-point bits) to a conceptual accumulator whose
+    /// quotient over 3600 is the HP bits restored; this holds
+    /// the remainder (0 ≤ r < 3600). Zero on every entity whose
+    /// row does not regenerate. Part of the hashed state, written
+    /// only while nonzero (marker 0xCB).
+    pub regen_remainder: i64,
     /// The passenger list of a garrison HOST entity (Castle P4a,
     /// GAR-10): the Battering Ram is the only entity kind that
     /// hosts — this holds the ids of the foot units inside it,
@@ -1359,6 +1396,7 @@ impl Entity {
             garrison_prod_entry: false,
             bell_snapshot: None,
             garrison_heal_remainder: 0,
+            regen_remainder: 0,
             garrison: Vec::new(),
             transport_cargo: Vec::new(),
             transported_in: None,

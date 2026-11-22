@@ -2897,14 +2897,32 @@ study's minor villager bonus rows are not in the table.) · *Status:*
 whose death eliminates its owner in Regicide (VIC-06); heroes (scenario
 units) regenerate HP and are conversion-immune (MNK-08). Both are data
 flags, not kinds with special code paths beyond those two rules.
-*Source:* GAP 5.4; wiki, Conversion (hero immunity). · *Impl:* flags in
+*Source:* GAP 5.4; wiki, Conversion (hero immunity); wiki, Hero
+(hero-mode bits 2 + 4); wiki, King; wiki, Garrison. · *Impl:* flags in
 the unit row: `regicide_unit`, `immune_conversion`, `regenerates`
-(rate column). The columns and the King's row shipped with Package C
-(the VIC-06 slice, 2026-10-29); the rule stays open on heroes — no
-hero exists in the game, the hero regeneration rate is unfixed in the
-sources, and nothing reads `regenerates` or `immune_conversion` yet
-(conversion itself lands with the Castle P5 monks). · *Status:*
-**MISSING**.
+(HP-per-minute column — re-dimensioned from HP/s, since the
+documented hero rate 30 HP/min = 0.5 HP/s is not representable as an
+HP/s integer). The columns and the King's row shipped with Package C
+(the VIC-06 slice, 2026-10-29); `immune_conversion` has been read by
+the conversion eligibility gate (`Sim::eligible_target`, MNK-08)
+since Castle P5b. The CLS-06 landing completes the rule: the
+regeneration phase (`Sim::regen_tick`, GAR-04-pattern remainder
+accumulator, hashed behind marker 0xCB only while nonzero) reads
+`regenerates` — a rate-30 hero gains exactly 30 HP in exactly
+3 600 ticks, capped at max HP, dead/contained skipped, stacking
+with monk and shelter healing; one documented hero subject exists,
+**Liu Bei** (kind 34; HP 425, armor 3/3, attack 15 melee +3 vs Shock
+Infantry, RoF 2.0 s, speed 0.9, LoS 5; classes Infantry + Heroes &
+Kings + Unique Units; wiki, Hero + Liu Bei, and the Counterforge
+unit page, fetched 2026-11-22) — test/scenario-spawn only, never
+trainable, no panel button, client reuses the Man-at-Arms sprite;
+the King (75 HP, no attack, 0/0, 1.32 tiles/s, LoS 6, no
+regeneration) now garrisons as a foot unit in the Town Center,
+towers and the Castle, with the documented Ram exclusion on the
+`GarrisonRef::Unit` arm of `can_garrison`. Out of this rule's text
+and not blocking it: hero-mode bits 8/16/32/64, Liu Bei's healing
+aura (trainable-hero content), Regicide's starting Castle / Treason
+(VIC-06's own delta). · *Status:* **MATCHES**.
 
 **CLS-07 — Ships are a separate combat ecology.** Ship classes (Ships,
 Fire Ship, Turtle Ship, …) interact through their own bonus rows; ship

@@ -123,7 +123,7 @@ test('rendering tables cover the Cog at 33 and the Transport Ship at 32', () => 
   assert.ok(app.includes("32: 'Transport Ship',"), 'KIND_NAME 32');
   assert.ok(app.includes("33: 'i-trade-cog',"), 'KIND_ICON 33');
   assert.ok(app.includes("32: 'i-transport-ship',"), 'KIND_ICON 32');
-  assert.match(app, /drawTradeCog\]; \/\/ 33: Trade Cog \(Water W5, TRD-05\)/);
+  assert.match(app, /drawTradeCog, \/\/ 33: Trade Cog \(Water W5, TRD-05\)/);
   assert.match(app, /function drawTradeCog\(i, wx, wy\)/);
   // The Cog's loaded leg reads the sim's trade state, like the
   // Cart's — never a client-side invention.

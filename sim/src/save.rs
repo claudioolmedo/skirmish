@@ -230,7 +230,13 @@ const MAGIC: &[u8; 4] = b"SKSV";
 /// taken mid-hold could never pass the load-time hash check
 /// without it; a save with no held chase carries only the
 /// presence byte's difference from v21.
-const SAVE_VERSION: u32 = 22;
+/// Version 23: CLS-06 — the entity record gains
+/// `regen_remainder` (the hero regeneration accumulator),
+/// written beside `garrison_heal_remainder`. The remainder is
+/// hashed state (marker 0xCB) exactly while nonzero, so a save
+/// taken mid-regeneration could never pass the load-time hash
+/// check without it.
+const SAVE_VERSION: u32 = 23;
 
 /// Little-endian byte writer over a growable buffer.
 struct W {
@@ -1055,6 +1061,9 @@ impl Sim {
             w.bool(e.garrison_prod_entry);
             w.bell_snapshot(e.bell_snapshot);
             w.i64(e.garrison_heal_remainder);
+            // CLS-06 (v23): the hero regeneration remainder,
+            // beside its GAR-04 sibling.
+            w.i64(e.regen_remainder);
             w.opt_u32(e.trade_home);
             w.opt_u32(e.trade_target);
             w.bool(e.trade_loaded);
@@ -1980,6 +1989,7 @@ impl Sim {
             let garrison_prod_entry = r.bool()?;
             let bell_snapshot = r.bell_snapshot()?;
             let garrison_heal_remainder = r.i64()?;
+            let regen_remainder = r.i64()?;
             let trade_home = r.opt_u32()?;
             let trade_target = r.opt_u32()?;
             let trade_loaded = r.bool()?;
@@ -2071,6 +2081,7 @@ impl Sim {
                 garrison_prod_entry,
                 bell_snapshot,
                 garrison_heal_remainder,
+                regen_remainder,
                 trade_home,
                 trade_target,
                 trade_loaded,

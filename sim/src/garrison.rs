@@ -537,7 +537,14 @@ impl Sim {
                 // eligibility column as a tower's (villagers,
                 // infantry, foot archers; mounted and siege are
                 // refused by the data, not by a branch).
-                GarrisonRef::Unit(_) => e.kind.is_foot_garrisonable(),
+                // CLS-06 exception (sk-17 §c step 4): the King is
+                // foot-garrisonable for the Town Center, towers
+                // and the Castle, but the reference explicitly
+                // excludes Kings from Rams (wiki, Garrison) — the
+                // exclusion lives here, on the Ram arm only.
+                GarrisonRef::Unit(_) => {
+                    e.kind.is_foot_garrisonable() && e.kind != EntityKind::King
+                }
             };
             if !admits {
                 return false;

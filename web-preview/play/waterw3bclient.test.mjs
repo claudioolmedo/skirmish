@@ -103,7 +103,7 @@ test('rendering tables cover the four tiers', () => {
   assert.match(app, /drawDemolitionShip, \/\/ 30: Demolition Ship/);
   assert.match(app, /drawWarHulk, \/\/ 31: War Hulk/);
   assert.match(app, /drawTransportShip, \/\/ 32: Transport Ship/);
-  assert.match(app, /drawTradeCog\]; \/\/ 33: Trade Cog/); // the table ends at the Cog since the W5 merge
+  assert.match(app, /drawTradeCog, \/\/ 33: Trade Cog/); // the table ended at the Cog from the W5 merge until CLS-06 appended the hero at 34
 });
 
 test('names and the tech exist in all three locales', () => {
