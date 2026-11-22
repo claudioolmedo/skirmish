@@ -507,7 +507,7 @@ let KIND_NAME = {
   20: 'Monk', 21: 'Relic', 22: 'King', 23: 'Fishing Ship',
   24: 'Galley', 25: 'Fire Galley', 26: 'Demolition Raft', 27: 'Hulk',
   28: 'War Galley', 29: 'Fire Ship', 30: 'Demolition Ship', 31: 'War Hulk',
-  32: 'Transport Ship', 33: 'Trade Cog',
+  32: 'Transport Ship', 33: 'Trade Cog', 34: 'Liu Bei',
 };
 // Selection-panel portraits per unit kind (SVG symbol ids in
 // play/index.html).
@@ -519,7 +519,7 @@ const KIND_ICON = {
   20: 'i-monk', 21: 'i-gold', 22: 'i-king', 23: 'i-fishing-ship',
   24: 'i-galley', 25: 'i-fire-galley', 26: 'i-demolition-raft', 27: 'i-hulk',
   28: 'i-war-galley', 29: 'i-fire-ship', 30: 'i-demolition-ship', 31: 'i-war-hulk',
-  32: 'i-transport-ship', 33: 'i-trade-cog',
+  32: 'i-transport-ship', 33: 'i-trade-cog', 34: 'i-militia',
 };
 
 // Original PNG icon set (2026-10-19, AI generations via Base44 on
@@ -19435,7 +19435,8 @@ function draw() {
     drawDemolitionShip, // 30: Demolition Ship (Water W3b, CLS-07)
     drawWarHulk, // 31: War Hulk (Water W3b, CLS-07)
     drawTransportShip, // 32: Transport Ship (Water W4, GAR-09)
-    drawTradeCog]; // 33: Trade Cog (Water W5, TRD-05)
+    drawTradeCog, // 33: Trade Cog (Water W5, TRD-05)
+    drawManAtArms]; // 34: Liu Bei, hero subject (CLS-06) — reuses the Man-at-Arms sprite; scenario/test spawns only, never in a normal match
   for (let i = 0; i < count; i++) {
     const wx = pos[i * 2];
     const wy = pos[i * 2 + 1];
