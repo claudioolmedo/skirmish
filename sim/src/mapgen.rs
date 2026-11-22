@@ -27,9 +27,10 @@
 //! boars at 15–24 in split directions; deer herds of 3 at 12–18 and
 //! 3 more at 20–28; one wolf pack of 3 at 26–34 (AI-08 — outside
 //! every starting band, so no pack ever spawns beside a Town
-//! Center). Heights are gentle value-noise hills, flattened
-//! around each start and its packages (disc + per-node flattening),
-//! so openings play identically on every seed. The generator also
+//! Center). Heights are RMS hill clumps (MAP-05 — the documented
+//! `create_elevation` mechanism, see `create_elevation` below),
+//! flattened around each start and its packages (disc + per-node
+//! flattening), so openings play identically on every seed. The generator also
 //! places the map's five relics (MAP-13, Castle P5d): two mirrored
 //! pairs plus one center relic at exactly equal Chebyshev distance
 //! from both Town Centers, every relic at least 20 tiles from both
@@ -71,6 +72,10 @@ const MAX_ATTEMPTS: u32 = 64;
 const MARGIN: i32 = 3;
 /// Minimum land distance from a Town Center to any water cell.
 const WATER_START_CLEARANCE: i32 = 22;
+/// MAP-05: elevation generation keeps this many tiles (Chebyshev)
+/// clear of every player start — the documented ~9-tile origin
+/// protection of the RMS elevation pass.
+const ELEV_START_CLEARANCE: u32 = 9;
 
 /// The map kind a match is generated under (MAP03-C0 plumbing):
 /// which generator family produces the map. Exactly one kind
@@ -389,14 +394,10 @@ fn build(sub_seed: u64) -> Option<GeneratedMap> {
     );
     let tc_b = rot(tc_a.0, tc_a.1);
 
-    // Heights: white-noise levels, three box-blur passes, then
-    // rotational symmetrization (copy the lower-indexed side).
-    for h in g.height.iter_mut() {
-        *h = g.rng.below(u32::from(MAX_HEIGHT) + 1) as u8;
-    }
-    for _ in 0..3 {
-        g.height = blur(&g.height);
-    }
+    // Heights (MAP-05): RMS hill clumps — see `create_elevation`
+    // — then rotational symmetrization (copy the lower-indexed
+    // side), the map's fairness mirror, as always.
+    create_elevation(&mut g.height, &mut g.rng, tc_a, tc_b);
     let hcopy = g.height.clone();
     for y in 0..GRID_DIM {
         for x in 0..GRID_DIM {
@@ -462,8 +463,12 @@ fn build(sub_seed: u64) -> Option<GeneratedMap> {
     g.place_neutral_forest();
 
     // Flatten heights around both starts and every package node, so
-    // each opening plays on level ground (the start's own sampled
-    // level — equal for both starts by symmetrization).
+    // each opening plays on level ground. The level is the Town
+    // Center's own — 0 by construction (elevation generation keeps
+    // hills ~9 tiles clear of the starts, MAP-05) and equal for
+    // both starts by symmetrization; the documented rule puts the
+    // TC area at the lowest elevation, and the tests pin exactly
+    // 0 at both Town Centers across seeds.
     let level_a = g.height[idx(tc_a.0, tc_a.1)];
     flatten_start(&mut g.height, tc_a, level_a, &g.nodes_a);
     flatten_start(&mut g.height, tc_b, level_a, &pkg_b.nodes);
@@ -720,8 +725,9 @@ pub fn validate(map: &GeneratedMap) -> bool {
     if !ponds_have_rims_and_docks(grid) {
         return false;
     }
-    // Height steps: the blurred hills step by at most 2 between
-    // neighbors; a step of 3 or more is an authored cliff border
+    // Height steps: the clump hills step by at most 1 between
+    // neighbors (the start flattening's blend ring by at most 2);
+    // a step of 3 or more is an authored cliff border
     // (MAP-07, see `author_cliffs`) — legal by design, so there
     // is nothing left to reject here. The flood above already
     // proved every package element stands on the shared landmass
@@ -982,9 +988,236 @@ fn fallback() -> GeneratedMap {
     }
 }
 
+/// MAP-05: RMS elevation generation — the documented
+/// `create_elevation` mechanism (RMS reference, *blocks* and
+/// *attributes*), replacing the M7 white-noise field.
+///
+/// The call, in the reference's terms: `create_elevation 6` —
+/// max-height 6, the classic ceiling (the DE's 8–16 editor range
+/// has no documented random-map use). `number-of-tiles` is the
+/// hills' total tile budget, scaled by map size from the
+/// reference's 100×100 base (`set-scale-by-size`); `number-of-
+/// clumps` is the hill count (`set-scale-by-groups` would scale
+/// it with the player count — the map is fixed 2-player, so the
+/// count is the constant the base script would carry);
+/// `spacing` is 1: one elevation level per ring in from a
+/// clump's edge, so a clump with few base tiles cannot climb as
+/// high (a 1-tile clump tops out at level 1 whatever peak it
+/// rolled). Each clump's peak is rolled uniformly in
+/// 1..=max-height — "hills of random height, up to the given
+/// height".
+///
+/// Start protection, as documented: clump growth never enters
+/// the ~9-tile zone around a player start (`ELEV_START_
+/// CLEARANCE`), and `flatten_start` then puts the Town Center
+/// area at the lowest level (0) outright.
+///
+/// The raw mechanism's southward placement bias is NOT
+/// reproduced: DE corrects it with `enable-balanced-elevation`
+/// (the RMS reference's own guidance for DE scripts), and this
+/// generator's rotational symmetrization (in `build`) cancels
+/// any north–south bias by construction. The field is the
+/// balanced reading.
+///
+/// No target *distribution* is implemented, because none exists
+/// in the public record: the mechanism is documented, the
+/// distribution is random by design (research-de/
+/// map05-map03-generation.md, 2026-11-22).
+fn create_elevation(height: &mut [u8], rng: &mut Pcg32, tc_a: (u32, u32), tc_b: (u32, u32)) {
+    /// Tile budget at the 100×100 reference base.
+    const BASE_TILES: u32 = 1_250;
+    /// Hill count.
+    const CLUMPS: u32 = 16;
+    /// Tiles between elevation levels.
+    const SPACING: u32 = 1;
+    let tiles = BASE_TILES * GRID_DIM * GRID_DIM / (100 * 100);
+    create_elevation_with(height, rng, &[tc_a, tc_b], MAX_HEIGHT, tiles, CLUMPS, SPACING);
+}
+
+/// The parameterized core of `create_elevation` (split out so
+/// the mechanism's pins can drive it directly).
+fn create_elevation_with(
+    height: &mut [u8],
+    rng: &mut Pcg32,
+    starts: &[(u32, u32)],
+    max_height: u8,
+    total_tiles: u32,
+    clumps: u32,
+    spacing: u32,
+) {
+    let n = (GRID_DIM * GRID_DIM) as usize;
+    // Clump ownership: which clump owns each cell, or -1.
+    let mut owner: Vec<i32> = vec![-1; n];
+    let mut hills: Vec<(u8, Vec<(u32, u32)>)> = Vec::new();
+    // Growth is barred from the documented ~9-tile zone around
+    // every player start.
+    let barred = |x: u32, y: u32| -> bool {
+        starts
+            .iter()
+            .any(|&(sx, sy)| chebyshev(x, y, sx, sy) <= ELEV_START_CLEARANCE)
+    };
+    let per_clump = total_tiles / clumps.max(1);
+    for c in 0..clumps {
+        // Roll this hill's peak: random height up to the cap.
+        let peak = 1 + rng.below(u32::from(max_height)) as u8;
+        // Size varies per hill around the equal share (½×–1½×).
+        let size = per_clump * (50 + rng.below(100)) / 100;
+        // Find a free, unbarred center (bounded retries; a
+        // crowded field simply fields one hill fewer).
+        let mut center = None;
+        for _ in 0..64 {
+            let x = MARGIN as u32 + rng.below(GRID_DIM - 2 * MARGIN as u32);
+            let y = MARGIN as u32 + rng.below(GRID_DIM - 2 * MARGIN as u32);
+            if owner[idx(x, y)] < 0 && !barred(x, y) {
+                center = Some((x, y));
+                break;
+            }
+        }
+        let Some(center) = center else { continue };
+        let cells = grow_clump(rng, &mut owner, c as i32, center, size, &barred);
+        if !cells.is_empty() {
+            hills.push((peak, cells));
+        }
+    }
+    // Paint each clump's own field and take the max: a clump's
+    // height at a cell is min(peak, ceil(inset / spacing)), the
+    // inset being the cell's Chebyshev distance to the nearest
+    // cell outside the clump (edge cells have inset 1). Each
+    // clump field is 1-Lipschitz and 0 outside its clump, so the
+    // max composition steps by at most 1 between neighbors —
+    // the natural field never authors a cliff (MAP-07).
+    for (peak, cells) in &hills {
+        let insets = chebyshev_insets(cells);
+        for (k, &(x, y)) in cells.iter().enumerate() {
+            let lvl = ((insets[k] + spacing - 1) / spacing).min(u32::from(*peak)) as u8;
+            let i = idx(x, y);
+            if lvl > height[i] {
+                height[i] = lvl;
+            }
+        }
+    }
+}
+
+/// Grow one hill clump of up to `size` cells from `center` by
+/// random frontier expansion: repeatedly claim a uniformly
+/// random frontier cell. Growth claims only unowned, unbarred
+/// cells inside the placement margin; a clump boxed in by other
+/// clumps or the start zones stops early — a hill with few base
+/// tiles, exactly as the reference describes. Marks ownership
+/// as it goes; returns the claimed cells (never empty: the
+/// center is always claimed, even for a rolled size of 0).
+fn grow_clump(
+    rng: &mut Pcg32,
+    owner: &mut [i32],
+    clump: i32,
+    center: (u32, u32),
+    size: u32,
+    barred: &dyn Fn(u32, u32) -> bool,
+) -> Vec<(u32, u32)> {
+    let mut cells: Vec<(u32, u32)> = Vec::new();
+    let mut frontier: Vec<(u32, u32)> = Vec::new();
+    clump_claim(owner, &mut frontier, &mut cells, clump, center, barred);
+    while (cells.len() as u32) < size && !frontier.is_empty() {
+        let pick = rng.below(frontier.len() as u32) as usize;
+        let (x, y) = frontier.swap_remove(pick);
+        if owner[idx(x, y)] >= 0 {
+            continue; // claimed since it entered the frontier
+        }
+        clump_claim(owner, &mut frontier, &mut cells, clump, (x, y), barred);
+    }
+    cells
+}
+
+/// Claim one cell for a growing clump and offer its free,
+/// unbarred, in-margin neighbors to the frontier.
+fn clump_claim(
+    owner: &mut [i32],
+    frontier: &mut Vec<(u32, u32)>,
+    cells: &mut Vec<(u32, u32)>,
+    clump: i32,
+    cell: (u32, u32),
+    barred: &dyn Fn(u32, u32) -> bool,
+) {
+    owner[idx(cell.0, cell.1)] = clump;
+    cells.push(cell);
+    for dy in -1i32..=1 {
+        for dx in -1i32..=1 {
+            if dx == 0 && dy == 0 {
+                continue;
+            }
+            let (nx, ny) = (cell.0 as i32 + dx, cell.1 as i32 + dy);
+            if nx < MARGIN || ny < MARGIN || nx >= GRID_DIM as i32 - MARGIN || ny >= GRID_DIM as i32 - MARGIN {
+                continue;
+            }
+            let (nx, ny) = (nx as u32, ny as u32);
+            if owner[idx(nx, ny)] < 0 && !barred(nx, ny) {
+                frontier.push((nx, ny));
+            }
+        }
+    }
+}
+
+/// Chebyshev distance from each of a clump's cells to the
+/// nearest cell outside the clump (edge cells: 1) — the inset
+/// that turns a grown blob into a hill, rising one level per
+/// inset ring (modulo `spacing`). Multi-source BFS inward from
+/// the clump's boundary, 8-neighborhood.
+fn chebyshev_insets(cells: &[(u32, u32)]) -> Vec<u32> {
+    let n = (GRID_DIM * GRID_DIM) as usize;
+    let mut member = vec![false; n];
+    for &(x, y) in cells {
+        member[idx(x, y)] = true;
+    }
+    let mut dist = vec![0u32; n];
+    let mut queue: std::collections::VecDeque<(u32, u32)> = std::collections::VecDeque::new();
+    for &(x, y) in cells {
+        let mut edge = false;
+        for dy in -1i32..=1 {
+            for dx in -1i32..=1 {
+                if dx == 0 && dy == 0 {
+                    continue;
+                }
+                let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                if nx < 0 || ny < 0 || nx >= GRID_DIM as i32 || ny >= GRID_DIM as i32
+                    || !member[idx(nx as u32, ny as u32)]
+                {
+                    edge = true;
+                }
+            }
+        }
+        if edge {
+            dist[idx(x, y)] = 1;
+            queue.push_back((x, y));
+        }
+    }
+    while let Some((x, y)) = queue.pop_front() {
+        let d = dist[idx(x, y)];
+        for dy in -1i32..=1 {
+            for dx in -1i32..=1 {
+                if dx == 0 && dy == 0 {
+                    continue;
+                }
+                let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                if nx < 0 || ny < 0 || nx >= GRID_DIM as i32 || ny >= GRID_DIM as i32 {
+                    continue;
+                }
+                let (nx, ny) = (nx as u32, ny as u32);
+                let ni = idx(nx, ny);
+                if member[ni] && dist[ni] == 0 {
+                    dist[ni] = d + 1;
+                    queue.push_back((nx, ny));
+                }
+            }
+        }
+    }
+    cells.iter().map(|&(x, y)| dist[idx(x, y)]).collect()
+}
+
 /// Flatten one start's ground: the disc (radius 14 at the start's
-/// level, blended out to 18) plus a radius-2 disc at the same level
-/// around every package node, so each resource sits on level ground.
+/// level, blended out to 18) plus a radius-2 disc around every
+/// package node at the node's own level in the flattened field,
+/// so each resource sits on level ground without punching the
+/// start's level into a hillside.
 fn flatten_start(
     height: &mut [u8],
     tc: (u32, u32),
@@ -1006,12 +1239,20 @@ fn flatten_start(
             }
         }
     }
-    for &(_, nx, ny) in nodes {
+    // Node discs: each node's level is sampled from the field
+    // the disc pass just produced (a node inside the start disc
+    // reads the start's level; one out on a hillside reads its
+    // own), then a radius-2 disc is leveled to it.
+    let node_levels: Vec<u8> = nodes
+        .iter()
+        .map(|&(_, nx, ny)| height[idx(nx, ny)])
+        .collect();
+    for (k, &(_, nx, ny)) in nodes.iter().enumerate() {
         for dy in -2i32..=2 {
             for dx in -2i32..=2 {
                 let (x, y) = (nx as i32 + dx, ny as i32 + dy);
                 if x >= 0 && y >= 0 && x < GRID_DIM as i32 && y < GRID_DIM as i32 {
-                    height[idx(x as u32, y as u32)] = level;
+                    height[idx(x as u32, y as u32)] = node_levels[k];
                 }
             }
         }
@@ -1034,9 +1275,14 @@ fn flatten_start(
 /// Every border inside the shape steps by at most 2 except the
 /// face itself (4 against 1 — a step of 3, a cliff by
 /// `grid::CLIFF_STEP`); every border between the shape and the
-/// untouched field also steps by at most 2 (the falloff value 2
-/// is within 2 of every legal height 0..=4), so the face is the
-/// ONLY cliff the stamp creates. The shelf is enterable from the
+/// untouched field also steps by at most 2, so the face is the
+/// ONLY cliff the stamp creates. With five legal heights the
+/// falloff value 2 was within 2 of all of them by arithmetic;
+/// with MAP-05's seven (0..=6) no fixed value is, so `try_cliff`
+/// checks the perimeter instead: a site whose forced cells
+/// would border a natural cell (or one of the shape's own
+/// unforced end cells) more than 2 away is refused, and the
+/// scan moves on. The shelf is enterable from the
 /// falloff side and around both ends (the end columns step 2 → 4
 /// onto the shelf); it is sealed across the face alone, exactly
 /// like the reference's cliff lines, which end and can be walked
@@ -1143,6 +1389,7 @@ fn try_cliff(
     // The mirror rectangle must satisfy the same discipline and
     // the two rectangles must not overlap (the mirror's stamp
     // would otherwise overwrite this one's heights).
+    let mut mirror_rect: Vec<(u32, u32)> = Vec::new();
     let mut mirror_forced: Vec<((u32, u32), u8)> = Vec::new();
     for &(x, y) in &rect {
         let (mx, my) = rot(x, y);
@@ -1152,34 +1399,41 @@ fn try_cliff(
         if g.terrain[idx(mx, my)] != TERRAIN_LAND || g.occ[idx(mx, my)] != 0 {
             return false;
         }
+        mirror_rect.push((mx, my));
     }
     for &((x, y), h) in &forced {
         mirror_forced.push((rot(x, y), h));
+    }
+    // MAP-05 perimeter discipline: every forced cell's neighbors
+    // outside the two shapes — natural cells — and the shapes'
+    // own unforced end cells must sit within 2 of the forced
+    // value, or the stamp would author cliff borders beyond its
+    // one face (see the shape comment). Forced-vs-forced borders
+    // are the shape's own steps (at most 2 except the face, by
+    // construction) and are not checked.
+    let in_shape = |p: (u32, u32)| rect.contains(&p) || mirror_rect.contains(&p);
+    let is_forced = |p: (u32, u32)| {
+        forced.iter().chain(mirror_forced.iter()).any(|&(q, _)| q == p)
+    };
+    for &((x, y), h) in forced.iter().chain(mirror_forced.iter()) {
+        for (dx, dy) in [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)] {
+            let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+            if nx < 0 || ny < 0 || nx >= GRID_DIM as i32 || ny >= GRID_DIM as i32 {
+                continue;
+            }
+            let (nx, ny) = (nx as u32, ny as u32);
+            if in_shape((nx, ny)) && is_forced((nx, ny)) {
+                continue;
+            }
+            if g.height[idx(nx, ny)].abs_diff(h) > 2 {
+                return false;
+            }
+        }
     }
     for &((x, y), h) in forced.iter().chain(mirror_forced.iter()) {
         g.height[idx(x, y)] = h;
     }
     true
-}
-
-/// One box-blur pass over the height field (3×3 mean, edges clamped,
-/// rounded) — the smoothing that turns white noise into hills.
-fn blur(h: &[u8]) -> Vec<u8> {
-    let mut out = vec![0u8; h.len()];
-    for y in 0..GRID_DIM as i32 {
-        for x in 0..GRID_DIM as i32 {
-            let mut sum = 0i32;
-            for dy in -1..=1 {
-                for dx in -1..=1 {
-                    let nx = (x + dx).clamp(0, GRID_DIM as i32 - 1) as u32;
-                    let ny = (y + dy).clamp(0, GRID_DIM as i32 - 1) as u32;
-                    sum += h[idx(nx, ny)] as i32;
-                }
-            }
-            out[idx(x as u32, y as u32)] = ((sum + 4) / 9) as u8;
-        }
-    }
-    out
 }
 
 /// The working state of one candidate build.
@@ -1675,6 +1929,116 @@ mod tests {
             c.grid.height_bytes(),
             "different seeds, identical height fields"
         );
+    }
+
+    #[test]
+    fn elevation_clumps_follow_the_documented_mechanism() {
+        // MAP-05 unit pins on `create_elevation_with`, driven
+        // directly (not through a full map): start protection,
+        // the height cap, real climbing, and the 1-Lipschitz
+        // hill shape (the natural field authors no cliff).
+        let starts = [(30u32, 30u32), (89u32, 89u32)];
+        let mut field = vec![0u8; (GRID_DIM * GRID_DIM) as usize];
+        let mut rng = Pcg32::new(12_345);
+        create_elevation_with(&mut field, &mut rng, &starts, MAX_HEIGHT, 1_800, 16, 1);
+        let mut max_seen = 0u8;
+        for y in 0..GRID_DIM {
+            for x in 0..GRID_DIM {
+                let h = field[idx(x, y)];
+                max_seen = max_seen.max(h);
+                assert!(h <= MAX_HEIGHT, "height {h} above the cap at ({x}, {y})");
+                for &(sx, sy) in &starts {
+                    if chebyshev(x, y, sx, sy) <= ELEV_START_CLEARANCE {
+                        assert_eq!(
+                            h, 0,
+                            "hill inside the start protection zone at ({x}, {y})"
+                        );
+                    }
+                }
+                if x + 1 < GRID_DIM {
+                    assert!(
+                        h.abs_diff(field[idx(x + 1, y)]) <= 1,
+                        "natural step > 1 at ({x}, {y})"
+                    );
+                }
+                if y + 1 < GRID_DIM {
+                    assert!(
+                        h.abs_diff(field[idx(x, y + 1)]) <= 1,
+                        "natural step > 1 at ({x}, {y})"
+                    );
+                }
+            }
+        }
+        assert!(max_seen >= 4, "hills never climb: max {max_seen}");
+    }
+
+    #[test]
+    fn elevation_small_clumps_cannot_climb_and_spacing_flattens() {
+        // MAP-05: the reference's growth facts, pinned. A 1-tile
+        // clump tops out at level 1 whatever peak it rolled (its
+        // only cell is an edge cell, inset 1); spacing 2 halves
+        // the climb of the identical growth — same seed, same
+        // draws (spacing enters only the height computation), so
+        // the hill support is identical and the maximum strictly
+        // lower.
+        let starts = [(30u32, 30u32), (89u32, 89u32)];
+        let mut field = vec![0u8; (GRID_DIM * GRID_DIM) as usize];
+        let mut rng = Pcg32::new(777);
+        create_elevation_with(&mut field, &mut rng, &starts, MAX_HEIGHT, 1, 1, 1);
+        assert_eq!(field.iter().copied().max(), Some(1));
+        let mut f1 = vec![0u8; (GRID_DIM * GRID_DIM) as usize];
+        let mut r1 = Pcg32::new(4_242);
+        create_elevation_with(&mut f1, &mut r1, &starts, MAX_HEIGHT, 1_800, 16, 1);
+        let mut f2 = vec![0u8; (GRID_DIM * GRID_DIM) as usize];
+        let mut r2 = Pcg32::new(4_242);
+        create_elevation_with(&mut f2, &mut r2, &starts, MAX_HEIGHT, 1_800, 16, 2);
+        let m1 = f1.iter().copied().max().unwrap();
+        let m2 = f2.iter().copied().max().unwrap();
+        assert!(
+            m1 >= 3 && m2 < m1,
+            "spacing must flatten hills: spacing 1 max {m1}, spacing 2 max {m2}"
+        );
+        assert!(
+            f1.iter().zip(f2.iter()).all(|(&a, &b)| (a == 0) == (b == 0)),
+            "spacing changed which cells are hills"
+        );
+    }
+
+    #[test]
+    fn generated_maps_use_seven_levels_with_flat_town_centers() {
+        // MAP-05 soak over full maps: heights stay within the
+        // seven levels, the top of the range actually occurs,
+        // and both Town Centers stand at the lowest level (0)
+        // with the documented ~9-tile protection clear around
+        // them.
+        let mut saw_high = false;
+        for seed in [1u64, 2, 3, 7, 42, 99, 1234, 31337] {
+            let m = generate(seed);
+            for tc in [m.starts[0].tc_cell, m.starts[1].tc_cell] {
+                assert_eq!(
+                    m.grid.height_at(tc.0, tc.1),
+                    0,
+                    "seed {seed}: Town Center not at elevation 0"
+                );
+                for y in 0..GRID_DIM {
+                    for x in 0..GRID_DIM {
+                        if chebyshev(x, y, tc.0, tc.1) <= ELEV_START_CLEARANCE {
+                            assert_eq!(
+                                m.grid.height_at(x, y),
+                                0,
+                                "seed {seed}: hill within the start protection zone"
+                            );
+                        }
+                    }
+                }
+            }
+            let max_h = m.grid.height_bytes().iter().copied().max().unwrap();
+            assert!(max_h <= MAX_HEIGHT, "seed {seed}: height {max_h} above the cap");
+            if max_h >= 5 {
+                saw_high = true;
+            }
+        }
+        assert!(saw_high, "no seed reached the upper levels (5-6)");
     }
 
     /// Count cliff borders (adjacent pairs stepping by

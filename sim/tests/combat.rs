@@ -1128,6 +1128,46 @@ fn negative_armor_amplifies_melee_on_every_path() {
 }
 
 #[test]
+fn elevation_factor_is_binary_across_the_full_seven_levels() {
+    // MAP-05/MAP-06 (2026-11-22): with the map carrying the full
+    // seven levels (0..=6), the hill bonus stays BINARY — the
+    // documented DE factor (×1.25 up / ×0.75 down, applied to
+    // the armor-subtracted sum, minimum 1 last) never scales
+    // with the size of the height difference. A six-level
+    // advantage pays exactly what a one-level advantage pays,
+    // at any rung of the range. (The mid-range values are the
+    // `negative_armor` test's: the Ram's amplified sum is 13.)
+    let ram = skirmish_sim::unit_spec(EntityKind::BatteringRam);
+    assert_eq!(
+        f(skirmish_sim::compute_damage_hit(&[(0, 10)], &ram, 6, 0, false)),
+        16.25,
+        "six levels up must pay the same 13 x 1.25 as one level up"
+    );
+    assert_eq!(
+        f(skirmish_sim::compute_damage_hit(&[(0, 10)], &ram, 0, 6, false)),
+        9.75,
+        "six levels down must cost the same 13 x 0.75 as one level down"
+    );
+    assert_eq!(
+        f(skirmish_sim::compute_damage_hit(&[(0, 10)], &ram, 6, 5, false)),
+        16.25,
+        "one level at the top of the range pays the full factor"
+    );
+    assert_eq!(
+        f(skirmish_sim::compute_damage_hit(&[(0, 10)], &ram, 5, 6, false)),
+        9.75,
+        "one level down at the top of the range pays the full factor"
+    );
+    assert_eq!(
+        f(skirmish_sim::elevation_factor(6, 0)),
+        1.25,
+        "the factor itself is the documented 1.25"
+    );
+    assert_eq!(f(skirmish_sim::elevation_factor(0, 6)), 0.75);
+    assert_eq!(f(skirmish_sim::elevation_factor(6, 6)), 1.0);
+}
+
+#[test]
 fn ram_building_attacks_scales_only_the_buildings_pair() {
     // GAR-10's derived strike table: +10 per passenger on the
     // STANDARD_BUILDINGS pair (class 8) only — the base melee

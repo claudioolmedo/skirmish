@@ -363,6 +363,29 @@ fn golden_hash_regression() {
     // while a Monastery holds relics or a trickle remainder —
     // the golden script builds no Monastery and tasks no monk.
     //
+    // MAP-05 step 2 (2026-11-22, deliberate update):
+    // d615c3fe453d4856 -> db571c3faeeedd88. Step attribution: the
+    // ONLY changes entering this scenario are mapgen's elevation
+    // mechanism and its two coherence riders. (a) The white-noise
+    // + blur height field is replaced by the documented RMS
+    // `create_elevation` mechanism (`mapgen::create_elevation`:
+    // hill clumps grown to a size-scaled tile budget, rolled
+    // peaks up to 6, spacing 1, ~9-tile start protection) — the
+    // draw stream changes wholesale, so seed 42's map, package
+    // and heights all differ. (b) `flatten_start`'s per-node
+    // discs now level to each node's own post-flatten height
+    // instead of the start's level (heights only; no draws).
+    // (c) `author_cliffs` gains a perimeter site check (no draws;
+    // it can only refuse a site the old scan would have taken).
+    // Probe: step 1's tree reproduces d615c3fe453d4856 exactly;
+    // the new value reproduced identically on a second run, in a
+    // private target dir (the shared target's cross-worktree
+    // fingerprints were observed serving stale integration
+    // binaries during this package — all step-2 verification ran
+    // in the private target). Nothing else enters the scenario:
+    // no commands are issued, and the combat factor is binary
+    // (MAP-06), so the taller hills change no damage.
+    //
     // MAP-05 step 1 (2026-11-22, deliberate update):
     // f89f443f9bd8a7fc -> d615c3fe453d4856. Step attribution: the
     // ONLY change is `grid::MAX_HEIGHT` 4 -> 6 — the map now
@@ -421,5 +444,5 @@ fn golden_hash_regression() {
         hash = sim.tick();
     }
     assert_eq!(sim.tick_count(), 360);
-    assert_eq!(format!("{:016x}", hash), "d615c3fe453d4856");
+    assert_eq!(format!("{:016x}", hash), "db571c3faeeedd88");
 }
