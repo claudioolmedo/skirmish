@@ -191,6 +191,8 @@ mod engagefrozen_tests;
 #[cfg(test)]
 mod tcsouth_tests;
 #[cfg(test)]
+mod tcrally_tests;
+#[cfg(test)]
 mod occorder23_tests;
 
 #[cfg(target_arch = "wasm32")]
