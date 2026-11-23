@@ -19296,27 +19296,44 @@ function draw() {
       else if (TERRAIN[fi] === 9) base = (gx + gy) % 2 ? '#5e8f74' : '#67a07e';
       else if (SHORE.has(fi)) base = '#b8a06a';
       else base = (gx + gy) % 2 ? '#3f7a37' : '#457f3b';
+      // MAP-05 relief (front 10, presentation only): a directional
+      // hillshade term. The light sits at screen upper-left, which
+      // in grid axes is the -x side (screen NW) with a -y lean, so
+      // ground whose downhill faces that way reads lit and ground
+      // facing +x (screen SE) reads shaded:
+      //   relief ∝ 2*(hE - hW) + (hS - hN)
+      // (west flank of a hill: hE > hW -> lit; east flank: shaded).
+      // Zero wherever the four neighbours share the cell's level,
+      // so flat ground renders exactly as before; slopes and hill
+      // edges gain the lit/shadow sides that make elevation read
+      // as relief instead of flat contour steps (live observation,
+      // bot-loop run #480). Sim, heights and ELEV_LIFT untouched.
+      const hE = gx + 1 < GW ? HEIGHTS[fi + 1] : hgt;
+      const hW = gx > 0 ? HEIGHTS[fi - 1] : hgt;
+      const hS = gy + 1 < GH ? HEIGHTS[fi + GW] : hgt;
+      const hN = gy > 0 ? HEIGHTS[fi - GW] : hgt;
+      const relief = Math.max(-0.16, Math.min(0.16,
+        0.08 * (2 * (hE - hW) + (hS - hN)) / 3));
       if (hgt > 0) {
-        // The step: the level below shows as a darker tread.
-        diamond(cx, cy + ELEV_LIFT * camS, hw, hh, shade(base, -0.25));
+        // The step: the level below shows as two faces. The SE
+        // face (screen lower-right) sits opposite the light and
+        // shades deeper than the SW face — the asymmetry is what
+        // makes a step read as a face rather than a contour line.
+        const liftPx = ELEV_LIFT * camS;
+        poly([[cx - hw, cy], [cx, cy + hh], [cx, cy + hh + liftPx], [cx - hw, cy + liftPx]], shade(base, -0.20));
+        poly([[cx, cy + hh], [cx + hw, cy], [cx + hw, cy + liftPx], [cx, cy + hh + liftPx]], shade(base, -0.38));
         // MAP-07: a cliff face — a neighbor CLIFF_STEP (3) or
         // more levels lower — stacks a darker tread per level
         // down toward the low ground, so the sheer drop reads
         // as a rock face instead of a floating step. Gentle
         // steps (≤ 2) draw exactly as before.
-        let lowN = hgt;
-        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-          const nx = gx + dx, ny = gy + dy;
-          if (nx >= 0 && ny >= 0 && nx < GW && ny < GH) {
-            lowN = Math.min(lowN, HEIGHTS[ny * GW + nx]);
-          }
-        }
+        const lowN = Math.min(hgt, hE, hW, hS, hN);
         for (let k = 2; k <= hgt - lowN - 1; k++) {
           diamond(cx, cy + k * ELEV_LIFT * camS, hw, hh, shade(base, -0.25 - 0.08 * (k - 1)));
         }
-        diamond(cx, cy, hw, hh, shade(base, hgt * 0.09));
+        diamond(cx, cy, hw, hh, shade(base, hgt * 0.09 + relief));
       } else {
-        diamond(cx, cy, hw, hh, base);
+        diamond(cx, cy, hw, hh, shade(base, relief));
       }
     }
   }
