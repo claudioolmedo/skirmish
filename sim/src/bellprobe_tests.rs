@@ -443,6 +443,41 @@ fn bellprobe_farmer_resumes_and_delivers() {
 
 // ------------------------------------------------------------------
 // Building: construction progress must resume and finish.
+/// MAP-05 re-stage (map05lib): the fixed House plot at TC+(4,4)
+/// is refused on seed 7's reshuffled layout — probe-verified, a
+/// starting sheep stands on footprint cell (34,78) and
+/// `validate_build`'s standing-unit check rejects the Build
+/// order whole (`can_build` false there), so the builder never
+/// took the task. Derive the plot from the live map instead:
+/// the first ring cell around the TC whose House placement the
+/// sim itself accepts for this builder (the scan the repair
+/// suites' `house_anchor` already uses).
+fn house_plot_near_tc(sim: &Sim, vil: u32) -> (I16F16, I16F16) {
+    let tc = sim.town_center().id;
+    let (tcx, tcy) = {
+        let e = ent(sim, tc);
+        sim.grid().world_to_cell(e.pos_x, e.pos_y)
+    };
+    for r in 2i32..=10 {
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if dx.abs() != r && dy.abs() != r {
+                    continue;
+                }
+                let (ax, ay) = (tcx as i32 + dx, tcy as i32 + dy);
+                if ax < 0 || ay < 0 {
+                    continue;
+                }
+                let (hx, hy) = sim.grid().cell_center(ax as u32, ay as u32);
+                if sim.can_build(vil, BuildingKind::House, hx, hy) {
+                    return (hx, hy);
+                }
+            }
+        }
+    }
+    panic!("no can_build House plot near the TC");
+}
+
 
 #[test]
 fn bellprobe_builder_resumes_and_completes() {
@@ -451,11 +486,7 @@ fn bellprobe_builder_resumes_and_completes() {
     let vil = spawn_villagers_near_tc(&mut sim, 1, 500)[0];
     sim.stockpile_mut(OWNER_PLAYER)
         .add(ResourceKind::Wood, I16F16::from_num(500));
-    let (tcx, tcy) = {
-        let e = ent(&sim, tc);
-        sim.grid().world_to_cell(e.pos_x, e.pos_y)
-    };
-    let (hx, hy) = sim.grid().cell_center(tcx + 4, tcy + 4);
+    let (hx, hy) = house_plot_near_tc(&sim, vil);
     sim.push_command(Command::Build {
         entity: vil,
         kind: BuildingKind::House,
@@ -877,11 +908,7 @@ fn bellprobe_fallback_foundation_destroyed_walks_back_to_snapshot() {
     let vil = spawn_villagers_near_tc(&mut sim, 1, 500)[0];
     sim.stockpile_mut(OWNER_PLAYER)
         .add(ResourceKind::Wood, I16F16::from_num(500));
-    let (tcx, tcy) = {
-        let e = ent(&sim, tc);
-        sim.grid().world_to_cell(e.pos_x, e.pos_y)
-    };
-    let (hx, hy) = sim.grid().cell_center(tcx + 4, tcy + 4);
+    let (hx, hy) = house_plot_near_tc(&sim, vil);
     sim.push_command(Command::Build {
         entity: vil,
         kind: BuildingKind::House,
@@ -1190,7 +1217,7 @@ fn bellprobe_combined_scene_all_tasks_resume_with_progress() {
         entity: v_tree,
         node: tree,
     });
-    let (hx, hy) = sim.grid().cell_center(tcx + 4, tcy + 4);
+    let (hx, hy) = house_plot_near_tc(&sim, v_build);
     sim.push_command(Command::Build {
         entity: v_build,
         kind: BuildingKind::House,

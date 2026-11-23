@@ -165,11 +165,33 @@ fn task_of(sim: &Sim, id: u32) -> Task {
         .expect("entity")
 }
 
+/// MAP-05 re-stage (map05lib): seed 42's Arabia is DRY since
+/// MAP-05's `create_elevation` started consuming the shared RNG
+/// stream ahead of pond placement (probe: seed 42 now generates
+/// zero water cells; 55 of seeds 1..=120 still carry a dockable,
+/// fish-stocked pond — the mapgen guarantees are intact, only
+/// this suite's pinned seed moved). Derive the pond from the
+/// generated maps at runtime: the first seed whose pond offers
+/// everything this suite stages on.
+fn pond_sim() -> Sim {
+    for seed in 1..=400u64 {
+        let sim = Sim::new(seed);
+        if dock_anchor(&sim).is_some()
+            && trap_cell(&sim).is_some()
+            && sim.nodes().iter().any(|n| n.kind == NodeKind::ShoreFish)
+            && sim.nodes().iter().any(|n| n.kind == NodeKind::DeepFish)
+        {
+            return sim;
+        }
+    }
+    panic!("no seed in 1..=400 offers a dockable pond with a trap cell and fish");
+}
+
 /// A Feudal sim with a Dock on the pond, one ship standing on
 /// a legal trap cell, and wood to build with. Returns
 /// (sim, dock, ship, trap cell).
 fn trap_stage() -> (Sim, u32, u32, (u32, u32)) {
-    let mut sim = Sim::new(42);
+    let mut sim = pond_sim();
     feudal(&mut sim);
     let dock = placed_dock(&mut sim, 900);
     let cell = trap_cell(&sim).expect("seed pond offers a trap cell");
@@ -371,7 +393,7 @@ fn pairing_gates_refuse_the_wrong_builders_and_foreign_ships() {
     );
     // Dark Age refuses the trap outright (Feudal-born kind):
     // a fresh Dark sim's ship order founds nothing.
-    let mut dark = Sim::new(42);
+    let mut dark = pond_sim();
     let dcell = trap_cell(&dark).expect("trap cell");
     let (dx, dy) = dark.grid().cell_center(dcell.0, dcell.1);
     let dship = spawn_ship(&mut dark, 951, OWNER_PLAYER, dx, dy);

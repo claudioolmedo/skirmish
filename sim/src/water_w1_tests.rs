@@ -37,13 +37,30 @@ fn dock_anchor(sim: &Sim) -> Option<(u32, u32)> {
     None
 }
 
+/// MAP-05 re-stage (map05lib): seed 42's Arabia is DRY since
+/// MAP-05's `create_elevation` started consuming the shared RNG
+/// stream ahead of pond placement (probe: seed 42 now generates
+/// zero water cells; 55 of seeds 1..=120 still carry a dockable,
+/// fish-stocked pond — the mapgen guarantees are intact, only
+/// this suite's pinned seed moved). Derive the pond from the
+/// generated maps at runtime: the first seed whose pond offers
+/// everything this suite stages on.
+fn pond_sim() -> Sim {
+    for seed in 1..=400u64 {
+        let sim = Sim::new(seed);
+        if dock_anchor(&sim).is_some() {
+            return sim;
+        }
+    }
+    panic!("no seed in 1..=400 offers a Dock site");
+}
+
 #[test]
 fn dock_builds_to_completion_on_a_pond_shore() {
-    // Seed 42's Arabia carries a pond (26 deep cells before the
-    // rim pass — measured by the W1 probe); its rim offers Dock
-    // sites by the mapgen validation guarantee.
-    let mut sim = Sim::new(42);
-    let (ax, ay) = dock_anchor(&sim).expect("seed 42: a legal Dock site on the pond shore");
+    // The pond seed's rim offers Dock sites by the mapgen
+    // validation guarantee (see `pond_sim`).
+    let mut sim = pond_sim();
+    let (ax, ay) = dock_anchor(&sim).expect("pond seed: a legal Dock site on the pond shore");
     let villager = a_villager(&sim);
     // Stage the builder on the site and let the fog settle:
     // the pond starts unexplored, and BLD-01's 2026-11-15

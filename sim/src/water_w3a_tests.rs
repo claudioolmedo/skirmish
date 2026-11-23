@@ -91,14 +91,34 @@ fn placed_dock(sim: &mut Sim, id: u32) -> u32 {
     id
 }
 
-/// A point on the seed-42 pond: the first deep-fish node's
+/// MAP-05 re-stage (map05lib): seed 42's Arabia is DRY since
+/// MAP-05's `create_elevation` started consuming the shared RNG
+/// stream ahead of pond placement (probe: seed 42 now generates
+/// zero water cells; 55 of seeds 1..=120 still carry a dockable,
+/// fish-stocked pond — the mapgen guarantees are intact, only
+/// this suite's pinned seed moved). Derive the pond from the
+/// generated maps at runtime: the first seed whose pond offers
+/// everything this suite stages on.
+fn pond_sim() -> Sim {
+    for seed in 1..=400u64 {
+        let sim = Sim::new(seed);
+        if dock_anchor(&sim).is_some()
+            && sim.nodes().iter().any(|n| n.kind == NodeKind::DeepFish)
+        {
+            return sim;
+        }
+    }
+    panic!("no seed in 1..=400 offers a dockable pond with deep fish");
+}
+
+/// A point on the pond seed's pond: the first deep-fish node's
 /// position (deep water by construction).
 fn pond_point(sim: &Sim) -> (I16F16, I16F16) {
     let n = sim
         .nodes()
         .iter()
         .find(|n| n.kind == NodeKind::DeepFish)
-        .expect("seed 42 stocks deep fish");
+        .expect("the pond seed stocks deep fish");
     (n.pos_x, n.pos_y)
 }
 
@@ -249,7 +269,7 @@ fn blacksmith_and_ballistics_patch_rows_land_on_the_ships() {
 
 #[test]
 fn combat_ships_train_at_the_dock_behind_the_feudal_gate() {
-    let mut sim = Sim::new(42);
+    let mut sim = pond_sim();
     let dock = placed_dock(&mut sim, 900);
     // Dark Age: the whole combat set is refused (the Fishing
     // Ship alone is Dark Age at the Dock).
@@ -314,7 +334,7 @@ fn fire_galley_beats_galley_at_close_range_and_galley_outranges_it() {
     // long-range class) sinks the Galley, whose own bolts land
     // (6 − 4 pierce armor) + 4 vs long-range = 6 per 3 s on the
     // Fire Galley — real damage, but far too slow.
-    let mut sim = Sim::new(42);
+    let mut sim = pond_sim();
     let (x, y) = pond_point(&sim);
     let fire = spawn_at(&mut sim, 950, EntityKind::FireGalley, OWNER_PLAYER, x, y);
     let galley = spawn_at(
@@ -344,16 +364,58 @@ fn fire_galley_beats_galley_at_close_range_and_galley_outranges_it() {
     // Range: a Galley ordered on a passive Fire Galley 4.5 tiles
     // away shoots from outside the spray's 2.5 — the Fire Galley
     // bleeds and the Galley stays untouched.
-    let mut sim = Sim::new(42);
-    let (x, y) = pond_point(&sim);
+    // MAP-05 re-stage, second pass (map05lib): the far hull must
+    // stand ON water 18 wu away — on a small pond it would be
+    // relocated into the spray's reach and the "untouched" pin
+    // would measure the relocation, not the range. The staging
+    // derives a deep node with five consecutive water-side
+    // cells in some cardinal direction (probe: 2 of seeds
+    // 1..=2000 eastward; the four-direction scan finds one far
+    // sooner) and stages the pair along that row.
+    let (mut sim, (x, y), (dx, dy)) = {
+        let mut found = None;
+        for seed in 1..=3000u64 {
+            let s = Sim::new(seed);
+            let pick = {
+                let g = s.grid();
+                let mut pick = None;
+                for n in s.nodes().iter().filter(|n| n.kind == NodeKind::DeepFish) {
+                    let (cx, cy) = g.world_to_cell(n.pos_x, n.pos_y);
+                    for (ddx, ddy) in [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)] {
+                        let ok = (0..5i32).all(|k| {
+                            let (nx, ny) = (cx as i32 + ddx * k, cy as i32 + ddy * k);
+                            nx >= 0
+                                && ny >= 0
+                                && nx < 120
+                                && ny < 120
+                                && g.is_water_side(nx as u32, ny as u32)
+                        });
+                        if ok {
+                            pick = Some(((n.pos_x, n.pos_y), (ddx, ddy)));
+                            break;
+                        }
+                    }
+                    if pick.is_some() {
+                        break;
+                    }
+                }
+                pick
+            };
+            if let Some((pos, dir)) = pick {
+                found = Some((s, pos, dir));
+                break;
+            }
+        }
+        found.expect("no seed in 1..=3000 offers a 5-cell water row at a deep node")
+    };
     let galley = spawn_at(&mut sim, 950, EntityKind::Galley, OWNER_PLAYER, x, y);
     let fire = spawn_at(
         &mut sim,
         951,
         EntityKind::FireGalley,
         OWNER_OPPONENT,
-        x + I16F16::from_num(18),
-        y,
+        x + I16F16::from_num(18 * dx),
+        y + I16F16::from_num(18 * dy),
     );
     sim.push_command(Command::SetStance {
         entity: fire,
@@ -383,7 +445,7 @@ fn hulk_strikes_carry_the_anti_fire_bonus() {
     // Hulk lands (4 − 1 melee armor) + 1 vs the Fire Ship class
     // = 4 per strike on a Fire Galley; the spray answers at the
     // minimum 1 (2 − 3 melee armor floors at 0, CMB-01's clamp).
-    let mut sim = Sim::new(42);
+    let mut sim = pond_sim();
     let (x, y) = pond_point(&sim);
     let hulk = spawn_at(&mut sim, 950, EntityKind::Hulk, OWNER_PLAYER, x, y);
     let fire = spawn_at(
@@ -436,7 +498,7 @@ fn demolition_blast_kills_the_cluster_and_spares_its_own() {
     // geometry the tapered blast lands ~44–58 — a kill on a
     // worn pair, a crippling on a fresh one; the fresh case's
     // damage is pinned by the death-detonation test below.
-    let mut sim = Sim::new(42);
+    let mut sim = pond_sim();
     let (x, y) = pond_point(&sim);
     let raft = spawn_at(&mut sim, 950, EntityKind::DemolitionRaft, OWNER_PLAYER, x, y);
     // Spacing is load-bearing: hulls spawned closer than the
@@ -531,7 +593,7 @@ fn demolition_raft_killed_by_fire_still_detonates() {
     // anything: the death detonation still fires, wounding the
     // enemy Fishing Ship moored beside the wreck and sparing
     // the owner's own.
-    let mut sim = Sim::new(42);
+    let mut sim = pond_sim();
     let (x, y) = pond_point(&sim);
     let raft = spawn_at(&mut sim, 950, EntityKind::DemolitionRaft, OWNER_PLAYER, x, y);
     let galley = spawn_at(

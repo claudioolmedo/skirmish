@@ -359,15 +359,25 @@ fn shipwright_research_flow() {
 // Shipwright at the Dock: the discounted charge, the +54%
 // creation rate on a ship head, and the unscaled research head.
 
-/// A seed-42 pond Dock with funds, at Feudal Age; `shipwright`
+/// A pond-seed pond Dock with funds, at Feudal Age; `shipwright`
 /// pre-grants the tech by mask write (the lookup discipline —
 /// the research flow itself is pinned above).
 fn pond_dock_sim(shipwright: bool) -> Sim {
-    let mut sim = Sim::new(42);
+    // MAP-05 re-stage (map05lib): seed 42 is dry since MAP-05 —
+    // derive the pond seed at runtime (first seed offering a
+    // Dock site).
+    let mut sim = (1..=400u64)
+        .map(Sim::new)
+        .find(|s| {
+            (0..=117u32)
+                .flat_map(|ay| (0..=117u32).map(move |ax| (ax, ay)))
+                .any(|(ax, ay)| s.grid().dock_placement_ok(ax, ay, 3))
+        })
+        .expect("no seed in 1..=400 offers a pond with a Dock site");
     let anchor = (0..=117u32)
         .flat_map(|ay| (0..=117u32).map(move |ax| (ax, ay)))
         .find(|&(ax, ay)| sim.grid().dock_placement_ok(ax, ay, 3))
-        .expect("seed 42 pond offers a Dock site");
+        .expect("pond seed offers a Dock site");
     let dock = placed(&mut sim, DOCK, BuildingKind::Dock, OWNER_PLAYER, anchor);
     sim.buildings.push(dock);
     sim.players[0].age = Age::Feudal;

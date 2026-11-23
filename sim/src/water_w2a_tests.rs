@@ -113,6 +113,105 @@ fn placed_dock(sim: &mut Sim, id: u32) -> u32 {
     id
 }
 
+/// MAP-05 re-stage (map05lib): seed 42's Arabia is DRY since
+/// MAP-05's `create_elevation` started consuming the shared RNG
+/// stream ahead of pond placement (probe: seed 42 now generates
+/// zero water cells; 55 of seeds 1..=120 still carry a dockable,
+/// fish-stocked pond — the mapgen guarantees are intact, only
+/// this suite's pinned seed moved). Derive the pond from the
+/// generated maps at runtime: the first seed whose pond offers
+/// everything this suite stages on.
+fn pond_sim() -> Sim {
+    for seed in 1..=400u64 {
+        let sim = Sim::new(seed);
+        if dock_anchor(&sim).is_some()
+            && !fish_nodes(&sim, NodeKind::ShoreFish).is_empty()
+            && deep_pair_shares_a_pond(&sim)
+            && dock_shares_the_deep_pond(&sim)
+        {
+            return sim;
+        }
+    }
+    panic!("no seed in 1..=400 offers a dockable pond with shore and deep fish");
+}
+
+/// The Dock and the fish must share one water body too: the
+/// first seed satisfying the checks above put the (first) Dock
+/// anchor on the mirrored pond while the deep pair swam in the
+/// other — the trained ship could never reach its Dock to
+/// deposit or shelter (the full-cycle and shelter tests caught
+/// it on the full-suite run). Some Dock anchor's footprint must
+/// touch the deep pair's component.
+fn dock_shares_the_deep_pond(sim: &Sim) -> bool {
+    let deep = fish_nodes(sim, NodeKind::DeepFish);
+    if deep.len() < 2 {
+        return false;
+    }
+    let g = sim.grid();
+    let cell = |id: u32| {
+        let n = sim.nodes().iter().find(|n| n.id == id).unwrap();
+        g.world_to_cell(n.pos_x, n.pos_y)
+    };
+    let start = cell(deep[0]);
+    let mut comp = std::collections::HashSet::new();
+    let mut stack = vec![start];
+    comp.insert(start);
+    while let Some((cx, cy)) = stack.pop() {
+        for (dx, dy) in [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)] {
+            let (nx, ny) = (cx as i32 + dx, cy as i32 + dy);
+            if nx < 0 || ny < 0 {
+                continue;
+            }
+            let (nx, ny) = (nx as u32, ny as u32);
+            if g.is_water_side(nx, ny) && comp.insert((nx, ny)) {
+                stack.push((nx, ny));
+            }
+        }
+    }
+    if !deep[1..].iter().any(|&id| comp.contains(&cell(id))) {
+        return false;
+    }
+    // The anchor `placed_dock` will actually use — the FIRST
+    // one in scan order, not just any anchor on the pond.
+    let Some((ax, ay)) = dock_anchor(sim) else {
+        return false;
+    };
+    (0..3).any(|dy| (0..3).any(|dx| comp.contains(&(ax + dx, ay + dy))))
+}
+
+/// Two deep-fish nodes on ONE water body: Arabia's ponds come in
+/// mirrored pairs, and a ship cannot sail between the two — the
+/// sail test needs both its spots on the same pond. (MAP-05
+/// re-stage: the first pond seed's deep pair sat one-per-pond.)
+fn deep_pair_shares_a_pond(sim: &Sim) -> bool {
+    let deep = fish_nodes(sim, NodeKind::DeepFish);
+    if deep.len() < 2 {
+        return false;
+    }
+    let g = sim.grid();
+    let cell = |id: u32| {
+        let n = sim.nodes().iter().find(|n| n.id == id).unwrap();
+        g.world_to_cell(n.pos_x, n.pos_y)
+    };
+    let start = cell(deep[0]);
+    let mut seen = std::collections::HashSet::new();
+    let mut stack = vec![start];
+    seen.insert(start);
+    while let Some((cx, cy)) = stack.pop() {
+        for (dx, dy) in [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)] {
+            let (nx, ny) = (cx as i32 + dx, cy as i32 + dy);
+            if nx < 0 || ny < 0 {
+                continue;
+            }
+            let (nx, ny) = (nx as u32, ny as u32);
+            if g.is_water_side(nx, ny) && seen.insert((nx, ny)) {
+                stack.push((nx, ny));
+            }
+        }
+    }
+    deep[1..].iter().any(|&id| seen.contains(&cell(id)))
+}
+
 fn spawn_ship_at(sim: &mut Sim, id: u32, node: u32) -> u32 {
     let n = sim.nodes().iter().find(|n| n.id == node).expect("node");
     let (x, y) = (n.pos_x, n.pos_y);
@@ -126,16 +225,17 @@ fn food(sim: &Sim) -> I16F16 {
 
 #[test]
 fn fish_stock_ponds_symmetrically_and_dry_seeds_have_none() {
-    // Seed 42 (the golden seed) carries a pond: both fish kinds
-    // are stocked, at the pinned amounts (200 shore / 250 deep),
-    // every fish cell is water-side, and the stocking is
-    // mirror-symmetric — for each fish node at (x, y) a node of
-    // the same kind stands at the rotational mirror cell.
-    let sim = Sim::new(42);
+    // A pond seed (see `pond_sim` — seed 42 itself is dry since
+    // MAP-05) carries a pond: both fish kinds are stocked, at
+    // the pinned amounts (200 shore / 250 deep), every fish cell
+    // is water-side, and the stocking is mirror-symmetric — for
+    // each fish node at (x, y) a node of the same kind stands at
+    // the rotational mirror cell.
+    let sim = pond_sim();
     let shore = fish_nodes(&sim, NodeKind::ShoreFish);
     let deep = fish_nodes(&sim, NodeKind::DeepFish);
-    assert!(!shore.is_empty(), "seed 42 stocks shore fish");
-    assert!(!deep.is_empty(), "seed 42 stocks deep fish");
+    assert!(!shore.is_empty(), "the pond seed stocks shore fish");
+    assert!(!deep.is_empty(), "the pond seed stocks deep fish");
     for n in sim.nodes().iter().filter(|n| n.kind.is_fish()) {
         let (cx, cy) = cell_of(&sim, n.pos_x, n.pos_y);
         assert!(
@@ -234,7 +334,7 @@ fn fishing_rates_carry_and_tech_rows_are_the_de_rows() {
 
 #[test]
 fn ship_trains_at_the_dock_spawns_on_water_and_fishes_a_full_cycle() {
-    let mut sim = Sim::new(42);
+    let mut sim = pond_sim();
     let dock = placed_dock(&mut sim, 900);
     sim.stockpile_mut(OWNER_PLAYER)
         .add(ResourceKind::Wood, I16F16::from_num(1000));
@@ -294,7 +394,7 @@ fn ship_trains_at_the_dock_spawns_on_water_and_fishes_a_full_cycle() {
 fn villager_works_shore_fish_and_the_pairing_gates_refuse() {
     // A villager tasked on shore fish walks to the bank, gathers
     // his 10 and deposits (the food stockpile rises by 10).
-    let mut sim = Sim::new(42);
+    let mut sim = pond_sim();
     let villager = a_villager(&sim);
     let shore = fish_nodes(&sim, NodeKind::ShoreFish)[0];
     let food_before = food(&sim);
@@ -310,7 +410,7 @@ fn villager_works_shore_fish_and_the_pairing_gates_refuse() {
     // The gates: a villager may not work deep fish, a ship may
     // not work a land node — both orders are refused outright
     // (no carry accrues, the node is untouched).
-    let mut sim = Sim::new(42);
+    let mut sim = pond_sim();
     let villager = a_villager(&sim);
     let deep = fish_nodes(&sim, NodeKind::DeepFish)[0];
     let deep_amount = sim
@@ -350,7 +450,7 @@ fn villager_works_shore_fish_and_the_pairing_gates_refuse() {
 
 #[test]
 fn ship_holds_off_land_and_sails_the_domain() {
-    let mut sim = Sim::new(42);
+    let mut sim = pond_sim();
     let deep = fish_nodes(&sim, NodeKind::DeepFish)[0];
     let ship = spawn_ship_at(&mut sim, 950, deep);
     // Ordered at the Town Center (deep in land): the water
@@ -391,7 +491,7 @@ fn ship_holds_off_land_and_sails_the_domain() {
 
 #[test]
 fn dock_shelters_the_ship_and_its_arrows_are_age_keyed() {
-    let mut sim = Sim::new(42);
+    let mut sim = pond_sim();
     let dock = placed_dock(&mut sim, 900);
     let deep = fish_nodes(&sim, NodeKind::DeepFish)[0];
     let ship = spawn_ship_at(&mut sim, 950, deep);
@@ -446,7 +546,7 @@ fn dock_shelters_the_ship_and_its_arrows_are_age_keyed() {
 
 #[test]
 fn fishing_techs_research_at_the_dock_behind_their_age_gates() {
-    let mut sim = Sim::new(42);
+    let mut sim = pond_sim();
     let dock = placed_dock(&mut sim, 900);
     // Dark Age: neither tech is researchable at the Dock.
     assert!(!sim.can_research_at(dock, TechId::FishingLines));

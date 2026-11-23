@@ -189,13 +189,23 @@ fn trade_cog_table_row_matches_the_wiki() {
 
 #[test]
 fn trade_cog_trains_at_the_dock_and_stamps_home() {
-    let mut sim = Sim::new(42);
-    // A completed Dock on the seed-42 pond shore (the W2a
+    // MAP-05 re-stage (map05lib): seed 42 is dry since MAP-05's
+    // elevation pass reshuffled the pond stream — derive the
+    // pond seed at runtime (first seed offering a Dock site).
+    let mut sim = (1..=400u64)
+        .map(Sim::new)
+        .find(|s| {
+            (0..=117u32)
+                .flat_map(|ay| (0..=117u32).map(move |ax| (ax, ay)))
+                .any(|(ax, ay)| s.grid().dock_placement_ok(ax, ay, 3))
+        })
+        .expect("no seed in 1..=400 offers a pond with a Dock site");
+    // A completed Dock on the pond seed's pond shore (the W2a
     // fixture's placement, via this module's `placed`).
     let anchor = (0..=117u32)
         .flat_map(|ay| (0..=117u32).map(move |ax| (ax, ay)))
         .find(|&(ax, ay)| sim.grid().dock_placement_ok(ax, ay, 3))
-        .expect("seed 42 pond offers a Dock site");
+        .expect("pond seed offers a Dock site");
     let dock = placed(&mut sim, HOME_DOCK, BuildingKind::Dock, OWNER_PLAYER, anchor);
     sim.buildings.push(dock);
     sim.stockpile_mut(OWNER_PLAYER)

@@ -34,7 +34,20 @@ fn grant(sim: &mut Sim, owner: u8, tech: TechId) {
     sim.players[slot].techs |= tech.bit();
 }
 
-/// A point on the seed-42 pond: the first deep-fish node's
+/// MAP-05 re-stage (map05lib): seed 42 is dry since MAP-05's
+/// elevation pass reshuffled the pond stream — the fire tests'
+/// pond is derived at runtime (first seed stocking deep fish).
+fn pond_sim() -> Sim {
+    for seed in 1..=400u64 {
+        let sim = Sim::new(seed);
+        if sim.nodes().iter().any(|n| n.kind == NodeKind::DeepFish) {
+            return sim;
+        }
+    }
+    panic!("no seed in 1..=400 stocks deep fish");
+}
+
+/// A point on the pond seed's pond: the first deep-fish node's
 /// position (deep water by construction — the water tests'
 /// staging pattern).
 fn pond_point(sim: &Sim) -> (I16F16, I16F16) {
@@ -42,7 +55,7 @@ fn pond_point(sim: &Sim) -> (I16F16, I16F16) {
         .nodes()
         .iter()
         .find(|n| n.kind == NodeKind::DeepFish)
-        .expect("seed 42 stocks deep fish");
+        .expect("the pond seed stocks deep fish");
     (n.pos_x, n.pos_y)
 }
 
@@ -204,8 +217,49 @@ fn prj02_scorpion_flight_at_seven_tiles_is_71_ticks() {
 
 #[test]
 fn prj02_fire_flight_at_two_and_a_half_tiles_is_51_ticks() {
-    let mut sim = Sim::new(42);
-    let (px, py) = pond_point(&sim);
+    // MAP-05 re-stage, second pass (map05lib): on the first
+    // pond seed the +10 wu target cell is off the pond, and the
+    // engine relocates the spawned Galley into the water ~4 wu
+    // away — the measured flight was 21 ticks, not the flame's
+    // 51 (probe-verified). The staging point is derived from
+    // the generated maps: the first deep-fish node with three
+    // consecutive water-side cells eastward, so the target
+    // stands on water exactly 2.5 tiles away, as staged.
+    let (mut sim, (px, py)) = {
+        let mut found = None;
+        for seed in 1..=2000u64 {
+            let s = Sim::new(seed);
+            let pick = {
+                let g = s.grid();
+                s.nodes()
+                    .iter()
+                    .filter(|n| n.kind == NodeKind::DeepFish)
+                    .find(|n| {
+                        // The target stands at the node's
+                        // position + 10 wu: the cell that point
+                        // falls in (and every cell between) must
+                        // be water-side, or the spawned Galley is
+                        // relocated into the pond and the flight
+                        // measures the relocation (~8 wu = 41
+                        // ticks on the first pond seed), not the
+                        // flame's speed.
+                        let (cx, cy) = g.world_to_cell(n.pos_x, n.pos_y);
+                        let (tx, ty) =
+                            g.world_to_cell(n.pos_x + I16F16::from_num(10), n.pos_y);
+                        tx >= cx
+                            && ty == cy
+                            && (cx..=tx).all(|x| g.is_water_side(x, cy))
+                            && !g.is_blocked_for(crate::grid::Domain::Water, tx, ty)
+                    })
+                    .map(|n| (n.pos_x, n.pos_y))
+            };
+            if let Some(pos) = pick {
+                found = Some((s, pos));
+                break;
+            }
+        }
+        found.expect("no seed in 1..=2000 offers a 3-cell water row at a deep node")
+    };
     // A Fire Galley at the pond point and a Galley exactly
     // 2.5 tiles (10 wu) east — the flame's maximum range, so
     // the Fire Galley stands and sprays. Flight at the flame's
@@ -238,7 +292,7 @@ fn prj02_fire_is_never_led_by_ballistics() {
     // shot at a crossing Galley must still aim at the target's
     // release-time position — a led aim would sit ~4.6 wu east
     // (51 ticks of flight × the Galley's speed).
-    let mut sim = Sim::new(42);
+    let mut sim = pond_sim();
     grant(&mut sim, OWNER_PLAYER, TechId::Ballistics);
     let (px, py) = pond_point(&sim);
     let f = spawn(&mut sim, EntityKind::FireGalley, OWNER_PLAYER, px, py);

@@ -8,9 +8,13 @@
 //! Ram's ejection path — takes its whole cargo with it when it
 //! sinks: zero survivors, zero ejections.
 //!
-//! Staging: seed 42's pond (13 water-side cells around grid
-//! (41..45, 22..26)) is Arabia's real water; the tests stage
-//! on its two shores exactly as a player would meet them.
+//! Staging: a generated Arabia pond is the tests' real water;
+//! the tests stage on its two shores exactly as a player would
+//! meet them. MAP-05 re-stage (map05lib): the pond is derived
+//! from the generated maps at runtime (`pond_stage`) — seed 42,
+//! whose pond the original staging pinned, is dry since MAP-05's
+//! `create_elevation` reshuffled the pond stream (probe: seed 42
+//! now generates zero water cells; dockable ponds remain common).
 
 use crate::build::{Building, BuildingKind};
 use crate::econ::ResourceKind;
@@ -104,15 +108,112 @@ fn spawn_at(sim: &mut Sim, id: u32, kind: EntityKind, owner: u8, cell: (u32, u32
     id
 }
 
-/// The pond staging cells (seed 42, probed): a deep cell on
-/// the west side, a deep cell on the east side, and a land
-/// cell on the west shore.
-const WEST_DEEP: (u32, u32) = (42, 24);
-const EAST_DEEP: (u32, u32) = (44, 24);
-const WEST_LAND: (u32, u32) = (40, 24);
+/// The pond staging cells, derived from the generated map:
+/// a water cell with a land neighbour (the loading shore), the
+/// farthest water cell of the same pond (the far shore), and
+/// that land neighbour cell. (Components run over water-side
+/// cells — deep cells sit isolated in their shallows rings, and
+/// the ship domain is the water side.) Returns (sim, west deep,
+/// east deep, west land) for the first seed offering all three.
+fn pond_stage() -> (Sim, (u32, u32), (u32, u32), (u32, u32)) {
+    for seed in 1..=400u64 {
+        let sim = Sim::new(seed);
+        let g = sim.grid();
+        // 4-connected deep-water components, via flood fill.
+        let mut comp_of = std::collections::HashMap::new();
+        let mut comps: Vec<Vec<(u32, u32)>> = Vec::new();
+        for y in 0..crate::grid::GRID_DIM {
+            for x in 0..crate::grid::GRID_DIM {
+                if !g.is_water_side(x, y) || comp_of.contains_key(&(x, y)) {
+                    continue;
+                }
+                let id = comps.len();
+                let mut cells = Vec::new();
+                let mut stack = vec![(x, y)];
+                comp_of.insert((x, y), id);
+                while let Some((cx, cy)) = stack.pop() {
+                    cells.push((cx, cy));
+                    for (dx, dy) in [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)] {
+                        let (nx, ny) = (cx as i32 + dx, cy as i32 + dy);
+                        if nx < 0 || ny < 0 {
+                            continue;
+                        }
+                        let (nx, ny) = (nx as u32, ny as u32);
+                        if g.is_water_side(nx, ny) && !comp_of.contains_key(&(nx, ny)) {
+                            comp_of.insert((nx, ny), id);
+                            stack.push((nx, ny));
+                        }
+                    }
+                }
+                comps.push(cells);
+            }
+        }
+        for cells in &comps {
+            if cells.len() < 4 {
+                continue;
+            }
+            for &w in cells {
+                // A land neighbour: dry, unblocked, spawnable.
+                let land = [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)]
+                    .iter()
+                    .filter_map(|&(dx, dy)| {
+                        let (nx, ny) = (w.0 as i32 + dx, w.1 as i32 + dy);
+                        if nx < 0 || ny < 0 {
+                            return None;
+                        }
+                        let (nx, ny) = (nx as u32, ny as u32);
+                        if !g.is_water(nx, ny)
+                            && !g.is_shallows(nx, ny)
+                            && !g.is_blocked(nx, ny)
+                        {
+                            Some((nx, ny))
+                        } else {
+                            None
+                        }
+                    })
+                    .next();
+                let Some(land) = land else { continue };
+                // The far shore: the pond's farthest water cell.
+                let e = cells
+                    .iter()
+                    .copied()
+                    .max_by_key(|&c| {
+                        (c.0 as i32 - w.0 as i32).abs() + (c.1 as i32 - w.1 as i32).abs()
+                    })
+                    .unwrap();
+                // MAP-05 re-stage, second pass (map05lib): the
+                // first derived pond was too small — the far
+                // shore sat inside the loading shore's unload
+                // ring, so a unit unloaded beside the far shore
+                // landed exactly on the loading cell; and a live
+                // node inside the wall-off ring gave the held
+                // cargo an exit the wall could not close. Require
+                // a real crossing (span >= 4 cells, loading cell
+                // >= 4 from the far shore) and a node-free ring
+                // around the loading cell.
+                let span = (e.0 as i32 - w.0 as i32).abs() + (e.1 as i32 - w.1 as i32).abs();
+                let land_to_east =
+                    (land.0 as i32 - e.0 as i32).abs() + (land.1 as i32 - e.1 as i32).abs();
+                // (Land-side nodes only: the pond's own fish
+                // sit on water cells and can never be an exit;
+                // counting them made every pond fail this check.)
+                let ring_has_node = sim.nodes().iter().any(|n| {
+                    let (nx, ny) = sim.grid().world_to_cell(n.pos_x, n.pos_y);
+                    !sim.grid().is_water_side(nx, ny)
+                        && (nx as i32 - w.0 as i32).abs() <= 3
+                        && (ny as i32 - w.1 as i32).abs() <= 3
+                });
+                if span >= 4 && land_to_east >= 4 && !ring_has_node {
+                    return (sim, w, e, land);
+                }
+            }
+        }
+    }
+    panic!("no seed in 1..=400 offers a two-shore pond");
+}
 
-fn staged_ship(sim: &mut Sim, id: u32) -> u32 {
-    spawn_at(sim, id, EntityKind::TransportShip, OWNER_PLAYER, WEST_DEEP)
+fn staged_ship(sim: &mut Sim, id: u32, cell: (u32, u32)) -> u32 {
+    spawn_at(sim, id, EntityKind::TransportShip, OWNER_PLAYER, cell)
 }
 
 #[test]
@@ -149,7 +250,7 @@ fn transport_row_tags_and_dock_roster() {
     // Fishing Ship — the combat set waits for Feudal, the
     // Transport does not): 125 wood leaves on enqueue and the
     // ship spawns on a water-side cell.
-    let mut sim = Sim::new(42);
+    let (mut sim, _, _, _) = pond_stage();
     let dock = placed_dock(&mut sim, 900);
     assert!(sim.can_train_at(dock, EntityKind::TransportShip));
     sim.stockpile_mut(OWNER_PLAYER)
@@ -182,8 +283,8 @@ fn transport_row_tags_and_dock_roster() {
 
 #[test]
 fn load_sail_unload_at_the_other_shore() {
-    let mut sim = Sim::new(42);
-    let ship = staged_ship(&mut sim, 950);
+    let (mut sim, west_deep, east_deep, west_land) = pond_stage();
+    let ship = staged_ship(&mut sim, 950, west_deep);
     // Five land units of mixed kinds on the west shore —
     // "transports carry anyone" (infantry, a villager, a monk,
     // cavalry, siege).
@@ -196,7 +297,7 @@ fn load_sail_unload_at_the_other_shore() {
     ];
     let mut ids = Vec::new();
     for (i, kind) in kinds.iter().enumerate() {
-        ids.push(spawn_at(&mut sim, 960 + i as u32, *kind, OWNER_PLAYER, WEST_LAND));
+        ids.push(spawn_at(&mut sim, 960 + i as u32, *kind, OWNER_PLAYER, west_land));
     }
     for id in &ids {
         assert!(sim.can_load_transport(*id, ship), "{id} refused at the gate");
@@ -218,11 +319,11 @@ fn load_sail_unload_at_the_other_shore() {
         assert!(e.order.is_none());
     }
     // Sail to the east deep cell, then unload.
-    let (ex, ey) = sim.grid().cell_center(EAST_DEEP.0, EAST_DEEP.1);
+    let (ex, ey) = sim.grid().cell_center(east_deep.0, east_deep.1);
     sim.push_command(Command::Move { entity: ship, x: ex, y: ey });
     let sailed = run_until(&mut sim, 10_000, |s| {
         let e = ent(s, ship);
-        s.grid().world_to_cell(e.pos_x, e.pos_y) == EAST_DEEP && e.order.is_none()
+        s.grid().world_to_cell(e.pos_x, e.pos_y) == east_deep && e.order.is_none()
     });
     assert!(sailed, "the loaded Transport never crossed the pond");
     // Cargo stayed aboard (and at full HP) through the crossing.
@@ -243,22 +344,22 @@ fn load_sail_unload_at_the_other_shore() {
         // Beside the ship's NEW position (the east shore), not
         // back at the loading shore.
         assert!(
-            (cx as i32 - EAST_DEEP.0 as i32).abs() <= 3 && (cy as i32 - EAST_DEEP.1 as i32).abs() <= 3,
+            (cx as i32 - east_deep.0 as i32).abs() <= 3 && (cy as i32 - east_deep.1 as i32).abs() <= 3,
             "{id} unloaded at {cx},{cy}, far from the east shore"
         );
-        assert_ne!((cx, cy), WEST_LAND, "{id} teleported back to the loading shore");
+        assert_ne!((cx, cy), west_land, "{id} teleported back to the loading shore");
     }
 }
 
 #[test]
 fn capacity_five_is_a_hard_stop_and_eligibility_is_domain() {
-    let mut sim = Sim::new(42);
-    let ship = staged_ship(&mut sim, 950);
+    let (mut sim, west_deep, east_deep, west_land) = pond_stage();
+    let ship = staged_ship(&mut sim, 950, west_deep);
     // Six militia walk to board: five board, the sixth's order
     // ends at the full ship and he stands idle on the shore.
     let mut ids = Vec::new();
     for i in 0..6u32 {
-        ids.push(spawn_at(&mut sim, 960 + i, EntityKind::Militia, OWNER_PLAYER, WEST_LAND));
+        ids.push(spawn_at(&mut sim, 960 + i, EntityKind::Militia, OWNER_PLAYER, west_land));
     }
     for id in &ids {
         sim.push_command(Command::LoadTransport { entity: *id, ship });
@@ -284,11 +385,11 @@ fn capacity_five_is_a_hard_stop_and_eligibility_is_domain() {
     // Eligibility is the domain test, applied at the gate:
     // a ship cannot board, an enemy cannot board, a full ship
     // refuses everyone.
-    let galley = spawn_at(&mut sim, 990, EntityKind::Galley, OWNER_PLAYER, EAST_DEEP);
+    let galley = spawn_at(&mut sim, 990, EntityKind::Galley, OWNER_PLAYER, east_deep);
     assert!(!sim.can_load_transport(galley, ship), "a Galley boarded");
-    let foe = spawn_at(&mut sim, 991, EntityKind::Militia, OWNER_OPPONENT, WEST_LAND);
+    let foe = spawn_at(&mut sim, 991, EntityKind::Militia, OWNER_OPPONENT, west_land);
     assert!(!sim.can_load_transport(foe, ship), "an enemy boarded");
-    let extra = spawn_at(&mut sim, 992, EntityKind::Militia, OWNER_PLAYER, WEST_LAND);
+    let extra = spawn_at(&mut sim, 992, EntityKind::Militia, OWNER_PLAYER, west_land);
     assert!(!sim.can_load_transport(extra, ship), "a full ship accepted a sixth");
 }
 
@@ -298,11 +399,11 @@ fn cargo_is_immune_while_aboard_and_dies_with_the_ship() {
     // transport and assert zero survivors — a copy-paste of
     // the Ram's destruction ejection would place the cargo
     // alive on the shore and fail every assertion below.
-    let mut sim = Sim::new(42);
-    let ship = staged_ship(&mut sim, 950);
+    let (mut sim, west_deep, east_deep, west_land) = pond_stage();
+    let ship = staged_ship(&mut sim, 950, west_deep);
     let mut ids = Vec::new();
     for i in 0..3u32 {
-        ids.push(spawn_at(&mut sim, 960 + i, EntityKind::Militia, OWNER_PLAYER, WEST_LAND));
+        ids.push(spawn_at(&mut sim, 960 + i, EntityKind::Militia, OWNER_PLAYER, west_land));
     }
     for id in &ids {
         sim.push_command(Command::LoadTransport { entity: *id, ship });
@@ -311,7 +412,7 @@ fn cargo_is_immune_while_aboard_and_dies_with_the_ship() {
 
     // An enemy Galley works the ship over: the ship bleeds,
     // the cargo does not (immune while aboard — GAR-09).
-    let galley = spawn_at(&mut sim, 990, EntityKind::Galley, OWNER_OPPONENT, EAST_DEEP);
+    let galley = spawn_at(&mut sim, 990, EntityKind::Galley, OWNER_OPPONENT, east_deep);
     sim.push_command(Command::Attack { entity: galley, target: ship });
     let bleeding = run_until(&mut sim, 20_000, |s| ent(s, ship).hp < I16F16::from_num(60));
     assert!(bleeding, "the Galley never hurt the Transport");
@@ -347,12 +448,12 @@ fn a_moved_ship_still_loads_live_geometry() {
     // The P4a Ram test's twin: the load order lands, the ship
     // sails to the far shore, and the walker re-approaches the
     // ship's NEW position and boards there.
-    let mut sim = Sim::new(42);
-    let ship = staged_ship(&mut sim, 950);
-    let vil = spawn_at(&mut sim, 960, EntityKind::Villager, OWNER_PLAYER, WEST_LAND);
+    let (mut sim, west_deep, east_deep, west_land) = pond_stage();
+    let ship = staged_ship(&mut sim, 950, west_deep);
+    let vil = spawn_at(&mut sim, 960, EntityKind::Villager, OWNER_PLAYER, west_land);
     sim.push_command(Command::LoadTransport { entity: vil, ship });
     // The ship leaves for the east shore immediately.
-    let (ex, ey) = sim.grid().cell_center(EAST_DEEP.0, EAST_DEEP.1);
+    let (ex, ey) = sim.grid().cell_center(east_deep.0, east_deep.1);
     sim.push_command(Command::Move { entity: ship, x: ex, y: ey });
     let boarded = run_until(&mut sim, 60_000, |s| s.transport_cargo_count(ship) == 1);
     assert!(boarded, "the villager never boarded the moved ship");
@@ -361,16 +462,25 @@ fn a_moved_ship_still_loads_live_geometry() {
 
 #[test]
 fn unload_with_no_free_shore_cell_holds_the_cargo() {
-    let mut sim = Sim::new(42);
-    let ship = staged_ship(&mut sim, 950);
-    let mil = spawn_at(&mut sim, 960, EntityKind::Militia, OWNER_PLAYER, WEST_LAND);
+    let (mut sim, west_deep, _, west_land) = pond_stage();
+    let ship = staged_ship(&mut sim, 950, west_deep);
+    let mil = spawn_at(&mut sim, 960, EntityKind::Militia, OWNER_PLAYER, west_land);
     sim.push_command(Command::LoadTransport { entity: mil, ship });
     assert!(run_until(&mut sim, 20_000, |s| s.transport_cargo_count(ship) == 1));
     // Wall off every land cell within the exit ring (radius 3)
-    // with the dynamic layer — no free shore cell exists.
-    let (scx, scy) = WEST_DEEP;
-    for dy in -3..=3i32 {
-        for dx in -3..=3i32 {
+    // with the dynamic layer — no free shore cell exists. The
+    // ring is the SHIP's, walled one cell wider than the ring
+    // itself (MAP-05 re-stage: on the derived pond the loaded
+    // ship settles a cell off its spawn cell while loading and
+    // again during the window, and a wall fitted to the spawn
+    // cell leaves the settled ring's far row open —
+    // probe-verified, the cargo exited there).
+    let (scx, scy) = {
+        let e = ent(&sim, ship);
+        sim.grid().world_to_cell(e.pos_x, e.pos_y)
+    };
+    for dy in -4..=4i32 {
+        for dx in -4..=4i32 {
             let (cx, cy) = (scx as i32 + dx, scy as i32 + dy);
             if cx >= 0 && cy >= 0 {
                 let (cx, cy) = (cx as u32, cy as u32);
@@ -392,9 +502,9 @@ fn unload_with_no_free_shore_cell_holds_the_cargo() {
 
 #[test]
 fn save_round_trip_keeps_the_cargo() {
-    let mut sim = Sim::new(42);
-    let ship = staged_ship(&mut sim, 950);
-    let mil = spawn_at(&mut sim, 960, EntityKind::Militia, OWNER_PLAYER, WEST_LAND);
+    let (mut sim, west_deep, _east_deep, west_land) = pond_stage();
+    let ship = staged_ship(&mut sim, 950, west_deep);
+    let mil = spawn_at(&mut sim, 960, EntityKind::Militia, OWNER_PLAYER, west_land);
     sim.push_command(Command::LoadTransport { entity: mil, ship });
     assert!(run_until(&mut sim, 20_000, |s| s.transport_cargo_count(ship) == 1));
     let bytes = sim.save_game();

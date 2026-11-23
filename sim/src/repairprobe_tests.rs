@@ -159,22 +159,47 @@ fn park_far(
     dist: i32,
     forbidden: &[(u32, u32)],
 ) -> (u32, u32) {
-    for r in dist..=dist + 10 {
-        for dy in -r..=r {
-            for dx in -r..=r {
-                if dx.abs() != r && dy.abs() != r {
-                    continue;
-                }
-                let (x, y) = (center.0 as i32 + dx, center.1 as i32 + dy);
-                if x < 1 || y < 1 {
-                    continue;
-                }
-                let cell = (x as u32, y as u32);
-                if forbidden.contains(&cell) || sim.grid().is_blocked(cell.0, cell.1) {
-                    continue;
-                }
-                if move_and_wait(sim, entity, cell) {
-                    return cell;
+    // MAP-05 re-stage (map05lib): the reshuffled layouts put wolf
+    // posts on the old first-parkable bearings — probe-verified,
+    // the (c) scene's repairer was chased and killed by a wolf at
+    // its park cell (hp 25 -> -2, wolf atk_t = the repairer), and
+    // the map05restage combat fix set the precedent: prefer park
+    // cells at least 60 wu from every live wolf post, falling
+    // back to the historical unfiltered scan when no safe cell
+    // exists in the distance band.
+    let wolves: Vec<(I16F16, I16F16)> = sim
+        .entities()
+        .iter()
+        .filter(|e| e.kind == EntityKind::Wolf && !e.dead)
+        .map(|e| (e.pos_x, e.pos_y))
+        .collect();
+    for wolf_safe in [true, false] {
+        for r in dist..=dist + 10 {
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    if dx.abs() != r && dy.abs() != r {
+                        continue;
+                    }
+                    let (x, y) = (center.0 as i32 + dx, center.1 as i32 + dy);
+                    if x < 1 || y < 1 {
+                        continue;
+                    }
+                    let cell = (x as u32, y as u32);
+                    if forbidden.contains(&cell) || sim.grid().is_blocked(cell.0, cell.1) {
+                        continue;
+                    }
+                    if wolf_safe {
+                        let (wx, wy) = sim.grid().cell_center(cell.0, cell.1);
+                        let near_wolf = wolves.iter().any(|&(px, py)| {
+                            f(crate::steer::vec_len(wx - px, wy - py)) < 60.0
+                        });
+                        if near_wolf {
+                            continue;
+                        }
+                    }
+                    if move_and_wait(sim, entity, cell) {
+                        return cell;
+                    }
                 }
             }
         }
@@ -571,6 +596,27 @@ fn b_repair_target_destroyed_enroute_releases_repairer() {
         }
     };
     assert!(gone, "(b) the Scout never destroyed the house");
+    // MAP-05 re-stage (map05lib): on the reshuffled layout the
+    // Scout ends the kill standing beside the rubble, inside
+    // acquisition range of the released repairer — probe-verified,
+    // it auto-acquired and killed him during the measurement
+    // window (idle-listed at +1200 ticks with 7 HP, dead by
+    // +2400). Withdraw the Scout to its own Town Center, the
+    // fixture's usual discipline, before measuring the release.
+    {
+        let htc = find_id(&fx.sim, OWNER_PLAYER, EntityKind::TownCenter);
+        let (hx, hy) = {
+            let t = ent(&fx.sim, htc);
+            (t.pos_x, t.pos_y)
+        };
+        fx.sim.push_command(Command::Move { entity: scout, x: hx, y: hy });
+        let away = run_until(&mut fx.sim, 60_000, |s| {
+            let sc = ent(s, scout);
+            let rp = ent(s, repairer);
+            f(crate::steer::vec_len(sc.pos_x - rp.pos_x, sc.pos_y - rp.pos_y)) > 40.0
+        });
+        assert!(away, "(b) staging: the Scout never withdrew from the rubble");
+    }
     // Whatever state the repairer was in when the target fell,
     // he must end released and idle-visible, with no limbo.
     let mut limbo_after = 0u64;
@@ -911,4 +957,3 @@ fn c_repairtc_stand_cell_blocked_after_order() {
     assert!(m.end_idle_listed, "(c) released TC repairer invisible to the idle query");
     assert!(!m.end_order, "(c) released TC repairer still holds an order");
 }
-

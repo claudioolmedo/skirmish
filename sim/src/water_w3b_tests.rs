@@ -93,14 +93,34 @@ fn placed_dock(sim: &mut Sim, id: u32) -> u32 {
     id
 }
 
-/// A point on the seed-42 pond: the first deep-fish node's
+/// MAP-05 re-stage (map05lib): seed 42's Arabia is DRY since
+/// MAP-05's `create_elevation` started consuming the shared RNG
+/// stream ahead of pond placement (probe: seed 42 now generates
+/// zero water cells; 55 of seeds 1..=120 still carry a dockable,
+/// fish-stocked pond — the mapgen guarantees are intact, only
+/// this suite's pinned seed moved). Derive the pond from the
+/// generated maps at runtime: the first seed whose pond offers
+/// everything this suite stages on.
+fn pond_sim() -> Sim {
+    for seed in 1..=400u64 {
+        let sim = Sim::new(seed);
+        if dock_anchor(&sim).is_some()
+            && sim.nodes().iter().any(|n| n.kind == NodeKind::DeepFish)
+        {
+            return sim;
+        }
+    }
+    panic!("no seed in 1..=400 offers a dockable pond with deep fish");
+}
+
+/// A point on the pond seed's pond: the first deep-fish node's
 /// position (deep water by construction).
 fn pond_point(sim: &Sim) -> (I16F16, I16F16) {
     let n = sim
         .nodes()
         .iter()
         .find(|n| n.kind == NodeKind::DeepFish)
-        .expect("seed 42 stocks deep fish");
+        .expect("the pond seed stocks deep fish");
     (n.pos_x, n.pos_y)
 }
 
@@ -114,8 +134,19 @@ fn pond_point(sim: &Sim) -> (I16F16, I16F16) {
 /// at (13, 4) and the owner's ship at −8) stands on open
 /// water, and stage there.
 fn wide_pond_sim() -> (Sim, (I16F16, I16F16)) {
-    for seed in 1..=400u64 {
-        let sim = Sim::new(seed);
+    // MAP-05 re-stage (map05lib): the reshuffled pond stream
+    // made the wide pond rare — the probe finds exactly one
+    // seed in 1..=3000 (1610) offering the staging cross, so
+    // the scan widens to match. Second pass: that seed's cross
+    // stands on a height step — MAP-05's hills run under the
+    // pond, and CMB-01's elevation factor scaled the blast to
+    // 80 x 0.75 = 60 (probe-verified at both the 6 wu and the
+    // 11 wu victims). Real water is level (the W5 staging's
+    // words), so the returned sim has the cross's cells leveled
+    // to the detonation cell's height; the blast claim itself
+    // (untapered 80 across the radius) is untouched.
+    for seed in 1..=3000u64 {
+        let mut sim = Sim::new(seed);
         for n in sim.nodes().iter().filter(|n| n.kind == NodeKind::DeepFish) {
             let (x, y) = (n.pos_x, n.pos_y);
             let ok = [(0, 0), (6, 0), (11, 0), (13, 4), (-8, 0)].iter().all(|&(dx, dy)| {
@@ -126,11 +157,19 @@ fn wide_pond_sim() -> (Sim, (I16F16, I16F16)) {
                     && !sim.grid().is_blocked_for(Domain::Water, cx, cy)
             });
             if ok {
+                let (hx, hy) = sim.grid().world_to_cell(x, y);
+                let h0 = sim.grid().height_at(hx, hy);
+                for &(dx, dy) in &[(0, 0), (6, 0), (11, 0), (13, 4), (-8, 0)] {
+                    let (cx, cy) = sim
+                        .grid()
+                        .world_to_cell(x + I16F16::from_num(dx), y + I16F16::from_num(dy));
+                    sim.grid.set_height(cx, cy, h0);
+                }
                 return (sim, (x, y));
             }
         }
     }
-    panic!("no seed in 1..=400 offers a wide pond");
+    panic!("no seed in 1..=3000 offers a wide pond");
 }
 
 fn spawn_at(sim: &mut Sim, id: u32, kind: EntityKind, owner: u8, x: I16F16, y: I16F16) -> u32 {
@@ -261,7 +300,7 @@ fn castle_ship_rows_are_the_spec_rows() {
 
 #[test]
 fn medium_warships_researches_at_the_dock_and_converts_standing_ships() {
-    let mut sim = Sim::new(42);
+    let mut sim = pond_sim();
     let dock = placed_dock(&mut sim, 900);
     // The Castle gate: not researchable in Feudal.
     set_age(&mut sim, OWNER_PLAYER, Age::Feudal);
@@ -359,7 +398,7 @@ fn medium_warships_researches_at_the_dock_and_converts_standing_ships() {
 
 #[test]
 fn upgraded_production_spawns_castle_tiers() {
-    let mut sim = Sim::new(42);
+    let mut sim = pond_sim();
     let dock = placed_dock(&mut sim, 900);
     set_age(&mut sim, OWNER_PLAYER, Age::Feudal);
     grant(&mut sim, OWNER_PLAYER, TechId::MediumWarships);
@@ -442,7 +481,7 @@ fn war_hulk_strikes_carry_the_anti_fire_bonus() {
     // Per-strike arithmetic on the Castle tier: the War Hulk
     // lands (4 − 2 melee armor) + 1 vs the Fire Ship class = 3
     // per strike on a Fire Ship, every 1.5 s.
-    let mut sim = Sim::new(42);
+    let mut sim = pond_sim();
     let (x, y) = pond_point(&sim);
     let hulk = spawn_at(&mut sim, 950, EntityKind::WarHulk, OWNER_PLAYER, x, y);
     let fire = spawn_at(
@@ -593,7 +632,7 @@ fn demolition_ship_tech_converts_rafts_and_only_rafts() {
     // the other, as DE rows them), charging the preview's
     // 150 wood / 100 gold on enqueue, converting standing
     // rafts on completion and later production at spawn.
-    let mut sim = Sim::new(42);
+    let mut sim = pond_sim();
     let dock = placed_dock(&mut sim, 900);
     set_age(&mut sim, OWNER_PLAYER, Age::Feudal);
     assert!(!sim.can_research_at(dock, TechId::DemolitionShip));
@@ -658,7 +697,7 @@ fn demolition_ship_tech_converts_rafts_and_only_rafts() {
     // Medium Warships a queued raft still leaves the Dock as
     // a raft; once the line's own research is held, the next
     // queued raft leaves as a Demolition Ship.
-    let mut sim = Sim::new(42);
+    let mut sim = pond_sim();
     let dock = placed_dock(&mut sim, 900);
     set_age(&mut sim, OWNER_PLAYER, Age::Castle);
     grant(&mut sim, OWNER_PLAYER, TechId::MediumWarships);

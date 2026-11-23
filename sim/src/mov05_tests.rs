@@ -132,19 +132,45 @@ fn clear_land_spot(sim: &Sim) -> (I16F16, I16F16) {
 /// The centre cell of a generated pond: deep water, with
 /// water-side cells (deep or shallows — both are ship domain)
 /// on both horizontal neighbours, so a spawned pair settling
-/// along x stays in the water the whole way. (Seed 42's ponds
+/// along x stays in the water the whole way. (Generated ponds
 /// are plus-shaped: a deep cross in a shallows ring.)
-fn open_water_spot(sim: &Sim) -> (I16F16, I16F16) {
+fn open_water_spot(sim: &Sim) -> Option<(I16F16, I16F16)> {
+    // MAP-05 re-stage, second pass (map05lib): the first pond
+    // seed's spot sat in a one-cell-wide pond arm — the traveller
+    // could not complete its approach order around the blocker
+    // in the channel and never "arrived". The spot now requires
+    // the whole 3x3 neighbourhood water-side (a pond's deep
+    // centre in its shallows ring; probe: 452 of seeds 1..=2000
+    // offer one), so the pair settles along x with water room
+    // on both sides, as the original seed-42 staging had.
     let g = sim.grid();
     for cy in 1..g.height() - 1 {
         for cx in 1..g.width() - 1 {
-            let wet = |x: u32, y: u32| g.is_water(x, y) || g.is_shallows(x, y);
-            if g.is_water(cx, cy) && wet(cx - 1, cy) && wet(cx + 1, cy) {
-                return g.cell_center(cx, cy);
+            if g.is_water(cx, cy)
+                && (0..3).all(|dy| {
+                    (0..3).all(|dx| g.is_water_side(cx + dx - 1, cy + dy - 1))
+                })
+            {
+                return Some(g.cell_center(cx, cy));
             }
         }
     }
-    panic!("seed 42: no open water spot");
+    None
+}
+
+/// MAP-05 re-stage (map05lib): seed 42 is dry since MAP-05's
+/// elevation pass reshuffled the pond stream, so the warship
+/// pair's pond is derived at runtime — the first seed whose
+/// generated pond offers the open-water spot, with the seed
+/// itself (the approach probe builds its own sim from it).
+fn water_seed_and_spot() -> (u64, (I16F16, I16F16)) {
+    for seed in 1..=400u64 {
+        let sim = Sim::new(seed);
+        if let Some(spot) = open_water_spot(&sim) {
+            return (seed, spot);
+        }
+    }
+    panic!("no seed in 1..=400 offers an open water spot");
 }
 
 /// MOV-03-era probe: a standing blocker of `kind` at `blocker`,
@@ -160,7 +186,17 @@ fn approach_stop(
     from: (I16F16, I16F16),
     to: (I16F16, I16F16),
 ) -> (i32, i32, bool) {
-    let mut sim = Sim::new(42);
+    approach_stop_on(42, kind, blocker, from, to)
+}
+
+fn approach_stop_on(
+    seed: u64,
+    kind: EntityKind,
+    blocker: (I16F16, I16F16),
+    from: (I16F16, I16F16),
+    to: (I16F16, I16F16),
+) -> (i32, i32, bool) {
+    let mut sim = Sim::new(seed);
     sim.entities.push(Entity::spawned(9_001, kind, OWNER_PLAYER, from.0, from.1));
     sim.entities.push(Entity::spawned(
         9_002,
@@ -254,15 +290,23 @@ fn siege_pairs_settle_at_the_documented_siege_diameters() {
 
 #[test]
 fn warship_pairs_settle_at_the_documented_ship_diameter() {
-    let sim = Sim::new(42);
-    let spot = open_water_spot(&sim);
-    drop(sim);
+    let (seed, spot) = water_seed_and_spot();
     // Two galleys: 2 × 2.0 = 4.0 world units (was 3.2). The run
     // follows the pond's row: one cell west to one cell east of
     // the deep centre the spot helper found.
     let cell = I16F16::from_num(4);
     let (b, f, t) = (spot, (spot.0 - cell, spot.1), (spot.0 + cell, spot.1));
-    assert_approach_stops(EntityKind::Galley, b, f, t, 262_144);
+    let (min_d, disp, arrived) = approach_stop_on(seed, EntityKind::Galley, b, f, t);
+    assert!(arrived, "Galley traveller never arrived past its blocker");
+    assert_eq!(disp, 0, "Galley blocker was displaced by {disp} bits (MOV-03)");
+    assert!(
+        min_d >= 262_144 - 8_192,
+        "Galley pair closed to {min_d} bits, inside the 262144 diameter"
+    );
+    assert!(
+        min_d <= 262_144 + 32_768,
+        "Galley pair never reached contact ({min_d} bits vs 262144)"
+    );
 }
 
 #[test]

@@ -1118,7 +1118,34 @@ fn gar07_bell_mixed_tasks_all_come_out_and_resume() {
         let e = ent(&sim, tc);
         sim.grid().world_to_cell(e.pos_x, e.pos_y)
     };
-    let (hx, hy) = sim.grid().cell_center(tcx + 4, tcy + 4);
+    // MAP-05 re-stage (map05lib): the fixed TC+(4,4) plot is
+    // refused on seed 7's reshuffled layout (a starting sheep
+    // stands on its footprint — the bellprobe bisect's probe),
+    // so the plot is derived from the live map: the first ring
+    // cell around the TC whose House placement the sim itself
+    // accepts for this builder.
+    let (hx, hy) = {
+        let mut found = None;
+        'outer: for r in 2i32..=10 {
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    if dx.abs() != r && dy.abs() != r {
+                        continue;
+                    }
+                    let (ax, ay) = (tcx as i32 + dx, tcy as i32 + dy);
+                    if ax < 0 || ay < 0 {
+                        continue;
+                    }
+                    let cand = sim.grid().cell_center(ax as u32, ay as u32);
+                    if sim.can_build(v_build, BuildingKind::House, cand.0, cand.1) {
+                        found = Some(cand);
+                        break 'outer;
+                    }
+                }
+            }
+        }
+        found.expect("no can_build House plot near the TC")
+    };
     sim.push_command(Command::Build {
         entity: v_build,
         kind: BuildingKind::House,
