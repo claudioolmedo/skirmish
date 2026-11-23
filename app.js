@@ -19308,20 +19308,37 @@ function draw() {
       // edges gain the lit/shadow sides that make elevation read
       // as relief instead of flat contour steps (live observation,
       // bot-loop run #480). Sim, heights and ELEV_LIFT untouched.
+      // Legibility pass (bot-loop run #484, on the reliefprobe
+      // measurement, handoff reliefprobe-build.md): at the old
+      // 0.08 coefficient the modal slope rendered +3 on the green
+      // channel — BELOW the ground checker's own +5 delta — so the
+      // relief was arithmetically invisible live (#482/#483). The
+      // coefficient is now 0.24 with a ±0.30 clamp: the modal slope
+      // reads ~+9 and a canonical 1-level slope ~+15 on green,
+      // 2–3x the checker noise, while flat ground still takes
+      // exactly 0 and renders as before.
       const hE = gx + 1 < GW ? HEIGHTS[fi + 1] : hgt;
       const hW = gx > 0 ? HEIGHTS[fi - 1] : hgt;
       const hS = gy + 1 < GH ? HEIGHTS[fi + GW] : hgt;
       const hN = gy > 0 ? HEIGHTS[fi - GW] : hgt;
-      const relief = Math.max(-0.16, Math.min(0.16,
-        0.08 * (2 * (hE - hW) + (hS - hN)) / 3));
+      const relief = Math.max(-0.30, Math.min(0.30,
+        0.24 * (2 * (hE - hW) + (hS - hN)) / 3));
       if (hgt > 0) {
         // The step: the level below shows as two faces. The SE
         // face (screen lower-right) sits opposite the light and
         // shades deeper than the SW face — the asymmetry is what
         // makes a step read as a face rather than a contour line.
+        // Each face is drawn ONLY where the neighbour across its
+        // edge is strictly lower, with depth proportional to the
+        // drop: reliefprobe's raster replication measured 0.0%
+        // pixel survival for faces whose front neighbour is at
+        // the same level (they are overpainted by that neighbour's
+        // top), and a fixed 1-level face understated every drop
+        // of 2+ levels. SW edge borders cell (gx, gy+1) = hS;
+        // SE edge borders cell (gx+1, gy) = hE.
         const liftPx = ELEV_LIFT * camS;
-        poly([[cx - hw, cy], [cx, cy + hh], [cx, cy + hh + liftPx], [cx - hw, cy + liftPx]], shade(base, -0.20));
-        poly([[cx, cy + hh], [cx + hw, cy], [cx + hw, cy + liftPx], [cx, cy + hh + liftPx]], shade(base, -0.38));
+        if (hS < hgt) poly([[cx - hw, cy], [cx, cy + hh], [cx, cy + hh + (hgt - hS) * liftPx], [cx - hw, cy + (hgt - hS) * liftPx]], shade(base, -0.20));
+        if (hE < hgt) poly([[cx, cy + hh], [cx + hw, cy], [cx + hw, cy + liftPx * (hgt - hE)], [cx, cy + hh + liftPx * (hgt - hE)]], shade(base, -0.38));
         // MAP-07: a cliff face — a neighbor CLIFF_STEP (3) or
         // more levels lower — stacks a darker tread per level
         // down toward the low ground, so the sheer drop reads

@@ -28,8 +28,8 @@ test('relief term: direction, clamp and flat-zero', () => {
   assert.ok(m, 'relief term not found in the ground pass');
   const lo = parseFloat(m[1]);
   const hi = parseFloat(m[2]);
-  assert.equal(lo, -0.16, 'relief clamp low');
-  assert.equal(hi, 0.16, 'relief clamp high');
+  assert.equal(lo, -0.30, 'relief clamp low');
+  assert.equal(hi, 0.30, 'relief clamp high');
   const expr = new Function('hE', 'hW', 'hS', 'hN', `return (${m[3]});`);
   const relief = (hE, hW, hS, hN) => Math.max(lo, Math.min(hi, expr(hE, hW, hS, hN)));
   // Flat ground: exactly zero — plains render as before.
@@ -42,9 +42,14 @@ test('relief term: direction, clamp and flat-zero', () => {
   // shaded, and darker than a merely SW-facing slope.
   assert.ok(relief(1, 3, 2, 2) < 0, 'east flank must be shaded');
   assert.ok(relief(1, 3, 2, 2) < relief(2, 2, 1, 3), 'SE-facing must be darkest');
-  // A one-level step is visible but subtle; the clamp caps it.
-  assert.ok(relief(2, 1, 1, 1) > 0.02 && relief(2, 1, 1, 1) < 0.16);
-  assert.equal(relief(6, 0, 6, 0), 0.16, 'clamp caps extreme slopes');
+  // Legibility floor (run #484, reliefprobe measurement): a
+  // one-level E/W slope must clear the ground checker's own
+  // delta (+5 on green) by a wide margin — at the old 0.08
+  // coefficient it rendered +5, exactly the noise floor, and
+  // the modal slope rendered +3, below it. 0.24 puts the
+  // canonical slope at 0.16 (~+15 on green).
+  assert.ok(relief(2, 1, 1, 1) > 0.10 && relief(2, 1, 1, 1) < 0.30);
+  assert.equal(relief(6, 0, 6, 0), 0.30, 'clamp caps extreme slopes');
 });
 
 test('step faces: SE strictly darker than SW', () => {
@@ -54,6 +59,22 @@ test('step faces: SE strictly darker than SW', () => {
   assert.ok(se, 'SE step face not found');
   assert.ok(parseFloat(se[1]) < parseFloat(sw[1]),
     `SE face (${se[1]}) must shade deeper than SW face (${sw[1]})`);
+});
+
+test('step faces: drawn only across a real drop, depth = drop', () => {
+  // reliefprobe raster replication: faces whose front neighbour
+  // is at the same level survive 0.0% — drawing them is waste,
+  // and a fixed 1-level depth understates drops of 2+. The SW
+  // face (neighbour hS) and SE face (neighbour hE) are each
+  // conditional on a strict drop and scaled by it.
+  assert.match(appJs, /if \(hS < hgt\) poly\(/,
+    'SW step face must be conditional on the S neighbour being lower');
+  assert.match(appJs, /if \(hE < hgt\) poly\(/,
+    'SE step face must be conditional on the E neighbour being lower');
+  assert.match(appJs, /\(hgt - hS\) \* liftPx/,
+    'SW step face depth must scale with the drop');
+  assert.match(appJs, /liftPx \* \(hgt - hE\)/,
+    'SE step face depth must scale with the drop');
 });
 
 test('projection and level lightening untouched', () => {
