@@ -47,7 +47,7 @@ test('the tech tree mirrors the Dock researches (tags 45/46)', () => {
   // TECH_TREE.length grew to 48 with Water W3b's Medium
   // Warships (tag 47, pinned in waterw3bclient.test.mjs), and
   // to 50 with Water W5's University ship pair (tags 48/49).
-  assert.equal(TECH_TREE.length, 58); // 50 at W5; +the Imperial trio (W6); +Siege Engineers (TEC-08); +the tower trio (BLD-18 completion); +Demolition Ship (split)
+  assert.equal(TECH_TREE.length, 60); // 50 at W5; +the Imperial trio (W6); +Siege Engineers (TEC-08); +the tower trio (BLD-18 completion); +Demolition Ship (split); +the TEC-11 pair 58/59
   assert.deepEqual(TECH_TREE[45], {
     tag: 45, host: 23, age: 1, cost: [50, 100, 0, 0], secs: 20, requires: null,
   });

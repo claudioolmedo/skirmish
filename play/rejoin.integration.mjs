@@ -30,8 +30,8 @@
 import { readFileSync } from 'node:fs';
 import init, { WasmSim } from '../pkg/skirmish_sim.js';
 import {
-  TURN_TICKS, applyCommand, tcIdOf, createSession, createRecorder,
-  createRelayClient, probeRegionPing,
+  TURN_TICKS, INITIAL_DELAY_TURNS, applyCommand, tcIdOf, createSession,
+  createRecorder, createRelayClient, probeRegionPing,
 } from './netplay.js';
 
 const RELAY = 'https://skirmish-relay.hoardserdure7.workers.dev';
@@ -130,6 +130,10 @@ class Client {
   // app.js sendResync(), verbatim payload.
   sendResync() {
     if (!this.session || !this.recorder) return;
+    // NET-02: settle any in-flight turn first — the snapshot
+    // (tick count + event stream) is only defined at a turn
+    // boundary (mirrors app.js sendResync).
+    this.session.settleTurn();
     const snapshot = this.recorder.finish({ result: 'ongoing', ticks: this.sim.tick_count() });
     this.resyncFrontier = {
       turn: this.session.state().turn,
@@ -171,7 +175,7 @@ class Client {
     });
     this.recorder.seed(msg.events || []);
     this.session = this.makeSession();
-    this.resyncDelay = msg.delay || 4;
+    this.resyncDelay = msg.delay || INITIAL_DELAY_TURNS;
     this.lastResyncMeta = {
       ticks: total, events: (msg.events || []).length,
       hashAfterFF: this.sim.state_hash(),
@@ -389,7 +393,7 @@ for (let cycle = 1; cycle <= 2; cycle++) {
   // the guest anchors its pacing clock when it RECEIVES the resume
   // frame, which is after the host anchored its own at rebase() time,
   // so at the instant the host alone reaches the target the guest is
-  // deterministically 2–3 turns behind (TURN_MS ≈ 29.4 ms vs the
+  // deterministically a few turns behind (TURN_MS ≈ 196 ms vs the
   // relay round-trip). Stopping on the host alone therefore compared
   // only 147–148 turns with no turn missing and no mismatch — a test
   // accounting artefact, proven by instrumented runs on 2026-10-28

@@ -108,7 +108,7 @@ test('the University gains the ship pair with the BigInt-safe done check', () =>
 });
 
 test('the tech tree mirrors the University ship pair (tags 48/49)', () => {
-  assert.equal(TECH_TREE.length, 58); // 50 here at W5; +the Imperial trio (W6); +Siege Engineers (TEC-08); +the tower trio (BLD-18 completion); +Demolition Ship (split)
+  assert.equal(TECH_TREE.length, 60); // 50 here at W5; +the Imperial trio (W6); +Siege Engineers (TEC-08); +the tower trio (BLD-18 completion); +Demolition Ship (split); +the TEC-11 pair 58/59
   assert.deepEqual(TECH_TREE[48], {
     tag: 48, host: 16, age: 2, cost: [100, 0, 200, 0], secs: 40, requires: null,
   });

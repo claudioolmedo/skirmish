@@ -165,7 +165,10 @@ export const PANEL_BUTTONS = {
   // Castle P3a: the Castle's panel — Train Petard, and Package
   // M's Conscription research beside it (the plain positional
   // grid's second cell).
-  castle: ['train-petard', 'research-conscription'],
+  // TEC-11 (2026-11-22): the unique-technology pair appends —
+  // Drilled March third (E), Siege Carpentry fourth (A, the
+  // second row's first cell); no existing letter moves.
+  castle: ['train-petard', 'research-conscription', 'research-drilledmarch', 'research-siegecarpentry'],
   // Castle P4a: the Siege Workshop's whole panel — Train Ram.
   siegeworkshop: ['train-ram'],
   // Castle P5a: the Monastery's panel — Train Monk, then the
@@ -366,6 +369,9 @@ export const PANEL_KEYS = {
   castle: {
     'train-petard': ['KeyQ', 'Q'],
     'research-conscription': ['KeyW', 'W'],
+    // TEC-11: the unique-technology pair continues the grid.
+    'research-drilledmarch': ['KeyE', 'E'],
+    'research-siegecarpentry': ['KeyA', 'A'],
   },
   // Castle P4a: the Siege Workshop's single train button, same
   // first-slot rule.

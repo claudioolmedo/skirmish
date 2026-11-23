@@ -64,7 +64,8 @@ import {
   FORMATIONS, createFormationChoice, formationApplies,
 } from './play/formation.js';
 import {
-  TURN_TICKS as NET_TURN_TICKS, REJOIN_GRACE_MS, LOAD_TIMEOUT_MS,
+  TURN_TICKS as NET_TURN_TICKS, INITIAL_DELAY_TURNS as NET_DELAY_TURNS,
+  REJOIN_GRACE_MS, LOAD_TIMEOUT_MS,
   PEER_STALL_TIMEOUT_MS,
   GAME_SPEED, GAME_SPEEDS, isGameSpeed, TICK_MS, advanceTicks,
   applyCommand as netApplyCommand, tcIdOf as netTcIdOf,
@@ -711,6 +712,7 @@ let TECH_NAME = {
   50: 'Dry Dock', 51: 'Carvel Hull', 52: 'Shipwright',
   53: 'Siege Engineers', 54: 'Guard Tower', 55: 'Keep', 56: 'Arrowslits',
   57: 'Demolition Ship',
+  58: 'Drilled March', 59: 'Siege Carpentry',
 };
 // Research-block explanations, indexed by the sim's ResearchBlock
 // tag (0 ok — unused, 1 funds, 2 queue full, 3 already done,
@@ -774,6 +776,7 @@ function refreshNames() {
     53: t('tech.siegeengineers'), 54: t('tech.guardtower'), 55: t('tech.keep'),
     56: t('tech.arrowslits'),
     57: t('tech.demolitionship'),
+    58: t('tech.drilledmarch'), 59: t('tech.siegecarpentry'),
   };
   RESEARCH_BLOCK_TITLES = [
     '', t('block.noResources'), t('block.queueFullTrain'),
@@ -6180,13 +6183,19 @@ async function rejoinFromResync(msg) {
   });
   net.recorder.seed(msg.events || []);
   net.session = makeNetSession();
-  net.resyncDelay = msg.delay || 4;
+  net.resyncDelay = msg.delay || NET_DELAY_TURNS;
   net.client.send({ type: 'resync-done' });
   lobbyStatus(t('status.rebuilt'));
 }
 
 function sendResync() {
   if (!net || !net.session || !net.recorder) return;
+  // NET-02: the snapshot pairs a tick count with the recorded
+  // event stream — both are only defined at a turn boundary,
+  // and execution inside a turn is incremental now, so settle
+  // any in-flight turn first (its commands join the stream and
+  // the tick count lands on the boundary).
+  net.session.settleTurn();
   const snapshot = net.recorder.finish({ result: 'ongoing', ticks: sim.tick_count() });
   net.client.send({
     type: 'resync',
@@ -16662,6 +16671,7 @@ function runCommandButton(id, times = 1) {
       'research-fortifiedwall': 24,
       'research-coinage': 25, 'research-banking': 26,
       'research-conscription': 29,
+      'research-drilledmarch': 58, 'research-siegecarpentry': 59,
       'research-goldmining': 11, 'research-stonemining': 12,
       'research-horsecollar': 13,
       'research-heavyplow': 30, 'research-croprotation': 31,
@@ -16844,7 +16854,7 @@ function renderCommands() {
   const RB_TAGS = {
     blacksmith: [2, 3, 4, 7, 8], barracks: [5], stable: [9, 16, 17],
     lumbercamp: [10, 43, 44], miningcamp: [11, 12], mill: [13, 30, 31], market: [19, 25, 26],
-    university: [20, 21, 22, 23, 24, 48, 49, 50, 51, 52, 53, 54, 55, 56], castle: [29],
+    university: [20, 21, 22, 23, 24, 48, 49, 50, 51, 52, 53, 54, 55, 56], castle: [29, 58, 59],
     lumbercamp: [10, 43, 44], miningcamp: [11, 12], mill: [13], market: [19, 25, 26],
     university: [20, 21, 22, 23, 24, 48, 49, 50, 51, 52, 53, 54, 55, 56], monastery: [32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42],
     dock: [45, 46, 47, 57],
@@ -17293,8 +17303,16 @@ function renderCommands() {
     // empty slots stay absent per the icon-only panel law).
     // Package M adds the Castle's one research: Conscription,
     // in the grid's second cell.
+    // TEC-11 (2026-11-22): the unique-technology pair appends
+    // after Conscription in the positional grid — Drilled
+    // March (Castle Age, E) and Siege Carpentry (Imperial
+    // Age, A). The exact DE grid slot of a civ's UT buttons
+    // is not documented (research-de/tec11-net02.md §A.3);
+    // appending keeps every existing cell unmoved.
     const underConstruction = !bk.complete;
     const consDone = (techMask & (1 << 29)) !== 0;
+    const dmDone = techMaskHas(techMask, 58);
+    const scDone = techMaskHas(techMask, 59);
     cmdGrid.append(
       cmdButton({
         id: 'train-petard', icon: 'i-petard', label: 'Petard',
@@ -17317,6 +17335,37 @@ function renderCommands() {
             : age < 3
               ? t('cmd.buildGate', { name: TECH_NAME[29], gate: t('gate.imperial') })
               : t('cmd.conscriptionTitle', { name: TECH_NAME[29], cost: costText([[150, 'food'], [150, 'gold']]), secs: 60 }) + (RESEARCH_BLOCK_TITLES[rbB[29]] ? ' ' + RESEARCH_BLOCK_TITLES[rbB[29]] : ''),
+      }),
+      // TEC-11: Drilled March — the Castle-Age unique
+      // technology (infantry +10% speed), third cell (E).
+      cmdButton({
+        id: 'research-drilledmarch', icon: 'i-drilledmarch', label: 'Drilled March',
+        costIcon: 'i-food', cost: 400, cost2Icon: 'i-gold', cost2: 300,
+        disabled: underConstruction || dmDone || rbB[58] === 2 || rbB[58] === 3 || rbB[58] === 4,
+        key: badgeForButton({ context, id: 'research-drilledmarch', index: 2 }),
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: TECH_NAME[58], building: BUILD_NAME[15] })
+          : dmDone
+            ? t('cmd.researchDone', { name: TECH_NAME[58] })
+            : age < 2
+              ? t('cmd.buildGate', { name: TECH_NAME[58], gate: t('gate.castle') })
+              : t('cmd.drilledmarchTitle', { name: TECH_NAME[58], cost: costText([[400, 'food'], [300, 'gold']]), secs: 45 }) + (RESEARCH_BLOCK_TITLES[rbB[58]] ? ' ' + RESEARCH_BLOCK_TITLES[rbB[58]] : ''),
+      }),
+      // TEC-11: Siege Carpentry — the Imperial-Age unique
+      // technology (siege weapons +25% HP), fourth cell (A,
+      // the second row's first cell).
+      cmdButton({
+        id: 'research-siegecarpentry', icon: 'i-siegecarpentry', label: 'Siege Carpentry',
+        costIcon: 'i-food', cost: 600, cost2Icon: 'i-gold', cost2: 500,
+        disabled: underConstruction || scDone || rbB[59] === 2 || rbB[59] === 3 || rbB[59] === 4,
+        key: badgeForButton({ context, id: 'research-siegecarpentry', index: 3 }),
+        title: underConstruction
+          ? t('cmd.underConstruction', { name: TECH_NAME[59], building: BUILD_NAME[15] })
+          : scDone
+            ? t('cmd.researchDone', { name: TECH_NAME[59] })
+            : age < 3
+              ? t('cmd.buildGate', { name: TECH_NAME[59], gate: t('gate.imperial') })
+              : t('cmd.siegecarpentryTitle', { name: TECH_NAME[59], cost: costText([[600, 'food'], [500, 'gold']]), secs: 50 }) + (RESEARCH_BLOCK_TITLES[rbB[59]] ? ' ' + RESEARCH_BLOCK_TITLES[rbB[59]] : ''),
       }),
     );
   } else if (context === 'siegeworkshop') {
