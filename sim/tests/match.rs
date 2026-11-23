@@ -265,6 +265,19 @@ fn scripted_siege_wins_the_match() {
     // adapted — bigger mass, repairers killed first, a gatherer
     // pulled to build when housed at cap — the win re-paces to
     // tick 113,091 (measured, probe2b). Window stays 600,000.
+    // MAP-05 re-stage (2026-11-22): the reshuffled layout froze
+    // the script's economy solid (probe-verified: stockpiles and
+    // unit positions bit-identical from ~tick 100,000 to
+    // 600,000 — the wood crew deadlocked head-on at the single
+    // nearest tree's stand face, wood froze at 10, Farms never
+    // fired, food nodes ran out, and the worker assignment had
+    // no fallback off the food slot, so idle villagers piled up
+    // at the Town Center doorstep). The script now derives its
+    // woodline from the generated map (roomy trees, crew spread
+    // across the three nearest — see `wood_node`) and falls back
+    // through its resource slots in deficit order (see
+    // `assign_workers`). The siege itself — mass, latch, repairer
+    // discipline — is unchanged.
     for _ in 0..600_000 {
         driver.drive(&mut sim);
         sim.tick();
@@ -320,6 +333,10 @@ fn passive_human_loses_the_match() {
 struct HumanScript {
     acted: Vec<u32>,
     pushing: bool,
+    /// MAP-05 re-stage (2026-11-22): the script's woodline picks,
+    /// derived from the generated map on first use (see
+    /// `wood_node` in `assign_workers`).
+    wood_picks: Vec<u32>,
 }
 
 impl HumanScript {
@@ -741,45 +758,163 @@ impl HumanScript {
             .map(|n| dist(n.pos_x - tc_x, n.pos_y - tc_y) <= 44.0)
             .unwrap_or(false);
         for vid in idle {
-            let mut slot = 0usize;
-            let mut best = i64::MIN;
-            for s in 0..3 {
-                let d = targets[s] as i64 - counts[s] as i64;
-                if d > best {
-                    best = d;
-                    slot = s;
+            // MAP-05 re-stage (2026-11-22): slots are tried in
+            // deficit order and the villager takes the FIRST
+            // resource that actually has a node (or a sheep) to
+            // work. The pre-stage script committed to the single
+            // max-deficit slot: on the reshuffled seed-21 map the
+            // food nodes on the home side run out (berries eaten,
+            // sheep eaten, and no Farms — their 120-wood want
+            // never fires because the wood crew is the bottleneck
+            // below), `nearest_node(Food)` returns None, and every
+            // idle villager stalled on the food slot forever,
+            // piling up at the Town Center doorstep while the
+            // stockpiles froze (probe-verified: every stockpile
+            // and every unit position bit-identical for 300,000+
+            // ticks). A player whose food runs out puts the
+            // surplus hands on wood and gold; so does the script.
+            let mut slots: Vec<usize> = (0..3).collect();
+            slots.sort_by_key(|&s| {
+                std::cmp::Reverse(targets[s] as i64 - counts[s] as i64)
+            });
+            for slot in slots {
+                let resource = [
+                    ResourceKind::Food,
+                    ResourceKind::Wood,
+                    ResourceKind::Gold,
+                ][slot];
+                if resource == ResourceKind::Food && !food_near {
+                    if let Some(sheep) = sim
+                        .entities()
+                        .iter()
+                        .find(|e| e.kind == EntityKind::Sheep && e.owner == me && !e.dead)
+                        .map(|e| e.id)
+                    {
+                        sim.push_command(Command::Attack {
+                            entity: vid,
+                            target: sheep,
+                        });
+                        self.acted.push(vid);
+                        counts[0] += 1;
+                        break;
+                    }
                 }
-            }
-            let resource = [
-                ResourceKind::Food,
-                ResourceKind::Wood,
-                ResourceKind::Gold,
-            ][slot];
-            if resource == ResourceKind::Food && !food_near {
-                if let Some(sheep) = sim
-                    .entities()
-                    .iter()
-                    .find(|e| e.kind == EntityKind::Sheep && e.owner == me && !e.dead)
-                    .map(|e| e.id)
-                {
-                    sim.push_command(Command::Attack {
+                let nid = if resource == ResourceKind::Wood {
+                    self.wood_node(sim, tc_x, tc_y)
+                } else {
+                    nearest_node(sim, resource, tc_x, tc_y)
+                };
+                if let Some(nid) = nid {
+                    sim.push_command(Command::Gather {
                         entity: vid,
-                        target: sheep,
+                        node: nid,
                     });
                     self.acted.push(vid);
-                    counts[0] += 1;
-                    continue;
+                    counts[slot] += 1;
+                    break;
                 }
             }
-            if let Some(nid) = nearest_node(sim, resource, tc_x, tc_y) {
-                sim.push_command(Command::Gather {
-                    entity: vid,
-                    node: nid,
-                });
-                self.acted.push(vid);
-                counts[slot] += 1;
-            }
         }
+    }
+
+    /// The script's woodline (MAP-05 re-stage, 2026-11-22):
+    /// among the three nearest ROOMY trees on the home side —
+    /// a tree with at least 3 ring cells the pathfinder reaches
+    /// from the Town Center, so a crew has stand room — pick the
+    /// one with the fewest cutters already assigned to it (ties
+    /// to the nearest). The pre-stage script sent every
+    /// woodcutter to the single nearest tree: on the reshuffled
+    /// seed-21 map the whole crew converged head-on at that
+    /// tree's one stand face (two villagers frozen in ToNode,
+    /// three in Returning with full carries, wood frozen at 10
+    /// for 300,000+ ticks — probe-verified), the exact stand-
+    /// point deadlock the suites' roomy picks fixed. The picks
+    /// are derived from the generated map on first use and
+    /// re-derived when every pick has been eaten; if no roomy
+    /// tree exists, the plain nearest-node rule stands.
+    fn wood_node(&mut self, sim: &Sim, tc_x: I16F16, tc_y: I16F16) -> Option<u32> {
+        let live = |sim: &Sim, id: u32| {
+            sim.nodes()
+                .iter()
+                .find(|n| n.id == id)
+                .map(|n| !n.is_depleted())
+                .unwrap_or(false)
+        };
+        if self.wood_picks.iter().all(|&id| !live(sim, id)) {
+            self.wood_picks.clear();
+            // Candidate trees on the home side (nearest_node's
+            // ownership rule), nearest first.
+            let foe_tc = sim
+                .entities()
+                .iter()
+                .find(|e| {
+                    e.owner == OWNER_OPPONENT
+                        && e.kind == EntityKind::TownCenter
+                        && !e.dead
+                })
+                .map(|e| (e.pos_x, e.pos_y));
+            let mut trees: Vec<(f64, u32)> = Vec::new();
+            for n in sim.nodes() {
+                if n.is_depleted() || n.resource() != ResourceKind::Wood {
+                    continue;
+                }
+                let mine = match foe_tc {
+                    Some((fx, fy)) => {
+                        dist(n.pos_x - tc_x, n.pos_y - tc_y)
+                            <= dist(n.pos_x - fx, n.pos_y - fy)
+                    }
+                    None => true,
+                };
+                if !mine {
+                    continue;
+                }
+                // Stand room: at least 3 ring cells unblocked
+                // and path-reachable from the Town Center.
+                let (cx, cy) = sim.grid().world_to_cell(n.pos_x, n.pos_y);
+                let mut reach = 0;
+                for dy in -1i32..=1 {
+                    for dx in -1i32..=1 {
+                        if dx == 0 && dy == 0 {
+                            continue;
+                        }
+                        let (nx, ny) = (cx as i32 + dx, cy as i32 + dy);
+                        if nx < 0 || ny < 0 || sim.grid().is_blocked(nx as u32, ny as u32) {
+                            continue;
+                        }
+                        let c = sim.grid().cell_center(nx as u32, ny as u32);
+                        if sim.grid().find_path((tc_x, tc_y), c).is_some() {
+                            reach += 1;
+                        }
+                    }
+                }
+                if reach >= 3 {
+                    trees.push((dist(n.pos_x - tc_x, n.pos_y - tc_y), n.id));
+                }
+            }
+            trees.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+            self.wood_picks = trees.iter().take(3).map(|&(_, id)| id).collect();
+        }
+        if self.wood_picks.is_empty() {
+            return nearest_node(sim, ResourceKind::Wood, tc_x, tc_y);
+        }
+        // Fewest assigned cutters wins; ties keep the nearer pick
+        // (the picks are stored nearest-first).
+        let assigned = |sim: &Sim, id: u32| {
+            sim.entities()
+                .iter()
+                .filter(|e| {
+                    e.owner == OWNER_PLAYER
+                        && e.kind == EntityKind::Villager
+                        && !e.dead
+                        && e.task_node == Some(id)
+                })
+                .count()
+        };
+        self.wood_picks
+            .iter()
+            .copied()
+            .filter(|&id| live(sim, id))
+            .min_by_key(|&id| assigned(sim, id))
     }
 }
 

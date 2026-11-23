@@ -133,6 +133,91 @@ fn woodline_tree(sim: &Sim) -> u32 {
         .id
 }
 
+/// A woodline tree a CREW can work (MAP-05 re-stage, 2026-11-22):
+/// the shared `woodline_tree` pick maximizes tree neighbors, which
+/// on the reshuffled MAP-05 forest lands on the deepest-interior
+/// trunk — on seed 61 a tree with exactly ONE free ring cell. A
+/// lone cutter works it (the hand_cart / town_center flows do,
+/// trickling in), but the gates test's crew converges on the
+/// single stand point together and deadlocks there (probe-verified:
+/// three villagers frozen in ToNode/Returning within 2 wu of each
+/// other, wood frozen for 400,000 ticks). This pick keeps the
+/// chaining requirement (≥3 tree neighbors) and adds stand room —
+/// at least 3 ring cells reachable from the Town Center — plus
+/// the suites' usual wolf-safety preference (≥60 wu from every
+/// wolf post), falling back through looser tiers. It derives the
+/// tree from the generated map at the moment of the call, like
+/// every other picker in these suites.
+fn crew_woodline_tree(sim: &Sim) -> u32 {
+    let tc = sim.town_center();
+    let trees: Vec<_> = sim
+        .nodes()
+        .iter()
+        .filter(|n| n.kind == NodeKind::Tree && !n.is_depleted())
+        .collect();
+    let neighbors = |t: &skirmish_sim::ResourceNode| {
+        trees
+            .iter()
+            .filter(|o| {
+                let dx = o.pos_x.to_num::<f64>() - t.pos_x.to_num::<f64>();
+                let dy = o.pos_y.to_num::<f64>() - t.pos_y.to_num::<f64>();
+                dx * dx + dy * dy <= 144.0
+            })
+            .count()
+    };
+    let reachable_ring = |t: &skirmish_sim::ResourceNode| {
+        let (cx, cy) = sim.grid().world_to_cell(t.pos_x, t.pos_y);
+        let mut n = 0;
+        for dy in -1i32..=1 {
+            for dx in -1i32..=1 {
+                if dx == 0 && dy == 0 {
+                    continue;
+                }
+                let (nx, ny) = (cx as i32 + dx, cy as i32 + dy);
+                if nx < 0 || ny < 0 || sim.grid().is_blocked(nx as u32, ny as u32) {
+                    continue;
+                }
+                let center = sim.grid().cell_center(nx as u32, ny as u32);
+                if sim.grid().find_path((tc.pos_x, tc.pos_y), center).is_some() {
+                    n += 1;
+                }
+            }
+        }
+        n
+    };
+    let wolf_posts: Vec<(f64, f64)> = sim
+        .entities()
+        .iter()
+        .filter(|e| e.kind == EntityKind::Wolf)
+        .map(|e| (e.pos_x.to_num::<f64>(), e.pos_y.to_num::<f64>()))
+        .collect();
+    let wolf_safe = |t: &skirmish_sim::ResourceNode| {
+        wolf_posts.iter().all(|(wx, wy)| {
+            let dx = t.pos_x.to_num::<f64>() - wx;
+            let dy = t.pos_y.to_num::<f64>() - wy;
+            dx * dx + dy * dy >= 60.0 * 60.0
+        })
+    };
+    trees
+        .iter()
+        .filter(|t| neighbors(t) >= 3 && reachable_ring(t) >= 3 && wolf_safe(t))
+        .max_by_key(|t| neighbors(t))
+        .or_else(|| {
+            trees
+                .iter()
+                .filter(|t| neighbors(t) >= 3 && reachable_ring(t) >= 3)
+                .max_by_key(|t| neighbors(t))
+        })
+        .or_else(|| {
+            trees
+                .iter()
+                .filter(|t| neighbors(t) >= 3 && reachable_ring(t) >= 1)
+                .max_by_key(|t| neighbors(t))
+        })
+        .expect("no crew-workable woodline tree")
+        .id
+}
+
 fn raise(sim: &mut Sim, entity: u32, kind: BuildingKind, cx: u32, cy: u32) {
     build(sim, entity, kind, cx, cy);
     let up = run_until(sim, 30_000, |s| {
@@ -346,7 +431,10 @@ fn castle_age_gates_cost_timing_and_the_bld11_step() {
     assert_eq!((tc_stats.armor_melee, tc_stats.armor_pierce), (4, 6));
 
     // A House raised in Feudal stands at the Feudal ceiling.
-    let tree = woodline_tree(&sim);
+    // (MAP-05 re-stage: this test works its wood phases with the
+    // whole village on one woodline — the crew pick above, not
+    // the shared max-neighbors pick; see crew_woodline_tree.)
+    let tree = crew_woodline_tree(&sim);
     gather(&mut sim, 3, tree);
     wait_stock(&mut sim, ResourceKind::Wood, 30);
     let house_id = raise_scan(&mut sim, 3, BuildingKind::House);
@@ -420,7 +508,7 @@ fn castle_age_gates_cost_timing_and_the_bld11_step() {
     // is rejected whole (econ.rs) — the player clicks the
     // standing forest the crew has chained to, not the stump.
     let vils = my_villagers(&sim);
-    let live_tree = woodline_tree(&sim);
+    let live_tree = crew_woodline_tree(&sim);
     gather(&mut sim, vils[2], live_tree);
     for i in 0..3 {
         wait_stock(&mut sim, ResourceKind::Wood, 85);

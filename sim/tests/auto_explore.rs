@@ -241,6 +241,50 @@ fn anchor_point(sim: &Sim, cx: u32, cy: u32) -> (I16F16, I16F16) {
     sim.grid().cell_center(cx, cy)
 }
 
+fn cell_of(sim: &Sim, x: I16F16, y: I16F16) -> (u32, u32) {
+    sim.grid().world_to_cell(x, y)
+}
+
+/// The first anchor cell near an arbitrary center cell where `kind`
+/// may be built by `entity` right now, scanning rings outward —
+/// the M7 pattern from construction.rs / combat.rs: placement
+/// scenarios derive their ground from the generated map.
+fn open_anchor_near(
+    sim: &Sim,
+    entity: u32,
+    kind: BuildingKind,
+    cx: u32,
+    cy: u32,
+) -> (u32, u32) {
+    for r in 0..=14i32 {
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if r > 0 && dx.abs() != r && dy.abs() != r {
+                    continue;
+                }
+                let (ax, ay) = (cx as i32 + dx, cy as i32 + dy);
+                if ax < 0 || ay < 0 {
+                    continue;
+                }
+                let (ax, ay) = (ax as u32, ay as u32);
+                let (x, y) = anchor_point(sim, ax, ay);
+                if sim.can_build(entity, kind, x, y) {
+                    return (ax, ay);
+                }
+            }
+        }
+    }
+    panic!("no buildable ground near ({cx}, {cy}) for {kind:?}");
+}
+
+/// The first buildable anchor for `kind` on rings around the
+/// Town Center.
+fn open_anchor_near_tc(sim: &Sim, entity: u32, kind: BuildingKind) -> (u32, u32) {
+    let tc = sim.town_center();
+    let (tcx, tcy) = cell_of(sim, tc.pos_x, tc.pos_y);
+    open_anchor_near(sim, entity, kind, tcx, tcy)
+}
+
 fn build(sim: &mut Sim, entity: u32, kind: BuildingKind, cx: u32, cy: u32) {
     let (x, y) = anchor_point(sim, cx, cy);
     sim.push_command(Command::Build {
@@ -373,12 +417,43 @@ fn reach_feudal(sim: &mut Sim) {
     // pack's ground — the pack killed both builders on the commute
     // (verified by trace: villagers 1 and 3 dead at the pack's LoS
     // edge, the Stable's builder among them). A DE player builds
-    // beside his TC, not across a wolf pack: the pair now stands
-    // by the TC (36, 76) — the Mill at (39, 77) beside the berry
-    // patch (41–43, 78–80), the Lumber Camp at (30, 73) toward the
-    // woodline side. Both cells verified buildable on this seed.
-    raise(sim, 2, BuildingKind::Mill, 39, 77);
-    raise(sim, 3, BuildingKind::LumberCamp, 30, 73);
+    // beside his TC, not across a wolf pack.
+    //
+    // MAP-05 re-stage (2026-11-22): the by-the-TC anchors that
+    // replaced them — Mill (39, 77) beside the old TC position
+    // (36, 76), Lumber Camp (30, 73) — are stale again: MAP-05's
+    // clump elevation changed the shared RNG draw count and seed
+    // 101's Town Center now stands at (37, 53), so (39, 77) is
+    // refused ground and the Mill never completed. The pair is
+    // derived from the generated map at runtime instead: the Mill
+    // beside the berry patch (first berry node's cell, ring
+    // scan), the Lumber Camp on the open edge between the
+    // woodline and the Town Center (the combat.rs camp pattern).
+    let berry0 = sim
+        .nodes()
+        .iter()
+        .find(|n| n.kind == NodeKind::BerryBush)
+        .unwrap();
+    let berry_cell = cell_of(sim, berry0.pos_x, berry0.pos_y);
+    let (mx, my) = open_anchor_near(sim, 2, BuildingKind::Mill, berry_cell.0, berry_cell.1);
+    raise(sim, 2, BuildingKind::Mill, mx, my);
+    let tree_node = sim
+        .nodes()
+        .iter()
+        .find(|n| n.id == woodline_tree(sim))
+        .unwrap();
+    let tree_cell = cell_of(sim, tree_node.pos_x, tree_node.pos_y);
+    let tc = sim.town_center();
+    let tc_cell = cell_of(sim, tc.pos_x, tc.pos_y);
+    let step_toward_tc = |a: u32, b: u32| -> u32 {
+        (a as i32 + (b as i32 - a as i32).signum() * 3).clamp(0, 119) as u32
+    };
+    let camp_center = (
+        step_toward_tc(tree_cell.0, tc_cell.0),
+        step_toward_tc(tree_cell.1, tc_cell.1),
+    );
+    let (lx, ly) = open_anchor_near(sim, 3, BuildingKind::LumberCamp, camp_center.0, camp_center.1);
+    raise(sim, 3, BuildingKind::LumberCamp, lx, ly);
     let berry = first_node(sim, NodeKind::BerryBush);
     sim.push_command(Command::Gather {
         entity: 1,
@@ -430,8 +505,14 @@ fn a_trained_scout_is_eligible_and_explores() {
     wait_wood(&mut sim, 175);
     // AI-08 landing adaptation: same move as reach_feudal — the
     // Barracks and Stable stand by the TC now, not across the
-    // wolf pack's ground. Cells verified buildable on seed 101.
-    raise(&mut sim, 1, BuildingKind::Barracks, 36, 80);
+    // wolf pack's ground.
+    // MAP-05 re-stage (2026-11-22): the by-the-TC cells verified
+    // for the old layout — Barracks (36, 80), Stable (29, 81) —
+    // belong to the old Town Center position; both anchors are
+    // derived from the generated map now (Barracks on rings
+    // around the Town Center, the Stable beside the Barracks).
+    let (bx, by) = open_anchor_near_tc(&sim, 1, BuildingKind::Barracks);
+    raise(&mut sim, 1, BuildingKind::Barracks, bx, by);
     // The Barracks spent the stockpile; refill for the Stable.
     let tree = woodline_tree(&sim);
     for id in 1..=3 {
@@ -442,18 +523,20 @@ fn a_trained_scout_is_eligible_and_explores() {
     }
     wait_wood(&mut sim, 175);
     // MOV-03 landing adaptation (2026-11-17): the historical
-    // Stable anchor (29, 80) is rejected in the MOV-03 timeline —
-    // at the scripted tick a sheep stands on footprint cell
-    // (31, 80), and a living unit standing on the footprint
-    // blocks placement (the reference game's rule), so the Build
-    // command was dropped and the raise waited forever. (On the
-    // builder's tree the blocker was a villager on (28, 80); the
-    // blocking cell differs by timeline, the rule does not.)
-    // Same move as the AI-08 adaptation above: the Stable shifts
-    // one cell south to (29, 81) — probe-verified on the final
-    // tree: all nine cells explored, unblocked, unit- and
-    // node-free at the scripted tick.
-    raise(&mut sim, 1, BuildingKind::Stable, 29, 81);
+    // Stable anchor (29, 80) was rejected in the MOV-03 timeline —
+    // at the scripted tick a sheep stood on a footprint cell,
+    // and a living unit standing on the footprint blocks
+    // placement (the reference game's rule), so the Build
+    // command was dropped and the raise waited forever.
+    // MAP-05 re-stage (2026-11-22): instead of pinning another
+    // fixed cell for the new layout, the Stable's anchor is
+    // derived at the scripted tick itself — the ring scan beside
+    // the Barracks only returns ground `can_build` accepts right
+    // now (explored, unblocked, unit- and node-free), which is
+    // exactly the property the fixed-cell probes kept verifying
+    // by hand after every layout shift.
+    let (sx, sy) = open_anchor_near(&sim, 1, BuildingKind::Stable, bx, by);
+    raise(&mut sim, 1, BuildingKind::Stable, sx, sy);
     let stable = building_id(&sim, BuildingKind::Stable);
     let berry = first_live_node(&sim, NodeKind::BerryBush);
     sim.push_command(Command::Gather {

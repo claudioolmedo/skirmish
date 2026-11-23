@@ -234,12 +234,66 @@ fn villager_dies_to_boar_population_drops_tombstone_stays() {
 #[test]
 fn boar_kill_leaves_340_carcass_and_hunt_carry_is_exactly_35() {
     let mut sim = Sim::new(23);
-    // East boar (14): the whole village piles in; villager hits lock
-    // the aggro and the damage is spread across attackers.
+    // The whole village piles in; villager hits lock the aggro
+    // and the damage is spread across attackers.
+    //
+    // MAP-05 re-stage (2026-11-22): the target boar is derived
+    // from the generated map, not pinned to id 14. MAP-05's clump
+    // elevation changed the shared RNG draw count and every
+    // animal post moved: boar 14 now stands at (48, 48), inside
+    // the wolf pack's sight (the pack posts at (57–59, 45–46),
+    // 36–44 wu away) — the pack joins the pile-in and kills the
+    // whole village before the boar falls (probe-verified: all
+    // four attackers dead by tick 4000, the boar healed home).
+    // A DE player hunts the boar the wolves are not watching:
+    // among the boars with a TC-reachable standing cell beside
+    // them, prefer one at least 60 wu from every wolf post (the
+    // suites' usual safety margin), falling back to any
+    // reachable boar. On this seed that derives boar 13.
+    let tc = sim.town_center();
+    let wolf_posts: Vec<(f64, f64)> = sim
+        .entities()
+        .iter()
+        .filter(|e| e.kind == EntityKind::Wolf)
+        .map(|e| (f(e.pos_x), f(e.pos_y)))
+        .collect();
+    let reachable_side = |b: &Entity| {
+        let (cx, cy) = cell_of(&sim, b.pos_x, b.pos_y);
+        (-1i32..=1).any(|dy| {
+            (-1i32..=1).any(|dx| {
+                let (nx, ny) = (cx as i32 + dx, cy as i32 + dy);
+                if nx < 0 || ny < 0 || sim.grid().is_blocked(nx as u32, ny as u32) {
+                    return false;
+                }
+                let c = sim.grid().cell_center(nx as u32, ny as u32);
+                sim.grid().find_path((tc.pos_x, tc.pos_y), c).is_some()
+            })
+        })
+    };
+    let wolf_safe = |b: &Entity| {
+        wolf_posts.iter().all(|(wx, wy)| {
+            let dx = f(b.pos_x) - wx;
+            let dy = f(b.pos_y) - wy;
+            dx * dx + dy * dy >= 60.0 * 60.0
+        })
+    };
+    let boars: Vec<&Entity> = sim
+        .entities()
+        .iter()
+        .filter(|e| e.kind == EntityKind::Boar)
+        .collect();
+    let boar = boars
+        .iter()
+        .filter(|b| reachable_side(b) && wolf_safe(b))
+        .min_by_key(|b| b.id)
+        .or_else(|| boars.iter().filter(|b| reachable_side(b)).min_by_key(|b| b.id))
+        .or_else(|| boars.iter().min_by_key(|b| b.id))
+        .expect("a boar")
+        .id;
     for id in [1, 2, 3, 4] {
-        sim.push_command(Command::Attack { entity: id, target: 14 });
+        sim.push_command(Command::Attack { entity: id, target: boar });
     }
-    let died = run_until(&mut sim, 30000, |s| ent(s, 14).dead);
+    let died = run_until(&mut sim, 30000, |s| ent(s, boar).dead);
     assert!(died, "the village never killed the boar");
     let carcass = sim
         .nodes()
@@ -452,10 +506,51 @@ fn build_barracks_and_archer(sim: &mut Sim) {
                 dx * dx + dy * dy > 36.0 * 36.0 || post_dist(o) >= 60.0 * 60.0
             })
         };
+        // MAP-05 re-stage (2026-11-22): stand room. The plain
+        // max-neighbors pick above lands on the deepest-interior
+        // tree of the reshuffled forest — on seed 31 that is a
+        // trunk with exactly ONE free ring cell, and a chopping
+        // crew deadlocks at its single stand point (probe-verified:
+        // one villager frozen in Returning with a full carry, the
+        // other frozen in ToNode beside it, wood frozen at one
+        // deposit for 60,000 ticks; the pre-MAP-05 forest gave the
+        // same pick room to work). A workable woodline for a crew
+        // needs several standing cells a cutter can reach from
+        // the Town Center: prefer trees with at least 3
+        // TC-reachable free ring cells, then fall back through
+        // the historical tiers.
+        let reachable_ring = |t: &skirmish_sim::ResourceNode| {
+            let (cx, cy) = cell_of(sim, t.pos_x, t.pos_y);
+            let mut n = 0;
+            for dy in -1i32..=1 {
+                for dx in -1i32..=1 {
+                    if dx == 0 && dy == 0 {
+                        continue;
+                    }
+                    let (nx, ny) = (cx as i32 + dx, cy as i32 + dy);
+                    if nx < 0 || ny < 0 || sim.grid().is_blocked(nx as u32, ny as u32) {
+                        continue;
+                    }
+                    let center = sim.grid().cell_center(nx as u32, ny as u32);
+                    if sim.grid().find_path((tc_x, tc_y), center).is_some() {
+                        n += 1;
+                    }
+                }
+            }
+            n
+        };
         let best = trees
             .iter()
-            .filter(|t| has_free_side(t) && neighbors(t) >= 3 && wolf_safe(t))
+            .filter(|t| {
+                has_free_side(t) && neighbors(t) >= 3 && wolf_safe(t) && reachable_ring(t) >= 3
+            })
             .max_by_key(|t| neighbors(t))
+            .or_else(|| {
+                trees
+                    .iter()
+                    .filter(|t| has_free_side(t) && neighbors(t) >= 3 && wolf_safe(t))
+                    .max_by_key(|t| neighbors(t))
+            })
             .or_else(|| {
                 trees
                     .iter()
@@ -562,7 +657,17 @@ fn build_barracks_and_archer(sim: &mut Sim) {
         .find(|b| b.kind == BuildingKind::ArcheryRange)
         .unwrap()
         .id;
-    assert!(sim.can_train_at(rid, EntityKind::Archer));
+    // MAP-05 re-stage (2026-11-22): can_train_at includes the
+    // Archer's 45-wood price, and on the reshuffled layout the
+    // stockpile has not re-banked it at the instant the Range
+    // completes (one chopper works while the other builds; trip
+    // lengths are the new map's). The claim under test is that
+    // the Range trains an Archer through the real path — wait
+    // for trainability like every other phase of this helper
+    // waits for its precondition, instead of asserting the
+    // old layout's bank timing.
+    let trainable = run_until(sim, 60_000, |s| s.can_train_at(rid, EntityKind::Archer));
+    assert!(trainable, "archery range never became able to train an archer");
     sim.push_command(Command::TrainAt {
         building: rid,
         kind: EntityKind::Archer,
@@ -855,24 +960,56 @@ fn opp_tc(sim: &Sim) -> &Entity {
 fn walk_opponent_away(sim: &mut Sim) {
     let tc = opp_tc(sim);
     let (ox, oy) = (tc.pos_x, tc.pos_y);
+    // MAP-05 re-stage (2026-11-22): the historical destination —
+    // the TC's position + (150, 150) world units — was pinned to
+    // the old layout. MAP-05 moved both Town Centers; on seeds
+    // 12/13 the opponent's TC now stands far enough east that
+    // +150 lands OUTSIDE the 120-cell grid, the Move order is
+    // refused whole, and the units never leave ("opponent units
+    // never left their Town Center"). The destination keeps the
+    // original south-east walk but is derived from the generated
+    // map: the TC's cell + 37 cells (≈150 wu, the original
+    // offset) per axis, clamped into the grid — always a legal
+    // Move target, and on these starts still ≥160 wu away.
+    let dim = sim.grid().width() as i32;
+    let tc_cell = cell_of(sim, ox, oy);
+    let clamped = |c: u32| -> u32 { (c as i32 + 37).clamp(0, dim - 1) as u32 };
+    let (tx, ty) = cell_point(sim, clamped(tc_cell.0), clamped(tc_cell.1));
+    // The walked set is the opponent's villagers + scout — this
+    // helper's own contract ("Walk every opponent unit (villagers
+    // + scout)"). It is defined by KIND, not by owner alone:
+    // MAP-05 re-stage (2026-11-22) — on the new layout a near
+    // sheep stands within capture range of the opponent's start
+    // and converts to OWNER_OPPONENT during the wait (AI-06
+    // herdables), joining an owner-only filter after the Move
+    // orders were issued; the sheep never received an order,
+    // never leaves, and the wait burned its full 90,000 ticks on
+    // every run (probe-verified: the four ordered units stood
+    // 186 wu away while a converted sheep idled 29 wu from the
+    // TC). Livestock is not a unit the CMB-08 chain can acquire
+    // as a defender, and it is not part of the walked set.
+    let walked = |e: &Entity| {
+        e.owner == OWNER_OPPONENT
+            && (e.kind == EntityKind::Villager || e.kind == EntityKind::ScoutCavalry)
+    };
     let ids: Vec<u32> = sim
         .entities()
         .iter()
-        .filter(|e| e.owner == OWNER_OPPONENT && e.kind != EntityKind::TownCenter)
+        .filter(|e| walked(e))
         .map(|e| e.id)
         .collect();
     for id in ids {
         sim.push_command(Command::Move {
             entity: id,
-            x: ox + I16F16::from_num(150),
-            y: oy + I16F16::from_num(150),
+            x: tx,
+            y: ty,
         });
     }
     let tc_pos = (f(ox), f(oy));
     let gone = run_until(sim, 90_000, |s| {
         s.entities()
             .iter()
-            .filter(|e| e.owner == OWNER_OPPONENT && e.kind != EntityKind::TownCenter)
+            .filter(|e| walked(e))
             .all(|e| {
                 let dx = f(e.pos_x) - tc_pos.0;
                 let dy = f(e.pos_y) - tc_pos.1;

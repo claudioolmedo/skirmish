@@ -134,12 +134,19 @@ fn run_until(sim: &mut Sim, cap: u64, mut done: impl FnMut(&Sim) -> bool) -> boo
 
 // Open, verified-free anchors used across the tests (checked against
 // the static layout: no walls, no nodes, not the Town Center cell):
-//   house plot (30, 68) — beside seed 31's Town Center (26, 71);
-//     moved from (18, 27) at the AI-08 landing (2026-10-22): the
-//     walk to the old south-west plot crosses the wolf pack's
-//     ground on this seed and the pack killed the lone builder
-//     on the way — the foundation stood forever unfinished.
 //   farm plot  (20, 27) — two cells east, no anchor overlap with (18, 27)
+//
+// MAP-05 re-stage (2026-11-22): the house plot beside seed 31's Town
+// Center is no longer a fixed cell. MAP-05's clump elevation draws a
+// different number of values from the shared RNG stream, so the
+// woodline reshuffled on every seed and a tree of the new layout
+// stands on the old plot's footprint cell (31, 68) — placement there
+// is correctly refused whole (a footprint may not swallow a live
+// node). The plot is now derived from the generated map at runtime
+// by the ring scan (`open_anchor_near_tc`), the way the rest of this
+// suite has derived ground since M7; the claims under test
+// (placement charge, footprint blocking, cap on completion) are
+// unchanged.
 
 #[test]
 fn house_completes_raises_cap_and_blocks_its_footprint() {
@@ -148,8 +155,9 @@ fn house_completes_raises_cap_and_blocks_its_footprint() {
     assert_eq!(sim.population(), 4);
     assert_eq!(sim.population_cap(), 5, "Town Center alone gives +5");
 
+    let (hx, hy) = open_anchor_near_tc(&sim, 1, BuildingKind::House);
     let start_wood = sim.stockpile().amount(ResourceKind::Wood);
-    build(&mut sim, 1, BuildingKind::House, 30, 68);
+    build(&mut sim, 1, BuildingKind::House, hx, hy);
     sim.tick(); // placement applied here
     assert_eq!(
         sim.stockpile().amount(ResourceKind::Wood),
@@ -166,15 +174,28 @@ fn house_completes_raises_cap_and_blocks_its_footprint() {
         "an unfinished house gives no room yet"
     );
     // The footprint cells are blocked for pathing immediately.
-    for (cx, cy) in [(30, 68), (31, 68), (30, 69), (31, 69)] {
+    let footprint = [(hx, hy), (hx + 1, hy), (hx, hy + 1), (hx + 1, hy + 1)];
+    for (cx, cy) in footprint {
         assert!(
             sim.grid().is_dynamic(cx, cy),
             "house cell ({cx},{cy}) not blocked"
         );
     }
     // A path across the plot must detour around the footprint.
-    let from = sim.grid().cell_center(28, 68);
-    let to = sim.grid().cell_center(34, 68);
+    // The endpoints stand on the plot's row, stepped outward from
+    // the footprint to the first unblocked cell on each side —
+    // derived from the map like the plot itself, so the check
+    // survives the anchor landing anywhere around the Town Center.
+    let clear_on_row = |sim: &Sim, start: i32, step: i32| -> u32 {
+        let mut cx = start;
+        while sim.grid().is_blocked(cx as u32, hy) {
+            cx += step;
+            assert!((0..120).contains(&cx), "no clear cell on the plot's row");
+        }
+        cx as u32
+    };
+    let from = sim.grid().cell_center(clear_on_row(&sim, hx as i32 - 2, -1), hy);
+    let to = sim.grid().cell_center(clear_on_row(&sim, hx as i32 + 3, 1), hy);
     let path = sim
         .grid()
         .find_path(from, to)
@@ -182,7 +203,7 @@ fn house_completes_raises_cap_and_blocks_its_footprint() {
     for &(wx, wy) in &path {
         let cell = sim.grid().world_to_cell(wx, wy);
         assert!(
-            ![(30, 68), (31, 68), (30, 69), (31, 69)].contains(&cell),
+            !footprint.contains(&cell),
             "path crosses the house footprint at {cell:?}"
         );
     }
@@ -232,8 +253,16 @@ fn training_is_refused_at_cap_and_trains_after_a_house() {
 
     // Build a house: capacity rises to 10, and a fresh order then
     // trains normally to completion.
-    explore_cells(&mut sim, &[(18, 27)]);
-    build(&mut sim, 1, BuildingKind::House, 18, 27);
+    // MAP-05 re-stage (2026-11-22): the old fixed plot (18, 27) and
+    // its staged Scout ride were pinned to seed 37's pre-MAP-05
+    // layout — the Town Center itself moved (27, 72) → (23, 77)
+    // when the elevation mechanism changed the RNG draw count, and
+    // the house never completed under the new layout. The plot is
+    // derived from the generated map by the ring scan instead, and
+    // the fog ride settles that derived anchor.
+    let (hx, hy) = open_anchor_near_tc(&sim, 1, BuildingKind::House);
+    explore_cells(&mut sim, &[(hx, hy)]);
+    build(&mut sim, 1, BuildingKind::House, hx, hy);
     let housed_no_more = run_until(&mut sim, 20_000, |s| {
         s.buildings().iter().any(|b| b.complete)
     });

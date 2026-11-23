@@ -31,6 +31,50 @@ fn anchor_point(sim: &Sim, cx: u32, cy: u32) -> (I16F16, I16F16) {
     sim.grid().cell_center(cx, cy)
 }
 
+fn cell_of(sim: &Sim, x: I16F16, y: I16F16) -> (u32, u32) {
+    sim.grid().world_to_cell(x, y)
+}
+
+/// The first anchor cell near an arbitrary center cell where `kind`
+/// may be built by `entity` right now, scanning rings outward —
+/// the M7 pattern from construction.rs / combat.rs: placement
+/// scenarios derive their ground from the generated map.
+fn open_anchor_near(
+    sim: &Sim,
+    entity: u32,
+    kind: BuildingKind,
+    cx: u32,
+    cy: u32,
+) -> (u32, u32) {
+    for r in 0..=14i32 {
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if r > 0 && dx.abs() != r && dy.abs() != r {
+                    continue;
+                }
+                let (ax, ay) = (cx as i32 + dx, cy as i32 + dy);
+                if ax < 0 || ay < 0 {
+                    continue;
+                }
+                let (ax, ay) = (ax as u32, ay as u32);
+                let (x, y) = anchor_point(sim, ax, ay);
+                if sim.can_build(entity, kind, x, y) {
+                    return (ax, ay);
+                }
+            }
+        }
+    }
+    panic!("no buildable ground near ({cx}, {cy}) for {kind:?}");
+}
+
+/// The first buildable anchor for `kind` on rings around the
+/// Town Center.
+fn open_anchor_near_tc(sim: &Sim, entity: u32, kind: BuildingKind) -> (u32, u32) {
+    let tc = sim.town_center();
+    let (tcx, tcy) = cell_of(sim, tc.pos_x, tc.pos_y);
+    open_anchor_near(sim, entity, kind, tcx, tcy)
+}
+
 fn build(sim: &mut Sim, entity: u32, kind: BuildingKind, cx: u32, cy: u32) {
     let (x, y) = anchor_point(sim, cx, cy);
     // BLD-01's 2026-11-15 amendment refuses unexplored ground,
@@ -173,9 +217,45 @@ fn raise(sim: &mut Sim, entity: u32, kind: BuildingKind, cx: u32, cy: u32) {
 
 /// Mill + Lumber Camp, berries to 500 food, click up — the
 /// standard Feudal opening (mirrors tests/tech.rs).
+///
+/// MAP-05 re-stage (2026-11-22): the historical fixed anchors
+/// (21, 20) / (16, 20) were pinned to the pre-MAP-05 layout. The
+/// clump elevation mechanism changed the shared RNG draw count,
+/// so every seed's Town Center, woodline and flat ground moved —
+/// on seed 107 the Town Center now stands at (23, 62) and the old
+/// plots sit ~40 cells away on ground `can_build` refuses (the
+/// Mill never completed). The pair is derived from the generated
+/// map instead, the way a DE player places them: the Mill beside
+/// the berry patch (first berry node's cell, ring scan), the
+/// Lumber Camp on the open edge between the woodline and the
+/// Town Center (the combat.rs camp pattern: step from the
+/// woodline tree toward the Town Center, then ring scan).
 fn reach_feudal(sim: &mut Sim) {
-    raise(sim, 2, BuildingKind::Mill, 21, 20);
-    raise(sim, 3, BuildingKind::LumberCamp, 16, 20);
+    let berry0 = sim
+        .nodes()
+        .iter()
+        .find(|n| n.kind == NodeKind::BerryBush)
+        .unwrap();
+    let berry_cell = cell_of(sim, berry0.pos_x, berry0.pos_y);
+    let (mx, my) = open_anchor_near(sim, 2, BuildingKind::Mill, berry_cell.0, berry_cell.1);
+    raise(sim, 2, BuildingKind::Mill, mx, my);
+    let tree_node = sim
+        .nodes()
+        .iter()
+        .find(|n| n.id == woodline_tree(sim))
+        .unwrap();
+    let tree_cell = cell_of(sim, tree_node.pos_x, tree_node.pos_y);
+    let tc = sim.town_center();
+    let tc_cell = cell_of(sim, tc.pos_x, tc.pos_y);
+    let step_toward_tc = |a: u32, b: u32| -> u32 {
+        (a as i32 + (b as i32 - a as i32).signum() * 3).clamp(0, 119) as u32
+    };
+    let camp_center = (
+        step_toward_tc(tree_cell.0, tc_cell.0),
+        step_toward_tc(tree_cell.1, tc_cell.1),
+    );
+    let (lx, ly) = open_anchor_near(sim, 3, BuildingKind::LumberCamp, camp_center.0, camp_center.1);
+    raise(sim, 3, BuildingKind::LumberCamp, lx, ly);
     let berry = first_node(sim, NodeKind::BerryBush);
     sim.push_command(Command::Gather {
         entity: 1,
@@ -365,7 +445,7 @@ fn bloodlines_raises_max_and_current_hp_of_mounted_units() {
     // The Stable requires a completed Barracks first (the
     // Feudal military chain): wood for both (175 + 175).
     // Villager 1 chops: villager 3 ends reach_feudal down at the
-    // Lumber Camp (16, 20), and since AI-08 the walk from there
+    // Lumber Camp, and since AI-08 the walk from there
     // to the woodline crosses the wolf pack's ground — the pack
     // killed it on that commute (the wood never stocked).
     // Villager 3 stays south and builds both buildings (their
@@ -471,7 +551,7 @@ fn horse_collar_stamps_new_farms_and_tops_up_standing_ones() {
     let mill = building_id(&sim, BuildingKind::Mill);
     // Wood for a farm (60) and Horse Collar (75): villager 1
     // chops — villager 3 ends reach_feudal down at the Lumber
-    // Camp (16, 20), and since AI-08 its walk to the woodline
+    // Camp, and since AI-08 its walk to the woodline
     // crosses the wolf pack's ground on seed 111 too (the pack
     // sits on the camp-to-forest line; the wood never stocked).
     // Villager 3 stays south, where Farm B's anchor (23, 27)
