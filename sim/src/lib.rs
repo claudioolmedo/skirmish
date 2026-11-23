@@ -187,6 +187,8 @@ mod engageunder_tests;
 #[cfg(test)]
 mod engagepillar_tests;
 #[cfg(test)]
+mod engagefrozen_tests;
+#[cfg(test)]
 mod occorder23_tests;
 
 #[cfg(target_arch = "wasm32")]
