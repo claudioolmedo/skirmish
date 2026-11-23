@@ -167,8 +167,8 @@ function makeWorld({ withOwn = true, withEnemy = false } = {}) {
 
 test('FIX #15 wiring: the TC garrison branch is gated on the pick naming no unit (or the TC itself)', () => {
   assert.match(orderAtSrc,
-    /if \(tcT != null && st\.owners\[tcT\] === localOwner && \(tgt == null \|\| tgt === tcT\)\) \{/,
-    'the garrison branch tests what the pick resolved to, not only where the point lies');
+    /if \(tcT != null && st\.owners\[tcT\] === localOwner && \(tgt == null \|\| tgt === tcT \|\| targets\.includes\(tgt\)\)\) \{/,
+    'the garrison branch tests what the pick resolved to, not only where the point lies (FIX #24 adds the selection-member disjunct — this round\'s bystander 72 is not in the selection, so every behavioural pin below is unchanged)');
   const gate = orderAtSrc.indexOf('tgt === tcT');
   const garrison = orderAtSrc.indexOf("t: 'garrison_tc'");
   assert.ok(gate >= 0 && gate < garrison,

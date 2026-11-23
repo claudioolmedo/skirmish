@@ -10544,7 +10544,33 @@ async function main() {
     // covers every other unit, ours included. The branches
     // above that legitimately reuse an own-unit click (Ram
     // garrison, Transport load, Monk heal) have already run.
-    if (tcT != null && st.owners[tcT] === localOwner && (tgt == null || tgt === tcT)) {
+    // FIX #24 (bot-loop kingpick, run #474): the gate gains
+    // the selection-member disjunct. Run #474's clean capture
+    // (Regicide, no enemy anywhere near): the selected King
+    // (entity 53) right-clicked on his own TC's footprint
+    // resolved through his own occlusion outline to HIMSELF
+    // (pick {picked:53, afterGate:53, tFromOutline:true,
+    // recordIds:[53,2,1,3]} — the TC, an occluder, never
+    // holds a pick record) and this gate vetoed the garrison:
+    // the click degraded to {t:'move', e:53} and the King
+    // stood outside. The King SPAWNS inside the footprint
+    // (the sim's KING_SPAWN_OFFSET (-5,-5) from the TC
+    // centre, behind its art), so nearly every footprint
+    // click near his corner names him. FIX #15's reading
+    // governs an OTHER-unit click (run #445: picked 72,
+    // selected 73 — a second unit exists to interact with);
+    // a pick naming a member of the very selection receiving
+    // the order carries no such reading — there is no other
+    // unit — so the building reading of the point applies,
+    // exactly as in DE: right-clicking your Town Center with
+    // units selected garrisons them, even when the click
+    // pixel lands on one of the selected units standing
+    // inside it. An enemy is never in targets, so FIX #5's
+    // guard and the #473 enemy reading are untouched; the
+    // FIX #16 building gate and FIX #17 drop-off gate keep
+    // their shape (the same self-pick shape there is a
+    // recorded residual, not this capture).
+    if (tcT != null && st.owners[tcT] === localOwner && (tgt == null || tgt === tcT || targets.includes(tgt))) {
       let any = false;
       for (const id of targets) {
         if (st.kinds[id] === 0 && carryKind.has(id)) continue;

@@ -384,12 +384,29 @@ test('sweep: no click point with the foe in ground range resolves to our own uni
 // Bounds: the garrison reading survives wherever NO enemy is
 // resolved at the point.
 
-test('bound R: a foe outside the ground radius still does not shadow our own rect winner — the pick stands, the order falls through (occorder18)', () => {
-  // occorder18 (FIX #15) supersedes this bound's order half:
+test('bound R: a foe outside the ground radius still does not shadow our own rect winner — the pick stands, the order garrisons the self-picked Militia (kingpick)', () => {
+  // occorder18 (FIX #15) superseded this bound's order half:
   // the rect pick still stands (our Militia 4, no foe
   // preference), but a click naming an own unit no longer
   // garrisons — garrison is a click on the TC itself (tgt
-  // null), per run #445. The click falls through to a move.
+  // null), per run #445. The click fell through to a move.
+  //
+  // AMENDMENT (kingpick, FIX #24, run #474): the order half
+  // moves once more, for this staging's exact shape. The
+  // rect winner 4 is the SELECTED unit itself (this world's
+  // selection is [4]) — run #474's clean capture is that
+  // shape (the selected King picked through his own outline
+  // inside his TC's footprint, degrading to a move), and
+  // FIX #24's selection-member disjunct restores the
+  // building reading of the point: the foe at (-6,-1) is
+  // resolved by NO geometry at this point (entityAt = 4
+  // proves it — outside the ground radius and failing both
+  // TC-arena gates), so the garrison reading stands, as
+  // this suite's own bounds header has always held ("the
+  // garrison reading survives wherever NO enemy is resolved
+  // at the point"). Run #445's shape — picked unit NOT in
+  // the selection — keeps occorder18's move outcome
+  // (kingpick.test.mjs pin (c)).
   const w = makeWorld({ foePos: [-6, -1] });
   const [wx, wy] = w.worldR;
   assert.equal(w.occludedRectUnitAt(wx, wy), 4, 'staging: only our Militia\'s rect is hit');
@@ -398,8 +415,8 @@ test('bound R: a foe outside the ground radius still does not shadow our own rec
   assert.equal(w.entityAt(wx, wy, true), 4,
     'with no foe outline, rect, body or ground hit at the point, the preference does not fire');
   w.orderAt(wx, wy, false, true);
-  assert.deepEqual(w.issued.map((c) => [c.t, c.e, c.tc]), [['move', 4, undefined]],
-    'occorder18: an own-unit pick inside the footprint issues a move, never a garrison');
+  assert.deepEqual(w.issued.map((c) => [c.t, c.e, c.tc]), [['garrison_tc', 4, 0]],
+    'kingpick: a self-pick inside the footprint garrisons — the foe, unresolved at the point, does not shadow');
 });
 
 test('bound: a TC-footprint click with no enemy present still garrisons a foot unit', () => {
