@@ -464,6 +464,37 @@ fn defensive_leashes_and_returns_aggressive_does_not() {
         sim.tick();
         let post = post_group(&mut sim, &militias);
         let quarry = villager_of(&sim, OWNER_OPPONENT);
+        // MAP-05 re-stage (2026-11-23, probe-proven class B): on
+        // the current layout the quarry's straight cross-map walk
+        // from its Town Center threads BOTH wolf packs' posts
+        // (packs at (38, 2) and (-38, -2) world; AI-08 wolves hunt
+        // villagers, documented DE behaviour). Probe: the packs
+        // took the quarry from 25 HP to 4.8 HP en route, so the
+        // militia's first blows killed it 9 units short of the
+        // post and the "chase" measured 7.4 — the stance code was
+        // never reached in its documented form. The quarry is
+        // staged up the east lane first (x = its start column,
+        // ≥60 wu from every wolf post the whole way), then across
+        // the post's row (≥88 wu clear of both packs), arriving
+        // at full HP as the scenario describes; the through-walk
+        // geometry below is computed from the staged position.
+        let qp0 = pos(&sim, quarry);
+        let lane = free_point(
+            &sim,
+            (qp0.0, post.1),
+            &[(0.0, 0.0), (3.0, 0.0), (-3.0, 0.0), (0.0, 3.0), (0.0, -3.0), (6.0, 0.0), (-6.0, 0.0)],
+        );
+        sim.push_command(Command::Move {
+            entity: quarry,
+            x: fx(lane.0),
+            y: fx(lane.1),
+        });
+        let staged = run_until(&mut sim, 60_000, |s| dist(pos(s, quarry), lane) <= 2.5);
+        assert!(staged, "the quarry never reached the wolf-safe staging lane");
+        assert!(
+            ent(&sim, quarry).hp.to_num::<f64>() >= 25.0,
+            "the quarry reached the staging lane hurt — the lane is not wolf-safe"
+        );
         let qp = pos(&sim, quarry);
         let dir = (post.0 - qp.0, post.1 - qp.1);
         let len = (dir.0 * dir.0 + dir.1 * dir.1).sqrt().max(1.0);

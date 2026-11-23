@@ -29,6 +29,143 @@ fn anchor_point(sim: &Sim, cx: u32, cy: u32) -> (I16F16, I16F16) {
     sim.grid().cell_center(cx, cy)
 }
 
+fn cell_of(sim: &Sim, x: I16F16, y: I16F16) -> (u32, u32) {
+    sim.grid().world_to_cell(x, y)
+}
+
+/// The first anchor cell near an arbitrary center cell where `kind`
+/// may be built by `entity` right now, scanning rings outward —
+/// the M7 pattern from construction.rs / combat.rs: placement
+/// scenarios derive their ground from the generated map.
+fn open_anchor_near(
+    sim: &Sim,
+    entity: u32,
+    kind: BuildingKind,
+    cx: u32,
+    cy: u32,
+) -> (u32, u32) {
+    for r in 0..=14i32 {
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if r > 0 && dx.abs() != r && dy.abs() != r {
+                    continue;
+                }
+                let (ax, ay) = (cx as i32 + dx, cy as i32 + dy);
+                if ax < 0 || ay < 0 {
+                    continue;
+                }
+                let (ax, ay) = (ax as u32, ay as u32);
+                let (x, y) = anchor_point(sim, ax, ay);
+                if sim.can_build(entity, kind, x, y) {
+                    return (ax, ay);
+                }
+            }
+        }
+    }
+    panic!("no buildable ground near ({cx}, {cy}) for {kind:?}");
+}
+
+/// The first buildable anchor for `kind` on rings around the
+/// Town Center.
+fn open_anchor_near_tc(sim: &Sim, entity: u32, kind: BuildingKind) -> (u32, u32) {
+    let tc = sim.town_center();
+    let (tcx, tcy) = cell_of(sim, tc.pos_x, tc.pos_y);
+    open_anchor_near(sim, entity, kind, tcx, tcy)
+}
+
+/// A Mill anchor beside the berry patch (first berry node's
+/// cell, ring scan) — the MAP-05 re-stage derivation the
+/// feudal_techs suite proved: the historical fixed anchors were
+/// pinned to the pre-MAP-05 layout, and on the current layout
+/// they sit dozens of cells from the moved Town Centers, on
+/// ground `can_build` refuses (fog / wolf country on the walk),
+/// so the Mill never completed.
+fn mill_anchor_beside_berries(sim: &Sim, entity: u32) -> (u32, u32) {
+    let berry0 = sim
+        .nodes()
+        .iter()
+        .find(|n| n.kind == NodeKind::BerryBush)
+        .unwrap();
+    let berry_cell = cell_of(sim, berry0.pos_x, berry0.pos_y);
+    open_anchor_near(sim, entity, BuildingKind::Mill, berry_cell.0, berry_cell.1)
+}
+
+/// A Farm anchor on rings around the Town Center, derived from
+/// the generated ground itself (every footprint cell buildable
+/// terrain, unblocked, and clear of nodes, standing units,
+/// buildings and the excluded Mill footprint). The Farm's
+/// `can_build` cannot pick this anchor before a Mill stands —
+/// the Mill gate is exactly what the caller is testing — so the
+/// ground is read directly instead; the gate verdicts themselves
+/// are asserted by the caller unchanged.
+fn farm_anchor_near_tc(sim: &Sim, exclude: (u32, u32)) -> (u32, u32) {
+    let size = BuildingKind::Farm.footprint().w;
+    let msize = BuildingKind::Mill.footprint().w;
+    let tc = sim.town_center();
+    let (tcx, tcy) = cell_of(sim, tc.pos_x, tc.pos_y);
+    // The Town Center's reserved 4x4 (BLD-16): its anchor is the
+    // TC's cell − (4/2 − 1) on each axis. The TC is an entity, not
+    // a `buildings()` entry, so the overlap checks below cannot
+    // see the reserve — it is excluded explicitly, as is any
+    // cliff border between footprint cells (MAP-07's straddle
+    // refusal). Probe on seed 97: the scan's first otherwise-clear
+    // plot overlapped the reserve and the standing-Mill verdict
+    // stayed refused.
+    let reserve = (tcx.saturating_sub(1), tcy.saturating_sub(1));
+    let clear = |sim: &Sim, ax: u32, ay: u32| -> bool {
+        (0..size).all(|dy| {
+            (0..size).all(|dx| {
+                let (gx, gy) = (ax + dx, ay + dy);
+                if gx >= exclude.0 && gx < exclude.0 + msize && gy >= exclude.1 && gy < exclude.1 + msize {
+                    return false;
+                }
+                if gx >= reserve.0 && gx < reserve.0 + 4 && gy >= reserve.1 && gy < reserve.1 + 4 {
+                    return false;
+                }
+                if dx + 1 < size && sim.grid().is_cliff_between(gx, gy, gx + 1, gy) {
+                    return false;
+                }
+                if dy + 1 < size && sim.grid().is_cliff_between(gx, gy, gx, gy + 1) {
+                    return false;
+                }
+                if !sim.grid().terrain_buildable(gx, gy) || sim.grid().is_blocked(gx, gy) {
+                    return false;
+                }
+                let node_here = sim.nodes().iter().any(|n| {
+                    cell_of(sim, n.pos_x, n.pos_y) == (gx, gy)
+                });
+                let unit_here = sim.entities().iter().any(|e| {
+                    !e.dead && cell_of(sim, e.pos_x, e.pos_y) == (gx, gy)
+                });
+                let bldg_here = sim.buildings().iter().any(|b| {
+                    let (bx, by) = cell_of(sim, b.pos_x, b.pos_y);
+                    let bs = b.kind.footprint().w;
+                    gx >= bx && gx < bx + bs && gy >= by && gy < by + bs
+                });
+                !node_here && !unit_here && !bldg_here
+            })
+        })
+    };
+    for r in 2..=16i32 {
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if dx.abs() != r && dy.abs() != r {
+                    continue;
+                }
+                let (ax, ay) = (tcx as i32 + dx, tcy as i32 + dy);
+                if ax < 0 || ay < 0 {
+                    continue;
+                }
+                let (ax, ay) = (ax as u32, ay as u32);
+                if clear(sim, ax, ay) {
+                    return (ax, ay);
+                }
+            }
+        }
+    }
+    panic!("no clear Farm ground near the Town Center");
+}
+
 fn build(sim: &mut Sim, entity: u32, kind: BuildingKind, cx: u32, cy: u32) {
     let (x, y) = anchor_point(sim, cx, cy);
     // BLD-01's 2026-11-15 amendment refuses unexplored ground,
@@ -136,19 +273,39 @@ fn woodline_tree(sim: &Sim) -> u32 {
             })
             .count()
     };
-    let workable = |t: &skirmish_sim::ResourceNode| {
+    // MAP-05 re-stage (2026-11-23): count the TC-reachable ring
+    // cells instead of accepting any single one — the castle_age
+    // suite's crew_woodline_tree precedent, from the same seed-61
+    // deadlock: the max-neighbors pick there is a forest-interior
+    // trunk whose ONLY free ring cell is the pocket mouth (probe:
+    // tree at cell (48, 98), seven of eight ring cells tree-
+    // blocked, the eighth the single stand cell). With the
+    // derived Lumber Camp beside the woodline, the three
+    // villagers converge on that one cell at once and jam head-on
+    // (a Returning hauler against two ToNode choppers, frozen for
+    // the full 240k-tick wait). A roomy tree (>= 3 reachable ring
+    // cells) gives the crew stand points that cannot jam.
+    let reachable_ring = |t: &skirmish_sim::ResourceNode| -> usize {
         let (cx, cy) = sim.grid().world_to_cell(t.pos_x, t.pos_y);
-        (-1i32..=1).any(|dy| {
-            (-1i32..=1).any(|dx| {
+        let mut n = 0;
+        for dy in -1i32..=1 {
+            for dx in -1i32..=1 {
+                if dx == 0 && dy == 0 {
+                    continue;
+                }
                 let (nx, ny) = (cx as i32 + dx, cy as i32 + dy);
                 if nx < 0 || ny < 0 || sim.grid().is_blocked(nx as u32, ny as u32) {
-                    return false;
+                    continue;
                 }
                 let center = sim.grid().cell_center(nx as u32, ny as u32);
-                sim.grid().find_path((tc.pos_x, tc.pos_y), center).is_some()
-            })
-        })
+                if sim.grid().find_path((tc.pos_x, tc.pos_y), center).is_some() {
+                    n += 1;
+                }
+            }
+        }
+        n
     };
+    let workable = |t: &skirmish_sim::ResourceNode| reachable_ring(t) >= 1;
     // AI-08 (2026-10-22): wolves hunt lumberjacks — DE behaviour,
     // and on seed 101 the densest woodline stands inside a wolf
     // pack's range, so the pack kills the choppers before any
@@ -174,10 +331,24 @@ fn woodline_tree(sim: &Sim) -> u32 {
         .filter(|t| workable(t) && neighbors(t) >= 3)
         .copied()
         .collect();
-    candidates
+    // Roomy tier first (the MAP-05 note above): wolf-safe roomy,
+    // then any roomy, then the historical pick unchanged.
+    let roomy: Vec<_> = candidates
+        .iter()
+        .filter(|t| reachable_ring(t) >= 3)
+        .copied()
+        .collect();
+    roomy
         .iter()
         .filter(|t| wolf_safe(t))
         .max_by_key(|t| neighbors(t))
+        .or_else(|| roomy.iter().max_by_key(|t| neighbors(t)))
+        .or_else(|| {
+            candidates
+                .iter()
+                .filter(|t| wolf_safe(t))
+                .max_by_key(|t| neighbors(t))
+        })
         .or_else(|| candidates.iter().max_by_key(|t| neighbors(t)))
         .expect("no workable woodline tree")
         .id
@@ -219,11 +390,39 @@ fn raise(sim: &mut Sim, entity: u32, kind: BuildingKind, cx: u32, cy: u32) {
 /// consumed the whole starting wood — tests that build afterwards
 /// must chop first (`wait_wood`).
 fn reach_feudal(sim: &mut Sim) {
-    raise(sim, 2, BuildingKind::Mill, 21, 20);
-    // Lumber Camp anchor (16, 20): the natural (18, 21) spot has a
-    // sheep standing on it, and placement refuses to cover a
-    // standing unit (M6 validate_build rule).
-    raise(sim, 3, BuildingKind::LumberCamp, 16, 20);
+    // MAP-05 re-stage (2026-11-23): the historical fixed anchors
+    // (21, 20) / (16, 20) were pinned to the pre-MAP-05 layout.
+    // The clump elevation mechanism changed the shared RNG draw
+    // count, so every seed's Town Center, woodline and flat
+    // ground moved — on seed 107 the Town Center now stands at
+    // (23, 62) and the old plots sit ~40 cells away on ground
+    // `can_build` refuses (the Mill never completed). The pair
+    // is derived from the generated map instead, the way a DE
+    // player places them: the Mill beside the berry patch (first
+    // berry node's cell, ring scan), the Lumber Camp on the open
+    // edge between the woodline and the Town Center (the
+    // combat.rs camp pattern: step from the woodline tree toward
+    // the Town Center, then ring scan). Same derivation the
+    // feudal_techs suite's reach_feudal already proved.
+    let (mx, my) = mill_anchor_beside_berries(sim, 2);
+    raise(sim, 2, BuildingKind::Mill, mx, my);
+    let tree_node = sim
+        .nodes()
+        .iter()
+        .find(|n| n.id == woodline_tree(sim))
+        .unwrap();
+    let tree_cell = cell_of(sim, tree_node.pos_x, tree_node.pos_y);
+    let tc = sim.town_center();
+    let tc_cell = cell_of(sim, tc.pos_x, tc.pos_y);
+    let step_toward_tc = |a: u32, b: u32| -> u32 {
+        (a as i32 + (b as i32 - a as i32).signum() * 3).clamp(0, 119) as u32
+    };
+    let camp_center = (
+        step_toward_tc(tree_cell.0, tc_cell.0),
+        step_toward_tc(tree_cell.1, tc_cell.1),
+    );
+    let (lx, ly) = open_anchor_near(sim, 3, BuildingKind::LumberCamp, camp_center.0, camp_center.1);
+    raise(sim, 3, BuildingKind::LumberCamp, lx, ly);
     let berry = first_node(sim, NodeKind::BerryBush);
     sim.push_command(Command::Gather {
         entity: 1,
@@ -446,9 +645,14 @@ fn deposits_route_to_the_nearest_valid_camp() {
     // stands at the wolf pack's doorstep on this seed — the pack
     // posts at (17–20, 21–22), six cells away — and the builder
     // died on the walk, so the Mill never completed. The plot
-    // now sits beside the berry patch it serves (24–26, 56–58),
-    // as the scenario always described.)
-    raise(&mut sim, 2, BuildingKind::Mill, 23, 54);
+    // now sits beside the berry patch it serves, as the scenario
+    // always described. MAP-05 re-stage, 2026-11-23: the
+    // (23, 54) plot pinned for that layout drifted again — seed
+    // 73's Town Center now stands at (36, 55) and the plot reads
+    // refused — so the beside-the-patch plot is derived from the
+    // generated map by ring scan instead of pinned.)
+    let (mx, my) = mill_anchor_beside_berries(&sim, 2);
+    raise(&mut sim, 2, BuildingKind::Mill, mx, my);
     let berry = first_node(&sim, NodeKind::BerryBush);
     let start_food = sim.stockpile().amount(ResourceKind::Food);
     sim.push_command(Command::Gather {
@@ -517,7 +721,12 @@ fn deposits_fall_back_to_the_tc_without_a_camp() {
 #[test]
 fn force_drop_off_deposits_and_returns_to_work() {
     let mut sim = Sim::new(83);
-    raise(&mut sim, 2, BuildingKind::Mill, 22, 27);
+    // MAP-05 re-stage (2026-11-23): the pinned (22, 27) plot sits
+    // ~50 cells from seed 83's moved Town Center (25, 79) — the
+    // builder never reached the site. The Mill goes beside the
+    // berry patch it serves, derived by ring scan.
+    let (mx, my) = mill_anchor_beside_berries(&sim, 2);
+    raise(&mut sim, 2, BuildingKind::Mill, mx, my);
     let berry = first_node(&sim, NodeKind::BerryBush);
     sim.push_command(Command::Gather {
         entity: 1,
@@ -598,17 +807,27 @@ fn a_builder_finishing_a_camp_deposits_its_carry_there() {
 #[test]
 fn farm_placement_requires_a_completed_mill() {
     let mut sim = Sim::new(97);
+    // MAP-05 re-stage (2026-11-23): the pinned Farm plot (28, 20)
+    // and Mill plot (20, 20) sit ~30 cells from seed 97's moved
+    // Town Center (27, 52), on ground the staging can no longer
+    // present — the Mill never completed. Both plots are derived
+    // from the generated map: the Mill beside the berry patch,
+    // the Farm on clear ground near the Town Center (read from
+    // the ground itself, since the Mill gate under test is what
+    // makes `can_build` refuse every Farm anchor at this point).
+    let (mx, my) = mill_anchor_beside_berries(&sim, 1);
+    let (fax, fay) = farm_anchor_near_tc(&sim, (mx, my));
     // Explore the Farm plot first (anchor + the 3x3's far
     // corner): with the fog satisfied, every can_build verdict
     // below is the Mill gate alone, which is what this test pins.
-    explore_cells(&mut sim, &[(28, 20), (30, 20)]);
-    let (fx, fy) = anchor_point(&sim, 28, 20);
+    explore_cells(&mut sim, &[(fax, fay), (fax + 2, fay)]);
+    let (fx, fy) = anchor_point(&sim, fax, fay);
     assert!(
         !sim.can_build(1, BuildingKind::Farm, fx, fy),
         "farm placeable with no Mill at all"
     );
     // An unfinished Mill does not open the gate either.
-    build(&mut sim, 1, BuildingKind::Mill, 20, 20);
+    build(&mut sim, 1, BuildingKind::Mill, mx, my);
     sim.tick();
     assert_eq!(sim.buildings().len(), 1);
     assert!(
@@ -693,9 +912,12 @@ fn blacksmith_technologies_patch_the_combat_rows() {
         node: tree,
     });
     wait_wood(&mut sim, 150);
-    // Anchor (30,30): clear of the horizontal wall row (y=32 spans
-    // cols 6..=20) and the vertical wall column.
-    raise(&mut sim, 1, BuildingKind::Blacksmith, 30, 30);
+    // MAP-05 re-stage (2026-11-23): the pinned anchor (30, 30)
+    // sat ~30 cells from seed 107's moved Town Center; the
+    // Blacksmith plot is derived on rings around the Town
+    // Center instead.
+    let (sx, sy) = open_anchor_near_tc(&sim, 1, BuildingKind::Blacksmith);
+    raise(&mut sim, 1, BuildingKind::Blacksmith, sx, sy);
     let smith = building_id(&sim, BuildingKind::Blacksmith);
     // Food for the three researches (100 each): the berry patch is
     // spent by the age-up, so farm instead — the Mill from
@@ -710,8 +932,16 @@ fn blacksmith_technologies_patch_the_combat_rows() {
         node: tree,
     });
     wait_wood(&mut sim, 120);
-    raise(&mut sim, 2, BuildingKind::Farm, 23, 24);
-    raise(&mut sim, 3, BuildingKind::Farm, 23, 27);
+    // MAP-05 re-stage (2026-11-23): the pinned Farm plots
+    // (23, 24) / (23, 27) drifted with the layout; each plot is
+    // derived on rings around the Town Center just before its
+    // raise (the standing Mill opens the Farm gate, and the
+    // first Farm's foundation excludes its own ground from the
+    // second scan).
+    let (f1x, f1y) = open_anchor_near_tc(&sim, 2, BuildingKind::Farm);
+    raise(&mut sim, 2, BuildingKind::Farm, f1x, f1y);
+    let (f2x, f2y) = open_anchor_near_tc(&sim, 3, BuildingKind::Farm);
+    raise(&mut sim, 3, BuildingKind::Farm, f2x, f2y);
     // (`raise` returns on the *first* Farm's completion; wait for
     // the second one's node explicitly.)
     let two = run_until(&mut sim, 60_000, |s| {
