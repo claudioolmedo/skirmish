@@ -223,8 +223,8 @@ test('wiring: entityAt carries the TC arena and orderAt carries the FIX #15 pick
     'the arena is consulted at the three own-win gates and at the ground stage (occorder13/14 pin)');
   assert.match(orderAtSrc, /FIX #15 \(bot-loop occorder18/,
     'the garrison branch is pick-gated (FIX #15 is marked in orderAt)');
-  assert.match(orderAtSrc, /tcT != null && st\.owners\[tcT\] === localOwner && \(tgt == null \|\| tgt === tcT\)/,
-    'garrison fires only when the pick named no unit (or the TC itself)');
+  assert.match(orderAtSrc, /tcT != null && st\.owners\[tcT\] === localOwner && \(tgt == null \|\| tgt === tcT \|\| targets\.includes\(tgt\)\)/,
+    'garrison fires only when the pick named no unit, the TC itself, or a member of the selection (FIX #24, kingpick)');
 });
 
 // ------------------------------------------------------------------

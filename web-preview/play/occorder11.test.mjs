@@ -453,12 +453,26 @@ test('bound B: a foe outside the ground radius still does not shadow our own out
     'with no foe outline, rect, body or ground hit at the point, the preference does not fire');
   w.orderAt(wx, wy, false, true);
   const iss = w.occEntries.filter((e) => e.ev === 'issue');
-  // occorder18 (FIX #15) supersedes the order half of this
+  // occorder18 (FIX #15) superseded the order half of this
   // bound: the pick still stands (our Scout 4, no foe
   // preference), but an own-unit pick no longer reaches the
   // TC garrison branch — the click is simply the ground move.
-  assert.deepEqual(iss.map((e) => [e.cmd.t, e.ok]), [['move', true]],
-    'occorder18: no garrison_tc is attempted on an own-unit pick — the ground move only');
+  //
+  // AMENDMENT (kingpick, FIX #24, run #474): the order half
+  // moves once more, for this staging's exact shape. The
+  // outline winner 4 is the SELECTED unit itself (this
+  // world's selection is [4]) — run #474's capture is that
+  // shape (the selected King picked through his own outline
+  // inside his TC's footprint), and FIX #24's selection-
+  // member disjunct lets the TC garrison branch fire on a
+  // self-pick: a garrison_tc is now ATTEMPTED, the sim
+  // refuses it (a mounted Scout cannot garrison in a TC —
+  // the original captures' refusal), and the click falls
+  // through to the same ground move. The player-visible
+  // outcome and this bound's pick half are unchanged; only
+  // the refused attempt joins the issue log.
+  assert.deepEqual(iss.map((e) => [e.cmd.t, e.ok]), [['garrison_tc', false], ['move', true]],
+    'kingpick: a self-pick attempts the garrison (refused: mounted), then the ground move — the foe still does not shadow');
 });
 
 test('host exemption: an own Battering Ram outline winner keeps its win over a ground-resolved foe', () => {
