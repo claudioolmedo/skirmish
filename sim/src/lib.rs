@@ -199,6 +199,7 @@ mod villagerattack_tests;
 #[cfg(test)]
 mod betweentargets_tests;
 mod engagefinish_tests;
+mod engagetech_tests;
 #[cfg(test)]
 mod engagestall_tests;
 #[cfg(test)]
