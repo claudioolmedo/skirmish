@@ -200,6 +200,7 @@ mod villagerattack_tests;
 mod occorder23_tests;
 #[cfg(test)]
 mod villageredge_tests;
+mod livematch_tests;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
