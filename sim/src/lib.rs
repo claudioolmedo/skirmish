@@ -198,6 +198,7 @@ mod engagese_tests;
 mod villagerattack_tests;
 #[cfg(test)]
 mod betweentargets_tests;
+mod engagefinish_tests;
 #[cfg(test)]
 mod occorder23_tests;
 #[cfg(test)]
