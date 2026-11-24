@@ -9603,6 +9603,81 @@ async function main() {
       }
       return aBest;
     };
+    // FIX #25 (bot-loop engageclient2, bot-loop #486 — the
+    // engageclient scoping's staged residual, its §5/R1 + P3):
+    // the TC-arena candidate above tests the click through
+    // tcAt — the click's GROUND point inside the ±tcHalf
+    // footprint box. But the occluded foe's outline is painted
+    // ON the Town Center's ART, and the art rises straight up
+    // the screen from the footprint (FIX #22's geometry): a
+    // click high on the roof / upperworks — on the top band of
+    // the hidden foe's figure, above its cached body box
+    // (spriteBodyD2's top), in a frame where the foe holds NO
+    // INF-12 record (the volatile per-frame artefact of
+    // FIX #7) — converts to a ground point displaced
+    // north-west of the foe, past the 2.2 ground radius AND
+    // outside the footprint box. Every foe candidate then
+    // misses in conjunction (outline / rect: no foe record;
+    // body: the click sits above the cached box top; ground:
+    // displacement > 2.2; arena: tcAt null), an own outline
+    // winner (the selected unit itself, frontmost under the
+    // same roof) or null survives, and orderAt reinterprets
+    // the click as a garrison / ground move — the unit walks
+    // to the displaced point and idles beside the foe it was
+    // ordered to attack. So the arena is restated in ART
+    // space, with tcArtAt's own content bands (FIX #22, read
+    // off drawTC's sprite contract — the click must land on
+    // the TC's drawn art, which is exactly where an occluded
+    // outline is painted): when the click lies on OUR Town
+    // Center's art and a non-own unit stands within the
+    // arena's membership box (±tcHalf + 2 of the centre,
+    // FIX #14) and within one half-extent (tcHalf) of the
+    // click, that foe is resolved at the point. Fog
+    // discipline is the arena's own (a foe whose cell is not
+    // currently visible names nothing; a target named this
+    // way is not tFromOutline, so orderAt's fog gate still
+    // applies). The distance gate keeps the earlier bounds:
+    // a far click on the art past a membership foe (d >= 8)
+    // names nothing, and a click below the art's bottom edge
+    // (iy > 1.75 — the occorder13/14/17 bounds' shape) never
+    // reaches this candidate. Canvas picks only, by the call
+    // sites' screenPick gates, like the arena it extends.
+    const foeTcArtArenaAtPoint = () => {
+      let tc = null;
+      for (let i = 0; i < st.count; i++) {
+        if (st.kinds[i] !== KIND_TC || st.owners[i] !== localOwner) continue;
+        const dxw = wx - st.pos[i * 2];
+        const dyw = wy - st.pos[i * 2 + 1];
+        const ix = dxw - dyw;
+        const iy = (dxw + dyw) / 2;
+        if (iy < -11.5 || iy > 1.75) continue;
+        if ((Math.abs(ix) <= 8.0 && iy >= -5.9) || Math.abs(ix) <= 4.5) {
+          tc = i;
+          break;
+        }
+      }
+      if (tc === null) return null;
+      const tx = st.pos[tc * 2];
+      const ty = st.pos[tc * 2 + 1];
+      let aBest = null;
+      let aBestD2 = Infinity;
+      for (let i = 0; i < st.count; i++) {
+        if (st.kinds[i] === KIND_TC || st.hp[i * 2] < 1) continue;
+        if (st.owners[i] === localOwner) continue;
+        if (st.garrisoned && st.garrisoned[i]) continue;
+        if (!cellVisibleW(st.pos[i * 2], st.pos[i * 2 + 1])) continue;
+        if (Math.abs(st.pos[i * 2] - tx) > tcHalf() + 2
+            || Math.abs(st.pos[i * 2 + 1] - ty) > tcHalf() + 2) continue;
+        const d2 = (st.pos[i * 2] - wx) ** 2
+          + (st.pos[i * 2 + 1] - wy) ** 2;
+        if (d2 >= tcHalf() * tcHalf()) continue;
+        if (d2 < aBestD2) {
+          aBestD2 = d2;
+          aBest = i;
+        }
+      }
+      return aBest;
+    };
     // FIX #6 (bot-loop occorder7, run #431 capture): foe
     // preference inside the record picks — FIX #2c's ground-pick
     // discipline extended to the outline pick, as occorder5's
@@ -9669,6 +9744,12 @@ async function main() {
         // footprint, past the ground radius).
         const foeArena = foeTcArenaAtPoint();
         if (foeArena !== null) return foeArena;
+        // FIX #25 (engageclient2): the art-space arena after
+        // it — a HIGH click on the TC art, on the foe's top
+        // band, whose ground point lands outside the footprint
+        // box the ground-space arena tests.
+        const foeArtArena = foeTcArtArenaAtPoint();
+        if (foeArtArena !== null) return foeArtArena;
       }
     }
     if (occ !== null) return occ;
@@ -9739,6 +9820,10 @@ async function main() {
       // the foe under the same roof instead of garrisoning.
       const foeArena = foeTcArenaAtPoint();
       if (foeArena !== null) return foeArena;
+      // FIX #25 (engageclient2): the art-space arena after
+      // it, as at the outline stage.
+      const foeArtArena = foeTcArtArenaAtPoint();
+      if (foeArtArena !== null) return foeArtArena;
     }
     if (occRect !== null) return occRect;
     // FIX #3 (bot-loop occorder3): the generalised sprite-body
@@ -9807,6 +9892,10 @@ async function main() {
         // foe under the same roof instead of garrisoning.
         const foeArena = foeTcArenaAtPoint();
         if (foeArena !== null) return foeArena;
+        // FIX #25 (engageclient2): the art-space arena after
+        // it, as at the outline stage.
+        const foeArtArena = foeTcArtArenaAtPoint();
+        if (foeArtArena !== null) return foeArtArena;
       }
       if (sBest !== null) return sBest;
     }
@@ -9869,6 +9958,12 @@ async function main() {
           && st.kinds[best] !== KIND_RAM && st.kinds[best] !== 32))) {
       const foeArena = foeTcArenaAtPoint();
       if (foeArena !== null) return foeArena;
+      // FIX #25 (engageclient2): the art-space arena after
+      // it — a HIGH click on the TC art that named nothing
+      // (or only our own unit) by ground geometry still names
+      // the foe under that roof.
+      const foeArtArena = foeTcArtArenaAtPoint();
+      if (foeArtArena !== null) return foeArtArena;
     }
     return best;
   }
