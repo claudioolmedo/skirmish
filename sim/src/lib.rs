@@ -203,6 +203,8 @@ mod engagetech_tests;
 #[cfg(test)]
 mod engagestall_tests;
 #[cfg(test)]
+mod engagearcher_tests;
+#[cfg(test)]
 mod occorder23_tests;
 #[cfg(test)]
 mod villageredge_tests;
