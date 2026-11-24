@@ -921,6 +921,197 @@ function occQualState(mmTerrainCells) {
   });
 }
 
+// ATTACKWATCH (bot-loop engageclient3, 2026-11-24):
+// attack-order follow-up instrumentation, client-only,
+// ?occlog=1 only — the discriminating instrument for the
+// "hidden attacker" defect (live sessions repeatedly show an
+// ordered Militia dealing exactly 1 hit then going idle
+// beside the foe, or arriving and idling; every sim-harness
+// staging failed to reproduce it, so the suspect is this
+// client's order path). The pre-existing instrument stopped
+// at issue time: occLog records the rclick, the pick and
+// every issue() verdict ({ev:'issue', cmd, ok}), so a live
+// capture could prove an attack order was ACCEPTED — and
+// then went blind. Nothing recorded what the attacker did
+// NEXT, so "order dropped by the client after acceptance",
+// "order reached the sim but the unit went idle" and "unit
+// kept attacking but no damage landed" were indistinguishable
+// from the log. This block closes that gap: when issue()
+// accepts an {t:'attack'} command (ok true), a watch is
+// registered for that (attacker, target) pair, and
+// occAttackWatchSampleAll emits, per watch, one sample every
+// ~1 s for up to ~10 s — plus an immediate sample whenever
+// the sampled state KEY changes (idle flip, death,
+// garrison) — reading exactly what the client itself can
+// see: the sim tick, both HP pairs (entityState), both
+// positions and their distance, whether the sim lists the
+// attacker among idle_military(), the attacker's order-route
+// and path lengths, and its garrison flag. Reading the
+// samples: target HP falling while idle=false is a working
+// attack; idle=true with the target alive and in reach is
+// "reached the sim, unit idle"; an accepted issue line with
+// NO watch samples at all would be this instrument's own
+// failure, and a watch whose first sample already reads
+// idle with no route/path is "order gone before the first
+// second". Presentation/logging only: no sim call here
+// mutates anything (entityState / idle_military /
+// entity_order_route / entity_path are all read-only ABI),
+// no order semantics change, and without the flag occLog
+// returns before recording and no watch is ever registered
+// (occAttackWatchStart returns on !OCCLOG_ON before touching
+// state), so there is zero behaviour change either way. All
+// live-state access is typeof/try-guarded, exactly like the
+// occLog call sites, so the node harnesses that slice these
+// functions out of this file keep working unchanged.
+const OCC_ATTACK_WATCH_MS = 10000;
+const OCC_ATTACK_SAMPLE_MS = 1000;
+let occAttackWatches = [];
+let occAttackTimer = null;
+function occAttackNow() {
+  try {
+    if (typeof performance !== 'undefined' && performance && typeof performance.now === 'function') return performance.now();
+  } catch { /* fall through to Date */ }
+  return Date.now();
+}
+function occAttackDist(aPos, tPos) {
+  if (!aPos || !tPos) return null;
+  const d = Math.hypot(aPos[0] - tPos[0], aPos[1] - tPos[1]);
+  return Math.round(d * 100) / 100;
+}
+function occAttackStateOf(snap, dist) {
+  if (!snap) return 'no-snapshot';
+  if (snap.tHp != null && snap.tHp < 1) return 'target-dead';
+  if (snap.aHp != null && snap.aHp < 1) return 'attacker-dead';
+  if (snap.garrisoned) return 'garrisoned';
+  if (snap.idle === true) return 'idle';
+  if (dist != null && dist <= 3.5) return 'in-range';
+  if ((snap.pathLen || 0) > 0 || (snap.routeLen || 0) > 0) return 'moving';
+  return 'ordered';
+}
+function occAttackWatchStart(cmd, ok, nowMs) {
+  // typeof-guarded: harnesses that slice this block without
+  // the occLog block in scope must see an inert instrument.
+  if (typeof OCCLOG_ON === 'undefined' || !OCCLOG_ON) return false;
+  if (!cmd || cmd.t !== 'attack' || !ok) return false;
+  if (cmd.e == null || cmd.tg == null) return false;
+  const now = typeof nowMs === 'number' ? nowMs : occAttackNow();
+  // One live watch per attacker: a re-issued attack replaces
+  // the old watch (the sim order replaces the same way).
+  occAttackWatches = occAttackWatches.filter((w) => w.e !== cmd.e);
+  const snap = occAttackRead(cmd.e, cmd.tg);
+  const dist = snap ? occAttackDist(snap.aPos, snap.tPos) : null;
+  occAttackWatches.push({
+    e: cmd.e, tg: cmd.tg, startedAt: now, lastSampleAt: null,
+    lastKey: null, samples: 0,
+  });
+  if (typeof occLog === 'function') {
+    occLog({
+      ev: 'attack-watch', phase: 'issue', e: cmd.e, tg: cmd.tg, ok: true,
+      tick: snap ? snap.tick : null,
+      aHp: snap ? snap.aHp : null, tHp: snap ? snap.tHp : null,
+      dist, state: occAttackStateOf(snap, dist),
+    });
+  }
+  occAttackTimerEnsure();
+  return true;
+}
+function occAttackRead(e, tg) {
+  // Live reader: the client's own view of the pair, or null
+  // when no sim/state is reachable (node harnesses, lobby).
+  try {
+    if (typeof entityState !== 'function') return null;
+    if (typeof sim === 'undefined' || !sim) return null;
+    const st = entityState();
+    if (!st || e >= st.count || tg >= st.count) return null;
+    let idle = null;
+    try {
+      if (typeof sim.idle_military === 'function') idle = sim.idle_military().includes(e);
+    } catch { idle = null; }
+    let routeLen = null;
+    try {
+      if (typeof sim.entity_order_route === 'function') {
+        const r = sim.entity_order_route(e);
+        routeLen = r ? Math.floor(r.length / 2) : null;
+      }
+    } catch { routeLen = null; }
+    let pathLen = null;
+    try {
+      if (typeof sim.entity_path === 'function') {
+        const r = sim.entity_path(e);
+        pathLen = r ? Math.floor(r.length / 2) : null;
+      }
+    } catch { pathLen = null; }
+    let tick = null;
+    try { tick = typeof sim.tick_count === 'function' ? sim.tick_count() : null; } catch { tick = null; }
+    return {
+      tick,
+      aHp: st.hp[e * 2], tHp: st.hp[tg * 2],
+      aPos: [st.pos[e * 2], st.pos[e * 2 + 1]],
+      tPos: [st.pos[tg * 2], st.pos[tg * 2 + 1]],
+      idle,
+      garrisoned: !!(st.garrisoned && st.garrisoned[e]),
+      routeLen, pathLen,
+    };
+  } catch { return null; }
+}
+function occAttackWatchSampleAll(nowMs, readFn) {
+  if (typeof OCCLOG_ON === 'undefined' || !OCCLOG_ON) return 0;
+  const now = typeof nowMs === 'number' ? nowMs : occAttackNow();
+  const read = typeof readFn === 'function' ? readFn : occAttackRead;
+  let emitted = 0;
+  const keep = [];
+  for (const w of occAttackWatches) {
+    const elapsed = now - w.startedAt;
+    const snap = read(w.e, w.tg);
+    const dist = snap ? occAttackDist(snap.aPos, snap.tPos) : null;
+    const state = occAttackStateOf(snap, dist);
+    const key = [state, snap ? snap.idle : null,
+      snap && snap.tHp != null && snap.tHp < 1 ? 'tdead' : '',
+      snap && snap.aHp != null && snap.aHp < 1 ? 'adead' : ''].join('|');
+    const due = w.lastSampleAt == null || (now - w.lastSampleAt) >= OCC_ATTACK_SAMPLE_MS;
+    const changed = w.lastKey != null && key !== w.lastKey;
+    const ended = state === 'target-dead' || state === 'attacker-dead' || elapsed >= OCC_ATTACK_WATCH_MS;
+    if ((due || changed) && typeof occLog === 'function') {
+      occLog({
+        ev: 'attack-watch', phase: ended ? 'end' : 'sample',
+        e: w.e, tg: w.tg, elapsedMs: Math.round(elapsed),
+        tick: snap ? snap.tick : null,
+        aHp: snap ? snap.aHp : null, tHp: snap ? snap.tHp : null,
+        aPos: snap ? snap.aPos : null, tPos: snap ? snap.tPos : null,
+        dist, idle: snap ? snap.idle : null,
+        garrisoned: snap ? snap.garrisoned : null,
+        routeLen: snap ? snap.routeLen : null,
+        pathLen: snap ? snap.pathLen : null,
+        state, ...(ended ? { reason: state === 'target-dead' || state === 'attacker-dead' ? state : 'timeout' } : {}),
+      });
+      emitted += 1;
+      w.lastSampleAt = now;
+      w.samples += 1;
+    }
+    w.lastKey = key;
+    if (!ended) keep.push(w);
+  }
+  occAttackWatches = keep;
+  if (!occAttackWatches.length) occAttackTimerStop();
+  return emitted;
+}
+function occAttackTimerEnsure() {
+  if (occAttackTimer != null) return;
+  // Browser only: node harnesses drive SampleAll by hand.
+  if (typeof document === 'undefined') return;
+  if (typeof setInterval !== 'function') return;
+  try {
+    occAttackTimer = setInterval(() => {
+      try { occAttackWatchSampleAll(occAttackNow(), null); } catch { /* logging never breaks the frame */ }
+    }, 250);
+  } catch { occAttackTimer = null; }
+}
+function occAttackTimerStop() {
+  if (occAttackTimer == null) return;
+  try { if (typeof clearInterval === 'function') clearInterval(occAttackTimer); } catch { /* inert */ }
+  occAttackTimer = null;
+}
+
 // SEL-05: the selection cap (the rulebook's number).
 const SELECTION_CAP = 60;
 
@@ -5076,6 +5267,9 @@ function issue(cmd) {
     if (!net.session || net.phase !== 'playing') return false;
     const sent = net.session.localCommand(cmd) >= 0;
     occLog({ ev: 'issue', cmd, ok: sent, net: true });
+    // ATTACKWATCH (engageclient3): follow an accepted attack
+    // order past issue time — see the block at occAttackWatches.
+    if (typeof occAttackWatchStart === 'function') occAttackWatchStart(cmd, sent);
     return sent;
   }
   const ok = applyLocalOrder(cmd);
@@ -5083,6 +5277,8 @@ function issue(cmd) {
     localRecorder.addLocal(sim.tick_count(), cmd);
   }
   occLog({ ev: 'issue', cmd, ok });
+  // ATTACKWATCH (engageclient3): as the net branch above.
+  if (typeof occAttackWatchStart === 'function') occAttackWatchStart(cmd, ok);
   return ok;
 }
 // M5: the mode decides the construction — Sandbox is the plain
