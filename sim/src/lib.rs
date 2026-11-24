@@ -198,6 +198,8 @@ mod engagese_tests;
 mod villagerattack_tests;
 #[cfg(test)]
 mod occorder23_tests;
+#[cfg(test)]
+mod villageredge_tests;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
