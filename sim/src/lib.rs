@@ -197,6 +197,8 @@ mod engagese_tests;
 #[cfg(test)]
 mod villagerattack_tests;
 #[cfg(test)]
+mod betweentargets_tests;
+#[cfg(test)]
 mod occorder23_tests;
 #[cfg(test)]
 mod villageredge_tests;
