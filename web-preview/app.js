@@ -5262,9 +5262,27 @@ function applyLocalOrder(cmd) {
 }
 
 function issue(cmd) {
-  if (playback) return false;
+  // ISSUEDROP (bot-loop engageclient4): the two early returns
+  // below used to drop an order SILENTLY — no {ev:'issue'}
+  // line at all, so a refused order was indistinguishable in
+  // the occlog from one never attempted (engageclient3 code
+  // evidence, items 1–2). Each now logs an issue-drop line
+  // first. occLog is inert without ?occlog=1, and the typeof
+  // guard keeps harnesses that slice issue() without the
+  // occLog block in scope working — logging only, no order
+  // semantics change: both points still return false.
+  if (playback) {
+    if (typeof occLog === 'function') occLog({ ev: 'issue-drop', reason: 'playback', cmd });
+    return false;
+  }
   if (net) {
-    if (!net.session || net.phase !== 'playing') return false;
+    if (!net.session || net.phase !== 'playing') {
+      if (typeof occLog === 'function') occLog({
+        ev: 'issue-drop', reason: 'net-not-playing', cmd,
+        phase: net.phase, hasSession: !!net.session,
+      });
+      return false;
+    }
     const sent = net.session.localCommand(cmd) >= 0;
     occLog({ ev: 'issue', cmd, ok: sent, net: true });
     // ATTACKWATCH (engageclient3): follow an accepted attack
