@@ -185,6 +185,8 @@ mod engagefoe_tests;
 #[cfg(test)]
 mod engageunder_tests;
 #[cfg(test)]
+mod engagecrowd_tests;
+#[cfg(test)]
 mod engagepillar_tests;
 #[cfg(test)]
 mod engagefrozen_tests;
