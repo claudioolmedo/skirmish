@@ -497,6 +497,15 @@ const MESSAGE_TYPES = new Set([
   'hello', 'start', 'start-ack', 'start-abort', 'go',
   'bundle', 'hash', 'delay', 'resign', 'resync', 'resync-done',
   'resume', 'claim', 'room-full',
+  // roomurl (Claudio's direction, 2026-11-26): a client in a
+  // match that is already 'starting' or 'playing' answers a
+  // STRANGER's hello with 'in-progress' — the late opener of the
+  // room's link gets a clear landing ("this match is already
+  // under way") instead of waiting in a room that can never
+  // admit them. The stranger/rejoin discrimination is the
+  // hellosSeen > 2 + seat-silence rule in app.js's hello case;
+  // 'room-full' keeps its lobby meanings (sealed seat).
+  'in-progress',
   // Relay v6: originated by the room object itself (never by a
   // client) when a member's socket closes — the surviving
   // client's signal that its peer is gone and the rejoin grace

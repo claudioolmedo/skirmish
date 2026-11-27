@@ -862,14 +862,27 @@
                full link in a read-only field, a real Copy button,
                and a native Share button where the browser offers
                one (app.js hides it when navigator.share is absent).
-               The link is still built on demand from in-memory room
-               state — the address bar stays room-free. -->
+               The same link also lives in the address bar for as
+               long as this tab is in the room (roomurl). -->
           <div class="invite-panel">
             <label class="invite-label" id="invite-txt" for="invite-link-input">Invite link —</label>
             <div class="invite-link-row">
               <input id="invite-link-input" type="text" readonly value="" autocomplete="off" spellcheck="false">
               <button id="btn-copy-link" class="btn btn-gold btn-sm" type="button">Copy link</button>
               <button id="btn-share-link" class="btn btn-ghost btn-sm" type="button" hidden>Share…</button>
+            </div>
+          </div>
+          <!-- roomurl: the late-opener landing. Shown when this
+               room turns out to be closed to us — the match is
+               already under way, the room is full, or nobody has
+               answered for a while and the game may have ended.
+               It never blocks a live room: presence hides it, and
+               waiting remains the default in the soft case. -->
+          <div id="room-closed-panel" hidden>
+            <p id="room-closed-text" class="overlay-note"></p>
+            <div class="pause-actions">
+              <button id="btn-closed-create" class="btn btn-gold" type="button">Create a new room</button>
+              <button id="btn-closed-browse" class="btn btn-ghost" type="button">Browse games</button>
             </div>
           </div>
         </div>
