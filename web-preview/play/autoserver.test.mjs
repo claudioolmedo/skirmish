@@ -324,7 +324,7 @@ test('private rooms: the nonce admits in the hello case; both hellos can carry i
 
 test('a new peer reopens the exchange; a migrated room\'s decision stays final', () => {
   const helloAt = appJs.indexOf("case 'hello': {");
-  const hello = appJs.slice(helloAt, helloAt + 4200);
+  const hello = appJs.slice(helloAt, helloAt + 4800);
   assert.ok(hello.includes('net.peerPings = null'), 'the old peer\'s table is dropped');
   assert.ok(hello.includes('net.autoTableSent = false'), 'the new peer is owed my table');
   assert.ok(hello.includes('if (!net.autoMigrated) {'), 'the pairing reopens — unless the room already moved');
