@@ -177,6 +177,90 @@ html, body {
 }
 #fs-hint[hidden] { display: none; }
 
+/* Close game: the persistent way OUT of the game itself — fixed
+   at the top right, on the pills' row under the top bar, but a
+   different creature from the fullscreen pill: fully opaque, a
+   deep red slab (the toast's danger colour) with square corners,
+   so "✕ Close game" never reads as "✕ Exit fullscreen". Its
+   layer (48) sits above the menu overlays (40) — the lobby and
+   the pause menu included — and below the toast (50), so it is
+   on screen in the lobby, over a match, and over the menus a
+   first-timer opens looking for a way out; pointer-lock clicks
+   reach it through the same elementFromPoint routing as every
+   HUD button. app.js (syncCloseGameUi) owns when it shows. When
+   the fullscreen pill is also up, the button stacks BELOW it
+   (the pill keeps its spot; the two ✕ labels stay distinct). */
+#close-game-btn {
+  position: fixed;
+  top: calc(var(--beta-h) + 50px);
+  right: 14px;
+  z-index: 48;
+  padding: 9px 16px;
+  border: 1px solid #c9a227;
+  border-radius: 10px;
+  background: rgba(122, 32, 18, 0.95);
+  color: #ffe9e2;
+  font: 700 14px/1.2 system-ui, sans-serif;
+  cursor: pointer;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+}
+#fs-exit-pill:not([hidden]) ~ #close-game-btn { top: calc(var(--beta-h) + 94px); }
+#close-game-btn:hover, #close-game-btn:focus-visible { background: rgba(154, 42, 24, 0.97); }
+#close-game-btn[hidden] { display: none; }
+
+/* The inline confirm for a live match: a small dark panel under
+   the button — Leave runs the exit, Stay folds it away. Same
+   stacking discipline as the button it belongs to. */
+#close-game-confirm {
+  position: fixed;
+  top: calc(var(--beta-h) + 96px);
+  right: 14px;
+  z-index: 48;
+  width: min(280px, 86vw);
+  padding: 12px 14px;
+  border: 1px solid #c9a227;
+  border-radius: 12px;
+  background: rgba(16, 12, 6, 0.95);
+  color: #e8dcc0;
+  font: 600 13.5px/1.35 system-ui, sans-serif;
+  text-align: left;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+}
+#fs-exit-pill:not([hidden]) ~ #close-game-confirm { top: calc(var(--beta-h) + 140px); }
+#close-game-confirm[hidden] { display: none; }
+#close-game-confirm p { margin: 0 0 10px; }
+.close-game-confirm-actions { display: flex; gap: 8px; }
+#close-game-leave {
+  padding: 7px 16px;
+  border: 1px solid #c9a227;
+  border-radius: 8px;
+  background: rgba(122, 32, 18, 0.95);
+  color: #ffe9e2;
+  font: 700 13.5px/1.2 system-ui, sans-serif;
+  cursor: pointer;
+}
+#close-game-leave:hover, #close-game-leave:focus-visible { background: rgba(154, 42, 24, 0.97); }
+#close-game-stay {
+  padding: 7px 16px;
+  border: 1px solid rgba(232, 220, 192, 0.55);
+  border-radius: 8px;
+  background: transparent;
+  color: #e8dcc0;
+  font: 600 13.5px/1.2 system-ui, sans-serif;
+  cursor: pointer;
+}
+#close-game-stay:hover, #close-game-stay:focus-visible { border-color: #e8dcc0; }
+
+/* Small screens: the top bar wraps to two rows (~84px tall —
+   the same offset the event feed uses), so the whole stack
+   drops below it. */
+@media (max-width: 700px) {
+  #close-game-btn { top: calc(var(--beta-h) + 96px); }
+  #fs-exit-pill:not([hidden]) ~ #close-game-btn { top: calc(var(--beta-h) + 140px); }
+  #close-game-confirm { top: calc(var(--beta-h) + 142px); }
+  #fs-exit-pill:not([hidden]) ~ #close-game-confirm { top: calc(var(--beta-h) + 186px); }
+}
+
 .overlay {
   position: fixed;
   /* below the beta strip: the strip stays visible over the menus */

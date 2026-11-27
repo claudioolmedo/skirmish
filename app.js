@@ -380,6 +380,16 @@ const pauseFullscreenBtn = document.getElementById('pause-fullscreen-btn');
 // match start's fullscreen transition settles (see fsHintPending).
 const fsExitPill = document.getElementById('fs-exit-pill');
 const fsHintEl = document.getElementById('fs-hint');
+// Close game (2026-11-26): the persistent "✕ Close game" button
+// and its inline Leave/Stay confirm. syncCloseGameUi owns the
+// button's visibility and labels; the exit itself is
+// closeGameExit, down with the leave machinery. NOT the pill
+// above: the pill leaves fullscreen, this closes the game.
+const closeGameBtn = document.getElementById('close-game-btn');
+const closeGameConfirmEl = document.getElementById('close-game-confirm');
+const closeGameConfirmTxt = document.getElementById('close-game-confirm-txt');
+const closeGameLeaveBtn = document.getElementById('close-game-leave');
+const closeGameStayBtn = document.getElementById('close-game-stay');
 // The app-drawn cursor for pointer lock (2026-10-23): shown only
 // while the pointer is locked; the lock hides the OS cursor, so
 // this arrow is what the player aims with then.
@@ -5506,6 +5516,14 @@ function lobbyStatus(text) {
 
 function showOverlay(el, show) {
   if (el) el.style.display = show ? 'flex' : 'none';
+  // The Close game button's visibility derives from the lobby
+  // and loading overlays (syncCloseGameUi): every show/hide of
+  // either — openLobby, enterLoading, teardownNet, the solo
+  // start — re-syncs it here, at the one choke point.
+  if (el && typeof netUi !== 'undefined' && netUi
+    && (el === netUi.onlineOverlay || el === netUi.loadingOverlay)) {
+    syncCloseGameUi();
+  }
 }
 
 /// THE pre-match state (M11 addendum, Claudio's rule): before a
@@ -5521,6 +5539,7 @@ function setInMatch(on) {
   if (!on) { captureWanted = false; exitGamePointerLock(); }
   if (document.body) document.body.classList.toggle('in-match', !!on);
   syncCaptureOverlay();
+  syncCloseGameUi(); // .in-match is one of the button's three grounds
 }
 
 /// Adopt a freshly built sim as THE match (start of an online game,
@@ -5731,6 +5750,97 @@ function teardownNet() {
     netUi.netStatus.hidden = true;
     if (netUi.resignBtn) netUi.resignBtn.hidden = true;
   }
+}
+
+// --- Close game (2026-11-26) -------------------------------------
+//
+// THE front door out, for a first-time player: until now the only
+// way to the website homepage was a note-sized text link at the
+// bottom of the pause menu, and every other exit landed on an
+// in-game screen (the Lobby Browser, a fresh local game under the
+// pause menu). The "✕ Close game" button floats at the top right
+// — beside, never instead of, the fullscreen pill: the pill
+// leaves fullscreen and the game keeps running; this button
+// closes the game and lands on the homepage ('../', the same
+// target as the pause menu's back-to-site link). window.close()
+// is never attempted: it does nothing on a tab the player opened
+// themselves, which is the normal way in.
+
+/// The button shows exactly when a first-timer needs a way out:
+/// the lobby is up (browser, create view, room screen), a match
+/// is loading, or a match is on screen (.in-match: live play,
+/// the pause menu over it, the end card, playback). Visibility is
+/// derived from that ground truth here and re-synced at the choke
+/// points: showOverlay (the lobby/loading flips), setInMatch and
+/// applyLocale (the label follows the language).
+function syncCloseGameUi() {
+  if (!closeGameBtn) return;
+  closeGameBtn.textContent = '✕ ' + t('top.closeGame');
+  if (closeGameConfirmTxt) closeGameConfirmTxt.textContent = t('closeGame.confirm');
+  if (closeGameLeaveBtn) closeGameLeaveBtn.textContent = t('closeGame.leave');
+  if (closeGameStayBtn) closeGameStayBtn.textContent = t('closeGame.stay');
+  const overlayUp = (el) => !!(el && el.style.display === 'flex');
+  const lobbyUp = typeof netUi !== 'undefined' && netUi && overlayUp(netUi.onlineOverlay);
+  const loadingUp = typeof netUi !== 'undefined' && netUi && overlayUp(netUi.loadingOverlay);
+  const inMatch = !!(document.body && document.body.classList.contains('in-match'));
+  closeGameBtn.hidden = !(lobbyUp || loadingUp || inMatch);
+  if (closeGameBtn.hidden) hideCloseGameConfirm();
+}
+
+function hideCloseGameConfirm() {
+  if (closeGameConfirmEl) closeGameConfirmEl.hidden = true;
+}
+
+/// Is the click happening over a LIVE match — the one case where
+/// a misclick must not kill anything, so the button asks first?
+/// The lobby owning the screen makes exits immediate (whatever
+/// match waits underneath was already left behind when the lobby
+/// opened over it). Online, 'playing' is the contested state:
+/// 'peer-left' has nobody left to notify and 'ended'/'desync'
+/// are already decided. Locally it is a running, undecided,
+/// non-playback match.
+function closeGameLiveMatch() {
+  if (typeof netUi !== 'undefined' && netUi && netUi.onlineOverlay
+    && netUi.onlineOverlay.style.display === 'flex') return false;
+  if (net) return net.phase === 'playing';
+  return !!(playing && !matchEnded && !playback);
+}
+
+function onCloseGameClick() {
+  if (closeGameLiveMatch()) {
+    if (closeGameConfirmEl) closeGameConfirmEl.hidden = false;
+    return;
+  }
+  closeGameExit();
+}
+
+/// Close the game: notify the peer exactly as the existing flows
+/// do, release capture, and navigate to the homepage. A match
+/// still loading leaves through cancelLoading — the one
+/// cancellation message, unwound by its own path. A live online
+/// match sends the pause-menu Resign button's own message, so
+/// the peer's client ends the match as a resignation, exactly as
+/// today; the teardown that follows is teardownNet, the common
+/// leave path. A local match has nobody to notify: the page is
+/// simply left.
+function closeGameExit() {
+  hideCloseGameConfirm();
+  if (net && net.phase === 'starting') cancelLoading(true);
+  if (net && net.phase === 'playing' && net.client) {
+    try { net.client.send({ type: 'resign' }); } catch { /* socket already gone */ }
+  }
+  if (net) teardownNet();
+  exitGamePointerLock();
+  if (isFullscreen()) {
+    const exit = document.exitFullscreen || document.webkitExitFullscreen;
+    if (exit) {
+      try {
+        const p = exit.call(document);
+        if (p && p.catch) p.catch(() => {});
+      } catch { /* navigation follows regardless */ }
+    }
+  }
+  location.href = '../';
 }
 
 /// Leave an online match back to local play (pause-menu Restart,
@@ -8484,6 +8594,7 @@ function applyLocale(loc) {
   applyStaticStrings();
   refreshNameUi(); // the lobby name field follows the locale paint
   syncFullscreenUi();
+  syncCloseGameUi(); // the Close game labels follow the locale too
   cmdSig = '';
   selSig = '';
   lastAge = -1;
@@ -8645,6 +8756,13 @@ async function main() {
   // The floating exit pill: visible only in fullscreen (see
   // syncFullscreenUi), and its click is the same exit path.
   if (fsExitPill) fsExitPill.addEventListener('click', toggleFullscreen);
+  // Close game: one click out (or, over a live match, the
+  // Leave/Stay confirm first). Stay only folds the confirm away;
+  // Leave runs the whole exit.
+  if (closeGameBtn) closeGameBtn.addEventListener('click', onCloseGameClick);
+  if (closeGameStayBtn) closeGameStayBtn.addEventListener('click', hideCloseGameConfirm);
+  if (closeGameLeaveBtn) closeGameLeaveBtn.addEventListener('click', closeGameExit);
+  syncCloseGameUi();
   document.addEventListener('fullscreenchange', onFullscreenChange);
   document.addEventListener('webkitfullscreenchange', onFullscreenChange);
   document.addEventListener('pointerlockchange', syncPointerLock);
