@@ -6924,6 +6924,23 @@ async function rejoinFromResync(msg) {
   lobbyStatus(t('status.rebuilt'));
 }
 
+/// Send a hello in this client's current posture (host extras,
+/// migrated-guest nonce) — the same frame the hello reply sends.
+/// Used by the departure re-invite in onPeerGone (roomurl2).
+function sendHello() {
+  if (!net || !net.client) return;
+  net.client.send({
+    type: 'hello', v: 1, role: net.role, name: myName(),
+    ...(net.role === 'host' ? {
+      victory: { ...matchVictory },
+      teams: [...matchTeams],
+      teamsUnlocked: matchTeamsUnlocked,
+    } : {}),
+    ...(net.role === 'guest' && net.migrateNonce
+      ? { nonce: net.migrateNonce } : {}),
+  });
+}
+
 function sendResync() {
   if (!net || !net.session || !net.recorder) return;
   // NET-02: the snapshot pairs a tick count with the recorded
@@ -6946,7 +6963,7 @@ function sendResync() {
   });
 }
 
-function onPeerGone() {
+function onPeerGone(reinvite = false) {
   if (!net) return;
   if (net.phase === 'playing') {
     // The direct chat dies with the peer's seat; a rejoin
@@ -6954,6 +6971,14 @@ function onPeerGone() {
     stopChatLink();
     net.phase = 'peer-left';
     net.peerLeftAt = Date.now();
+    // roomurl2: the departure notice is PROOF the seat is empty,
+    // and the peer itself may already have returned on the same
+    // link and knocked before the notice landed (its hello was
+    // answered in-progress while we still showed 'playing').
+    // Re-invite with a fresh hello: the waiting returner answers
+    // it, and that hello takes the peer-left resync branch. A
+    // peer that has not returned yet simply never hears it.
+    if (reinvite) sendHello();
     updateNetStatus();
     showOverlay(netUi.peerOverlay, true);
     if (netUi.claimBtn) netUi.claimBtn.disabled = true;
@@ -6987,6 +7012,17 @@ function onPeerGone() {
     net.selfReady = false;
     net.peerPwOk = false;
     net.doorGuest = false;
+    // roomurl2: a REJOINING peer's fresh hello earns no reply
+    // while our one reply is spent — it then waits forever on
+    // "Joining the room…" (live proof 2026-11-26: a reloaded
+    // guest never regained presence). The departure re-opens the
+    // reply, and the re-invite covers the lag order too (the
+    // returner's hello arriving BEFORE this notice): the waiting
+    // returner hears the fresh hello and answers it.
+    if (reinvite) {
+      net.helloReplied = false;
+      sendHello();
+    }
     lobbyStatus(t('status.opponentLeft'));
     renderRoom();
     updateNetStatus();
@@ -7184,7 +7220,7 @@ function onNetMessage(msg) {
       if (net.phase === 'playing' || net.phase === 'starting'
         || net.phase === 'lobby') {
         net.peerGone = true;
-        onPeerGone();
+        onPeerGone(true);
       }
       break;
     case 'hello': {
@@ -7324,30 +7360,24 @@ function onNetMessage(msg) {
       } else if (net.phase === 'playing' && !wasGone && net.hellosSeen > 2) {
         // The real peer accounts for at most two hellos (its own
         // plus its reply to mine); a third hello is a third client
-        // opening the link mid-match — USUALLY. One exception
-        // (rejoin fix F1): the relay's peer-left notice can lag
-        // the drop by seconds (2.1 s and 6.6 s observed live,
-        // 2026-10-22), so the peer itself, returning fast on the
-        // same link, can arrive before its own departure notice.
-        // Its seat is provably silent then — the session is
-        // stalled waiting for its bundles and no turn has executed
-        // for over two seconds — so treat the hello as the peer
-        // reclaiming its seat: pass through the grace state and
-        // answer with the resync, exactly as if the notice had
-        // landed first. A genuinely live peer (turns still
-        // executing) keeps the in-progress answer (roomurl: the
-        // late opener lands on "this match is already under way"
-        // instead of waiting in a room that cannot admit them).
-        if (net.session && net.session.state().waiting
-          && net.lastTurnAt && Date.now() - net.lastTurnAt > 2000) {
-          net.peerGone = true;
-          onPeerGone();
-          showOverlay(netUi.peerOverlay, false);
-          net.phase = 'playing';
-          sendResync();
-        } else {
-          net.client.send({ type: 'in-progress' });
-        }
+        // opening the link mid-match, and it ALWAYS gets the
+        // in-progress answer (roomurl: the late opener lands on
+        // "This match is already under way"). roomurl2 removed
+        // the F1 seat-silence exception that used to answer such
+        // a hello with the resync when the session looked stalled:
+        // a stalled session is NOT proof the seat is empty (a
+        // backgrounded tab stalls exactly the same way), and the
+        // live proof of 2026-11-26 showed a stranger walking
+        // straight into a running match through it — with the
+        // room link now sitting in the address bar, strangers
+        // knocking mid-match are expected, not exotic. The
+        // genuine fast return F1 protected is covered by the
+        // departure re-invite instead: when the peer-left notice
+        // lands, onPeerGone sends a fresh hello, the waiting
+        // returner answers it, and THAT hello takes the peer-left
+        // resync branch above — proof first (the relay says the
+        // seat is empty), resync second.
+        net.client.send({ type: 'in-progress' });
       }
       if (net.phase === 'lobby') {
         // Presence just settled — reconverge the start gate.
