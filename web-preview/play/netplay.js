@@ -506,6 +506,23 @@ const MESSAGE_TYPES = new Set([
   // handshake. All lobby traffic — none of it ever reaches the sim
   // or the hashed state (NET-10 discipline).
   'ready', 'pw', 'pw-req', 'pw-ok', 'pw-no',
+  // Auto-server (Claudio's direction, 2026-11-26): once both
+  // players are in a room, each client measures its ping to every
+  // region and shares the table ('pings'); the host then puts
+  // BOTH players on the server that is best for the PAIR, moving
+  // the room once if that is a different region ('migrate': the
+  // new region, the new room code — same suffix, new prefix —
+  // and a one-time nonce a private room's already-admitted guest
+  // presents in its hello on the new region instead of being
+  // asked for the password again). When the pair's best IS the
+  // room's region, the host confirms instead ('server-ok', the
+  // pw-ok pattern): the guest's room screen can then show the
+  // server as automatic/best-for-both too. All lobby traffic,
+  // like the ready/pw family above: nothing here reaches the
+  // sim or the hashed state, and the exchange never blocks
+  // ready/start — a peer that never answers simply leaves
+  // today's behaviour in place (stay on the room's region).
+  'pings', 'migrate', 'server-ok',
   // M10 loading phase: sent by a client that cancels a match
   // during loading (it is leaving, or its own load failed), so the
   // peer returns to the lobby too instead of waiting out the
@@ -585,6 +602,44 @@ export function decodeMessage(text) {
   }
   if (msg.type === 'ready' && typeof msg.ready !== 'boolean') {
     return { ok: false, error: 'bad ready' };
+  }
+  // Auto-server ping table: an object whose keys are region ids
+  // (a subset is fine — a partial probe is still information)
+  // and whose values are a measured round trip in ms or null
+  // (unreachable). Anything else is junk.
+  if (msg.type === 'pings') {
+    const tbl = msg.table;
+    if (!tbl || typeof tbl !== 'object' || Array.isArray(tbl)) {
+      return { ok: false, error: 'bad pings' };
+    }
+    for (const [k, v] of Object.entries(tbl)) {
+      if (!REGIONS.some((r) => r.id === k)) {
+        return { ok: false, error: 'bad pings' };
+      }
+      if (v !== null && !(typeof v === 'number' && Number.isFinite(v)
+        && v >= 0 && v <= 60000)) {
+        return { ok: false, error: 'bad pings' };
+      }
+    }
+  }
+  // Auto-server migration order: the region must be a real one,
+  // the code must be a short-link code OF that region (its first
+  // char is the region prefix — a code/region mismatch is junk),
+  // and the nonce is a bounded string (its secrecy is the host's
+  // minting, not its shape).
+  if (msg.type === 'migrate') {
+    if (!REGIONS.some((r) => r.id === msg.region)
+      || regionFromRoomId(msg.code) !== msg.region
+      || typeof msg.nonce !== 'string'
+      || msg.nonce.length < 8 || msg.nonce.length > 64) {
+      return { ok: false, error: 'bad migrate' };
+    }
+  }
+  // Auto-server stay confirmation: just a real region id (the
+  // receiver checks it against the room it is actually in).
+  if (msg.type === 'server-ok'
+    && !REGIONS.some((r) => r.id === msg.region)) {
+    return { ok: false, error: 'bad server-ok' };
   }
   // A password is a short human string; anything else is junk.
   if (msg.type === 'pw' && (typeof msg.pw !== 'string' || msg.pw.length > 128)) {
@@ -1480,4 +1535,106 @@ export function pickFastestRegion(pings) {
     }
   }
   return best;
+}
+
+// ---------------------------------------------------------------------
+// Auto-server: the pair's best region (Claudio's direction,
+// 2026-11-26 — "se os dois estão com um ping melhor em um lugar,
+// automaticamente deveria estar no mesmo server").
+//
+// The room is born on the host's picked region (the code carries
+// it), but once BOTH players are present each client probes every
+// region and shares its table; the host then picks the server
+// that is best for the PAIR and, when that is not where the room
+// already sits, moves the room there once (see 'migrate' in the
+// codec). Everything here is pure decision logic — the probing
+// and the reconnect live in app.js.
+
+/// A ping table made safe to compute with: exactly the REGIONS
+/// keys, each a finite measured ms or null (unmeasured /
+/// unreachable / junk all read as null). Foreign input — the
+/// peer's table arrives over the wire — is never trusted raw.
+export function sanitizePingTable(table) {
+  const out = {};
+  for (const r of REGIONS) {
+    const v = table && typeof table === 'object' ? table[r.id] : null;
+    out[r.id] = (typeof v === 'number' && Number.isFinite(v) && v >= 0)
+      ? v : null;
+  }
+  return out;
+}
+
+/// The pair's best region from the two players' ping tables:
+/// minimize the WORSE player's ping (max of the two — the pair
+/// plays at its slowest member's latency), tie-break by the sum,
+/// then by the host's own ping, then by REGIONS list order. An
+/// unmeasured region counts as infinitely far for that player,
+/// so a region either side cannot reach only wins when nothing
+/// better exists for the pair. Null when either side measured
+/// NOTHING at all — no basis for a decision, the room stays
+/// where it is (the feature's silent fallback).
+export function bestRegionForPair(hostPings, guestPings) {
+  const host = sanitizePingTable(hostPings);
+  const guest = sanitizePingTable(guestPings);
+  const anyMeasured = (t) => REGIONS.some((r) => t[r.id] !== null);
+  if (!anyMeasured(host) || !anyMeasured(guest)) return null;
+  let best = null;
+  let bestKey = null;
+  for (const r of REGIONS) {
+    const h = host[r.id] === null ? Infinity : host[r.id];
+    const g = guest[r.id] === null ? Infinity : guest[r.id];
+    const key = [Math.max(h, g), h + g, h];
+    if (bestKey === null
+      || key[0] < bestKey[0]
+      || (key[0] === bestKey[0] && key[1] < bestKey[1])
+      || (key[0] === bestKey[0] && key[1] === bestKey[1] && key[2] < bestKey[2])) {
+      best = r.id;
+      bestKey = key;
+    }
+  }
+  return best;
+}
+
+/// The room code a migration moves to: the new region's prefix
+/// char over the SAME six-char suffix — the room's identity (and
+/// its invite link's tail) survives the move; only the server
+/// changes. Null for a junk code or region.
+export function roomCodeForRegion(code, regionId) {
+  const prefix = REGION_PREFIX[regionId];
+  if (!prefix || typeof code !== 'string' || code.length !== 7) return null;
+  return prefix + code.slice(1);
+}
+
+/// A one-time migration nonce: 16 chars of the room alphabet
+/// from the caller's randomness (injectable for tests, like
+/// makeRoomId's). The host mints one per migration, rides it in
+/// the 'migrate' message, and admits a post-move hello carrying
+/// it in place of the password check — once, for this room: the
+/// nonce is room state, never stored, and dies with the room.
+export function makeMigrateNonce(rand = Math.random) {
+  let s = '';
+  for (let i = 0; i < 16; i++) {
+    s += ROOM_ALPHABET[Math.floor(rand() * ROOM_ALPHABET.length)];
+  }
+  return s;
+}
+
+/// Probe EVERY region in parallel and collect the table
+/// {regionId: ms | null}. Each probe is the ordinary
+/// probeRegionPing with its timeout set to the shared budget
+/// (~1.5 s, the homepage invite box's budget), so the whole
+/// sweep settles inside the budget: a region that has not
+/// answered by then reads null (unreachable), never a hang —
+/// the room UI is never blocked on this.
+export async function probeAllRegions({
+  relayHttp, socketFactory, budgetMs = 1500, rand,
+} = {}) {
+  const table = {};
+  await Promise.all(REGIONS.map(async (r) => {
+    const res = await probeRegionPing({
+      relayHttp, region: r.id, socketFactory, timeoutMs: budgetMs, rand,
+    }).catch(() => null);
+    table[r.id] = res && typeof res.ms === 'number' ? res.ms : null;
+  }));
+  return table;
 }

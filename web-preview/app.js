@@ -73,6 +73,8 @@ import {
   createRelayClient, probeRegionPing, makeRoomId, buildShortUrl,
   regionFromRoomId, claimRoomFromParams,
   linkJoinRoom, pickFastestRegion, REGIONS as NET_REGIONS,
+  probeAllRegions, sanitizePingTable, bestRegionForPair,
+  roomCodeForRegion, makeMigrateNonce,
   normalizeTeams, packTeams, teamsIsDefault,
   packTeamsWithLock, normalizeTeamsUnlocked,
 } from './play/netplay.js';
@@ -87,7 +89,7 @@ import {
   joinTarget, filterLobbyRows, selectionSurvives, pingQuality,
 } from './play/lobby.js';
 import {
-  checkPassword, peerAdmitted, guestAdmitted, canToggleReady,
+  checkPassword, checkNonce, peerAdmitted, guestAdmitted, canToggleReady,
   startGate, guestSlotOf, slotIsAi, slotSealed, slotAiMode,
   slotLabel, roomConfigText, peerSeatLabel,
   teamPickOf, teamsForPick, teamPickForTeams,
@@ -6373,6 +6375,17 @@ function renderRoom() {
       teamsUnlocked: normalizeTeamsUnlocked(net.teamsUnlocked), // Teams T3b
     }, roomConfigStrings());
   }
+  // Auto-server: the room's server line — the region the room
+  // sits on; once the pair decision has actually run (stayed or
+  // moved) it reads as automatic, best for both. autoBest is
+  // only ever set BY a decision, so the silent-fallback case
+  // (a table that measured nothing) keeps the plain line.
+  if (netUi.roomServerLine) {
+    const region = regionName(net.region);
+    netUi.roomServerLine.textContent = net.autoBest
+      ? t('room.serverAuto', { region })
+      : t('room.server', { region });
+  }
   // M12: the guest-seat selector is the host's alone, and it
   // locks while a human guest is present (or at the door): the
   // seat cannot be reconfigured out from under a person.
@@ -6502,6 +6515,140 @@ function submitPassword() {
   net.client.send({ type: 'pw', pw });
   lobbyStatus(t('status.checkingPw'));
   renderRoom();
+}
+
+// --- Auto-server: the pair's best region -----------------------------------
+//
+// Claudio's rule (2026-11-26): when both players are in a room,
+// the game itself puts BOTH on the server that is best for the
+// pair — nobody picks. The room is born on the host's region,
+// but presence triggers one probe sweep per client (~1.5 s,
+// parallel, never blocking the room): each side measures every
+// region with the ordinary probe and shares its table ('pings').
+// The HOST decides (bestRegionForPair: minimize the worse
+// player's ping) and either stays — the room's server line then
+// reads as automatic, best for both — or moves the room ONCE to
+// the better region ('migrate'): same room suffix under the new
+// region's prefix char, both clients reconnect with their same
+// role, name and settings, ready flags reset. A private room's
+// admitted guest is not asked for the password again: the
+// migrate carries a one-time nonce its post-move hello presents
+// (the host admits it exactly like pw-ok — see the hello case).
+// The exchange is best-effort by design: a peer whose table
+// never arrives (older client, failed probe) leaves today's
+// behaviour untouched — the room stays on its region and
+// ready/start are never blocked on any of this.
+
+/// Presence completed in the lobby: share this client's ping
+/// table with the current peer if the exchange still owes it.
+/// Idempotent — every lobby message lands here via onNetMessage,
+/// and the flags make repeats free. The sweep itself runs once
+/// per room (my pings do not change because the peer did); a
+/// later peer in the same room is re-shared the cached table.
+function kickAutoServer() {
+  if (!net || net.phase !== 'lobby' || !net.room) return;
+  if (!net.peerPresent || !myAdmitted()) return;
+  if (net.autoMigrated || net.autoProbing || net.autoTableSent) return;
+  if (slotIsAi(net.guestSlot) || slotSealed(net.guestSlot)) return;
+  if (net.autoPings) {
+    net.autoTableSent = true;
+    if (net.client) net.client.send({ type: 'pings', table: net.autoPings });
+    maybeDecideAutoServer();
+    return;
+  }
+  net.autoProbing = true;
+  const mine = net;
+  probeAllRegions({ relayHttp: RELAY_HTTP }).then((table) => {
+    if (!net || net !== mine) return;
+    net.autoProbing = false;
+    // The room moved (or the match left the lobby) while the
+    // sweep ran: the table describes a room that no longer
+    // exists in this form — drop it.
+    if (net.autoMigrated || net.phase !== 'lobby') return;
+    net.autoPings = table;
+    net.autoTableSent = true;
+    if (net.client) net.client.send({ type: 'pings', table });
+    maybeDecideAutoServer();
+  }).catch(() => {
+    if (net && net === mine) net.autoProbing = false;
+  });
+}
+
+/// Host only, and only with both tables in: pick the pair's best
+/// region and act on it — stay (mark the server automatic) or
+/// spend the one migration. A table that measured nothing is no
+/// basis for a decision: close the exchange silently and keep
+/// today's behaviour (the room's original region).
+function maybeDecideAutoServer() {
+  if (!net || net.role !== 'host' || net.phase !== 'lobby') return;
+  if (net.autoServerDone || net.autoMigrated) return;
+  if (!net.autoPings || !net.peerPings) return;
+  const best = bestRegionForPair(net.autoPings, net.peerPings);
+  net.autoServerDone = true;
+  if (!best) return; // no basis: closed silently — plain line, no confirmation
+  if (best === net.region) {
+    net.autoBest = net.region;
+    // Confirm the stay, so the guest's room screen shows the
+    // server as automatic/best-for-both too (the pw-ok pattern:
+    // a one-word verdict for a decision the peer cannot see).
+    net.client.send({ type: 'server-ok', region: net.region });
+    renderRoom();
+    return;
+  }
+  const code = roomCodeForRegion(net.room, best);
+  if (!code) return;
+  net.autoBest = best;
+  // The nonce rides every migrate (public rooms ignore it); for
+  // a private room it is the admitted guest's pass on the new
+  // region — minted here, held only in the two clients' memory.
+  net.migrateNonce = makeMigrateNonce();
+  net.client.send({
+    type: 'migrate', region: best, code, nonce: net.migrateNonce,
+  });
+  applyMigration(best, code);
+}
+
+/// Move this client to the room's new region/code — the host
+/// from its own decision, the guest from the host's 'migrate'.
+/// One-time per room session (autoMigrated is the spend flag,
+/// and the decision that leads here already closed the exchange),
+/// and never once the match has left the lobby. The reconnect
+/// reuses connectToRoom wholesale: same role, same name, same
+/// room settings — only the region and the code change. Ready
+/// flags reset (clean state on the new server), presence clears
+/// until the hellos cross again, and a private guest keeps its
+/// admission: its pwState stays 'ok' and its next hello carries
+/// the nonce (net.migrateNonce, set by the caller on the guest).
+function applyMigration(region, code) {
+  if (!net || net.phase !== 'lobby' || net.autoMigrated) return;
+  net.autoMigrated = true;
+  net.autoServerDone = true;
+  net.autoBest = region;
+  net.selfReady = false;
+  net.peerReady = false;
+  net.peerPresent = false;
+  net.helloReplied = false;
+  net.hostSeen = false;
+  net.doorGuest = false;
+  // Host side of a private room: the old region's pw-ok does
+  // not carry over — on the new region the guest is admitted by
+  // the migration nonce in its hello, and by nothing else (the
+  // nonce is load-bearing, not a courtesy). The guest's own
+  // pwState stays 'ok': it never re-types the password.
+  net.peerPwOk = false;
+  const stale = net.client;
+  net.region = region;
+  net.room = code;
+  net.roomLinkValue = buildShortUrl(location.origin, code);
+  // The stale socket's late frames (its 'peer-left', its close)
+  // must never touch the new connection: connectToRoom's
+  // handlers only answer for the CURRENT net.client, and the
+  // socket replaced below is no longer it.
+  if (stale) stale.close();
+  lobbyStatus(t('status.serverMoved', { region: regionName(region) }));
+  connectToRoom();
+  renderRoom();
+  updateNetStatus();
 }
 
 // --- rejoin ------------------------------------------------------------------
@@ -6871,8 +7018,13 @@ function onNetMessage(msg) {
         net.client.send({
           type: 'hello', v: 1, role: net.role, name: myName(),
           ...(net.role === 'host' ? { victory: { ...normalizeVictory(net.victory) }, teams: [...normalizeTeams(net.teams)], teamsUnlocked: normalizeTeamsUnlocked(net.teamsUnlocked) } : {}),
+          ...(net.role === 'guest' && net.migrateNonce ? { nonce: net.migrateNonce } : {}),
         });
       }
+      // Auto-server: a private room's admitted guest presents
+      // the migration nonce — checkNonce admits like pw-ok.
+      if (net.role === 'host' && net.phase === 'lobby' && net.privacy === 'private'
+        && !net.peerPwOk && checkNonce(net.migrateNonce, msg.nonce)) net.peerPwOk = true;
       // M10 private rooms: a guest at the door of a private room
       // does not count as present until the password check passes
       // (host side). The host asks for the password instead; the
@@ -6910,6 +7062,21 @@ function onNetMessage(msg) {
       // both-ready deadlock (2026-11-26). A peer that actually
       // LEAVES clears both ready flags in onPeerGone, so no
       // stale ready survives a real departure.
+      if (isNewPresence && net.phase === 'lobby') {
+        // Auto-server: a NEW peer reopens the pair exchange for
+        // this pairing — their table, my share to them, and the
+        // decision all start over (the one migration itself may
+        // already be spent; kickAutoServer and the host's
+        // decision honour autoMigrated).
+        net.peerPings = null;
+        net.autoTableSent = false;
+        // (A migrated room's decision is final — the post-move
+        // hello must not reopen it.)
+        if (!net.autoMigrated) {
+          net.autoServerDone = false;
+          net.autoBest = null;
+        }
+      }
       if (net.phase === 'lobby' || net.phase === 'starting') {
         if (net.selfReady && net.phase === 'lobby') {
           lobbyStatus(t('status.youReady'));
@@ -7083,6 +7250,41 @@ function onNetMessage(msg) {
         renderRoom();
       }
       break;
+    case 'pings':
+      // Auto-server: the peer's region ping table. Foreign
+      // input — sanitized before it is stored, and only ever
+      // consumed by the host's pair decision. A table arriving
+      // after the exchange closed (decided / migrated) is inert.
+      if (net.phase === 'lobby' && !net.autoMigrated) {
+        net.peerPings = sanitizePingTable(msg.table);
+        maybeDecideAutoServer();
+      }
+      break;
+    case 'migrate':
+      // Auto-server: the host moves the room to the pair's best
+      // region. The codec already proved the code belongs to the
+      // region; the guest follows once, in the lobby only, and
+      // keeps the nonce to present in its post-move hello (a
+      // private room's admitted guest is not asked again).
+      if (net.role === 'guest' && net.phase === 'lobby'
+        && !net.autoMigrated) {
+        net.migrateNonce = typeof msg.nonce === 'string' ? msg.nonce : null;
+        applyMigration(msg.region, msg.code);
+      }
+      break;
+    case 'server-ok':
+      // Auto-server: the host decided the pair's best server is
+      // the one the room already sits on — nothing moves, and
+      // this client's server line reads automatic/best-for-both
+      // like the host's. A confirmation naming any other region
+      // is not this room's verdict and is ignored.
+      if (net.role === 'guest' && net.phase === 'lobby'
+        && msg.region === net.region && !net.autoMigrated) {
+        net.autoServerDone = true;
+        net.autoBest = net.region;
+        renderRoom();
+      }
+      break;
     case 'resign':
       if (net.phase === 'playing' || net.phase === 'peer-left') {
         showOverlay(netUi.peerOverlay, false);
@@ -7143,6 +7345,11 @@ function onNetMessage(msg) {
     default:
       break;
   }
+  // Auto-server: any lobby traffic may be the moment presence
+  // completed (a hello, a pw-ok, the peer's own arrival) — the
+  // kick is idempotent and flag-guarded, so landing it here
+  // covers every ordering, guest-first included.
+  kickAutoServer();
 }
 
 /// M12: tell the room object whether this room belongs in the
@@ -7208,17 +7415,31 @@ function connectToRoom() {
     ? '&listed=0' : '';
   const wsUrl = RELAY_HTTP.replace(/^http/, 'ws')
     + `/room/${encodeURIComponent(net.room)}?region=${encodeURIComponent(net.region)}${privFlag}${hostFlag}${listedFlag}`;
-  net.client = createRelayClient({
+  // The handlers answer only while this client is still the
+  // room's connection (net.client === client): an auto-server
+  // migration replaces the socket mid-lobby, and the stale
+  // socket's late frames — its 'peer-left', its close — must
+  // never touch the new connection's state.
+  const client = createRelayClient({
     onOpen: () => {
       // Package C: the host's hello also advertises its victory
       // settings, so the guest's room screen can show the real
       // conditions before readying (the binding copy still rides
       // the 'start' handshake). Older clients ignore the field.
-      net.client.send({
+      client.send({
         type: 'hello', v: 1, role: net.role, name: myName(),
         ...(net.role === 'host' ? { victory: { ...normalizeVictory(net.victory) }, teams: [...normalizeTeams(net.teams)], teamsUnlocked: normalizeTeamsUnlocked(net.teamsUnlocked) } : {}),
+        // Auto-server: a migrated guest presents the one-time
+        // nonce in its hello (the host admits it like pw-ok).
+        ...(net.role === 'guest' && net.migrateNonce ? { nonce: net.migrateNonce } : {}),
       });
-      if (net.role === 'host') {
+      if (net.autoMigrated) {
+        // Auto-server: this connection IS the move — the status
+        // line says the server changed to the pair's best and
+        // the ready flags start over (applyMigration reset
+        // them), whatever the role's ordinary line would say.
+        lobbyStatus(t('status.serverMoved', { region: regionName(net.region) }));
+      } else if (net.role === 'host') {
         // M12: a sealed seat changes what "created" means — the
         // room is not in the public list and needs no guest.
         if (slotIsAi(net.guestSlot)) {
@@ -7237,15 +7458,18 @@ function connectToRoom() {
       }
       renderRoom();
     },
-    onMessage: (m) => onNetMessage(m),
+    onMessage: (m) => {
+      if (net && net.client === client) onNetMessage(m);
+    },
     onClose: () => {
-      if (net && net.client) {
+      if (net && net.client === client) {
         net.peerGone = true;
         onPeerGone();
       }
     },
   });
-  net.client.connect(wsUrl);
+  net.client = client;
+  client.connect(wsUrl);
 }
 
 /// Open the lobby overlay — since M9 this is the Lobby Browser:
@@ -7319,6 +7543,23 @@ function openLobby(join) {
     privacy: join && join.private ? 'private' : 'public',
     password: null,
     peerPwOk: false, doorGuest: false, hostSeen: false,
+    // Auto-server (the pair's best region): once both players
+    // are present, each client probes every region and shares
+    // its table; the host decides for the pair and may move the
+    // room ONCE to the best region (see kickAutoServer /
+    // applyMigration). autoPings is MY table (measured once per
+    // room), peerPings the current peer's (sanitized on
+    // arrival, reset when a new peer arrives), autoTableSent
+    // marks my table shared with the CURRENT peer;
+    // autoServerDone closes the decision for the current
+    // pairing (moved, stayed, or confirmed via 'server-ok');
+    // autoMigrated spends the one move. migrateNonce: the
+    // host's issued nonce / the guest's to present in its
+    // post-move hello.
+    autoPings: null, peerPings: null, autoProbing: false,
+    autoTableSent: false,
+    autoServerDone: false, autoMigrated: false, autoBest: null,
+    migrateNonce: null,
     selfReady: false, peerReady: false,
     pwState: join && join.private ? 'needed' : 'na',
     roomLinkValue: '',
@@ -8657,6 +8898,7 @@ async function main() {
     slotHost: document.getElementById('slot-host'),
     slotGuest: document.getElementById('slot-guest'),
     roomConfigLine: document.getElementById('room-config-line'),
+    roomServerLine: document.getElementById('room-server-line'),
     slotControlRow: document.getElementById('slot-control-row'),
     roomGuestSlot: document.getElementById('guest-slot-select'),
     teamControlRow: document.getElementById('team-control-row'),
