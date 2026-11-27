@@ -107,3 +107,28 @@ test('rotation never touches a slot inside a hidden overlay (match started)', ()
   // The still-visible loading slot rotated normally.
   assert.equal(window.SkirmishAds.creativeOf('ad-slot-loading'), 'house');
 });
+
+test('adfit: the house/promo fills fit their fixed slots (no clipped title, button or note)', () => {
+  const css = readFileSync(new URL('../site.css', import.meta.url), 'utf8');
+  // The 90px leaderboard: the house message lies in a ROW at the
+  // slot's full height — the old centred column (~125px natural
+  // height) was clipped top and bottom in the live check of
+  // 2026-11-26.
+  const rowRule = css.match(/\.ad-slot-leaderboard \.house-ad \{([^}]*)\}/);
+  assert.ok(rowRule, 'the leaderboard house rule exists');
+  assert.match(rowRule[1], /display: flex/, 'row layout in the leaderboard');
+  assert.match(rowRule[1], /height: 100%/, 'the fill takes the slot height');
+  assert.match(rowRule[1], /align-items: center/, 'vertically centred in the row');
+  assert.ok(css.includes('.ad-slot-leaderboard .house-text { flex: 1 1 auto;'),
+    'the text flexes between title and button');
+  assert.ok(css.includes('.ad-slot-leaderboard .house-link { flex: 0 0 auto;'),
+    'the button never shrinks');
+  // The 300x250 promo is budgeted to its box: 44px emblem and
+  // 12px vertical padding keep the note inside.
+  assert.ok(css.includes('.promo-ad .promo-emblem { width: 44px; height: 44px; }'),
+    'the promo emblem is 44px');
+  const promoRule = css.match(/\.promo-ad \{([^}]*)\}/);
+  assert.ok(promoRule, 'the promo rule exists');
+  assert.match(promoRule[1], /padding: 12px 16px/, 'the promo padding is compact');
+  assert.match(promoRule[1], /height: 100%/, 'the promo fills its slot');
+});
