@@ -639,7 +639,11 @@ a { color: var(--gold-bright); }
    the title at the top and the button at the bottom (live check,
    2026-11-26). There the house message lies in a ROW instead —
    title, text and button side by side, vertically centred,
-   inside the unchanged footprint. */
+   inside the unchanged footprint. The title must NOT shrink
+   (flex 0 0) and the text takes only the leftover (basis 0):
+   with a shrinking title and an auto-basis text, flex squeezed
+   the title to ~90px and it wrapped to four lines and clipped
+   again (second live check, 2026-11-26). */
 .ad-slot-leaderboard .house-ad {
   display: flex;
   align-items: center;
@@ -650,8 +654,8 @@ a { color: var(--gold-bright); }
   padding: 6px 18px;
   text-align: left;
 }
-.ad-slot-leaderboard .house-title { flex: 0 1 205px; margin: 0; }
-.ad-slot-leaderboard .house-text { flex: 1 1 auto; margin: 0; }
+.ad-slot-leaderboard .house-title { flex: 0 0 205px; margin: 0; }
+.ad-slot-leaderboard .house-text { flex: 1 1 0; margin: 0; }
 .ad-slot-leaderboard .house-link { flex: 0 0 auto; margin: 0; }
 .ad-slot-leaderboard .house-link a { padding: 4px 12px; }
 
@@ -669,14 +673,14 @@ a { color: var(--gold-bright); }
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  padding: 12px 16px;
+  gap: 3px;
+  padding: 10px 16px;
   text-align: center;
   /* Transparent: the parchment panel of .ad-slot is the surface,
      so the promo reads as part of the same panel family. */
   background: transparent;
 }
-.promo-ad .promo-emblem { width: 44px; height: 44px; }
+.promo-ad .promo-emblem { width: 40px; height: 40px; }
 .promo-ad .promo-title {
   margin: 2px 0 0;
   font-family: Georgia, "Times New Roman", serif;
