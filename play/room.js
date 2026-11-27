@@ -29,6 +29,24 @@ export function checkPassword(expected, given) {
   );
 }
 
+/// The host-side migration-nonce check (auto-server): after the
+/// pair's best server moves a PRIVATE room to a new region, the
+/// guest who already passed the password check presents the
+/// one-time nonce the host issued in its 'migrate' message
+/// instead of being asked again. Same discipline as the password
+/// check — an unset nonce can never be "presented correctly" —
+/// and the nonce admits exactly like 'pw-ok' did: it is bound to
+/// this room and this move, lives only in the two clients'
+/// memory, and dies with the room.
+export function checkNonce(expected, given) {
+  return (
+    typeof expected === 'string' &&
+    expected.length > 0 &&
+    typeof given === 'string' &&
+    given === expected
+  );
+}
+
 /// HOST view: is the peer admitted to the room? In a public room,
 /// presence is admission. In a private room, only a guest who
 /// passed the password check counts.
