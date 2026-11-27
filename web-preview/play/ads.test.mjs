@@ -119,16 +119,18 @@ test('adfit: the house/promo fills fit their fixed slots (no clipped title, butt
   assert.match(rowRule[1], /display: flex/, 'row layout in the leaderboard');
   assert.match(rowRule[1], /height: 100%/, 'the fill takes the slot height');
   assert.match(rowRule[1], /align-items: center/, 'vertically centred in the row');
-  assert.ok(css.includes('.ad-slot-leaderboard .house-text { flex: 1 1 auto;'),
-    'the text flexes between title and button');
+  assert.ok(css.includes('.ad-slot-leaderboard .house-text { flex: 1 1 0;'),
+    'the text takes only the leftover between title and button');
+  assert.ok(css.includes('.ad-slot-leaderboard .house-title { flex: 0 0 205px;'),
+    'the title never shrinks — a shrunk title wraps to four lines and clips');
   assert.ok(css.includes('.ad-slot-leaderboard .house-link { flex: 0 0 auto;'),
     'the button never shrinks');
   // The 300x250 promo is budgeted to its box: 44px emblem and
   // 12px vertical padding keep the note inside.
-  assert.ok(css.includes('.promo-ad .promo-emblem { width: 44px; height: 44px; }'),
+  assert.ok(css.includes('.promo-ad .promo-emblem { width: 40px; height: 40px; }'),
     'the promo emblem is 44px');
   const promoRule = css.match(/\.promo-ad \{([^}]*)\}/);
   assert.ok(promoRule, 'the promo rule exists');
-  assert.match(promoRule[1], /padding: 12px 16px/, 'the promo padding is compact');
+  assert.match(promoRule[1], /padding: 10px 16px/, 'the promo padding is compact');
   assert.match(promoRule[1], /height: 100%/, 'the promo fills its slot');
 });
