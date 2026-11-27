@@ -71,7 +71,7 @@ import {
   applyCommand as netApplyCommand, tcIdOf as netTcIdOf,
   createSession, createRecorder, replayEvents, isReplay,
   createRelayClient, probeRegionPing, makeRoomId, buildShortUrl,
-  regionFromRoomId, claimRoomFromParams,
+  regionFromRoomId, claimRoomFromParams, buildPlayUrl,
   linkJoinRoom, pickFastestRegion, REGIONS as NET_REGIONS,
   probeAllRegions, sanitizePingTable, bestRegionForPair,
   roomCodeForRegion, makeMigrateNonce,
@@ -5739,6 +5739,7 @@ function teardownNet() {
   stopChatLink();
   stopLobbyBrowser();
   if (net && net.loadTimer) clearTimeout(net.loadTimer);
+  if (net && net.waitNoticeTimer) clearTimeout(net.waitNoticeTimer);
   if (net && net.client) net.client.close();
   net = null;
   if (netUi) {
@@ -6062,11 +6063,11 @@ function writeRoomLinkMark(room) {
 
 /// Drop the room params (room/region/private, plus the short
 /// link's `g` alias), the amigo param and the dono claim param
-/// from the address bar without navigating. From the moment a
-/// room exists it lives in memory (net.room); the invite link
-/// is built on demand by the room screen's copy action, never
-/// read back from the URL — so the address bar can never
-/// re-trigger a join or a claim on reload.
+/// from the address bar without navigating. Boot arrivals are
+/// consumed from the params exactly once (the marks above);
+/// from the moment a room exists it lives in memory (net.room)
+/// and syncRoomUrl — not this — owns the bar, keeping the
+/// room's own link in it for as long as the tab is in the room.
 function cleanPlayUrl() {
   try {
     const p = new URLSearchParams(location.search);
@@ -6139,6 +6140,65 @@ function writeDonoMark(code) {
 /// sets it immediately before running the create flow;
 /// createGame consumes it — one claim, one room.
 let claimedRoomCode = null;
+
+// --- the room's link in the address bar (roomurl, 2026-11-26) ---------------
+// Claudio's direction: the game's link belongs IN the browser
+// bar while you play, so copying the address shares the game —
+// the bar shows the room's play URL for as long as this tab is
+// in the room (lobby, loading, match), follows an auto-server
+// migration to the new code, and returns to plain /play/ when
+// the room is left. Two session marks make a RELOAD of that bar
+// land back in the same room instead of the front door:
+//   BAR_ROOM — the room the bar currently names (written by
+//     syncRoomUrl itself, so it exists exactly while the bar
+//     carries the link). The boot treats a ?room= arrival whose
+//     code matches BAR_ROOM as a reload, not a fresh link click,
+//     and lets it past the consume-once mark.
+//   HOSTED_ROOM — the room this tab created (written by
+//     createGame). A reload whose code matches BOTH marks
+//     re-claims the host seat through the ordinary claim flow;
+//     a private room instead lands on the create view with the
+//     code still armed — its password lived only in memory, so
+//     the host sets it again before the room reopens.
+// A fresh link click (no BAR_ROOM match) keeps the consume-once
+// rule untouched: the mark is written, the bar cleaned, and a
+// later reload lands on the Lobby Browser.
+const BAR_ROOM_KEY = 'skirmish2.barRoom';
+const HOSTED_ROOM_KEY = 'skirmish2.hostedRoom';
+
+function readBarRoomMark() {
+  try { return sessionStorage.getItem(BAR_ROOM_KEY); } catch { return null; }
+}
+
+function readHostedMark() {
+  try { return sessionStorage.getItem(HOSTED_ROOM_KEY); } catch { return null; }
+}
+
+function writeHostedMark(code) {
+  try { sessionStorage.setItem(HOSTED_ROOM_KEY, code); } catch { /* storage off — a reload just rejoins as guest */ }
+}
+
+/// Keep the address bar equal to the room this tab is in: the
+/// room's play URL while net.room stands, plain /play/ once it
+/// is gone. Idempotent; called wherever the room changes
+/// (openLobby, createGame, connectToRoom, migration).
+function syncRoomUrl() {
+  try {
+    if (net && net.room) {
+      const url = buildPlayUrl('/play/', net.room, net.region,
+        { private: net.privacy === 'private' });
+      if (location.pathname + location.search !== url) {
+        history.replaceState(null, '', url);
+      }
+      sessionStorage.setItem(BAR_ROOM_KEY, net.room);
+    } else {
+      if (new URLSearchParams(location.search).has('room')) {
+        history.replaceState(null, '', '/play/');
+      }
+      sessionStorage.removeItem(BAR_ROOM_KEY);
+    }
+  } catch { /* non-http(s) context / storage off — the bar just stays as it was */ }
+}
 
 // --- the handshake ---------------------------------------------------------
 
@@ -6561,6 +6621,24 @@ function renderRoom() {
   // where the browser offers native sharing.
   refreshInviteLink();
   if (netUi.shareLinkBtn) netUi.shareLinkBtn.hidden = !shareSupported();
+  updateRoomClosedPanel();
+}
+
+/// roomurl: the late-opener landing inside the room screen. It
+/// shows exactly while this room is closed to us (closedNotice
+/// set) and nobody has arrived since — presence dissolves it,
+/// because a room with a peer in it is a live room again. The
+/// two buttons are the way out: make a fresh room, or browse.
+function updateRoomClosedPanel() {
+  if (!netUi || !netUi.roomClosedPanel) return;
+  const show = !!(net && net.room && net.closedNotice && !net.peerPresent);
+  netUi.roomClosedPanel.hidden = !show;
+  if (show && netUi.roomClosedText) {
+    netUi.roomClosedText.textContent = t(
+      net.closedNotice === 'underway' ? 'room.closedUnderway'
+        : net.closedNotice === 'full' ? 'room.closedFull'
+          : 'room.closedWaiting');
+  }
 }
 
 /// The both-ready rule (host side only — startGate enforces it):
@@ -7188,6 +7266,15 @@ function onNetMessage(msg) {
       // both-ready deadlock (2026-11-26). A peer that actually
       // LEAVES clears both ready flags in onPeerGone, so no
       // stale ready survives a real departure.
+      // roomurl: someone is here — any closed/waiting landing
+      // dissolves and its silence timer is spent.
+      if (isNewPresence) {
+        net.closedNotice = null;
+        if (net.waitNoticeTimer) {
+          clearTimeout(net.waitNoticeTimer);
+          net.waitNoticeTimer = null;
+        }
+      }
       if (isNewPresence && net.phase === 'lobby') {
         // Auto-server: a NEW peer reopens the pair exchange for
         // this pairing — their table, my share to them, and the
@@ -7203,6 +7290,21 @@ function onNetMessage(msg) {
           net.autoServerDone = false;
           net.autoBest = null;
         }
+      }
+      // roomurl: a match that is starting has no seat for a
+      // third client, and its real peer accounts for at most
+      // two hellos (its own plus its reply to mine) — a further
+      // hello in 'starting' against a present peer is a stranger
+      // opening the link late. Answer 'in-progress' and nothing
+      // else. A peer rejoining mid-load returns through the
+      // 'peer-left' grace state, not as a third hello; and if
+      // one ever did land here, its own client ignores
+      // 'in-progress' (it has presence; the receiver case checks),
+      // so the answer can never disturb the match.
+      if (net.phase === 'starting' && !isNewPresence
+        && (net.hellosSeen || 0) > 2) {
+        net.client.send({ type: 'in-progress' });
+        break;
       }
       if (net.phase === 'lobby' || net.phase === 'starting') {
         if (net.selfReady && net.phase === 'lobby') {
@@ -7233,7 +7335,9 @@ function onNetMessage(msg) {
         // reclaiming its seat: pass through the grace state and
         // answer with the resync, exactly as if the notice had
         // landed first. A genuinely live peer (turns still
-        // executing) keeps the room-full answer.
+        // executing) keeps the in-progress answer (roomurl: the
+        // late opener lands on "this match is already under way"
+        // instead of waiting in a room that cannot admit them).
         if (net.session && net.session.state().waiting
           && net.lastTurnAt && Date.now() - net.lastTurnAt > 2000) {
           net.peerGone = true;
@@ -7242,7 +7346,7 @@ function onNetMessage(msg) {
           net.phase = 'playing';
           sendResync();
         } else {
-          net.client.send({ type: 'room-full' });
+          net.client.send({ type: 'in-progress' });
         }
       }
       if (net.phase === 'lobby') {
@@ -7264,7 +7368,24 @@ function onNetMessage(msg) {
       break;
     }
     case 'room-full':
+      // Sealed seat / the room is spoken for: if we never got IN
+      // ourselves, the room screen gains the closed landing
+      // (roomurl) — the way out is one tap from there.
+      if (net.role === 'guest' && net.phase === 'lobby' && !net.peerPresent) {
+        net.closedNotice = 'full';
+        renderRoom();
+      }
       lobbyStatus(t('status.roomFull'));
+      break;
+    case 'in-progress':
+      // roomurl: the match behind this link already started —
+      // it can never admit us. The closed landing, firmer words.
+      // Guarded by presence: a rejoining peer (who HAS presence)
+      // ignores a stray answer that was meant for a stranger.
+      if (net.role === 'guest' && net.phase === 'lobby' && !net.peerPresent) {
+        net.closedNotice = 'underway';
+        renderRoom();
+      }
       break;
     case 'start':
       if (net.role === 'guest' && net.phase === 'lobby') guestHandleStart(msg);
@@ -7597,6 +7718,7 @@ function connectToRoom() {
   });
   net.client = client;
   client.connect(wsUrl);
+  syncRoomUrl(); // roomurl: the bar names this room (and follows a migration here)
 }
 
 /// Open the lobby overlay — since M9 this is the Lobby Browser:
@@ -7695,6 +7817,14 @@ function openLobby(join) {
     // peerName arrives on the peer's hello.
     peerName: null,
     selfLoaded: false, peerLoaded: false, loadTimer: null,
+    // roomurl: the late-opener landing on THIS side of the link.
+    // closedNotice is null while the room is live for us; it
+    // becomes 'full' / 'underway' when a player answers our hello
+    // with room-full / in-progress, or 'waiting' when nobody has
+    // answered at all for a while (the game may have ended — the
+    // notice is soft and never ends the wait by itself).
+    // waitNoticeTimer arms that last check for a joined guest.
+    closedNotice: null, waitNoticeTimer: null,
   };
   showOverlay(netUi.onlineOverlay, true);
   hideLoading();
@@ -7709,12 +7839,32 @@ function openLobby(join) {
   if (join) {
     stopLobbyBrowser();
     connectToRoom();
+    armWaitNotice(net);
   } else {
     startLobbyBrowser();
   }
   renderRoom();
   updateLobbyClose();
   updateNetStatus();
+  syncRoomUrl();
+}
+
+/// roomurl: how long a joined guest waits in complete silence
+/// before the room screen gently says the game may be over.
+/// Silence only: a host who is merely late keeps the wait
+/// untouched, and anyone seen (presence or even a door hello)
+/// disarms it.
+const WAIT_NOTICE_MS = 15000;
+
+function armWaitNotice(mine) {
+  if (!mine || mine.role !== 'guest') return;
+  mine.waitNoticeTimer = setTimeout(() => {
+    if (net !== mine) return;
+    if (mine.phase !== 'lobby' || mine.peerPresent || mine.hostSeen) return;
+    if (mine.closedNotice) return; // a firmer answer already landed
+    mine.closedNotice = 'waiting';
+    renderRoom();
+  }, WAIT_NOTICE_MS);
 }
 
 async function loadRegionsAndPings() {
@@ -7846,10 +7996,12 @@ function createGame() {
     // be just the site root plus the code.
     net.room = makeRoomId(net.region);
   }
-  // The room lives in memory from here — the address bar stays
-  // room-free (a reload must land on the Lobby Browser), and the
-  // invite link is built on demand by the copy action.
-  cleanPlayUrl();
+  // The room lives in memory from here — and its link goes INTO
+  // the address bar (roomurl): copying the address shares the
+  // game, and a reload of this tab lands back in this room (the
+  // hosted mark below is what re-claims the host seat then).
+  writeHostedMark(net.room);
+  syncRoomUrl();
   net.roomLinkValue = buildShortUrl(location.origin, net.room);
   if (netUi.createBtn) netUi.createBtn.disabled = true;
   // The room screen takes over from the browser + create view.
@@ -8591,6 +8743,8 @@ function applyStaticStrings() {
   setPlaceholder('pw-input', 'room.pwPlaceholder');
   setText('btn-pw-enter', 'room.enter');
   setText('invite-txt', 'room.invite');
+  setText('btn-closed-create', 'room.createNew');
+  setText('btn-closed-browse', 'room.browseGames');
   setText('btn-copy-link', 'room.copyLink');
   setText('btn-share-link', 'room.share');
   setText('btn-play-friend', 'lobby.playFriend');
@@ -9049,6 +9203,10 @@ async function main() {
     pwEnterBtn: document.getElementById('btn-pw-enter'),
     pwNote: document.getElementById('pw-note'),
     readyBtn: document.getElementById('btn-ready'),
+    roomClosedPanel: document.getElementById('room-closed-panel'),
+    roomClosedText: document.getElementById('room-closed-text'),
+    closedCreateBtn: document.getElementById('btn-closed-create'),
+    closedBrowseBtn: document.getElementById('btn-closed-browse'),
     copyLinkBtn: document.getElementById('btn-copy-link'),
     inviteLinkInput: document.getElementById('invite-link-input'),
     shareLinkBtn: document.getElementById('btn-share-link'),
@@ -9226,6 +9384,17 @@ async function main() {
   // M10: the room screen's one button toggles ready; the host's
   // client starts the match itself when both players are ready.
   if (netUi.readyBtn) netUi.readyBtn.addEventListener('click', toggleReady);
+  // roomurl: the closed landing's way out — a fresh room (the
+  // create view, one tap from a new link) or the games browser.
+  // Both leave this room first through the ordinary front door.
+  if (netUi.closedCreateBtn) netUi.closedCreateBtn.addEventListener('click', () => {
+    openLobby(null);
+    if (netUi.gamesSection) netUi.gamesSection.hidden = true;
+    if (netUi.createSection) netUi.createSection.hidden = false;
+  });
+  if (netUi.closedBrowseBtn) netUi.closedBrowseBtn.addEventListener('click', () => {
+    openLobby(null);
+  });
   if (netUi.pwEnterBtn) netUi.pwEnterBtn.addEventListener('click', submitPassword);
   if (netUi.pwInput) {
     netUi.pwInput.addEventListener('keydown', (e) => {
@@ -9408,11 +9577,30 @@ async function main() {
   // the local match waits behind the panel and "Play solo instead"
   // starts it in one tap. Arriving by link skips the browser and
   // joins that room directly; ?online=1 lands on the browser too.
-  // Reload rule: the link is consumed ONCE per tab — the mark is
-  // written and the address bar cleaned BEFORE joining, so any
-  // later reload of this tab lands on the Lobby Browser.
+  // Reload rule: a fresh link is consumed ONCE per tab — the mark
+  // is written and the address bar cleaned BEFORE joining, so a
+  // later reload of this tab lands on the Lobby Browser. The one
+  // exception is roomurl's: while this tab is IN a room its bar
+  // carries that room's link, and a reload of THAT bar re-enters
+  // the room (guest) or re-claims it (host) — see the bar-room /
+  // hosted marks.
   {
-    const join = linkJoinRoom(location.search, readRoomLinkMark());
+    // roomurl: a ?room= arrival whose code matches the bar-room
+    // mark is a RELOAD of the room this tab is in, not a fresh
+    // link click — it passes the consume-once mark below. If
+    // the hosted mark matches too, this tab created that room:
+    // the host seat is re-claimed through the claim flow (a
+    // public room at once; a private room lands on the create
+    // view with the code still armed — its password lived only
+    // in the old page's memory and is set again there).
+    const barRoom = readBarRoomMark();
+    let join = linkJoinRoom(location.search, readRoomLinkMark());
+    if (!join && barRoom) {
+      const un = linkJoinRoom(location.search, null);
+      if (un && un.room === barRoom) join = un;
+    }
+    const reclaim = !!(join && barRoom === join.room
+      && readHostedMark() === join.room);
     // Read the amigo intent BEFORE cleanPlayUrl strips the param.
     const amigo = amigoIntent(location.search, readAmigoMark());
     // The homepage claim, likewise read before the bar is
@@ -9422,7 +9610,24 @@ async function main() {
     // all and the boot degrades to the plain front door.
     const claim = claimRoomFromParams(location.search, readDonoMark());
     setPaused(true);
-    if (join) {
+    if (join && reclaim && !join.private) {
+      // Reload of my own public room: re-claim the host seat
+      // through the ordinary create, born with the same code.
+      cleanPlayUrl();
+      openLobby(null);
+      claimedRoomCode = join.room;
+      createGame();
+    } else if (join && reclaim) {
+      // Reload of my own PRIVATE room: land on the create view
+      // with the code still armed — set the password again,
+      // Create, and the room reopens under the very same link.
+      cleanPlayUrl();
+      openLobby(null);
+      claimedRoomCode = join.room;
+      if (netUi.gamesSection) netUi.gamesSection.hidden = true;
+      if (netUi.createSection) netUi.createSection.hidden = false;
+      lobbyStatus(t('status.reclaimPrivate'));
+    } else if (join) {
       writeRoomLinkMark(join.room);
       cleanPlayUrl();
       openLobby({ room: join.room, region: join.region, private: join.private });
