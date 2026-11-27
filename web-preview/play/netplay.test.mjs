@@ -15,7 +15,7 @@ import {
   createSession, createRecorder, isReplay, replayEvents,
   createRelayClient, probeRegionPing,
   makeRoomId, buildPlayUrl, buildShortUrl, regionFromRoomId,
-  parsePlayParams, linkJoinRoom,
+  parsePlayParams, linkJoinRoom, claimRoomFromParams,
   pickFastestRegion, REGIONS,
   DEFAULT_TEAMS, NO_TEAM, normalizeTeams, teamsIsDefault, packTeams, unpackTeams,
 } from './netplay.js';
@@ -376,6 +376,38 @@ test('glink: a region-less link joins the region the code carries', () => {
   assert.equal(parsePlayParams('?room=abc123def4').region, null);
   // Consume-once applies to short-code joins exactly as before.
   assert.equal(linkJoinRoom('?room=uexamps', 'uexamps'), null);
+});
+
+test('glink: the dono claim — the homepage code, claimed once, or nothing', () => {
+  // A well-formed claim: the code comes back exactly, and the
+  // region it carries is the region the room will be born on.
+  assert.equal(claimRoomFromParams('?dono=wlehsls', null), 'wlehsls');
+  assert.equal(regionFromRoomId(claimRoomFromParams('?dono=uexamps', null)), 'weur');
+  // Every region's homepage code is claimable (round-trip).
+  for (const r of REGIONS) {
+    const code = makeRoomId(r.id, () => 0.42);
+    assert.equal(claimRoomFromParams(`?dono=${code}`, null), code, `${r.id} claims`);
+  }
+  // Case does not matter — the claim lowercases like the 404
+  // bounce does.
+  assert.equal(claimRoomFromParams('?dono=WLEHSLS', null), 'wlehsls');
+  // Consumed exactly once per tab: the same code again claims
+  // nothing (a reload lands on the front door)...
+  assert.equal(claimRoomFromParams('?dono=wlehsls', 'wlehsls'), null);
+  // ...but a DIFFERENT code in the same tab is a fresh claim.
+  assert.equal(claimRoomFromParams('?dono=uexamps', 'wlehsls'), 'uexamps');
+  // Malformed claims degrade to nothing: no param, empty, a
+  // legacy 10-char code, an unclaimed prefix, junk shapes.
+  assert.equal(claimRoomFromParams('', null), null);
+  assert.equal(claimRoomFromParams('?online=1', null), null);
+  assert.equal(claimRoomFromParams('?dono=', null), null);
+  assert.equal(claimRoomFromParams('?dono=abc123def4', null), null);
+  assert.equal(claimRoomFromParams('?dono=zzzzzzz', null), null);
+  assert.equal(claimRoomFromParams('?dono=wlehsl', null), null);
+  assert.equal(claimRoomFromParams('?dono=wlehsls9', null), null);
+  assert.equal(claimRoomFromParams('?dono=w!ehsls', null), null);
+  // A claim is not a join: the room param path ignores dono.
+  assert.equal(linkJoinRoom('?dono=wlehsls', null), null);
 });
 
 // ---------------------------------------------------------------- applier

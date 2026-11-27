@@ -19,6 +19,16 @@
 //
 // Client/presentation only: the sim and the golden hash are
 // untouched, and legacy 10-char long links keep working.
+//
+// Extension (homepage invite box): the homepage now mints the
+// code itself and offers the host a claim link —
+// /play/?dono=CODE. The claim boot runs the ordinary create
+// flow with the code as an override (one claim, one room, the
+// room screen at the end), consume-once like every link
+// doctrine here. The pure claim parse lives in netplay.js
+// (claimRoomFromParams, pinned in netplay.test.mjs); the pins
+// below cover the app.js wiring and the guest-first pairing
+// the flow relies on.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
@@ -73,6 +83,88 @@ test('the address bar is cleaned of the g alias too', () => {
   const body = functionBody(appJs, 'cleanPlayUrl');
   assert.ok(body.includes("p.delete('g');"),
     'a consumed ?g= join leaves the bar room-free like ?room=');
+});
+
+test('the dono claim: consume-once mark, cleaned param, one armed override', () => {
+  assert.ok(appJs.includes("const DONO_MARK_KEY = 'skirmish2.donoConsumed'"),
+    'the once-per-tab-session claim mark lives in sessionStorage');
+  const read = functionBody(appJs, 'readDonoMark');
+  assert.ok(read.includes('sessionStorage.getItem(DONO_MARK_KEY)'), 'the mark is read at boot');
+  const write = functionBody(appJs, 'writeDonoMark');
+  assert.ok(write.includes('sessionStorage.setItem(DONO_MARK_KEY, code)'),
+    'and written with the claimed code on consumption');
+  const clean = functionBody(appJs, 'cleanPlayUrl');
+  assert.ok(clean.includes("p.delete('dono')"),
+    'a consumed claim leaves the address bar param-free like a join');
+  assert.ok(appJs.includes('let claimedRoomCode = null;'),
+    'the create override is a single armed slot, null at rest');
+});
+
+test('the claim boot runs the ordinary create flow with the code armed', () => {
+  const bootAt = appJs.indexOf('linkJoinRoom(location.search, readRoomLinkMark())');
+  assert.ok(bootAt >= 0, 'the boot block stands');
+  const boot = appJs.slice(bootAt, bootAt + 2600);
+  const claimAt = boot.indexOf('claimRoomFromParams(location.search, readDonoMark())');
+  assert.ok(claimAt >= 0, 'the boot reads the claim');
+  assert.ok(claimAt < boot.indexOf('cleanPlayUrl()'),
+    'the claim is read before cleanPlayUrl strips the param');
+  const branchAt = boot.indexOf('} else if (claim) {');
+  assert.ok(branchAt > boot.indexOf('if (join) {'),
+    'a room link still wins — the claim only runs when there is no join');
+  const branch = boot.slice(branchAt, branchAt + 700);
+  assert.ok(branch.includes('writeDonoMark(claim)'), 'the mark is written on the claim');
+  assert.ok(branch.indexOf('writeDonoMark(claim)') < branch.indexOf('openLobby(null)'),
+    'mark and clean first — a reload lands on the front door, never re-claims');
+  assert.ok(branch.includes('claimedRoomCode = claim;'),
+    'the code is armed as the create override');
+  assert.ok(branch.indexOf('claimedRoomCode = claim;') < branch.indexOf('createGame();'),
+    'armed before the ordinary create flow runs — no parallel create path');
+});
+
+test('createGame consumes the claim: exact code, region from the code', () => {
+  const body = functionBody(appJs, 'createGame');
+  assert.ok(body.includes('const claim = claimedRoomCode;'),
+    'the override is taken into a local at the top');
+  assert.ok(body.indexOf('const claim = claimedRoomCode;') < body.indexOf('claimedRoomCode = null;'),
+    'and the slot is cleared immediately — an early return cannot leak it');
+  assert.ok(body.includes('net.region = regionFromRoomId(claim) || net.region;'),
+    'the room is born on the region the code carries');
+  assert.ok(body.includes('net.room = claim;'),
+    'with EXACTLY the homepage code — no re-mint');
+  assert.ok(body.includes('net.room = makeRoomId(net.region);'),
+    'the unclaimed create still mints from the picked region');
+});
+
+test('guest-first: a guest waiting in the room pairs when the host arrives', () => {
+  // The relay is a dumb broadcast pipe and roles are client-side
+  // state, so arrival order cannot matter — provided the hello
+  // handshake is symmetric. It is: every client sends its hello
+  // on connect (the host claiming late sends his then)...
+  const connect = functionBody(appJs, 'connectToRoom');
+  assert.ok(connect.includes("type: 'hello', v: 1, role: net.role"),
+    'connect sends the hello with the client-side role, host or guest alike');
+  // ...and the first hello a client RECEIVES is answered with
+  // its own hello, so the early guest's presence reaches the
+  // late host (and vice versa) without either re-sending.
+  const helloAt = appJs.indexOf("case 'hello': {");
+  assert.ok(helloAt >= 0, 'the hello case exists');
+  const hello = appJs.slice(helloAt, helloAt + 3400);
+  assert.ok(hello.includes('if (!net.helloReplied)'),
+    'the reply is gated on not having replied yet');
+  const replyAt = hello.indexOf('if (!net.helloReplied)');
+  assert.ok(hello.slice(replyAt, replyAt + 500).includes("type: 'hello', v: 1, role: net.role"),
+    'the unreplied hello is answered with a hello');
+  assert.ok(hello.includes('net.peerPresent = true;'),
+    'the (possibly reply) hello completes presence on the receiving side');
+  // And presence is what the start gate consumes: the host's
+  // client fires the handshake itself once both sides are
+  // present and ready — a guest who readied while waiting is
+  // paired the moment the host claims and readies.
+  const gate = functionBody(appJs, 'maybeStartMatch');
+  assert.ok(gate.includes('peerPresent: net.peerPresent'),
+    'the both-ready gate reads the presence the hellos set');
+  assert.ok(gate.includes('hostStartMatch()'),
+    'and fires the host start handshake from it');
 });
 
 test('404.html exists at the site root and bounces /g=CODE to the play page', () => {

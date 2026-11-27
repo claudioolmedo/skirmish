@@ -1431,6 +1431,41 @@ export function linkJoinRoom(search, consumedRoom) {
   return params;
 }
 
+/// Host-claim links (the homepage invite box): the homepage
+/// mints a room code before anyone has entered the game and
+/// offers it two ways — the short link for the friend (an
+/// ordinary guest join, above) and /play/?dono=CODE for the
+/// host ("dono" — the room's owner). Returns the code when this
+/// boot should claim it: app.js then runs the ORDINARY create
+/// flow with the code as an override, so the room is born with
+/// exactly the code the homepage showed, on the region the code
+/// carries. Returns null when there is nothing to claim: no
+/// param, a malformed code, or a code this tab already claimed.
+///
+/// A claimable code has exactly the shape the guest side
+/// accepts: 7 chars of the link alphabet with a region prefix
+/// regionFromRoomId can read. Legacy 10-char codes and junk
+/// claim nothing — the boot degrades to the plain Lobby Browser.
+/// Consumed exactly once per tab, like a room link: the caller
+/// passes the code this tab already claimed (sessionStorage in
+/// app.js), so a reload never re-claims, while a DIFFERENT code
+/// in the same tab is a fresh claim. Guest-first is safe by
+/// construction: the friend may already be waiting inside the
+/// room when the host claims it — the hello handshake pairs
+/// latecomers (the first hello a client receives is answered
+/// with its own), so presence completes on the host's arrival
+/// and the both-ready gate fires as usual.
+export function claimRoomFromParams(search, consumedCode) {
+  const p = new URLSearchParams(search || '');
+  const raw = p.get('dono');
+  if (!raw) return null;
+  const code = raw.toLowerCase();
+  if (!/^[a-z2-9]{7}$/.test(code)) return null;
+  if (!regionFromRoomId(code)) return null;
+  if (consumedCode && code === consumedCode) return null;
+  return code;
+}
+
 /// The region with the lowest measured ping (ties: list order).
 /// Null when nothing measured — the lobby then defaults to the
 /// first region rather than guessing.
