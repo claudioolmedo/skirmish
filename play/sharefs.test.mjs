@@ -245,15 +245,19 @@ test('homepage invite box: a fresh room code at the front door, copy/share/enter
   }
   // The region is measured, not guessed: a probe per region
   // against the relay's probe rooms, timing the second echo,
-  // inside a ~1.5 s budget, with wnam as the silence fallback.
+  // inside a 4 s budget (1.5 s starved cold probe rooms — the
+  // box silently fell back to wnam for distant visitors), with
+  // wnam as the silence fallback. The box never blocks the
+  // page either way: the field shows the game link until the
+  // code lands.
   assert.ok(homeIndex.includes("'/room/probe-' + region.id + '-' + suffix"),
     'the probe opens the region probe room, like probeRegionPing');
   assert.ok(homeIndex.includes("'?region=' + encodeURIComponent(region.id)"),
     'with the region as the placement hint');
   assert.ok(homeIndex.includes('if (echoes === 1)'),
     'the first echo only re-arms — the second is the timed one');
-  assert.ok(homeIndex.includes('var PROBE_BUDGET_MS = 1500;'),
-    'the probe budget is ~1.5 s — the box never blocks the page');
+  assert.ok(homeIndex.includes('var PROBE_BUDGET_MS = 4000;'),
+    'the probe budget is 4 s — cold probe rooms get time to open');
   assert.ok(homeIndex.includes('adoptRegion(best || REGIONS[0]);'),
     'silence everywhere falls back to the first region (wnam)');
   // Once minted, the code never changes (the decided guard), and

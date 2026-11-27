@@ -279,7 +279,13 @@
       { id: 'apac', prefix: 'a' },
       { id: 'oc', prefix: 'c' }
     ];
-    var PROBE_BUDGET_MS = 1500;
+    // 4 s, not 1.5 s: every probe targets a fresh, cold Durable
+    // Object, and from a distant browser all seven handshakes
+    // can miss a 1.5 s budget at once — the box then silently
+    // fell back to wnam for visitors it is not nearest to (the
+    // same defect that starved the in-room pair decision,
+    // 2026-11-26). Total silence still falls back to wnam.
+    var PROBE_BUDGET_MS = 4000;
 
     var input = document.getElementById('site-share-link');
     var copyBtn = document.getElementById('site-share-copy');
