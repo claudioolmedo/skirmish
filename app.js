@@ -371,6 +371,12 @@ const techtreeOverlay = document.getElementById('techtree-overlay');
 // a pause-menu entry, both driving the one toggleFullscreen().
 const fullscreenBtn = document.getElementById('fullscreen-btn');
 const pauseFullscreenBtn = document.getElementById('pause-fullscreen-btn');
+// The floating fullscreen-exit pill + the once-per-session
+// fullscreen hint: syncFullscreenUi owns the pill's visibility
+// and label; the hint is shown by onFullscreenChange when a
+// match start's fullscreen transition settles (see fsHintPending).
+const fsExitPill = document.getElementById('fs-exit-pill');
+const fsHintEl = document.getElementById('fs-hint');
 // The app-drawn cursor for pointer lock (2026-10-23): shown only
 // while the pointer is locked; the lock hides the OS cursor, so
 // this arrow is what the player aims with then.
@@ -4666,6 +4672,48 @@ function syncFullscreenUi() {
   if (pauseFullscreenBtn) {
     pauseFullscreenBtn.textContent = fs ? t('top.exitFullscreen') : t('top.fullscreen');
   }
+  // The exit pill exists ONLY in fullscreen: a labelled ✕ under
+  // the top bar, so leaving never depends on finding the toggle
+  // in a menu. Its click runs the same toggleFullscreen() exit
+  // path as the top-bar button (wired in main()).
+  if (fsExitPill) {
+    fsExitPill.hidden = !fs;
+    fsExitPill.textContent = '✕ ' + t('top.exitFullscreen');
+  }
+  if (!fs) hideFsHint();
+}
+
+// --- Fullscreen hint (once per tab session) ----------------------
+// The first time a match start lands the player in fullscreen,
+// say so — and say how to leave (the ✕ pill, or hold Esc) — for
+// ~6 s. Players who did not know the game had taken the whole
+// screen had no visible door out; this is that door's sign.
+// Once per TAB session (sessionStorage): a reload in the same
+// tab does not nag again, a new tab is a new player moment.
+const FS_HINT_KEY = 'skirmish2.fsHintShown';
+let fsHintPending = false; // a match start asked for fullscreen
+let fsHintTimer = 0;
+
+function fsHintAlreadyShown() {
+  try { return !!sessionStorage.getItem(FS_HINT_KEY); } catch { return false; }
+}
+
+function markFsHintShown() {
+  try { sessionStorage.setItem(FS_HINT_KEY, '1'); } catch { /* private mode: the in-page flag below still applies */ }
+  fsHintPending = false;
+}
+
+function hideFsHint() {
+  if (fsHintTimer) { clearTimeout(fsHintTimer); fsHintTimer = 0; }
+  if (fsHintEl) fsHintEl.hidden = true;
+}
+
+function showFsHint() {
+  if (!fsHintEl) return;
+  fsHintEl.textContent = t('fs.hint');
+  fsHintEl.hidden = false;
+  if (fsHintTimer) clearTimeout(fsHintTimer);
+  fsHintTimer = setTimeout(hideFsHint, 6000);
 }
 
 // The fullscreen request on its own, shared by the toggle and by
@@ -4736,6 +4784,15 @@ function onFullscreenChange() {
   syncFullscreenUi();
   if (isFullscreen()) lockEscapeKey();
   else unlockEscapeKey();
+  // A match start's fullscreen has SETTLED: if the hint is
+  // still owed this tab session, show it now (never mid-
+  // transition, never twice).
+  if (isFullscreen() && fsHintPending && !fsHintAlreadyShown()) {
+    markFsHintShown();
+    showFsHint();
+  } else {
+    fsHintPending = false;
+  }
   fitCanvas();
   // The transition has SETTLED: if a live match wants capture
   // and the lock is not held, take it now — this is the reliable
@@ -4884,6 +4941,11 @@ function enterGameCapture() {
   captureWanted = true;
   if (pointerLocked) { syncCaptureOverlay(); return; }
   if (!isFullscreen()) {
+    // A match start is taking the screen: arm the once-per-
+    // session fullscreen hint; onFullscreenChange shows it when
+    // the transition settles (or it simply never fires if the
+    // browser refuses fullscreen — windowed play, no hint).
+    if (!fsHintAlreadyShown()) fsHintPending = true;
     const p = requestGameFullscreen();
     if (p && typeof p.then === 'function') {
       if (p.catch) p.catch(() => {});
@@ -5262,9 +5324,27 @@ function applyLocalOrder(cmd) {
 }
 
 function issue(cmd) {
-  if (playback) return false;
+  // ISSUEDROP (bot-loop engageclient4): the two early returns
+  // below used to drop an order SILENTLY — no {ev:'issue'}
+  // line at all, so a refused order was indistinguishable in
+  // the occlog from one never attempted (engageclient3 code
+  // evidence, items 1–2). Each now logs an issue-drop line
+  // first. occLog is inert without ?occlog=1, and the typeof
+  // guard keeps harnesses that slice issue() without the
+  // occLog block in scope working — logging only, no order
+  // semantics change: both points still return false.
+  if (playback) {
+    if (typeof occLog === 'function') occLog({ ev: 'issue-drop', reason: 'playback', cmd });
+    return false;
+  }
   if (net) {
-    if (!net.session || net.phase !== 'playing') return false;
+    if (!net.session || net.phase !== 'playing') {
+      if (typeof occLog === 'function') occLog({
+        ev: 'issue-drop', reason: 'net-not-playing', cmd,
+        phase: net.phase, hasSession: !!net.session,
+      });
+      return false;
+    }
     const sent = net.session.localCommand(cmd) >= 0;
     occLog({ ev: 'issue', cmd, ok: sent, net: true });
     // ATTACKWATCH (engageclient3): follow an accepted attack
@@ -5867,21 +5947,47 @@ function writeRoomLinkMark(room) {
   try { sessionStorage.setItem(ROOM_LINK_MARK_KEY, room); } catch { /* storage off — the link just stays re-joinable */ }
 }
 
-/// Drop the room params (room/region/private) from the address bar
-/// without navigating. From the moment a room exists it lives in
-/// memory (net.room); the invite link is built on demand by the
-/// room screen's copy action, never read back from the URL — so
-/// the address bar can never re-trigger a join on reload.
+/// Drop the room params (room/region/private) and the amigo
+/// param from the address bar without navigating. From the moment
+/// a room exists it lives in memory (net.room); the invite link is
+/// built on demand by the room screen's copy action, never read
+/// back from the URL — so the address bar can never re-trigger a
+/// join on reload.
 function cleanPlayUrl() {
   try {
     const p = new URLSearchParams(location.search);
-    if (!p.has('room') && !p.has('region') && !p.has('private')) return;
+    if (!p.has('room') && !p.has('region') && !p.has('private') && !p.has('amigo')) return;
     p.delete('room');
     p.delete('region');
     p.delete('private');
+    p.delete('amigo');
     const qs = p.toString();
     history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
   } catch { /* non-http(s) context — nothing to clean */ }
+}
+
+// --- amigo-link consume-once -------------------------------------------------
+// The homepage's "Play a friend" button links to /play/?amigo=1:
+// the visitor came to play a friend, so the boot lands them on
+// the create-room view — one tap from making the room and sending
+// its invite link. Consumed exactly once per tab session, like a
+// room link: the mark lives in sessionStorage, so a RELOAD of the
+// same tab lands on the plain Lobby Browser (the front door).
+const AMIGO_MARK_KEY = 'skirmish2.amigoConsumed';
+
+function readAmigoMark() {
+  try { return sessionStorage.getItem(AMIGO_MARK_KEY); } catch { return null; }
+}
+
+function writeAmigoMark() {
+  try { sessionStorage.setItem(AMIGO_MARK_KEY, '1'); } catch { /* storage off — the link just stays re-jumpable */ }
+}
+
+/// True when this boot should jump to the create view: the amigo
+/// param is present and this tab has not consumed it yet.
+function amigoIntent(search, consumed) {
+  if (consumed) return false;
+  return new URLSearchParams(search || '').get('amigo') === '1';
 }
 
 // --- the handshake ---------------------------------------------------------
@@ -6142,6 +6248,31 @@ function lobbyStrings() {
   };
 }
 
+// The invite link, built on demand from in-memory room state —
+// never read from the address bar, which is kept room-free so a
+// reload lands on the Lobby Browser (the consume-once rule).
+// Every surface that shows or sends the link (the room screen's
+// read-only field, Copy, Share) goes through here so they can
+// never disagree.
+function refreshInviteLink() {
+  if (net && net.room) {
+    net.roomLinkValue = buildPlayUrl(
+      location.origin + location.pathname, net.room, net.region,
+      { private: net.privacy === 'private' });
+  }
+  if (netUi && netUi.inviteLinkInput) {
+    netUi.inviteLinkInput.value = (net && net.roomLinkValue) || '';
+  }
+  return (net && net.roomLinkValue) || '';
+}
+
+// Native sharing (the phone share sheet, the OS share dialog) is
+// a MAY: where navigator.share does not exist the Share button
+// stays hidden and Copy is the whole surface.
+function shareSupported() {
+  return typeof navigator !== 'undefined' && typeof navigator.share === 'function';
+}
+
 function renderRoom() {
   if (!netUi || !netUi.roomSection) return;
   const inRoom = !!(net && net.room);
@@ -6261,6 +6392,11 @@ function renderRoom() {
   netUi.readyBtn.disabled = !can;
   netUi.readyBtn.textContent = net.selfReady ? t('room.readyCancel') : t('room.start');
   netUi.readyBtn.classList.toggle('active', !!net.selfReady);
+  // The invite panel: the read-only field carries the current
+  // link on every render, and the Share button exists only
+  // where the browser offers native sharing.
+  refreshInviteLink();
+  if (netUi.shareLinkBtn) netUi.shareLinkBtn.hidden = !shareSupported();
 }
 
 /// The both-ready rule (host side only — startGate enforces it):
@@ -7980,7 +8116,10 @@ function applyStaticStrings() {
   setPlaceholder('pw-input', 'room.pwPlaceholder');
   setText('btn-pw-enter', 'room.enter');
   setText('invite-txt', 'room.invite');
-  setText('btn-copy-link', 'room.copy');
+  setText('btn-copy-link', 'room.copyLink');
+  setText('btn-share-link', 'room.share');
+  setText('btn-play-friend', 'lobby.playFriend');
+  setText('play-friend-note', 'lobby.playFriendNote');
   setText('conn-title-h', 'conn.title');
   setText('loading-title-h', 'load.title');
   // Ad slots: the caption + note (the slot bodies belong to ads.js).
@@ -8157,6 +8296,9 @@ async function main() {
   if (resultsChip) resultsChip.addEventListener('click', () => setRevealMap(false));
   if (fullscreenBtn) fullscreenBtn.addEventListener('click', toggleFullscreen);
   if (pauseFullscreenBtn) pauseFullscreenBtn.addEventListener('click', toggleFullscreen);
+  // The floating exit pill: visible only in fullscreen (see
+  // syncFullscreenUi), and its click is the same exit path.
+  if (fsExitPill) fsExitPill.addEventListener('click', toggleFullscreen);
   document.addEventListener('fullscreenchange', onFullscreenChange);
   document.addEventListener('webkitfullscreenchange', onFullscreenChange);
   document.addEventListener('pointerlockchange', syncPointerLock);
@@ -8387,6 +8529,7 @@ async function main() {
     refreshGamesBtn: document.getElementById('btn-refresh-games'),
     joinLobbyBtn: document.getElementById('btn-join-lobby'),
     createOpenBtn: document.getElementById('btn-create-open'),
+    playFriendBtn: document.getElementById('btn-play-friend'),
     createBackBtn: document.getElementById('btn-create-back'),
     connQualityList: document.getElementById('conn-quality-list'),
     soloBtn: document.getElementById('btn-solo'),
@@ -8423,6 +8566,8 @@ async function main() {
     pwNote: document.getElementById('pw-note'),
     readyBtn: document.getElementById('btn-ready'),
     copyLinkBtn: document.getElementById('btn-copy-link'),
+    inviteLinkInput: document.getElementById('invite-link-input'),
+    shareLinkBtn: document.getElementById('btn-share-link'),
     lobbyStatus: document.getElementById('lobby-status'),
     loadingOverlay: document.getElementById('loading-overlay'),
     loadSlotHost: document.getElementById('load-slot-host'),
@@ -8553,6 +8698,16 @@ async function main() {
       if (netUi.createSection) netUi.createSection.hidden = false;
     });
   }
+  // "Play with a friend": the same jump to the create view the
+  // Create Lobby button makes — the friend flow IS create a room
+  // and send the link (the note under the button says exactly
+  // that); no separate screen to learn.
+  if (netUi.playFriendBtn) {
+    netUi.playFriendBtn.addEventListener('click', () => {
+      if (netUi.gamesSection) netUi.gamesSection.hidden = true;
+      if (netUi.createSection) netUi.createSection.hidden = false;
+    });
+  }
   if (netUi.createBackBtn) {
     netUi.createBackBtn.addEventListener('click', () => {
       if (netUi.createSection) netUi.createSection.hidden = true;
@@ -8606,15 +8761,39 @@ async function main() {
       // The invite link is built on demand from in-memory room
       // state — never read from the address bar, which is kept
       // room-free so a reload lands on the Lobby Browser.
-      if (net && net.room) {
-        net.roomLinkValue = buildPlayUrl(
-          location.origin + location.pathname, net.room, net.region,
-          { private: net.privacy === 'private' });
-        if (navigator.clipboard) {
-          navigator.clipboard.writeText(net.roomLinkValue);
-        }
+      const link = refreshInviteLink();
+      if (link && navigator.clipboard) {
+        navigator.clipboard.writeText(link);
       }
       flash(t('flash.linkCopied'));
+    });
+  }
+  if (netUi.inviteLinkInput) {
+    // One click selects the whole link, for a manual copy on
+    // browsers without a clipboard API.
+    netUi.inviteLinkInput.addEventListener('click', () => {
+      netUi.inviteLinkInput.select();
+    });
+  }
+  if (netUi.shareLinkBtn) {
+    // The Share button starts hidden and renderRoom unhides it
+    // only where navigator.share exists; this guard is the same
+    // check, so a stale visible button can never throw.
+    netUi.shareLinkBtn.hidden = !shareSupported();
+    netUi.shareLinkBtn.addEventListener('click', () => {
+      if (!shareSupported()) return;
+      const link = refreshInviteLink();
+      if (!link) return;
+      try {
+        const p = navigator.share({
+          title: document.title,
+          text: t('room.shareText'),
+          url: link,
+        });
+        // A dismissed share sheet rejects its promise: that is
+        // the player changing their mind, not an error — silent.
+        if (p && p.catch) p.catch(() => {});
+      } catch { /* sharing unavailable mid-flight: silent */ }
     });
   }
   if (netUi.resignBtn) {
@@ -8750,6 +8929,8 @@ async function main() {
   // later reload of this tab lands on the Lobby Browser.
   {
     const join = linkJoinRoom(location.search, readRoomLinkMark());
+    // Read the amigo intent BEFORE cleanPlayUrl strips the param.
+    const amigo = amigoIntent(location.search, readAmigoMark());
     setPaused(true);
     if (join) {
       writeRoomLinkMark(join.room);
@@ -8758,6 +8939,16 @@ async function main() {
     } else {
       cleanPlayUrl(); // a consumed link's params leave the bar too
       openLobby(null);
+      if (amigo) {
+        // The homepage's "Play a friend" landing: a room link
+        // would have won above; here the visitor came to play a
+        // friend, so make the same jump to the create view the
+        // Lobby's own friend button makes. The mark is written
+        // first — a reload lands on the plain Lobby Browser.
+        writeAmigoMark();
+        if (netUi.gamesSection) netUi.gamesSection.hidden = true;
+        if (netUi.createSection) netUi.createSection.hidden = false;
+      }
     }
   }
   // Quality override (pause menu): Auto / High / Medium / Low.

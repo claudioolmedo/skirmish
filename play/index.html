@@ -217,6 +217,21 @@
      never see it: windowed play, no nagging. -->
 <button id="capture-overlay" type="button" hidden><span id="capture-overlay-txt">Click to capture the mouse</span></button>
 
+<!-- Fullscreen exit pill: the obvious way OUT of fullscreen — a
+     labelled ✕ button under the top bar, shown by app.js
+     (syncFullscreenUi) only while fullscreen is active. Same
+     layer as the click-to-capture pill (z 30: above the HUD,
+     below the menus), so it stays clickable under pointer lock
+     through the same locked-event routing as the top-bar
+     fullscreen button. Semi-transparent at rest, opaque on
+     hover/focus. -->
+<button id="fs-exit-pill" type="button" hidden>✕ Exit fullscreen</button>
+
+<!-- Fullscreen hint: shown once per tab session when a match
+     start enters fullscreen — you are in fullscreen, and here is
+     how to leave. Non-interactive, fades after ~6 s (app.js). -->
+<div id="fs-hint" hidden role="status"></div>
+
 <!-- TOP: resource bar -->
 <header class="ui-topbar">
   <div class="ui-res-group" id="res-group" role="status" aria-label="Resources">
@@ -671,9 +686,11 @@
           <div class="games-actions">
             <button id="btn-solo" class="btn-quiet" type="button">Play solo</button>
             <span class="games-actions-spacer"></span>
+            <button id="btn-play-friend" class="btn btn-gold" type="button">Play with a friend</button>
             <button id="btn-join-lobby" class="btn btn-gold" type="button" disabled>Join Lobby</button>
             <button id="btn-create-open" class="btn btn-gold" type="button">Create Lobby</button>
           </div>
+          <p id="play-friend-note" class="overlay-note">Create the room and send the link to your friend — they join with one click, no account.</p>
         </div>
         <div id="create-section" hidden>
           <div class="games-head">
@@ -817,7 +834,20 @@
           <div class="pause-actions">
             <button id="btn-ready" class="btn btn-gold btn-big" type="button" disabled>Start</button>
           </div>
-          <p class="invite-row"><span id="invite-txt">Invite link —</span> <button id="btn-copy-link" class="linklike" type="button">copy</button></p>
+          <!-- Friend invite panel (Chess.com-style sharing): the
+               full link in a read-only field, a real Copy button,
+               and a native Share button where the browser offers
+               one (app.js hides it when navigator.share is absent).
+               The link is still built on demand from in-memory room
+               state — the address bar stays room-free. -->
+          <div class="invite-panel">
+            <label class="invite-label" id="invite-txt" for="invite-link-input">Invite link —</label>
+            <div class="invite-link-row">
+              <input id="invite-link-input" type="text" readonly value="" autocomplete="off" spellcheck="false">
+              <button id="btn-copy-link" class="btn btn-gold btn-sm" type="button">Copy link</button>
+              <button id="btn-share-link" class="btn btn-ghost btn-sm" type="button" hidden>Share…</button>
+            </div>
+          </div>
         </div>
         <p id="lobby-status" class="overlay-note">Pick a server, then create the game.</p>
       </div>
