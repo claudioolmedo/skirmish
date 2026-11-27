@@ -70,7 +70,7 @@ import {
   GAME_SPEED, GAME_SPEEDS, isGameSpeed, TICK_MS, advanceTicks,
   applyCommand as netApplyCommand, tcIdOf as netTcIdOf,
   createSession, createRecorder, replayEvents, isReplay,
-  createRelayClient, probeRegionPing, makeRoomId, buildPlayUrl,
+  createRelayClient, probeRegionPing, makeRoomId, buildShortUrl,
   linkJoinRoom, pickFastestRegion, REGIONS as NET_REGIONS,
   normalizeTeams, packTeams, teamsIsDefault,
   packTeamsWithLock, normalizeTeamsUnlocked,
@@ -5947,20 +5947,21 @@ function writeRoomLinkMark(room) {
   try { sessionStorage.setItem(ROOM_LINK_MARK_KEY, room); } catch { /* storage off — the link just stays re-joinable */ }
 }
 
-/// Drop the room params (room/region/private) and the amigo
-/// param from the address bar without navigating. From the moment
-/// a room exists it lives in memory (net.room); the invite link is
-/// built on demand by the room screen's copy action, never read
-/// back from the URL — so the address bar can never re-trigger a
-/// join on reload.
+/// Drop the room params (room/region/private, plus the short
+/// link's `g` alias) and the amigo param from the address bar
+/// without navigating. From the moment a room exists it lives in
+/// memory (net.room); the invite link is built on demand by the
+/// room screen's copy action, never read back from the URL — so
+/// the address bar can never re-trigger a join on reload.
 function cleanPlayUrl() {
   try {
     const p = new URLSearchParams(location.search);
-    if (!p.has('room') && !p.has('region') && !p.has('private') && !p.has('amigo')) return;
+    if (!p.has('room') && !p.has('region') && !p.has('private') && !p.has('amigo') && !p.has('g')) return;
     p.delete('room');
     p.delete('region');
     p.delete('private');
     p.delete('amigo');
+    p.delete('g');
     const qs = p.toString();
     history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
   } catch { /* non-http(s) context — nothing to clean */ }
@@ -6256,9 +6257,12 @@ function lobbyStrings() {
 // never disagree.
 function refreshInviteLink() {
   if (net && net.room) {
-    net.roomLinkValue = buildPlayUrl(
-      location.origin + location.pathname, net.room, net.region,
-      { private: net.privacy === 'private' });
+    // The SHORT link (glink): site root + the room code, nothing
+    // else — the code carries the region, and a private room's
+    // guest is asked for the password by the host's 'pw-req'
+    // handshake even without a private flag on the link, so one
+    // link form serves every room.
+    net.roomLinkValue = buildShortUrl(location.origin, net.room);
   }
   if (netUi && netUi.inviteLinkInput) {
     netUi.inviteLinkInput.value = (net && net.roomLinkValue) || '';
@@ -7368,14 +7372,15 @@ function createGame() {
   // (the room screen carries its twin toggle).
   net.teamsUnlocked = !!(netUi.createTeamsUnlocked && netUi.createTeamsUnlocked.checked);
   net.region = net.selectedRegion || net.region || regionList[0].id;
-  net.room = makeRoomId();
+  // The region is picked FIRST because the room code carries it
+  // in its first char (glink) — that is what lets the invite link
+  // be just the site root plus the code.
+  net.room = makeRoomId(net.region);
   // The room lives in memory from here — the address bar stays
   // room-free (a reload must land on the Lobby Browser), and the
   // invite link is built on demand by the copy action.
   cleanPlayUrl();
-  net.roomLinkValue = buildPlayUrl(
-    location.origin + location.pathname, net.room, net.region,
-    { private: net.privacy === 'private' });
+  net.roomLinkValue = buildShortUrl(location.origin, net.room);
   if (netUi.createBtn) netUi.createBtn.disabled = true;
   // The room screen takes over from the browser + create view.
   stopLobbyBrowser();

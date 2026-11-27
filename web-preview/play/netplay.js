@@ -1336,12 +1336,53 @@ export function probeRegionPing({
 
 const ROOM_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789'; // no lookalikes
 
-export function makeRoomId(rand = Math.random) {
-  let id = '';
-  for (let i = 0; i < 10; i++) {
+// Short links (glink, Claudio's request 2026-11-26): a room id is
+// 7 chars and CARRIES its region in char 1, so the invite link can
+// be just the site root plus the code —
+// https://skirmish.online/g=wlehsls — with no region param for the
+// guest client to need: it reads the region back out of the code.
+// The prefix letters are distinct members of ROOM_ALPHABET, one
+// per region in REGIONS, picked to hint at the region:
+//   wnam 'w' (West North America), enam 'e' (East North America),
+//   sam 's' (South America), weur 'u' (eUrope West), eeur 'r'
+//   (euRope East), apac 'a' (Asia-Pacific), oc 'c' (oCeania).
+const REGION_PREFIX = {
+  wnam: 'w', enam: 'e', sam: 's', weur: 'u', eeur: 'r', apac: 'a', oc: 'c',
+};
+const PREFIX_REGION = Object.fromEntries(
+  Object.entries(REGION_PREFIX).map(([region, ch]) => [ch, region]));
+
+export function makeRoomId(regionId, rand = Math.random) {
+  // An unknown region falls back to wnam's prefix — the same
+  // default a region-less guest join has always landed on.
+  let id = REGION_PREFIX[regionId] || REGION_PREFIX.wnam;
+  for (let i = 0; i < 6; i++) {
     id += ROOM_ALPHABET[Math.floor(rand() * ROOM_ALPHABET.length)];
   }
   return id;
+}
+
+/// The region a room id carries in its first char, or null when
+/// the id is not a short-link-era id: legacy 10-char codes (whose
+/// links always named the region explicitly) and codes whose
+/// prefix letter no region claims both read as null, and the
+/// caller falls back to the explicit param / the wnam default.
+export function regionFromRoomId(room) {
+  if (typeof room !== 'string' || room.length !== 7) return null;
+  return PREFIX_REGION[room[0]] || null;
+}
+
+/// The short invite link: the site root plus the code, nothing
+/// else — https://skirmish.online/g=wlehsls. The root 404 page
+/// bounces it to /play/?room=CODE (GitHub Pages serves the custom
+/// 404 for the unknown /g= path), and the code itself carries the
+/// region (see makeRoomId), so the guest needs no params at all.
+/// One link form for every room, private included: a flag-less
+/// guest of a private room is still asked for the password by the
+/// host's 'pw-req' handshake before presence counts, so the
+/// private=1 flag was only ever a prompt-timing courtesy.
+export function buildShortUrl(origin, room) {
+  return `${origin}/g=${room}`;
 }
 
 export function buildPlayUrl(base, room, region, opts = {}) {
@@ -1356,9 +1397,18 @@ export function buildPlayUrl(base, room, region, opts = {}) {
 
 export function parsePlayParams(search) {
   const p = new URLSearchParams(search || '');
+  // `g` is the room param's short alias, so /play/?g=CODE works
+  // exactly like /play/?room=CODE (the root /g=CODE link itself
+  // bounces through 404.html and lands here as ?room=).
+  const room = p.get('room') || p.get('g') || null;
+  // No explicit region: a short-link-era code carries its own
+  // (regionFromRoomId), so the guest joins the room's real region
+  // instead of the wnam default. An explicit region always wins,
+  // and legacy 10-char codes derive nothing.
+  const region = p.get('region') || regionFromRoomId(room);
   return {
-    room: p.get('room') || null,
-    region: p.get('region') || null,
+    room,
+    region,
     online: p.get('online') === '1',
     private: p.get('private') === '1',
   };

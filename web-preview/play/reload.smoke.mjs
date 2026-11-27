@@ -308,8 +308,11 @@ const LINK = `https://skirmish.online/play/?room=${LINK_ROOM}&region=wnam`;
   tab.el('btn-copy-link').click();
   await sleep(20);
   assert.equal(tab.clipWrites.length, 1, 'copy writes the invite link');
-  assert.ok(tab.clipWrites[0].includes(`room=${m[1]}`), 'copied link carries the in-memory room');
-  assert.ok(tab.clipWrites[0].includes('region='), 'copied link carries the region');
+  // glink (2026-11-26): the copied link is the SHORT root link —
+  // the code itself carries the region, so no room=/region=
+  // params ride along; the room it names is the in-memory one.
+  assert.equal(tab.clipWrites[0], `https://skirmish.online/g=${m[1]}`,
+    'copied link is the short link of the in-memory room');
   assert.equal(tab.location.search, '', 'address bar still clean after copying');
   assert.ok(noWasmFetched(tab), 'no .wasm fetched while creating');
   console.log('PASS (d) create keeps the URL clean; copy builds the link on demand');

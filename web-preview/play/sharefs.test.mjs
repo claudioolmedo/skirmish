@@ -73,7 +73,10 @@ test('room screen carries the invite panel: read-only link field, Copy and Share
 
 test('the invite link still comes from refreshInviteLink over in-memory room state', () => {
   const body = functionBody(appJs, 'refreshInviteLink');
-  assert.ok(body.includes('buildPlayUrl('), 'the link is built by buildPlayUrl');
+  // glink (2026-11-26) superseded the link FORM, not the
+  // mechanism: still built on demand from in-memory state, now
+  // as the short root link via buildShortUrl (see glink.test.mjs).
+  assert.ok(body.includes('buildShortUrl('), 'the link is built by buildShortUrl');
   assert.ok(body.includes('net.room'), 'from the in-memory room state');
   assert.ok(body.includes('inviteLinkInput'), 'and lands in the read-only field');
   assert.ok(!body.includes('location.search'), 'never parsed back out of the address bar');

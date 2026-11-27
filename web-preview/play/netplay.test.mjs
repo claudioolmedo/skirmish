@@ -14,7 +14,8 @@ import {
   encodeMessage, decodeMessage,
   createSession, createRecorder, isReplay, replayEvents,
   createRelayClient, probeRegionPing,
-  makeRoomId, buildPlayUrl, parsePlayParams, linkJoinRoom,
+  makeRoomId, buildPlayUrl, buildShortUrl, regionFromRoomId,
+  parsePlayParams, linkJoinRoom,
   pickFastestRegion, REGIONS,
   DEFAULT_TEAMS, NO_TEAM, normalizeTeams, teamsIsDefault, packTeams, unpackTeams,
 } from './netplay.js';
@@ -326,6 +327,55 @@ test('linkJoinRoom: a room link joins once per tab session', () => {
   assert.equal(linkJoinRoom('?online=1', 'abc123def4'), null);
   // The private flag rides along on the fresh join.
   assert.equal(linkJoinRoom('?room=abc123def4&private=1', null).private, true);
+});
+
+test('glink: the room code carries its region (round-trip per region)', () => {
+  // Every region's prefix survives the round trip: a code made
+  // for a region reads back as that region, whatever the tail.
+  for (const r of REGIONS) {
+    const id = makeRoomId(r.id, () => 0.42);
+    assert.equal(id.length, 7);
+    assert.equal(regionFromRoomId(id), r.id, `${r.id} round-trips`);
+  }
+  // Distinct regions, distinct first chars (no shared prefix).
+  const firsts = REGIONS.map((r) => makeRoomId(r.id, () => 0)[0]);
+  assert.equal(new Set(firsts).size, REGIONS.length);
+  // An unknown region falls back to wnam's prefix, the standing
+  // default — and reads back as wnam.
+  assert.equal(regionFromRoomId(makeRoomId('nowhere', () => 0)), 'wnam');
+  // Legacy 10-char codes carry nothing: their links always named
+  // the region explicitly, and they keep working that way.
+  assert.equal(regionFromRoomId('abc123def4'), null);
+  assert.equal(regionFromRoomId('wlehsls9x2'), null);
+  // A 7-char string whose prefix no region claims is not a code.
+  assert.equal(regionFromRoomId('zzzzzzz'), null);
+  assert.equal(regionFromRoomId(''), null);
+  assert.equal(regionFromRoomId(null), null);
+});
+
+test('glink: the short URL is the site root plus the code', () => {
+  assert.equal(buildShortUrl('https://skirmish.online', 'wlehsls'),
+    'https://skirmish.online/g=wlehsls');
+});
+
+test('glink: a region-less link joins the region the code carries', () => {
+  // The 404 bounce lands as /play/?room=CODE with no region: the
+  // guest joins the code's region, not the wnam default.
+  assert.deepEqual(parsePlayParams('?room=uexamps'),
+    { room: 'uexamps', region: 'weur', online: false, private: false });
+  const join = linkJoinRoom('?room=uexamps', null);
+  assert.equal(join.region, 'weur');
+  // The g alias on the play page itself behaves identically.
+  assert.deepEqual(parsePlayParams('?g=cexamps'),
+    { room: 'cexamps', region: 'oc', online: false, private: false });
+  assert.equal(linkJoinRoom('?g=cexamps', null).room, 'cexamps');
+  // An explicit region always wins over the code's prefix.
+  assert.equal(parsePlayParams('?room=uexamps&region=sam').region, 'sam');
+  // Legacy behaviour untouched: a 10-char code without a region
+  // still derives nothing (the caller defaults to wnam).
+  assert.equal(parsePlayParams('?room=abc123def4').region, null);
+  // Consume-once applies to short-code joins exactly as before.
+  assert.equal(linkJoinRoom('?room=uexamps', 'uexamps'), null);
 });
 
 // ---------------------------------------------------------------- applier
@@ -1198,9 +1248,10 @@ test('region ping falls back to handshake timing when echoes never return', asyn
 // ---------------------------------------------------------------- lobby helpers
 
 test('lobby helpers: room ids, links, fastest region', () => {
-  const id = makeRoomId(() => 0.5);
-  assert.equal(id.length, 10);
+  const id = makeRoomId('wnam', () => 0.5);
+  assert.equal(id.length, 7);
   assert.match(id, /^[a-z2-9]+$/);
+  assert.equal(id[0], 'w', 'char 1 carries the region (wnam)');
   const url = buildPlayUrl('https://skirmish.online/play/', 'abc123xyz9', 'wnam');
   assert.equal(url, 'https://skirmish.online/play/?room=abc123xyz9&region=wnam');
   const parsed = parsePlayParams('?room=abc123xyz9&region=wnam');
