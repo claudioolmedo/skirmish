@@ -167,11 +167,19 @@ test('fullscreen hint: once per tab session, ~6 s, localized, non-interactive', 
   assert.ok(hintCss.includes('pointer-events: none'), 'the hint never blocks play');
 });
 
-test('homepage hero: Play a friend button beside the Play CTA, linking to ?amigo=1', () => {
+test('homepage hero: one friend door — the invite box; no Play a friend button beside the Play CTA', () => {
   assert.ok(/<a class="btn btn-gold" href="play\/">Play the test build<\/a>/.test(homeIndex),
     'the hero carries the main Play call-to-action');
-  assert.ok(/<a class="btn btn-ghost" href="play\/\?amigo=1">Play a friend<\/a>/.test(homeIndex),
-    'the friend button sits beside it and links to the amigo landing');
+  // Claudio's dedup correction (2026-11-26, after the glink
+  // publish): the friend action appeared twice in the hero —
+  // the invite box AND a "Play a friend" button linking to
+  // ?amigo=1. The hero keeps ONE friend door, the invite box
+  // (with its "Enter this room and play"); the button is gone.
+  // (The ?amigo=1 boot handling and the in-Lobby friend button
+  // stay — only the hero anchor was removed.)
+  const heroSlice = homeIndex.slice(0, homeIndex.indexOf('</section>'));
+  assert.ok(!heroSlice.includes('play/?amigo=1'),
+    'no ?amigo=1 anchor in the hero — the invite box is the only friend door');
   const ctaAt = homeIndex.indexOf('class="hero-cta"');
   const boxAt = homeIndex.indexOf('class="share-box invite-box"');
   // Claudio's corrections (2026-11-26, after seeing the live
