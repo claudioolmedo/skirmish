@@ -22,6 +22,14 @@
 //
 // Presentation/client only: the sim, the golden hash and the
 // room-link semantics are untouched.
+//
+// Follow-up (same package): sharing moves to the very start of
+// the site. The homepage hero gains a Play / Play a friend CTA
+// row and a share box (the game's link, ready to copy or send),
+// the play page boots ?amigo=1 straight into the create-room
+// view (consume-once, like a room link), and the homepage gains
+// a Quick tips section covering the friend flow and the
+// fullscreen exits.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -31,6 +39,8 @@ import { STRINGS, LOCALES } from './i18n.js';
 const playIndex = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 const appJs = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
 const playCss = readFileSync(new URL('./play.css', import.meta.url), 'utf8');
+const homeIndex = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+const siteCss = readFileSync(new URL('../site.css', import.meta.url), 'utf8');
 
 function functionBody(src, name) {
   const start = src.indexOf(`function ${name}(`);
@@ -145,6 +155,102 @@ test('fullscreen hint: once per tab session, ~6 s, localized, non-interactive', 
     'the hint shows when a match start\u2019s fullscreen transition settles');
   const hintCss = playCss.slice(playCss.indexOf('#fs-hint {'), playCss.indexOf('#fs-hint[hidden]'));
   assert.ok(hintCss.includes('pointer-events: none'), 'the hint never blocks play');
+});
+
+test('homepage hero: Play a friend button beside the Play CTA, linking to ?amigo=1', () => {
+  assert.ok(/<a class="btn btn-gold" href="play\/">Play the test build<\/a>/.test(homeIndex),
+    'the hero carries the main Play call-to-action');
+  assert.ok(/<a class="btn btn-ghost" href="play\/\?amigo=1">Play a friend<\/a>/.test(homeIndex),
+    'the friend button sits beside it and links to the amigo landing');
+  const ctaAt = homeIndex.indexOf('class="hero-cta"');
+  assert.ok(ctaAt > homeIndex.indexOf('class="chess-line"') && ctaAt < homeIndex.indexOf('class="share-box"'),
+    'the CTA row sits in the hero, above the share box');
+});
+
+test('homepage share box: the game link in a read-only field, Copy and Share wired', () => {
+  assert.ok(/<input id="site-share-link" type="text" readonly value="https:\/\/skirmish\.online\/play\/">/.test(homeIndex),
+    'the share field shows the game link, read-only');
+  assert.ok(/<button id="site-share-copy" class="btn btn-gold" type="button">Copy link<\/button>/.test(homeIndex),
+    'copy is a real labelled button');
+  assert.ok(/<button id="site-share-share" class="btn btn-ghost" type="button" hidden>Share&hellip;<\/button>/.test(homeIndex),
+    'the Share button exists and starts hidden (the script unhides it only with navigator.share)');
+  assert.ok(homeIndex.includes("typeof navigator.share === 'function'"),
+    'the homepage script feature-tests navigator.share like the play page does');
+  assert.ok(homeIndex.includes('navigator.clipboard.writeText(url)'),
+    'copy writes the link to the clipboard');
+  assert.ok(homeIndex.includes('navigator.share({'),
+    'the Share button calls navigator.share');
+  assert.ok(homeIndex.includes("input.addEventListener('click', function () { input.select(); })"),
+    'the field selects on click for a manual copy');
+  // Cancel is silent on the homepage too: the rejection is
+  // swallowed and no alert rides the share path.
+  const shareAt = homeIndex.indexOf('navigator.share({');
+  const shareBlock = homeIndex.slice(shareAt, shareAt + 500);
+  assert.ok(shareBlock.includes('p.catch(function () {})'),
+    'a dismissed share sheet rejects silently');
+  assert.ok(!shareBlock.includes('alert('), 'no alert on the share path');
+  const boxCss = siteCss.slice(siteCss.indexOf('.share-box {'), siteCss.indexOf('.share-label {'));
+  assert.ok(boxCss.includes('border-radius: 10px'), 'the share box wears the site panel styling');
+});
+
+test('homepage Quick tips: the five one-liners, friend flow and fullscreen exits', () => {
+  assert.ok(homeIndex.includes('<section class="section" id="tips">'),
+    'the tips section exists on the homepage');
+  assert.ok(homeIndex.includes('<h2>Quick tips</h2>'), 'titled Quick tips');
+  assert.ok(homeIndex.includes('No account, no install'),
+    'tip 1: no account, no install');
+  assert.ok(homeIndex.includes('create a room and send them the invite link'),
+    'tip 2: the friend flow — create a room, send the invite link');
+  assert.ok(homeIndex.includes('they land straight in your room'),
+    'tip 2: the friend lands straight in the room');
+  assert.ok(homeIndex.includes('A match opens in fullscreen'),
+    'tip 3: a match opens in fullscreen');
+  assert.ok(homeIndex.includes('&times; Exit fullscreen button (top-right)'),
+    'tip 3: the ✕ Exit fullscreen button is the way out');
+  assert.ok(homeIndex.includes('or by holding Esc'),
+    'tip 3: holding Esc is the other way out');
+  assert.ok(homeIndex.includes('A short Esc press cancels and closes panels'),
+    'tip 4: short Esc works the game, not the fullscreen');
+  assert.ok(homeIndex.includes('on phone and computer'),
+    'tip 5: phone and computer');
+  assert.ok(siteCss.includes('.tips-list {'), 'the tips list is styled in site.css');
+});
+
+test('play boot ?amigo=1: consume-once jump to the create view, param cleaned', () => {
+  assert.ok(appJs.includes("const AMIGO_MARK_KEY = 'skirmish2.amigoConsumed'"),
+    'the once-per-tab-session flag lives in sessionStorage');
+  const read = functionBody(appJs, 'readAmigoMark');
+  assert.ok(read.includes('sessionStorage.getItem(AMIGO_MARK_KEY)'), 'the mark is read at boot');
+  const write = functionBody(appJs, 'writeAmigoMark');
+  assert.ok(write.includes('sessionStorage.setItem(AMIGO_MARK_KEY'), 'and written on consumption');
+  const intent = functionBody(appJs, 'amigoIntent');
+  assert.ok(intent.includes("get('amigo') === '1'"), 'the intent is the amigo=1 param');
+  assert.ok(intent.includes('if (consumed) return false'),
+    'a consumed amigo link never jumps twice');
+  const clean = functionBody(appJs, 'cleanPlayUrl');
+  assert.ok(clean.includes("p.delete('amigo')"),
+    'the amigo param leaves the address bar with the room params');
+  // The boot block: intent read BEFORE the URL is cleaned, the
+  // room link wins, and only the plain-lobby landing jumps —
+  // mark first, then the same section flip the friend button
+  // makes.
+  const bootAt = appJs.indexOf('linkJoinRoom(location.search, readRoomLinkMark())');
+  assert.ok(bootAt >= 0, 'the boot block stands');
+  const boot = appJs.slice(bootAt, bootAt + 1600);
+  const intentAt = boot.indexOf('amigoIntent(location.search, readAmigoMark())');
+  assert.ok(intentAt >= 0, 'the boot reads the amigo intent');
+  assert.ok(intentAt < boot.indexOf('cleanPlayUrl()'),
+    'the intent is read before cleanPlayUrl strips the param');
+  const jumpAt = boot.indexOf('if (amigo) {');
+  assert.ok(jumpAt > boot.indexOf('openLobby(null)'),
+    'the jump rides the plain Lobby Browser landing (a room link still wins)');
+  const jump = boot.slice(jumpAt, jumpAt + 500);
+  assert.ok(jump.includes('writeAmigoMark()'), 'the mark is written on the jump');
+  assert.ok(jump.indexOf('writeAmigoMark()') < jump.indexOf('netUi.gamesSection.hidden = true'),
+    'mark first — a reload lands on the front door');
+  assert.ok(jump.includes('netUi.gamesSection.hidden = true'), 'it leaves the browser view');
+  assert.ok(jump.includes('netUi.createSection.hidden = false'),
+    'and lands on the create view — the same navigation as the friend button');
 });
 
 test('every new i18n key exists in EN, PT and ES with the pinned labels', () => {

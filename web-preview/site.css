@@ -204,6 +204,50 @@ a { color: var(--gold-bright); }
   text-shadow: 0 2px 10px rgba(0, 0, 0, 0.85);
 }
 
+.hero-cta {
+  margin-top: 26px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+}
+
+/* Share box: the game's link, ready to copy or send to a friend
+   the moment a visitor lands — no scrolling, no hunting. */
+.share-box {
+  max-width: 640px;
+  margin: 22px auto 0;
+  background: rgba(12, 17, 11, 0.72);
+  border: 1px solid var(--panel-edge);
+  border-radius: 10px;
+  padding: 14px 16px 16px;
+}
+
+.share-label {
+  display: block;
+  font-size: 14.5px;
+  color: #f2ecd9;
+  margin-bottom: 10px;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.85);
+}
+
+.share-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.share-row input {
+  flex: 1 1 240px;
+  min-width: 0;
+  padding: 9px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--iron);
+  background: rgba(0, 0, 0, 0.45);
+  color: var(--ink);
+  font-size: 14.5px;
+}
+
 /* ---------- sections ---------- */
 
 .section {
@@ -335,6 +379,22 @@ a { color: var(--gold-bright); }
   font-size: 14.5px;
   color: var(--ink-dim);
 }
+
+/* ---------- quick tips ---------- */
+
+.tips-list {
+  max-width: 720px;
+  margin: 0;
+  padding: 18px 22px 18px 40px;
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-radius: 10px;
+  color: var(--ink-dim);
+  font-size: 15px;
+}
+
+.tips-list li { margin: 6px 0; }
+.tips-list li::marker { color: var(--gold-bright); }
 
 /* ---------- roadmap ---------- */
 

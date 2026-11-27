@@ -65,6 +65,18 @@
     growing, kept alive by the community, for the community. Anyone can play
     it &mdash; right in the browser, no install, no account.</p>
     <p class="chess-line">The chess of the 21st century &mdash; mechanics that don't need to change. They need to run forever.</p>
+    <div class="hero-cta">
+      <a class="btn btn-gold" href="play/">Play the test build</a>
+      <a class="btn btn-ghost" href="play/?amigo=1">Play a friend</a>
+    </div>
+    <div class="share-box">
+      <label class="share-label" for="site-share-link">Or send the game to a friend — copy the link, send it, and play together:</label>
+      <div class="share-row">
+        <input id="site-share-link" type="text" readonly value="https://skirmish.online/play/">
+        <button id="site-share-copy" class="btn btn-gold" type="button">Copy link</button>
+        <button id="site-share-share" class="btn btn-ghost" type="button" hidden>Share&hellip;</button>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -120,6 +132,17 @@
         </div>
       </aside>
     </div>
+  </section>
+
+  <section class="section" id="tips">
+    <h2>Quick tips</h2>
+    <ul class="tips-list">
+      <li>No account, no install &mdash; open the link and play.</li>
+      <li>Play a friend: create a room and send them the invite link &mdash; they land straight in your room.</li>
+      <li>A match opens in fullscreen &mdash; leave with the &times; Exit fullscreen button (top-right), or by holding Esc.</li>
+      <li>A short Esc press cancels and closes panels, without leaving fullscreen.</li>
+      <li>It works right in the browser, on phone and computer.</li>
+    </ul>
   </section>
 
   <section class="section" id="about">
@@ -209,6 +232,49 @@
     } catch (e) { /* keep English */ }
     var el = document.getElementById('beta-banner-text');
     if (el) el.textContent = STRINGS[loc];
+  })();
+</script>
+<script>
+  // Share box (hero): the game's link, ready to copy or send the
+  // moment a visitor lands. Copy mirrors the play page's invite
+  // copy — a clipboard write, and the field selects on click for
+  // a manual copy where no clipboard API exists. The Share
+  // button only appears where navigator.share exists, and a
+  // dismissed share sheet is silent: the visitor changed their
+  // mind, which is not an error.
+  (function () {
+    var input = document.getElementById('site-share-link');
+    var copyBtn = document.getElementById('site-share-copy');
+    var shareBtn = document.getElementById('site-share-share');
+    if (!input) return;
+    var url = input.value;
+    input.addEventListener('click', function () { input.select(); });
+    if (copyBtn) {
+      copyBtn.addEventListener('click', function () {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(url);
+        } else {
+          input.select();
+          try { document.execCommand('copy'); } catch (e) { /* manual copy stays possible */ }
+        }
+        var old = copyBtn.textContent;
+        copyBtn.textContent = 'Copied!';
+        setTimeout(function () { copyBtn.textContent = old; }, 2000);
+      });
+    }
+    if (shareBtn && typeof navigator.share === 'function') {
+      shareBtn.hidden = false;
+      shareBtn.addEventListener('click', function () {
+        try {
+          var p = navigator.share({
+            title: 'Skirmish II',
+            text: 'Play Skirmish II with me — a real-time strategy game right in the browser. No install, no account:',
+            url: url
+          });
+          if (p && p.catch) p.catch(function () {});
+        } catch (e) { /* sharing unavailable mid-flight: silent */ }
+      });
+    }
   })();
 </script>
 </body>

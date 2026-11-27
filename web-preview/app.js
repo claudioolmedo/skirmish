@@ -5947,21 +5947,47 @@ function writeRoomLinkMark(room) {
   try { sessionStorage.setItem(ROOM_LINK_MARK_KEY, room); } catch { /* storage off — the link just stays re-joinable */ }
 }
 
-/// Drop the room params (room/region/private) from the address bar
-/// without navigating. From the moment a room exists it lives in
-/// memory (net.room); the invite link is built on demand by the
-/// room screen's copy action, never read back from the URL — so
-/// the address bar can never re-trigger a join on reload.
+/// Drop the room params (room/region/private) and the amigo
+/// param from the address bar without navigating. From the moment
+/// a room exists it lives in memory (net.room); the invite link is
+/// built on demand by the room screen's copy action, never read
+/// back from the URL — so the address bar can never re-trigger a
+/// join on reload.
 function cleanPlayUrl() {
   try {
     const p = new URLSearchParams(location.search);
-    if (!p.has('room') && !p.has('region') && !p.has('private')) return;
+    if (!p.has('room') && !p.has('region') && !p.has('private') && !p.has('amigo')) return;
     p.delete('room');
     p.delete('region');
     p.delete('private');
+    p.delete('amigo');
     const qs = p.toString();
     history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
   } catch { /* non-http(s) context — nothing to clean */ }
+}
+
+// --- amigo-link consume-once -------------------------------------------------
+// The homepage's "Play a friend" button links to /play/?amigo=1:
+// the visitor came to play a friend, so the boot lands them on
+// the create-room view — one tap from making the room and sending
+// its invite link. Consumed exactly once per tab session, like a
+// room link: the mark lives in sessionStorage, so a RELOAD of the
+// same tab lands on the plain Lobby Browser (the front door).
+const AMIGO_MARK_KEY = 'skirmish2.amigoConsumed';
+
+function readAmigoMark() {
+  try { return sessionStorage.getItem(AMIGO_MARK_KEY); } catch { return null; }
+}
+
+function writeAmigoMark() {
+  try { sessionStorage.setItem(AMIGO_MARK_KEY, '1'); } catch { /* storage off — the link just stays re-jumpable */ }
+}
+
+/// True when this boot should jump to the create view: the amigo
+/// param is present and this tab has not consumed it yet.
+function amigoIntent(search, consumed) {
+  if (consumed) return false;
+  return new URLSearchParams(search || '').get('amigo') === '1';
 }
 
 // --- the handshake ---------------------------------------------------------
@@ -8903,6 +8929,8 @@ async function main() {
   // later reload of this tab lands on the Lobby Browser.
   {
     const join = linkJoinRoom(location.search, readRoomLinkMark());
+    // Read the amigo intent BEFORE cleanPlayUrl strips the param.
+    const amigo = amigoIntent(location.search, readAmigoMark());
     setPaused(true);
     if (join) {
       writeRoomLinkMark(join.room);
@@ -8911,6 +8939,16 @@ async function main() {
     } else {
       cleanPlayUrl(); // a consumed link's params leave the bar too
       openLobby(null);
+      if (amigo) {
+        // The homepage's "Play a friend" landing: a room link
+        // would have won above; here the visitor came to play a
+        // friend, so make the same jump to the create view the
+        // Lobby's own friend button makes. The mark is written
+        // first — a reload lands on the plain Lobby Browser.
+        writeAmigoMark();
+        if (netUi.gamesSection) netUi.gamesSection.hidden = true;
+        if (netUi.createSection) netUi.createSection.hidden = false;
+      }
     }
   }
   // Quality override (pause menu): Auto / High / Medium / Low.
