@@ -566,9 +566,18 @@ a { color: var(--gold-bright); }
 
 .ad-slot {
   margin: 0 auto;
-  border: 1px dashed var(--iron);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.02);
+  /* A deliberate panel of the site, not a dashed placeholder box
+     (Claudio, 2026-11-26: "está muito feio"): the same parchment
+     slab as the game's own cards (.overlay-card in play/play.css)
+     — parchment texture, umber edge, dark umber text. The texture
+     path is relative to this stylesheet (the site root), so it
+     resolves from / and from /play/ alike; the flat parchment
+     colour under it is the fallback. Slot sizes are unchanged. */
+  background: #d9c49a url("play/ui-art/tex-parchment.webp") center / cover no-repeat;
+  border: 1px solid #8a6a1f;
+  border-radius: 10px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35), inset 0 0 34px rgba(101, 72, 28, 0.30);
+  color: #43300f;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -594,22 +603,41 @@ a { color: var(--gold-bright); }
   max-width: calc(100vw - 48px);
 }
 
-.house-ad { padding: 10px 18px; }
+.house-ad { padding: 10px 18px; text-align: center; }
 .house-ad .house-title {
   margin: 0 0 4px;
   font-family: Georgia, "Times New Roman", serif;
   font-size: 16.5px;
-  color: var(--gold-bright);
+  font-weight: 700;
+  color: #8a5a10;
+  text-shadow: 0 1px 0 rgba(255, 242, 205, 0.65);
 }
 .house-ad .house-text {
-  margin: 0 auto 6px;
+  margin: 0 auto 8px;
   max-width: 520px;
   font-size: 13.5px;
-  color: var(--ink-dim);
+  color: #43300f;
 }
 .house-ad .house-link { margin: 0; font-size: 13.5px; }
-.house-ad .house-link a { color: var(--moss); text-decoration: none; }
-.house-ad .house-link a:hover { text-decoration: underline; }
+/* The star appeal is a proper button — the site's .btn-gold recipe
+   at the slot's scale — never a bare link. */
+.house-ad .house-link a {
+  display: inline-block;
+  padding: 7px 14px;
+  border: 1px solid var(--gold);
+  border-radius: 6px;
+  background: var(--gold);
+  color: #221a05;
+  font-weight: 700;
+  font-size: 13.5px;
+  text-decoration: none;
+  transition: background 0.15s ease;
+}
+.house-ad .house-link a:hover { background: var(--gold-bright); }
+/* The 90px leaderboard is short: slimmer padding there keeps the
+   whole message + button inside the unchanged footprint. */
+.ad-slot-leaderboard .house-ad { padding: 6px 14px; }
+.ad-slot-leaderboard .house-link a { padding: 4px 12px; }
 
 /* House promo (the /play lobby sidebar slot): a designed promo for
    the game itself that fills the 300x250 box like a real unit, so
@@ -625,7 +653,9 @@ a { color: var(--gold-bright); }
   gap: 5px;
   padding: 16px 18px;
   text-align: center;
-  background: linear-gradient(180deg, #2b2110, #1c1507);
+  /* Transparent: the parchment panel of .ad-slot is the surface,
+     so the promo reads as part of the same panel family. */
+  background: transparent;
 }
 .promo-ad .promo-emblem { width: 52px; height: 52px; }
 .promo-ad .promo-title {
@@ -633,27 +663,31 @@ a { color: var(--gold-bright); }
   font-family: Georgia, "Times New Roman", serif;
   font-size: 21px;
   letter-spacing: 0.18em;
-  color: var(--gold-bright);
+  color: #8a5a10;
+  text-shadow: 0 1px 0 rgba(255, 242, 205, 0.65);
 }
-.promo-ad .promo-tag { margin: 0; font-style: italic; font-size: 13.5px; color: var(--ink); }
-.promo-ad .promo-text { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--ink-dim); }
+.promo-ad .promo-tag { margin: 0; font-style: italic; font-size: 13.5px; color: #43300f; }
+.promo-ad .promo-text { margin: 0; font-size: 12.5px; line-height: 1.45; color: #5d4630; }
 .promo-ad .promo-cta { margin: 6px 0 0; }
 .promo-ad .promo-cta a {
   display: inline-block;
   padding: 7px 14px;
-  border-radius: 7px;
+  border: 1px solid var(--gold);
+  border-radius: 6px;
   background: var(--gold);
-  color: #241a05;
+  color: #221a05;
   font-weight: 700;
   font-size: 13.5px;
   text-decoration: none;
+  transition: background 0.15s ease;
 }
+.promo-ad .promo-cta a:hover { background: var(--gold-bright); }
 .promo-ad .promo-note {
   margin: 4px 0 0;
   font-size: 10.5px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #767d68;
+  color: #7a6248;
 }
 
 /* ---------- play section layout (game + side slot) ---------- */
