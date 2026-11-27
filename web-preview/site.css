@@ -634,14 +634,33 @@ a { color: var(--gold-bright); }
   transition: background 0.15s ease;
 }
 .house-ad .house-link a:hover { background: var(--gold-bright); }
-/* The 90px leaderboard is short: slimmer padding there keeps the
-   whole message + button inside the unchanged footprint. */
-.ad-slot-leaderboard .house-ad { padding: 6px 14px; }
+/* The 90px leaderboard is short: the column layout's natural
+   height (~125px) overflowed it and the slot's centring clipped
+   the title at the top and the button at the bottom (live check,
+   2026-11-26). There the house message lies in a ROW instead —
+   title, text and button side by side, vertically centred,
+   inside the unchanged footprint. */
+.ad-slot-leaderboard .house-ad {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 6px 18px;
+  text-align: left;
+}
+.ad-slot-leaderboard .house-title { flex: 0 1 205px; margin: 0; }
+.ad-slot-leaderboard .house-text { flex: 1 1 auto; margin: 0; }
+.ad-slot-leaderboard .house-link { flex: 0 0 auto; margin: 0; }
 .ad-slot-leaderboard .house-link a { padding: 4px 12px; }
 
 /* House promo (the /play lobby sidebar slot): a designed promo for
    the game itself that fills the 300x250 box like a real unit, so
-   the lobby placement reads realistically while ads are simulated. */
+   the lobby placement reads realistically while ads are simulated.
+   The metrics are budgeted to the box: emblem, title, tag, text,
+   button and note must sum under 250px or the slot clips the note
+   (live check, 2026-11-26 — keep the total in mind when editing). */
 .promo-ad {
   width: 100%;
   height: 100%;
@@ -650,14 +669,14 @@ a { color: var(--gold-bright); }
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  padding: 16px 18px;
+  gap: 4px;
+  padding: 12px 16px;
   text-align: center;
   /* Transparent: the parchment panel of .ad-slot is the surface,
      so the promo reads as part of the same panel family. */
   background: transparent;
 }
-.promo-ad .promo-emblem { width: 52px; height: 52px; }
+.promo-ad .promo-emblem { width: 44px; height: 44px; }
 .promo-ad .promo-title {
   margin: 2px 0 0;
   font-family: Georgia, "Times New Roman", serif;
@@ -667,7 +686,7 @@ a { color: var(--gold-bright); }
   text-shadow: 0 1px 0 rgba(255, 242, 205, 0.65);
 }
 .promo-ad .promo-tag { margin: 0; font-style: italic; font-size: 13.5px; color: #43300f; }
-.promo-ad .promo-text { margin: 0; font-size: 12.5px; line-height: 1.45; color: #5d4630; }
+.promo-ad .promo-text { margin: 0; font-size: 12.5px; line-height: 1.4; color: #5d4630; }
 .promo-ad .promo-cta { margin: 6px 0 0; }
 .promo-ad .promo-cta a {
   display: inline-block;
