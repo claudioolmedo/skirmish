@@ -167,30 +167,38 @@ test('fullscreen hint: once per tab session, ~6 s, localized, non-interactive', 
   assert.ok(hintCss.includes('pointer-events: none'), 'the hint never blocks play');
 });
 
-test('homepage hero: one friend door — the invite box; no Play a friend button beside the Play CTA', () => {
-  assert.ok(/<a class="btn btn-gold" href="play\/">Play the test build<\/a>/.test(homeIndex),
-    'the hero carries the main Play call-to-action');
-  // Claudio's dedup correction (2026-11-26, after the glink
+test('homepage hero: few options — title, tagline, short line, invite box; no CTA button row', () => {
+  // Claudio's dedup corrections (2026-11-26, after the glink
   // publish): the friend action appeared twice in the hero —
-  // the invite box AND a "Play a friend" button linking to
-  // ?amigo=1. The hero keeps ONE friend door, the invite box
-  // (with its "Enter this room and play"); the button is gone.
-  // (The ?amigo=1 boot handling and the in-Lobby friend button
-  // stay — only the hero anchor was removed.)
+  // the invite box AND a "Play a friend" button — "ainda está
+  // tudo duplicado, muito confuso, tem que ter poucas opções".
+  // Final hero: title → tagline → one short line → invite box
+  // (link + Copy + Share + "Enter this room and play") and
+  // NOTHING else: the whole hero CTA row (both "Play a friend"
+  // and "Play the test build") is gone. The top nav keeps its
+  // "Play" link as the general door to the game; the ?amigo=1
+  // boot handling and the in-Lobby friend button stay.
   const heroSlice = homeIndex.slice(0, homeIndex.indexOf('</section>'));
+  assert.ok(!heroSlice.includes('hero-cta'),
+    'no CTA button row in the hero');
   assert.ok(!heroSlice.includes('play/?amigo=1'),
-    'no ?amigo=1 anchor in the hero — the invite box is the only friend door');
-  const ctaAt = homeIndex.indexOf('class="hero-cta"');
+    'no ?amigo=1 anchor in the hero');
+  assert.ok(!heroSlice.includes('>Play the test build<'),
+    'no "Play the test build" button in the hero');
+  assert.ok(!heroSlice.includes('>Play a friend<'),
+    'no "Play a friend" button in the hero');
+  assert.ok(heroSlice.includes('Enter this room and play'),
+    'the invite box keeps its own door into the room');
+  assert.ok(homeIndex.includes('<a class="btn btn-gold nav-play" href="play/">Play</a>'),
+    'the top nav keeps its Play link — the general door to the game');
   const boxAt = homeIndex.indexOf('class="share-box invite-box"');
-  // Claudio's corrections (2026-11-26, after seeing the live
-  // homepage): ONE box only, and it sits ABOVE the Play buttons
-  // — directly under the tagline text, the first interactive
-  // element a visitor reaches; the Play row stays below it.
-  // The hero itself was then simplified to title → tagline →
-  // one short line → invite box → Play buttons (the long pitch
-  // and the chess line moved down to the Why section).
-  assert.ok(boxAt > homeIndex.indexOf('class="tagline"') && boxAt < ctaAt,
-    'the invite box sits under the tagline, above the Play button row');
+  // One box only, directly under the tagline text — the first
+  // (and only) interactive element a visitor reaches in the
+  // hero. The hero was simplified to title → tagline → one
+  // short line → invite box (the long pitch and the chess
+  // line moved down to the Why section).
+  assert.ok(boxAt > homeIndex.indexOf('class="tagline"'),
+    'the invite box sits under the tagline');
   assert.ok(boxAt > homeIndex.indexOf('class="hero-short"'),
     'the one short line stands between the tagline and the box');
   assert.ok(homeIndex.includes('Play a friend right in the browser &mdash; no install, no account.'),
