@@ -69,8 +69,9 @@ visible slots).
 
 `ads.js` ships with `enabled: false` and placeholder ids, so every slot
 renders a **house placeholder**: a friendly message ("Your friendly ad will
-live here soon — for now, thanks for playing!") with a link to the GitHub
-repo. The two waiting slots render a designed **promo for the game
+live here soon — for now, thanks for playing!") whose single link appeals
+for a star on the GitHub repo ("⭐ Star it on GitHub →"); the designed
+promo's button makes the same appeal. The two waiting slots render a designed **promo for the game
 itself** (emblem, headline, button) that fills its 300×250 box like a
 real unit, so the placements can be judged realistically — it never
 pretends to be a third-party sponsor — and they rotate between that
