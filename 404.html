@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<!-- Skirmish II — the site's 404 page, and the short invite
+     link's front door.
+
+     Short links (glink, Claudio's request 2026-11-26) look like
+     https://skirmish.online/g=wlehsls : the site root, "g=", and
+     a 7-char room code whose first char carries the room's
+     region. GitHub Pages serves THIS page for any path it does
+     not know — /g=CODE included — so the script below recognises
+     that one shape and bounces it to the play page with the code
+     as the room param (no region: the client derives it from the
+     code). Every other unknown path is a plain 404.
+
+     Dependency-free and immediate on purpose: the redirect runs
+     in the head, before anything renders. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Skirmish II — page not found</title>
+<script>
+  (function () {
+    var m = /^\/g=([a-z2-9]{7})$/i.exec(location.pathname);
+    if (m) {
+      location.replace('/play/?room=' + m[1].toLowerCase());
+    }
+  })();
+</script>
+<style>
+  body { font-family: Georgia, 'Times New Roman', serif; background: #171310; color: #e8dcc0; margin: 0; padding: 3rem 1.5rem; text-align: center; }
+  h1 { font-size: 1.6rem; letter-spacing: .04em; }
+  a { color: #c9a227; }
+</style>
+</head>
+<body>
+  <h1>Page not found</h1>
+  <p>That page does not exist. <a href="/">Back to Skirmish II</a> — or <a href="/play/">straight to the game</a>.</p>
+</body>
+</html>

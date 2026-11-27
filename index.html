@@ -61,21 +61,22 @@
     <img class="emblem" src="art/emblem.webp" alt="Skirmish II emblem — a wooden shield with crossed swords and a small tower">
     <h1>SKIRMISH II</h1>
     <p class="tagline">Some games cannot die.</p>
-    <p class="pitch">Skirmish II is the attempt to build one: it starts simple, it keeps
-    growing, kept alive by the community, for the community. Anyone can play
-    it &mdash; right in the browser, no install, no account.</p>
-    <p class="chess-line">The chess of the 21st century &mdash; mechanics that don't need to change. They need to run forever.</p>
-    <div class="hero-cta">
-      <a class="btn btn-gold" href="play/">Play the test build</a>
-      <a class="btn btn-ghost" href="play/?amigo=1">Play a friend</a>
-    </div>
-    <div class="share-box">
-      <label class="share-label" for="site-share-link">Or send the game to a friend — copy the link, send it, and play together:</label>
+    <p class="hero-short">Play a friend right in the browser &mdash; no install, no account.</p>
+    <div class="share-box invite-box">
+      <label class="share-label" for="site-share-link">Copy this link and share it with your friend to play — you'll both land in the same room:</label>
       <div class="share-row">
         <input id="site-share-link" type="text" readonly value="https://skirmish.online/play/">
         <button id="site-share-copy" class="btn btn-gold" type="button">Copy link</button>
         <button id="site-share-share" class="btn btn-ghost" type="button" hidden>Share&hellip;</button>
       </div>
+      <div class="share-row invite-enter-row">
+        <a id="site-invite-enter" class="btn btn-gold" href="play/">Enter this room and play</a>
+        <span class="invite-enter-note">Send the link first, then enter — or enter first and send it from inside. Either order works: you meet in this room.</span>
+      </div>
+    </div>
+    <div class="hero-cta">
+      <a class="btn btn-gold" href="play/">Play the test build</a>
+      <a class="btn btn-ghost" href="play/?amigo=1">Play a friend</a>
     </div>
   </div>
 </section>
@@ -150,6 +151,10 @@
     <p class="lede">Big strategy games want new hardware, a huge download and a store account.
     Skirmish II is the opposite: a complete little RTS that lives in a browser tab &mdash; for
     anyone, on any machine.</p>
+    <p class="pitch">Skirmish II is the attempt to build one: it starts simple, it keeps
+    growing, kept alive by the community, for the community. Anyone can play
+    it &mdash; right in the browser, no install, no account.</p>
+    <p class="chess-line">The chess of the 21st century &mdash; mechanics that don't need to change. They need to run forever.</p>
     <div class="cards">
       <div class="card">
         <h3>Same game, every machine</h3>
@@ -235,19 +240,58 @@
   })();
 </script>
 <script>
-  // Share box (hero): the game's link, ready to copy or send the
-  // moment a visitor lands. Copy mirrors the play page's invite
-  // copy — a clipboard write, and the field selects on click for
-  // a manual copy where no clipboard API exists. The Share
-  // button only appears where navigator.share exists, and a
-  // dismissed share sheet is silent: the visitor changed their
-  // mind, which is not an error.
+  // Invite box (hero): a room of your own, minted on the spot.
+  // The box generates a FRESH room code the moment the page
+  // loads, in the game's own scheme (play/netplay.js:
+  // makeRoomId / REGION_PREFIX — a 7-char code whose first char
+  // names the region and whose tail is random from the
+  // no-lookalikes alphabet; keep the two in sync). The field
+  // shows the short link — https://skirmish.online/g=CODE —
+  // ready to copy or share; the friend who opens it lands in
+  // that room as the guest, and "Enter this room and play"
+  // takes the host into the SAME room (play/?dono=CODE claims
+  // the code through the game's ordinary create flow).
+  //
+  // The region is the one nearest THIS visitor, because the
+  // host should sit close to the room's server: a tiny timing
+  // probe per region, against the same relay probe rooms the
+  // game's probeRegionPing uses, timing the SECOND echo (the
+  // first pays the cold-start cost). The budget is ~1.5 s: the
+  // fastest region that answered in time wins, and if none did
+  // the code falls back to North America West — the box never
+  // blocks the page. Until the code is final the field simply
+  // carries the game's link, like the old share box; once
+  // minted, the code NEVER changes — the copied link and the
+  // claimed room are the same room, whichever order the two
+  // players arrive in.
+  //
+  // Copy mirrors the play page's invite copy — a clipboard
+  // write, and the field selects on click for a manual copy
+  // where no clipboard API exists. The Share button only
+  // appears where navigator.share exists, and a dismissed
+  // share sheet is silent: the visitor changed their mind,
+  // which is not an error.
   (function () {
+    var RELAY_HTTP = 'https://skirmish-relay.hoardserdure7.workers.dev';
+    var ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789'; // no lookalikes
+    var REGIONS = [
+      { id: 'wnam', prefix: 'w' },
+      { id: 'enam', prefix: 'e' },
+      { id: 'sam', prefix: 's' },
+      { id: 'weur', prefix: 'u' },
+      { id: 'eeur', prefix: 'r' },
+      { id: 'apac', prefix: 'a' },
+      { id: 'oc', prefix: 'c' }
+    ];
+    var PROBE_BUDGET_MS = 1500;
+
     var input = document.getElementById('site-share-link');
     var copyBtn = document.getElementById('site-share-copy');
     var shareBtn = document.getElementById('site-share-share');
+    var enterBtn = document.getElementById('site-invite-enter');
     if (!input) return;
-    var url = input.value;
+
+    var url = input.value; // until the code lands: the game link
     input.addEventListener('click', function () { input.select(); });
     if (copyBtn) {
       copyBtn.addEventListener('click', function () {
@@ -268,13 +312,94 @@
         try {
           var p = navigator.share({
             title: 'Skirmish II',
-            text: 'Play Skirmish II with me — a real-time strategy game right in the browser. No install, no account:',
+            text: 'Play Skirmish II with me — open this link and you land right in my room. No install, no account:',
             url: url
           });
           if (p && p.catch) p.catch(function () {});
         } catch (e) { /* sharing unavailable mid-flight: silent */ }
       });
     }
+
+    function now() {
+      return (window.performance && performance.now) ? performance.now() : Date.now();
+    }
+
+    function mintCode(prefix) {
+      var code = prefix;
+      for (var i = 0; i < 6; i++) {
+        code += ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
+      }
+      return code;
+    }
+
+    function adoptRegion(region) {
+      var code = mintCode(region.prefix);
+      url = 'https://skirmish.online/g=' + code;
+      input.value = url;
+      if (enterBtn) enterBtn.href = 'play/?dono=' + code;
+    }
+
+    // One probe socket per region, all in parallel — the
+    // budget, not the slowest region, bounds the wait. A probe
+    // that errors or closes settles without a time; whatever
+    // has answered when the last probe settles (or the budget
+    // runs out) decides.
+    var decided = false;
+    var results = {};
+    var settled = 0;
+    function finish() {
+      if (decided) return;
+      decided = true;
+      var best = null;
+      for (var i = 0; i < REGIONS.length; i++) {
+        var r = REGIONS[i];
+        if (typeof results[r.id] === 'number'
+          && (best === null || results[r.id] < results[best.id])) best = r;
+      }
+      adoptRegion(best || REGIONS[0]); // silence everywhere: wnam
+    }
+    var budget = setTimeout(finish, PROBE_BUDGET_MS);
+    function settledOne() {
+      settled++;
+      if (settled >= REGIONS.length) {
+        clearTimeout(budget);
+        finish();
+      }
+    }
+    REGIONS.forEach(function (region) {
+      var done = false;
+      var ws = null;
+      function settle(ms) {
+        if (done) return;
+        done = true;
+        if (typeof ms === 'number') results[region.id] = ms;
+        if (ws) { try { ws.close(); } catch (e) { /* already gone */ } }
+        settledOne();
+      }
+      try {
+        var suffix = Math.random().toString(36).slice(2, 10);
+        ws = new WebSocket(RELAY_HTTP.replace(/^http/, 'ws')
+          + '/room/probe-' + region.id + '-' + suffix
+          + '?region=' + encodeURIComponent(region.id));
+      } catch (e) { settle(null); return; }
+      var sentAt = 0;
+      var echoes = 0;
+      ws.addEventListener('open', function () {
+        sentAt = now();
+        ws.send('probe');
+      });
+      ws.addEventListener('message', function () {
+        echoes++;
+        if (echoes === 1) {
+          sentAt = now();
+          ws.send('probe');
+        } else {
+          settle(Math.round(now() - sentAt));
+        }
+      });
+      ws.addEventListener('error', function () { settle(null); });
+      ws.addEventListener('close', function () { settle(null); });
+    });
   })();
 </script>
 </body>

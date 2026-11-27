@@ -30,6 +30,13 @@
 // view (consume-once, like a room link), and the homepage gains
 // a Quick tips section covering the friend flow and the
 // fullscreen exits.
+//
+// Extension (glink package): the homepage share box becomes an
+// INVITE box — it mints a fresh room code on load (region probed
+// nearest the visitor), the field/copy/share carry the room's
+// short link, and an "Enter this room and play" button claims
+// the code on the play page (?dono=CODE; the claim wiring is
+// pinned in glink.test.mjs, the pure parse in netplay.test.mjs).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -73,7 +80,10 @@ test('room screen carries the invite panel: read-only link field, Copy and Share
 
 test('the invite link still comes from refreshInviteLink over in-memory room state', () => {
   const body = functionBody(appJs, 'refreshInviteLink');
-  assert.ok(body.includes('buildPlayUrl('), 'the link is built by buildPlayUrl');
+  // glink (2026-11-26) superseded the link FORM, not the
+  // mechanism: still built on demand from in-memory state, now
+  // as the short root link via buildShortUrl (see glink.test.mjs).
+  assert.ok(body.includes('buildShortUrl('), 'the link is built by buildShortUrl');
   assert.ok(body.includes('net.room'), 'from the in-memory room state');
   assert.ok(body.includes('inviteLinkInput'), 'and lands in the read-only field');
   assert.ok(!body.includes('location.search'), 'never parsed back out of the address bar');
@@ -163,17 +173,84 @@ test('homepage hero: Play a friend button beside the Play CTA, linking to ?amigo
   assert.ok(/<a class="btn btn-ghost" href="play\/\?amigo=1">Play a friend<\/a>/.test(homeIndex),
     'the friend button sits beside it and links to the amigo landing');
   const ctaAt = homeIndex.indexOf('class="hero-cta"');
-  assert.ok(ctaAt > homeIndex.indexOf('class="chess-line"') && ctaAt < homeIndex.indexOf('class="share-box"'),
-    'the CTA row sits in the hero, above the share box');
+  const boxAt = homeIndex.indexOf('class="share-box invite-box"');
+  // Claudio's corrections (2026-11-26, after seeing the live
+  // homepage): ONE box only, and it sits ABOVE the Play buttons
+  // — directly under the tagline text, the first interactive
+  // element a visitor reaches; the Play row stays below it.
+  // The hero itself was then simplified to title → tagline →
+  // one short line → invite box → Play buttons (the long pitch
+  // and the chess line moved down to the Why section).
+  assert.ok(boxAt > homeIndex.indexOf('class="tagline"') && boxAt < ctaAt,
+    'the invite box sits under the tagline, above the Play button row');
+  assert.ok(boxAt > homeIndex.indexOf('class="hero-short"'),
+    'the one short line stands between the tagline and the box');
+  assert.ok(homeIndex.includes('Play a friend right in the browser &mdash; no install, no account.'),
+    'the short line: play a friend, in the browser, no install, no account');
+  const heroEnd = homeIndex.indexOf('</section>');
+  assert.ok(!homeIndex.slice(0, heroEnd).includes('class="pitch"'),
+    'the long pitch paragraph is out of the hero');
+  assert.ok(!homeIndex.slice(0, heroEnd).includes('class="chess-line"'),
+    'the chess line is out of the hero');
+  const aboutAt = homeIndex.indexOf('id="about"');
+  assert.ok(homeIndex.indexOf('class="pitch"') > aboutAt,
+    'the pitch moved into the Why section, not deleted');
+  assert.ok(homeIndex.indexOf('kept alive by the community') > aboutAt,
+    'with its community text intact');
+  assert.ok(homeIndex.indexOf('class="chess-line"') > aboutAt,
+    'the chess line moved into the Why section too');
+  assert.equal(homeIndex.split('class="share-box').length - 1, 1,
+    'exactly one share/invite box on the homepage — the invite box replaced the generic share box');
+  assert.ok(!homeIndex.includes('Or send the game to a friend'),
+    'the old generic-link share box copy is gone — no duplicate friend flow');
 });
 
-test('homepage share box: the game link in a read-only field, Copy and Share wired', () => {
+test('homepage invite box: a fresh room code at the front door, copy/share/enter wired', () => {
+  // The box (glink extension): the hero share box upgraded — the
+  // field starts on the game link (the no-JS / pre-probe
+  // fallback) and the script swaps in the room's short link.
   assert.ok(/<input id="site-share-link" type="text" readonly value="https:\/\/skirmish\.online\/play\/">/.test(homeIndex),
-    'the share field shows the game link, read-only');
+    'the field starts on the game link, read-only');
+  assert.ok(homeIndex.includes('Copy this link and share it with your friend to play — you\'ll both land in the same room:'),
+    'the label is the one-line explanation: copy, share, both land in the same room');
   assert.ok(/<button id="site-share-copy" class="btn btn-gold" type="button">Copy link<\/button>/.test(homeIndex),
     'copy is a real labelled button');
   assert.ok(/<button id="site-share-share" class="btn btn-ghost" type="button" hidden>Share&hellip;<\/button>/.test(homeIndex),
     'the Share button exists and starts hidden (the script unhides it only with navigator.share)');
+  assert.ok(/<a id="site-invite-enter" class="btn btn-gold" href="play\/">Enter this room and play<\/a>/.test(homeIndex),
+    'the host entry button exists, starting on the plain play link until the code lands');
+  // The code scheme replicates the game's (netplay.js): the
+  // no-lookalikes alphabet and the region-prefix map, all seven.
+  assert.ok(homeIndex.includes("var ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789';"),
+    'the homepage mints from the same alphabet as makeRoomId');
+  for (const [id, prefix] of [['wnam', 'w'], ['enam', 'e'], ['sam', 's'], ['weur', 'u'], ['eeur', 'r'], ['apac', 'a'], ['oc', 'c']]) {
+    assert.ok(homeIndex.includes(`{ id: '${id}', prefix: '${prefix}' }`),
+      `the prefix map carries ${id} → ${prefix}, matching REGION_PREFIX`);
+  }
+  // The region is measured, not guessed: a probe per region
+  // against the relay's probe rooms, timing the second echo,
+  // inside a ~1.5 s budget, with wnam as the silence fallback.
+  assert.ok(homeIndex.includes("'/room/probe-' + region.id + '-' + suffix"),
+    'the probe opens the region probe room, like probeRegionPing');
+  assert.ok(homeIndex.includes("'?region=' + encodeURIComponent(region.id)"),
+    'with the region as the placement hint');
+  assert.ok(homeIndex.includes('if (echoes === 1)'),
+    'the first echo only re-arms — the second is the timed one');
+  assert.ok(homeIndex.includes('var PROBE_BUDGET_MS = 1500;'),
+    'the probe budget is ~1.5 s — the box never blocks the page');
+  assert.ok(homeIndex.includes('adoptRegion(best || REGIONS[0]);'),
+    'silence everywhere falls back to the first region (wnam)');
+  // Once minted, the code never changes (the decided guard), and
+  // adopting it rewires the whole box to the one room: the field
+  // shows the short link and Enter claims the same code.
+  assert.ok(homeIndex.includes('if (decided) return;'),
+    'the region decision lands once — a copied link can never be swapped under the visitor');
+  assert.ok(homeIndex.includes("url = 'https://skirmish.online/g=' + code;"),
+    'the shared link is the short root link');
+  assert.ok(homeIndex.includes('input.value = url;'), 'the field shows it');
+  assert.ok(homeIndex.includes("enterBtn.href = 'play/?dono=' + code;"),
+    'Enter claims exactly that code through the dono boot');
+  // Copy/Share ride the same final url variable.
   assert.ok(homeIndex.includes("typeof navigator.share === 'function'"),
     'the homepage script feature-tests navigator.share like the play page does');
   assert.ok(homeIndex.includes('navigator.clipboard.writeText(url)'),
@@ -191,6 +268,7 @@ test('homepage share box: the game link in a read-only field, Copy and Share wir
   assert.ok(!shareBlock.includes('alert('), 'no alert on the share path');
   const boxCss = siteCss.slice(siteCss.indexOf('.share-box {'), siteCss.indexOf('.share-label {'));
   assert.ok(boxCss.includes('border-radius: 10px'), 'the share box wears the site panel styling');
+  assert.ok(siteCss.includes('.invite-enter-row {'), 'the enter row is styled in site.css');
 });
 
 test('homepage Quick tips: the five one-liners, friend flow and fullscreen exits', () => {
@@ -236,7 +314,9 @@ test('play boot ?amigo=1: consume-once jump to the create view, param cleaned', 
   // makes.
   const bootAt = appJs.indexOf('linkJoinRoom(location.search, readRoomLinkMark())');
   assert.ok(bootAt >= 0, 'the boot block stands');
-  const boot = appJs.slice(bootAt, bootAt + 1600);
+  // The slice reaches past the dono claim branch (glink
+  // extension) into the plain-landing amigo jump at the end.
+  const boot = appJs.slice(bootAt, bootAt + 3400);
   const intentAt = boot.indexOf('amigoIntent(location.search, readAmigoMark())');
   assert.ok(intentAt >= 0, 'the boot reads the amigo intent');
   assert.ok(intentAt < boot.indexOf('cleanPlayUrl()'),

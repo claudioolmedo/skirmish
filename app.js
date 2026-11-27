@@ -70,7 +70,8 @@ import {
   GAME_SPEED, GAME_SPEEDS, isGameSpeed, TICK_MS, advanceTicks,
   applyCommand as netApplyCommand, tcIdOf as netTcIdOf,
   createSession, createRecorder, replayEvents, isReplay,
-  createRelayClient, probeRegionPing, makeRoomId, buildPlayUrl,
+  createRelayClient, probeRegionPing, makeRoomId, buildShortUrl,
+  regionFromRoomId, claimRoomFromParams,
   linkJoinRoom, pickFastestRegion, REGIONS as NET_REGIONS,
   normalizeTeams, packTeams, teamsIsDefault,
   packTeamsWithLock, normalizeTeamsUnlocked,
@@ -5947,20 +5948,23 @@ function writeRoomLinkMark(room) {
   try { sessionStorage.setItem(ROOM_LINK_MARK_KEY, room); } catch { /* storage off — the link just stays re-joinable */ }
 }
 
-/// Drop the room params (room/region/private) and the amigo
-/// param from the address bar without navigating. From the moment
-/// a room exists it lives in memory (net.room); the invite link is
-/// built on demand by the room screen's copy action, never read
-/// back from the URL — so the address bar can never re-trigger a
-/// join on reload.
+/// Drop the room params (room/region/private, plus the short
+/// link's `g` alias), the amigo param and the dono claim param
+/// from the address bar without navigating. From the moment a
+/// room exists it lives in memory (net.room); the invite link
+/// is built on demand by the room screen's copy action, never
+/// read back from the URL — so the address bar can never
+/// re-trigger a join or a claim on reload.
 function cleanPlayUrl() {
   try {
     const p = new URLSearchParams(location.search);
-    if (!p.has('room') && !p.has('region') && !p.has('private') && !p.has('amigo')) return;
+    if (!p.has('room') && !p.has('region') && !p.has('private') && !p.has('amigo') && !p.has('g') && !p.has('dono')) return;
     p.delete('room');
     p.delete('region');
     p.delete('private');
     p.delete('amigo');
+    p.delete('g');
+    p.delete('dono');
     const qs = p.toString();
     history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
   } catch { /* non-http(s) context — nothing to clean */ }
@@ -5989,6 +5993,40 @@ function amigoIntent(search, consumed) {
   if (consumed) return false;
   return new URLSearchParams(search || '').get('amigo') === '1';
 }
+
+// --- dono-link consume-once --------------------------------------------------
+// The homepage's invite box mints a room code before anyone has
+// entered the game. The friend gets the short link (a guest
+// join); the host gets "Enter this room and play" —
+// /play/?dono=CODE. The claim boot runs the ORDINARY create
+// flow (createGame) with the code as an override — same
+// settings defaults, same connection, same room screen; the
+// room is simply born with the homepage's code instead of a
+// freshly minted one, on the region that code carries. The
+// friend may ALREADY be waiting inside when the host claims:
+// the hello handshake answers the first hello a client
+// receives with its own (see onNetMessage), so the latecomer's
+// arrival completes presence on both sides and the both-ready
+// gate fires as usual — guest-first needs no special case.
+// Consumed exactly once per tab session, like a room link: the
+// mark stores the claimed code, so a RELOAD of this tab lands
+// on the Lobby Browser instead of re-claiming; a different
+// code in the same tab is a fresh claim.
+const DONO_MARK_KEY = 'skirmish2.donoConsumed';
+
+function readDonoMark() {
+  try { return sessionStorage.getItem(DONO_MARK_KEY); } catch { return null; }
+}
+
+function writeDonoMark(code) {
+  try { sessionStorage.setItem(DONO_MARK_KEY, code); } catch { /* storage off — the claim just stays repeatable */ }
+}
+
+/// The room code the next createGame call must use instead of
+/// minting one (null when no claim is armed). The claim boot
+/// sets it immediately before running the create flow;
+/// createGame consumes it — one claim, one room.
+let claimedRoomCode = null;
 
 // --- the handshake ---------------------------------------------------------
 
@@ -6256,9 +6294,12 @@ function lobbyStrings() {
 // never disagree.
 function refreshInviteLink() {
   if (net && net.room) {
-    net.roomLinkValue = buildPlayUrl(
-      location.origin + location.pathname, net.room, net.region,
-      { private: net.privacy === 'private' });
+    // The SHORT link (glink): site root + the room code, nothing
+    // else — the code carries the region, and a private room's
+    // guest is asked for the password by the host's 'pw-req'
+    // handshake even without a private flag on the link, so one
+    // link form serves every room.
+    net.roomLinkValue = buildShortUrl(location.origin, net.room);
   }
   if (netUi && netUi.inviteLinkInput) {
     netUi.inviteLinkInput.value = (net && net.roomLinkValue) || '';
@@ -7329,6 +7370,12 @@ function renderRegionList(pings) {
 
 function createGame() {
   if (!net || net.room) return;
+  // A homepage claim arms exactly one create (the dono boot):
+  // take it into a local NOW, so an early return below (private
+  // room without a password) can never leak the override into a
+  // later, unrelated create.
+  const claim = claimedRoomCode;
+  claimedRoomCode = null;
   // M10: the privacy choice (Public default / Private + password).
   const privEl = document.querySelector('input[name="room-privacy"]:checked');
   net.privacy = privEl && privEl.value === 'private' ? 'private' : 'public';
@@ -7367,15 +7414,26 @@ function createGame() {
   // settings box — it rides the 'start' handshake to the guest
   // (the room screen carries its twin toggle).
   net.teamsUnlocked = !!(netUi.createTeamsUnlocked && netUi.createTeamsUnlocked.checked);
-  net.region = net.selectedRegion || net.region || regionList[0].id;
-  net.room = makeRoomId();
+  // A homepage claim (the dono boot) overrides both picks: the
+  // room is born with the code the homepage minted, on the
+  // region that code carries — everything else in this flow
+  // (settings, connection, room screen) is exactly the ordinary
+  // create.
+  if (claim) {
+    net.region = regionFromRoomId(claim) || net.region;
+    net.room = claim;
+  } else {
+    net.region = net.selectedRegion || net.region || regionList[0].id;
+    // The region is picked FIRST because the room code carries it
+    // in its first char (glink) — that is what lets the invite link
+    // be just the site root plus the code.
+    net.room = makeRoomId(net.region);
+  }
   // The room lives in memory from here — the address bar stays
   // room-free (a reload must land on the Lobby Browser), and the
   // invite link is built on demand by the copy action.
   cleanPlayUrl();
-  net.roomLinkValue = buildPlayUrl(
-    location.origin + location.pathname, net.room, net.region,
-    { private: net.privacy === 'private' });
+  net.roomLinkValue = buildShortUrl(location.origin, net.room);
   if (netUi.createBtn) netUi.createBtn.disabled = true;
   // The room screen takes over from the browser + create view.
   stopLobbyBrowser();
@@ -8931,11 +8989,30 @@ async function main() {
     const join = linkJoinRoom(location.search, readRoomLinkMark());
     // Read the amigo intent BEFORE cleanPlayUrl strips the param.
     const amigo = amigoIntent(location.search, readAmigoMark());
+    // The homepage claim, likewise read before the bar is
+    // cleaned: a room link still wins (it names a room to JOIN);
+    // the claim instead runs the create flow with the
+    // homepage's code. A malformed claim reads as no claim at
+    // all and the boot degrades to the plain front door.
+    const claim = claimRoomFromParams(location.search, readDonoMark());
     setPaused(true);
     if (join) {
       writeRoomLinkMark(join.room);
       cleanPlayUrl();
       openLobby({ room: join.room, region: join.region, private: join.private });
+    } else if (claim) {
+      // The mark is written and the bar cleaned BEFORE the
+      // create runs — a reload of this tab lands on the Lobby
+      // Browser, never re-claims. The create itself is the
+      // ordinary flow with the code armed as its override, so
+      // the host lands on the room screen of a room born with
+      // exactly the homepage's code, its short invite link
+      // already in the panel.
+      writeDonoMark(claim);
+      cleanPlayUrl();
+      openLobby(null);
+      claimedRoomCode = claim;
+      createGame();
     } else {
       cleanPlayUrl(); // a consumed link's params leave the bar too
       openLobby(null);
