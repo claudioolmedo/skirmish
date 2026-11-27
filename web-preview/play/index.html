@@ -232,6 +232,26 @@
      how to leave. Non-interactive, fades after ~6 s (app.js). -->
 <div id="fs-hint" hidden role="status"></div>
 
+<!-- Close game: THE obvious way out of the game itself — a
+     persistent, text-labelled button at the top right, shown by
+     app.js (syncCloseGameUi) on the lobby screens and in-match.
+     It is NOT the fullscreen pill above it: the pill leaves
+     fullscreen and the game keeps running; this one closes the
+     game and lands on the website homepage. In a live match the
+     click first raises the inline confirm below (Leave / Stay)
+     so a misclick cannot kill a match; everywhere else it exits
+     at once. Same fixed layer family as the pills, above the
+     menu overlays, so it stays reachable under pointer lock
+     through the same locked-event routing. -->
+<button id="close-game-btn" type="button" hidden>✕ Close game</button>
+<div id="close-game-confirm" hidden role="alertdialog" aria-labelledby="close-game-confirm-txt">
+  <p id="close-game-confirm-txt">Leave this match? The game will close.</p>
+  <div class="close-game-confirm-actions">
+    <button id="close-game-leave" type="button">Leave</button>
+    <button id="close-game-stay" type="button">Stay</button>
+  </div>
+</div>
+
 <!-- TOP: resource bar -->
 <header class="ui-topbar">
   <div class="ui-res-group" id="res-group" role="status" aria-label="Resources">
