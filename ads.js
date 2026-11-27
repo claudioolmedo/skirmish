@@ -99,10 +99,10 @@
       '<div class="house-ad">' +
         '<p class="house-title">Your friendly ad will live here soon</p>' +
         '<p class="house-text">For now — thanks for playing! Skirmish II is ' +
-        'open, and small ads like this one will help pay for the servers ' +
-        'and keep development going.</p>' +
+        'open, and small ads like this one will help pay for the servers. ' +
+        'Enjoying it? A star on GitHub helps other players find it.</p>' +
         '<p class="house-link"><a href="' + GITHUB_URL + '">' +
-        'Follow the build on GitHub &rarr;</a></p>' +
+        '⭐ Star it on GitHub &rarr;</a></p>' +
       '</div>';
   }
 
@@ -122,7 +122,7 @@
         '<p class="promo-text">An open real-time strategy game inspired by the ' +
         'classics. Send a link, play a friend — right in the browser.</p>' +
         '<p class="promo-cta"><a href="' + GITHUB_URL + '">' +
-        'Follow the build &rarr;</a></p>' +
+        '⭐ Star it on GitHub &rarr;</a></p>' +
         '<p class="promo-note">House ad — the game itself, for now</p>' +
       '</div>';
   }
