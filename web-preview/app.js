@@ -6675,6 +6675,22 @@ function kickAutoServer() {
     // sweep ran: the table describes a room that no longer
     // exists in this form — drop it.
     if (net.autoMigrated || net.phase !== 'lobby') return;
+    // A sweep that measured NOTHING (every region null) is
+    // almost always cold probe rooms missing the budget from
+    // a slow vantage point, not a truly unreachable relay —
+    // and sharing it would close the pair decision on no
+    // basis, forever (the autoserver live defect, 2026-11-26).
+    // Withhold it and retry ONCE per pairing after a short
+    // delay; if the retry also measures nothing, the ordinary
+    // path below proceeds and today's silent fallback stands.
+    const measuredNothing = Object.values(table).every((v) => v == null);
+    if (measuredNothing && !net.autoRetried) {
+      net.autoRetried = true;
+      setTimeout(() => {
+        if (net && net === mine) kickAutoServer();
+      }, 2000);
+      return;
+    }
     net.autoPings = table;
     net.autoTableSent = true;
     if (net.client) net.client.send({ type: 'pings', table });
@@ -7180,6 +7196,7 @@ function onNetMessage(msg) {
         // decision honour autoMigrated).
         net.peerPings = null;
         net.autoTableSent = false;
+        net.autoRetried = false;
         // (A migrated room's decision is final — the post-move
         // hello must not reopen it.)
         if (!net.autoMigrated) {
@@ -7661,13 +7678,15 @@ function openLobby(join) {
     // room), peerPings the current peer's (sanitized on
     // arrival, reset when a new peer arrives), autoTableSent
     // marks my table shared with the CURRENT peer;
-    // autoServerDone closes the decision for the current
-    // pairing (moved, stayed, or confirmed via 'server-ok');
-    // autoMigrated spends the one move. migrateNonce: the
+    // autoRetried spends the one re-sweep allowed when a sweep
+    // measured nothing at all (cold probe rooms — see
+    // kickAutoServer); autoServerDone closes the decision for
+    // the current pairing (moved, stayed, or confirmed via
+    // 'server-ok'); autoMigrated spends the one move. migrateNonce: the
     // host's issued nonce / the guest's to present in its
     // post-move hello.
     autoPings: null, peerPings: null, autoProbing: false,
-    autoTableSent: false,
+    autoTableSent: false, autoRetried: false,
     autoServerDone: false, autoMigrated: false, autoBest: null,
     migrateNonce: null,
     selfReady: false, peerReady: false,

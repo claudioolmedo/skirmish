@@ -1622,12 +1622,18 @@ export function makeMigrateNonce(rand = Math.random) {
 /// Probe EVERY region in parallel and collect the table
 /// {regionId: ms | null}. Each probe is the ordinary
 /// probeRegionPing with its timeout set to the shared budget
-/// (~1.5 s, the homepage invite box's budget), so the whole
-/// sweep settles inside the budget: a region that has not
-/// answered by then reads null (unreachable), never a hang —
-/// the room UI is never blocked on this.
+/// (4 s), so the whole sweep settles inside the budget: a
+/// region that has not answered by then reads null
+/// (unreachable), never a hang — the room UI is never blocked
+/// on this. The budget was 1.5 s at first and that was the
+/// autoserver live defect (2026-11-26): every probe targets a
+/// fresh, cold Durable Object, and from a distant browser all
+/// seven handshakes can miss 1.5 s at once — an all-null table
+/// on either side then closed the pair decision silently and
+/// the automatic server line never appeared. (The lobby's own
+/// probes allow the same probeRegionPing its 7 s default.)
 export async function probeAllRegions({
-  relayHttp, socketFactory, budgetMs = 1500, rand,
+  relayHttp, socketFactory, budgetMs = 4000, rand,
 } = {}) {
   const table = {};
   await Promise.all(REGIONS.map(async (r) => {
