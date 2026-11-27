@@ -6475,6 +6475,18 @@ function toggleReady() {
   if (net.selfReady) enterGameCapture();
   net.client.send({ type: 'ready', ready: net.selfReady });
   renderRoom();
+  // The status line follows the toggle: a player who has
+  // readied was still told "Press Start when you are ready"
+  // (the guest's line in the 2026-11-26 screenshot) while
+  // already waiting. Say what is true now; un-readying
+  // restores the presence line.
+  if (net.peerPresent) {
+    if (net.selfReady) {
+      lobbyStatus(t('status.youReady'));
+    } else {
+      lobbyStatus(t(net.role === 'host' ? 'status.opponentHere' : 'status.connected'));
+    }
+  }
   maybeStartMatch();
 }
 
@@ -6891,10 +6903,17 @@ function onNetMessage(msg) {
       const isNewPresence = !net.peerPresent;
       net.peerPresent = true;
       net.peerGone = false;
-      // A fresh arrival starts unready on both sides of the gate.
-      if (isNewPresence && net.phase === 'lobby') net.peerReady = false;
+      // Deliberately NOT resetting net.peerReady on a fresh
+      // arrival: the peer's ready can legitimately be recorded
+      // before its hello settles presence (see the 'ready'
+      // case), and erasing it here was the second half of the
+      // both-ready deadlock (2026-11-26). A peer that actually
+      // LEAVES clears both ready flags in onPeerGone, so no
+      // stale ready survives a real departure.
       if (net.phase === 'lobby' || net.phase === 'starting') {
-        if (net.role === 'host') {
+        if (net.selfReady && net.phase === 'lobby') {
+          lobbyStatus(t('status.youReady'));
+        } else if (net.role === 'host') {
           lobbyStatus(t('status.opponentHere'));
         } else {
           lobbyStatus(t('status.connected'));
@@ -6931,6 +6950,21 @@ function onNetMessage(msg) {
         } else {
           net.client.send({ type: 'room-full' });
         }
+      }
+      if (net.phase === 'lobby') {
+        // Presence just settled — reconverge the start gate.
+        // If WE are the readied side, re-announce it: the
+        // peer's record of our flag is exactly what a flap on
+        // its side can have dropped (the mirror of the early-
+        // ready hole in the 'ready' case). Then re-evaluate
+        // the gate itself: presence is one of its inputs and
+        // may have been the last one missing. hostStartMatch's
+        // own phase/role guards make an extra evaluation
+        // harmless.
+        if (net.selfReady) {
+          net.client.send({ type: 'ready', ready: true });
+        }
+        maybeStartMatch();
       }
       updateNetStatus();
       break;
@@ -6977,11 +7011,20 @@ function onNetMessage(msg) {
       }
       break;
     case 'ready':
-      // M10: the peer's ready flag. Presence is already gated on
-      // admission (a private-room guest counts as present only
-      // after pw-ok), so a ready from a present peer is a ready
-      // that counts. The host's gate runs on every change.
-      if (net.phase === 'lobby' && net.peerPresent) {
+      // M10: the peer's ready flag. Record it whenever we are
+      // in the lobby — even before presence has settled here.
+      // A peer sends its ready exactly once (when it toggles),
+      // so dropping an early one deadlocked the room: the
+      // guest's ready can beat its hello here (its first hello
+      // lost before the host joined the guest-first room the
+      // short link creates), and then both screens showed
+      // Ready ✓ with no start, ever (live report, 2026-11-26).
+      // Presence stays a start INPUT — startGate still
+      // requires the peer to be here — so an absent peer's
+      // recorded ready starts nothing; and a peer that
+      // actually leaves clears the flag again (onPeerGone),
+      // so no stale ready survives a real departure.
+      if (net.phase === 'lobby') {
         net.peerReady = !!msg.ready;
         renderRoom();
         maybeStartMatch();
@@ -7017,6 +7060,9 @@ function onNetMessage(msg) {
         }
         renderRoom();
         updateNetStatus();
+        // Admission just settled a gate input (presence):
+        // re-evaluate like every other input change.
+        maybeStartMatch();
       }
       break;
     case 'pw-ok':
@@ -7027,6 +7073,7 @@ function onNetMessage(msg) {
         lobbyStatus(t('status.youAreIn'));
         renderRoom();
         updateNetStatus();
+        maybeStartMatch();
       }
       break;
     case 'pw-no':
